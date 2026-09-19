@@ -2,6 +2,28 @@
 
 ## Newest execution checkpoint
 
+Second batch completed: **56 additional direct-child Downloads worktrees removed,
+59 total, 537 registered remain.** Exact paths/branches/commit hashes and live
+remote archive refs are in `outputs/checkout-cleanup-20260919/removed-batch-two.json`.
+Every removed path is absent and all 56 recovery commits still resolve. Active
+HEAD remained 8868ca9b during cleanup; primary Git and both package dependencies
+remain accessible. Frontend and Worker `npm run typecheck` both exit 0 afterward.
+
+PowerShell 5 JSON enumeration initially selected only the final preflight record;
+post-removal counts detected the mismatch (1 rather than 56). Corrected explicit
+record iteration and count assertion, retained that removal record, then resumed
+the other 55 with all checks repeated. No out-of-manifest path was removed.
+
+Ignored-file inventory completed without reading file contents: 173 worktrees
+contain dependency junctions only, 61 dependency/build directories, 138 other
+local data requiring preservation. See generated ignored-manifest.json. Names
+alone do not authorize removing Wrangler state or credentials. The remaining
+three initially clean candidates are outside this direct-child Downloads batch.
+Owner invited questions; local recovery archival choice requested for unique
+files before removing their old checkout. No runtime code/data/deploy changes.
+
+### First batch (historical)
+
 Goal active. Owner confirmed Claude processes are idle. Fresh origin fetch
 succeeded; current pre-cleanup HEAD fe4d035f has 22 commits not reachable from
 origin refs. Full read-only scan completed for all 596 registered worktrees:

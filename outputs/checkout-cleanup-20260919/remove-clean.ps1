@@ -1,4 +1,4 @@
-param([switch]$Apply)
+param([switch]$Apply, [switch]$BatchTwo)
 $ErrorActionPreference = 'Stop'
 $taskRoot = 'C:\Users\mrkl6\Downloads\bos-supplier-settlement-20260918'
 $downloadsRoot = 'C:\Users\mrkl6\Downloads'
@@ -11,6 +11,34 @@ $activeClaims = @($team.claims | Where-Object { -not $_.stale })
 $outcomes = @()
 # Only these three independently checked, remotely archived clean worktrees.
 $approvedNames = @('bos-active-data-completeness-20260908', 'bos-backend-gate-merge-harness-20260908', 'bos-canonical-branch-i18n-20260908')
+if ($BatchTwo) {
+    if ($Apply) {
+        $preflight = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'preflight-batch-two.json') -Raw | ConvertFrom-Json
+        $approvedNames = @(foreach ($planned in $preflight) { [IO.Path]::GetFileName([string]$planned.path) })
+        if ($approvedNames.Count -ne $preflight.Count) { throw 'Preflight enumeration mismatch' }
+        $priorLog = Join-Path $PSScriptRoot 'removed-batch-two.json'
+        if (Test-Path -LiteralPath $priorLog) {
+            $priorRecords = Get-Content -LiteralPath $priorLog -Raw | ConvertFrom-Json
+            foreach ($prior in $priorRecords) {
+                if (-not $prior.removed -or (Test-Path -LiteralPath $prior.path)) { throw 'Prior removal log mismatch' }
+                $outcomes += $prior
+            }
+            $priorNames = @($outcomes | ForEach-Object { [IO.Path]::GetFileName([string]$_.path) })
+            $approvedNames = @($approvedNames | Where-Object { $_ -notin $priorNames })
+        }
+        Write-Output "Remaining checked names: $($approvedNames.Count)"
+    } else {
+        $approvedNames = @($manifest.results | Where-Object {
+            $_.disposition -eq 'review-active-use-before-removal' -and
+            [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($_.path)) -eq $downloadsRoot -and
+            (Test-Path -LiteralPath $_.path)
+        } | ForEach-Object { [IO.Path]::GetFileName($_.path) })
+    }
+}
+$remoteHeads = @{}
+$remoteLines = @(& git -C $taskRoot ls-remote --heads origin)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot verify current remote branches' }
+foreach ($line in $remoteLines) { $parts = $line -split '\s+'; $remoteHeads[$parts[1]] = $parts[0] }
 foreach ($name in $approvedNames) {
     $candidate = [IO.Path]::GetFullPath((Join-Path $downloadsRoot $name)).TrimEnd('\')
     if ([IO.Path]::GetDirectoryName($candidate) -ne $downloadsRoot -or $candidate -eq $taskRoot) { throw 'Invalid cleanup boundary' }
@@ -30,12 +58,10 @@ foreach ($name in $approvedNames) {
     if ($LASTEXITCODE -ne 0 -or $dirty.Count) { throw "Dirty candidate: $name" }
     $ignored = @(& git -C $candidate ls-files --others --ignored --exclude-standard)
     if ($LASTEXITCODE -ne 0 -or $ignored.Count) { throw "Ignored data: $name" }
-    $ref = @($entry[0].remoteRefs | Where-Object { $_ -like 'refs/remotes/origin/archive/*' })[0]
+    $ref = @($entry[0].remoteRefs | Where-Object { $_ -like 'refs/remotes/origin/archive/*' -and $remoteHeads.ContainsKey($_.Replace('refs/remotes/origin/', 'refs/heads/')) })[0]
     if (-not $ref) { throw "No archive ref: $name" }
     $remoteRef = $ref.Replace('refs/remotes/origin/', 'refs/heads/')
-    $remoteLine = @(& git -C $taskRoot ls-remote origin $remoteRef)
-    if ($LASTEXITCODE -ne 0 -or $remoteLine.Count -ne 1) { throw "Remote archive unavailable: $name" }
-    $remoteSha = ($remoteLine[0] -split '\s+')[0]
+    $remoteSha = $remoteHeads[$remoteRef]
     & git -C $taskRoot merge-base --is-ancestor $head $remoteSha
     if ($LASTEXITCODE -ne 0) { throw "Remote no longer contains commit: $name" }
     $outcome = [ordered]@{path=$candidate;head=$head;branch=$entry[0].branch;remote=$remoteRef;remoteSha=$remoteSha;removed=$false;recovery='git worktree add using retained local branch or recorded commit'}
@@ -50,6 +76,7 @@ foreach ($name in $approvedNames) {
     }
     $outcomes += [pscustomobject]$outcome
     $suffix = if ($Apply) { 'removed' } else { 'preflight' }
+    if ($BatchTwo) { $suffix += '-batch-two' }
     $outcomes | ConvertTo-Json -Depth 5 | Out-File -LiteralPath (Join-Path $PSScriptRoot ($suffix + '.json')) -Encoding utf8
     Write-Output "$suffix : $name"
 }

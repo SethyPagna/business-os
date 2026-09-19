@@ -1,3 +1,13 @@
+## Checkout cleanup second verified batch — September 19
+
+59 redundant checkouts removed total (3 + 56); 537 registered remain. Exact second
+batch/recovery evidence: outputs/checkout-cleanup-20260919/removed-batch-two.json.
+All removed paths absent; commits retained; active workspace/common Git valid.
+Frontend and Worker npm run typecheck pass after removal. Ignored scan: 173
+dependency-link-only, 61 dependency/build, 138 local-data preservation candidates.
+No runtime changes/deploy. Goal active. Asked owner about verified local recovery
+archive for unique files before retiring remaining old checkouts.
+
 ## Checkout cleanup first verified removal — September 19
 
 Goal active, not complete. All 596 worktrees inventoried; owner confirms Claude

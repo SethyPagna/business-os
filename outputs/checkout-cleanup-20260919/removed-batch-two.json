@@ -1,0 +1,506 @@
+﻿[
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-zero-stock-atomic-20260905",
+        "head":  "3c5d11cb0ad79312f2b3ee0dac840bbfb30bb72a",
+        "branch":  "refs/heads/codex/zero-stock-atomic-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/zero-stock-atomic-20260905",
+        "remoteSha":  "3c5d11cb0ad79312f2b3ee0dac840bbfb30bb72a",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-codex-reports-20260906",
+        "head":  "ed9ccc0bca8954054309436f30d02265e568a9aa",
+        "branch":  "refs/heads/codex/a2-reports-gross-net-refund-20260906",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-codex-delivery-2026-09-07",
+        "remoteSha":  "60b7a681b68fcd639131f702a97a8a8ef19436da",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-customer-gender-restore-frontend-20260912",
+        "head":  "84254339690a5d07747b733faaeea4985868534c",
+        "branch":  "refs/heads/codex/customer-gender-restore-frontend-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/customer-gender-restore-frontend-20260912",
+        "remoteSha":  "84254339690a5d07747b733faaeea4985868534c",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f40-reconcile-preview-20260908",
+        "head":  "98d16c51227b9a4473c70e71c972c72587a2a390",
+        "branch":  "refs/heads/codex/f40-reconcile-preview-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f40-reconcile-preview-20260908",
+        "remoteSha":  "98d16c51227b9a4473c70e71c972c72587a2a390",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f45-ws-reconnect-20260907",
+        "head":  "659f0067ac7fa849456fbc9953bd165cc4c4a162",
+        "branch":  "refs/heads/codex/f45-ws-reconnect-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/f45-ws-reconnect-20260907",
+        "remoteSha":  "659f0067ac7fa849456fbc9953bd165cc4c4a162",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f46-backup-reset-20260908",
+        "head":  "a1d9b71a007d7a60511cff4b1b703a3a0d79b076",
+        "branch":  "refs/heads/codex/f46-backup-reset-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f46-backup-reset-20260908",
+        "remoteSha":  "a1d9b71a007d7a60511cff4b1b703a3a0d79b076",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f46-frontend-stale-tests-20260908",
+        "head":  "415be5a413bdfe46fbbded43ca80b743aad06e25",
+        "branch":  "refs/heads/codex/f46-frontend-stale-tests-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f46-frontend-stale-tests-20260908",
+        "remoteSha":  "415be5a413bdfe46fbbded43ca80b743aad06e25",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f46-plan-20260908",
+        "head":  "b08b411b136802a9e1b79c9e9026c2404db48742",
+        "branch":  "refs/heads/codex/f46-selected-conflict-plan-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f46-selected-conflict-plan-20260908",
+        "remoteSha":  "b08b411b136802a9e1b79c9e9026c2404db48742",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47a-contact-duplicate-decision-20260908",
+        "head":  "4122059729b759470c38c52784bb3bfe194a1b43",
+        "branch":  "refs/heads/codex/f47a-contact-duplicate-decision-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47a-contact-duplicate-decision-20260908",
+        "remoteSha":  "4122059729b759470c38c52784bb3bfe194a1b43",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47a-review-e4b55538",
+        "head":  "e4b55538267a3c84671bd8635180ffedb777d20a",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47a-contact-duplicate-decision-20260908",
+        "remoteSha":  "4122059729b759470c38c52784bb3bfe194a1b43",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47b-review-20260908",
+        "head":  "cb3cbf4be2b88668a0f1b71a8f2b1635933329f4",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47bc-import-supplier-20260908",
+        "remoteSha":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47bc-rereview-20260908",
+        "head":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47bc-import-supplier-20260908",
+        "remoteSha":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f47bc-review-20260908",
+        "head":  "8ceb2b9b7ce6b579fc7daef13fceff52f5b8e67e",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f47bc-import-supplier-20260908",
+        "remoteSha":  "f294aa813451bb311100b4c9be2056fb23c88f72",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f48-shift-audit-20260908",
+        "head":  "3892711bbd672cfca740f540b7185a724dd70b34",
+        "branch":  "refs/heads/codex/f48-shift-discrepancy-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f48-shift-discrepancy-20260908",
+        "remoteSha":  "3892711bbd672cfca740f540b7185a724dd70b34",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f51-canonical-branch-plan-20260908",
+        "head":  "3324ab1f0e09ab67f991b7355008fad12372cc7d",
+        "branch":  "refs/heads/codex/f51-canonical-branch-plan-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f51-canonical-branch-plan-20260908",
+        "remoteSha":  "3324ab1f0e09ab67f991b7355008fad12372cc7d",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f61-f64-pos-scan-20260908",
+        "head":  "02d9e786038d9d40f7060e80c86fde04d376ff94",
+        "branch":  "refs/heads/codex/f61-f64-pos-scan-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f61-f64-pos-scan-20260908",
+        "remoteSha":  "02d9e786038d9d40f7060e80c86fde04d376ff94",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f63-device-reapproval-reset-20260908",
+        "head":  "15138f2d3d0a55b1ebd74c85bcba4fc7a6e47132",
+        "branch":  "refs/heads/codex/f63-device-reapproval-reset-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f63-device-reapproval-reset-20260908",
+        "remoteSha":  "15138f2d3d0a55b1ebd74c85bcba4fc7a6e47132",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-group-history-phase2-20260908",
+        "head":  "53ba4bf64ad8d8356696f661823faecf0f17a1ec",
+        "branch":  "refs/heads/codex/f65-group-history-phase2-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-history-phase2-20260908",
+        "remoteSha":  "53ba4bf64ad8d8356696f661823faecf0f17a1ec",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-phase2-rereview-b2a9326f",
+        "head":  "b2a9326f06cafd28ae6a7c0879c58aae410f0a49",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-finalize-apply-20260908",
+        "remoteSha":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-phase2-rereview-c86fa1a0",
+        "head":  "c86fa1a08763c2f0eb3f8f0ba7b43c6484b30dc4",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-finalize-apply-20260908",
+        "remoteSha":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-phase2-rereview-d111a124",
+        "head":  "d111a1240e1ac5d34489fc07d531438183279022",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-finalize-apply-20260908",
+        "remoteSha":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-phase3-rereview-3dfbe124",
+        "head":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-finalize-apply-20260908",
+        "remoteSha":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f65-phase3-rereview-e5cb3e14",
+        "head":  "e5cb3e14547001189503bb3a250be276aeaa503e",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/f65-group-finalize-apply-20260908",
+        "remoteSha":  "3dfbe124a325d4df5d542ff1828664ee88cccb03",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-f75-contacts-bulk-guard-20260909",
+        "head":  "3a367417795b4918525f06e4cf036173d1dddb2b",
+        "branch":  "refs/heads/codex/f75-contacts-bulk-guard-20260909",
+        "remote":  "refs/heads/archive/local-20260916/codex/f75-contacts-bulk-guard-20260909",
+        "remoteSha":  "3a367417795b4918525f06e4cf036173d1dddb2b",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-imp",
+        "head":  "625830d5ccb18ecdefae5616e7cd11ab975bb51c",
+        "branch":  "refs/heads/fx/legacy-import-subtotal",
+        "remote":  "refs/heads/archive/local-20260916/claude/a2-additems-2026-09-06",
+        "remoteSha":  "957fd6e09421c75659eee030f33023b84fd7caad",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-import-harness-repair-20260907",
+        "head":  "1aa5e9a5f85e1a908826b4435863db95fa1a0fd8",
+        "branch":  "refs/heads/codex/import-harness-repair-20260907",
+        "remote":  "refs/heads/archive/local-20260916/codex/import-harness-repair-20260907",
+        "remoteSha":  "1aa5e9a5f85e1a908826b4435863db95fa1a0fd8",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-inactive-lot-invariant-20260911",
+        "head":  "dcd931e7ca4585c9738f9e156925d5f5920beab4",
+        "branch":  "refs/heads/codex/inactive-lot-invariant-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/inactive-lot-invariant-20260911",
+        "remoteSha":  "dcd931e7ca4585c9738f9e156925d5f5920beab4",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-leading-zero-planner-loader-20260913",
+        "head":  "02e1bfe41c2796751bf4ef83401c02120ad4a317",
+        "branch":  "refs/heads/codex/leading-zero-planner-loader-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/leading-zero-planner-loader-20260913",
+        "remoteSha":  "02e1bfe41c2796751bf4ef83401c02120ad4a317",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-merge-tests-20260908",
+        "head":  "30c71b52c4f5d0e4a4ab5f1272776a5c6e62af68",
+        "branch":  "refs/heads/codex/merge-tests-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/merge-tests-20260908",
+        "remoteSha":  "30c71b52c4f5d0e4a4ab5f1272776a5c6e62af68",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-owner-khmer-review-20260908",
+        "head":  "5832b05992358988373046d88dd946c26c4f892e",
+        "branch":  "refs/heads/codex/owner-khmer-review-20260908",
+        "remote":  "refs/heads/archive/local-20260916/codex/owner-khmer-review-20260908",
+        "remoteSha":  "5832b05992358988373046d88dd946c26c4f892e",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-positive-lot-parent-guard-20260911",
+        "head":  "355d3c0e9f1988ff502eaf82170f9c99ccd81905",
+        "branch":  "refs/heads/codex/positive-lot-parent-guard-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/positive-lot-parent-guard-20260911",
+        "remoteSha":  "355d3c0e9f1988ff502eaf82170f9c99ccd81905",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-private-read-cache-scope-20260912",
+        "head":  "53aff31823931984a806a81b789c03d772d25a5b",
+        "branch":  "refs/heads/codex/private-read-cache-scope-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/actor-read-cache-boundary-20260912",
+        "remoteSha":  "49ac6027f6eb63d286871967c71c4332a7ab3c8d",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-report-edited-v0-precision-20260913",
+        "head":  "cc8b1e8dbc4b25e5439a70cb9965b6525086cbfa",
+        "branch":  "refs/heads/codex/report-edited-v0-precision-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/report-edited-v0-precision-20260913",
+        "remoteSha":  "cc8b1e8dbc4b25e5439a70cb9965b6525086cbfa",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-report-hub-layout-test-20260911",
+        "head":  "856854a0c01da33917fcc4a9e8a4807c6d1df400",
+        "branch":  "refs/heads/codex/report-hub-layout-test-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/report-hub-layout-test-20260911",
+        "remoteSha":  "856854a0c01da33917fcc4a9e8a4807c6d1df400",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-reports-composed-responsive-test-20260913",
+        "head":  "86fab2938d2098d49cd5e9414d2109063926fda2",
+        "branch":  "refs/heads/codex/reports-composed-responsive-test-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/reports-composed-responsive-test-20260913",
+        "remoteSha":  "86fab2938d2098d49cd5e9414d2109063926fda2",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-reports-filter-geometry-20260911",
+        "head":  "6f4ac3ae2ca0bc5337d45a9a50eac52c69550a53",
+        "branch":  "refs/heads/codex/reports-filter-geometry-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/reports-filter-geometry-20260911",
+        "remoteSha":  "6f4ac3ae2ca0bc5337d45a9a50eac52c69550a53",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-reports-toolbar-20260913",
+        "head":  "86c35899b0556c89218955971a185f49a9a1db3c",
+        "branch":  "refs/heads/codex/reports-toolbar-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/reports-toolbar-20260913",
+        "remoteSha":  "86c35899b0556c89218955971a185f49a9a1db3c",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-sales-read-deadline-test-20260911",
+        "head":  "969cad26f120e5306a70de5e24ed370ce9e10550",
+        "branch":  "refs/heads/codex/sales-read-deadline-test-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/sales-read-deadline-test-20260911",
+        "remoteSha":  "969cad26f120e5306a70de5e24ed370ce9e10550",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-selling-price-divide-ceil-20260913",
+        "head":  "2d918f268b0e42dc8c1b1c1fd10e666b74028916",
+        "branch":  "refs/heads/codex/selling-price-divide-ceil-20260913",
+        "remote":  "refs/heads/archive/local-20260916/codex/selling-price-divide-ceil-20260913",
+        "remoteSha":  "2d918f268b0e42dc8c1b1c1fd10e666b74028916",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-cost-test-followup-20260912",
+        "head":  "366bd127bdcd2ebc23667a9285f19c905db470f4",
+        "branch":  "refs/heads/codex/stock-cost-test-followup-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-cost-test-followup-20260912",
+        "remoteSha":  "366bd127bdcd2ebc23667a9285f19c905db470f4",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-stock-in-cost-image",
+        "head":  "f23bcfceb800ada11cef5799030870766aa6354a",
+        "branch":  "refs/heads/codex/stock-in-cost-image-20260906",
+        "remote":  "refs/heads/archive/local-20260916/codex/stock-in-cost-image-20260906",
+        "remoteSha":  "f23bcfceb800ada11cef5799030870766aa6354a",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-test-stock-set-zero-loader-20260912",
+        "head":  "dff782bb213584caaa73d6422c885b965ed18149",
+        "branch":  "refs/heads/codex/test-stock-set-zero-loader-20260912",
+        "remote":  "refs/heads/archive/local-20260916/codex/test-stock-set-zero-loader-20260912",
+        "remoteSha":  "dff782bb213584caaa73d6422c885b965ed18149",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-u13-u15-review-20260908",
+        "head":  "cf3d4d23bb7d63886677edec643f17595434f97a",
+        "branch":  "(detached)",
+        "remote":  "refs/heads/archive/local-20260916/codex/mobile-sales-u13-u15-20260908",
+        "remoteSha":  "cf3d4d23bb7d63886677edec643f17595434f97a",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-dashboard-nav-20260911",
+        "head":  "348ea06bbcc9e16ce8b2cbd8b33471b54b85ce70",
+        "branch":  "refs/heads/codex/ui-dashboard-nav-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-dashboard-nav-20260911",
+        "remoteSha":  "348ea06bbcc9e16ce8b2cbd8b33471b54b85ce70",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-final-test-reconcile-20260911",
+        "head":  "8575c4f2449545b1caca0c884808baa0878897b5",
+        "branch":  "refs/heads/codex/ui-final-test-reconcile-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-final-test-reconcile-20260911",
+        "remoteSha":  "8575c4f2449545b1caca0c884808baa0878897b5",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-localization-20260911",
+        "head":  "9a758447a3a2cd2eddb9cbbb47c815c520048608",
+        "branch":  "refs/heads/codex/ui-localization-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-localization-20260911",
+        "remoteSha":  "9a758447a3a2cd2eddb9cbbb47c815c520048608",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-products-20260911",
+        "head":  "315299d1b0cfd37e9accf21bcb9cc3fd7d07bff0",
+        "branch":  "refs/heads/codex/ui-products-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-products-20260911",
+        "remoteSha":  "315299d1b0cfd37e9accf21bcb9cc3fd7d07bff0",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-test-reconcile-20260911",
+        "head":  "0c049bd5e3a1bbda29e9e07b841f1fdef1619eeb",
+        "branch":  "refs/heads/codex/ui-test-reconcile-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-test-reconcile-20260911",
+        "remoteSha":  "0c049bd5e3a1bbda29e9e07b841f1fdef1619eeb",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\bos-ui-test-reconcile2-20260911",
+        "head":  "700904f9311201ff198a9a1b6c4bf29255697a4f",
+        "branch":  "refs/heads/codex/ui-test-reconcile2-20260911",
+        "remote":  "refs/heads/archive/local-20260916/codex/ui-test-reconcile2-20260911",
+        "remoteSha":  "700904f9311201ff198a9a1b6c4bf29255697a4f",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-b1-refresh-test-20260905",
+        "head":  "1c31b8670fba7c3658e6926b252e6f98ccb1e424",
+        "branch":  "refs/heads/codex/b1-refresh-test-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/b1-refresh-test-20260905",
+        "remoteSha":  "1c31b8670fba7c3658e6926b252e6f98ccb1e424",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-branch-products-20260905",
+        "head":  "868e87772920f9f9dfc8d58397f15c60cf07403b",
+        "branch":  "refs/heads/codex/branch-products-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/branch-products-20260905",
+        "remoteSha":  "868e87772920f9f9dfc8d58397f15c60cf07403b",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-driver-text",
+        "head":  "d9df45f403d40a206923e9e0bd1153b865b6c42f",
+        "branch":  "refs/heads/codex/sale-driver-text",
+        "remote":  "refs/heads/archive/local-20260916/codex/sale-driver-text",
+        "remoteSha":  "d9df45f403d40a206923e9e0bd1153b865b6c42f",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-f2-subtotal-repair",
+        "head":  "98e84173df33923a59c467952ecd3e9283fe6706",
+        "branch":  "refs/heads/codex/f2-sep23-subtotal-repair",
+        "remote":  "refs/heads/archive/local-20260916/codex/f2-sep23-subtotal-repair",
+        "remoteSha":  "98e84173df33923a59c467952ecd3e9283fe6706",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-financial-precision-doc",
+        "head":  "6061eb910ebba04304470b0274321552c737be27",
+        "branch":  "refs/heads/codex/financial-precision-audit-doc",
+        "remote":  "refs/heads/archive/local-20260916/codex/financial-precision-audit-doc",
+        "remoteSha":  "6061eb910ebba04304470b0274321552c737be27",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-payment-central-hook-20260905",
+        "head":  "373045bc6d5cb5e4f02b84415767fca72071b6c5",
+        "branch":  "refs/heads/codex/payment-central-hook-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/payment-central-hook-20260905",
+        "remoteSha":  "373045bc6d5cb5e4f02b84415767fca72071b6c5",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    },
+    {
+        "path":  "C:\\Users\\mrkl6\\Downloads\\business-os-v1-subtotal-sargable-20260905",
+        "head":  "871cff2c1281d8eae4a848298dcc4ad0c67a44bd",
+        "branch":  "refs/heads/codex/subtotal-sargable-allowlist-20260905",
+        "remote":  "refs/heads/archive/local-20260916/codex/subtotal-sargable-allowlist-20260905",
+        "remoteSha":  "871cff2c1281d8eae4a848298dcc4ad0c67a44bd",
+        "removed":  true,
+        "recovery":  "git worktree add using retained local branch or recorded commit"
+    }
+]
