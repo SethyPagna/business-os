@@ -9,7 +9,7 @@ export type InvoiceLedgerSummaryItem = {
 type InvoiceLedgerSummaryProps = {
   ariaLabel: string
   items: InvoiceLedgerSummaryItem[]
-  total: InvoiceLedgerSummaryItem
+  total?: InvoiceLedgerSummaryItem
 }
 
 // Contacts ledgers pass display-ready values here. This component owns only
@@ -32,12 +32,12 @@ export default function InvoiceLedgerSummary({ ariaLabel, items, total }: Invoic
           </div>
         ))}
       </dl>
-      <dl className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700">
+      {total ? <dl className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700">
         <div className="grid grid-cols-[minmax(0,1fr)_max-content] items-baseline gap-3">
           <dt className="text-xs font-medium leading-5 text-gray-600 dark:text-gray-300">{total.label}</dt>
           <dd className="text-right text-base font-bold tabular-nums text-gray-950 dark:text-white">{total.value}</dd>
         </div>
-      </dl>
+      </dl> : null}
     </section>
   )
 }
