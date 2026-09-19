@@ -31,7 +31,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } fro
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
+import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
