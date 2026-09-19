@@ -15,7 +15,7 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
-import { recomputeCatalogCost } from '../lib/catalogCostRecompute'
+import { recomputeCatalogCost, catalogCostRecomputeStatement } from '../lib/catalogCostRecompute'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -378,7 +378,7 @@ app.patch('/:id', async (c) => {
   if (!canEditAcquisitionCosts(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
     return c.json({ error: 'Cost-entry permission is required to change stored receipt costs.', code: 'product_cost_edit_required' }, 403)
   }
-  const existing = await db.prepare('SELECT id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; updated_at: string | null }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
@@ -460,19 +460,29 @@ app.patch('/:id', async (c) => {
   // Deactivation and the positive-stock check are one SQL statement. A
   // separate pre-read would allow a receipt/quantity correction to land in
   // between the check and this UPDATE, hiding stock in an inactive lot.
-  const update = await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id${deactivating
+  const updateSql = `UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id${deactivating
     ? ` AND NOT EXISTS (
           SELECT 1 FROM branch_batch_stock
           WHERE batch_id = @id AND quantity > 0
         )`
-    : ''}`).run(params)
-  if (deactivating && update.changes === 0) {
+    : ''}`
+  // Catalog projection and lot correction commit together. Receipt totals,
+  // movements, sale/return snapshots and allocation prices are never edited.
+  const recompute = catalogCostRecomputeStatement(existing.variant_product_id)
+  const affectsCatalogCost = bodyExtra.unit_cost_usd !== undefined || body.is_active !== undefined
+  const results = await db.batch([
+    { sql: updateSql, params },
+    ...(affectsCatalogCost ? [{ ...recompute, sql: `${recompute.sql} AND changes() > 0` }] : []),
+  ])
+  if (deactivating && Number(results[0]?.meta?.changes ?? 0) === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
   // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
   // into the same waitUntil the broadcast already used.
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_update', 'product_batch', id, body),
+    bumpVersion(c.env, 'products'),
+    broadcast(c.env, 'products', { action: 'update', id: existing.variant_product_id }),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
   ]))
   return c.json({ success: true })
