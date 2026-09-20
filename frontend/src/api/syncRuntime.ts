@@ -30,12 +30,6 @@ export const FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = [
 
 export type SyncQueueChangedDetail = Record<string, unknown>
 
-type SyncRegistration = ServiceWorkerRegistration & {
-  sync?: {
-    register: (tag: string) => Promise<void>
-  }
-}
-
 let persistentStorageRequest: Promise<boolean> | null = null
 
 export function requestPersistentAppStorage(): Promise<boolean> {
@@ -74,14 +68,6 @@ export function hasStoredUserSession(): boolean {
 }
 
 export function registerOutboxBackgroundSync(): void {
-  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
-  navigator.serviceWorker.ready
-    .then((registration) => {
-      const syncRegistration = registration as SyncRegistration
-      if (syncRegistration?.sync?.register) {
-        syncRegistration.sync.register(OUTBOX_SYNC_TAG).catch(() => {})
-      }
-      registration?.active?.postMessage({ type: 'BUSINESS_OS_SYNC_NOW' })
-    })
-    .catch(() => {})
+  // Online-only writes. Existing offline work is retained for explicit,
+  // original-account recovery; never schedule an unattended replay.
 }

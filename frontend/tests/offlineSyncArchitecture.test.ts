@@ -22,7 +22,7 @@ const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.me
 const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
 
-await runTest('service worker replays the IndexedDB outbox through secure authenticated background sync', () => {
+await runTest('legacy service-worker triggers cannot replay retained business writes', async () => {
   assert.match(swSource, /const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'/)
   assert.match(swSource, /self\.addEventListener\('sync'/)
   assert.match(swSource, /event\.tag === OUTBOX_SYNC_TAG/)
@@ -32,6 +32,12 @@ await runTest('service worker replays the IndexedDB outbox through secure authen
   assert.match(swSource, /fetch\(`\$\{base\}\/api\/sync\/outbox`/)
   assert.doesNotMatch(swSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
   assert.doesNotMatch(swSource, new RegExp(`x-auth-${'session'}`))
+  const trigger = swSource.match(/function syncOutboxOnce\(\) \{[\s\S]*?\n\}/)?.[0] || ''
+  assert.ok(trigger)
+  let calls = 0
+  const result = await new Function('syncOutbox', `${trigger}; return syncOutboxOnce()`)(() => { calls++; return Promise.resolve() })
+  assert.equal(calls, 0, 'old sync/message events must not send business writes')
+  assert.equal(result.manual_recovery_required, true)
 })
 
 await runTest('service worker preserves conflicts and auth failures instead of overwriting newer server state', () => {
@@ -42,11 +48,11 @@ await runTest('service worker preserves conflicts and auth failures instead of o
   assert.match(swSource, /reason: 'auth_required'/)
 })
 
-await runTest('browser registers background sync without sharing auth tokens with the worker', () => {
+await runTest('browser no longer registers or messages automatic business replay', () => {
   assert.match(webApiSource, /registerOutboxBackgroundSync/)
   assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
-  assert.match(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
-  assert.match(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
+  assert.doesNotMatch(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
+  assert.doesNotMatch(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
   assert.match(webApiSource, /queueBusinessOutboxOperation/)
   assert.match(webApiSource, /encrypted_payload/)
   assert.doesNotMatch(webApiSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
@@ -82,13 +88,14 @@ await runTest('online maintenance keeps the offline mirror and app shell fresh w
   assert.match(webApiSource, /registration\.update\?\.\(\)/)
 })
 
-await runTest('queued offline writes carry version metadata and do not disappear on server conflicts', () => {
+await runTest('legacy sale payloads retain their original identity and never disappear on conflicts', () => {
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
   assert.match(webApiSource, /registerOutboxBackgroundSync/)
-  assert.match(saleWriteTransportSource, /registerOutboxBackgroundSync/)
+  assert.doesNotMatch(saleWriteTransportSource, /registerOutboxBackgroundSync/)
   assert.match(saleWriteTransportSource, /emitSyncQueueChanged/)
-  assert.match(saleWriteTransportSource, /queue_version/)
-  assert.match(saleWriteTransportSource, /base_updated_at/)
+  assert.match(saleWriteTransportSource, /payload.client_request_id !== row.id/)
+  assert.match(saleWriteTransportSource, /options.manualRecovery !== true/)
+  assert.doesNotMatch(saleWriteTransportSource, /queueOfflineSale\(/)
   assert.match(saleWriteTransportSource, /isWriteConflictError/)
   assert.match(saleWriteTransportSource, /status: 'conflict'/)
   assert.doesNotMatch(saleWriteTransportSource, /isWriteConflictError\(error\)[\s\S]{0,120}completeQueuedSale/)

@@ -264,9 +264,9 @@ function scheduleSensitiveMirrorPurge() {
   }, SENSITIVE_MIRROR_PURGE_DELAY_MS)
 }
 
-export async function discardPendingSyncQueue(reason = 'Offline changes were cleared.') {
+export async function discardPendingSyncQueue(reason = 'Reviewed pending sales were cleared.', reviewToken?: string) {
   const { discardPendingSyncQueue: discardPendingSyncQueueRequest } = await loadPendingSyncTransport()
-  return discardPendingSyncQueueRequest(reason)
+  return discardPendingSyncQueueRequest(reason, reviewToken)
 }
 
 export async function getPendingSyncState() {
@@ -274,9 +274,9 @@ export async function getPendingSyncState() {
   return getPendingSyncStateRequest()
 }
 
-export async function retryPendingSyncNow() {
+export async function retryPendingSyncNow(reviewToken?: string) {
   const { retryPendingSyncNow: retryPendingSyncNowRequest } = await loadPendingSyncTransport()
-  return retryPendingSyncNowRequest()
+  return retryPendingSyncNowRequest(reviewToken)
 }
 
 export async function refreshOfflineDeviceSnapshot(options = {}) {

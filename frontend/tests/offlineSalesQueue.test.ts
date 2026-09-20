@@ -25,34 +25,35 @@ const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.ur
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 
-await runTest('createSale queues retryable offline writes with an idempotency key', () => {
+await runTest('createSale retains the request identity but never queues new offline writes', () => {
   assert.match(methodsSource, /export async function createSale/)
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
   assert.match(saleWriteTransportSource, /ensureSaleClientRequestId\(stampOfflineSaleOwner\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}\), 'sale'\)/)
   assert.match(saleWriteTransportSource, /const scope = captureActorReadScope\(\)[\s\S]*stampOfflineSaleOwner[\s\S]*await createSaleRequest/)
   assert.match(saleWriteTransportSource, /catch\s*\(error\)/)
   assert.match(saleWriteTransportSource, /isRetryableOfflineSaleError\(error\)/)
-  assert.match(saleWriteTransportSource, /queueOfflineSale\(salePayload/)
+  assert.doesNotMatch(saleWriteTransportSource, /queueOfflineSale\(/)
+  assert.match(saleWriteTransportSource, /code: 'sale_confirmation_required', client_request_id: salePayload.client_request_id/)
 })
 
 await runTest('retryPendingSyncNow syncs pending sales instead of discarding them', () => {
   assert.match(saleWriteTransportSource, /export function syncPendingSalesQueue/)
   assert.match(saleWriteTransportSource, /pendingSalesSyncPromise/)
-  assert.match(saleWriteTransportSource, /db\.transaction\('rw', salesTable, queueTable/)
-  assert.match(saleWriteTransportSource, /requestPersistentAppStorage\(\)/)
+  assert.match(saleWriteTransportSource, /db\.transaction\('rw', syncQueue, sales/)
+  assert.match(saleWriteTransportSource, /options.manualRecovery !== true/)
   assert.match(saleWriteTransportSource, /createSaleWithoutWriteDedupe\(payload\)/)
   assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
   assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)
-  const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+  const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(reviewToken\?: string\) \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.match(retryBody, /loadPendingSyncTransport\(\)/)
   assert.doesNotMatch(retryBody, /discardPendingSyncQueue/)
-  assert.match(pendingSyncTransportSource, /export function retryPendingSyncNow\(\): Promise<unknown>[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.match(pendingSyncTransportSource, /export async function retryPendingSyncNow\(reviewToken\?: string\)[\s\S]*validatedReview\(reviewToken\)[\s\S]*syncPendingSalesQueue\(\{ force: true, manualRecovery: true, expectedOwner: review.owner, reviewedRows: review.rows \}\)/)
   assert.doesNotMatch(methodsSource, /syncPendingSalesQueue\(\{ force: true \}\)/)
 })
 
-await runTest('browser startup and online recovery retry queued work without clearing it', () => {
+await runTest('browser startup and reconnect refresh reads without replaying retained sales', () => {
   assert.doesNotMatch(webApiSource, /discardPendingSyncQueue\?\.\(\)/)
-  assert.match(webApiSource, /loadSaleWriteTransportModule\(\)[\s\S]*module\.syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.doesNotMatch(webApiSource, /module\.syncPendingSalesQueue\(/)
   assert.match(webApiSource, /loadOfflineSnapshotTransportModule\(\)[\s\S]*module\.refreshOfflineDeviceSnapshot\(\{ force \}\)/)
   assert.match(webApiSource, /sync:reconnected/)
   assert.match(webApiSource, /addEventListener\('online'/)
@@ -82,8 +83,9 @@ await runTest('offline mode banner stays visible while offline and announces syn
 
 await runTest('server diagnostics queue syncs pending offline work instead of calling it invalid', () => {
   assert.match(serverPageSource, /retryPendingSyncNow/)
-  assert.match(serverPageSource, /Sync now/)
-  assert.match(serverPageSource, /Offline actions are queued by timestamp/)
+  assert.match(serverPageSource, /Recover reviewed sales/)
+  assert.match(serverPageSource, /New sales require the server/)
+  assert.match(serverPageSource, /recovered only when you choose/)
   assert.doesNotMatch(serverPageSource, /invalid pending client actions/)
   assert.doesNotMatch(serverPageSource, /Discard invalid changes/)
 })

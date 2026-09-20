@@ -113,18 +113,18 @@ await test('standalone SW owner parser and matcher parity, including malformed a
   const values = [null, {}, ownerA, ownerB, { ...ownerA, actor_id: '71' }, { ...ownerA, organization_id: 2 }, { ...ownerA, organization_id: undefined }, { ...ownerA, runtime: 'legacy' }, { ...ownerA, authority: 'https://shop.example/path' }, { ...ownerA, authority: 'javascript:alert(1)' }]
   for (const a of values) { assert.deepEqual(sw.normalizeOfflineSaleOwner(a), ownership.normalizeOfflineSaleOwner(a)); for (const b of values) assert.equal(sw.offlineSaleOwnersMatch(a, b), ownership.offlineSaleOwnersMatch(a, b)) }
 })
-await test('queue admission captures A before failed request switches to B; never relabels sale', async () => {
+await test('online-only failure during account switch cannot admit or relabel a sale', async () => {
   reset(); failPost = true; postHook = () => { currentOwner = ownerB; generation++ }
   await assert.rejects(transport.createSale({ client_request_id: 'sale-A' }), /Keep this pending sale/)
-  assert.deepEqual(queues.get(1)?.payload.offline_owner, ownerA)
-  assert.equal(queues.get(1)?.status, 'pending')
+  assert.equal(queues.size, 0)
+  assert.equal(mirrors.size, 0)
 })
 await test('admission without an authenticated identity or with a supplied foreign owner fails closed', async () => {
   reset({ ...ownerA, actor_id: undefined }); await assert.rejects(transport.createSale({}), /Keep this pending sale/); assert.equal(posts, 0); assert.equal(queues.size, 0)
   reset(ownerB); await assert.rejects(transport.createSale({ offline_owner: ownerA }), /Keep this pending sale/); assert.equal(posts, 0)
 })
-await test('foreground B and ownerless legacy queues quarantine without dispatch or deletion', async () => {
-  for (const owner of [ownerA, null]) { reset(ownerB); queues.set(1, row(owner)); const result = await transport.runPendingSalesQueueSync({ force: true }); assert.equal(posts, 0); assert.equal(result.synced, 0); assert.equal(queues.get(1)?.status, 'quarantined') }
+await test('foreground B and ownerless legacy queues are retained without dispatch or mutation', async () => {
+  for (const owner of [ownerA, null]) { reset(ownerB); queues.set(1, row(owner)); const result = await transport.runPendingSalesQueueSync({ force: true }); assert.equal(posts, 0); assert.equal(result.synced, 0); assert.equal(queues.get(1)?.status, 'pending') }
 })
 await test('foreground trusts live authenticated owner over stale UI identity', async () => {
   for (const changed of [ownerB, { ...ownerA, organization_id: 2 }, { ...ownerA, authority: 'https://other.example' }, { ...ownerA, runtime: 'legacy' }]) {

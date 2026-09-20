@@ -1,6 +1,5 @@
 import type { IndexableType, Table } from 'dexie'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { businessDateTimeId, isBusinessReceiptNumber } from '../utils/timestampId.ts'
 import {
   apiFetch,
   isNetErr,
@@ -11,24 +10,23 @@ import {
 } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from './actorReadScope.ts'
-import { captureOfflineSaleOwner, normalizeOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE, sameQueuedSaleRevision, stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
+import { captureOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE, sameQueuedSaleRevision, stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 import {
   OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
   dispatchSyncUpdates,
   emitSyncQueueChanged,
-  registerOutboxBackgroundSync,
-  requestPersistentAppStorage,
 } from './syncRuntime.ts'
 
 type SalePayload = Record<string, unknown>
 type LocalRow = Record<string, unknown> & { _seq?: number }
-type QueueSyncOptions = { force?: boolean }
+type QueueSyncOptions = { force?: boolean; manualRecovery?: boolean; expectedOwner?: unknown; reviewedRows?: LocalRow[] }
 type LocalDb = Awaited<ReturnType<typeof getLocalDb>>
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_SALE_SYNC_LEASE_MS = 60_000
 let pendingSalesSyncPromise: Promise<Record<string, unknown>> | null = null
+let pendingRecoveryScope: ReturnType<typeof captureActorReadScope> | null = null
 
 function asText(value: unknown): string {
   return String(value ?? '')
@@ -51,17 +49,6 @@ function localTable(db: LocalDb, tableName: string): Table<LocalRow, IndexableTy
   return db.table(tableName) as Table<LocalRow, IndexableType>
 }
 
-// Offline sales mint their receipt id at QUEUE time from the device clock
-// -- the sale's own moment, not the later sync -- in the same bare
-// YYYYMMDD-HHMMSS shape the server mints online (user, Aug 30 2026:
-// receipt ids encode date+time; Aug 31 2026: "Receipt no need RCP" -- no
-// prefix). The id rides the replayed payload, so the server keeps it; the
-// pending-sync UI reads the sale row's offline_pending flag, which is what
-// the old OFFLINE- prefix signaled.
-function buildOfflineSaleReceiptNumber(): string {
-  return businessDateTimeId()
-}
-
 function isRetryableOfflineSaleError(error: unknown): boolean {
   const err = error as { status?: number; message?: string; reason?: string } | null
   if (!err) return false
@@ -70,124 +57,6 @@ function isRetryableOfflineSaleError(error: unknown): boolean {
   if (isTransientGatewayError(err.status)) return true
   const message = asText(err.message).toLowerCase()
   return message.includes('timed out') || message.includes('server is offline') || message.includes('server unavailable')
-}
-
-async function findQueuedSale(clientRequestId: unknown, owner: unknown): Promise<LocalRow | null> {
-  const clean = asText(clientRequestId).trim()
-  if (!clean) return null
-  const db = await getLocalDb()
-  const rows = await localTable(db, 'sync_queue').where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
-  return (rows as LocalRow[]).find((row) => asText((row.payload as SalePayload | undefined)?.client_request_id) === clean && offlineSaleOwnersMatch((row.payload as SalePayload)?.offline_owner, owner)) || null
-}
-
-function buildOfflineSaleMirror(payload: SalePayload, receiptNumber: string, offlineId: number, now: string): LocalRow {
-  return {
-    id: offlineId,
-    receipt_number: receiptNumber,
-    client_request_id: payload.client_request_id,
-    offline_owner: payload.offline_owner,
-    cashier_id: payload.cashier_id || null,
-    cashier_name: payload.cashier_name || '',
-    customer_name: payload.customer_name || '',
-    customer_phone: payload.customer_phone || '',
-    total_usd: payload.total_usd || 0,
-    total_khr: payload.total_khr || 0,
-    subtotal_usd: payload.subtotal_usd || payload.subtotal || 0,
-    subtotal_khr: payload.subtotal_khr || 0,
-    items: JSON.stringify(payload.items || []),
-    sale_status: payload.sale_status || 'completed',
-    payment_method: payload.payment_method || 'Cash',
-    created_at: payload.created_at || now,
-    updated_at: now,
-    offline_pending: true,
-  }
-}
-
-async function queueOfflineSale(payload: SalePayload, reason = 'server_offline'): Promise<Record<string, unknown>> {
-  const salePayload = ensureSaleClientRequestId({ ...(payload || {}) }, 'sale')
-  if (!normalizeOfflineSaleOwner(salePayload.offline_owner)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
-  const existing = await findQueuedSale(salePayload.client_request_id, salePayload.offline_owner)
-  if (existing) {
-    return {
-      success: true,
-      queued: true,
-      duplicate: true,
-      id: existing.entity_id || null,
-      receiptNumber: existing.entity_name || buildOfflineSaleReceiptNumber(),
-      client_request_id: salePayload.client_request_id,
-    }
-  }
-
-  const now = new Date().toISOString()
-  const receiptNumber = buildOfflineSaleReceiptNumber()
-  // A caller-supplied number is kept only when it is a real business id; a
-  // foreign shape (the old system's `NNNNNN@YYYY-MM-DD` label, say) is
-  // replaced here rather than printed on the offline receipt and then
-  // silently re-minted by the server on replay.
-  salePayload.receipt_number = isBusinessReceiptNumber(salePayload.receipt_number)
-    ? String(salePayload.receipt_number).trim()
-    : receiptNumber
-  // The sale's own moment, stamped at QUEUE time like the receipt id above.
-  // The replayed payload carries it to POST /api/sales, whose bounded
-  // sanitizeClientCreatedAt puts the sale on the day it happened instead of
-  // the day it synced (online checkouts send no created_at).
-  salePayload.created_at = asText(salePayload.created_at) || now
-  let localId = -Math.abs(Date.now())
-  const row = {
-    id: salePayload.client_request_id,
-    channel: OFFLINE_SALE_QUEUE_CHANNEL,
-    operation: 'create',
-    entity_table: 'sales',
-    entity_id: localId,
-    entity_name: receiptNumber,
-    status: 'pending',
-    payload: salePayload,
-    created_at: now,
-    updated_at: now,
-    retry_count: 0,
-    retry_at: now,
-    error: null,
-    reason,
-    queue_version: 1,
-    base_updated_at: salePayload.expectedUpdatedAt || salePayload.expected_updated_at || salePayload.updated_at || now,
-  }
-  const db = await getLocalDb()
-  const salesTable = localTable(db, 'sales')
-  const queueTable = localTable(db, 'sync_queue')
-  // The visible local sale and its replay instruction are one durable fact.
-  // A WebKit process kill between two separate writes must never leave a sale
-  // that appears recorded locally but can no longer reach the server.
-  await db.transaction('rw', salesTable, queueTable, async () => {
-    // Millisecond ids can collide across tabs. Never overwrite another local
-    // sale while admitting this queue entry, even before replay begins.
-    while (await salesTable.get(localId)) localId -= 1
-    row.entity_id = localId
-    await salesTable.put(buildOfflineSaleMirror(salePayload, receiptNumber, localId, now))
-    await queueTable.put(row)
-  })
-  // Best effort: Chromium can grant persistent storage from this user-driven
-  // checkout. Safari may not expose the API, but the request is always safe and
-  // unsupported/denied cases remain non-fatal.
-  void requestPersistentAppStorage()
-  registerOutboxBackgroundSync()
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('sync:offline-sale-queued', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        receiptNumber,
-        client_request_id: salePayload.client_request_id,
-        ts: now,
-      },
-    }))
-  }
-  return {
-    success: true,
-    queued: true,
-    id: localId,
-    receiptNumber,
-    client_request_id: salePayload.client_request_id,
-  }
 }
 
 function queuedSaleBackoffMs(retryCount = 0): number {
@@ -234,6 +103,7 @@ async function completeQueuedSale(row: LocalRow, result: Record<string, unknown>
         channel: OFFLINE_SALE_QUEUE_CHANNEL,
         receiptNumber: result?.receiptNumber || result?.receipt_number || row.entity_name || null,
         client_request_id: (row?.payload as SalePayload | undefined)?.client_request_id || row.id || null,
+        offline_owner: (row.payload as SalePayload | undefined)?.offline_owner,
         duplicate: !!result?.duplicate,
         ts: Date.now(),
       },
@@ -253,7 +123,6 @@ async function failQueuedSale(row: LocalRow, error: unknown, { retryable = false
     error: err?.message || asText(error || 'Sync failed'),
   })
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
-  if (retryable) registerOutboxBackgroundSync()
 }
 
 async function markQueuedSaleConflict(row: LocalRow, error: unknown): Promise<void> {
@@ -298,7 +167,10 @@ function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
   )
 }
 
-async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
+async function runPendingSalesQueueSync({ force = false, expectedOwner, reviewedRows }: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
+  const recoveryScope = captureActorReadScope()
+  const recoveryOwner = expectedOwner || captureOfflineSaleOwner()
+  const reviewed = reviewedRows ? new Map(reviewedRows.map((row) => [row._seq, row])) : null
   const now = Date.now()
   const db = await getLocalDb()
   const rows = await localTable(db, 'sync_queue')
@@ -309,6 +181,8 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
   const eligible: LocalRow[] = []
   for (const row of rows) {
     if (!row?.payload) continue
+    if (reviewed && !sameQueuedSaleRevision(reviewed.get(row._seq), row)) continue
+    if (!offlineSaleOwnersMatch((row.payload as SalePayload).offline_owner, recoveryOwner)) continue
     const status = asText(row.status || 'pending')
     if (!['pending', 'failed', 'retry', 'syncing', 'quarantined'].includes(status)) continue
     if (status === 'syncing') {
@@ -325,6 +199,7 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
 
   const result = { success: true, attempted: 0, synced: 0, failed: 0, pending: rows.length }
   for (const row of eligible) {
+    if (!isActorReadScopeCurrent(recoveryScope, false)) break
     const scope = captureActorReadScope()
     const queuedOwner = (row.payload as SalePayload).offline_owner
     const quarantine = (target: LocalRow) => updateQueuedRow(target, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE })
@@ -341,7 +216,11 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
     result.attempted += 1
     try {
       if (!isActorReadScopeCurrent(scope, false)) { await quarantine(claimed); continue }
-      const payload = ensureSaleClientRequestId({ ...((row.payload as SalePayload) || {}) }, 'sale')
+      const payload = { ...((row.payload as SalePayload) || {}) }
+      if (!asText(payload.client_request_id).trim() || payload.client_request_id !== row.id) {
+        await quarantine(claimed)
+        continue
+      }
       const response = await createSaleWithoutWriteDedupe(payload) as Record<string, unknown>
       const after = await apiFetch('GET', '/api/sync/owner') as Record<string, unknown>
       if (!isActorReadScopeCurrent(scope, false) || !offlineSaleOwnersMatch(queuedOwner, after.owner)
@@ -373,9 +252,17 @@ async function runPendingSalesQueueSync({ force = false }: QueueSyncOptions = {}
 }
 
 export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<Record<string, unknown>> {
+  if (options.manualRecovery !== true || !Array.isArray(options.reviewedRows) || !offlineSaleOwnersMatch(options.expectedOwner, captureOfflineSaleOwner())) {
+    return Promise.resolve({ success: false, manual_recovery_required: true, synced: 0, error: 'Pending sales are retained. Review them in the original account and explicitly choose recovery.' })
+  }
+  if (pendingSalesSyncPromise && pendingRecoveryScope && !isActorReadScopeCurrent(pendingRecoveryScope, false)) {
+    return Promise.resolve({ success: false, manual_recovery_required: true, synced: 0, error: 'A prior account recovery is finishing. Keep the records and review again.' })
+  }
   if (!pendingSalesSyncPromise) {
+    pendingRecoveryScope = captureActorReadScope()
     pendingSalesSyncPromise = runPendingSalesQueueSync(options).finally(() => {
       pendingSalesSyncPromise = null
+      pendingRecoveryScope = null
     })
   }
   return pendingSalesSyncPromise
@@ -384,14 +271,18 @@ export function syncPendingSalesQueue(options: QueueSyncOptions = {}): Promise<R
 export async function createSale(payload: SalePayload = {}): Promise<unknown> {
   const scope = captureActorReadScope()
   const salePayload = ensureSaleClientRequestId(stampOfflineSaleOwner({ ...getClientDeviceInfo(), ...payload }), 'sale')
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw Object.assign(new Error('Connect to the server before recording this sale. Your draft is retained; no sale was queued.'), { code: 'online_required' })
+  }
   try {
     return await createSaleRequest(salePayload)
   } catch (error) {
     if (isRetryableOfflineSaleError(error)) {
-      const err = error as { reason?: string } | null
-      const queued = await queueOfflineSale(salePayload, err?.reason || 'server_offline')
       if (!isActorReadScopeCurrent(scope, false)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
-      return queued
+      // A lost response might already have committed. Keep the original
+      // request identity/draft for receipt recovery; never enqueue or mint a
+      // replacement request merely because its outcome is unknown.
+      throw Object.assign(new Error('The server could not confirm this sale. Keep the original draft and request; reconnect and check its receipt before retrying. No new offline sale was queued.'), { code: 'sale_confirmation_required', client_request_id: salePayload.client_request_id, cause: error })
     }
     throw error
   }
