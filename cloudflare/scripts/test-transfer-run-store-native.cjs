@@ -9,7 +9,7 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const compile = file => ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib', file), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText
+}).outputText.replace("from './permissions'", "from './permissions.js'")
 const worker = `
 import { D1Compat } from './db.js';
 import { registerTransferRunStatements,sealTransferRunChunkStatements,commitTransferRunChunk,committedTransferRunChunk } from './store.js';
@@ -17,7 +17,8 @@ export default { async fetch(request,env) {
   const {mode,phase='first'} = await request.json();
   const db = new D1Compat(env.DB);
   const key = 'child-'+mode, runId = 'run-'+mode;
-  const owner = {actual:{actorId:7,organizationId:4},expected:{actorId:7,organizationId:4}};
+  const generation = await db.prepare("SELECT json_extract(value,'$.generation') generation FROM system_flags WHERE key='business_dataset_generation'").get();
+  const owner = {actual:{actorId:7,organizationId:4},expected:{actorId:7,organizationId:4},datasetGeneration:generation.generation};
   const pos = {...owner,runId,revision:0,sequence:0};
   const intent = {requestId:key,requestJson:JSON.stringify({quantity:1,reason:mode}),digest:'a'.repeat(64)};
   if (phase==='first' || phase==='setup') {
@@ -76,12 +77,14 @@ async function main() {
     {type:'ESModule',path:'entry.js',contents:worker},
     {type:'ESModule',path:'db.js',contents:compile('db.ts')},
     {type:'ESModule',path:'store.js',contents:compile('transferRunStore.ts')},
+    {type:'ESModule',path:'permissions.js',contents:compile('permissions.ts')},
   ], compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR) })
   try {
     const db = await mf.getD1Database('DB')
     for (let i=0;i<schema.length;i+=25) await db.batch(schema.slice(i,i+25).map(row=>db.prepare(row.sql)))
     const migration = fs.readFileSync(path.join(dir,'0185_transfer_runs.sql'),'utf8')
     await db.batch(split(migration).map(sql=>db.prepare(sql)))
+    await db.batch(split(fs.readFileSync(path.join(dir,'0186_transfer_run_retirement.sql'),'utf8')).map(sql=>db.prepare(sql)))
     await db.prepare('CREATE TABLE native_stock(key TEXT PRIMARY KEY,quantity REAL,cost REAL)').run()
     async function fetchCase(mode,phase='first') {
       const response = await mf.dispatchFetch('http://native-transfer.test/',{method:'POST',body:JSON.stringify({mode,phase})})
