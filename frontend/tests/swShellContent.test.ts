@@ -8,6 +8,35 @@ const source = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf
 const start = source.indexOf('function isValidDocumentResponse')
 const end = source.indexOf('async function mapWithConcurrency', start)
 const guards = new Function('self', `${source.slice(start, end)};return {isValidDocumentResponse,isValidStaticResponse}`)({ location: { origin: 'https://app.test' } })
+
+// Serialized into the page. An incumbent can terminate after postMessage but
+// before replying. Every probe must settle so expect.poll can try its successor.
+function probeControllerVersion(dropReply: boolean) {
+  return new Promise<{ version: string | null, reason: string }>(resolve => {
+    const channel = new MessageChannel()
+    let done = false
+    const finish = (version: string | null, reason: string) => {
+      if (done) return
+      done = true
+      clearTimeout(deadline)
+      navigator.serviceWorker.removeEventListener('controllerchange', changed)
+      channel.port1.onmessage = null
+      channel.port1.close()
+      channel.port2.close()
+      resolve({ version, reason })
+    }
+    const changed = () => finish(null, 'controllerchange')
+    const deadline = setTimeout(() => finish(null, 'deadline'), 250)
+    navigator.serviceWorker.addEventListener('controllerchange', changed)
+    channel.port1.onmessage = event => {
+      if (!dropReply) finish(event.data.version, 'reply')
+    }
+    const controller = navigator.serviceWorker.controller
+    if (!controller) { finish(null, 'no-controller'); return }
+    try { controller.postMessage({ type: 'BUSINESS_OS_APP_VERSION_REQUEST' }, [channel.port2]) }
+    catch { finish(null, 'post-failed') }
+  })
+}
 test('document routing preserves SPA paths but bypasses resources and private paths', () => {
   const routes = source.slice(source.indexOf('function isNeverCachedPath'), source.indexOf('function isCacheableStaticPath'))
   const isDocument = new Function(`${routes};return isAppDocumentPath`)()
@@ -55,6 +84,10 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     await page.goto(origin + '/sales')
     await page.evaluate(async () => { await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready })
     await page.waitForFunction(() => !!navigator.serviceWorker.controller)
+    // Deliberately lose a real response. The old unbounded promise could never
+    // yield another poll; this must terminate and release both message ports.
+    assert.deepEqual(await page.evaluate(probeControllerVersion, true), { version: null, reason: 'deadline' })
+    assert.equal((await page.evaluate(probeControllerVersion, false)).version, 'business-os-app-shell-old-poison')
     await page.goto(origin + '/business-os-build.json')
     await page.waitForFunction(async () => (await (await caches.open('business-os-app-shell-old-poison')).match('/index.html'))?.headers.get('content-type')?.includes('application/json'))
     failSales = true // keep the already-poisoned cache when background refresh fails
@@ -66,11 +99,22 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     worker = source.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'fixed-shell')
     await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration())!.update() })
     await page.waitForFunction(async () => (await caches.keys()).includes('business-os-app-shell-fixed-shell'))
-    await expect.poll(() => page.evaluate(() => new Promise(resolve => {
-      const channel = new MessageChannel()
-      channel.port1.onmessage = event => { channel.port1.close(); resolve(event.data.version === 'business-os-app-shell-fixed-shell') }
-      navigator.serviceWorker.controller!.postMessage({ type: 'BUSINESS_OS_APP_VERSION_REQUEST' }, [channel.port2])
-    }))).toBe(true)
+    const probes: Array<{ version: string | null, reason: string }> = []
+    try {
+      await expect.poll(async () => {
+        const result = await page.evaluate(probeControllerVersion, probes.length === 0)
+        probes.push(result)
+        return result.version
+      }).toBe('business-os-app-shell-fixed-shell')
+      assert.ok(probes.length >= 2, 'a lost first reply must cause another probe, not a false success')
+      assert.equal(probes[0].version, null)
+    } catch (error) {
+      console.error('SW upgrade diagnostic', { probes, registration: await page.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration()
+        return { active: registration?.active?.state, waiting: registration?.waiting?.state, installing: registration?.installing?.state, caches: await caches.keys() }
+      }) })
+      throw error
+    }
     failSales = false
     await page.goto(origin + '/sales?view=shift#history')
     assert.equal(await page.locator('#app').innerText(), 'REAL APP SHELL')
