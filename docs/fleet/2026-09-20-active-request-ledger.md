@@ -5,6 +5,24 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current release and newly verified gaps
 
+Latest stock-in scope checkpointcbbebe5841f8 deployed as49b64606-d25a-4894-b630-6baa371005d1.
+Frontend504/504 and browser6/6, local gates and live report/detail smoke pass;
+no migration or money changes. Prior pending verification for this slice resolved.
+
+Owner approval received for verified export/transfer tracking AND restore/reset
+retirement with permanent retry-ID reservations. Historical financial amounts must
+remain unchanged. No new migration remotely applied. Isolated955711f1 batchOnce
+store accepted1093c381; backup/reset audit5615b2dd requires lifecycle retirement,
+non-restored dataset generation and reservation union before route integration.
+0186 append-only implementation assigned; no generic maintenance bypass. Existing
+0185 CHECK/FK rules stay; retirement tables retain identities before deleting live
+rows under narrow lifecycle authorization. Export still needs per-write revision.
+
+Shift pagination8326895e is NOT integrated: independent concurrent insert produced
+total1/rows2 from separate reads. Writer assigned consistent count/slice SQL fix,
+including empty/out-of-range pages. Focused normal traversal/permissions/lineage
+and selected export pass, but not sufficient to waive this race.
+
 Next local sourceac0104747552: stock-in report/detail cache now masks immediately
 on query/account/authority/permission changes, rejects stale line-page/results.
 Independent reviewer4fd541e3 ran34 cases and negative controls for removed render

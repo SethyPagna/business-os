@@ -1,3 +1,21 @@
+## Stock-in scope checkpoint deployed; lifecycle tracking approved — September 20
+
+Source `cbbebe5841f8` deployed Paid as Worker
+`49b64606-d25a-4894-b630-6baa371005d1`; main/working branch pushed. Frontend504/504,
+zero skips;6 native browser cases; types/i18n/build and both tier dry runs pass.
+Live stock-in report and detail open, no captured console errors; entry script
+matches build. No schema or financial changes. See stock-in-scope release report.
+
+Owner now APPROVED export/transfer tracking plus permanent retirement/retry-ID
+preservation across restore/reset, only after verification, without historical
+financial recalculation. Earlier approval-pending entries for this scope are
+superseded. No new migration applied. Isolated0185/store955711f1 single-attempt
+adapter passes independent review1093c381;0186 lifecycle generation/retirement
+implementation underway, not integrated. Shared internal dataset-generation flag
+is proposed for export/reset boundaries; per-write export revision remains needed.
+Shift pagination8326895e held for count/page race560cc14e; writer correcting.
+Full goal and remaining ledger items stay open.
+
 ## Stock-in scope fix integrated; verification running — September 20
 
 Local source `ac0104747552` integrates independently reviewed stock-in invoice
