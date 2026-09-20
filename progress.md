@@ -1,3 +1,32 @@
+## Exact artifact built; final certification running — September 20
+
+Build3064 TERMINAL0: artifact6f608476ed25/hashd73469dc0c9c67d5,
+2026-09-20T11:30:29.890Z; frontend type/i18n/build pass,269chunks/zero cycles,
+public preload excludes admin/file/import code. Fullfrontend57621 LIVE at last
+poll; preview_safety owns browser90516 on dedicated4344, user4319 untouched.
+Root viewed actual320px Khmer screenshot:241-245/245 and13/13 fully visible
+in one row, Back/Next words/icons retained. Remaining browser cases still running.
+No new production deployment or migration. Working branch pushed9b07ce48.
+
+Council decision for0189 (one model simulating five perspectives, not five
+independent experts): Skeptic requires unforgeable exact-state guards and lost-ACK
+checks; Engineer separates owner admission, immutable history evidence and mutable
+replay head; Expansionist proposes full durable recovery workflows as future scope;
+Outsider requires explaining why old Undo may need administrator review; Executor
+chooses a native bounded prototype before route wiring. Anonymous cross-critique:
+A's fail-closed proof risks disabling valid history; B's separation risks redundant
+storage; C's comprehensive workflow is too broad for first proof; D's clarity alone
+cannot enforce authority; E's small test is not rollout certification. Chairman:
+prototype now, biggest risk is a broad retired-receipt bypass, first step prove
+exact Undo/Redo and permanently denied retry responses together. Independent
+reviewb4ee0958 also accepts prototype only, requiring member INSERT/DELETE
+invalidation, fenced installation, full-chain/load/old-worker checks before rollout.
+
+Restore discovery audit found avoidable per-table queries; isolated consolidation
+assigned with migrated native-D1 graph equivalence tests. This does NOT solve full
+restore/backup/reset Free capacity; those need durable bounded workflow and quota
+handling. Keep these gaps in the full goal, not as waived deployment features.
+
 ## Reviewed source pin, compact pager and report harness integrated — September 20
 
 Local6f608476 integrates source-pin83089233 (candidatecf328f31, independent
