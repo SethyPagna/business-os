@@ -154,6 +154,7 @@ test('a card opens ONE breakdown as a float (Modal) above the page, not an inlin
   // panel into a Modal (portalled to document.body), so opening it layers
   // above the list instead of shoving it down.
   const strip = read('src/components/shared/StatsStrip.tsx')
+  assert.match(strip, /continuous = false/, 'existing StatsStrip consumers retain their default clock semantics')
   assert.ok(/setOpenKey\(\(current\) => \(current === card\.key \? null : card\.key\)\)/.test(strip), 'tapping toggles ONE open card at a time')
   assert.ok(strip.includes('aria-expanded'), 'the cards announce their state')
   assert.ok(strip.includes('<InfoHint'), 'the float carries the explanation affordance')
@@ -421,7 +422,7 @@ test('Part 560: StatsStrip owns one stable date/action row and a one-row preset 
   const strip = read('src/components/shared/StatsStrip.tsx')
   assert.match(strip, /<StatsRangeRow range=\{range\} onRangeChange=\{onRangeChange\}/, 'StatsStrip owns the shared date row when its range contract is supplied')
   assert.ok(strip.includes('leading={statsTrigger}') && !strip.includes('statsOpen && range'), 'range stays visible beside Stats while cards are folded')
-  assert.match(strip, /showTime=\{showTime\} showPresets=\{showPresets\}/, 'StatsStrip forwards the clock and preset contract to the shared row')
+  assert.match(strip, /showTime=\{showTime\} continuous=\{continuous\} showPresets=\{showPresets\}/, 'StatsStrip forwards the clock, continuous interval and preset contract to the shared row')
   // Sales, Returns, and Expenses pass their one range state to StatsStrip and
   // no longer render a sibling StatsRangeRow. Inventory retains a separate
   // range surface for its mixed embedded/product modes and is not used as a
@@ -455,6 +456,9 @@ test('preset buttons execute the shared date-only and timestamp range callbacks'
   for (const showTime of [false, true]) {
     let changed: ReturnType<typeof statsPresetRange> | null = null
     const tree = mod.exports.default({ range: statsPresetRange('all'), t: (key: string) => key, showTime, onRangeChange: (value: ReturnType<typeof statsPresetRange>) => { changed = value } })
+    assert.equal(tree.props.children[0].props.children[1].props.continuous, false, 'shared row does not silently change existing consumers')
+    const continuousTree = mod.exports.default({ range: statsPresetRange('today'), t: (key: string) => key, showTime, continuous: true, onRangeChange: () => {} })
+    assert.equal(continuousTree.props.children[0].props.children[1].props.continuous, true, 'explicit continuous semantics reach the actual picker')
     const rail = tree.props.children[1]
     const buttons = rail.props.children
     assert.equal(buttons.length, 8)

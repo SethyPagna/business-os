@@ -740,6 +740,39 @@ const DAMAGED_ITEM_COUNT_SQL = `(
       WHERE dri.return_id = r.id AND lower(COALESCE(dri.stock_action, '')) = 'damaged'
     ) AS damaged_item_count`
 
+/** Shared list/statistics cohort. Exact bounds are continuous entry timestamps,
+ * not a recurring clock window; full days retain the business-date predicate. */
+export function returnRangePredicate(query: Record<string, string>, column: 'r.created_at' | 'created_at'): { sql: string; params: Record<string, unknown> } {
+  const startDate = String(query.startDate || '').trim()
+  const endDate = String(query.endDate || '').trim()
+  const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) throw new RangeError('Return dates must use valid YYYY-MM-DD dates')
+  if (startDate && endDate && startDate > endDate) throw new RangeError('Return end date must not precede the start date')
+  if (query.startTime || query.endTime) throw new RangeError('Use createdFrom and createdTo together for an exact return time range')
+  const from = String(query.createdFrom || '').trim()
+  const to = String(query.createdTo || '').trim()
+  if (!!from !== !!to) throw new RangeError('createdFrom and createdTo must be provided together')
+  if (from && to) {
+    const bound = (value: string): string => {
+      const match = /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?([zZ]|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.exec(value)
+      if (!match || !validDate(match[1])) throw new RangeError('createdFrom and createdTo must be valid timestamps')
+      const parsed = new Date(match[2] ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}Z`)
+      if (!Number.isFinite(parsed.getTime())) throw new RangeError('createdFrom and createdTo must be valid timestamps')
+      return parsed.toISOString().slice(0, 19).replace('T', ' ')
+    }
+    const createdFrom = bound(from), createdTo = bound(to)
+    if (createdFrom >= createdTo) throw new RangeError('createdTo must be after createdFrom')
+    return { sql: `datetime(${column}) >= @createdFrom AND datetime(${column}) < @createdTo`, params: { createdFrom, createdTo } }
+  }
+  const clauses: string[] = []
+  const params: Record<string, unknown> = {}
+  if (startDate) { clauses.push(localDateAtOrAfter(column)); params.startDate = startDate }
+  if (endDate) { clauses.push(localDateAtOrBefore(column)); params.endDate = endDate }
+  return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
+}
+
 // GET /api/returns
 app.get('/', async (c) => {
   const db = getDb(c.env)
@@ -753,10 +786,10 @@ app.get('/', async (c) => {
   const includeItems = Boolean(query.saleId) || ['1', 'true', 'yes'].includes(String(query.includeItems || '').trim().toLowerCase())
   const limit = Math.min(1000, Math.max(1, Number.parseInt(String(query.limit || '500'), 10) || 500))
 
-  const where: string[] = ['1=1']
-  const params: Record<string, unknown> = { limit }
-  if (query.startDate) { where.push(localDateAtOrAfter('r.created_at')); params.startDate = query.startDate }
-  if (query.endDate) { where.push(localDateAtOrBefore('r.created_at')); params.endDate = query.endDate }
+  let range: ReturnType<typeof returnRangePredicate>
+  try { range = returnRangePredicate(query, 'r.created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
+  const where: string[] = [range.sql]
+  const params: Record<string, unknown> = { limit, ...range.params }
   if (query.saleId) { where.push('r.sale_id = @saleId'); params.saleId = query.saleId }
   if (scope !== 'all') { where.push(`COALESCE(r.return_scope, 'customer') = @scope`); params.scope = scope }
   if (typeValues.length === 1) {
@@ -983,24 +1016,21 @@ app.get('/receipt-lookup', async (c) => {
 app.get('/report', async (c) => {
   const db = getDb(c.env)
   const query = c.req.query()
-  const startDate = String(query.startDate || '').slice(0, 10)
-  const endDate = String(query.endDate || '').slice(0, 10)
-  const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
-  if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) {
-    return c.json({ error: 'startDate/endDate must use YYYY-MM-DD' }, 400)
-  }
+  const startDate = String(query.startDate || '').trim()
+  const endDate = String(query.endDate || '').trim()
+  let range: ReturnType<typeof returnRangePredicate>
+  try { range = returnRangePredicate(query, 'created_at') } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   // scope=supplier reports return-to-supplier cases (compensation / business
   // loss) with the SAME response shape -- customer rows simply carry zero in
   // the supplier money columns and vice versa, so one reader serves both the
   // Reports hub (customer) and the Returns page's scope-aware stats strip.
   const scope = String(query.scope || 'customer') === 'supplier' ? 'supplier' : 'customer'
   const clauses = [
+    range.sql,
     `COALESCE(return_scope, 'customer') = @scope`,
     `COALESCE(status, 'completed') <> 'cancelled'`,
   ]
-  const params: Record<string, unknown> = { scope }
-  if (startDate) { clauses.push(localDateAtOrAfter('created_at')); params.startDate = startDate }
-  if (endDate) { clauses.push(localDateAtOrBefore('created_at')); params.endDate = endDate }
+  const params: Record<string, unknown> = { scope, ...range.params }
   if (query.branchId) { clauses.push('branch_id = @branchId'); params.branchId = query.branchId }
   const where = clauses.join(' AND ')
   // RETURN-DATE ACTIVITY, not a revenue term. Every figure below is scoped

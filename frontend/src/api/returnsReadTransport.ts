@@ -1,5 +1,19 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
+import { reportUtcBound } from '../components/sales/reports/reportModel.ts'
+
+/** Reports-compatible continuous entry-time interval; full days keep the
+ * existing Cambodia created-at calendar-date filters. */
+export function returnRangeParams(range: { startDate: string; endDate: string; startTime?: string; endTime?: string }): QueryParams {
+  const params: QueryParams = { startDate: range.startDate || undefined, endDate: range.endDate || undefined }
+  const startTime = range.startTime || '00:00'
+  const endTime = range.endTime || '23:59'
+  if (startTime === '00:00' && endTime === '23:59') return params
+  const createdFrom = reportUtcBound(range.startDate, startTime)
+  const createdTo = reportUtcBound(range.endDate, endTime, 1)
+  if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Return end date/time must be after the start date/time; both dates are required.')
+  return { ...params, createdFrom, createdTo }
+}
 
 function encodeId(id: number | string): string {
   return encodeURIComponent(String(id))

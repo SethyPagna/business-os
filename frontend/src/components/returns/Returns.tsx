@@ -58,6 +58,7 @@ import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
   getReturnsReport,
+  returnRangeParams,
 } from '../../api/returnsReadTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
@@ -489,14 +490,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   // useDeferredValue-for-local-filter + separate-hand-rolled-350ms-debounce-
   // for-the-fetch pattern, not something specific to Sales.
   const debouncedSearch = useDebouncedValue(search, 180)
-  const returnsDateRange = useMemo(() => {
-    const startDate = String(stripRange.startDate || '').trim()
-    const endDate = String(stripRange.endDate || '').trim()
-    const out: { startDate?: string; endDate?: string } = {}
-    if (startDate) out.startDate = startDate
-    if (endDate) out.endDate = endDate
-    return out
-  }, [stripRange.startDate, stripRange.endDate])
+  const returnsDateRange = useMemo(() => ({
+    startDate: stripRange.startDate, endDate: stripRange.endDate,
+    startTime: stripRange.startTime, endTime: stripRange.endTime,
+  }), [stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime])
 
   // A return "counts" toward the refund figures only if it isn't cancelled:
   // the list GET returns cancelled returns too, but every refund total (strip
@@ -530,7 +527,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         const params = {
           scope,
           ...(debouncedSearch ? { search: debouncedSearch } : {}),
-          ...returnsDateRange,
+          ...returnRangeParams(returnsDateRange),
         }
         const result = await withLoaderTimeout(() => fetchReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
@@ -638,8 +635,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     setStripLoading(true)
     try {
       const result = await getReturnsReport({
-        ...(stripRange.startDate ? { startDate: stripRange.startDate } : {}),
-        ...(stripRange.endDate ? { endDate: stripRange.endDate } : {}),
+        ...returnRangeParams(returnsDateRange),
         scope,
       })
       if (stripRequestRef.current !== requestId) return
@@ -650,7 +646,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
-  }, [isActive, scope, stripRange.endDate, stripRange.startDate])
+  }, [isActive, scope, returnsDateRange])
   useEffect(() => { void loadStatsStrip() }, [loadStatsStrip])
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
@@ -1169,7 +1165,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     setReturnPage(1)
-  }, [debouncedSearch, stripRange.startDate, stripRange.endDate, returnGroupMode, returnSortSpec, scope, typeFilter])
+  }, [debouncedSearch, returnsDateRange, returnGroupMode, returnSortSpec, scope, typeFilter])
 
   const allVisibleReturns = useMemo(
     () => allReturnSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -1488,7 +1484,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         t={t}
         range={stripRange}
         onRangeChange={setStripRange}
-        showTime={false}
+        showTime
+        continuous
         showPresets
         iconOnly
         compactRange
