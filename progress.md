@@ -2,7 +2,8 @@
 
 Owner requested continued goal-backed execution until completion. Goal is active;
 no overall completion claim. Returns time parity, standalone transfer-budget
-planning and compiler-gate negative controls are in progress in isolated lanes.
+planning and compiler-gate negative controls are integrated locally and focused
+tests pass; broader integrated verification is running. They are NOT deployed.
 Returns list/export 500/1000 loaded-row cap is a newly confirmed separate open
 completeness issue. Transfer tracking migration approval remains pending.
 Latest production provenance remains the online-only checkpoint below; this wave
