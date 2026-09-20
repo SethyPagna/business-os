@@ -200,6 +200,7 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
+  './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   './moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },

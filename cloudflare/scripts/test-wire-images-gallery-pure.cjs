@@ -123,6 +123,7 @@ const productConflictActionGroups = loadReal('lib/productConflictActionGroups.ts
 const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
+  './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
   './db': { getDb: () => dbShim },
   './media': media,
   './importImageMatch': importImageMatch,

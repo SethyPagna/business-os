@@ -66,12 +66,13 @@ const script = built.match(/<script data-business-os-route-preloads>([\s\S]*?)<\
 assert.ok(script, 'plugin must emit an executable route preload script')
 
 type Link = { rel?: string; href?: string; fetchPriority?: string; attributes: Record<string, string>; setAttribute: (name: string, value: string) => void }
-function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string; rejectFetch?: boolean } = {}) {
+function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string; rejectFetch?: boolean; unresolvedSignout?: boolean; blockedStorage?: boolean } = {}) {
   const links: Link[] = []
   const calls: Array<{ url: string; init: RequestInit }> = []
   const existingPromise = options.existingPromise ? Promise.resolve({ user: 'already-started' }) : undefined
   const window = {
     location: { pathname },
+    get localStorage() { if (options.blockedStorage) throw new Error('Storage blocked'); return { getItem: (key: string) => key === 'businessos_unresolved_signout_v1' && options.unresolvedSignout ? 'retained-intent' : null } },
     __businessOsAuthBootstrapPromise: existingPromise,
     fetch: (url: string, init: RequestInit) => {
       calls.push({ url, init })
@@ -115,6 +116,9 @@ for (const path of ['/pos', '/point-of-sale']) expectRoute(path, [...admin, 'POS
 for (const [route, chunks] of Object.entries(otherRoutes)) expectRoute('/' + route, [...admin, ...chunks])
 
 const bootstrap = run('/products')
+assert.equal(run('/products', { unresolvedSignout: true }).calls.length, 0, 'unresolved sign-out suppresses private early bootstrap')
+assert.equal(run('/products', { blockedStorage: true }).calls.length, 0, 'unreadable intent storage fails closed before private bootstrap')
+assert.deepEqual(run('/shop', { publicRoot: true, unresolvedSignout: true }).links.map(link => link.href), run('/shop', { publicRoot: true }).links.map(link => link.href), 'admin sign-out fence preserves public route preloads')
 assert.equal(bootstrap.calls.length, 1)
 assert.equal(bootstrap.calls[0].url, '/api/auth/bootstrap')
 assert.equal(bootstrap.calls[0].init.credentials, 'include')

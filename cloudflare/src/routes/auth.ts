@@ -338,6 +338,22 @@ app.post('/login', async (c) => {
 })
 
 app.post('/logout', async (c) => {
+  const body: unknown = await c.req.json().catch(() => null)
+  if (body && typeof body === 'object' && ('expected_actor_id' in body || 'expected_organization_id' in body)) {
+    const expectedActor = 'expected_actor_id' in body ? body.expected_actor_id : undefined
+    const expectedOrg = 'expected_organization_id' in body ? body.expected_organization_id : undefined
+    if (typeof expectedActor !== 'number' || !Number.isSafeInteger(expectedActor) || expectedActor <= 0
+      || !(expectedOrg === null || (typeof expectedOrg === 'number' && Number.isSafeInteger(expectedOrg) && expectedOrg > 0))) {
+      return c.json({ error: 'The original sign-out account is required.', code: 'invalid_signout_owner' }, 400)
+    }
+    const user = await getSessionUser(c)
+    if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+    if (user.id !== expectedActor || (user.organization_id ?? null) !== expectedOrg) {
+      return c.json({ error: 'The signed-in account changed. This sign-out did not change it.', code: 'signout_actor_changed' }, 409)
+    }
+  }
+  // Legacy explicit logout remains compatible. Guarded retries target the
+  // original account, including a newer session of that same account, never B.
   await revokeSession(c)
   clearSessionCookie(c)
   return c.json({ ok: true })

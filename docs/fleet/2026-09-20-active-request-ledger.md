@@ -3,6 +3,11 @@
 This supplements, not replaces, earlier issue ledgers and screenshots/video evidence.
 Recorded means tracked; implemented does not mean verified or deployed.
 
+LATEST: online-only/cost/account safety checkpoint6a31689f deployed as
+Worker3f5ad76d-5be1-468b-876d-6151239c61d9 with0184 applied once. See
+2026-09-20-online-only-release.md. This supersedes older NOTdeployed/blocker
+entries for that slice only. Other admin/public/Freecapacity items stay open.
+
 ## Latest owner priority and release truth
 
 ### Approved online-first goal refinement

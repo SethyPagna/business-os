@@ -1,4 +1,6 @@
 import { STORAGE_KEYS } from '../constants'
+import { assertNoUnresolvedSignout } from './unresolvedSignout.ts'
+import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
 import {
   apiFetch,
   getSyncServerUrl,
@@ -102,7 +104,9 @@ function takeEmbeddedAuthBootstrapPayload(): unknown | null {
 }
 
 export async function getAppBootstrap(): Promise<unknown> {
+  assertNoUnresolvedSignout()
   const hasServer = Boolean(ensureBootstrapServerUrl())
+  const actorScope = captureActorReadScope()
   const hasStoredSession = hasStoredUserSession()
 
   if (!hasServer) {
@@ -113,9 +117,19 @@ export async function getAppBootstrap(): Promise<unknown> {
     const embeddedBootstrapPayload = takeEmbeddedAuthBootstrapPayload()
     if (embeddedBootstrapPayload) return embeddedBootstrapPayload
     const earlyBootstrapPromise = takeEarlyAuthBootstrapPromise()
-    if (earlyBootstrapPromise) return await earlyBootstrapPromise
-    return await apiFetch('GET', '/api/auth/bootstrap')
+    if (earlyBootstrapPromise) {
+      const payload = await earlyBootstrapPromise
+      assertActorReadScope(actorScope, false)
+      assertNoUnresolvedSignout()
+      return payload
+    }
+    const payload = await apiFetch('GET', '/api/auth/bootstrap')
+    assertActorReadScope(actorScope, false)
+    assertNoUnresolvedSignout()
+    return payload
   } catch (error) {
+    assertActorReadScope(actorScope, false)
+    assertNoUnresolvedSignout()
     if (isInvalidSessionError(error)) {
       const message = readErrorField(error, 'message')
       const localBootstrap = emptyBootstrap()

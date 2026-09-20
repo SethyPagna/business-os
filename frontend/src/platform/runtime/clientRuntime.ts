@@ -292,6 +292,7 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // than imported to keep this runtime module free of UI-utility imports.
   localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`)
   localPreserveKeys.add('businessos_auth_cookie_pending')
+  localPreserveKeys.add('businessos_unresolved_signout_v1')
   if (preserveAuth) {
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
@@ -302,7 +303,7 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   const keptLocal = canUseBrowserStorage() ? [
     // Live coordination keys are never removed, and must never be restored
     // from a snapshot after asynchronous cleanup: their owner may have changed.
-    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending'),
+    ...snapshotStorage(window.localStorage, localPreserveKeys).filter(([key]) => key !== 'businessos_read_session' && key !== 'businessos_auth_cookie_pending' && key !== 'businessos_unresolved_signout_v1'),
     ...(options.preserveUiDrafts === true ? snapshotStoragePrefixes(window.localStorage, ['businessos_draft_']) : []),
   ] : []
   const keptSession = canUseBrowserStorage() ? snapshotStorage(window.sessionStorage, sessionPreserveKeys) : []

@@ -11,6 +11,16 @@ export type OfflineSaleOwner = {
 
 export const OFFLINE_OWNER_REVIEW_MESSAGE = 'Keep this pending sale. Sign in to its original account and server to sync it. Older unowned sales need review in the current app; do not recreate or discard them.'
 
+// Only normalize trusted authenticated-user shapes, never retained queue owners.
+export function authenticatedOrganizationId(user: Record<string, unknown>): number | null {
+  const snake = Object.prototype.hasOwnProperty.call(user, 'organization_id')
+  const camel = Object.prototype.hasOwnProperty.call(user, 'organizationId')
+  if (snake && camel && user.organization_id !== user.organizationId) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
+  const value = snake ? user.organization_id : camel ? user.organizationId : null
+  if (value !== null && (!Number.isSafeInteger(value) || Number(value) <= 0)) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
+  return value as number | null
+}
+
 // Keep this validator identical to the standalone service worker counterpart.
 // Ownership is a consistency fence; the server still obtains identity from auth.
 export function normalizeOfflineSaleOwner(value: unknown): OfflineSaleOwner | null {
@@ -44,7 +54,7 @@ export function captureOfflineSaleOwner(): OfflineSaleOwner {
   } catch { /* Deny admission when the authenticated bootstrap is unavailable. */ }
   let authority = ''
   try { authority = new URL(getSyncServerUrl() || window.location.origin).origin } catch { /* fail closed */ }
-  const owner = normalizeOfflineSaleOwner({ version: 1, actor_id: user.id, organization_id: user.organization_id ?? null, authority, runtime: 'cloudflare-workers' })
+  const owner = normalizeOfflineSaleOwner({ version: 1, actor_id: user.id, organization_id: authenticatedOrganizationId(user), authority, runtime: 'cloudflare-workers' })
   if (!owner) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
   return owner
 }
