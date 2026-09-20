@@ -10,6 +10,10 @@ export type ReturnsStatementRange = {
 /** Frontend counterpart of returnExportWindow; shared parity vectors test both.
  * Custom dates are primary. Presets need not be aligned to calendar blocks. */
 export function returnsStatementParams(range: ReturnsStatementRange): Record<string, string> {
+  // Make the existing reportUtcBound Date.UTC domain explicit on both sides.
+  if (![range.startDate, range.endDate].every(value => /^(?:0[1-9]\d{2}|[1-9]\d{3})-\d{2}-\d{2}$/.test(value))) {
+    throw new RangeError('Return statement business dates must use years 0100 through 9999')
+  }
   const startTime = range.startTime || '00:00', endTime = range.endTime || '23:59'
   const createdFrom = reportUtcBound(range.startDate, startTime)
   const createdTo = reportUtcBound(range.endDate, endTime, 1)

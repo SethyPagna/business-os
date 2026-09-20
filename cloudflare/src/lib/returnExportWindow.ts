@@ -33,6 +33,11 @@ function sqlUtc(ms: number): string {
 export function returnExportWindow(query: Record<string, string>): ReturnExportWindow {
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
+  // Match reportUtcBound's existing Date.UTC business-date domain explicitly:
+  // 0100..9999. UTC bounds may legitimately fall in 0099 after the -7h shift.
+  if (![startDate, endDate].every(value => /^(?:0[1-9]\d{2}|[1-9]\d{3})-\d{2}-\d{2}$/.test(value))) {
+    throw new RangeError('Return statement business dates must use years 0100 through 9999')
+  }
   const startDay = dateMs(startDate), endDay = dateMs(endDate)
   if (startDay > endDay) throw new RangeError('Return statement end date must not precede its start date')
   if (query.startTime || query.endTime) throw new RangeError('Use paired createdFrom and createdTo for statement times')

@@ -12,6 +12,10 @@ const { returnExportWindow } = loaded.exports
 const { returnsStatementParams } = require('../../frontend/src/utils/returnsExportWindow.ts')
 
 const vectors = [
+  { startDate: '0100-01-01', endDate: '0100-01-01' },
+  { startDate: '0100-01-01', endDate: '0100-12-31' },
+  { startDate: '9999-01-01', endDate: '9999-12-31' },
+  { startDate: '9999-12-31', endDate: '9999-12-31', startTime: '23:59', endTime: '23:59' },
   { startDate: '2024-01-01', endDate: '2024-12-31' },
   { startDate: '2025-01-01', endDate: '2025-12-31' },
   { startDate: '2024-02-29', endDate: '2025-02-27' },
@@ -43,6 +47,13 @@ for (const invalid of [
   { ...day, createdFrom: '2025-09-19 17:00:00', createdTo: '2026-09-19 17:01:00' },
   { ...day, startTime: '08:00' },
 ]) assert.throws(() => returnExportWindow(invalid), RangeError, JSON.stringify(invalid))
+for (const unsupported of ['0000', '0001', '0099', '10000']) {
+  const invalid = { startDate: `${unsupported}-01-01`, endDate: `${unsupported}-01-01` }
+  assert.throws(() => returnExportWindow(invalid), RangeError)
+  assert.throws(() => returnsStatementParams(invalid), RangeError)
+}
+assert.throws(() => returnExportWindow({ startDate: '9999-12-31', endDate: '10000-01-01' }), RangeError)
+assert.throws(() => returnsStatementParams({ startDate: '9999-12-31', endDate: '10000-01-01' }), RangeError)
 
 const raw = new DatabaseSync(':memory:')
 raw.exec(`CREATE TABLE returns(id INTEGER PRIMARY KEY,created_at TEXT,status TEXT,customer_id INTEGER);
