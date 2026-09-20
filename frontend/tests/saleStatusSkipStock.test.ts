@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const read = (...parts: string[]): string => fs.readFileSync(path.join(ROOT, ...parts), 'utf8')
@@ -130,4 +131,6 @@ console.log('All sale status skip-stock frontend tests passed')
 // Each suite temporarily owns browser globals. Complete one before starting
 // the next, including the asynchronous CommonJS membership recovery checks.
 await import('./saleBulkStatus.test.ts')
-await (await import('./membershipDefaults20260905.test.cjs')).default
+const require = createRequire(import.meta.url)
+const membershipChecks: Promise<void> = require('./membershipDefaults20260905.test.cjs')
+await membershipChecks
