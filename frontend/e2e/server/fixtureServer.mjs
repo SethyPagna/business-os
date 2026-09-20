@@ -466,12 +466,28 @@ function handleApi(pathname, query, req, res, body) {
     }, { 'Set-Cookie': `${SESSION_COOKIE}=${encodeURIComponent(username)}; Path=/; HttpOnly; SameSite=Lax` })
   }
   if (pathname === '/api/auth/logout') {
+    // Per-context fault injection reaches native service workers too. It must
+    // leave the session cookie intact to model an unconfirmed sign-out.
+    if (/(?:^|;\s*)e2e_logout_failure=1(?:;|$)/.test(req.headers.cookie || '')) {
+      return sendJson(res, 503, { error: 'Synthetic logout unavailable' })
+    }
     return sendJson(res, 200, { ok: true }, {
       'Set-Cookie': `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
     })
   }
 
   const sessionUser = readSessionUser(req)
+  // sync.ts GET /owner is an uncached cookie-authenticated identity probe.
+  // Serve it here (not page.route) so native service workers see it too.
+  if (pathname === '/api/sync/owner') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    const headers = { 'Cache-Control': 'private, no-store' }
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' }, headers)
+    return sendJson(res, 200, { owner: {
+      version: 1, actor_id: sessionUser.id, organization_id: sessionUser.organizationId,
+      authority: new URL(req.url, `http://${req.headers.host}`).origin, runtime: 'cloudflare-workers',
+    } }, headers)
+  }
   if (pathname === '/api/auth/bootstrap' || pathname === '/api/auth/me') {
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
     return sendJson(res, 200, sessionPayload(sessionUser, req))

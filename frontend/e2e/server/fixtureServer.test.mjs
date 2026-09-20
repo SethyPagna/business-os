@@ -36,7 +36,7 @@ test('fixture preview supplies dashboard and POS boot reads without hiding missi
         if (match) resolve(`http://127.0.0.1:${match[1]}`)
       })
     })
-    const routes = ['/api/dashboard', '/api/analytics', '/api/dashboard/startup', '/api/promotions/rules/active', '/api/inventory/tagged-lots', '/api/products/stock-in-sessions']
+    const routes = ['/api/dashboard', '/api/analytics', '/api/dashboard/startup', '/api/promotions/rules/active', '/api/inventory/tagged-lots', '/api/products/stock-in-sessions', '/api/sync/owner']
     for (const route of routes) {
       const response = await fetch(origin + route)
       assert.equal(response.status, 401, `${route} must require a session`)
@@ -48,6 +48,26 @@ test('fixture preview supplies dashboard and POS boot reads without hiding missi
     })
     assert.equal(login.status, 200)
     const headers = { Cookie: login.headers.get('set-cookie').split(';')[0] }
+    for (const [account, id] of [['admin', 1], ['cashier_a', 11], ['cashier_b', 12]]) {
+      const response = await fetch(origin + '/api/sync/owner?actor_id=999', { headers: { Cookie: `bos_session=${account}` } })
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('cache-control'), 'private, no-store')
+      assert.deepEqual(await response.json(), { owner: { version: 1, actor_id: id,
+        organization_id: 1, authority: origin, runtime: 'cloudflare-workers' } })
+    }
+    const signedOutOwner = await fetch(origin + '/api/sync/owner')
+    assert.equal(signedOutOwner.status, 401)
+    assert.equal(signedOutOwner.headers.get('cache-control'), 'private, no-store')
+    const failedLogout = await fetch(origin + '/api/auth/logout', {
+      method: 'POST', headers: { Cookie: 'bos_session=cashier_a; e2e_logout_failure=1' },
+    })
+    assert.equal(failedLogout.status, 503)
+    assert.equal(failedLogout.headers.get('set-cookie'), null)
+    const normalLogout = await fetch(origin + '/api/auth/logout', {
+      method: 'POST', headers: { Cookie: 'bos_session=cashier_b' },
+    })
+    assert.equal(normalLogout.status, 200, 'One context fault must not affect another context')
+    assert.match(normalLogout.headers.get('set-cookie'), /Max-Age=0/)
     const get = async (route) => {
       const response = await fetch(origin + route, { headers })
       assert.equal(response.status, 200, route)
