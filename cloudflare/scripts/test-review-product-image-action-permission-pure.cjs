@@ -41,6 +41,7 @@ const imagePermission = loadTs('lib/productImagePermission.ts', { './media': med
 const permissions = loadTs('lib/permissions.ts')
 const dbLib = loadTs('lib/db.ts')
 const realProductWrites = loadTs('lib/productWrites.ts', {
+  './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,
   './moneyPrecision': loadTs('lib/moneyPrecision.ts'),
   './media': media,
