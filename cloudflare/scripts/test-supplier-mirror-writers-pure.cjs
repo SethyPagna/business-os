@@ -204,21 +204,22 @@ function readers(sql) {
   }, 'W4: the row keeps its attribution (for an un-revert); the readers treat "nothing received, no money" as no purchase')
   ok(true, 'W4 revert of a receipt: purchase, credit reminder and invoice line all leave the supplier automatically')
 
-  // A same-day receipt AFTER the revert reuses the row and carries ITS OWN
-  // supplier: a lot with received_quantity 0 adopts the incoming attribution
-  // (LOT_ATTRIBUTION_SET_SQL) instead of first-attribution-sticks.
+  // A differently priced same-day receipt AFTER revert gets its own lot and
+  // supplier; the historical emptied lot retains its original attribution.
   db.prepare(`INSERT INTO suppliers (id, name) VALUES (42, 'Other Trading')`).run({})
   const w4b = await productBatches.receiveBatchStock(db, {
     productId: 501, branchId: 1, quantity: 3, receivedDate: '2026-09-01', supplierId: 42, supplierName: 'Other Trading', unitCostUsd: 6, paymentStatus: 'paid',
   })
-  assert.equal(w4b.batchId, w3.batchId, 'same date, same lot row')
-  const lot4b = lotOf(w3.batchId)
+  assert.notEqual(w4b.batchId, w3.batchId, 'same date with a new price gets a separate lot')
+  assert.equal(lotOf(w3.batchId).supplier_id, SUPPLIER.id, 'historical emptied lot retains original supplier')
+  assert.equal(lotOf(w3.batchId).received_quantity, 0)
+  const lot4b = lotOf(w4b.batchId)
   assert.deepEqual(
     { supplier_id: lot4b.supplier_id, payment_status: lot4b.payment_status, received_quantity: lot4b.received_quantity, received_cost_usd: lot4b.received_cost_usd, is_active: lot4b.is_active },
     { supplier_id: 42, payment_status: 'paid', received_quantity: 3, received_cost_usd: 18, is_active: 1 },
   )
   assert.deepEqual(read.totals(), { batches: 0, units: 0, cost: 0, creditOpen: 0, creditBatches: 0 }, 'Acme is not charged for Other Trading\'s receipt')
-  ok(true, 'a later same-day receipt on the emptied lot is attributed to ITS supplier, never the reverted one')
+  ok(true, 'a later same-day differently priced receipt gets its own lot and supplier, never the reverted supplier')
 
   // W4-null: a lot zeroed with an OLD supplier, then a NEW receipt that
   // carries NO supplier at all, must NOT inherit the old one -- the zeroed
@@ -238,14 +239,14 @@ function readers(sql) {
     'precondition: lot zeroed, still carrying OldSup\'s attribution',
   )
   const w4nNext = await productBatches.receiveBatchStock(db, {
-    productId: 506, branchId: 1, quantity: 4, receivedDate: '2026-09-01', unitCostUsd: 7,
+    productId: 506, branchId: 1, quantity: 4, receivedDate: '2026-09-01', unitCostUsd: 3,
   })
-  const w4nNextMovement = recordReceiptMovement(506, w4nNext.batchId, 4, 7)
-  assert.equal(w4nNext.batchId, w4n.batchId, 'same date, same lot row')
+  const w4nNextMovement = recordReceiptMovement(506, w4nNext.batchId, 4, 3)
+  assert.equal(w4nNext.batchId, w4n.batchId, 'same date and price reuses the emptied lot row')
   const lot4n = lotOf(w4n.batchId)
   assert.deepEqual(
     { supplier_id: lot4n.supplier_id, supplier_name: lot4n.supplier_name, received_quantity: lot4n.received_quantity, unit_cost_usd: lot4n.unit_cost_usd },
-    { supplier_id: null, supplier_name: null, received_quantity: 4, unit_cost_usd: 7 },
+    { supplier_id: null, supplier_name: null, received_quantity: 4, unit_cost_usd: 3 },
     'a NO-SUPPLIER receipt on a zeroed lot clears the old supplier entirely -- it does not inherit OldSup',
   )
   assert.deepEqual(read.totals(), { batches: 0, units: 0, cost: 0, creditOpen: 0, creditBatches: 0 }, 'OldSup is not charged for the unattributed receipt')
@@ -263,10 +264,10 @@ function readers(sql) {
   })
   const w4c1Movement = recordReceiptMovement(507, w4c1.batchId, 5, 3)
   const w4c2 = await productBatches.receiveBatchStock(db, {
-    productId: 507, branchId: 1, quantity: 2, receivedDate: '2026-09-01', unitCostUsd: 9,
+    productId: 507, branchId: 1, quantity: 2, receivedDate: '2026-09-01', unitCostUsd: 3,
   })
-  const w4c2Movement = recordReceiptMovement(507, w4c2.batchId, 2, 9)
-  assert.equal(w4c2.batchId, w4c1.batchId, 'same date, same lot row')
+  const w4c2Movement = recordReceiptMovement(507, w4c2.batchId, 2, 3)
+  assert.equal(w4c2.batchId, w4c1.batchId, 'same date and price tops up the live lot row')
   const lot4c = lotOf(w4c1.batchId)
   assert.deepEqual(
     { supplier_id: lot4c.supplier_id, supplier_name: lot4c.supplier_name, received_quantity: lot4c.received_quantity, unit_cost_usd: lot4c.unit_cost_usd },
@@ -279,17 +280,17 @@ function readers(sql) {
   assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4c2Movement), actor)).ok, true)
   assert.equal((await stockRevert.applyMovementRevert(db, movementById(w4c1Movement), actor)).ok, true)
 
-  // W5: two same-day receipts share one lot; reverting one leaves the other.
+  // W5: two same-day, same-price receipts share one lot; reverting one leaves the other.
   db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (502, 'Mask', 'M-1', 'pcs', 0, 1)`).run({})
   const a = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 10, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4, paymentStatus: 'credit', creditDueDate: '2026-10-03' })
   const aMovement = recordReceiptMovement(502, a.batchId, 10, 4)
-  const b = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 5, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 5 })
-  const bMovement = recordReceiptMovement(502, b.batchId, 5, 5)
+  const b = await productBatches.receiveBatchStock(db, { productId: 502, branchId: 1, quantity: 5, receivedDate: '2026-09-03', supplierId: SUPPLIER.id, supplierName: SUPPLIER.name, unitCostUsd: 4 })
+  const bMovement = recordReceiptMovement(502, b.batchId, 5, 4)
   assert.equal(b.batchId, a.batchId)
-  assert.deepEqual(read.totals(), { batches: 1, units: 15, cost: 65, creditOpen: 65, creditBatches: 1 })
+  assert.deepEqual(read.totals(), { batches: 1, units: 15, cost: 60, creditOpen: 60, creditBatches: 1 })
   const r5 = await stockRevert.applyMovementRevert(db, movementById(bMovement), actor)
   assert.equal(r5.ok, true, r5.error)
-  assert.deepEqual(read.totals(), { batches: 1, units: 10, cost: 40, creditOpen: 40, creditBatches: 1 }, 'W5: only B\'s 5 units / $25 left; A stays on credit')
+  assert.deepEqual(read.totals(), { batches: 1, units: 10, cost: 40, creditOpen: 40, creditBatches: 1 }, 'W5: only B\'s 5 units / $20 leave; A stays on credit')
   assert.equal(read.reminders(), 1, 'W5: A\'s credit reminder stays')
   assert.deepEqual(read.invoiceLines(), [{ key: `id:${SUPPLIER.id}`, qty: 10, cost: 40 }])
   const r5b = await stockRevert.applyMovementRevert(db, movementById(aMovement), actor)
