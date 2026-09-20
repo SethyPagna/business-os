@@ -187,7 +187,9 @@ const hooks = {
   },
   useEffect(effect: () => void, deps: any[]) {
     const slot = cursor++
-    if (!slots[slot] || deps.some((value, i) => !Object.is(value, slots[slot][i]))) { slots[slot] = deps; effectQueue.push(effect) }
+    if (!slots[slot] || deps.some((value, i) => !Object.is(value, slots[slot].deps[i]))) {
+      effectQueue.push(() => { slots[slot]?.cleanup?.(); slots[slot] = { deps, cleanup: effect() } })
+    }
   },
   useCallback(callback: any, deps: any[]) {
     const slot = cursor++
@@ -313,5 +315,99 @@ try {
   assert.equal(nodes(tree).find((node) => node.type === ModalMarker)!.props.closeDisabled, false)
   assert.equal(nodes(tree).some((node) => node.type === SubmitMarker), false, 'committed history close exits the draft')
   checks += 6
+  // Execute all four real callback bodies against delayed mutation completions.
+  // Only expose their closures for the harness; no callback logic is rewritten
+  // except in the explicit negative-control mutant below.
+  const exerciseMutation = async (action: string, outcome: 'success' | 'error', change: 'branch' | 'permission' | 'none', mutant = false, competing = false) => {
+    slots.length = 0; effectQueue.length = 0
+    globalThis.window = Object.assign(new EventTarget(), { sessionStorage: createReadableStorage() }) as any
+    let probe: any
+    let actor: any = { id: 4, role_code: 'admin' }
+    let branch = 1
+    let resolveMutation: (value: any) => void = () => {}
+    let rejectMutation: (cause: any) => void = () => {}
+    let detailReads = 0
+    const notices: any[] = []
+    const delayed = () => new Promise((resolve, reject) => { resolveMutation = resolve; rejectMutation = reject })
+    const fixture = { ...historyShift, closed_at: action === 'Reopen' ? '2026-09-05T02:00:00Z' : null,
+      capabilities: { can_edit: true, can_close: true, can_reopen: true, can_cancel: true } }
+    let source = modal.replace('  const editDirty =', `  capture({ saveEdit, saveClose, saveReopen, saveCancel, setOpen, setSelected, setEdit, setClose, setReopen, setCancelReason, selected, saving, pending, detailsError, edit, close, reopen, cancelReason });\n  const editDirty =`)
+    if (mutant) source = source.replaceAll('if (!isCurrent()) return', '').replaceAll('if (isCurrent())', 'if (true)')
+    const testModule: any = { exports: {} }
+    new Function('require', 'module', 'exports', 'capture', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText)((name: string) => {
+      if (name === 'react') return hooks
+      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx }
+      if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: actor, notify: (...args: any[]) => notices.push(args) }) }
+      if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
+      if (name.includes('formatters')) return { fmtDateOnly: String }
+      if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
+        listShifts: async () => ({ shifts: [], total: 0, page: 1, scope: 'own' }),
+        fetchShiftHistory: async () => { detailReads++; return { shift: fixture, amendments: [] } },
+        amendShift: delayed, closeShiftById: delayed, reopenShift: delayed, cancelShift: delayed }
+      return { default: () => null }
+    }, testModule, testModule.exports, (value: any) => { probe = value })
+    const draw = () => { cursor = 0; testModule.exports.default({ branchId: branch }); effectQueue.splice(0).forEach((effect) => effect()) }
+    draw(); probe.setOpen(true); draw(); draw()
+    probe.setSelected(fixture)
+    probe.setEdit({ expectedRevision: 2, reason: 'correction', openedAt: '2026-09-05T08:00', closedAt: '', openingUsd: '', openingKhr: '', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', openingNote: '', closingNote: '' })
+    probe.setClose({ closedAt: '2026-09-05T10:00', closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
+    probe.setReopen({ reason: 'continue', openingUsd: '', openingKhr: '', openingNote: '' })
+    probe.setCancelReason('correction')
+    draw()
+    const operation = probe[`save${action}`]()
+    draw()
+    assert.equal(probe.saving, true, `${action} really dispatched`)
+    if (change !== 'none') {
+      if (change === 'branch') branch = 2
+      else actor = { id: 4, role_code: 'staff' }
+      draw(); draw()
+      assert.equal(probe.saving, false)
+      assert.equal(probe.pending, false)
+      assert.equal(probe.edit, null)
+      assert.equal(probe.cancelReason, '')
+      // A -> B -> A must not resurrect the old operation's generation.
+      if (change === 'branch') { branch = 1; draw(); draw() }
+    }
+    const finishOld = resolveMutation, rejectOld = rejectMutation
+    let newOperation: Promise<void> | undefined
+    if (competing) {
+      probe.setSelected({ ...fixture, id: 91 })
+      probe.setCancelReason('new scope operation')
+      draw()
+      newOperation = probe.saveCancel()
+      draw()
+      assert.equal(probe.saving, true)
+    }
+    if (outcome === 'success') finishOld({ shift: fixture })
+    else rejectOld(Object.assign(new Error('delayed failure'), { status: 409, outcome: change === 'branch' ? 'rejected' : 'unknown' }))
+    await operation
+    draw()
+    if (change === 'none') {
+      assert.equal(probe.selected.id, fixture.id)
+      assert.equal(detailReads, 1, `${action} same-scope success refreshes detail`)
+      assert.equal(notices.length, 1)
+      assert.equal(probe.saving, false)
+    } else {
+      if (competing) assert.equal(probe.selected.id, 91, `${action} cannot replace the newer operation's selection`)
+      else assert.equal(probe.selected, null, `${action} cannot restore old selection`)
+      assert.equal(detailReads, 0, `${action} cannot start a follow-up read`)
+      assert.equal(notices.length, 0, `${action} cannot notify new scope`)
+      assert.equal(probe.pending, false, `${action} old error cannot mark new scope pending`)
+      assert.equal(probe.detailsError, '')
+      assert.equal(probe.saving, competing, `${action} old finally cannot clear newer operation's saving state`)
+    }
+    if (newOperation) { resolveMutation({ shift: { ...fixture, id: 91 } }); await newOperation }
+  }
+  for (const action of ['Edit', 'Close', 'Reopen', 'Cancel']) {
+    for (const change of ['branch', 'permission'] as const) {
+      for (const outcome of ['success', 'error'] as const) await exerciseMutation(action, outcome, change)
+    }
+    await exerciseMutation(action, 'success', 'none')
+    await exerciseMutation(action, 'success', 'branch', false, true)
+    await exerciseMutation(action, 'error', 'branch', false, true)
+    await assert.rejects(() => exerciseMutation(action, 'success', 'branch', true), /cannot restore old selection/, `${action} negative control must detect unfenced success`)
+    await assert.rejects(() => exerciseMutation(action, 'error', 'permission', true), /old error cannot mark new scope pending/, `${action} negative control must detect unfenced error`)
+    checks += 9
+  }
 } finally { globalThis.window = oldWindow }
 console.log(`\nshiftGateUx: all ${checks} checks passed`)

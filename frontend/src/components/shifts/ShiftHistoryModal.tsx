@@ -213,8 +213,13 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const [pageInfo, setPageInfo] = useState({ page: 1, total: 0 })
   const listScope = `${actorScope}:${page}:${pageSize}:${open}`
   const scopeRef = useRef(listScope)
+  const scopeGeneration = useRef({})
+  const mutationRef = useRef<object | null>(null)
+  useEffect(() => () => { scopeGeneration.current = {}; mutationRef.current = null }, [])
   if (scopeRef.current !== listScope) {
     scopeRef.current = listScope
+    scopeGeneration.current = {}
+    mutationRef.current = null
     listRequest.current += 1
     detailsRequest.current += 1
     setRows([])
@@ -225,6 +230,22 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setError('')
     setDetailsError('')
     setPageInfo({ page, total: 0 })
+    setEdit(null)
+    setClose(blankClose())
+    setReopen(blankReopen())
+    setCancelReason('')
+    setPending(false)
+    setSaving(false)
+    setDetailsLoading(false)
+  }
+  const renderGeneration = scopeGeneration.current
+  const beginMutation = () => {
+    if (scopeRef.current !== listScope || scopeGeneration.current !== renderGeneration || mutationRef.current) return null
+    const generation = renderGeneration
+    const operation = {}
+    mutationRef.current = operation
+    setSaving(true)
+    return () => scopeRef.current === listScope && scopeGeneration.current === generation && mutationRef.current === operation
   }
 
   useEffect(() => {
@@ -314,21 +335,22 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setRows((current) => orderShiftRows(current.map((row) => row.id === shift.id ? shift : row)))
   }
 
-  const refreshDetails = async (shift: Shift) => {
+  const refreshDetails = async (shift: Shift, isCurrent: () => boolean) => {
+    if (!isCurrent()) return
     const requestId = ++detailsRequest.current
     setDetailsLoading(true)
     try {
       const history = await fetchShiftHistory(shift.id)
-      if (requestId === detailsRequest.current) {
+      if (isCurrent() && requestId === detailsRequest.current) {
         replaceRow(history.shift)
         setAmendments(history.amendments)
         setSegments(history.segments || [history.shift])
         setDetailsError('')
       }
     } catch (cause) {
-      if (requestId === detailsRequest.current) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
+      if (isCurrent() && requestId === detailsRequest.current) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
     } finally {
-      if (requestId === detailsRequest.current) setDetailsLoading(false)
+      if (isCurrent() && requestId === detailsRequest.current) setDetailsLoading(false)
     }
   }
 
@@ -347,7 +369,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     if (closingCountInvalid(edit.openingUsd) || closingCountInvalid(edit.openingKhr)
       || (edit.closedAt && (closingCountInvalid(edit.closingUsd) || closingCountInvalid(edit.closingKhr)
         || closingCountInvalid(edit.additionalUsd) || closingCountInvalid(edit.additionalKhr)))) return
-    setSaving(true)
+    const isCurrent = beginMutation()
+    if (!isCurrent) return
     try {
       const result = await amendShift(selected.id, {
         actorId: app.user?.id,
@@ -364,14 +387,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         closingCountedKhr: closing.khr,
         closingNote: edit.closedAt ? edit.closingNote.trim() || null : null,
       })
+      if (!isCurrent()) return
       replaceRow(result.shift)
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_amend_saved'), 'success')
-      await refreshDetails(result.shift)
+      await refreshDetails(result.shift, isCurrent)
     } catch (cause) {
-      reportSaveError(cause, 'shift_amend_failed')
-    } finally { setSaving(false) }
+      if (isCurrent()) reportSaveError(cause, 'shift_amend_failed')
+    } finally { if (isCurrent()) { mutationRef.current = null; setSaving(false) } }
   }
 
   const saveClose = async () => {
@@ -379,7 +403,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     const closing = shiftClosingCounts(close.closingUsd, close.closingKhr)
     if (closingCountInvalid(close.closingUsd) || closingCountInvalid(close.closingKhr)
       || closingCountInvalid(close.additionalUsd) || closingCountInvalid(close.additionalKhr)) return
-    setSaving(true)
+    const isCurrent = beginMutation()
+    if (!isCurrent) return
     try {
       const result = await closeShiftById(selected.id, {
         actorId: app.user?.id,
@@ -393,21 +418,23 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         additionalCashKhr: close.additionalKhr.trim() === '' ? null : Number(close.additionalKhr),
         closingNote: close.closingNote.trim() || null,
       })
+      if (!isCurrent()) return
       if (result.shift) replaceRow(result.shift)
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_close_saved'), 'success')
-      await refreshDetails(result.shift)
+      await refreshDetails(result.shift, isCurrent)
     } catch (cause) {
-      reportSaveError(cause, 'shift_end_failed')
-    } finally { setSaving(false) }
+      if (isCurrent()) reportSaveError(cause, 'shift_end_failed')
+    } finally { if (isCurrent()) { mutationRef.current = null; setSaving(false) } }
   }
 
   const saveReopen = async () => {
     if (!selected || !reopen.reason.trim() || saving) return
     const opening = shiftOpeningCounts(reopen.openingUsd, reopen.openingKhr)
     if (closingCountInvalid(reopen.openingUsd) || closingCountInvalid(reopen.openingKhr)) return
-    setSaving(true)
+    const isCurrent = beginMutation()
+    if (!isCurrent) return
     try {
       const result = await reopenShift(selected.id, {
         actorId: app.user?.id,
@@ -417,31 +444,34 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
         openingFloatKhr: opening.khr,
         openingNote: reopen.openingNote.trim() || null,
       })
+      if (!isCurrent()) return
       setRows((current) => orderShiftRows([...current.filter((row) => row.id !== result.shift.id), result.shift]))
       setSelected(result.shift)
       setEdit(editDraft(result.shift))
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_reopen_saved'), 'success')
-      await refreshDetails(result.shift)
+      await refreshDetails(result.shift, isCurrent)
     } catch (cause) {
-      reportSaveError(cause, 'shift_reopen_failed')
-    } finally { setSaving(false) }
+      if (isCurrent()) reportSaveError(cause, 'shift_reopen_failed')
+    } finally { if (isCurrent()) { mutationRef.current = null; setSaving(false) } }
   }
 
   const saveCancel = async () => {
     if (!selected || !cancelReason.trim() || saving) return
-    setSaving(true)
+    const isCurrent = beginMutation()
+    if (!isCurrent) return
     try {
       const result = await cancelShift(selected.id, selected.revision, cancelReason.trim(), app.user?.id)
+      if (!isCurrent()) return
       replaceRow(result.shift)
       resetAction()
       refreshMountedShiftState()
       sendNotice?.(t('shift_cancel_saved'), 'success')
-      await refreshDetails(result.shift)
+      await refreshDetails(result.shift, isCurrent)
     } catch (cause) {
-      reportSaveError(cause, 'shift_cancel_failed')
-    } finally { setSaving(false) }
+      if (isCurrent()) reportSaveError(cause, 'shift_cancel_failed')
+    } finally { if (isCurrent()) { mutationRef.current = null; setSaving(false) } }
   }
 
   const editDirty = !!(selected && edit && JSON.stringify(edit) !== JSON.stringify(editDraft(selected)))

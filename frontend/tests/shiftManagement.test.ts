@@ -197,7 +197,7 @@ ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.te
 ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')
 ok(/row\.id !== result\.shift\.id/.test(modal) && /setSelected\(result\.shift\)/.test(modal), 'reopen adds the linked child without replacing the preserved parent')
-ok((modal.match(/await refreshDetails\(result\.shift\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all lifecycle saves reload amendments, including close and reopen')
+ok((modal.match(/await refreshDetails\(result\.shift, isCurrent\)/g) || []).length >= 4 && !/setAmendments\(\[\]\)[\s\S]{0,180}shift_reopen_saved/.test(modal), 'all current-scope lifecycle saves reload amendments, including close and reopen')
 ok(/amendmentFields\.filter/.test(modal) && /before\[field\].*after\[field\]/.test(modal), 'amendment detail renders whitelisted before-to-after field changes')
 ok(/selected\.capabilities\.can_cancel/.test(modal) && /maxLength=\{500\}/.test(modal), 'only the server can_cancel capability reveals the bounded reason form')
 ok(/cancelShift\(selected\.id, selected\.revision, cancelReason\.trim\(\), app\.user\?\.id\)/.test(modal), 'cancel submits the selected revision, required reason and authenticated retry scope')
