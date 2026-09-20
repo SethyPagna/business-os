@@ -64,7 +64,10 @@ const expectedConsumers = [
   'src/components/returns/Returns.tsx',
   'src/components/review/LegacyDeletedSalesSection.tsx',
   'src/components/sales/Sales.tsx',
+  // Only the shift-selection list is paged, not the report document.
+  'src/components/sales/reports/ShiftReport.tsx',
   'src/components/shared/NotificationCenter.tsx',
+  'src/components/shifts/ShiftHistoryModal.tsx',
   'src/components/utils-settings/AuditLog.tsx',
 ].sort()
 
