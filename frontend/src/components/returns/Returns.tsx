@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
+import { captureActorReadScope, assertActorReadScope } from '../../api/actorReadScope.ts'
 import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
@@ -299,9 +300,9 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
     Reason: ret.reason || '',
     Type: getReturnTypeLabel(ret, tr),
     Settlement: ret.supplier_settlement || '',
-    Refund_USD: ret.total_refund_usd || 0,
-    Compensation_USD: ret.supplier_compensation_usd || 0,
-    Business_Loss_USD: ret.supplier_loss_usd || 0,
+    Refund_USD: ret.total_refund_usd ?? '',
+    Compensation_USD: ret.supplier_compensation_usd ?? '',
+    Business_Loss_USD: ret.supplier_loss_usd ?? '',
     Status: ret.status || 'completed',
   }))
 }
@@ -1070,10 +1071,6 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       itemHaystack,
     ].join(' ')
   }
-  const searchFiltered = useMemo(() => {
-    if (!searchTerms.length) return rows
-    return rows.filter((ret) => matchesSearchTermGroups(buildReturnHaystack(ret), searchTerms, 'AND'))
-  }, [rows, searchTerms])
   const filtered = useMemo(() => rows.filter((ret) => {
     if (!matchesMulti(typeFilter, getReturnTypeKey(ret))) return false
     if (!searchTerms.length) return true
@@ -1292,34 +1289,62 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     [selectedIds],
   )
 
-  // Per-scope row split for the export menu. The old per-scope stat sums
-  // moved to the range-driven StatsStrip above (server-computed via
-  // /api/returns/report), so only the rows themselves are needed here.
-  const returnScopeSummary = useMemo(() => {
-    const summary: { customerRows: ReturnRow[]; supplierRows: ReturnRow[] } = { customerRows: [], supplierRows: [] }
-    for (const ret of searchFiltered) {
-      if (normalizeScope(ret.return_scope) === SUPPLIER_SCOPE) summary.supplierRows.push(ret)
-      else summary.customerRows.push(ret)
-    }
-    return summary
-  }, [searchFiltered])
-
-  const { customerRows, supplierRows } = returnScopeSummary
-
   // H1+X5 (Part 402): exports open the shared options dialog (column
   // chooser remembered per page + CSV/Excel/PDF) instead of a fixed xlsx.
-  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string } | null>(null)
+  const exportScope = JSON.stringify([user, isActive, canViewReturns, canExportReturns, canViewAcquisitionCosts(user), scope, returnsDateRange, search, typeFilter])
+  const exportScopeRef = useRef(exportScope)
+  exportScopeRef.current = exportScope
+  const exportRequestRef = useRef<{ controller: AbortController; scope: string } | null>(null)
+  const [exportProgress, setExportProgress] = useState<{ scope: string; received: number; total: number } | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ scope: string; rows: Array<Record<string, unknown>>; baseName: string; costs: boolean; supplier: boolean; allowed: () => boolean; verify: () => Promise<void> } | null>(null)
+  const closeExport = useCallback(() => {
+    exportRequestRef.current?.controller.abort()
+    exportRequestRef.current = null
+    setExportProgress(null)
+    setExportDialog(null)
+  }, [])
+  useEffect(() => { closeExport(); return () => { exportRequestRef.current?.controller.abort(); exportRequestRef.current = null } }, [exportScope, closeExport])
+  const exportStatement = useCallback(async (prefix: string, selected?: ReturnRow[], includeType = true) => {
+    if (exportRequestRef.current) return
+    const request = { controller: new AbortController(), scope: exportScope }
+    const actor = captureActorReadScope('returns')
+    const assertAllowed = () => {
+      assertActorReadScope(actor)
+      if (request.controller.signal.aborted || exportScopeRef.current !== request.scope || !isActive || !canViewReturns || !canExportReturns) throw new DOMException('Return export cancelled or authority changed', 'AbortError')
+    }
+    const ids = selected ? [...new Set(selected.map(row => Number(row.id)))].sort((a, b) => a - b) : undefined
+    if (ids && !ids.length) { notify(tr('no_data_to_export', 'No data to export'), 'error'); return }
+    exportRequestRef.current = request
+    setExportProgress({ scope: request.scope, received: 0, total: 0 })
+    try {
+      assertAllowed()
+      const { loadReturnStatement } = await import('../../api/returnsStatementApi.ts')
+      assertAllowed()
+      const complete = await loadReturnStatement<ReturnRow & { id: number }>(returnsDateRange, {
+        scope, ...(search.trim() ? { search: search.trim() } : {}),
+        ...(includeType && typeFilter !== 'all' ? { type: typeFilter } : {}),
+        ...(ids ? { ids: ids.join(',') } : {}),
+      }, {
+        signal: request.controller.signal, assertAllowed, expectedIds: ids,
+        onProgress: (received, total) => { assertAllowed(); setExportProgress({ scope: request.scope, received, total }) },
+      })
+      assertAllowed()
+      if (!complete.rows.length) { notify(tr('no_data_to_export', 'No data to export'), 'error'); closeExport(); return }
+      const allowed = () => { try { assertAllowed(); complete.assertCurrent(); return true } catch { return false } }
+      setExportDialog({ scope: request.scope, rows: exportReturnRows(complete.rows, tr), baseName: prefix, costs: canViewAcquisitionCosts(user), supplier: scope === SUPPLIER_SCOPE, allowed, verify: complete.verifyBeforeExport })
+      setExportProgress(null)
+    } catch (error) {
+      if (exportRequestRef.current === request) {
+        closeExport()
+        if (!(error instanceof Error && error.name === 'AbortError')) notify(error instanceof RangeError
+          ? `${tr('date_time_range', 'Date and time range')}: ${isKhmer ? 'ជ្រើសរើសចន្លោះកាលបរិច្ឆេទមិនលើសមួយឆ្នាំ រួចនាំចេញម្ដងទៀត។' : 'Choose valid dates covering at most one year in the existing date filter, then export again.'}`
+          : error instanceof Error ? error.message : tr('error', 'Error'), 'error')
+      }
+    }
+  }, [exportScope, isActive, isKhmer, canViewReturns, canExportReturns, returnsDateRange, scope, search, typeFilter, user, notify, tr, closeExport])
   const exportVisible = useCallback(async (rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
-    if (!canExportReturns) {
-      notify(tr('permission_denied', 'You do not have permission to perform this action.'), 'error')
-      return
-    }
-    if (!rowsToExport.length) {
-      notify(tr('no_data_to_export', 'No data to export'), 'error')
-      return
-    }
-    setExportDialog({ rows: exportReturnRows(rowsToExport, tr), baseName: prefix })
-  }, [canExportReturns, notify, tr, visibleReturns])
+    await exportStatement(prefix, rowsToExport, false)
+  }, [exportStatement, visibleReturns])
 
   const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
@@ -1329,12 +1354,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const exportItems = useMemo(() => ([
     { label: tr('export_visible_returns', 'Export visible returns', 'នាំចេញការត្រឡប់ដែលកំពុងបង្ហាញ'), onClick: () => exportVisible(visibleReturns, `returns-${scope}`) },
     selectedReturns.length ? { label: tr('export_selected_returns', 'Export selected returns', 'នាំចេញការត្រឡប់ដែលបានជ្រើស'), onClick: exportSelected, color: 'blue' } : null,
-    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportVisible(filtered, `returns-${typeFilter}`) } : null,
-    (stripRange.startDate || stripRange.endDate) ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportVisible(filtered, 'returns-filtered') } : null,
+    typeFilter !== 'all' ? { label: tr('export_filtered_type', `Export ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`, `នាំចេញតាមប្រភេទ ${typeOptions.find(([id]) => id === typeFilter)?.[1] || typeFilter}`), onClick: () => exportStatement(`returns-${typeFilter}`) } : null,
+    (stripRange.startDate || stripRange.endDate) ? { label: tr('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportStatement('returns-filtered') } : null,
     scope !== CUSTOMER_SCOPE
-      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportVisible(supplierRows, 'returns-supplier') }
-      : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportVisible(customerRows, 'returns-customer') },
-  ].filter(Boolean)), [customerRows, exportSelected, exportVisible, filtered, stripRange.startDate, stripRange.endDate, scope, selectedReturns.length, supplierRows, tr, typeFilter, typeOptions, visibleReturns])
+      ? { label: tr('export_supplier_returns', 'Export supplier returns', 'នាំចេញការត្រឡប់ទៅអ្នកផ្គត់ផ្គង់'), onClick: () => exportStatement('returns-supplier', undefined, false) }
+      : { label: tr('export_customer_returns', 'Export customer returns', 'នាំចេញការត្រឡប់ពីអតិថិជន'), onClick: () => exportStatement('returns-customer', undefined, false) },
+  ].filter(Boolean)), [exportSelected, exportVisible, exportStatement, stripRange.startDate, stripRange.endDate, scope, selectedReturns.length, tr, typeFilter, typeOptions, visibleReturns])
 
   const filterSections = useMemo(() => {
     if (!isReturnsFilterMenuOpen) return []
@@ -1477,6 +1502,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           cards (default today) whose folds carry the by-type / by-reason
           breakdowns from /api/returns/report. Type filtering stayed where
           it also already lived — the Filters menu's type section. */}
+      {exportProgress?.scope === exportScope ? <div role="status" aria-live="polite" className="mb-2 flex min-w-0 items-center gap-2 text-xs">
+        <span className="min-w-0 flex-1 truncate">{tr('loading', 'Loading')} {exportProgress.received}/{exportProgress.total || '…'}</span>
+        <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-xs" onClick={closeExport}>{tr('cancel', 'Cancel')}</button>
+      </div> : null}
       <StatsStrip
         className="mb-3"
         cards={stripCards}
@@ -1624,17 +1653,19 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
         <PaginationControls compact rangeAsPageSize compactCentered page={returnPage} pageSize={returnPageSize} totalItems={allVisibleReturns.length} label={tr('returns_count', 'returns')} t={t} onPageChange={setReturnPage} onPageSizeChange={(size) => { setReturnPageSize(size); setReturnPage(1) }} />
       </div>
 
-      {canExportReturns && exportDialog ? (
+      {canExportReturns && canViewReturns && exportDialog?.scope === exportScope && exportDialog.allowed() ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
             fileBaseName={exportDialog.baseName}
-            columns={RETURN_EXPORT_KEYS.map((key) => ({ key, label: exportColumnLabel(key) }))}
+            columns={RETURN_EXPORT_KEYS.filter(key => exportDialog.costs || !['Compensation_USD', 'Business_Loss_USD', ...(exportDialog.supplier ? ['Refund_USD'] : [])].includes(key)).map((key) => ({ key, label: exportColumnLabel(key) }))}
             rows={exportDialog.rows}
             rememberKey="returns"
             t={t}
             notify={notify}
-            onClose={() => setExportDialog(null)}
+            canExport={exportDialog.allowed}
+            beforeExport={exportDialog.verify}
+            onClose={closeExport}
           />
         </Suspense>
       ) : null}

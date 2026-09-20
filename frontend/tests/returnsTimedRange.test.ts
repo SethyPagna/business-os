@@ -80,14 +80,15 @@ for (const time of ['22:00', '23:00']) {
   assert.deepEqual(rows, suppliedRows); assert.equal(stats.count, 1)
   evaluate(resetEffect.arguments[0].getText(ast), { setReturnPage: (value: number) => { pageNumber = value } })()
   assert.equal(pageNumber, 1)
-  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, canExportReturns: true, visibleReturns: rows,
-    notify: () => { throw Error('unexpected export rejection') }, tr: (key: string) => key,
-    exportReturnRows: (value: unknown) => value, setExportDialog: (value: unknown) => { exportDialog = value } })
-  const items = evaluate(variable('exportItems'), { ...hooks, tr: (key: string) => key, exportVisible,
+  const exportStatement = async (baseName: string, selected?: unknown, includeType = true) => { exportDialog = { baseName, selected, includeType, range: returnsDateRange } }
+  const exportVisible = evaluate(variable('exportVisible'), { ...hooks, visibleReturns: rows, exportStatement })
+  const items = evaluate(variable('exportItems'), { ...hooks, tr: (key: string) => key, exportVisible, exportStatement,
     visibleReturns: rows, selectedReturns: [], exportSelected: () => {}, typeFilter: 'all', typeOptions: [],
     stripRange: currentRange, filtered: rows, scope: 'customer', CUSTOMER_SCOPE: 'customer', supplierRows: [], customerRows: rows })
   await items.find((item: any) => item.label === 'export_filtered_time_range').onClick()
-  assert.deepEqual(exportDialog, { rows: suppliedRows, baseName: 'returns-filtered' }, 'filtered export follows the new timed response, retaining loaded-row export semantics')
+  assert.deepEqual(exportDialog, { baseName: 'returns-filtered', selected: undefined, includeType: true, range: returnsDateRange }, 'filtered export requests the complete timed cohort, not the loaded rows')
+  await items.find((item: any) => item.label === 'export_visible_returns').onClick()
+  assert.deepEqual(exportDialog, { baseName: 'returns-customer', selected: suppliedRows, includeType: false, range: returnsDateRange }, 'explicit visible export retains exact row identity within the same timed range')
 }
 currentRange = { ...range, startDate: '' }
 const invalidDraft = makeRange() // must not throw during render
