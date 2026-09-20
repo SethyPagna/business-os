@@ -216,17 +216,21 @@ async function toStoredBody(data) {
 function makeFakeR2(seed = {}) {
   const store = new Map()
   const failGets = new Set()
+  const identity = body => ({ etag: require('node:crypto').createHash('sha256').update(body).digest('hex'), version: require('node:crypto').randomUUID() })
   for (const [key, value] of Object.entries(seed)) {
-    store.set(key, { body: value.body ?? key, httpMetadata: value.httpMetadata, customMetadata: value.customMetadata, size: value.size ?? String(value.body ?? key).length, uploaded: value.uploaded ?? new Date() })
+    store.set(key, { ...identity(String(value.body ?? key)), body: value.body ?? key, httpMetadata: value.httpMetadata, customMetadata: value.customMetadata, size: value.size ?? Buffer.byteLength(String(value.body ?? key)), uploaded: value.uploaded ?? new Date() })
   }
   return {
     _store: store,
     _failGets: failGets,
-    async get(key) {
+    async get(key, options) {
       if (failGets.has(key)) return null
       const object = store.get(key)
       if (!object) return null
+      const metadata = { key, etag: object.etag, version: object.version, size: object.size, httpMetadata: object.httpMetadata, customMetadata: object.customMetadata }
+      if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== object.etag) return metadata
       return {
+        ...metadata,
         // A fresh stream per get() -- restore reads the manifest twice.
         body: stringToStream(object.body),
         httpMetadata: object.httpMetadata,
@@ -242,7 +246,7 @@ function makeFakeR2(seed = {}) {
     },
     async put(key, data, opts) {
       const body = await toStoredBody(data)
-      store.set(key, { body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: body.length, uploaded: new Date() })
+      store.set(key, { ...identity(body), body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: Buffer.byteLength(body), uploaded: new Date() })
     },
     // Multipart support, added when createCloudflareBackup moved off a
     // single put() of one giant JSON string (which was exceeding the
@@ -270,7 +274,7 @@ function makeFakeR2(seed = {}) {
             .sort((a, b) => a - b)
             .map((n) => parts.get(n) ?? '')
             .join('')
-          store.set(key, { body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: body.length, uploaded: new Date() })
+          store.set(key, { ...identity(body), body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: Buffer.byteLength(body), uploaded: new Date() })
           return { key, etag: 'etag-complete' }
         },
         async abort() {
