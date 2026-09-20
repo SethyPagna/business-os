@@ -38,8 +38,6 @@ Use `node agent-team/scripts/team-state.mjs` for cross-tool claims, heartbeats, 
 - Never infer that `main` is deployed. Production claims require recorded commit/deployment provenance.
 - D1 migrations are append-only. Keep trigger SQL LF-only and pair data changes with pre/post assertions and recovery notes.
 
-## Local verification
-
 ## Continuous cleanup and compact-UI acceptance gates
 
 - Apply `docs/AI_COUNCIL_REVIEW.md` throughout substantive design, cleanup and release decisions: independent perspectives, cross-critique and evidence-based verdict. Routine implementation/status does not require repeating the ceremony; preserve its decisions and unresolved objections. Disclose simulated reviews.
