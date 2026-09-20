@@ -1,3 +1,29 @@
+## Shift fixes integrated and local gates pass; reset protection pending — September 20
+
+Local0e38c8d8 integrates reviewed Shift pagination, one-SQL count/page and
+scope-generation mutation completion fencing (a8fd0cb5/e445bdcf/0e38c8d8).
+Independent f7a6029a closes delayed mutation/A-B-A blocker. Root frontend9/9
+shift test files, all11 Worker shift scripts, both typechecks, EN/KM5892-key
+verification and build pass. Build0e38c8d8beb9/hashd047744ad013a26f,
+2026-09-20T10:28:26.745Z;269chunks/zero cycles/public preload isolation pass.
+Buildhandle88001 and Workershift49971 TERMINAL0. Browser verification assigned
+preview_safety using this exact artifact; NOT deployed yet.
+
+Tracking candidates remain isolated:0187/5ca7e531 accepted f0d4b0a2;
+0186 ABA correction7ba68dfa accepted3674d5c2 (all prior generations permanently
+reserved). Combined0185/0186/0187 chain and full lifecycle routes remain unverified.
+Root-confirmed reset vulnerability: authorized poisoned backup custom_tables.name
+can name system_flags/receipt ledgers; dropAllCustomTables then drops these before
+guarded reset. Actual validator/restore/drop negative controls reproduce it.
+date_controls_fix owns strict historical ct_ namespace preflight and pre-write
+restore validation. No auth bypass claimed; no production test writes occurred.
+
+Next transfer contractd195f50a requires legacy receipt tombstones, exact historical
+restore allowance, all9 replay-response fences and atomic maintenance admission;
+server-only generation does not solve stale-client new-key submissions after reset.
+Returns bounded statement endpoint now local implementation, not wired/deployed.
+No new remote migration; production still cbbebe5841f8/49b64606. Full goal active.
+
 ## Owner reaffirmed continuous cleanup, Council and compact UI — September 20
 
 These are ongoing acceptance gates, not a new visual redesign. AGENTS.md now
