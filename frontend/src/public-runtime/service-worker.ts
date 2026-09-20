@@ -614,18 +614,8 @@ async function syncOutbox() {
       })
     }
 
-    const rows = await readQueuedSales(db)
-    const dueRows = rows.filter((row) => {
-      const retryAt = row.retry_at ? Date.parse(row.retry_at) : 0
-      return !Number.isFinite(retryAt) || retryAt <= Date.now()
-    })
-    for (const row of dueRows) {
-      try {
-        await replayQueuedSale(db, row, base)
-      } catch (error) {
-        await markQueueFailure(db, row, error)
-      }
-    }
+    // Do not replay legacy POS sales in a background event. Keep sync_queue
+    // intact for explicit original-account recovery in the foreground.
   } catch (error) {
     broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
       reason: 'sync_failed',
@@ -636,15 +626,10 @@ async function syncOutbox() {
   }
 }
 
-let syncOutboxPromise = null
-
 function syncOutboxOnce() {
-  if (!syncOutboxPromise) {
-    syncOutboxPromise = syncOutbox().finally(() => {
-      syncOutboxPromise = null
-    })
-  }
-  return syncOutboxPromise
+  // Registrations/messages left by older clients must not replay ANY business
+  // writes after this upgrade. Existing rows remain available for review.
+  return Promise.resolve({ success: false, manual_recovery_required: true })
 }
 
 // DEPLOY-TIME CONFLICT, spelled out because the three handlers below all

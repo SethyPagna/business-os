@@ -94,6 +94,7 @@ import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, assertActorSessionDispatchAllowed } from '../../api/actorReadScope.ts'
+import { captureOfflineSaleOwner, normalizeOfflineSaleOwner, offlineSaleOwnersMatch, stampOfflineSaleOwner, OFFLINE_OWNER_REVIEW_MESSAGE } from '../../api/offlineQueueOwnership.ts'
 import { useSaleMoneyCapability } from '../sales/useSaleMoneyCapability.ts'
 import { saleSecurityFingerprint } from '../sales/saleSettlementConfig.ts'
 import { canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../../utils/saleMoneyV1.ts'
@@ -624,6 +625,12 @@ async function createPosSale(payload: Record<string, unknown>, scope = captureAc
   const { createSale } = await getSaleWriteTransport()
   assertActorSessionDispatchAllowed(scope)
   return createSale(payload) as Promise<SaleResult>
+}
+
+function assertPosCheckoutOwner(payload: Record<string, unknown> | undefined, user: AppContextValue['user']): void {
+  const owner = normalizeOfflineSaleOwner(payload?.offline_owner)
+  if (!owner || owner.actor_id !== Number(user?.id) || owner.organization_id !== (user?.organization_id ?? null)
+    || !offlineSaleOwnersMatch(owner, captureOfflineSaleOwner())) throw new Error(OFFLINE_OWNER_REVIEW_MESSAGE)
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -3136,6 +3143,9 @@ export default function POS() {
     if (pendingId) {
       checkoutInFlightRef.current = true; setLoading(true)
       try {
+        // Old ownerless drafts remain intact for review, including when a
+        // receipt exists. Never let receipt recovery adopt another owner.
+        assertPosCheckoutOwner(active.checkoutPayload, user)
         const transport = await getSaleWriteTransport()
         assertActorSessionDispatchAllowed(checkoutScope)
         const proof = await transport.recoverSaleCreateReceipt(pendingId) as { committed?: boolean; response?: unknown }
@@ -3337,7 +3347,8 @@ export default function POS() {
 
       moneyCapability.assertReady()
       assertActorSessionDispatchAllowed(checkoutScope)
-      const frozen = frozenSaleCheckoutBody(clientRequestId, undefined, () => saleData)
+      const frozen = frozenSaleCheckoutBody(clientRequestId, undefined, () => stampOfflineSaleOwner(saleData))
+      assertPosCheckoutOwner(frozen, user)
       submittedRequestId = clientRequestId
       const durableOrders = ordersRef.current.map(order => order.id === resolvedActiveId ? { ...order, checkoutRequestId: clientRequestId, checkoutPayload: frozen } : order)
       const serialized = JSON.stringify(durableOrders)
@@ -3395,6 +3406,7 @@ export default function POS() {
     checkoutInFlightRef.current = true
     setLoading(true)
     try {
+      assertPosCheckoutOwner(order.checkoutPayload, user)
       const transport = await getSaleWriteTransport()
       assertActorSessionDispatchAllowed(scope)
       const proof = await transport.recoverSaleCreateReceipt(requestId) as { committed?: boolean; response?: unknown }

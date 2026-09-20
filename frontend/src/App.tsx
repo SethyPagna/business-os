@@ -28,7 +28,8 @@ import { persistentNoticeFingerprint, shouldRenderPersistentNotice } from './uti
 import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGuard.ts'
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
-import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, isActorSessionQuarantined, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, captureActorReadScope, isActorReadScopeCurrent, isActorSessionQuarantined, subscribeActorSessionQuarantine, type ActorReadScope } from './api/actorReadScope.ts'
+import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from './api/offlineQueueOwnership.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
 
@@ -69,6 +70,7 @@ interface NavigatorWithConnection extends Navigator {
 
 interface AppUser {
   id?: number | string
+  organization_id?: number | null
   name?: string
   username?: string
 }
@@ -113,6 +115,8 @@ interface SyncProblemDetail {
 }
 
 interface PendingSyncState {
+  owner?: unknown
+  review_token?: string | null
   total?: number
   syncing?: number
   failed?: number
@@ -120,6 +124,7 @@ interface PendingSyncState {
 }
 
 interface OfflineSaleNoticeDetail {
+  offline_owner?: unknown
   client_request_id?: string
   receiptNumber?: string
   ts?: number | string
@@ -148,7 +153,7 @@ interface AppShellApi {
   getPendingSyncState?: () => Promise<PendingSyncState | null | undefined>
   getPendingAppUpdate?: () => SyncProblemDetail | null | undefined
   clearPendingAppUpdate?: () => void
-  retryPendingSyncNow?: () => Promise<unknown>
+  retryPendingSyncNow?: (reviewToken?: string) => Promise<unknown>
 }
 
 interface AppContextValue {
@@ -717,11 +722,26 @@ function useMountedPages(activePage: AdminPageId): AdminPageId[] {
   return mountedPages
 }
 
+function pendingSaleOwnerForUser(user: AppUser | null): OfflineSaleOwner | null {
+  if (!user || isActorSessionQuarantined()) return null
+  try {
+    const owner = captureOfflineSaleOwner()
+    return owner.actor_id === Number(user.id) && owner.organization_id === (user.organization_id ?? null) ? owner : null
+  } catch { return null }
+}
+
+function acceptsOfflineSaleNotice(detail: OfflineSaleNoticeDetail, user: AppUser | null, scope: ActorReadScope): boolean {
+  return isActorReadScopeCurrent(scope, false) && offlineSaleOwnersMatch(detail.offline_owner, pendingSaleOwnerForUser(user))
+}
+
 function useSyncErrorBanner(user: AppUser | null) {
   // Central listener for sync write/read failures that should surface globally.
   const [syncError, setSyncError] = useState<SyncProblemDetail | null>(null)
   const [transientOutage, setTransientOutage] = useState<SyncProblemDetail | null>(null)
-  const [pendingSync, setPendingSync] = useState<PendingSyncState | null>(null)
+  const [pendingSync, setPendingSync] = useState<{ state: PendingSyncState; scope: ActorReadScope } | null>(null)
+  const bannerScopeRef = useRef<ActorReadScope | null>(null)
+  const owner = pendingSaleOwnerForUser(user)
+  const ownerKey = owner ? JSON.stringify(owner) : ''
   const [vaultLocked, setVaultLocked] = useState<SyncProblemDetail | null>(null)
   const [appUpdate, setAppUpdate] = useState<SyncProblemDetail | null>(null)
   const dismissedAppUpdateRef = useRef('')
@@ -757,27 +777,39 @@ function useSyncErrorBanner(user: AppUser | null) {
   }, [])
 
   useEffect(() => {
-    if (!user || typeof window === 'undefined') {
-      setSyncError(null)
-      setTransientOutage(null)
-      setPendingSync(null)
-      setVaultLocked(null)
-      setConflictsNeedReview(null)
-      return undefined
-    }
+    setSyncError(null)
+    setTransientOutage(null)
+    setPendingSync(null)
+    setVaultLocked(null)
+    setConflictsNeedReview(null)
+    bannerScopeRef.current = null
+    if (!owner || typeof window === 'undefined') return undefined
+    const scope = captureActorReadScope('pending-sales')
+    bannerScopeRef.current = scope
+    let disposed = false
+    let request = 0
+    const isCurrent = () => !disposed && isActorReadScopeCurrent(scope, false)
+      && offlineSaleOwnersMatch(owner, pendingSaleOwnerForUser(user))
 
     const refreshPendingSync = () => {
+      if (!isCurrent()) return
+      const requestId = ++request
       getAppShellApi().getPendingSyncState?.()
-        .then((state) => setPendingSync(state || null))
+        .then((state) => {
+          if (!isCurrent() || requestId !== request) return
+          setPendingSync(state && offlineSaleOwnersMatch(state.owner, owner) ? { state, scope } : null)
+        })
         .catch(() => {})
     }
     const onSyncError = (event: Event) => {
+      if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
       if (detail?.transient) return
       setSyncError(detail)
       refreshPendingSync()
     }
     const onTransientOutage = (event: Event) => {
+      if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : {}
       if (detail.active === false) {
         setTransientOutage(null)
@@ -786,6 +818,7 @@ function useSyncErrorBanner(user: AppUser | null) {
       setTransientOutage(detail)
     }
     const onSyncRecovered = (event: Event) => {
+      if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemDetail : null
       if (event.type === 'sync:reconnected' || detail?.connected) {
         setSyncError(null)
@@ -794,12 +827,14 @@ function useSyncErrorBanner(user: AppUser | null) {
       }
     }
     const onSyncErrorResolved = (event: Event) => {
+      if (!isCurrent()) return
       const detail = event instanceof CustomEvent ? event.detail as SyncProblemReference : null
       setSyncError((current) => shouldClearResolvedSyncError(current, detail) ? null : current)
     }
     const onQueueChanged = () => refreshPendingSync()
-    const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
+    const onVaultLocked = (event: Event) => { if (isCurrent()) setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() }) }
     const onConflictReview = (event: Event) => {
+      if (!isCurrent()) return
       setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
     }
@@ -817,6 +852,7 @@ function useSyncErrorBanner(user: AppUser | null) {
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
     const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
     return () => {
+      disposed = true
       cancelInitialPendingSyncRefresh()
       cancelPendingSyncPolling()
       window.removeEventListener('sync:error', onSyncError)
@@ -831,15 +867,18 @@ function useSyncErrorBanner(user: AppUser | null) {
       window.removeEventListener('offline:vault-locked', onVaultLocked)
       window.removeEventListener('sync:write-conflict', onConflictReview)
     }
-  }, [user])
+  }, [user, ownerKey])
 
+  // Fence the render itself: effects run after paint and cannot hide a prior
+  // actor's already-resolved count during an account/authority transition.
+  const bannerCurrent = !!owner && !!bannerScopeRef.current && isActorReadScopeCurrent(bannerScopeRef.current, false)
   return {
-    syncError,
-    transientOutage,
-    pendingSync,
-    vaultLocked,
+    syncError: bannerCurrent ? syncError : null,
+    transientOutage: bannerCurrent ? transientOutage : null,
+    pendingSync: owner && pendingSync && isActorReadScopeCurrent(pendingSync.scope, false) && offlineSaleOwnersMatch(pendingSync.state.owner, owner) ? pendingSync.state : null,
+    vaultLocked: bannerCurrent ? vaultLocked : null,
     appUpdate,
-    conflictsNeedReview,
+    conflictsNeedReview: bannerCurrent ? conflictsNeedReview : null,
     clearVaultLocked: () => setVaultLocked(null),
     clearAppUpdate: () => {
       if (appUpdate) dismissedAppUpdateRef.current = persistentNoticeFingerprint('app-update', appUpdate)
@@ -1580,7 +1619,7 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
                 type="button"
                 className="rounded-full border border-current px-3 py-1 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!ready}
-                onClick={() => getAppShellApi().retryPendingSyncNow?.().catch(() => {})}
+                onClick={() => getAppShellApi().retryPendingSyncNow?.(pendingSync?.review_token || undefined).catch(() => {})}
               >
                 {ready ? (t('sync_now') || 'Sync now') : (t('waiting_for_server') || 'Waiting for server')}
               </button>
@@ -2003,8 +2042,10 @@ export default function App() {
 
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
+    const noticeScope = captureActorReadScope('offline-sale-notices')
     const onQueued = (event: Event) => {
       const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
+      if (!acceptsOfflineSaleNotice(detail, user, noticeScope)) return
       const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
       if (offlineNoticeRef.current.queued === key) return
       offlineNoticeRef.current.queued = key
@@ -2018,6 +2059,7 @@ export default function App() {
     }
     const onSynced = (event: Event) => {
       const detail = event instanceof CustomEvent ? event.detail as OfflineSaleNoticeDetail : {}
+      if (!acceptsOfflineSaleNotice(detail, user, noticeScope)) return
       const key = `${detail.client_request_id || ''}:${detail.ts || ''}`
       if (offlineNoticeRef.current.synced === key) return
       offlineNoticeRef.current.synced = key
