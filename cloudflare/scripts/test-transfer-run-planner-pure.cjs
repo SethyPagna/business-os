@@ -16,7 +16,8 @@ function load(name, dependencies = {}) {
   return module.exports
 }
 const budget = load('transferRunBudget')
-const { planTransferRunFragment: plan } = load('transferRunPlanner', { './transferRunBudget': budget })
+const quantityKernel = load('moneyPrecision')
+const { planTransferRunFragment: plan } = load('transferRunPlanner', { './transferRunBudget': budget, './moneyPrecision': quantityKernel })
 const { readTransferLotPage: read, TRANSFER_LOT_PAGE_MAX } = load('transferRunLots')
 const reserve = (tier = 'free', alreadyUsed = 0) => ({ tier, alreadyUsed, remainingReads: 3,
   completionQueries: 2, retryQueries: 2, safetyQueries: 3, extraAtomicStatements: 2 })
@@ -110,6 +111,42 @@ async function main() {
   assert.equal(db.prepare('SELECT COUNT(*) n FROM product_batches WHERE unit_cost_usd=3.123456').get().n, 1200)
   assert.equal(db.prepare('SELECT SUM(quantity) n FROM branch_batch_stock').get().n, 1209)
   console.log('PASS budget clipping never fabricates untracked stock; no stored money or quantity mutation')
+
+  const fractionalPage = (quantities, exhausted = true, selectedBatchId = null) => ({
+    productId: 1, branchId: 1, exhausted, selectedBatchId,
+    lots: quantities.map((available, index) => ({ batchId: index + 1, available,
+      cursor: { productId: 1, branchId: 1, batchId: index + 1, receivedAt: null, batchNumber: null } })),
+  })
+  const fractional = plan({ page: fractionalPage(Array(7).fill(0.1)), remainingQuantity: 0.7, budget: reserve(), mayCloneLots: false })
+  assert.equal(fractional.untrackedQuantity, 0)
+  assert.equal(fractional.remainingQuantity, 0)
+  assert.equal(fractional.quantity, 0.7)
+  assert.equal(quantityKernel.subtractDecimalSum(0.7, fractional.allocations.map(row => row.quantity)), '0')
+  const clipped = plan({ page: fractionalPage(Array(7).fill(0.1)), remainingQuantity: 0.7, budget: reserve('free', 17), mayCloneLots: false })
+  assert.equal(clipped.allocations.length, 2)
+  assert.equal(clipped.quantity, 0.2)
+  assert.equal(clipped.remainingQuantity, 0.5)
+  assert.equal(clipped.untrackedQuantity, 0)
+  const resumed = plan({ page: fractionalPage(Array(5).fill(0.1)), remainingQuantity: clipped.remainingQuantity, budget: reserve(), mayCloneLots: false })
+  assert.equal(resumed.untrackedQuantity, 0)
+  assert.equal(resumed.remainingQuantity, 0)
+  const selectedFraction = plan({ page: fractionalPage([0.3], true, 1), remainingQuantity: 0.2, budget: reserve(), mayCloneLots: false })
+  assert.equal(selectedFraction.quantity, 0.2)
+  assert.equal(selectedFraction.untrackedQuantity, 0)
+  const genuineRemainder = plan({ page: fractionalPage([0.1, 0.1]), remainingQuantity: 0.3, budget: reserve(), mayCloneLots: false })
+  assert.equal(genuineRemainder.untrackedQuantity, 0.1)
+  assert.equal(quantityKernel.subtractDecimalSum(genuineRemainder.quantity,
+    [...genuineRemainder.allocations.map(row => row.quantity), genuineRemainder.untrackedQuantity]), '0')
+  const nextPageNeeded = plan({ page: fractionalPage([0.1, 0.1], false), remainingQuantity: 0.3, budget: reserve(), mayCloneLots: false })
+  assert.equal(nextPageNeeded.untrackedQuantity, 0)
+  assert.equal(nextPageNeeded.remainingQuantity, 0.1)
+  for (const unsafe of [1e20, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+    assert.throws(() => plan({ page: fractionalPage([1]), remainingQuantity: unsafe, budget: reserve(), mayCloneLots: false }), /quantity/)
+    assert.throws(() => plan({ page: fractionalPage([unsafe]), remainingQuantity: 1, budget: reserve(), mayCloneLots: false }), /lot page/)
+  }
+  assert.throws(() => plan({ page: fractionalPage([0.1]), remainingQuantity: Number.MAX_SAFE_INTEGER,
+    budget: reserve(), mayCloneLots: false }), /represented exactly/)
+  console.log('PASS exact fractional exhausted/clipped/resumed/selected conservation; genuine remainder; unsafe magnitude and decimal roundtrip refusal')
   db.close()
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
