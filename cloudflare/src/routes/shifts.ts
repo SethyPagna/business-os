@@ -554,6 +554,17 @@ app.get('/', async (c) => {
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
   if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
   const requestedUserId = parsedUserId
+  const from = c.req.query('from') || null
+  const to = c.req.query('to') || null
+  const validDate = (value: string | null) => {
+    if (value == null) return true
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+    const date = new Date(`${value}T00:00:00.000Z`)
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+  }
+  if (!validDate(from) || !validDate(to) || (from != null && to != null && from > to)) {
+    return c.json({ error: 'Invalid shift business date range.' }, 400)
+  }
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
   const visibility = shiftVisibility(user, await readShiftPolicy(db))
   // ---- ONE ROW PER SHIFT RECORD (owner ruling, Sep 14 2026) --------------
@@ -579,7 +590,7 @@ app.get('/', async (c) => {
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
-  const params = { ...visibility.params, requestedUserId, branchId, from: c.req.query('from') || null, to: c.req.query('to') || null, limit }
+  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit }
   const [openShifts, closedShifts] = await Promise.all([
     db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND closed_at IS NULL AND cancelled_at IS NULL
       ORDER BY business_date DESC, opened_at DESC, id DESC`).all<ShiftDbRow>(params),
