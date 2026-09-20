@@ -14,6 +14,12 @@ Baseline2489fd7a. This document is a plan, not completion or production evidence
 
 ## Ordered implementation and gates
 
+Step1 checkpoint: integratedefcfa855/d2adbf04, root6325 terminal0 and independent
+1a391746 pass.11pure checks, native acquisition/progress/release races with12corrupt
+states, five actualHono route cases and Worker types. Exactraw observation revision
+binds operator clear; failed release cannot report success. Not deployed. This does
+not stop effects of a previously running restore after forceclear; steps2-6 required.
+
 1. Atomic maintenance ownership, guarded progress/release and truthful route outcomes. Test competing acquire, old progress after new owner, normal/force clear interleavings, corrupt marker and unrelated D1 failures. Isolated writer assigned; no migration required for this prerequisite.
 2. Durable operation journal plus transaction-time write fences. Record immutable request/owner/source identity, phase and cursor; acquire/update them atomically with each bounded batch. Do not rely only on an earlier middleware read.
 3. Page transfer retirement with atomic progress, permanent retry tombstones and one guarded generation transition. Test lost acknowledgments and every crash boundary; never reuse old identities after restoring older backups.

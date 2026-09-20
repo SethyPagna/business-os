@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL:**efcfa855 maintenance ownership hardening integrated. Root6325 terminal0 (11pure, native races/12corrupt states, fiveactualHono routes, types), independent1a391746; fivefiles exactly matchd2adbf04. Not deployed. Full operation fencing/journal/reset/restore/transfer/export lifecycle remains open; see dataset-lifecycle plan. Production unchangedce945bb4/7fb32ac1.
+
 > **LATEST LIVE:**ce945bb4ed15 / Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991 Paid deployed7351 terminal0. Live separate Returns tab renders normally; original preserved tab gone and browser tool disconnected before metadata/warm-reload/controller verification. Smoke is PARTIAL. No migrations/data writes. Full backlog active, Returns export still held for lifecycle dependencies. September21 release record is authoritative over older entries.
 
 > **LATEST release candidate:**a1ed5ca3/aa5762b4 browser upgrade integrated; corrected root8181 twelve/twelve, independent67795 six/six, types/i18n/build19655 and tier dry86723 pass. Initial56075 timeout retained, exact cause unproven. Deployment pending. Returns candidate remains excluded due missing dataset-generation/reset/restore lifecycle dependencies (0b9e3d76). See September21 release record and progress.md; full goal active.

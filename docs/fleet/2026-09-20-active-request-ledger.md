@@ -5,6 +5,10 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+September21 localefcfa855 maintenance ownership prerequisite verified root6325 and
+independent1a391746, not deployed. No migration. Larger durable reset/restore and
+transfer/export lifecycle remain open; markerCAS alone does not fence running effects.
+
 September21 deployed:ce945bb4ed15/Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991
 Paid;7351 terminal0. Separate live Returns tab loads; original preserved tab gone,
 browser connection stopped before metadata cycle/warm-reload/controller verification.

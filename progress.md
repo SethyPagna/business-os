@@ -1,3 +1,15 @@
+## Maintenance ownership prerequisite integrated and verified — September 21
+
+Rootefcfa855 integratesd2adbf04: atomic acquire, validated exact-state progress and
+release, corrupt marker failclosed, narrowly retained missing-table compatibility,
+observed-revision forceclear and truthful restore-release failure responses.
+Root6325 TERMINAL0:11pure checks, native concurrent/stale progress/ordinary-force
+release races and12corrupt states, five actualHono route cases, Worker typecheck.
+Independent1a391746 boundedPASS; integrated fivefiles exactly match candidate.
+No new deployment/migration/data writes; production remainsce945bb4/7fb32ac1.
+Do NOT label full lifecycle complete: ongoing restore effects after forceclear,
+durable journal/phased reset/restore, transfer retirement and export wiring remain.
+
 ## Dataset lifecycle prerequisites under implementation — September 21
 
 Previous turn made progress: deployedce945bb4 and recorded partialsmoke. New read-only
