@@ -6,16 +6,21 @@ Recorded means tracked; implemented does not mean verified or deployed.
 ## Current authoritative checkpoint
 
 Production: cbbebe5841f8 / Worker49b64606-d25a-4894-b630-6baa371005d1 (Paid).
-Locald731220e includes Shift pagination/scope fixes, reviewed custom-table namespace
-protection and dead LoadingScreen cleanup with live recovery tests. Not deployed.
-Frontend full80907 finished503/504,zero skips; only missing new pager inventory
-failed, now corrected and focusedpasses. Browser found real History paging/Refresh
-failures; correction3b287861 underreview, rebuild/browser retest required.
+Artifact3a71661f5715/hash e80017a0356c231c includes corrected Shift History paging
+and fresh Refresh, namespace protection and proven-dead LoadingScreen removal.
+All15 logical browser cases pass across completed slices, not one combined run.
+320px Khmer compact pager still hides total-page digits; correction underway.
+Fullfrontend63726 finished505/506,zero skips (reportsRenderPass failure); focused
+rerun32539 passes but original cause unresolved. Build and both tier dry runs pass;
+not deployed and not Free capacity certification.
 
 Owner tracking migration approval EXISTS after verification; no new remote apply.
-0185/0186/0187 and0188 remain isolated. Returns complete export endpoint/UI and
-transfer legacy retirement/admission/reset integration remain incomplete. D1 real
-binding-limit regression is being corrected; no Free capacity certification.
+0185/0186/0187 and0188 remain isolated. Returns complete export endpoint/UI through
+66399fef independently accepted for bounded scope after real D1 binding-limit fix;
+browser downloads and combined lifecycle integration remain. Transfer retirement
+kernel0188 accepted locally; admission/legacy undo compatibility still design.
+Actual R2 source substitution between validation and restoration is reproduced;
+exact-source pre-delete pin assigned, UI confirmation/asset sidecars separate.
 Protected-table restore/reset fix and safe component cleanup are locally reviewed,
 not evidence that whole restore consistency or all dead-code work is complete.
 

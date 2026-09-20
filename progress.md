@@ -1,3 +1,31 @@
+## Functional browser checks pass; compact pager and final gates remain — September 20
+
+Artifact 3a71661f5715 / e80017a0356c231c passed all 15 logical browser cases
+across completed desktop/Android/iOS slices, not one clean combined run.
+History Next and actual Refresh regressions are corrected. Test-only c6b6f358
+scopes mobile Back and dismisses the real iOS install notice without forced clicks.
+The 320px Khmer compact pager still elides total-page digits; an isolated correction
+is underway. Functional passes do not waive this visual acceptance gap.
+
+Full frontend handle63726 finished 505/506, zero skips; reportsRenderPass failed.
+Focused rerun32539 passes its five real-browser report shapes; the original cause
+is not established, so the full suite is NOT green. Build24890 and both Wrangler
+Free/Paid dry runs pass. Dry runs are not Free capacity certification.
+
+Returns endpoint/UI through66399fef independently accepted for its bounded scope,
+including native D1 limits and complete exports, but remains isolated pending
+lifecycle integration and browser download verification. Legacy retirement0188
+is locally accepted; prospective admission/old historical undo compatibility is
+still design work. No tracking migration has been applied remotely.
+
+Actual restore source-substitution defect reproduced: validation reads one R2
+object, then restore can consume its replacement. Minimal exact-version pin before
+any deletion assigned separately; earlier UI confirmation and asset sidecars are
+separate gaps. Current restore dependency discovery also exceeds Free query budget.
+Production unchanged: cbbebe5841f8 / Worker49b64606-d25a-4894-b630-6baa371005d1.
+Keep dead-code proof, Council challenge and compact readable UI as ongoing gates.
+All earlier snapshots below are historical. Full goal remains active.
+
 ## Reset protection and safe cleanup integrated; browser release gate held — September 20
 
 Locald731220e includes reviewed custom-table restore/reset protection5e9cfb80
