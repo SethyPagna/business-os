@@ -12,6 +12,22 @@ entries for that slice only. Other admin/public/Freecapacity items stay open.
 
 ### Active completion goal and next wave
 
+Integrated local checkpoint a789e527: frontend test:utils501/501 files, zero skips;
+frontend and Worker typechecks pass; EN/KM5892-key check passes; build269chunks,
+zero cycles, public preload excludes admin/file/import code. This covers Returns
+time parity, compiler-gate hardening and the standalone transfer planner, NOT the
+unintegrated statement-export/Dashboard/shift candidates. No deployment of this
+checkpoint. Browser verification assigned separately; hardware remains unverified.
+
+New bounded findings: derived shift cash reconciliation is returned to staff via
+current/history/close/replay despite admin-view requirement; fix in isolation,
+preserving operational entered counts and nonblocking mismatch close. Dashboard
+currently strips times in persistence and backend; end-to-end parity fix assigned.
+Statement export guards lack customer anonymity/replacement-item coverage and a
+durable non-restored epoch. D1 bookmarks are not pinned snapshots. Additive
+tracking authority requested; no new migration applied. Partial helper candidate
+passes21001-row traversal but endpoint/UI remain unwired, not a completed export.
+
 Owner export decision: allow custom start/end date ranges with at most one year
 per download. Monthly, three-month, six-month and one-year statement presets are
 convenience shortcuts, not required calendar blocks. Longer history requires multiple
