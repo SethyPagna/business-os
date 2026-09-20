@@ -177,9 +177,16 @@ app.post('/', async (c) => {
       const activeImports = await c.env.DB.prepare(
         "SELECT COUNT(*) AS n FROM import_jobs WHERE status IN ('pending','queued','running','analyzing','approved','applying','cancelling')",
       ).first<{ n: number }>().catch(() => null)
-      if (Number(activeImports?.n || 0) > 0) {
+      // Unknown is not idle. Never begin destructive restore when the admission
+      // read failed or returned an invalid count. Transaction-time fencing of
+      // imports starting after this read remains a separate lifecycle requirement.
+      if (!activeImports || !Number.isSafeInteger(activeImports.n) || activeImports.n < 0) {
+        return c.json({ code: 'import_status_unavailable',
+          error: 'Import activity could not be verified. No restore was started. Try again after the import service is available.' }, 503)
+      }
+      if (activeImports.n > 0) {
         return c.json({
-          error: `${activeImports!.n} import job(s) are still active. Wait for them to finish (or cancel them) before restoring -- their queued writes would interleave with the restore.`,
+          error: `${activeImports.n} import job(s) are still active. Wait for them to finish (or cancel them) before restoring -- their queued writes would interleave with the restore.`,
         }, 409)
       }
       const maintenance = await beginMaintenance(c.env, {
