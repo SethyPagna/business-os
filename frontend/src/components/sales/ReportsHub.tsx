@@ -54,6 +54,7 @@ import {
   readStoredJson,
   resolveReportView,
   reportExportAllowed,
+  reportQueryParams,
   visibleReportViews,
   writeStoredJson,
   type ReportFilters,
@@ -231,6 +232,12 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     status: statusFilter,
     paymentMethod: paymentFilter,
   }), [range, branchFilter, statusFilter, paymentFilter])
+  const rangeError = useMemo(() => {
+    if (!view) return ''
+    try { reportQueryParams(filters, view); return '' } catch (error) {
+      return error instanceof Error ? error.message : 'Invalid report date/time range'
+    }
+  }, [filters, view])
   const activeFilterCount = (branchFilter ? 1 : 0) + (supportsSaleFilters ? (statusFilter ? 1 : 0) + (paymentFilter ? 1 : 0) : 0)
   const clearFilters = () => { setBranchFilter(''); setStatusFilter(''); setPaymentFilter('') }
 
@@ -397,6 +404,11 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   const body = !viewProps || !view ? (
     <EmptyState icon={<BarChart3 className="h-5 w-5" />} title={trh('reports', 'Reports')} text={trh('rpt_no_access', 'No report is available for your permissions.')} />
+  ) : rangeError ? (
+    <div role="alert" className="min-w-0 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-100">
+      <p className="font-semibold">{trh('date_time_range', 'Date and time range')}</p>
+      <p className="break-words">{rangeError}</p>
+    </div>
   ) : view.id === 'overview' ? <OverviewReport {...viewProps} />
     : view.id === 'shift' ? <ShiftReport {...viewProps} />
       : view.id === 'periods' ? <PeriodReport {...viewProps} />

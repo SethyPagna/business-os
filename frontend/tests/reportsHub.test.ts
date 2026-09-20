@@ -588,7 +588,8 @@ test('reportQueryParams: clock window only for timestamp-backed views; status/pa
   const allDay = reportQueryParams({ ...f, startTime: '00:00', endTime: '23:59' }, getReportView('periods'))
   assert.ok(!('createdFrom' in allDay) && !('createdTo' in allDay), 'the whole-day window is the default and is not sent')
   const half = reportQueryParams({ ...f, endTime: '' }, getReportView('periods'))
-  assert.ok(!('createdFrom' in half) && !('createdTo' in half), 'a half-set window is not sent')
+  assert.equal(half.createdFrom, '2026-08-01 02:00:00', 'a half-set window preserves the entered start')
+  assert.equal(half.createdTo, '2026-08-31 17:00:00', 'blank end defaults to the inclusive final minute of the selected day')
   assert.deepEqual(reportQueryParams(EMPTY_REPORT_FILTERS, getReportView('overview')), {})
 })
 
