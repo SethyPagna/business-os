@@ -1,3 +1,25 @@
+## Adversarial verification rejects two false-completion paths — September 20
+
+Previous continuation made concrete progress: integrated mobile browser test
+correction067997fa, updated handoffdacc2935 and pushed working branch; no deployment.
+Compact pager candidate008c20f0 passes seven native layout cases but independent
+reviewa08221fa confirms 100-digit draft renders input896px wide at320px. Integration
+held; bounded draft correction assigned. Static seeded-hook layout reproduces the
+post-handler state; it is not yet a hydrated paste test. Normal six-digit values
+must remain readable, and centered/range/default branches stay unchanged.
+
+Report harness audit executed a negative control removing only header-sort click:
+all five views still passed, proving the absolute renders>=2 barrier is insufficient.
+Focused unchanged test also passes; original full-suite failure cause is NOT proven.
+Isolated correction will require the intended navigation plus a relative sort commit
+and positive sortRows increment before measuring zero extra sorting. No timeout
+increase or weaker product assertion authorized.
+
+R2 source-pin implementation is in focused verification and independent review;
+no integration yet. Transfer0189 design is being reviewed before schema edits.
+Read-only restore query-budget inventory is separate from source pinning. These
+findings preserve, rather than replace, the full admin/public/deployment goal.
+
 ## Functional browser checks pass; compact pager and final gates remain — September 20
 
 Artifact 3a71661f5715 / e80017a0356c231c passed all 15 logical browser cases
