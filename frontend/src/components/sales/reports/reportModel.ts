@@ -200,7 +200,11 @@ export function reportQueryParams(f: ReportFilters, view: ReportViewDef): Record
   if (f.startDate) q.startDate = f.startDate
   if (f.endDate) q.endDate = f.endDate
   if (f.branchId) q.branchId = f.branchId
-  if (view.supportsTime && (f.startTime || f.endTime)) {
+  // Date-only views normalize clocks even for the existing All-dates sentinel.
+  // Preserve that persisted shape when switching back to a timed view.
+  const allDates = !f.startDate && !f.endDate
+    && (!f.startTime || f.startTime === '00:00') && (!f.endTime || f.endTime === '23:59')
+  if (view.supportsTime && !allDates && (f.startTime || f.endTime)) {
     // Clearing one clock means the corresponding day edge, not permission to
     // discard the other boundary. Populated invalid clocks must fail closed.
     const startTime = f.startTime || '00:00'
