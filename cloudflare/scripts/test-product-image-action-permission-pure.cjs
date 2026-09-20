@@ -46,6 +46,7 @@ const moneyPrecision = loadTs('lib/moneyPrecision.ts')
 const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './moneyPrecision': moneyPrecision,
+  './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision }),
   './db': db,
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
