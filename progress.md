@@ -1,3 +1,26 @@
+## Late-upgrade correction design resumed — September 20
+
+Previous turn classified as progress: retry evidence changed the observed state,
+while preserving the independently reproduced late-upgrade defect as open.
+Current root e57d2924 tracked-clean. New isolated owner sw_upgrade_fix and read-only
+sw_upgrade_review replace completed prior agents; no runtime edit yet. Root traced
+index.tsx announceWaitingAppShell: waiting hash equal to page hash suppresses the
+prompt even if an older controller still owns the tab. Existing restartIntoLatestApp
+dirty-work guard must remain intact; no forced document reload is acceptable.
+
+Council design pass (one model simulating five perspectives, not independent
+experts): Skeptic rejects takeover that loses old lazy chunks or drafts; Engineer
+requires an exact incumbent identity and separate shell-policy capability;
+Expansionist proposes future cross-version/device lifecycle coverage, aspirational;
+Outsider requires eventual recovery without hidden update actions; Executor chooses
+a real two-tab migration test with retained input/IDB and missing old network chunks.
+Anonymous critique: A protects data but permanent waiting leaves the outage; B's
+identity proof must survive timeouts and superseded waiting versions; C cannot delay
+bounded recovery indefinitely; D needs a precise mechanism; E's one scenario needs
+future-capable-update and private-cache negative controls. Chairman: implement only
+after bounded identity/asset-retention design review, biggest risk is indirect reload
+and draft loss, first gate is native takeover with no document navigation or POST.
+
 ## Requested retry recovered; late-upgrade defect remains open — September 20
 
 User requested another ordinary retry. Preserved Returns tab460569392 recovered

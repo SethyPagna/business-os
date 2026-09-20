@@ -5,6 +5,25 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+September20 latest: live590a62399d22/Workerfe1e59bf-2c86-4b10-a687-2f08241310e6
+(Paid), frontendcf805522d2fd/hash76b9ca111ec0b69f. HTML MIME/resource guards are
+deployed, but late-upgrade behavior remains OPEN. Replacement installed while
+incumbent cache is healthy can wait behind the old controller; later metadata
+navigation poisons its shell. Independent native proofbaf03c4a. Subsequent user
+retryb59050a5 recovered Returns and another warm reload, not closure of this gap.
+No storage clearing or business-data changes. sw_upgrade_fix owns isolated next
+implementation, sw_upgrade_review independent read-only review. No next fix deployed.
+
+All484 Worker test files now have passing evidence for unchanged5b81a2c3 Worker
+sources:478 ordinary passes plus5 isolated reruns and1 protected orphan audit.
+Not one uninterrupted green sweep. Durable5e26bfaf; source freeze released.
+Reviewed schema consolidationc2807725 remains isolated, not integrated/deployed.
+Transfer admission correction74be1a64 independently passed but remains prototype;
+full route/lifecycle and complete Returns export integration are still open.
+
+The following checkpoint paragraphs are historical; this paragraph and progress.md
+supersede their deployment and running-test state, not outstanding requirements.
+
 LIVE SMOKE BLOCKER: metadata navigation can cache JSON as the service-worker HTML
 shell; subsequent Returns reload shows JSON. Livec970f084 and source confirm.
 Current deployment below is not fully smoke-green. Same defect in prior version;
