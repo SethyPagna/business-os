@@ -13,9 +13,11 @@ for (const file of fs.readdirSync(directory).filter(file => file.endsWith('.sql'
 }
 const source = fs.readFileSync(path.join(__dirname, '../src/lib/transferRunStore.ts'), 'utf8')
 const moduleObj = { exports: {} }
-new Function('module', 'exports', ts.transpileModule(source, { compilerOptions: {
+const permissionModule = { exports: {} }
+new Function('module', 'exports', ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib/permissions.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(permissionModule, permissionModule.exports)
+new Function('module', 'exports', 'require', ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
-} }).outputText)(moduleObj, moduleObj.exports)
+} }).outputText)(moduleObj, moduleObj.exports, name => { assert.equal(name, './permissions'); return permissionModule.exports })
 const store = moduleObj.exports
 const digest = text => crypto.createHash('sha256').update(text).digest('hex')
 const owner = { actual: { actorId: 7, organizationId: 4 }, expected: { actorId: 7, organizationId: 4 } }
@@ -58,6 +60,8 @@ const before = {
 const migration = fs.readFileSync(path.join(directory, name), 'utf8')
 assert.equal(migration.includes('\r'), false, 'append-only trigger SQL must be LF-only')
 db.exec(migration)
+db.exec(fs.readFileSync(path.join(directory, '0186_transfer_run_retirement.sql'), 'utf8'))
+owner.datasetGeneration = JSON.parse(db.prepare("SELECT value FROM system_flags WHERE key='business_dataset_generation'").get().value).generation
 assert.deepEqual(db.prepare('SELECT * FROM products WHERE id=900001').get(), before.product)
 assert.deepEqual(db.prepare('SELECT * FROM transfer_operation_receipts').all(), before.receipts)
 assert.deepEqual(db.prepare('SELECT * FROM action_history').all(), before.history)
@@ -134,7 +138,7 @@ console.log('PASS unwrapped matching child rolls back; wrapped commit wins exact
     assert.throws(() => store.transitionTransferRunStatements({ ...position('run-main', 1, 1), actual: changed, status: 'paused' }), /actor or organization/)
     await assert.rejects(store.committedTransferRunChunk(adapter, { ...owner, actual: changed, runId: 'run-main', sequence: 0 }), /actor or organization/)
     // A new caller whose own expected identity matches still cannot access owner7/org4.
-    assert.equal(await store.committedTransferRunChunk(adapter, { actual: changed, expected: changed, runId: 'run-main', sequence: 0 }), undefined)
+    assert.equal(await store.committedTransferRunChunk(adapter, { actual: changed, expected: changed, datasetGeneration: owner.datasetGeneration, runId: 'run-main', sequence: 0 }), undefined)
     assert.throws(() => execute(store.transitionTransferRunStatements({ ...position('run-main', 1, 1), actual: changed, expected: changed, status: 'paused' })), /NOT NULL/)
   }
   console.log('PASS lost-ack reads same receipt; actor/org/null-org fences')
@@ -148,8 +152,8 @@ console.log('PASS unwrapped matching child rolls back; wrapped commit wins exact
   assert.throws(() => execute(store.transitionTransferRunStatements({ ...position('run-main', 4, 2), status: 'active' })), /transition/)
   execute(store.transitionTransferRunStatements({ ...position('registered-winner'), status: 'abandoned' }))
   assert.throws(() => execute(effects('original-reserved')), /reserved/)
-  assert.throws(() => db.exec("DELETE FROM transfer_runs WHERE id='registered-winner'"), /retained/)
-  assert.throws(() => db.exec("DELETE FROM transfer_run_chunks WHERE run_id='run-main'"), /retained/)
+  assert.throws(() => db.exec("DELETE FROM transfer_runs WHERE id='registered-winner'"), /retirement snapshot/)
+  assert.throws(() => db.exec("DELETE FROM transfer_run_chunks WHERE run_id='run-main'"), /retirement snapshot/)
   assert.throws(() => execute(store.transitionTransferRunStatements({ ...position('registered-winner', 1), status: 'active' })), /transition/)
   assert.equal(db.prepare('SELECT cost_price_usd FROM products WHERE id=900001').get().cost_price_usd, 3.123456)
   assert.deepEqual(db.prepare("SELECT * FROM transfer_operation_receipts WHERE request_id='legacy-committed'").get(), before.receipts[0])

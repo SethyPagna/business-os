@@ -1,13 +1,16 @@
 import type { D1Compat } from './db'
+import { hasPermission, type PermissionUser } from './permissions'
 
 type Statement = { sql: string; params?: Record<string, unknown> }
 type Owner = { actorId: number; organizationId: number | null }
 /** actual MUST come from authenticated server context, never request JSON.
  * Permission/session admission remains the future route's responsibility. */
-export type TransferRunOwnerProof = { actual: Owner; expected: Owner }
+export type TransferRunOwnerProof = { actual: Owner; expected: Owner; datasetGeneration: string }
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 type RunPosition = TransferRunOwnerProof & { runId: string; revision: number; sequence: number }
 function owner(proof: TransferRunOwnerProof): Owner {
   const { actual, expected } = proof
+  if (!uuid.test(proof.datasetGeneration)) throw new Error('A dataset generation is required')
   if (!Number.isSafeInteger(actual.actorId) || actual.actorId <= 0
     || (actual.organizationId !== null && (!Number.isSafeInteger(actual.organizationId) || actual.organizationId <= 0))
     || actual.actorId !== expected.actorId || actual.organizationId !== expected.organizationId) throw new Error('Transfer actor or organization changed')
@@ -17,7 +20,7 @@ function position(input: RunPosition): Record<string, unknown> {
   const identity = owner(input)
   if (!input.runId || !Number.isSafeInteger(input.revision) || input.revision < 0
     || !Number.isSafeInteger(input.sequence) || input.sequence < 0) throw new Error('Invalid transfer position')
-  return { run: input.runId, revision: input.revision, sequence: input.sequence, actor: identity.actorId, org: identity.organizationId }
+  return { run: input.runId, revision: input.revision, sequence: input.sequence, actor: identity.actorId, org: identity.organizationId, datasetGeneration: input.datasetGeneration }
 }
 function json(text: string, max: number): void {
   if (typeof text !== 'string' || new TextEncoder().encode(text).length > max) throw new Error('Transfer JSON exceeds limit')
@@ -32,7 +35,8 @@ function guard(condition: string, params: Record<string, unknown>): Statement {
   return { sql: `INSERT INTO branches(name) SELECT NULL WHERE COALESCE((${condition}),0)=0`, params }
 }
 const ownedPosition = `r.id=@run AND r.actor_id=@actor AND r.organization_id IS @org
-  AND r.revision=@revision AND r.next_sequence=@sequence`
+  AND r.revision=@revision AND r.next_sequence=@sequence AND r.dataset_generation=@datasetGeneration
+  AND r.dataset_generation=(SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation')`
 
 /** Registration is insert-only. On a uniqueness/race error the caller reads the
  * original receipt/run and compares BOTH original bytes and digest. Never retry
@@ -43,9 +47,9 @@ export function registerTransferRunStatements(input: TransferRunOwnerProof & {
   const identity = owner(input)
   request(input, 131072)
   if (!input.runId || !['branches', 'inventory'].includes(input.scope)) throw new Error('Invalid transfer run')
-  return [{ sql: `INSERT INTO transfer_runs(id,actor_id,organization_id,request_id,request_digest,request_json,scope)
-    VALUES(@run,@actor,@org,@request,@digest,@body,@scope)`, params: { run: input.runId, actor: identity.actorId,
-    org: identity.organizationId, request: input.requestId, digest: input.digest, body: input.requestJson, scope: input.scope } }]
+  return [{ sql: `INSERT INTO transfer_runs(id,actor_id,organization_id,request_id,request_digest,request_json,scope,dataset_generation)
+    VALUES(@run,@actor,@org,@request,@digest,@body,@scope,@datasetGeneration)`, params: { run: input.runId, actor: identity.actorId,
+    org: identity.organizationId, request: input.requestId, digest: input.digest, body: input.requestJson, scope: input.scope, datasetGeneration: input.datasetGeneration } }]
 }
 
 /** Caller supplies a server-generated child key and a validated planner fragment.
@@ -115,6 +119,111 @@ export async function committedTransferRunChunk(db: D1Compat, input: TransferRun
     FROM transfer_runs r JOIN transfer_run_chunks c ON c.run_id=r.id
     JOIN transfer_operation_receipts p ON p.id=c.receipt_id
     WHERE r.id=@run AND r.actor_id=@actor AND r.organization_id IS @org
+      AND r.dataset_generation=@datasetGeneration
+      AND r.dataset_generation=(SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation')
       AND c.sequence=@sequence AND c.status='committed' AND p.status='committed'`)
-    .get({ run: input.runId, actor: identity.actorId, org: identity.organizationId, sequence: input.sequence })
+    .get({ run: input.runId, actor: identity.actorId, org: identity.organizationId, sequence: input.sequence, datasetGeneration: input.datasetGeneration })
+}
+
+export async function readBusinessDatasetGeneration(db: Pick<D1Compat, 'prepare'>): Promise<string> {
+  const row = await db.prepare("SELECT json_extract(value,'$.generation') AS generation FROM system_flags WHERE key='business_dataset_generation'").get<{ generation: string }>()
+  if (!row || !uuid.test(row.generation)) throw new Error('Dataset generation is unavailable')
+  return row.generation
+}
+
+export type RetiredTransferKey = {
+  actorId: number; organizationId: number | null; requestId: string; runId: string; sequence: number | null
+  datasetGeneration: string; digest: string; requestJson: string; snapshotJson: string
+}
+type LifecycleProof = TransferRunOwnerProof & {
+  /** Trusted live authenticated user, never a client-provided permissions object. */
+  user: PermissionUser & { id: number; organization_id: number | null }
+}
+function lifecycle(proof: LifecycleProof): Record<string, unknown> {
+  const identity = owner(proof)
+  if (proof.user.id !== identity.actorId || proof.user.organization_id !== identity.organizationId
+    || !hasPermission(proof.user, 'backup_restore')) throw new Error('Restore/reset authority required')
+  return { before: proof.datasetGeneration, token: crypto.randomUUID() }
+}
+function lifecycleStart(params: Record<string, unknown>): Statement[] {
+  return [guard("(SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation')=@before", params),
+    { sql: 'INSERT INTO transfer_run_lifecycle_guard(id,token,kind,generation_before,generation_after) VALUES(1,@token,@kind,@before,@after)', params }]
+}
+function lifecycleEnd(params: Record<string, unknown>): Statement {
+  return { sql: 'DELETE FROM transfer_run_lifecycle_guard WHERE id=1 AND token=@token', params }
+}
+async function executeLifecycle(db: Pick<D1Compat, 'batchOnce'>, statements: Statement[], maxStatements: number): Promise<void> {
+  if (!Number.isSafeInteger(maxStatements) || maxStatements < statements.length) throw new Error('Lifecycle statement budget exceeded')
+  await db.batchOnce(statements)
+}
+
+/** Private complete execution envelope. This retires only transfer continuation
+ * state; it does NOT reset business data. Future reset integration must compose
+ * its fixed, reviewed mutations inside this private executor, never export a
+ * prefix. Restore integration must preserve/union retirement records and add an
+ * exact historical-receipt import contract before applying the business backup.
+ */
+export async function retireTransferRunsForDatasetChange(db: Pick<D1Compat, 'batchOnce'>, input: LifecycleProof & {
+  kind: 'restore' | 'reset'; nextGeneration: string; maxStatements: number
+}): Promise<void> {
+  const params = { ...lifecycle(input), after: input.nextGeneration, kind: input.kind }
+  if (!['restore', 'reset'].includes(input.kind) || !uuid.test(input.nextGeneration) || input.nextGeneration === input.datasetGeneration) throw new Error('A fresh lifecycle generation is required')
+  const statements = lifecycleStart(params)
+  statements.push({ sql: `INSERT INTO transfer_run_retired_keys(actor_id,request_id,organization_id,run_id,sequence,dataset_generation,request_digest,request_json,snapshot_json)
+    SELECT r.actor_id,r.request_id,r.organization_id,r.id,NULL,r.dataset_generation,r.request_digest,r.request_json,
+      json_object('id',r.id,'actor_id',r.actor_id,'organization_id',r.organization_id,'request_id',r.request_id,
+        'request_digest',r.request_digest,'request_json',r.request_json,'scope',r.scope,'status',r.status,
+        'revision',r.revision,'next_sequence',r.next_sequence,'cursor_json',r.cursor_json,
+        'created_at',r.created_at,'updated_at',r.updated_at,'dataset_generation',r.dataset_generation)
+    FROM transfer_runs r` },
+  { sql: `INSERT INTO transfer_run_retired_keys(actor_id,request_id,organization_id,run_id,sequence,dataset_generation,request_digest,request_json,snapshot_json)
+    SELECT c.actor_id,c.request_id,r.organization_id,c.run_id,c.sequence,r.dataset_generation,c.request_digest,c.request_json,
+      json_object('run_id',c.run_id,'sequence',c.sequence,'actor_id',c.actor_id,'request_id',c.request_id,
+        'request_digest',c.request_digest,'request_json',c.request_json,'cursor_before',c.cursor_before,
+        'cursor_after',c.cursor_after,'is_final',c.is_final,'status',c.status,'receipt_id',c.receipt_id,
+        'receipt_response_json',p.response_json,'receipt_operation_id',p.operation_id,
+        'receipt_action_history_id',p.action_history_id,'receipt_generation',p.generation,'receipt_replay_state',p.replay_state,
+        'receipt',CASE WHEN p.id IS NULL THEN NULL ELSE json_object('id',p.id,'actor_id',p.actor_id,
+          'request_id',p.request_id,'request_digest',p.request_digest,'request_json',p.request_json,
+          'response_json',p.response_json,'status',p.status,'created_at',p.created_at,'updated_at',p.updated_at,
+          'operation_id',p.operation_id,'provenance_version',p.provenance_version,
+          'action_history_id',p.action_history_id,'replay_state',p.replay_state,'generation',p.generation) END)
+    FROM transfer_run_chunks c JOIN transfer_runs r ON r.id=c.run_id LEFT JOIN transfer_operation_receipts p ON p.id=c.receipt_id` },
+  { sql: 'DELETE FROM transfer_run_chunks' }, { sql: 'DELETE FROM transfer_runs' },
+  { sql: "UPDATE system_flags SET value=json_object('generation',@after),updated_at=CURRENT_TIMESTAMP WHERE key='business_dataset_generation'", params },
+  lifecycleEnd(params))
+  await executeLifecycle(db, statements, input.maxStatements)
+}
+
+/** Bounded reservation union only, never restoration/reactivation of live runs.
+ * Existing immutable evidence wins when exact identity matches; differing digest,
+ * body, owner, source generation or run/sequence is a hard conflict, no overwrite.
+ */
+export async function unionRetiredTransferKeys(db: Pick<D1Compat, 'batchOnce'>, input: LifecycleProof & {
+  keys: readonly RetiredTransferKey[]; maxStatements: number
+}): Promise<void> {
+  if (input.keys.length > 100) throw new Error('Retirement union page too large')
+  const params = { ...lifecycle(input), after: input.datasetGeneration, kind: 'union' }
+  const statements = lifecycleStart(params)
+  for (const key of input.keys) {
+    request({ requestId: key.requestId, requestJson: key.requestJson, digest: key.digest }, 131072)
+    json(key.snapshotJson, 262144)
+    if (!Number.isSafeInteger(key.actorId) || key.actorId <= 0 || !key.runId
+      || (key.organizationId !== null && (!Number.isSafeInteger(key.organizationId) || key.organizationId <= 0))
+      || (key.sequence !== null && (!Number.isSafeInteger(key.sequence) || key.sequence < 0))
+      || (key.datasetGeneration !== '' && !uuid.test(key.datasetGeneration))) throw new Error('Invalid retired identity')
+    const p = { actor: key.actorId, org: key.organizationId, request: key.requestId, run: key.runId, sequence: key.sequence,
+      generation: key.datasetGeneration, digest: key.digest, body: key.requestJson, snapshot: key.snapshotJson }
+    statements.push(guard(`NOT EXISTS(SELECT 1 FROM transfer_runs WHERE actor_id=@actor AND request_id=@request)
+      AND NOT EXISTS(SELECT 1 FROM transfer_run_chunks WHERE actor_id=@actor AND request_id=@request)
+      AND (NOT EXISTS(SELECT 1 FROM transfer_operation_receipts WHERE actor_id=@actor AND request_id=@request)
+        OR EXISTS(SELECT 1 FROM transfer_run_retired_keys WHERE actor_id=@actor AND request_id=@request))`, p),
+      { sql: `INSERT INTO transfer_run_retired_keys(actor_id,request_id,organization_id,run_id,sequence,dataset_generation,request_digest,request_json,snapshot_json)
+        VALUES(@actor,@request,@org,@run,@sequence,@generation,@digest,@body,@snapshot) ON CONFLICT(actor_id,request_id) DO NOTHING`, params: p },
+      guard(`EXISTS(SELECT 1 FROM transfer_run_retired_keys WHERE actor_id=@actor AND request_id=@request
+        AND organization_id IS @org AND run_id=@run AND sequence IS @sequence AND dataset_generation=@generation
+        AND request_digest=@digest AND request_json=@body)`, p))
+  }
+  statements.push(lifecycleEnd(params))
+  await executeLifecycle(db, statements, input.maxStatements)
 }
