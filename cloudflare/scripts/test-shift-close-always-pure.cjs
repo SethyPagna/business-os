@@ -148,10 +148,11 @@ const user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.string
 
 function scenario() {
   const sqlite = database()
+  let actor = user
   const route = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/db': { getDb: () => d1(sqlite) },
-    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
     '../lib/shiftReconciliation': { ...recon, loadShiftReconciliation: reconciliationFor },
@@ -174,14 +175,43 @@ function scenario() {
     return (await res.json()).shift
   }
   const shiftCount = () => sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions').get().n
-  return { call, row, open, shiftCount }
+  return { call, row, open, shiftCount, actAs: (next) => { actor = next }, sqlite }
 }
 
 async function main() {
   assertOpeningPresenceMigration()
+  // Shared operational counts are intentional, but the comparison is not a
+  // shop-wide staff capability. Check real routes and same-request replay.
+  {
+    const { call, open, actAs, sqlite } = scenario()
+    sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_scope_mode','shop_wide') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+    sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
+    const shift = await open()
+    actAs({ id: 8, username: 'colleague', permissions: JSON.stringify({ pos: true, products_cost_view: true }) })
+    for (const url of ['/current?branch_id=1', `/${shift.id}/history`]) {
+      const body = await (await call('GET', url)).json()
+      assert.equal(body.shift.opening_float_usd, 10, 'shared registered cash stays visible')
+      assert.equal(body.shift.reconciliation, null, 'shop-wide and cost grants do not grant admin comparison')
+      assert.ok(!body.shift.figures, 'staff sees no admin figures')
+    }
+    const input = { shift_id: shift.id, expected_revision: 0, client_request_id: 'shift-visibility-replay-001', branch_id: 1, closing_counted_usd: 3 }
+    assert.equal((await call('POST', '/close', input)).status, 403, 'comparison changes never widen mutation authority')
+    actAs({ ...user, role_code: 'admin' })
+    assert.ok((await (await call('GET', '/current?branch_id=1')).json()).shift.reconciliation)
+    const closed = await (await call('POST', '/close', input)).json()
+    assert.equal(closed.shift.reconciliation.difference.usd, -47)
+    const replay = await (await call('POST', '/close', input)).json()
+    assert.equal(replay.already_closed, true)
+    assert.equal(replay.shift.reconciliation.difference.usd, -47)
+    actAs(user)
+    const revokedReplay = await (await call('POST', '/close', input)).json()
+    assert.equal(revokedReplay.already_closed, true)
+    assert.equal(revokedReplay.shift.reconciliation, null, 'replay rechecks current authority, not original privilege')
+    assert.equal(revokedReplay.shift.closing_counted_usd, 3)
+  }
   // ---- 1. counted far from expected -------------------------------------
   {
-    const { call, row, open } = scenario()
+    const { call, row, open, actAs } = scenario()
     const shift = await open()
     const res = await call('POST', '/close', { branch_id: 1, closing_counted_usd: 3, closing_counted_khr: 0 })
     assert.equal(res.status, 200, 'a drawer that does not match expected still closes')
@@ -189,8 +219,11 @@ async function main() {
     assert.equal(body.is_open, false)
     assert.equal(row(shift.id).closing_counted_usd, 3)
     // The mismatch is REPORTED, not enforced: -$47 against a $50 expected.
-    assert.equal(body.shift.reconciliation.expected.usd, 50)
-    assert.equal(body.shift.reconciliation.difference.usd, -47)
+    assert.equal(body.shift.reconciliation, null, 'staff close keeps operational counts, not admin comparison')
+    actAs({ ...user, role_code: 'admin' })
+    const reviewed = await (await call('GET', `/${shift.id}/history`)).json()
+    assert.equal(reviewed.shift.reconciliation.expected.usd, 50)
+    assert.equal(reviewed.shift.reconciliation.difference.usd, -47)
     assert.ok(!('requires_confirmation' in body) && !('variance_blocked' in body),
       'the close response carries no confirmation gate')
   }
@@ -206,11 +239,7 @@ async function main() {
     assert.equal(stored.closing_counted_usd, null)
     assert.equal(stored.closing_counted_khr, null)
     const body = await res.json()
-    assert.deepEqual(body.shift.reconciliation.counted, { usd: null, khr: null })
-    assert.deepEqual(body.shift.reconciliation.difference, { usd: null, khr: null },
-      'an uncounted drawer reports no difference rather than a fake zero')
-    // Expected is still there: the report half of the close is unaffected.
-    assert.equal(body.shift.reconciliation.expected.usd, 50)
+    assert.equal(body.shift.reconciliation, null, 'uncounted staff close remains successful without comparison')
   }
 
   // ---- 3. blank strings (what an untouched form field posts) -------------

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Modal from '../shared/Modal'
 import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { useApp } from '../../AppContext'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
 import { closeShift, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
@@ -56,7 +57,7 @@ type ShiftGateContext = {
   // drawer figures on this screen are printed exactly as POS prints them.
   fmtUSD: (value: unknown) => string
   fmtKHR: (value: unknown) => string
-  user?: { id?: string | number | null }
+  user?: NonNullable<PermissionUser> & { id?: string | number | null }
   settings?: { shift_scope_mode?: unknown }
 }
 
@@ -409,7 +410,9 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   const [pending, setPending] = useState(false)
 
   const now = useWallClock(open && !closed)
-  const shift = closed || target || state?.shift || null
+  const receivedShift = closed || target || state?.shift || null
+  const shift = receivedShift && !isAdminControlUser(user)
+    ? { ...receivedShift, reconciliation: null, figures: null } : receivedShift
   const canCloseCurrent = state?.is_open === true && state.shift?.capabilities.can_close === true
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
     || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null

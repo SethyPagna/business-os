@@ -1,5 +1,22 @@
 import type { Shift } from '../../api/shiftTransport.ts'
 
+/** Server-authorized comparison values, without recalculating any money. */
+export function shiftComparisonRows(shift: Pick<Shift, 'reconciliation'>): Array<{ key: string; usd: number | null; khr: number | null }> {
+  const comparison = shift.reconciliation
+  if (!comparison) return []
+  return [
+    { key: 'shift_recon_opening', ...comparison.opening },
+    { key: 'shift_recon_additional_cash', usd: comparison.additional_cash?.usd ?? 0, khr: comparison.additional_cash?.khr ?? 0 },
+    { key: 'shift_recon_cash_sales', ...comparison.cash_sales },
+    { key: 'refunds', usd: -comparison.refunds.usd, khr: -comparison.refunds.khr },
+    { key: 'fees', usd: -comparison.expenses.usd, khr: -comparison.expenses.khr },
+    { key: 'courier', usd: -comparison.courier.usd, khr: -comparison.courier.khr },
+    { key: 'shift_recon_expected', ...comparison.expected },
+    { key: 'shift_recon_counted', ...comparison.counted },
+    { key: 'shift_difference', ...comparison.difference },
+  ]
+}
+
 export type ShiftCountPairValue = { usd: number | null; khr: number | null }
 
 export type ShiftFiguresShape = {

@@ -55,6 +55,7 @@ function load(rel: string): Record<string, unknown> {
       }
     }
     if (id.includes('utils/formatters')) return require('../src/utils/formatters.ts')
+    if (id.includes('utils/permissions')) return require('../src/utils/permissions.ts')
     if (id.includes('shiftReportModel')) return require('../src/components/shifts/shiftReportModel.ts')
     if (id.includes('constants')) return require('../src/constants.ts')
     return { __esModule: true, default: () => null }

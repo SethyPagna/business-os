@@ -4,11 +4,40 @@ import test from 'node:test'
 import type { Shift } from '../src/api/shiftTransport.ts'
 import {
   shiftCountedPairText,
+  shiftComparisonRows,
   shiftFigureRows,
   shiftFiguresOf,
   shiftRegisteredCash,
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
+
+test('comparison export preserves the authorized server numbers and nulls, including refunds', () => {
+  assert.deepEqual(shiftComparisonRows({ reconciliation: null }), [])
+  const reconciliation = {
+    opening: { usd: 50, khr: null }, additional_cash: { usd: 5, khr: 0 },
+    cash_sales: { usd: 40, khr: 8000 }, refunds: { usd: 6, khr: 2000 },
+    expenses: { usd: 4, khr: 1000 }, courier: { usd: 3, khr: 500 },
+    expected: { usd: 82, khr: null }, counted: { usd: 70, khr: null },
+    difference: { usd: -12, khr: null }, needs_review: false, review_codes: [],
+  }
+  const rows = shiftComparisonRows({ reconciliation })
+  assert.equal(rows.find((row) => row.key === 'refunds')?.usd, -6)
+  assert.equal(rows.find((row) => row.key === 'fees')?.usd, -4)
+  assert.equal(rows.find((row) => row.key === 'shift_recon_expected')?.usd, 82)
+  assert.deepEqual(rows.at(-1), { key: 'shift_difference', usd: -12, khr: null })
+  assert.equal(reconciliation.refunds.usd, 6, 'presentation never mutates the server accounting payload')
+})
+
+test('Reports uses authorized selection/detail and shared comparison rows rather than current-shift polling', () => {
+  const report = fs.readFileSync(new URL('../src/components/sales/reports/ShiftReport.tsx', import.meta.url), 'utf8')
+  const breakdown = fs.readFileSync(new URL('../src/components/shifts/ShiftCashBreakdown.tsx', import.meta.url), 'utf8')
+  assert.match(report, /listShifts\(/)
+  assert.match(report, /fetchShiftHistory\(selectedId!/)
+  assert.doesNotMatch(report, /fetchCurrentShift/)
+  assert.match(report, /shiftComparisonRows\(shift\)/)
+  assert.match(breakdown, /shiftComparisonRows\(\{ reconciliation \}\)/)
+  assert.match(report, /isAdminControlUser\(user\)/, 'cached admin response is gated after permission revocation')
+})
 
 const figures: ShiftFiguresShape = {
   opening: { usd: 10, khr: 40000 },
