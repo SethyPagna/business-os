@@ -57,21 +57,22 @@ await runTest('offline vault uses Web Crypto PIN derivation, AES-GCM, persistenc
   assert.match(webApiSource, /offline:vault-locked/)
 })
 
-await runTest('all business offline edits use operation ids and the versioned outbox endpoint', () => {
+await runTest('legacy business format remains readable while new offline admission is denied', () => {
   assert.match(webApiSource, /queueBusinessOutboxOperation/)
-  assert.match(webApiSource, /business_outbox_operation/)
+  assert.match(webApiSource, /code: 'online_required'/)
+  assert.doesNotMatch(webApiSource, /sync_outbox\.put\(/)
   assert.match(swSource, /\/api\/sync\/outbox/)
   assert.match(swSource, /operation_id/)
   assert.match(swSource, /schema_version/)
   assert.match(swSource, /payload_digest/)
 })
 
-await runTest('chunked offline files are queued and replayed separately from JSON edits', () => {
+await runTest('legacy file format remains retained but foreground replay endpoints are disabled', () => {
   assert.match(webApiSource, /queueOfflineFileChunks/)
   assert.match(webApiSource, /syncUnlockedOfflineOutbox/)
   assert.match(webApiSource, /syncUnlockedOfflineFileChunks/)
-  assert.match(webApiSource, /system_busy/)
-  assert.match(webApiSource, /status:\s*'paused'/)
+  assert.match(webApiSource, /code: 'legacy_recovery_required'/)
+  assert.doesNotMatch(webApiSource, /offline_file_chunks\.(put|update|delete)\(/)
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_FILE_PROGRESS/)
   assert.match(webApiSource, /OFFLINE_FILE_CHUNK_SIZE = 1024 \* 1024/)
   assert.match(swSource, /\/api\/sync\/files\/chunks\/init/)
@@ -80,13 +81,12 @@ await runTest('chunked offline files are queued and replayed separately from JSO
   assert.match(swSource, /offline_file_chunks/)
 })
 
-await runTest('interrupted file staging cannot be completed as a corrupt upload', () => {
-  assert.match(webApiSource, /status:\s*'building'/)
-  assert.match(webApiSource, /staging_status:\s*'ready'/)
-  assert.match(webApiSource, /file\.slice\(start, start \+ OFFLINE_FILE_CHUNK_SIZE\)\.arrayBuffer\(\)/)
-  assert.match(webApiSource, /manifestRow\.status !== 'ready'/)
-  assert.match(webApiSource, /hasCompleteChunkSet/)
-  assert.match(webApiSource, /Offline file staging was interrupted\. Reselect the file/)
+await runTest('interrupted legacy file staging cannot dispatch or complete any upload', async () => {
+  assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\/files/)
+  assert.doesNotMatch(webApiSource, /file\.slice\(/)
+  assert.match(webApiSource, /Legacy encrypted records and files are retained on this device/)
+  // Behavioral coverage invokes all four exposed methods and reconnect handlers.
+  await import('./onlineOnlyGenericQueues.test.ts')
 })
 
 await runTest('iOS resume repairs half-open sockets and coalesces foreground recovery bursts', () => {
