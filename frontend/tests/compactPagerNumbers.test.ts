@@ -31,3 +31,10 @@ test('plain compact actions and dynamically sized page input retain their contra
   assert.equal(input.props.style.width, 'max(2.25rem, calc(6ch + 0.5rem))')
   assert.equal(input.props['aria-label'], 'Page')
 })
+
+test('compact draft handler bounds oversized paste without losing valid edits', () => {
+  const drafts: string[] = []
+  const input = elements(compactPager({ page: 1, totalItems: 2469120, compactPageInput: true }, undefined, draft => drafts.push(draft))).find(node => node.type === 'input')
+  for (const value of ['9'.repeat(100), '0'.repeat(100), '000123456', '123456', '', '12x3', '123457']) input.props.onChange({ target: { value } })
+  assert.deepEqual(drafts, ['123456', '0', '123456', '123456', '', '123', '123456'])
+})

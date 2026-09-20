@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
-import { compactPager, language, markup, oldCompactLayout, pagerSource } from './support/compactPagerFixture'
+import { compactPager, hydrationScript, language, markup, oldCompactLayout, pagerSource } from './support/compactPagerFixture'
 
 const require = createRequire(import.meta.url)
 const postcss = require('postcss'), tailwind = require('tailwindcss')
@@ -69,5 +69,36 @@ for (const lang of ['en', 'km']) for (const width of [320, 375, 1280]) {
 test('negative old compact tracks/ellipsis conceal Khmer total page at320', async ({ page }, testInfo) => {
   await show(page, 'km', 13, 320, oldCompactLayout())
   await page.screenshot({ path: testInfo.outputPath('negative.png') })
+  expect((await clipped(page)).length).toBeGreaterThan(0)
+})
+
+async function hydrateInput(page: any, lang: string, source = pagerSource) {
+  await show(page, lang, 123456, 320, source, true)
+  await page.addScriptTag({ content: hydrationScript({ compact: true, compactPageInput: true, page: 123456, pageSize: 20, totalItems: 2469120 }, language(lang), source) })
+  await expect(page.locator('body')).toHaveAttribute('data-hydrated', 'true')
+}
+
+for (const lang of ['en', 'km']) test(`${lang} hydrated compact input bounds oversized paste and preserves edits`, async ({ page }) => {
+  await hydrateInput(page, lang)
+  const input = page.getByRole('textbox')
+  for (const [pasted, expected] of [['9'.repeat(100), '123456'], ['0'.repeat(100), '0'], ['000123456', '123456'], ['', ''], ['123456', '123456']]) {
+    await input.fill(pasted)
+    await expect(input).toHaveValue(expected)
+    expect(await clipped(page)).toEqual([])
+  }
+  await input.fill('123455')
+  await input.press('Enter')
+  await expect(input).toHaveValue('123455')
+  await expect(page.getByRole('button', { name: language(lang).next, exact: true })).toBeEnabled()
+  await input.fill('')
+  await input.press('Tab')
+  await expect(input).toHaveValue('123455')
+})
+
+test('negative unbounded hydrated draft reproduces100digit overflow', async ({ page }) => {
+  const unbounded = pagerSource.replace('const compactDraft = boundedDraft(pageDraft)', 'const compactDraft = pageDraft').replace('setPageDraft(boundedDraft(event.target.value))', "setPageDraft(event.target.value.replace(/[^\\d]/g, '') || '')")
+  await hydrateInput(page, 'km', unbounded)
+  await page.getByRole('textbox').fill('9'.repeat(100))
+  await expect(page.getByRole('textbox')).toHaveValue('9'.repeat(100))
   expect((await clipped(page)).length).toBeGreaterThan(0)
 })
