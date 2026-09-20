@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST release candidate:**a1ed5ca3/aa5762b4 browser upgrade integrated; corrected root8181 twelve/twelve, independent67795 six/six, types/i18n/build19655 and tier dry86723 pass. Initial56075 timeout retained, exact cause unproven. Deployment pending. Returns candidate remains excluded due missing dataset-generation/reset/restore lifecycle dependencies (0b9e3d76). See September21 release record and progress.md; full goal active.
+
 > **LATEST September21:** Local21bf39ce restore-query consolidation verified by root90946 and independent8558, both terminal0 (pure18, native schema/eight restore cases/overflow, six source-pin cases, types). Durable2bf11fb4. Not deployed. SW late-upgrade correction now approved for bounded isolated implementation; architecture74e02b5c, runtime/native certification pending. Production still590a6239/fe1e59bf. Full Free restore and broader ledger remain open. See progress.md first; older status entries below are historical.
 
 > **LATEST retry:** Returns preserved tab recovered and second warm reload passed exact newentryDIi (b59050a5), without clearing storage. Earlier metadata/late-upgrade failure remains OPEN: replacement waiting behind healthy oldcontroller cannot prevent later poisoning. Independent nativebaf03c4a confirms. Corrective contract6d4dc092 not implemented. Worker sweep complete484 files with passing evidence after5 isolated reruns, not uninterrupted green; durable5e26bfaf. Runtime production unchanged590a6239/fe1e59bf. Full goal active.

@@ -1,3 +1,17 @@
+## Legacy browser upgrade integrated and release gates passed — September 21
+
+Previous goal turn made progress: restore21bf39ce verified/pushed and upgrade
+retention loophole identified. This turn integrateda1ed5ca3 + testaa5762b4.
+Initial56075 navigation timeout preserved; exact cause remains unproven. Stronger
+test-only committed-response oracle passed independent67795 six/six and root8181
+twelve/twelve. Types/i18n/build19655 and Paid/Free dry86723 terminal0. Independent
+runtime890e71fa accepted bounded Chromium scope. Deployment pending; no remote
+migration/data action. See docs/fleet/2026-09-21-sw-upgrade-release.md.
+
+Returns readiness0b9e3d76 found missing dataset-generation/lifecycle prerequisites;
+do not deploy its UI/0187 alone. Finalized0185/0186 plus actual reset/restore/export
+continuation tests are required. Full goal remains active, not completed.
+
 ## Restore-query integration verified; upgrade correction implementing — September 21
 
 Local runtime commit21bf39ce integrates reviewed c2807725: one bounded allowlisted

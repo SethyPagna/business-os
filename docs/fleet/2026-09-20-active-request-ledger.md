@@ -5,6 +5,12 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+September21 later: browser upgrade integrateda1ed5ca3/testaa5762b4; twelve focused
+root files and independent corrected six-file sequence pass. Types/i18n/build and
+both packaging dry runs pass. Deployment pending, previous production unchanged.
+Returns remains excluded until dataset-generation and reset/restore lifecycle are
+integrated, not merely0187. See docs/fleet/2026-09-21-sw-upgrade-release.md.
+
 September21: local21bf39ce restore schema consolidation now integrated and verified
 by root90946 plus independent8558 (terminal0; durable2bf11fb4). No deployment yet.
 SW late-upgrade migration approved for isolated implementation after architecture
