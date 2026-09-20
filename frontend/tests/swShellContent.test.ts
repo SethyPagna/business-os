@@ -96,8 +96,22 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     // yield another poll; this must terminate and release both message ports.
     assert.deepEqual(await page.evaluate(probeControllerVersion, true), { version: null, reason: 'deadline' })
     assert.equal((await page.evaluate(probeControllerVersion, false)).version, 'business-os-app-shell-old-poison')
-    await page.goto(origin + '/business-os-build.json')
+    // The worker's background revalidation is deliberately held below. Browser
+    // load completion is not the required oracle (an integrated run stalled
+    // there); it must not gate release of our deliberately unfinished request.
+    // Commit plus observable HTML/cache assertions proves interception without
+    // coupling release of the response to the event it may be holding open.
+    const metadataNavigation = await page.goto(origin + '/business-os-build.json', { waitUntil: 'commit' })
+    assert.equal(metadataNavigation?.fromServiceWorker(), true, 'legacy worker must intercept the metadata navigation')
+    assert.match(metadataNavigation?.headers()['content-type'] || '', /text\/html/)
+    assert.equal(await page.locator('#app').innerText(), 'REAL APP SHELL', 'real old HTML is usable while revalidation is held')
     await expect.poll(() => !!heldMetadata).toBe(true)
+    const navigationWitness = {
+      workerResponse: metadataNavigation?.fromServiceWorker(),
+      documentState: await page.evaluate(() => document.readyState),
+      backgroundResponseHeld: !!heldMetadata && !heldMetadata.writableEnded,
+    }
+    console.info('metadata navigation before held-response release', navigationWitness)
     const cachedOldBody = () => page.evaluate(async () => (await (await caches.open('business-os-app-shell-old-poison')).match('/index.html'))?.text())
     assert.equal(await cachedOldBody(), html, 'held network JSON has not reached the cache yet')
     // Negative oracle control: this installed Playwright version treats the
@@ -114,7 +128,8 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     assert.match(await page.locator('body').innerText(), /"metadata":true/, 'old worker must reproduce the observed poisoning')
 
     // The poisoned tab has no app JS. A browser registration update still
-    // installs the replacement; its prior-shell check must activate unaided.
+    // installs the replacement; direct legacy-controller proof activates it
+    // without page code issuing skipWaiting or clearing application storage.
     worker = source.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'fixed-shell')
     await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration())!.update() })
     await expect.poll(() => page.evaluate(async () => (await caches.keys()).includes('business-os-app-shell-fixed-shell'))).toBe(true)
