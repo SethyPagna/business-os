@@ -78,6 +78,7 @@ export default function StatsStrip({
   actions,
   rangeActions,
   showTime = false,
+  continuous = false,
   showPresets = true,
   iconOnly = false,
   compactRange = false,
@@ -98,6 +99,7 @@ export default function StatsStrip({
   /** Secondary actions always stay beside the range and primary actions. */
   rangeActions?: ReactNode
   showTime?: boolean
+  continuous?: boolean
   showPresets?: boolean
   /** Render the Stats trigger as one accessible icon square. */
   iconOnly?: boolean
@@ -150,7 +152,7 @@ export default function StatsStrip({
       {range && onRangeChange ? (
         <StatsRangeRow range={range} onRangeChange={onRangeChange} t={t}
           leading={statsTrigger} actions={toolbarActions}
-          showTime={showTime} showPresets={showPresets} compactRange={compactRange} />
+          showTime={showTime} continuous={continuous} showPresets={showPresets} compactRange={compactRange} />
       ) : (
         <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {statsTrigger}

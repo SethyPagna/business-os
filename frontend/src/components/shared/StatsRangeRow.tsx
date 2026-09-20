@@ -6,7 +6,7 @@ type TranslateFn = (key: string) => string | undefined
 
 /** One stable control row; presets remain reachable while Stats is folded. */
 export default function StatsRangeRow({
-  range, onRangeChange, t, leading, actions, showTime = false,
+  range, onRangeChange, t, leading, actions, showTime = false, continuous = false,
   showPresets = true, compactRange = false, className = '',
 }: {
   range: DateTimeRange
@@ -15,6 +15,7 @@ export default function StatsRangeRow({
   leading?: ReactNode
   actions?: ReactNode
   showTime?: boolean
+  continuous?: boolean
   showPresets?: boolean
   compactRange?: boolean
   className?: string
@@ -38,7 +39,7 @@ export default function StatsRangeRow({
       <div className="flex min-w-0 flex-wrap items-center gap-1" data-stats-range-controls>
         {leading}
         <DateTimeRangePicker
-          value={range} onChange={onRangeChange} t={t} showTime={showTime}
+          value={range} onChange={onRangeChange} t={t} showTime={showTime} continuous={continuous}
           showCalendarIcon={false}
           compactTriggerLabels={compactRange}
           showQuickRanges={!showPresets}
