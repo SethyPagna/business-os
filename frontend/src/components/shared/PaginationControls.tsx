@@ -332,20 +332,20 @@ export default function PaginationControls({
   }
 
   if (compact) {
+    const compactDigits = Math.max(1, String(pageDraft).length)
     return (
-      <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-2 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        {/* P10-20: the middle grid column used to hold the per-page selector
-            (owner: "no need to show rows per page options"). Two columns now
-            -- the item-range chip and the back/next pill -- so removing the
-            selector widens the count chip instead of leaving a hole. */}
-        <div className="grid max-w-full grid-cols-[minmax(5rem,1fr)_minmax(12rem,14rem)] items-center gap-1">
-          <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-            {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
+      <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
+        {/* Keep one useful row when it fits. Large counts wrap between the
+            range and navigation rather than ellipsizing either number. */}
+        <div className="flex max-w-full flex-wrap items-center justify-between gap-1">
+          <span className="inline-flex max-w-full flex-wrap items-center justify-center rounded-full bg-slate-50 px-1.5 py-1 font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+            <span className="whitespace-nowrap">{start.toLocaleString()}</span>-<span className="whitespace-nowrap">{end.toLocaleString()}</span>
+            <span className="whitespace-nowrap">&nbsp;/ {total.toLocaleString()}</span>
           </span>
-          <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+          <div className="inline-flex max-w-full flex-wrap items-center justify-center rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
-              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={backDisabled}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label={backLabel}
@@ -354,12 +354,13 @@ export default function PaginationControls({
               <span>{backLabel}</span>
             </button>
             {compactPageInput ? (
-              <div className="inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <div className="inline-flex shrink-0 items-center justify-center gap-1 px-1 text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
                 <input
                   type="text"
                   inputMode="numeric"
                   aria-label={pageLabel}
-                  className="h-7 w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                  style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
+                  className="h-7 min-w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
                   value={pageDraft}
                   onChange={(event) => {
                     setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')
@@ -370,13 +371,14 @@ export default function PaginationControls({
                 <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-300">/ {totalPages}</span>
               </div>
             ) : (
-              <span className="min-w-0 flex-1 truncate px-1 text-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
-                {pageLabel} {safePage} {ofLabel} {totalPages}
+              <span className="shrink-0 whitespace-nowrap px-1 text-center text-[11px] font-semibold tabular-nums text-slate-700 dark:text-slate-100">
+                <span aria-hidden="true">{safePage} / {totalPages}</span>
+                <span className="sr-only">{pageLabel} {safePage} {ofLabel} {totalPages}</span>
               </span>
             )}
             <button
               type="button"
-              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-2 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 shrink-0 items-center gap-0.5 px-1 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={nextDisabled}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label={nextLabel}
