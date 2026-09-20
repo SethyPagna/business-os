@@ -209,6 +209,7 @@ const gateModule: any = { exports: {} }
 new Function('require', 'module', 'exports', compiled)((name: string) => {
   if (name === 'react') return hooks
   if (name.includes('actorReadScope')) return actorReadScope
+  if (name.includes('permissions')) return { isAdminControlUser: () => false }
   if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
   if (name.includes('shared/Modal')) return { default: ModalMarker }
   if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 4 }, settings: {}, fmtUSD: String, fmtKHR: String }) }

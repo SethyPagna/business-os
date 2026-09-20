@@ -479,18 +479,20 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
  * committed by the time this runs, and losing the receipt-side arithmetic
  * must not turn a successful close into a 500 the cashier will retry.
  */
-async function reconciliationFor(env: Env, shift: ShiftRow): Promise<ShiftReconciliation | null> {
+async function reconciliationFor(env: Env, user: SessionUser, shift: ShiftRow): Promise<ShiftReconciliation | null> {
+  // Registered counts remain operational records; derived business comparisons
+  // belong to the same admin reviewer as figures, including replay responses.
+  if (!canManageShifts(user)) return null
   try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
 }
 /**
  * The shift REPORT figures -- sales, COGS, profit, delivery and the expense
  * split, from lib/shiftReconciliation.ts.
  *
- * ADMIN ONLY, and null for everyone else. The drawer reconciliation above is
- * the cashier's own till and travels with the close; COGS and profit are the
- * shop's margin and belong to the same reviewer capability that already gates
- * cancel and cross-cashier reads (canManageShifts). A cashier closing their
- * own drawer sees what they counted against what was expected, and no more.
+ * ADMIN ONLY, like the derived drawer comparison above. Registered opening,
+ * additional and closing counts remain visible on authorized operational rows.
+ * COGS/profit and the comparison use the same existing reviewer identity as
+ * cancel and cross-cashier reads (canManageShifts).
  *
  * Absent from the LIST read and from /current on purpose: each call runs the
  * sales kernel over the window, and neither a page of shifts nor a polled
@@ -512,7 +514,7 @@ type ReconciledShift = ShiftResponseRow & {
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
   const shift = responseShift(user, row)
   const [reconciliation, figures] = await Promise.all([
-    reconciliationFor(env, shift),
+    reconciliationFor(env, user, shift),
     figuresFor(env, user, shift),
   ])
   return { ...shift, reconciliation, figures }
@@ -536,10 +538,9 @@ app.get('/current', async (c) => {
   const exempt = policy.admin_exempt && isAdminControlUser(user)
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
   const body = currentResponse(user, shift, policy, exempt)
-  // The breakdown the close dialog and the shift summary render. Computed for
-  // an open shift too: a cashier counting down wants to know what the drawer
-  // SHOULD hold before they type what it does.
-  const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, body.shift) } : null
+  // Admin comparison may include an open shift. Staff retain only registered
+  // counts; no report calculation is needed to enter or close their drawer.
+  const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
   return c.json({ ...body, shift: presented })
 })
 

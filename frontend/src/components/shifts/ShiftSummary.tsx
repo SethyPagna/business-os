@@ -5,6 +5,7 @@ import type { Shift } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
 import { shiftCountedPairText } from './shiftReportModel.ts'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
   shift: Shift
@@ -20,7 +21,9 @@ function duration(shift: Shift, t: (key: string) => string): string {
   return `${Math.floor(minutes / 60)} ${t('shift_hours_short')} ${minutes % 60} ${t('shift_minutes_short')}`
 }
 
-export default function ShiftSummary({ shift, detail = false, className = '' }: Props) {
+export default function ShiftSummary({ shift: receivedShift, detail = false, className = '' }: Props) {
+  const { user } = useApp() as { user: PermissionUser }
+  const shift = isAdminControlUser(user) ? receivedShift : { ...receivedShift, reconciliation: null, figures: null }
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string

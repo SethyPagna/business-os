@@ -188,7 +188,11 @@ const round2 = (n) => Math.round(n * 100) / 100
   console.log('PASS chain: POST /close writes closed_at, the counts, the username snapshot and one audited report')
 
   // ---- 2. the breakdown, and that it is the shared one ----------------------
-  const recon = body.shift.reconciliation
+  assert.equal(body.shift.reconciliation, null, 'staff close does not disclose derived comparison')
+  const cashier = user
+  user = { ...user, role_code: 'admin' }
+  const adminHistory = await (await call('GET', `/${openedShift.id}/history`)).json()
+  const recon = adminHistory.shift.reconciliation
   assert.ok(recon, 'the close returns the drawer breakdown the dialog renders')
   // By hand from the fixture, per currency, nothing converted:
   //   USD: 50 opening + 50 cash (40 + 10; ABA is not cash) - 6 refunds
@@ -212,7 +216,7 @@ const round2 = (n) => Math.round(n * 100) / 100
     closing_counted_usd: 100, closing_counted_khr: 150000,
   }, Date.now())
   assert.deepEqual(recon, direct, 'the route returns the SAME function\'s answer, not its own arithmetic')
-  console.log('PASS breakdown: the close hands back the shared reconciliation, component for component')
+  console.log('PASS breakdown: admin detail retains the shared reconciliation, component for component')
 
   // ---- 3. NOT the old frontend formula --------------------------------------
   // shiftCashDifference used to answer counted - opening float:
@@ -226,11 +230,12 @@ const round2 = (n) => Math.round(n * 100) / 100
   console.log('PASS discrimination: neither the old app formula nor the old report formula gives these numbers')
 
   // ---- 4. the reads carry the same breakdown -------------------------------
+  user = cashier
   const current = await (await call('GET', '/current?branch_id=1')).json()
-  assert.deepEqual(current.shift.reconciliation, recon, 'GET /current carries the breakdown for a closed shift')
+  assert.equal(current.shift.reconciliation, null, 'staff /current preserves comparison privacy')
   const history = await (await call('GET', `/${openedShift.id}/history`)).json()
-  assert.deepEqual(history.shift.reconciliation, recon, 'GET /:id/history carries it too')
-  console.log('PASS reads: /current and /:id/history return the same breakdown as the close')
+  assert.equal(history.shift.reconciliation, null, 'staff history preserves comparison privacy')
+  console.log('PASS reads: staff /current and /:id/history redact the admin comparison')
 
   // ---- 5. a second press is safe -------------------------------------------
   telegramReportsFor = []
@@ -239,7 +244,8 @@ const round2 = (n) => Math.round(n * 100) / 100
   assert.equal(again.status, 200)
   const againBody = await again.json()
   assert.equal(againBody.already_closed, true)
-  assert.deepEqual(againBody.shift.reconciliation.counted, { usd: 100, khr: 150000 }, 'the second press cannot overwrite the count')
+  assert.equal(againBody.shift.reconciliation, null, 'staff replay is also redacted')
+  assert.equal(againBody.shift.closing_counted_usd, 100, 'the second press cannot overwrite the registered count')
   assert.equal(sqlite.prepare('SELECT closing_counted_usd FROM shift_sessions WHERE id=?').get(openedShift.id).closing_counted_usd, 100)
   assert.deepEqual(telegramReportsFor, [], 'and it does not send a second report')
   console.log('PASS idempotence: pressing End shift twice reports the stored close and writes nothing')

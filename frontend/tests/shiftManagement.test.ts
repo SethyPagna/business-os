@@ -45,6 +45,7 @@ const panel = read('src/components/shifts/ShiftHistoryPanel.tsx')
 const modal = read('src/components/shifts/ShiftHistoryModal.tsx')
 const summary = read('src/components/shifts/ShiftSummary.tsx')
 const breakdown = read('src/components/shifts/ShiftCashBreakdown.tsx')
+const comparisonModel = read('src/components/shifts/shiftReportModel.ts')
 const currentSummary = read('src/components/shifts/CurrentShiftSummary.tsx')
 const sales = read('src/components/sales/Sales.tsx')
 const fees = read('src/components/fees/FeesPage.tsx')
@@ -169,7 +170,7 @@ for (const token of ['fmtClock24(shift.opened_at)', "fmtClock24(shift.closed_at)
 ok(/<ShiftCashBreakdown/.test(summary) && /shift\.reconciliation/.test(summary), 'detail renders the server reconciliation, never a locally recomputed difference')
 ok(!/shiftCashDifference/.test(summary), 'the summary no longer subtracts the opening float to invent a difference')
 for (const key of ['shift_recon_opening', 'shift_recon_additional_cash', 'shift_recon_cash_sales', 'fees', 'courier', 'shift_recon_expected', 'shift_recon_counted', 'shift_difference']) {
-  ok(breakdown.includes(`'${key}'`), `the breakdown carries the ${key} row`)
+  ok((breakdown + comparisonModel).includes(`'${key}'`), `the breakdown carries the ${key} row`)
 }
 ok(/shift_difference_hint/.test(breakdown) && /shift_recon_review/.test(breakdown), 'the breakdown explains expected and surfaces the server review flag')
 ok(/detail \? \(/.test(summary) && /shift_duration/.test(summary) && /shift_cash_breakdown/.test(summary), 'duration and cash breakdown stay in detail rather than the default row')
@@ -247,6 +248,7 @@ ok(usedShiftKeys.every((key) => key in en || key === 'shift_registered_cash_hint
 ok(usedShiftKeys.every((key) => key in km || key === 'shift_registered_cash_hint'), 'every popup shift key exists in Khmer or is in the locale handoff')
 const breakdownKeys = [...new Set([...breakdown.matchAll(/\bt\('([^']+)'\)/g)].map((match) => match[1]))]
   .concat([...breakdown.matchAll(/: '([a-z_]+)',$/gm)].map((match) => match[1]))
+  .concat([...comparisonModel.matchAll(/key: '([^']+)'/g)].map((match) => match[1]))
 ok(breakdownKeys.length >= 12, `expected the breakdown to name its rows through the pack, found ${breakdownKeys.length}`)
 // Language packs are owned by the integration branch. This component's one
 // new key is handed off there and verified after the branches meet.

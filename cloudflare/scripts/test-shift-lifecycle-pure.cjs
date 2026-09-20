@@ -166,11 +166,16 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.deepEqual([rootCloseA.status, rootCloseB.status].sort(), [200, 409], 'concurrent exact close has one winner')
   const rootClose = rootCloseA.status === 200 ? rootCloseA : rootCloseB
   const closedRoot = (await rootClose.json()).shift
-  assert.deepEqual(closedRoot.reconciliation.opening, { usd: 10, khr: 10000 },
+  assert.equal(closedRoot.reconciliation, null, 'staff exact-id close redacts derived comparison')
+  const originalUser = user
+  user = { ...user, role_code: 'admin' }
+  const adminClosedRoot = (await (await call('GET', `/${rootShift.id}/history`)).json()).shift
+  user = originalUser
+  assert.deepEqual(adminClosedRoot.reconciliation.opening, { usd: 10, khr: 10000 },
     'the lifecycle route loads the real reconciliation helper and returns its opening registration')
-  assert.deepEqual(closedRoot.reconciliation.counted, { usd: 12, khr: 12000 },
+  assert.deepEqual(adminClosedRoot.reconciliation.counted, { usd: 12, khr: 12000 },
     'the real helper returns the persisted closing registration')
-  assert.deepEqual(closedRoot.reconciliation.expected, { usd: 10, khr: 10000 },
+  assert.deepEqual(adminClosedRoot.reconciliation.expected, { usd: 10, khr: 10000 },
     'an empty trading window keeps the expected drawer at the opening registration')
   assert.equal(closedRoot.capabilities.can_reopen, true)
   assert.equal(sent.filter((id) => id === rootShift.id).length, 2,

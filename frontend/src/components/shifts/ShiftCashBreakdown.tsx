@@ -1,11 +1,9 @@
 import { useApp } from '../../AppContext.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import { shiftCountedPairText } from './shiftReportModel.ts'
+import { shiftComparisonRows, shiftCountedPairText } from './shiftReportModel.ts'
 import type { ShiftReconciliation } from '../../api/shiftTransport.ts'
 
-// The drawer rows, in the owner's reading order. Returns are shown in the
-// shift business figures; this block stays focused on cash movements that
-// explain the expected drawer.
+// The same signed cash movements as the report export, including refunds.
 //
 // Every figure comes from the server's single reconciliation
 // (cloudflare/src/lib/shiftReconciliation.ts). Nothing is recomputed here --
@@ -48,13 +46,9 @@ export default function ShiftCashBreakdown({ reconciliation, className = '' }: P
   const signed = (value: number | null, format: (input: unknown) => string) =>
     value == null ? '—' : `${value > 0 ? '+' : ''}${format(value)}`
 
-  const rows: { key: string; label: string; value: string }[] = [
-    { key: 'shift_recon_opening', label: t('shift_recon_opening'), value: countedPair(reconciliation.opening.usd, reconciliation.opening.khr) },
-    { key: 'shift_recon_additional_cash', label: t('shift_recon_additional_cash'), value: `+ ${pair(reconciliation.additional_cash?.usd ?? 0, reconciliation.additional_cash?.khr ?? 0)}` },
-    { key: 'shift_recon_cash_sales', label: t('shift_recon_cash_sales'), value: pair(reconciliation.cash_sales.usd, reconciliation.cash_sales.khr) },
-    { key: 'fees', label: t('fees'), value: `− ${pair(reconciliation.expenses.usd, reconciliation.expenses.khr)}` },
-    { key: 'courier', label: t('courier'), value: `− ${pair(reconciliation.courier.usd, reconciliation.courier.khr)}` },
-  ]
+  const rows = shiftComparisonRows({ reconciliation }).slice(0, 6).map((row) => ({
+    key: row.key, label: t(row.key), value: pair(row.usd, row.khr),
+  }))
 
   return (
     <div className={`min-w-0 ${className}`}>
