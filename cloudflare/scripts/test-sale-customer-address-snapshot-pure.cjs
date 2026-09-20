@@ -35,6 +35,7 @@ const cache = new Map()
 // import it does not name, and a stubbed kernel would make every address here
 // resolve to undefined -- a test that agrees with itself and proves nothing.
 const actual = new Set([
+  'offlineSaleOwnership',
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
@@ -126,6 +127,7 @@ function fixture(options = {}) {
   const executionCtx = { waitUntil() {}, passThroughOnException() {} }
   const call = async (url, body, method = 'PATCH') => {
     const requestBody = method === 'POST' ? {
+      offline_owner: { version: 1, actor_id: 1, organization_id: null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
       ...body,
       money_precision_version: 1,
       items: body.items.map((item) => ({

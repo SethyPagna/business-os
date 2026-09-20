@@ -529,6 +529,7 @@ async function main() {
         payment_details: [{ method: 'Cash', amount_usd: 26, amount_khr: 0 }],
         payment_currency: 'USD', amount_paid_usd: 26, amount_paid_khr: 0, exchange_rate: 4100,
         client_request_id: 'orphan-sale-1',
+        offline_owner: { version: 1, actor_id: 7, organization_id: null, authority: 'http://local', runtime: 'cloudflare-workers' },
       }, 'POST /api/sales')
       state.saleA = Number(created.id)
       assert.ok(state.saleA > 0, `no sale id came back: ${JSON.stringify(created).slice(0, 200)}`)
@@ -543,6 +544,7 @@ async function main() {
         payment_details: [{ method: 'Cash', amount_usd: 10, amount_khr: 0 }],
         payment_currency: 'USD', amount_paid_usd: 10, amount_paid_khr: 0, exchange_rate: 4100,
         client_request_id: 'orphan-sale-2',
+        offline_owner: { version: 1, actor_id: 7, organization_id: null, authority: 'http://local', runtime: 'cloudflare-workers' },
       }, 'POST /api/sales (second)')
       state.saleB = Number(created.id)
       assert.ok(state.saleB > 0, `no second sale id came back: ${JSON.stringify(created).slice(0, 200)}`)

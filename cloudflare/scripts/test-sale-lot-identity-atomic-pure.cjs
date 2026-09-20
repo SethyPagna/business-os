@@ -138,6 +138,7 @@ async function postSale(db, items, suffix, overrides = {}, hooks = {}) {
     payment_currency: 'USD',
     amount_paid_usd: 100,
     client_request_id: `lot-atomic-${suffix}`,
+    offline_owner: { version: 1, actor_id: 51, organization_id: null, authority: 'http://localhost', runtime: 'cloudflare-workers' },
     ...overrides,
   }
   const response = await app.request('/', {
