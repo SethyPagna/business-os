@@ -82,7 +82,7 @@ for (const language of ['en', 'km'] as const) {
     await expect(page.getByText('1-20 / 245', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: t.next, exact: true }).click()
     await expect(page.locator('.report-shift-plain')).toContainText('SHIFT-21')
-    await page.getByRole('button', { name: t.back, exact: true }).click()
+    await page.getByRole('main').getByRole('button', { name: t.back, exact: true }).click()
     await expect(page.getByText('1-20 / 245', { exact: true })).toBeVisible()
     for (let p = 2; p <= 13; p++) {
       await page.getByRole('button', { name: t.next, exact: true }).click()
@@ -106,6 +106,14 @@ for (const language of ['en', 'km'] as const) {
     await history(page, t.shift_history)
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('1-20 / 245', { exact: true })).toBeVisible()
+    if (info.project.name === 'ios-webkit') {
+      // The real iOS install notice overlaps the lower pager in this viewport.
+      // Dismiss its visible control, not a forced click through an overlay.
+      const installNotice = page.getByRole('status').filter({ hasText: t.ios_install_hint })
+      await expect(installNotice).toBeVisible()
+      await installNotice.getByRole('button', { name: t.dismiss_notification, exact: true }).click()
+      await expect(installNotice).toBeHidden()
+    }
     await dialog.getByRole('button', { name: t.next, exact: true }).click()
     await expect(dialog.getByText('21-40 / 245', { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: t.back, exact: true }).click()
