@@ -1,3 +1,17 @@
+## Online-only account-safety checkpoint deployed — September 20
+
+Source6a31689fb67c / Worker3f5ad76d-5be1-468b-876d-6151239c61d9 deployed Paid;
+GitHubmain/workingbranch pushed. Approved0184 applied once, pre/post assertions
+pass, no historical backfill. Live dashboard/POS/paymentselector/publicAbout render.
+Finalfrontend499/499; both typechecks/i18n/build269zero cycles; nativebrowser9/9.
+Worker476sweep16fixture failures repaired; allfocused reruns pass, nativeorphan
+silent-exit qualification retained. Full evidence: docs/fleet/2026-09-20-online-only-release.md.
+Offline newwrites/automaticreplay disabled; existingwork retained original-owner
+explicitrecovery, reviewedsetscoped. Signout fence/lateauth/storageguards included.
+Costs/receiptidentity/importhistory, Expenses timeparity and inlinequeue fix included.
+Remainingadmin work, Freecapacity and public backlog NOT complete. Transfer-run
+additive tracking approval requested; do not infer from approved cost migration.
+
 ## Admin-first continuation and account-isolation release blocker — September 20
 
 Owner reaffirmed full prior scope as completion goal: admin first, public second,

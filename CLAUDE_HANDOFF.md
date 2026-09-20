@@ -215,6 +215,16 @@ Latest pasted duplicate evidence:
 Tell the user you have read this handoff and are verifying its checkpoints, not starting over. Finish exact pending integration, independently test the final candidate, then repair remaining real blockers. Maintain a concise requirement/status ledger. Only deploy a verifiably correct checkpoint with explicit provenance and safe migration recovery; never describe pending source work as live.
 
 The Codex goal is still active because it is genuinely unfinished. The user should pause that goal in Codex if Claude takes over, to avoid competing automatic continuations and duplicated usage. Do not set it complete merely to stop activity.
+# September20 deployed continuation
+
+Latest production:6a31689fb67c, Worker3f5ad76d-5be1-468b-876d-6151239c61d9.
+Migration0184 applied once; do not replay. Main andworkingbranch pushed.
+See docs/fleet/2026-09-20-online-only-release.md for verification and remaining
+scope. Offline sales/genericwrites now online-only, retainedwork explicitoriginal
+ownerrecovery; signout fencing implemented. Old release-blocker entries below are
+historical and superseded, not pending duplicates. Admin-first completion still
+open. Publicselling-priceoption retained; privateprice/dataexclusion work deferred.
+
 # September20 active continuation
 
 Active candidate1fe5a392 in bos-supplier-settlement-20260918; not deployed.
