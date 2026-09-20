@@ -100,6 +100,8 @@ check(
   const body = sliceFunctionBody(compatSrc, 'async function dashboardAnalytics')
   check('dashboardAnalytics calls getSalesTotalsAndPeriodSeries', /getSalesTotalsAndPeriodSeries\(env, filters, granularity/.test(body))
   check('dashboardAnalytics does not also call getSalesPeriodSeries redundantly', !/getSalesPeriodSeries\(/.test(body))
+  check('all-time skips previous-period reads', /range\.allTime \? Promise\.resolve\(\{\}\) : getSalesTotals\(env, previousPeriodFilters\(filters\)\)/.test(body))
+  check('shared current and previous filters retain exact timestamp bounds', /const filters = \{ startDate, endDate, createdFrom, createdTo, branchId:/.test(body))
 }
 
 console.log(`\n${passed} passed`)

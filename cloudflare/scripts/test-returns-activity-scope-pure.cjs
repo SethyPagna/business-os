@@ -52,8 +52,10 @@ function todayReturnsSql(source) {
   }
   if (templateEnd < 0) throw new Error('compat.ts dashboard-summary returns SQL template is unterminated')
   return source.slice(at, templateEnd)
-    .replace(/\$\{range\.allTime \? '1 = 1' : localDateRangeClause\('created_at'\)\}/,
-      win.localDateRangeClause('created_at'))
+    // This fixture exercises full-day return scope. The timed handler suite
+    // separately executes dashboardRangeClause and the shared snapshot.
+    .replace("${dashboardRangeClause('returns', range)}",
+      win.localDateRangeClause('returns.created_at'))
     .replace("${saleBranchClause('returns')}", '')
     .trim()
 }

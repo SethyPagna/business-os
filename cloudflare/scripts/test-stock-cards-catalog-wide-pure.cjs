@@ -42,7 +42,7 @@ const inventory = read('src', 'routes', 'inventory.ts')
 const familyStockStats = read('src', 'lib', 'familyStockStats.ts')
 
 // Anything that would make a stock figure depend on WHEN a product sold.
-const RANGE_SCOPE = /sale_items|localDateRangeClause|localTodayRangeClause|@startDate|@endDate|productInRangeClause/
+const RANGE_SCOPE = /sale_items|localDateRangeClause|dashboardRangeClause|shiftWindowWhere|localTodayRangeClause|@startDate|@endDate|@createdFrom|@createdTo|productInRangeClause/
 
 // ---- Every getFamilyStockStats() call carries no range scope ----
 //
@@ -134,7 +134,7 @@ check('inventory.ts stock stats are the plain active catalog',
   // scope. See test-compat-dashboard-daterange-pure.cjs's sibling 4->3
   // locator-count update in the same commit.
   check('compat.ts keeps the range on the movement queries (sales, returns, recent sales)',
-    (summary.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 3)
+    (summary.match(/dashboardRangeClause\('(sales|returns)', range\)/g) || []).length >= 3)
   check('compat.ts records the stock/alert exception in the code itself',
     /deliberate exception to the\s*\n?\s*\/\/ one-range-scopes-list-and-stats convention \(user, 2026-09-03\)/.test(summary)
     || /one-range-scopes-list-and-stats convention \(user, 2026-09-03\)/.test(summary))
