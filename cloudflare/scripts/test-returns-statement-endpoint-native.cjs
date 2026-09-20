@@ -60,6 +60,12 @@ const noRows = response => { assert.ok(!('rows' in response.body), JSON.stringif
   const verify = await get({ snapshotToken: token, verify: '1' })
   assert.equal(verify.status, 200); assert.deepEqual(verify.body.rows, []); assert.equal(verify.body.snapshotToken, token); assert.equal(verify.body.total, total)
   const empty = await get({ search: 'nothing-exists' }); assert.equal(empty.status, 200); assert.equal(empty.body.total, 0); assert.deepEqual(empty.body.rows, []); assert.equal(empty.body.nextCursor, null)
+  const selected = await get({ ids: '90002,90001,90002' })
+  assert.equal(selected.status, 200); assert.deepEqual(selected.body.rows.map(row => row.id), [90001, 90002]); assert.equal(selected.body.total, 2)
+  assert.equal((await get({ ids: '90001,90002', snapshotToken: selected.body.snapshotToken, verify: '1' })).status, 200, 'ID identity is canonical')
+  assert.equal(noRows(await get({ ids: '90001', snapshotToken: selected.body.snapshotToken })).status, 409, 'selection cannot change under a token')
+  for (const ids of ['', '0', '-1', '1.5', '1,,2', Array(1001).fill('1').join(','), Array(300).fill('9007199254740991').join(',')]) assert.equal(noRows(await get({ ids })).status, 400)
+  assert.equal(noRows(await get({ search: 'x'.repeat(6145) })).status, 400, 'URL budget rejects oversized requests')
   const byProduct = await get({ search: 'statement-sku' }); assert.equal(byProduct.body.total, 1)
   for (const patch of [{ branchId: '1' }, { scope: 'supplier' }, { search: 'statement-sku' }, { type: 'damaged' }, { status: 'cancelled' }]) assert.equal(noRows(await get({ ...patch, snapshotToken: token })).status, 409)
   for (const mutation of [

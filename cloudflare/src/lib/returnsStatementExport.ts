@@ -9,12 +9,13 @@ export class ReturnStatementError extends Error {
   constructor(message: string, readonly status: 400 | 409 | 413 | 503) { super(message) }
 }
 
-const KEYS = new Set(['startDate', 'endDate', 'createdFrom', 'createdTo', 'scope', 'search', 'q', 'searchMode', 'search_mode', 'type', 'returnType', 'branchId', 'status', 'saleId', 'limit', 'cursor', 'snapshotToken', 'verify'])
+const KEYS = new Set(['startDate', 'endDate', 'createdFrom', 'createdTo', 'scope', 'search', 'q', 'searchMode', 'search_mode', 'type', 'returnType', 'branchId', 'status', 'saleId', 'ids', 'limit', 'cursor', 'snapshotToken', 'verify'])
 const textFields = ['return_number', 'created_at', 'receipt_number', 'customer_name', 'supplier_name', 'reason', 'return_type', 'supplier_settlement', 'status']
 
 /** Summary-only statement; no unbounded nested items or private contact fields. */
 export async function readReturnStatement(env: Env, user: SessionUser, query: Record<string, string>) {
   for (const key of Object.keys(query)) if (!KEYS.has(key)) throw new ReturnStatementError(`Unsupported statement filter: ${key}`, 400)
+  if (new URLSearchParams(query).toString().length > 6144) throw new ReturnStatementError('Statement filters exceed the request-size budget; use a shorter search or complete-scope export', 400)
   let window: ReturnType<typeof returnExportWindow>
   try { window = returnExportWindow(query) } catch (error) { throw new ReturnStatementError((error as Error).message, 400) }
   const positiveId = (value: string | undefined, label: string): number | null => {
@@ -39,19 +40,30 @@ export async function readReturnStatement(env: Env, user: SessionUser, query: Re
   const types = [...new Set(String(query.type || query.returnType || '').split(',').map(value => value.trim().toLowerCase()).filter(value => value && value !== 'all'))].sort()
   if (types.length > 20 || types.some(value => value.length > 64)) throw new ReturnStatementError('Invalid statement types', 400)
   const branchId = positiveId(query.branchId, 'branch'), saleId = positiveId(query.saleId, 'sale')
+  let ids: number[] | null = null
+  if (query.ids !== undefined) {
+    const values = query.ids.split(',')
+    if (!query.ids || query.ids.length > 4000 || values.length > 1000) throw new ReturnStatementError('Selected IDs exceed the request-size budget; use complete-scope export', 400)
+    ids = [...new Set(values.map(value => {
+      const id = positiveId(value, 'selected return ID')
+      if (id === null) throw new ReturnStatementError('Invalid selected return ID', 400)
+      return id
+    }))].sort((a, b) => a - b)
+  }
   const status = String(query.status || '').trim().toLowerCase()
   if (status && !['all', 'completed', 'cancelled', 'pending'].includes(status)) throw new ReturnStatementError('Invalid return status', 400)
-  const identity = { ...window, scope, search, mode, types, branchId, saleId, status: status === 'all' ? '' : status }
+  const identity = { ...window, scope, search, mode, types, branchId, saleId, ids, status: status === 'all' ? '' : status }
   const params: Record<string, unknown> = { ...window, cursor: cursor ?? 0, take: verify ? 0 : limit + 1 }
   const where = ['datetime(r.created_at) >= @createdFrom AND datetime(r.created_at) < @createdTo']
+  if (ids) { where.push('r.id IN (SELECT value FROM json_each(@ids))'); params.ids = JSON.stringify(ids) }
   if (scope !== 'all') { where.push("COALESCE(r.return_scope, 'customer') = @scope"); params.scope = scope }
   for (const [key, value, column] of [['branchId', branchId, 'branch_id'], ['saleId', saleId, 'sale_id']] as const) {
     if (value !== null) { where.push(`r.${column} = @${key}`); params[key] = value }
   }
   if (identity.status) { where.push('lower(r.status) = @status'); params.status = identity.status }
   if (types.length) {
-    const keys = types.map((value, i) => { params[`type${i}`] = value; return `@type${i}` })
-    where.push(`lower(COALESCE(r.${scope === 'supplier' ? 'supplier_settlement' : 'return_type'}, '${scope === 'supplier' ? 'refund' : 'manual'}')) IN (${keys.join(',')})`)
+    params.types = JSON.stringify(types)
+    where.push(`lower(COALESCE(r.${scope === 'supplier' ? 'supplier_settlement' : 'return_type'}, '${scope === 'supplier' ? 'refund' : 'manual'}')) IN (SELECT value FROM json_each(@types))`)
   }
   const flat = `(${['search_normalized', 'return_number', 'receipt_number', 'cashier_name', 'customer_name', 'supplier_name', 'reason', 'notes', 'return_type', 'supplier_settlement'].map(field => `COALESCE(r.${field}, '')`).join(" || ' ' || ")} || ' ' || CAST(r.id AS TEXT))`
   const item = `(COALESCE(rii.product_name,'') || ' ' || COALESCE(rip.sku,'') || ' ' || COALESCE(rip.barcode,'') || ' ' || COALESCE(rip.brand,'') || ' ' || COALESCE(rip.name_normalized,'') || ' ' || COALESCE(rip.brand_compact,''))`
@@ -69,9 +81,11 @@ export async function readReturnStatement(env: Env, user: SessionUser, query: Re
   // A row whose selected text exceeds 16K characters fails the whole page;
   // never truncate statement text or materialize arbitrary-size item arrays.
   const textSize = textFields.map(field => `length(COALESCE(r.${field},''))`).concat("length(COALESCE(replacement_receipt_number,''))").join('+')
+  const objects: string[] = []
+  for (let i = 0; i < fields.length; i += 12) objects.push(`json_object(${fields.slice(i, i + 12).join(',')})`)
+  const projection = objects.reduce((left, right) => `json_patch(${left},${right})`)
   let snapshot: { generation: string | null; revision: string | null; maintenance: number; total: number; rows_json: string } | undefined
-  try {
-    snapshot = await getDb(env).prepare(`WITH
+  const sql = `WITH
       metadata AS (SELECT
         (SELECT value FROM system_flags WHERE key='business_dataset_generation') AS generation,
         (SELECT value FROM system_flags WHERE key='returns_export_revision') AS revision,
@@ -83,8 +97,13 @@ export async function readReturnStatement(env: Env, user: SessionUser, query: Re
         (SELECT COUNT(*) FROM return_items i WHERE i.return_id=r.id AND lower(COALESCE(i.stock_action,''))='damaged') AS damaged_item_count
         FROM cohort r WHERE r.id > @cursor ORDER BY r.id ASC LIMIT @take)
       SELECT metadata.*, (SELECT COUNT(*) FROM cohort) AS total,
-        (SELECT json_group_array(json(CASE WHEN ${textSize} > 16384 THEN '{"oversize":true}' ELSE json_object(${fields.join(',')}) END)) FROM page r) AS rows_json
-      FROM metadata`).get<typeof snapshot>(params)
+        (SELECT json_group_array(json(CASE WHEN ${textSize} > 16384 THEN '{"oversize":true}' ELSE ${projection} END)) FROM page r) AS rows_json
+      FROM metadata`
+  // D1Compat expands every occurrence of a named parameter to a positional
+  // binding. Count occurrences, not object keys; never silently drop words.
+  if ((sql.match(/@[A-Za-z_]\w*/g) || []).length > 100) throw new ReturnStatementError('Statement search exceeds the query budget; use fewer search words', 400)
+  try {
+    snapshot = await getDb(env).prepare(sql).get<typeof snapshot>(params)
   } catch { throw new ReturnStatementError('Return statement tracking is unavailable; no export was produced', 503) }
   if (!snapshot || snapshot.maintenance) throw new ReturnStatementError('Return statements are unavailable during dataset maintenance', 503)
   let generation: unknown, revision: unknown
