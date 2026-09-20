@@ -10,6 +10,28 @@ entries for that slice only. Other admin/public/Freecapacity items stay open.
 
 ## Latest owner priority and release truth
 
+### Active completion goal and next wave
+
+The completion goal is ACTIVE following the owner's instruction to continue until
+finished. Earlier blocked-goal wording below is historical, not current state.
+The latest online-only release above supersedes older undeployed status only for
+its documented scope; remaining work is not implicitly complete.
+
+- Returns time-range parity: implementation and independent verification in progress.
+  Newly confirmed separate issue: loaded lists cap at 500 by default / 1000 maximum;
+  client pagination and exports can therefore omit rows while statistics cover all.
+  This completeness issue remains OPEN and must not be hidden by the time-range fix.
+- Transfer budgets: standalone local planner/reader candidate 285f54ad awaits
+  independent review. No route integration or production-capacity claim. Durable
+  transfer-run/chunk tracking requires separately approved additive migration.
+- Compiler cleanup gates: hardening startup/error detection with negative controls
+  in progress; unchanged unused-declaration budgets are not a deletion allowlist.
+- Remaining date hosts, shift visibility, historical evidence, device checks,
+  maintainability, Free capacity, archive consolidation and public work stay open.
+
+Admin work precedes public work. Preserve four-decimal calculations, cost rules,
+existing historical records and original-account recovery throughout this wave.
+
 ### Approved online-first goal refinement
 
 Owner explicitly approved online-only business writes with account isolation.

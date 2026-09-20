@@ -1,3 +1,13 @@
+## Completion goal active; remaining admin wave — September 20
+
+Owner requested continued goal-backed execution until completion. Goal is active;
+no overall completion claim. Returns time parity, standalone transfer-budget
+planning and compiler-gate negative controls are in progress in isolated lanes.
+Returns list/export 500/1000 loaded-row cap is a newly confirmed separate open
+completeness issue. Transfer tracking migration approval remains pending.
+Latest production provenance remains the online-only checkpoint below; this wave
+has not been deployed. Active request ledger retains all earlier open requirements.
+
 ## Online-only account-safety checkpoint deployed — September 20
 
 Source6a31689fb67c / Worker3f5ad76d-5be1-468b-876d-6151239c61d9 deployed Paid;
