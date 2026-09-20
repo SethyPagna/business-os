@@ -69,8 +69,9 @@ const windowMock = { localStorage: {
 const helperNames = ['getDashboardFilterStorageKey', 'todayDashboardFilterPrefs', 'validDashboardCustomDates',
   'readDashboardFilterPrefs', 'normalizeDashboardRangeId', 'resolveDashboardFilterRange', 'dashboardPrefsForSelection']
 const helperCode = transformSync(`${helperNames.map((name) => fn(dashboard, name)).join('\n')}; return { ${helperNames.join(',')} }`, { loader: 'ts', format: 'cjs' }).code
-const helpers = new Function('window', 'DASHBOARD_FILTER_STORAGE_PREFIX', 'statsPresetRange', 'todayStr', helperCode)(
-  windowMock, 'bos_dashboard_filters:', preset, () => preset('today').startDate,
+const { dashboardRangeQuery } = await import('../src/components/dashboard/dashboardRange.ts')
+const helpers = new Function('window', 'DASHBOARD_FILTER_STORAGE_PREFIX', 'statsPresetRange', 'todayStr', 'dashboardRangeQuery', helperCode)(
+  windowMock, 'bos_dashboard_filters:', preset, () => preset('today').startDate, dashboardRangeQuery,
 )
 const key = helpers.getDashboardFilterStorageKey({ id: 17 })
 const day1 = '2026-09-11'
@@ -423,9 +424,9 @@ for (const range of [preset('today'), preset('all')]) {
       assert.equal(evaluated.createdTo, undefined)
     }
   }
-  const canonical = evaluate(variable(dashboard, 'getCurrentDashboardRange'), { ...hooks, customStart: range.startDate, customEnd: range.endDate })()
+  const canonical = evaluate(variable(dashboard, 'getCurrentDashboardRange'), { ...hooks, rangeQuery: dashboardRangeQuery(range) })()
   for (const endpoint of ['getDashboardStartup', 'getDashboard', 'getAnalytics']) {
-    const params = evaluate(requestArgs(dashboard, endpoint)[0], { ...canonical, gran: canonical.granularity })
+    const params = evaluate(requestArgs(dashboard, endpoint)[0], { query: canonical })
     const wire = withDashboardRangeScope(params)
     expectDates(wire, bounded ? day1 : '')
     assert.equal(wire.rangeScope, bounded ? undefined : 'all')

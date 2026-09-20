@@ -26,12 +26,12 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /const getCurrentDashboardRange = useCallback[\s\S]{0,180}start: customStart, end: customEnd/,
+  /const getCurrentDashboardRange = useCallback[\s\S]{0,180}\.\.\.rangeQuery/,
   'Dashboard requests use the same canonical dates shown by the shared range control',
 )
 assert.match(
   dashboard,
-  /const rangeLabel = !customStart && !customEnd[\s\S]{0,180}customStart[\s\S]{0,80}customEnd/,
+  /const rangeLabel = !customStart && !customEnd[\s\S]{0,180}dashboardRangeLabel\(dashboardRange\)/,
   'Dashboard export labels are derived from the same canonical dates, including All time',
 )
 assert.match(
@@ -70,7 +70,8 @@ assert.deepEqual(
   'partially specified legacy bounds are not broadened to all-time',
 )
 assert.match(compat, /const allTime = String\(query\.rangeScope \|\| ''\)[\s\S]*?query\.startDate === ''[\s\S]*?if \(allTime\)/, 'Worker range parsing keeps explicit all-time distinct from its Today fallback')
-assert.match(compat, /range\.allTime \? '1 = 1' : localDateRangeClause\('created_at'\)/, 'all-time dashboard summary queries omit the date predicate')
+assert.match(compat, /if \(range\.allTime\) return '1 = 1'/, 'all-time dashboard summary queries omit the date predicate')
+assert.match(compat, /localDateRangeClause\(`\$\{alias\}\.created_at`\), \.\.\.shiftWindowWhere\(alias, range\)\.clauses/, 'timed dashboard reads combine day bounds with the continuous interval')
 assert.match(compat, /range\.allTime \? Promise\.resolve\(\{\}\) : getSalesTotals\(env, previousPeriodFilters\(filters\)\)/, 'all-time analytics does not invent a previous comparison period')
 assert.match(dashboard, /if \(prefs\.rangeId === 'custom'\)[\s\S]{0,220}prefs\.customStart[\s\S]{0,220}statsPresetRange\(prefs\.rangeId\)/, 'saved named presets are recomputed while only custom ranges reuse stored dates')
 assert.match(dashboard, /const rangeLabel = !customStart && !customEnd[\s\S]{0,100}translateOr\('all_time', 'All time'\)/, 'all-time exports use the same explicit All time label as the dashboard range')
