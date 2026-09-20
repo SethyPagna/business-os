@@ -127,5 +127,7 @@ if (failed) {
 }
 console.log('All sale status skip-stock frontend tests passed')
 // Keep related integration suites reachable without exceeding Windows' command-line limit.
-import './saleBulkStatus.test.ts'
-import './membershipDefaults20260905.test.cjs'
+// Each suite temporarily owns browser globals. Complete one before starting
+// the next, including the asynchronous CommonJS membership recovery checks.
+await import('./saleBulkStatus.test.ts')
+await (await import('./membershipDefaults20260905.test.cjs')).default

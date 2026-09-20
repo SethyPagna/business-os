@@ -27,7 +27,7 @@ for (const setting of ['false', 'true']) {
   const queuedPayload = JSON.parse(JSON.stringify({ loyalty_accrual: resolve(restored.loyaltyAccrual, setting) }))
   draft = normalizeOrder({}, 1)
   assert.equal(resolve(draft.loyaltyAccrual, setting), expected, 'next sale resets override')
-  assert.equal(queuedPayload.loyalty_accrual, !expected, 'offline payload retains resolved choice')
+  assert.equal(queuedPayload.loyalty_accrual, !expected, 'serialized request retains resolved choice')
   assert.equal(resolve(normalizeOrder(constants.createEmptyOrder(2), 2).loyaltyAccrual, setting), expected)
 }
 const delayed = normalizeOrder({})
@@ -82,24 +82,70 @@ uncertainTabs.closeOrder(uncertainOrder.id, true)
 assert.equal(uncertainTabs.state()[0].checkoutRequestId, '', 'known committed close starts a fresh order with the canonical empty request ID')
 async function offline() {
   const saleSource = fs.readFileSync(path.join(root, 'src/api/saleWriteTransport.ts'), 'utf8')
-  const saleAst = ts.createSourceFile('sale.ts', saleSource, ts.ScriptTarget.Latest, true)
-  const names = ['queueOfflineSale', 'createSaleWithoutWriteDedupe']
-  const picked = saleAst.statements.filter(node => ts.isFunctionDeclaration(node) && names.includes(node.name?.text)).map(node => `export ${node.getText(saleAst)}`).join('\n')
-  let queued, replayed
-  const tables = { sales: { put: async () => {} }, sync_queue: { put: async row => { queued = JSON.parse(JSON.stringify(row)) } } }
-  const { queueOfflineSale, createSaleWithoutWriteDedupe } = evaluate(picked, {
-    ensureSaleClientRequestId: payload => ({ ...payload, client_request_id: 'test-request' }), findQueuedSale: async () => null,
-    buildOfflineSaleReceiptNumber: () => '20260905-120000', isBusinessReceiptNumber: () => false, asText: value => String(value || ''),
-    OFFLINE_SALE_QUEUE_CHANNEL: 'sales', getLocalDb: async () => ({ transaction: async (_mode, _sales, _queue, action) => action() }),
-    localTable: (_db, name) => tables[name], buildOfflineSaleMirror: payload => payload,
-    requestPersistentAppStorage: async () => {}, registerOutboxBackgroundSync: () => {}, emitSyncQueueChanged: () => {},
-    apiFetch: async (_method, _path, payload) => { replayed = payload; return {} },
-  })
-  for (const value of [true, false]) {
-    await queueOfflineSale({ loyalty_accrual: value })
-    await createSaleWithoutWriteDedupe(queued.payload)
-    assert.equal(replayed.loyalty_accrual, value, 'real queue and replay preserve boolean')
+  const ownership = await import('../src/api/offlineQueueOwnership.ts')
+  const owner = { version: 1, actor_id: 71, organization_id: null, authority: 'https://shop.example', runtime: 'cloudflare-workers' }
+  const foreign = { ...owner, actor_id: 72 }
+  const storage = { getItem: () => JSON.stringify({ id: owner.actor_id, organization_id: null }) }
+  const priorWindow = globalThis.window
+  const priorEvent = globalThis.CustomEvent
+  globalThis.window = { location: { origin: owner.authority }, sessionStorage: storage, localStorage: storage, dispatchEvent() {} }
+  globalThis.CustomEvent = class {}
+  const rows = new Map()
+  const sent = []
+  let failNetwork = false
+  const table = {
+    where: () => ({ equals: () => ({ toArray: async () => structuredClone([...rows.values()]) }) }),
+    get: async id => structuredClone(rows.get(id)),
+    put: async row => rows.set(row._seq, structuredClone(row)),
+    delete: async id => rows.delete(id),
   }
-  console.log('PASS actual order creation/reset/tab handlers, defaults and draft restore, delayed settings, real offline queue/replay, POS transport wiring')
+  const dependencies = {
+    '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({}) },
+    './offlineQueueOwnership.ts': ownership,
+    './actorReadScope.ts': { captureActorReadScope: () => 1, isActorReadScopeCurrent: () => true },
+    './lazyLocalDb.ts': { getLocalDb: async () => ({ table: () => table, transaction: async (...args) => args.at(-1)() }) },
+    './syncRuntime.ts': { emitSyncQueueChanged() {}, dispatchSyncUpdates() {}, OFFLINE_SALE_SYNC_UPDATE_CHANNELS: [] },
+    './http.ts': {
+      route: (_channel, run) => run(), isNetErr: () => false, isTransientGatewayError: status => status === 503,
+      isWriteBlockedError: () => false, isWriteConflictError: () => false,
+      apiFetch: async (method, _path, payload) => {
+        if (method === 'GET') return { owner }
+        if (failNetwork) throw Object.assign(new Error('unavailable'), { status: 503 })
+        sent.push(structuredClone(payload))
+        return { id: 1, client_request_id: payload.client_request_id, offline_owner: payload.offline_owner }
+      },
+    },
+  }
+  const { createSale, syncPendingSalesQueue } = evaluate(saleSource, { require: id => { assert.ok(id in dependencies, id); return dependencies[id] } })
+  try {
+  for (const value of [true, false]) {
+    const payload = { client_request_id: `test-${value}`, loyalty_accrual: value }
+    await createSale(payload)
+    assert.equal(sent.at(-1).loyalty_accrual, value, 'online transport preserves explicit loyalty choice')
+    assert.equal(rows.size, 0, 'online creation never queues a sale')
+    failNetwork = true
+    await assert.rejects(createSale(payload), error => error.code === 'sale_confirmation_required')
+    failNetwork = false
+    assert.equal(payload.loyalty_accrual, value, 'uncertain response retains original draft intent')
+    assert.equal(rows.size, 0, 'failed network does not admit new offline work')
+    const queued = { _seq: 1, id: payload.client_request_id, channel: 'sales:create', status: 'pending', created_at: '2026-01-01', payload: { ...payload, offline_owner: owner } }
+    rows.set(1, structuredClone(queued)) // Historical fixture, not newly queued work.
+    const before = sent.length
+    await syncPendingSalesQueue({ force: true })
+    await syncPendingSalesQueue({ force: true, manualRecovery: true, expectedOwner: foreign, reviewedRows: [queued] })
+    assert.equal(sent.length, before, 'automatic or foreign-owner recovery must not send loyalty intent')
+    assert.equal(rows.size, 1)
+    const result = await syncPendingSalesQueue({ force: true, manualRecovery: true, expectedOwner: owner, reviewedRows: [queued] })
+    assert.equal(result.synced, 1)
+    assert.equal(sent.at(-1).loyalty_accrual, value, 'explicit original-owner recovery preserves historical boolean')
+    assert.equal(rows.size, 0)
+    await assert.rejects(createSale({ ...payload, offline_owner: foreign }), /Keep this pending sale/)
+    assert.equal(sent.length, before + 1, 'foreign-owned request denied before dispatch')
+  }
+  } finally {
+    if (priorWindow === undefined) delete globalThis.window; else globalThis.window = priorWindow
+    if (priorEvent === undefined) delete globalThis.CustomEvent; else globalThis.CustomEvent = priorEvent
+  }
+  console.log('PASS order lifecycle/defaults, online loyalty intent, no offline admission, owner-gated legacy recovery and POS wiring')
 }
-offline().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = offline().catch(error => { console.error(error); process.exitCode = 1 })
