@@ -7,6 +7,7 @@ import { statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
 import { buildInventoryProductsSearchParams } from '../src/components/inventory/inventoryProductsQuery.ts'
 import { withDashboardRangeScope } from '../src/api/dashboardTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
+import { feeRangeParams } from '../src/api/feesTransport.ts'
 
 // Execute the production initializers, preference functions and request
 // expressions. No duplicate date-policy implementation lives in the fixture.
@@ -397,15 +398,23 @@ for (const range of [preset('today'), preset('all')]) {
     checkWire(evaluate(variable(read(file), memo), { ...hooks, stripRange: range }))
   }
   for (const params of requestArgs(read('fees/FeesPage.tsx'), 'getFeesRequest')) {
-    checkWire(evaluate(params, { ...common, stripRange: range }), 'from', 'to')
+    const evaluated = evaluate(params, { ...common, feeRangeParams, stripRange: range })
+    checkWire(evaluated, 'from', 'to')
+    assert.equal(evaluated.createdFrom, undefined, 'Today/All time fees stay on booked dates, not entry timestamps')
+    assert.equal(evaluated.createdTo, undefined)
   }
   for (const params of requestArgs(read('branches/Branches.tsx'), 'getTransfers')) {
     checkWire(evaluate(params, { ...common, branchDateRange: range, pageSize: 500 }))
   }
   const inventoryParams = requestArgs(read('inventory/Inventory.tsx'), 'buildInventoryProductsSearchParams')[0]
   checkWire(buildInventoryProductsSearchParams(evaluate(inventoryParams, { ...common, stripRange: range })))
-  for (const [file, endpoint] of [['returns/Returns.tsx', 'getReturnsReport'], ['fees/FeesPage.tsx', 'getFeesReport']] as const) {
-    checkWire(evaluate(requestArgs(read(file), endpoint)[0], { ...common, stripRange: range }))
+  for (const [file, endpoint, start, end] of [['returns/Returns.tsx', 'getReturnsReport', 'startDate', 'endDate'], ['fees/FeesPage.tsx', 'getFeesReport', 'from', 'to']] as const) {
+    const evaluated = evaluate(requestArgs(read(file), endpoint)[0], { ...common, feeRangeParams, stripRange: range })
+    checkWire(evaluated, start, end)
+    if (endpoint === 'getFeesReport') {
+      assert.equal(evaluated.createdFrom, undefined, 'default fee statistics share the booked-date list scope')
+      assert.equal(evaluated.createdTo, undefined)
+    }
   }
   const canonical = evaluate(variable(dashboard, 'getCurrentDashboardRange'), { ...hooks, customStart: range.startDate, customEnd: range.endDate })()
   for (const endpoint of ['getDashboardStartup', 'getDashboard', 'getAnalytics']) {
