@@ -598,13 +598,29 @@ app.get('/', async (c) => {
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
   const params = { ...visibility.params, requestedUserId, branchId, from, to, limit }
   if (paged) {
-    const counts = await db.prepare(`SELECT COUNT(*) AS total FROM shift_sessions WHERE ${filters}`).get<{ total: number }>(params)
-    const total = Number(counts?.total || 0)
-    const effectivePage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)))
-    const rows = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters}
-      ORDER BY CASE WHEN closed_at IS NULL AND cancelled_at IS NULL THEN 0 ELSE 1 END,
-        business_date DESC, opened_at DESC, id DESC LIMIT @pageSize OFFSET @offset`).all<ShiftDbRow>({ ...params, pageSize, offset: (effectivePage - 1) * pageSize })
-    return c.json({ shifts: rows.map((shift) => responseShift(user, shift)), scope: visibility.scope,
+    // One statement gives count, clamping and page rows the same SQLite read
+    // snapshot. The LEFT JOIN retains metadata even for an empty match set.
+    const rows = await db.prepare(`WITH matched AS (
+      SELECT id, business_date, opened_at,
+        CASE WHEN closed_at IS NULL AND cancelled_at IS NULL THEN 0 ELSE 1 END AS open_order
+      FROM shift_sessions WHERE ${filters}
+    ), metadata AS (
+      SELECT COUNT(*) AS total, MIN(@page, MAX(1, CAST((COUNT(*) + @pageSize - 1) / @pageSize AS INTEGER))) AS effective_page FROM matched
+    ), page_ids AS (
+      SELECT id FROM matched ORDER BY open_order, business_date DESC, opened_at DESC, id DESC
+      LIMIT @pageSize OFFSET (SELECT (effective_page - 1) * @pageSize FROM metadata)
+    ), page_rows AS (
+      SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id IN (SELECT id FROM page_ids)
+    )
+    SELECT page_rows.*, metadata.total AS pagination_total, metadata.effective_page AS pagination_page
+      FROM metadata LEFT JOIN page_rows ON 1 = 1
+      ORDER BY CASE WHEN page_rows.closed_at IS NULL AND page_rows.cancelled_at IS NULL THEN 0 ELSE 1 END,
+        page_rows.business_date DESC, page_rows.opened_at DESC, page_rows.id DESC
+    `).all<ShiftDbRow & { pagination_total: number; pagination_page: number }>({ ...params, page, pageSize })
+    const total = Number(rows[0].pagination_total)
+    const effectivePage = Number(rows[0].pagination_page)
+    const shifts = rows.filter((row) => row.id != null).map(({ pagination_total: _total, pagination_page: _page, ...shift }) => responseShift(user, shift))
+    return c.json({ shifts, scope: visibility.scope,
       page: effectivePage, page_size: pageSize, total, has_more: effectivePage * pageSize < total })
   }
   const [openShifts, closedShifts] = await Promise.all([
