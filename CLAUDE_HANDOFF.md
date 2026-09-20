@@ -215,3 +215,13 @@ Latest pasted duplicate evidence:
 Tell the user you have read this handoff and are verifying its checkpoints, not starting over. Finish exact pending integration, independently test the final candidate, then repair remaining real blockers. Maintain a concise requirement/status ledger. Only deploy a verifiably correct checkpoint with explicit provenance and safe migration recovery; never describe pending source work as live.
 
 The Codex goal is still active because it is genuinely unfinished. The user should pause that goal in Codex if Claude takes over, to avoid competing automatic continuations and duplicated usage. Do not set it complete merely to stop activity.
+# September20 active continuation
+
+Active candidate1fe5a392 in bos-supplier-settlement-20260918; not deployed.
+Expenses timed filtering and inline queue isolation verified, including native
+workerd D1/R2 seven-case concurrency smoke. Latest owner priority: finish admin,
+then public; retain optional public selling prices but no private prices/data.
+RELEASE BLOCKER: independent probes reproduce account-A offline sales replaying
+with B cookies in foreground and SW. pos_compact_fix owns isolated ownership,
+server enforcement and retained-quarantine fix; do not duplicate edits.
+Migration0184 remains unapplied remotely. Previous release provenance below.

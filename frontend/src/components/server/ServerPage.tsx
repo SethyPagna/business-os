@@ -19,6 +19,8 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
+import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
@@ -31,6 +33,7 @@ const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250
 type TranslationFn = (key: string) => string
 
 type AppContextValue = {
+  user?: { id?: number; organization_id?: number | null } | null
   settings?: Record<string, unknown>
   t: TranslationFn
   notify: (message: string, type?: string) => void
@@ -100,6 +103,10 @@ type PendingSyncState = {
   syncing: number
   failed: number
   items: PendingSyncItem[]
+  quarantined?: number
+  owner?: OfflineSaleOwner | null
+  review_token?: string | null
+  actor_scope?: ActorReadScope
 }
 
 type ServerInfo = {
@@ -128,8 +135,8 @@ type ServerApi = {
   clearCallLog?: () => void
   getSystemBootstrap?: () => Promise<unknown>
   getSystemDebugLog: () => Promise<unknown>
-  retryPendingSyncNow?: () => Promise<unknown>
-  discardPendingSyncQueue?: () => Promise<unknown>
+  retryPendingSyncNow?: (reviewToken?: string) => Promise<unknown>
+  discardPendingSyncQueue?: (reason?: string, reviewToken?: string) => Promise<unknown>
   getSystemConfig?: () => Promise<unknown>
   testSyncServer: (url: string) => Promise<SyncTestResult>
 }
@@ -153,6 +160,9 @@ function normalizePendingSyncState(value: unknown): PendingSyncState {
     syncing: Number(candidate.syncing || 0),
     failed: Number(candidate.failed || 0),
     items: Array.isArray(candidate.items) ? candidate.items : [],
+    quarantined: Number(candidate.quarantined || 0),
+    owner: candidate.owner || null,
+    review_token: candidate.review_token || null,
   }
 }
 
@@ -364,11 +374,18 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
 
 function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
+  const { user, notify } = useApp()
+  const actorKey = `${user?.id || ''}:${user?.organization_id ?? ''}:${syncUrl || ''}`
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
   const [writeErrors, setWriteErrors] = useState<WriteErrorEntry[]>([])
-  const [pendingSync, setPendingSync] = useState<PendingSyncState>({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
+  const [pendingSyncState, setPendingSync] = useState<PendingSyncState>({ total: 0, pending: 0, syncing: 0, failed: 0, items: [] })
+  let currentOwner: OfflineSaleOwner | null = null
+  try { currentOwner = captureOfflineSaleOwner() } catch { /* Hide stale details immediately. */ }
+  const pendingSync = pendingSyncState.owner?.actor_id === user?.id && pendingSyncState.actor_scope
+    && isActorReadScopeCurrent(pendingSyncState.actor_scope, false) && offlineSaleOwnersMatch(pendingSyncState.owner, currentOwner)
+    ? pendingSyncState : { total: 0, pending: 0, syncing: 0, failed: 0, quarantined: 0, items: [], review_token: null }
   const [retryingQueue, setRetryingQueue] = useState(false)
   const [tab, setTab] = useState<DiagnosticsTab>('client')
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -379,6 +396,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
   const loadQueueState = useCallback(async () => {
     if (!active) return
+    const actorScope = captureActorReadScope()
     const requestId = beginTrackedRequest(queueRequestRef)
     try {
       const state = await withLoaderTimeout(
@@ -386,11 +404,11 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
         'Pending sync queue',
         SERVER_PENDING_SYNC_TIMEOUT_MS,
       )
-      if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && state) {
-        setPendingSync(normalizePendingSyncState(state))
+      if (mounted.current && isTrackedRequestCurrent(queueRequestRef, requestId) && isActorReadScopeCurrent(actorScope, false) && state) {
+        setPendingSync({ ...normalizePendingSyncState(state), actor_scope: actorScope })
       }
     } catch {}
-  }, [active])
+  }, [active, actorKey])
 
   useEffect(() => {
     if (!active) {
@@ -468,16 +486,20 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
   }
 
   async function handleRetryQueue() {
+    const reviewToken = pendingSync.review_token
+    if (!reviewToken) return
     if (!getServerApi().retryPendingSyncNow) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
       await withLoaderTimeout(
-        () => getServerApi().retryPendingSyncNow?.(),
+        () => getServerApi().retryPendingSyncNow?.(reviewToken),
         'Retry pending sync queue',
         SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
       )
       await loadQueueState()
+    } catch (error) {
+      notify(getErrorMessage(error, 'The pending sales are retained. Refresh and review them in the original account.'), 'error')
     } finally {
       finishSingleAction(queueActionInFlightRef)
       setRetryingQueue(false)
@@ -485,16 +507,20 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
   }
 
   async function handleDiscardQueue() {
+    const reviewToken = pendingSync.review_token
+    if (!reviewToken || !window.confirm('Clear only the pending sales reviewed in this account? This removes their local recovery copies. Other accounts and unidentified records will be retained.')) return
     if (!getServerApi().discardPendingSyncQueue) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
     try {
       await withLoaderTimeout(
-        () => getServerApi().discardPendingSyncQueue?.(),
+        () => getServerApi().discardPendingSyncQueue?.('Reviewed pending sales were cleared.', reviewToken),
         'Discard pending sync queue',
         SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,
       )
       await loadQueueState()
+    } catch (error) {
+      notify(getErrorMessage(error, 'Nothing was cleared. Refresh and review the original account’s pending sales.'), 'error')
     } finally {
       finishSingleAction(queueActionInFlightRef)
       setRetryingQueue(false)
@@ -610,25 +636,26 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   onClick={handleRetryQueue}
-                  disabled={retryingQueue || pendingSync.total === 0 || !syncConnected}
+                  disabled={retryingQueue || !pendingSync.review_token || pendingSync.total === 0 || !syncConnected}
                   className="text-blue-600 hover:underline disabled:opacity-40"
                 >
-                  {retryingQueue ? 'Syncing...' : 'Sync now'}
+                  {retryingQueue ? 'Recovering...' : 'Recover reviewed sales'}
                 </button>
                 <button
                   onClick={handleDiscardQueue}
-                  disabled={retryingQueue || pendingSync.total === 0}
+                  disabled={retryingQueue || !pendingSync.review_token || pendingSync.total === 0 || !syncConnected}
                   className="text-red-500 hover:underline disabled:opacity-40"
                 >
-                  Clear queue
+                  Clear reviewed sales
                 </button>
               </div>
             </div>
             {pendingSync.total > 0 ? (
               <p className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
-                Offline actions are queued by timestamp and replayed oldest first when the server is reachable. Keep them unless support asks you to clear the queue.
+                New sales require the server. These retained sales belong to this account and are recovered only when you choose. Keep the original records until their receipts are confirmed.
               </p>
             ) : null}
+            {(pendingSync.quarantined || 0) > 0 ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{pendingSync.quarantined} other or unidentified records are retained privately for their original account or support review.</p> : null}
             {pendingSync.total === 0 ? (
               <p className="py-4 text-center text-xs text-gray-400">No pending offline actions.</p>
             ) : pendingSync.items.map((item) => (

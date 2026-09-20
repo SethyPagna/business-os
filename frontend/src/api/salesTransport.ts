@@ -9,6 +9,7 @@ import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
+import { stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 
 type SalePayload = ExpectedUpdatedAtPayload
 type ResultRecord = Record<string, unknown>
@@ -46,9 +47,10 @@ function attachAttempted(error: unknown, attempted: unknown): never {
 }
 
 export function createSale(payload: SalePayload): Promise<unknown> {
+  const ownedPayload = stampOfflineSaleOwner(payload)
   return route(
     'sales:create',
-    () => apiFetch('POST', '/api/sales', payload),
+    () => apiFetch('POST', '/api/sales', ownedPayload),
     null,
     true,
   )
@@ -84,10 +86,11 @@ export async function updateSalesBulkStatus(payload: BulkSaleStatusPayload): Pro
   return result
 }
 export function createSaleWithoutWriteDedupe(payload: SalePayload): Promise<unknown> {
+  const ownedPayload = stampOfflineSaleOwner(payload)
   return apiFetch(
     'POST',
     '/api/sales',
-    payload,
+    ownedPayload,
     SYNC.REQUEST_TIMEOUT_MS,
     { skipWriteDedupe: true },
   )

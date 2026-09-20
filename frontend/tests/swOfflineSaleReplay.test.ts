@@ -88,10 +88,12 @@ await runTest('SW deletes a queued sale ONLY when the per-operation result is ap
 await runTest('a non-applied outbox result keeps the sale queued (thrown -> markQueueFailure) rather than deleting it', () => {
   const body = swSource.match(/async function replayQueuedSale[\s\S]*?\n\}/)?.[0] || ''
   // The tail of the handler throws for any non-applied, non-conflict, non-auth
-  // outcome; syncOutbox's catch routes that to markQueueFailure, which uses
+  // outcome; the handler's catch routes that to markQueueFailure, which uses
   // putQueueRow (preserve + backoff), never deleteQueueRow.
   assert.match(body, /throw new Error\(result\?\.error/)
-  assert.match(swSource, /catch \(error\)\s*\{\s*await markQueueFailure\(db, row, error\)/)
+  assert.match(body, /catch \(error\)[\s\S]*await markQueueFailure\(db, row, error\)/)
+  const background = swSource.match(/function syncOutboxOnce[\s\S]*?\n\}/)?.[0] || ''
+  assert.doesNotMatch(background, /syncOutbox\(/, 'old background events cannot dispatch legacy sales')
   const markBody = swSource.match(/async function markQueueFailure[\s\S]*?\n\}/)?.[0] || ''
   assert.match(markBody, /putQueueRow/)
   assert.doesNotMatch(markBody, /deleteQueueRow/)

@@ -3,7 +3,32 @@
 This supplements, not replaces, earlier issue ledgers and screenshots/video evidence.
 Recorded means tracked; implemented does not mean verified or deployed.
 
+## Latest owner priority and release truth
+
+- Complete remaining admin work first, then public work; retain all historical tasks.
+- Public decision supersedes the temporary hide-all interpretation: retain optional selling-price display and reasonable copy friction. Costs, wholesale prices and internal/personal business data must not reach public responses or the public AI. Visible selling prices cannot be guaranteed uncopiable.
+- Completion requires regression evidence, adversarial review, deployment provenance and real Free/Paid capacity assessment, not merely successful bundle builds. Existing goal-tool state remains blocked from earlier archival work; this does not mean the broadened completion goal was achieved.
+- Deployed checkpoint: fdcee3fe685d / Worker07362be0-f996-4c89-a5e3-1e551c25b8c6. Older status rows below are historical and superseded where this entry or the release report provides newer evidence.
+- Prospective cost candidate through17b610f7 is NOT deployed; migration0184 is NOT remotely applied. Independent bounded review reran20scripts successfully. Final frontend typecheck/i18n/build passed;268emitted chunks, zero cycles. One unused inventory import was removed after the zombie-import gate flagged it; focused rerun follows.
+- Next bounded admin slice: Expenses timed-entry versus full-day booked-date parity. Account-owned offline replay, inline queue loss, remaining date hosts, transfer budgets, Free-tier capacity, old audit findings and safe folder consolidation remain open.
+
 ## Current acceptance checklist
+
+### Continuation evidence and release challenge
+
+- c409abf7: Expenses timestamp/full-day parity implemented; independent native and boundary checks pass. Other date hosts remain open.
+- f26ff13d +1fe5a392: concurrent inline queue roots isolated.20pure checks and7actual workerd D1/R2 cases pass; old implementation fails concurrency controls. Bound queue behavior unchanged.
+- Integrated frontend typecheck/i18n/build passes; Worker typecheck and52plan-tier/config/queue/surface checks pass. These are not live Free capacity certification.
+- Independent actual-function probes reproduce cross-account offline sale replay in foreground and SW. Fix assigned; mismatched/ownerless records must remain recoverable, not silently submitted or deleted. This blocks the next release.
+
+AI Council release decision (one lead simulating five perspectives, not five independent advisors):
+1. Skeptic: a green costing suite does not protect an offline sale from wrong-actor replay; release confidence is overstated without that boundary.
+2. Engineer: durable write identity, authorization and queue ownership must agree at dispatch and server admission; cookie identity alone is insufficient.
+3. Expansionist: eventually exercise an end-to-end device/account/failure matrix automatically on every release. Aspirational, not current coverage.
+4. Outsider: a user changing accounts must not unknowingly inherit another person's pending actions; retained recovery must be understandable.
+5. Executor: first make the observed A-to-B replay fail safely in both paths, with tests demonstrating the old failure.
+Anonymous cross-critique: A's strongest point is the concrete release risk but does not prescribe recovery; B supplies the invariant but needs legacy treatment; C broadens coverage but cannot delay the minimal repair indefinitely; D protects user comprehension but needs server proof; E is actionable but must include SW as well as foreground.
+Chairman: within the next release decision, prioritize ownership enforcement and retained quarantine; biggest risk is silent wrong-account writes or lost queued work. Number-one step is the failing-then-passing replay regression. Keep cost migration/deployment pending this check.
 
 | Request | Current evidence/status | Remaining acceptance |
 | --- | --- | --- |

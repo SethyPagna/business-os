@@ -598,6 +598,22 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
 
   const operations = []
   for (const row of rows) {
+    // POS sales use the dedicated owner-scoped queue. Legacy generic sales
+    // must not reach the generic replay/acknowledgement path or be reassigned.
+    // Retain the original encrypted/plaintext payload for explicit review.
+    if (row.operation_id === 'sales.create') {
+      await offlineDb.transaction('rw', offlineDb.sync_outbox, async () => {
+        const key = getSyncOutboxKey(row)
+        const current = await offlineDb.sync_outbox.get(key)
+        if (!current || JSON.stringify(current) !== JSON.stringify(row)) return
+        await offlineDb.sync_outbox.update(key, {
+          status: 'quarantined', retry_at: null, reason: 'offline_owner_review',
+          error: 'Keep this pending sale. Its original account and server must review it in the current app; do not recreate or discard it.',
+          updated_at: new Date().toISOString(),
+        })
+      })
+      continue
+    }
     try {
       const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
       operations.push({
@@ -837,18 +853,13 @@ function refreshServiceWorkerSoon(force = false): void {
 function runOfflineMaintenance(force = false): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   if (!hasStoredUserSession()) return
-  const salesSync = loadSaleWriteTransportModule()
-    .then((module) => module.syncPendingSalesQueue({ force: true }))
-    .catch(() => {})
   if (offlineVaultKey) {
     syncUnlockedOfflineOutbox({ force }).catch(() => {})
     syncUnlockedOfflineFileChunks({ force }).catch(() => {})
   }
   refreshOfflineSnapshotSoon(force)
-  // Let the foreground sale replay acquire/release its IndexedDB lease before
-  // asking the worker to inspect the same queue. This avoids two contexts
-  // racing the same row while retaining the worker fallback for generic work.
-  salesSync.finally(() => registerOutboxBackgroundSync())
+  // Legacy sales are never replayed by startup, timers or reconnect events.
+  // Their original account must explicitly review and request recovery.
   refreshServiceWorkerSoon(force)
 }
 
@@ -1216,36 +1227,18 @@ const staticApi = {
   },
 
   async getPendingSyncState() {
-    const db = await getOfflineDb()
-    const rows = await db.sync_queue
-      .orderBy('_seq')
-      .toArray()
-      .catch(() => [])
-    const sorted = [...rows].sort((left, right) => {
-      const byCreated = String(left?.created_at || '').localeCompare(String(right?.created_at || ''))
-      if (byCreated !== 0) return byCreated
-      return Number(left?._seq || 0) - Number(right?._seq || 0)
-    }) as OfflineRow[]
-    const counts = sorted.reduce((acc, item) => {
-      const status = String(item?.status || 'pending')
-      acc.total += 1
-      if (status === 'syncing') acc.syncing += 1
-      else if (status === 'conflict') acc.conflict += 1
-      else if (status === 'failed') acc.failed += 1
-      else acc.pending += 1
-      return acc
-    }, { total: 0, pending: 0, syncing: 0, failed: 0, conflict: 0 })
-    return {
-      ...counts,
-      oldest_created_at: sorted[0]?.created_at || null,
-      writes_require_server: true,
-      items: serializePendingSyncPreview(sorted),
-    }
+    const module = await import('./api/pendingSyncTransport.ts')
+    return module.getPendingSyncState()
   },
 
-  async retryPendingSyncNow() {
-    const module = await loadSaleWriteTransportModule()
-    return module.syncPendingSalesQueue({ force: true })
+  async retryPendingSyncNow(reviewToken?: string) {
+    const module = await import('./api/pendingSyncTransport.ts')
+    return module.retryPendingSyncNow(reviewToken)
+  },
+
+  async discardPendingSyncQueue(reason?: string, reviewToken?: string) {
+    const module = await import('./api/pendingSyncTransport.ts')
+    return module.discardPendingSyncQueue(reason, reviewToken)
   },
 
   async refreshOfflineDeviceSnapshot(options: unknown = {}) {

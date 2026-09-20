@@ -1,3 +1,16 @@
+## Admin-first continuation and account-isolation release blocker — September 20
+
+Owner reaffirmed full prior scope as completion goal: admin first, public second,
+with Free/Paid capacity evidence. Public selling-price toggle stays; no costs,
+wholesale or internal/personal data may reach public/AI surfaces. Copy friction
+is deterrence, not secrecy. Do not use the superseded hide-all interpretation.
+Candidate1fe5a392 adds verified Expenses timed-range parity and isolated inline
+queue roots. Worker/type/i18n/build and plan-tier tests pass; native queue7/7.
+Independent audit reproduced offline sale A replaying under B via foreground
+and service worker. This is a current release blocker; protected ownership and
+quarantine fix is assigned. No new deployment or migration0184 applied yet.
+Existing deployed provenance remains below; all other open ledgers still apply.
+
 ## Deployed checkpoint and new cost semantics — September 20
 
 Checkpoint fdcee3fe685d deployed as Worker07362be0-f996-4c89-a5e3-1e551c25b8c6;
