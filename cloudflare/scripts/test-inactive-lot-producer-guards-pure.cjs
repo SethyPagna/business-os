@@ -103,9 +103,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/actorSnapshot': { actorSnapshot: () => 'Tester' },
-  // P10-4: not exercised by this fixture's stubbed receiveBatchStock, but
-  // the module-level import must still resolve.
-  '../lib/catalogCostRecompute': { recomputeCatalogCost: async () => null },
+  '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
 }).default
 
 const fakeExecutionCtx = { waitUntil: (promise) => { promise?.catch?.(() => {}) } }
@@ -134,9 +132,11 @@ const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
-  // P10-4: not exercised by this fixture, but the module-level import must
-  // still resolve.
-  './catalogCostRecompute': { recomputeCatalogCost: async () => null },
+  './productBatches': loadReal('lib/productBatches.ts', {
+    './batchCode': batchCode,
+    './sqlBinding': loadReal('lib/sqlBinding.ts'),
+  }),
+  './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
 })
 
 let passed = 0

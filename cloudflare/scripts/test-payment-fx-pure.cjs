@@ -7,7 +7,7 @@ const Database = require('better-sqlite3')
 const root = path.join(__dirname, '..')
 const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['acquisitionCostAccess','actorSnapshot','movementBranchName',
+const actual = new Set(['offlineSaleOwnership','acquisitionCostAccess','actorSnapshot','movementBranchName',
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
@@ -58,6 +58,7 @@ const sales = load('routes/sales.ts').default
 const settlementAction = load('lib/saleSettlementAction.ts')
 const lineAddition = load('lib/saleLineAddition.ts')
 const amendments = load('lib/saleAmendments.ts')
+const owner = load('lib/offlineSaleOwnership.ts').canonicalOfflineSaleOwner(user, 'http://localhost/')
 
 function fixture() {
   const sql = new Database(':memory:')
@@ -148,7 +149,8 @@ async function reviewed(f, path, body) {
 
 async function run() {
   const native = fixture(); seed(native)
-  const nativeCreate = await native.call('/', {
+  const nativeDraft = {
+    offline_owner: owner,
     money_precision_version: 1,
     items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
       client_line_key: 'native-change-create-line-1', pricing_source: 'manual',
@@ -164,12 +166,21 @@ async function run() {
     change_usd: 1,
     change_khr: 0,
     client_request_id: 'native-change-create-1',
-  }, 'POST')
+  }
+  const beforeOwnerDenial = native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n
+  for (const offline_owner of [undefined, { ...owner, actor_id: 99 }]) {
+    const denied = await native.call('/', { ...nativeDraft, offline_owner }, 'POST')
+    assert.equal(denied.status, 409, JSON.stringify(denied))
+    assert.equal(denied.body.code, offline_owner ? 'offline_owner_mismatch' : 'offline_owner_required')
+    assert.equal(native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n, beforeOwnerDenial, 'owner rejection creates no sale')
+  }
+  const nativeCreate = await native.call('/', nativeDraft, 'POST')
   assert.equal(nativeCreate.status, 200, JSON.stringify(nativeCreate))
   const nativeStored = native.sql.prepare('SELECT change_usd,change_khr,change_is_actual,change_exchange_rate FROM sales WHERE id=?').get(nativeCreate.body.id)
   assert.deepEqual(nativeStored, { change_usd: 1, change_khr: 0, change_is_actual: 1, change_exchange_rate: 4000 })
   const saleCountBeforeInvalid = native.sql.prepare('SELECT COUNT(*) n FROM sales').get().n
   const invalidNative = await native.call('/', {
+    offline_owner: owner,
     money_precision_version: 1,
     items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1,
       client_line_key: 'native-change-invalid-line-1', pricing_source: 'manual',
