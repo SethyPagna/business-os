@@ -4,6 +4,15 @@ import { readCompleteReturnStatement, type ReturnStatementPage } from '../src/ap
 import { invalidateActorReadChannel, resetActorReadSession } from '../src/api/actorReadScope.ts'
 
 const year = { startDate: '2024-01-01', endDate: '2024-12-31' }
+for (const unsupported of ['0000', '0001', '0099', '10000']) {
+  assert.throws(() => returnsStatementParams({ startDate: `${unsupported}-01-01`, endDate: `${unsupported}-01-01` }), RangeError)
+}
+assert.deepEqual(returnsStatementParams({ startDate: '0100-01-01', endDate: '0100-01-01' }), {
+  startDate: '0100-01-01', endDate: '0100-01-01', createdFrom: '0099-12-31 17:00:00', createdTo: '0100-01-01 17:00:00',
+})
+assert.deepEqual(returnsStatementParams({ startDate: '9999-01-01', endDate: '9999-12-31' }), {
+  startDate: '9999-01-01', endDate: '9999-12-31', createdFrom: '9998-12-31 17:00:00', createdTo: '9999-12-31 17:00:00',
+}, 'local exclusive endpoint rolls into year10000, but UTC wire bounds remain four-digit years')
 assert.deepEqual(returnsStatementParams(year), {
   ...year, createdFrom: '2023-12-31 17:00:00', createdTo: '2024-12-31 17:00:00',
 })
