@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL:** 2c6a1e38 restore import admission fails closed; root dab734 passed 11 actual route cases, 11 maintenance checks and Worker types, independent 4d6ecef8 PASS. Not deployed. Journal 0190 is under isolated implementation with explicit principal-loss pause, not synthetic continuation authority. Transfer foundation 3e326b6c source-only PASS; remote migration and lifecycle integration remain held. Production remains ce945bb4 / 7fb32ac1. Read progress.md before older entries.
+
 > **LATEST LOCAL:**efcfa855 maintenance ownership hardening integrated. Root6325 terminal0 (11pure, native races/12corrupt states, fiveactualHono routes, types), independent1a391746; fivefiles exactly matchd2adbf04. Not deployed. Full operation fencing/journal/reset/restore/transfer/export lifecycle remains open; see dataset-lifecycle plan. Production unchangedce945bb4/7fb32ac1.
 
 > **LATEST LIVE:**ce945bb4ed15 / Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991 Paid deployed7351 terminal0. Live separate Returns tab renders normally; original preserved tab gone and browser tool disconnected before metadata/warm-reload/controller verification. Smoke is PARTIAL. No migrations/data writes. Full backlog active, Returns export still held for lifecycle dependencies. September21 release record is authoritative over older entries.

@@ -1,3 +1,19 @@
+## Restore admission verified; journal implementation continues — September 21
+
+Commit 2c6a1e38 refuses destructive restore when the import activity lookup fails,
+is missing, or returns an invalid count. Active imports still return 409. Root
+dab734 TERMINAL0: 11 actual Hono route cases, 11 maintenance checks, Worker types.
+Independent review 4d6ecef8 passed the actual route tests and diff check. Not deployed;
+production remains ce945bb4 / 7fb32ac1. Admission-read TOCTOU remains open.
+
+Transfer foundation review 3e326b6c passed five fresh focused scripts, source-only.
+Do not remotely apply 0188: its guards affect existing receipt deletion and current
+backup/reset paths do not yet preserve permanent retirement evidence correctly.
+Journal 0190 implementation is isolated. Principal deletion/recreation or permission
+loss must fail closed; no synthetic actor or silently inherited restore authority.
+Principal-destructive phases require a separately reviewed explicit admin recovery
+binding. Full reset/restore/transfer/export integration is still OPEN.
+
 ## Maintenance ownership prerequisite integrated and verified — September 21
 
 Rootefcfa855 integratesd2adbf04: atomic acquire, validated exact-state progress and

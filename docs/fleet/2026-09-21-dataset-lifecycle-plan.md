@@ -34,6 +34,31 @@ and record pre/post assertions/recovery before any remote execution.
 
 ## Council challenge (one model simulating five perspectives)
 
+### Principal-destructive phase decision — September 21
+
+The journal primitive fails closed if its initiating principal is deleted,
+recreated, or loses authorization. Reset/restore must pause before destructive
+principal phases until a separately verified explicit administrator recovery
+binding exists. No synthetic actor or automatic trust of a recreated account ID.
+This is a bounded primitive decision, not a claim of end-to-end restore continuity.
+
+One model simulating five perspectives: Skeptic rejects restored-account authority
+reuse; Engineer requires current authority and exact operation identity; Expansionist
+proposes a separately audited recovery coordinator; Outsider requires a visible
+paused state instead of apparent completion; Executor implements fail-closed tests
+before recovery. Anonymous cross-critique: A needs an operational recovery path;
+B cannot assume original authority survives restoration; C must not introduce a
+bypass; D needs durable backend evidence; E is only a prerequisite. Chairman:
+implement the safe primitive now, separately review recovery before route enablement.
+Biggest risk is accidentally continuing under a different person's restored ID.
+First test is principal deletion/recreation between admission and the atomic batch.
+
+Restore admission 2c6a1e38 separately rejects uncertain import lookup; root dab734
+and independent 4d6ecef8 passed. This does not close the import-start TOCTOU gap.
+Transfer review 3e326b6c accepts source-only integration; 0188 immediately changes
+receipt deletion behavior when applied and is not safe to deploy before lifecycle
+and permanent retirement-evidence preservation are integrated.
+
 Independent first-pass lenses: Skeptic rejects a false completion based on metadata
 alone or midpoint crashes; Engineer requires atomic ownership and phase/cursor/data
 agreement; Expansionist proposes full fault-injection across every device/tier,
