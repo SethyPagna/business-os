@@ -28,6 +28,7 @@ import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
+import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -225,6 +226,8 @@ interface DashboardFilterPrefs {
   rangeId: DashboardRangeId
   customStart: string
   customEnd: string
+  customStartTime?: string
+  customEndTime?: string
 }
 
 interface KpiDetail {
@@ -250,11 +253,11 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboard: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
-  getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
-  getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboard: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
+  getAnalytics: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboardStartup: (params: DashboardRangeQuery & { granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStockAlerts: (params: { state: DashboardStockAlertState; page: number; pageSize: number }) => Promise<unknown>
-  getDashboardInsightList: (params: { insight: DashboardInsightKind; startDate: string; endDate: string; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
+  getDashboardInsightList: (params: DashboardRangeQuery & { insight: DashboardInsightKind; branchId?: string }) => ReturnType<typeof getDashboardInsightList>
 }
 
 type DashboardExportModule = typeof import('./dashboardExport.ts')
@@ -441,9 +444,12 @@ function readDashboardFilterPrefs(storageKey: string): DashboardFilterPrefs {
     // legacy empty dates cannot prove an intentional All-time selection.
     if (parsed.version !== 2 && (rangeId === 'all' || rangeId === 'custom')) return todayDashboardFilterPrefs()
     if (rangeId === 'custom') {
-      return validDashboardCustomDates(parsed.customStart, parsed.customEnd)
-        ? { version: 2, rangeId, customStart: parsed.customStart, customEnd: parsed.customEnd }
-        : todayDashboardFilterPrefs()
+      if (!validDashboardCustomDates(parsed.customStart, parsed.customEnd)) return todayDashboardFilterPrefs()
+      const startTime = parsed.customStartTime ?? ''
+      const endTime = parsed.customEndTime ?? ''
+      if (typeof startTime !== 'string' || typeof endTime !== 'string') return todayDashboardFilterPrefs()
+      dashboardRangeQuery({ startDate: parsed.customStart, endDate: parsed.customEnd, startTime, endTime })
+      return { version: 2, rangeId, customStart: parsed.customStart, customEnd: parsed.customEnd, customStartTime: startTime, customEndTime: endTime }
     }
     return { version: 2, rangeId, customStart: '', customEnd: '' }
   } catch {
@@ -473,7 +479,7 @@ function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTi
     return { startDate: today, endDate: today, startTime: '', endTime: '' }
   }
   if (prefs.rangeId === 'custom') {
-    return { startDate: prefs.customStart, endDate: prefs.customEnd, startTime: '', endTime: '' }
+    return { startDate: prefs.customStart, endDate: prefs.customEnd, startTime: prefs.customStartTime || '', endTime: prefs.customEndTime || '' }
   }
   const preset = statsPresetRange(prefs.rangeId)
   return { ...preset, startTime: '', endTime: '' }
@@ -483,7 +489,8 @@ function dashboardPrefsForSelection(nextRange: DateTimeRange, source: DashboardR
   if (!normalizeDashboardRangeId(source)) return null
   if (source === 'custom') {
     if (!validDashboardCustomDates(nextRange.startDate, nextRange.endDate)) return null
-    return { version: 2, rangeId: 'custom', customStart: nextRange.startDate, customEnd: nextRange.endDate }
+    try { dashboardRangeQuery(nextRange) } catch { return null }
+    return { version: 2, rangeId: 'custom', customStart: nextRange.startDate, customEnd: nextRange.endDate, customStartTime: nextRange.startTime || '', customEndTime: nextRange.endTime || '' }
   }
   return { version: 2, rangeId: source, customStart: '', customEnd: '' }
 }
@@ -807,8 +814,8 @@ export default function Dashboard() {
     { id: 'inventory',  label: translateOr('dashboard_group_inventory', 'Inventory & activity', 'ស្តុក និងសកម្មភាព') },
   ]
 
-  const [summary, setSummary]     = useState<DashboardSummary | null>(null)
-  const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null)
+  const [summarySnapshot, setSummary] = useState<{ scope: string; data: DashboardSummary } | null>(null)
+  const [analyticsSnapshot, setAnalytics] = useState<{ scope: string; data: DashboardAnalytics } | null>(null)
   const [loading, setLoading]     = useState(true)
   const [aLoading, setALoading]   = useState(true)
   const [silentRefresh, setSilentRefresh] = useState(false)
@@ -826,6 +833,16 @@ export default function Dashboard() {
   const dashboardRange = useMemo(() => resolveDashboardFilterRange(filterPrefs), [filterPrefs, businessDay])
   const customStart = dashboardRange.startDate
   const customEnd = dashboardRange.endDate
+  const rangeQuery = useMemo(() => dashboardRangeQuery(dashboardRange), [dashboardRange])
+  const dashboardScope = `${dashboardFilterStorageKey}:${JSON.stringify(rangeQuery)}`
+  const dashboardScopeRef = useRef(dashboardScope)
+  const loadingScopeRef = useRef(dashboardScope)
+  const rangePending = loadingScopeRef.current !== dashboardScope
+  dashboardScopeRef.current = dashboardScope
+  // Mask old-window values synchronously; effects must not relabel old totals
+  // or exported figures while a new interval is loading.
+  const summary = summarySnapshot?.scope === dashboardScope ? summarySnapshot.data : null
+  const analytics = analyticsSnapshot?.scope === dashboardScope ? analyticsSnapshot.data : null
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -920,27 +937,28 @@ export default function Dashboard() {
   }, [navigateTo])
 
   const getCurrentDashboardRange = useCallback(() => {
-    return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
-  }, [customEnd, customStart])
+    return { ...rangeQuery, granularity: 'day' as DashboardGranularity }
+  }, [rangeQuery])
   const handleDashboardRangeChange = useCallback((nextRange: DateTimeRange, source?: DashboardRangeId) => {
     const prefs = dashboardPrefsForSelection(nextRange, source)
     if (prefs) setFilterSelection({ storageKey: dashboardFilterStorageKey, prefs })
   }, [dashboardFilterStorageKey])
 
   const loadDashboardStartup = useCallback(async () => {
+    const requestScope = dashboardScope
     const requestId = beginTrackedRequest(startupRequestRef)
     startupLoadingRef.current = true
     startupAttemptedRef.current = true
     setLoading(true)
     setAnalyticsLoading(true)
-    const { start, end, granularity: gran } = getCurrentDashboardRange()
+    const query = getCurrentDashboardRange()
     try {
       const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboardStartup({ startDate: start, endDate: end, granularity: gran }),
+        () => getDashboardApi().getDashboardStartup(query),
         'Dashboard startup',
         DASHBOARD_STARTUP_TIMEOUT_MS,
       )
-      if (!isTrackedRequestCurrent(startupRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(startupRequestRef, requestId)) return null
       const payload = data && typeof data === 'object' ? data as { summary?: unknown; analytics?: unknown } : {}
       if (!isDashboardSummaryPayload(payload.summary)) {
         throw new Error('Dashboard startup returned incomplete summary data.')
@@ -951,13 +969,13 @@ export default function Dashboard() {
       const normalizedSummary = normalizeDashboardSummaryPayload(payload.summary)
       const normalizedAnalytics = normalizeDashboardAnalyticsPayload(payload.analytics)
       if (!normalizedSummary || !normalizedAnalytics) throw new Error('Dashboard startup returned invalid data.')
-      setSummary(normalizedSummary)
-      setAnalytics(normalizedAnalytics)
+      setSummary({ scope: requestScope, data: normalizedSummary })
+      setAnalytics({ scope: requestScope, data: normalizedAnalytics })
       setSummaryError('')
       setAnalyticsError('')
       return data
     } catch (error) {
-      if (!isTrackedRequestCurrent(startupRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(startupRequestRef, requestId)) return null
       const message = isInvalidSessionError(error)
         ? 'Please sign in again to continue.'
         : getErrorMessage(error, 'Dashboard startup failed to load.')
@@ -968,13 +986,13 @@ export default function Dashboard() {
       setAnalyticsError(message)
       return null
     } finally {
-      startupLoadingRef.current = false
-      if (isTrackedRequestCurrent(startupRequestRef, requestId)) {
+      if (requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(startupRequestRef, requestId)) {
+        startupLoadingRef.current = false
         setLoading(false)
         setAnalyticsLoading(false)
       }
     }
-  }, [getCurrentDashboardRange, setAnalyticsLoading])
+  }, [dashboardScope, getCurrentDashboardRange, setAnalyticsLoading])
 
   const loadSummary = useCallback(async ({
     label = 'Dashboard summary',
@@ -985,25 +1003,26 @@ export default function Dashboard() {
     // response cannot append rows or advance the new cursor.
     invalidateStockAlertPageRequests()
     const requestId = beginTrackedRequest(summaryRequestRef)
+    const requestScope = dashboardScope
     if (markLoading) setLoading(true)
     try {
-      const { start, end, granularity } = getCurrentDashboardRange()
+      const query = getCurrentDashboardRange()
       const data = await withLoaderTimeout(
-        () => getDashboardApi().getDashboard({ startDate: start, endDate: end, granularity }),
+        () => getDashboardApi().getDashboard(query),
         label,
         DASHBOARD_SUMMARY_TIMEOUT_MS,
       )
-      if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
       }
       const normalized = normalizeDashboardSummaryPayload(data)
       if (!normalized) throw new Error('Dashboard summary returned invalid data.')
-      setSummary(normalized)
+      setSummary({ scope: requestScope, data: normalized })
       setSummaryError('')
       return data
     } catch (error) {
-      if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (isInvalidSessionError(error)) {
         setSummaryError('Please sign in again to continue.')
         return null
@@ -1012,11 +1031,11 @@ export default function Dashboard() {
       setSummaryError(getErrorMessage(error, 'Dashboard summary failed to load.'))
       return null
     } finally {
-      if (markLoading && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
+      if (markLoading && requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(summaryRequestRef, requestId)) {
         setLoading(false)
       }
     }
-  }, [getCurrentDashboardRange, invalidateStockAlertPageRequests])
+  }, [dashboardScope, getCurrentDashboardRange, invalidateStockAlertPageRequests])
 
   const loadStockAlertPage = useCallback(async (state: DashboardStockAlertState, page: number) => {
     const requestRef = state === 'low' ? lowStockRequestRef : outOfStockRequestRef
@@ -1065,44 +1084,53 @@ export default function Dashboard() {
   // their already-truncated preview array (recent sales, expiring products,
   // top products/customers). Fetched fresh each time its float opens, scoped
   // to the SAME window the card itself is showing.
-  const [insightLists, setInsightLists] = useState<Record<string, { items: unknown[]; truncated: boolean; loading: boolean; error: string }>>({})
+  const [insightSnapshots, setInsightLists] = useState<Record<string, { scope: string; items: unknown[]; truncated: boolean; loading: boolean; error: string }>>({})
+  const insightLists = Object.fromEntries(Object.entries(insightSnapshots).filter(([, value]) => value.scope === dashboardScope))
+  const insightRequestRef = useRef<Record<string, number>>({})
   const loadInsightList = useCallback(async (kind: DashboardInsightKind) => {
-    setInsightLists((prev) => ({ ...prev, [kind]: { items: prev[kind]?.items || [], truncated: prev[kind]?.truncated || false, loading: true, error: '' } }))
+    const requestScope = dashboardScope
+    const requestId = (insightRequestRef.current[kind] || 0) + 1
+    insightRequestRef.current[kind] = requestId
+    const isCurrent = () => requestScope === dashboardScopeRef.current && insightRequestRef.current[kind] === requestId
+    setInsightLists((prev) => ({ ...prev, [kind]: { scope: requestScope, items: prev[kind]?.scope === requestScope ? prev[kind].items : [], truncated: false, loading: true, error: '' } }))
     try {
-      const { start, end } = getCurrentDashboardRange()
+      const query = getCurrentDashboardRange()
       const result = await withLoaderTimeout(
-        () => getDashboardApi().getDashboardInsightList({ insight: kind, startDate: start, endDate: end }),
+        () => getDashboardApi().getDashboardInsightList({ ...query, insight: kind }),
         'Dashboard insight list',
         DASHBOARD_SUMMARY_TIMEOUT_MS,
       )
-      setInsightLists((prev) => ({ ...prev, [kind]: { items: result.items, truncated: result.truncated, loading: false, error: '' } }))
+      if (!isCurrent()) return
+      setInsightLists((prev) => ({ ...prev, [kind]: { scope: requestScope, items: result.items, truncated: result.truncated, loading: false, error: '' } }))
     } catch (error) {
-      setInsightLists((prev) => ({ ...prev, [kind]: { items: prev[kind]?.items || [], truncated: prev[kind]?.truncated || false, loading: false, error: getErrorMessage(error, 'Could not load the full list.') } }))
+      if (!isCurrent()) return
+      setInsightLists((prev) => ({ ...prev, [kind]: { scope: requestScope, items: prev[kind]?.items || [], truncated: prev[kind]?.truncated || false, loading: false, error: getErrorMessage(error, 'Could not load the full list.') } }))
     }
-  }, [getCurrentDashboardRange])
+  }, [dashboardScope, getCurrentDashboardRange])
 
   const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = beginTrackedRequest(analyticsRequestRef)
+    const requestScope = dashboardScope
     const shouldClearLoading = !silent || analyticsLoadingRef.current
     if (!silent) setAnalyticsLoading(true)
-    const { start, end, granularity: gran } = getCurrentDashboardRange()
+    const query = getCurrentDashboardRange()
     try {
       const data = await withLoaderTimeout(
-        () => getDashboardApi().getAnalytics({ startDate: start, endDate: end, granularity: gran }),
+        () => getDashboardApi().getAnalytics(query),
         'Dashboard analytics',
         DASHBOARD_ANALYTICS_TIMEOUT_MS,
       )
-      if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       if (!isDashboardAnalyticsPayload(data)) {
         throw new Error('Dashboard analytics returned incomplete data.')
       }
       const normalized = normalizeDashboardAnalyticsPayload(data)
       if (!normalized) throw new Error('Dashboard analytics returned invalid data.')
-      setAnalytics(normalized)
+      setAnalytics({ scope: requestScope, data: normalized })
       setAnalyticsError('')
       return data
     } catch (error) {
-      if (!isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
+      if (requestScope !== dashboardScopeRef.current || !isTrackedRequestCurrent(analyticsRequestRef, requestId)) return null
       if (isInvalidSessionError(error)) {
         setAnalyticsError('Please sign in again to continue.')
         return null
@@ -1111,11 +1139,36 @@ export default function Dashboard() {
       setAnalyticsError(getErrorMessage(error, 'Dashboard analytics failed to load.'))
       return null
     } finally {
-      if (shouldClearLoading && isTrackedRequestCurrent(analyticsRequestRef, requestId)) {
+      if (shouldClearLoading && requestScope === dashboardScopeRef.current && isTrackedRequestCurrent(analyticsRequestRef, requestId)) {
         setAnalyticsLoading(false)
       }
     }
-  }, [getCurrentDashboardRange, setAnalyticsLoading])
+  }, [dashboardScope, getCurrentDashboardRange, setAnalyticsLoading])
+
+  // Runs before loader effects: an old startup must not suppress the new
+  // interval's requests, nor may its finally block release the new loading UI.
+  useEffect(() => {
+    loadingScopeRef.current = dashboardScope
+    invalidateTrackedRequest(startupRequestRef)
+    invalidateTrackedRequest(summaryRequestRef)
+    invalidateTrackedRequest(analyticsRequestRef)
+    invalidateTrackedRequest(refreshRequestRef)
+    Object.keys(insightRequestRef.current).forEach((kind) => { insightRequestRef.current[kind]++ })
+    startupLoadingRef.current = false
+    setSummaryError('')
+    setAnalyticsError('')
+    setSilentRefresh(false)
+    setKpiDetail(null)
+    setCustomerDetail(null)
+    setProductDetail(null)
+    setRecentSaleDetail(null)
+    setRecentSalesOpen(false)
+    setTopProductsListOpen(false)
+    setTopCustomersListOpen(false)
+    setBranchPerformanceListOpen(false)
+    setBestHourListOpen(false)
+    setExportChoicesOpen(false)
+  }, [dashboardScope])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !dashboardFilterStorageKey) return
@@ -1226,6 +1279,8 @@ export default function Dashboard() {
     invalidateTrackedRequest(summaryRequestRef)
     invalidateTrackedRequest(analyticsRequestRef)
     invalidateTrackedRequest(refreshRequestRef)
+    invalidateTrackedRequest(startupRequestRef)
+    Object.keys(insightRequestRef.current).forEach((kind) => { insightRequestRef.current[kind]++ })
     invalidateStockAlertPageRequests()
   }, [invalidateStockAlertPageRequests])
 
@@ -1310,9 +1365,9 @@ export default function Dashboard() {
 
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
-  const summaryUnavailable = !loading && !summaryReady
-  const analyticsPending = !analyticsReady && aLoading
-  const analyticsUnavailable = !analyticsReady && !aLoading
+  const summaryUnavailable = !rangePending && !loading && !summaryReady
+  const analyticsPending = !analyticsReady && (rangePending || aLoading)
+  const analyticsUnavailable = !rangePending && !analyticsReady && !aLoading
   const staleSummaryNotice = summaryReady && summaryError
   const staleAnalyticsNotice = analyticsReady && analyticsError
   const calcTrend = (curr: number, prev: number) => (!prev || prev === 0) ? undefined : ((curr - prev) / prev) * 100
@@ -1440,9 +1495,9 @@ export default function Dashboard() {
   const collectedExampleText = `${fmtUSD(aRevenue + aTax + aDelivery)} = ${fmtUSD(aRevenue)} + ${fmtUSD(aTax)} + ${fmtUSD(aDelivery)}`
   const rangeLabel = !customStart && !customEnd
     ? translateOr('all_time', 'All time')
-    : `${customStart || '…'} - ${customEnd || '…'}`
+    : dashboardRangeLabel(dashboardRange)
 
-  const periodShort = customStart === todayStr() && customEnd === todayStr()
+  const periodShort = !rangeQuery.createdFrom && customStart === todayStr() && customEnd === todayStr()
     ? translateOr('range_today', 'Today')
     : rangeLabel
   const lowShortLabel = translateOr('low_stock_short', 'Low')
@@ -1967,12 +2022,14 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           t={(key: string) => t(key)}
           range={dashboardRange}
           onRangeChange={handleDashboardRangeChange}
-          showTime={false}
+          showTime
+          continuous
           loading={analyticsPending}
           rangeActions={hasPermission('dashboard_export') ? (
             <button
               type="button"
               onClick={() => setExportChoicesOpen(true)}
+              disabled={!summary || !analytics || loading || aLoading}
               className={toolbarIconButtonClassName}
               aria-label={exportLabel}
               title={exportLabel}
