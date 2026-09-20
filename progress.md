@@ -1,3 +1,11 @@
+## Owner reaffirmed continuous cleanup, Council and compact UI — September 20
+
+These are ongoing acceptance gates, not a new visual redesign. AGENTS.md now
+records proven-dead-only cleanup, evidence/rollback, substantive Council review,
+one-useful-row-first layouts, useful two-column pairings (including public portal),
+shared button sizing and narrow/desktop EN/KM overflow checks. Preserve existing
+financial, permission, recovery and UI rules. No runtime changes in this note.
+
 ## Shift mutation-scope blocker confirmed; export/lifecycle work local — September 20
 
 Shift count/page correction490b46e2 passed independent review05d530c9.

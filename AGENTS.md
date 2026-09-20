@@ -40,6 +40,16 @@ Use `node agent-team/scripts/team-state.mjs` for cross-tool claims, heartbeats, 
 
 ## Local verification
 
+## Continuous cleanup and compact-UI acceptance gates
+
+- Apply `docs/AI_COUNCIL_REVIEW.md` throughout substantive design, cleanup and release decisions: independent perspectives, cross-critique and evidence-based verdict. Routine implementation/status does not require repeating the ceremony; preserve its decisions and unresolved objections. Disclose simulated reviews.
+- Inspect touched surfaces for dead code, duplicate logic, unused UI/dependencies, redundant requests and avoidable complexity. Remove only proven-unused behavior after tracing dynamic, external, permission, audit, recovery and historical consumers. Do not remove safety checks or financial rules as "debloat". Record candidates, evidence, risk, tests and rollback; preserve migrations and recovery evidence.
+- Preserve the owner's established compact UI. Fit related controls/metadata in one useful row first; wrap only when necessary for readability, localization, touch targets or available width. Use two-column pairings where useful, including public-portal details/forms; do not default every item to a full-width row or card.
+- Reuse existing shared controls and Manage-height button conventions; keep sibling pages consistent. Avoid introducing competing spacing, size or date-control variants. Preserve established product-name wrapping, invisible horizontal scrolling and compact edit/read modes.
+- Verify affected layouts at narrow/mobile and desktop widths, EN/KM and long-content cases. No clipped values, out-of-bounds inputs/tooltips, inaccessible actions or accidental page-wide horizontal overflow. Compactness must not hide required information or weaken permission/data-isolation boundaries.
+
+## Verification commands
+
 Use the smallest focused test first, then the affected package gates:
 
 ```powershell
