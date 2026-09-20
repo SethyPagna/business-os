@@ -75,6 +75,15 @@ assert.throws(() => db.exec("UPDATE transfer_run_chunks SET request_json='{}' WH
 assert.throws(() => register('child-collision', 'child-main-000'), /reserved/)
 assert.throws(() => seal('registered-winner', 'original-main'), /reserved/)
 const baseline = db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n
+const historyBeforeUnwrapped = db.prepare('SELECT COUNT(*) n FROM action_history').get().n
+// Reviewer regression: a legacy route can receive a sealed child key and the
+// exact canonical body. Receipt matching alone must NOT authorize its effects.
+assert.throws(() => execute(effects('child-main-000')), /active intent/)
+assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline)
+assert.equal(db.prepare('SELECT COUNT(*) n FROM action_history').get().n, historyBeforeUnwrapped)
+assert.equal(db.prepare("SELECT COUNT(*) n FROM transfer_operation_receipts WHERE request_id='child-main-000'").get().n, 0)
+assert.equal(db.prepare("SELECT status FROM transfer_run_chunks WHERE run_id='run-main'").get().status, 'planned')
+assert.equal(db.prepare("SELECT next_sequence FROM transfer_runs WHERE id='run-main'").get().next_sequence, 0)
 const commit = store.commitTransferRunChunkStatements(position('run-main'), effects('child-main-000'))
 const mismatched = effects('child-main-000').map(statement => statement.params
   ? { ...statement, params: { ...statement.params, body: '{"quantity":999}' } } : statement)
@@ -91,8 +100,11 @@ assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001')
 assert.deepEqual(db.prepare("SELECT revision,next_sequence,status,cursor_json FROM transfer_runs WHERE id='run-main'").get(),
   { revision: 1, next_sequence: 1, status: 'active', cursor_json: '{"done":1}' })
 assert.throws(() => execute(commit), /NOT NULL/)
+// Opposite race ordering: wrapped commit wins; a delayed legacy attempt still
+// rolls back, cannot move stock twice or strand progress.
+assert.throws(() => execute(effects('child-main-000')), /active intent|UNIQUE/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline - 1)
-console.log('PASS atomic rollback of stock/history/receipt/chunk/progress; duplicate commit blocked')
+console.log('PASS unwrapped matching child rolls back; wrapped commit wins exactly once; atomic rollback clears execution marker')
 
 const adapter = { prepare(sql) { return { async get(params) { return db.prepare(sql).get(params) } } } }
 async function main() {
