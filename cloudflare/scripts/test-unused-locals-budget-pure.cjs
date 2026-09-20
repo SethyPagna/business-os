@@ -36,6 +36,7 @@
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const assert = require('node:assert/strict')
+const { unusedCompilerDiagnostics } = require('../../ops/scripts/lib/compiler-result.cjs')
 
 const root = path.join(__dirname, '..')
 
@@ -50,16 +51,14 @@ const result = spawnSync(
     '--noEmit',
     '--noUnusedLocals',
     '--noUnusedParameters',
+    '--pretty', 'false',
     '-p',
     'tsconfig.json',
   ],
   { cwd: root, encoding: 'utf8' },
 )
 
-const output = `${result.stdout || ''}${result.stderr || ''}`
-const diagnosticLines = output
-  .split(/\r?\n/)
-  .filter((line) => /error TS6133:|error TS6196:/.test(line))
+const diagnosticLines = unusedCompilerDiagnostics(result)
 
 assert.ok(
   diagnosticLines.length <= BUDGET,
