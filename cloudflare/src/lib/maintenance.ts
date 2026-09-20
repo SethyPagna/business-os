@@ -62,14 +62,6 @@ export async function getMaintenance(env: Env): Promise<MaintenanceState | null>
 // caller decides whether to surface "force clear first"). Returns the state
 // with the holder token the caller uses for updates/end.
 export async function beginMaintenance(env: Env, input: { backupKey: string; startedBy: string }): Promise<MaintenanceState> {
-  const existing = await getMaintenance(env)
-  if (existing) {
-    throw new Error(
-      `A restore is already in progress (or a crashed one was never cleared): started ${existing.startedAt} by ${existing.startedBy}, `
-      + 'last phase ' + existing.phase + (existing.table ? ` on ${existing.table}` : '')
-      + '. Clear maintenance first if that restore is dead.',
-    )
-  }
   const state: MaintenanceState = {
     mode: 'restore',
     token: crypto.randomUUID(),
@@ -79,36 +71,35 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     phase: 'deleting',
     updatedAt: new Date().toISOString(),
   }
-  await writeState(env, state)
+  const result = await env.DB.prepare(`INSERT INTO system_flags(key,value,updated_at)
+    VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO NOTHING`)
+    .bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
+  if (result.meta.changes !== 1) throw new Error('A restore is already in progress or requires recovery. Inspect maintenance before clearing it.')
   return state
 }
 
 export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<MaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
-  const current = await getMaintenance(env)
-  if (!current || current.token !== token) return
-  await writeState(env, { ...current, ...patch, updatedAt: new Date().toISOString() })
+  await env.DB.prepare(`UPDATE system_flags SET value=json_patch(value,?),updated_at=CURRENT_TIMESTAMP
+    WHERE key=? AND json_extract(value,'$.token')=?`)
+    .bind(JSON.stringify({ ...patch, updatedAt: new Date().toISOString() }), MAINTENANCE_FLAG_KEY, token).run()
 }
 
 // Ends maintenance. Token-guarded so only the restore that began it (or a
 // force clear, which passes force: true) removes it -- a concurrent begin
 // attempt can never clear someone else's hold.
 export async function endMaintenance(env: Env, token: string | null, options: { force?: boolean } = {}): Promise<boolean> {
-  const current = await getMaintenance(env)
-  if (!current) return true
-  if (!options.force && current.token !== token) return false
   try {
-    await env.DB.prepare('DELETE FROM system_flags WHERE key = ?').bind(MAINTENANCE_FLAG_KEY).run()
+    // Capture the exact row even for force-clear. Never delete a replacement
+    // holder acquired after this read, nor resurrect a stale progress update.
+    const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key=?').bind(MAINTENANCE_FLAG_KEY).first<{value:string}>()
+    if (!row) return true
+    if (!options.force && parseState(row.value)?.token !== token) return false
+    const result = await env.DB.prepare('DELETE FROM system_flags WHERE key=? AND value=?')
+      .bind(MAINTENANCE_FLAG_KEY, row.value).run()
+    return result.meta.changes === 1
   } catch {
     return false
   }
-  return true
-}
-
-async function writeState(env: Env, state: MaintenanceState): Promise<void> {
-  await env.DB.prepare(`
-    INSERT INTO system_flags (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
 }
 
 // The write gate's allowlist. While a restore runs, every state-changing
