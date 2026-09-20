@@ -57,6 +57,7 @@ test('HTML shell admission is independent of static transport admission', () => 
 // than page routing (which bypasses the cache behavior this regression needs).
 test('native SW metadata poisoning negative control, upgrade, recovery and offline shell', { timeout: 60000 }, async () => {
   const oldSource = source
+    .replace(', shellPolicy: SHELL_POLICY', '')
     .replace(/return isValidTransportResponse\(response\)[\s\S]*?=== 'text\/html';/, 'return isValidTransportResponse(response);')
     .replace('if (!isAppDocumentPath(url.pathname))\n            return;', '')
     .replace("const revalidate = fetch('/index.html',", 'const revalidate = fetch(request,')

@@ -72,6 +72,56 @@ const PRECACHE_CONCURRENCY = 4;
 // update installs.
 const DEFERRED_PRECACHE_CONCURRENCY = 2;
 const CACHE_METADATA_URL = '/__business_os_cache_metadata__';
+const SHELL_POLICY = 1;
+const INCUMBENT_METADATA_URL = '/__business_os_incumbent__';
+function validShellVersion(version) {
+    return typeof version === 'string' && /^business-os-app-shell-[A-Za-z0-9_-]{1,128}$/.test(version);
+}
+// Ask the actual active worker, not a page or the most recently created cache.
+// The legacy version protocol already supports transferred reply ports.
+function probeIncumbent(worker) {
+    return new Promise((resolve) => {
+        const channel = new MessageChannel();
+        let finished = false;
+        const finish = (value) => {
+            if (finished)
+                return;
+            finished = true;
+            clearTimeout(deadline);
+            channel.port1.close();
+            channel.port2.close();
+            resolve(value);
+        };
+        const deadline = setTimeout(() => finish(null), 1500);
+        channel.port1.onmessage = (event) => {
+            const reply = event.data;
+            finish(reply?.type === 'BUSINESS_OS_APP_VERSION' && validShellVersion(reply.version)
+                ? { version: reply.version, legacy: reply.shellPolicy === undefined } : null);
+        };
+        try {
+            worker.postMessage({ type: 'BUSINESS_OS_APP_VERSION_REQUEST' }, [channel.port2]);
+        }
+        catch {
+            finish(null);
+        }
+    });
+}
+async function readIncumbentVersion() {
+    const proof = await caches.open(APP_SHELL_CACHE)
+        .then((cache) => cache.match(INCUMBENT_METADATA_URL))
+        .then((response) => response?.json()).catch(() => null);
+    return proof?.schema === 1 && proof.current === APP_SHELL_VERSION
+        && validShellVersion(proof.previous) && proof.previous !== APP_SHELL_VERSION ? proof.previous : null;
+}
+async function retainedStaticCaches() {
+    const proof = await caches.open(APP_SHELL_CACHE).then((cache) => cache.match(INCUMBENT_METADATA_URL))
+        .then((response) => response?.json()).catch(() => null);
+    if (proof?.schema !== 1 || proof.current !== APP_SHELL_VERSION || !validShellVersion(proof.previous))
+        return [];
+    const incumbent = proof.previous.replace('business-os-app-shell-', 'business-os-static-');
+    return [incumbent, ...(Array.isArray(proof.migrationStaticCaches) ? proof.migrationStaticCaches : [])]
+        .filter((name, index, names) => typeof name === 'string' && /^business-os-static-[A-Za-z0-9_-]{1,128}$/.test(name) && names.indexOf(name) === index);
+}
 const FILE_CHUNK_ENDPOINTS = {
     init: '/api/sync/files/chunks/init',
     chunk: '/api/sync/files/chunks/:uploadId/chunk',
@@ -373,41 +423,15 @@ async function precacheAppShell() {
     // already looking at finishes loading.
     pendingDeferredAssets = [...new Set(deferredAssets.filter((url) => (!requiredEntryAssets.includes(url) && !optionalEagerAssets.includes(url))))];
 }
-// A worker that is ALREADY running with a poisoned shell cannot be waited
-// out politely. It answers every navigation with a response the browser
-// rejects (see isValidDocumentResponse), so the user sees a blank page and
-// there is no app left in which to press Update -- and a waiting worker
-// parks until the last client using the old one goes away. The phone that
-// hit the Sep 17 outage is in exactly that state: it is holding the poison
-// right now, and the fix has to reach it without the user being able to ask
-// for it. So a new install checks the generations it is replacing, and takes
-// over immediately when one of them cannot serve a navigation at all.
-async function priorShellIsUnservable(keys) {
-    const priorShells = keys.filter((key) => key.startsWith('business-os-app-shell-') && key !== APP_SHELL_CACHE);
-    for (const name of priorShells) {
-        const cache = await caches.open(name).catch(() => null);
-        if (!cache)
-            continue;
-        for (const url of ['/index.html', '/']) {
-            const entry = await cache.match(url).catch(() => null);
-            if (entry && !isValidDocumentResponse(entry))
-                return true;
-        }
-    }
-    return false;
-}
 async function cacheNamesToRetain(keys) {
     const retained = new Set([APP_SHELL_CACHE, STATIC_CACHE]);
-    const priorShells = keys.filter((key) => key.startsWith('business-os-app-shell-') && key !== APP_SHELL_CACHE);
-    const records = await Promise.all(priorShells.map(async (name) => {
-        const metadata = await caches.open(name)
-            .then((cache) => cache.match(CACHE_METADATA_URL))
-            .then((response) => response?.json?.())
-            .catch(() => null);
-        return { name, installedAt: Number(metadata?.installedAt || 0) };
-    }));
-    records.sort((a, b) => b.installedAt - a.installedAt);
-    const previous = records[0]?.name;
+    const previous = await readIncumbentVersion();
+    // Unknown incumbent must not turn an identity timeout into draft-breaking
+    // cache deletion. Timestamps can identify an abandoned waiting worker.
+    if (!previous)
+        return new Set(keys);
+    for (const name of await retainedStaticCaches())
+        retained.add(name);
     if (previous) {
         retained.add(previous);
         retained.add(previous.replace('business-os-app-shell-', 'business-os-static-'));
@@ -653,22 +677,9 @@ function syncOutboxOnce() {
     // writes after this upgrade. Existing rows remain available for review.
     return Promise.resolve({ success: false, manual_recovery_required: true });
 }
-// DEPLOY-TIME CONFLICT, spelled out because the three handlers below all
-// touch it: the moment a deploy lands, a phone still running the OLD build
-// meets the NEW Worker and the NEW sw.js at once.
-//  - Navigations. The old worker keeps serving, and its appShellFallback is
-//    network-first; the document still carries the must-revalidate headers
-//    frontend/public/_headers declares (the Worker re-sets the same value on
-//    the admin-host rewrite), so the old client fetches the current
-//    index.html instead of replaying a cached one and never pins itself to a
-//    stale shell.
-//  - Caches. The new worker precaches under its OWN build hash, so the old
-//    page keeps serving from the generation it installed with. A FAILED new
-//    install therefore deletes only the caches that did not exist before it
-//    started -- never the running generation the old page is still reading.
-//  - Update prompt. A parked worker never takes the session; the page offers
-//    an update only when the waiting build hash actually differs from the one
-//    it is running (index.tsx asks this worker for its version below).
+// Installation never reloads documents. Legacy shell-policy migration can
+// replace the controller while old documents and drafts keep running; their
+// exact incumbent static generation is retained. Normal capable upgrades wait.
 self.addEventListener('install', (event) => {
     event.waitUntil((async () => {
         // Which of this generation's caches already existed. precacheAppShell
@@ -689,14 +700,26 @@ self.addEventListener('install', (event) => {
                 .map((name) => caches.delete(name).catch(() => { })));
             throw error;
         }
-        // Do not take over a live checkout or editor mid-session. Updated workers
-        // wait until the user closes the old client or explicitly chooses Update;
-        // the first install still activates normally because there is no incumbent.
-        if (self.registration.active) {
-            // The one case where waiting is worse than taking over: the incumbent
-            // is serving a shell the browser refuses, so the session it is
-            // protecting does not exist.
-            if (await priorShellIsUnservable(await caches.keys()).catch(() => false)) {
+        await (await caches.open(APP_SHELL_CACHE)).delete(INCUMBENT_METADATA_URL);
+        const incumbent = self.registration.active;
+        if (incumbent) {
+            const identity = await probeIncumbent(incumbent);
+            if (identity && self.registration.active === incumbent && identity.version !== APP_SHELL_VERSION) {
+                const cache = await caches.open(APP_SHELL_CACHE);
+                await cache.put(INCUMBENT_METADATA_URL, new Response(JSON.stringify({
+                    schema: 1, current: APP_SHELL_VERSION, previous: identity.version,
+                    // An old controller may have served newer HTML into a live draft.
+                    // Keep its already-existing static generations for this migration.
+                    migrationStaticCaches: identity.legacy ? (await caches.keys()).filter((name) => /^business-os-static-[A-Za-z0-9_-]{1,128}$/.test(name)) : [],
+                }), { headers: { 'Content-Type': 'application/json' } }));
+                if (self.registration.active !== incumbent)
+                    await cache.delete(INCUMBENT_METADATA_URL);
+            }
+            // One-time migration: legacy controllers can poison a healthy cache
+            // AFTER this install. Waiting for corruption is therefore too late.
+            // Take control, never reload documents or replay queued writes. Capable
+            // future workers retain normal consent-based waiting.
+            if (identity?.legacy && self.registration.active === incumbent && identity.version !== APP_SHELL_VERSION) {
                 await self.skipWaiting();
                 return;
             }
@@ -749,7 +772,7 @@ self.addEventListener('message', (event) => {
     // -- without this reply it cannot tell a genuinely newer shell from the
     // build the page is already running, and would prompt for both.
     if (event?.data?.type === 'BUSINESS_OS_APP_VERSION_REQUEST') {
-        event.ports?.[0]?.postMessage({ type: 'BUSINESS_OS_APP_VERSION', version: APP_SHELL_VERSION });
+        event.ports?.[0]?.postMessage({ type: 'BUSINESS_OS_APP_VERSION', version: APP_SHELL_VERSION, shellPolicy: SHELL_POLICY });
     }
 });
 function isSameOrigin(requestUrl) {
@@ -802,14 +825,11 @@ function isCacheableStaticPath(pathname) {
 // slow-but-alive connection (the reported iOS lag) made every navigation
 // wait for the full round trip before the shell could even start parsing.
 // Serve the cached shell immediately when one exists and refresh it in the
-// background instead -- the cache is safe to trust because APP_SHELL_CACHE
-// is named after THIS worker's own BUILD_HASH (see the const above): a new
-// deploy runs an entirely new worker with an entirely new cache, so this
-// can never serve an old build's shell under a new build's version. That
-// guarantee lives in the cache-name boundary, not in this function, and is
-// unaffected by this change -- the BUSINESS_OS_APP_VERSION_REQUEST reply in
-// the message handler above is the actual new-build detector and still
-// answers with this worker's real APP_SHELL_VERSION either way. Falls back
+// background instead. Canonical revalidation can fetch a newer HTML document
+// while this worker still controls the tab: document and controller versions
+// are intentionally distinct. Only verified HTML may replace the shell.
+// BUSINESS_OS_APP_VERSION_REQUEST identifies the controller, not the document.
+// Falls back
 // to a live fetch (and its normal offline error) only when there is no
 // cached shell yet, e.g. the very first navigation this worker serves.
 async function appShellFallback(request, event) {
@@ -853,7 +873,7 @@ async function cacheFirstStatic(request, event) {
     // fails the module parse on every load, forever. Drop it and go to network.
     if (cached && !isValidStaticResponse(request, cached)) {
         await cache.delete(request).catch(() => { });
-        return fetchAndCacheStatic(request, event, cache);
+        return await retainedStaticAsset(request) || fetchAndCacheStatic(request, event, cache);
     }
     if (cached) {
         const refresh = fetch(request)
@@ -866,7 +886,21 @@ async function cacheFirstStatic(request, event) {
         event.waitUntil(refresh);
         return cached;
     }
-    return fetchAndCacheStatic(request, event, cache);
+    return await retainedStaticAsset(request) || fetchAndCacheStatic(request, event, cache);
+}
+async function retainedStaticAsset(request) {
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin || !/^\/assets\/[^/]+-[A-Za-z0-9_-]+\.(js|css)$/.test(url.pathname))
+        return null;
+    for (const name of await retainedStaticCaches()) {
+        const cache = await caches.open(name);
+        const response = await cache.match(request);
+        const mime = String(response?.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        const validMime = url.pathname.endsWith('.css') ? mime === 'text/css' : /^(text|application)\/(javascript|ecmascript)$/.test(mime);
+        if (validMime && isValidStaticResponse(request, response))
+            return response;
+    }
+    return null;
 }
 async function fetchAndCacheStatic(request, event, cache) {
     const response = await fetch(request);
