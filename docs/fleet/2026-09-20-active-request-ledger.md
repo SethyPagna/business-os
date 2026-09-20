@@ -3,7 +3,26 @@
 This supplements, not replaces, earlier issue ledgers and screenshots/video evidence.
 Recorded means tracked; implemented does not mean verified or deployed.
 
-## Current release and newly verified gaps
+## Current authoritative checkpoint
+
+Production: cbbebe5841f8 / Worker49b64606-d25a-4894-b630-6baa371005d1 (Paid).
+Locald731220e includes Shift pagination/scope fixes, reviewed custom-table namespace
+protection and dead LoadingScreen cleanup with live recovery tests. Not deployed.
+Frontend full80907 finished503/504,zero skips; only missing new pager inventory
+failed, now corrected and focusedpasses. Browser found real History paging/Refresh
+failures; correction3b287861 underreview, rebuild/browser retest required.
+
+Owner tracking migration approval EXISTS after verification; no new remote apply.
+0185/0186/0187 and0188 remain isolated. Returns complete export endpoint/UI and
+transfer legacy retirement/admission/reset integration remain incomplete. D1 real
+binding-limit regression is being corrected; no Free capacity certification.
+Protected-table restore/reset fix and safe component cleanup are locally reviewed,
+not evidence that whole restore consistency or all dead-code work is complete.
+
+The dated checkpoint narratives below are retained for provenance and superseded
+by this section and progress.md where they conflict. Full scope is unchanged.
+
+## Historical release and verification snapshots
 
 Latest stock-in scope checkpointcbbebe5841f8 deployed as49b64606-d25a-4894-b630-6baa371005d1.
 Frontend504/504 and browser6/6, local gates and live report/detail smoke pass;

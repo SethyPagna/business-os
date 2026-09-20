@@ -1,3 +1,27 @@
+## Reset protection and safe cleanup integrated; browser release gate held — September 20
+
+Locald731220e includes reviewed custom-table restore/reset protection5e9cfb80
+(review8af97bcf), unused LoadingScreen removal8bef864a with executable live-root
+recovery tests (reviewsf0582eeb/297b41d0), and Shift pager inventory correction.
+Root33 actual restore/reset cases,18backup checks,20reset checks,Worker typecheck,
+7pagination inventory checks and live-boundary/iOS tests pass. Handle80935 TERMINAL0.
+
+Full frontend80907 TERMINAL1:503pass/1fail of504,zero skips,510358ms.
+Failure was missing two new Shift consumers in paginationSurfaceContract inventory;
+d731220e updates only that inventory and focused test passes. No full-green claim.
+Browser0e38c8d8 found actual HistoryNext snapback and warm-cache Refresh no request;
+regression3710b741 records both. Other Reports245-selection and A-B-A stale-response
+checks pass. Isolated correction3b287861 is under independent review; rebuild and
+browser retest still required. NOT deployed; production remainscbbebe5841f8.
+
+Returns endpoint0167e6b2 remains isolated:1205-row nativeSQL tests pass, but actual
+D1 rejected101bindings for valid compoundsearch. Writer correcting boundedbinding
+handling and publishedfunction-argument contract, with fullrouteworkerd tests;
+UI hookup underway. Legacy transfer retirement0188/b5abeb3a under independent
+review; no migration applied remotely. High-member atomic restore Free budget,
+full admission/generation/restore source pinning and route integration remain open.
+Full goal active; earlier status snapshots below are historical, not current proof.
+
 ## Shift fixes integrated and local gates pass; reset protection pending — September 20
 
 Local0e38c8d8 integrates reviewed Shift pagination, one-SQL count/page and
