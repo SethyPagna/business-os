@@ -49,7 +49,7 @@ await runTest('service worker preserves conflicts and auth failures instead of o
 })
 
 await runTest('browser no longer registers or messages automatic business replay', () => {
-  assert.match(webApiSource, /registerOutboxBackgroundSync/)
+  assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
   assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
   assert.doesNotMatch(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.doesNotMatch(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
@@ -59,21 +59,22 @@ await runTest('browser no longer registers or messages automatic business replay
   assert.doesNotMatch(webApiSource, /function syncBackgroundAuthSessionToken/)
 })
 
-await runTest('vault-unlocked foreground sync decrypts outbox payloads and reports progress', () => {
+await runTest('vault-unlocked foreground replay is denied without decryption or network dispatch', () => {
   assert.match(webApiSource, /async function syncUnlockedOfflineOutbox/)
-  assert.match(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
-  assert.match(webApiSource, /\/api\/sync\/outbox/)
+  assert.doesNotMatch(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
+  assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\//)
+  assert.match(webApiSource, /code: 'legacy_recovery_required'/)
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_PROGRESS/)
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_CONFLICT/)
   assert.match(webApiSource, /async function syncUnlockedOfflineFileChunks/)
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_FILE_PROGRESS/)
 })
 
-await runTest('offline file chunk failure status writes are bounded', () => {
+await runTest('disabled offline file replay does not change retained chunk status', () => {
   assert.match(webApiSource, /const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3/)
   assert.match(webApiSource, /async function mapOfflineFileChunkStatusUpdates/)
   assert.match(webApiSource, /Math\.min\(OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY, list\.length\)/)
-  assert.match(webApiSource, /await mapOfflineFileChunkStatusUpdates\(rows, \(row\) => offlineDb\.offline_file_chunks\.update/)
+  assert.doesNotMatch(webApiSource, /offlineDb\.offline_file_chunks\.(update|put|delete)\(/)
   assert.doesNotMatch(webApiSource, /Promise\.all\(rows\.map\(\(row\) => (dexieDb|offlineDb)\.offline_file_chunks\.update/)
 })
 
@@ -90,7 +91,7 @@ await runTest('online maintenance keeps the offline mirror and app shell fresh w
 
 await runTest('legacy sale payloads retain their original identity and never disappear on conflicts', () => {
   assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
-  assert.match(webApiSource, /registerOutboxBackgroundSync/)
+  assert.doesNotMatch(webApiSource, /registerOutboxBackgroundSync/)
   assert.doesNotMatch(saleWriteTransportSource, /registerOutboxBackgroundSync/)
   assert.match(saleWriteTransportSource, /emitSyncQueueChanged/)
   assert.match(saleWriteTransportSource, /payload.client_request_id !== row.id/)

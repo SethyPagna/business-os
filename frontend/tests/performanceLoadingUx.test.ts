@@ -229,11 +229,12 @@ assert.match(app, /const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000/, 'initia
 assert.match(app, /const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000/, 'deferred pending-sync read should still run during a long-lived session')
 assert.match(app, /const PENDING_SYNC_POLL_INTERVAL_MS = 20_000/, 'pending-sync polling cadence should stay explicit')
 assert.match(app, /function useSyncErrorBanner\(user: AppUser \| null\)/, 'pending sync polling should know whether an authenticated user exists')
-assert.match(app, /if \(!user \|\| typeof window === 'undefined'\) \{[\s\S]*setPendingSync\(null\)[\s\S]*return undefined[\s\S]*const refreshPendingSync = \(\) => \{[\s\S]*getAppShellApi\(\)\.getPendingSyncState/, 'logged-out startup should not register sync banner listeners or load the full API registry just to read pending sync')
+assert.match(app, /setPendingSync\(null\)[\s\S]*if \(!owner \|\| typeof window === 'undefined'\) return undefined[\s\S]*const refreshPendingSync = \(\) => \{\s*if \(!isCurrent\(\)\) return[\s\S]*getAppShellApi\(\)\.getPendingSyncState/, 'unverified/logged-out startup should clear old state and not register sync listeners or read pending sync')
+assert.match(app, /function pendingSaleOwnerForUser[\s\S]*if \(!user \|\| isActorSessionQuarantined\(\)\) return null/, 'only a current authenticated, nonquarantined actor can admit the deferred queue read')
 assert.match(app, /function scheduleDeferredPendingSyncPolling\(refresh: \(\) => void\): CancelWarmup \{[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*window\.setInterval\(refresh, PENDING_SYNC_POLL_INTERVAL_MS\)[\s\S]*PENDING_SYNC_INITIAL_REFRESH_DELAY_MS/, 'pending sync polling should be created only after the initial startup window')
 assert.match(app, /const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)[\s\S]*const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling\(refreshPendingSync\)/, 'pending sync refresh and polling should both stay behind the authenticated guard')
 assert.doesNotMatch(app, /const timer = window\.setInterval\(refreshPendingSync, 20_000\)/, 'pending sync polling should not allocate an immediate first-paint interval')
-assert.match(app, /\}, \[user\]\)/, 'pending sync listeners should re-evaluate when bootstrap validates or clears the stored user')
+assert.match(app, /\}, \[user, ownerKey\]\)/, 'pending sync listeners should re-evaluate when bootstrap validates/clears the actor or its authority changes')
 assert.match(appContext, /const hasRecoverableSession = !!\(user\?\.id \|\| getStoredUserPayload\(\)\)[\s\S]*if \(!hasRecoverableSession\) \{[\s\S]*return undefined[\s\S]*const quickCheck = window\.setTimeout\(poll, 100\)/, 'signed-out startup should skip sync listeners and websocket polling until a stored or active user exists')
 assert.match(httpApi, /let healthLifecycleListenersRegistered = false/, 'health lifecycle listeners should be one-shot and not module-load work')
 assert.match(httpApi, /export function startHealthCheck\(\): void \{\s*ensureHealthLifecycleListeners\(\)/, 'health lifecycle listeners should install only when authenticated health polling starts')
@@ -271,7 +272,7 @@ assert.doesNotMatch(serviceWorker, /function isHashedBuildAsset/, 'the hashed/un
 assert.doesNotMatch(serviceWorker, /function networkFirstStatic/, 'networkFirstStatic is dead now that its only caller was removed')
 assert.match(app, /function scheduleInitialPendingSyncRefresh\(refresh: \(\) => void\): CancelWarmup/, 'pending-sync startup refresh should use a cancellable idle scheduler')
 assert.match(app, /window\.requestIdleCallback\(run, \{ timeout: PENDING_SYNC_IDLE_TIMEOUT_MS \}\)/, 'pending-sync startup refresh should prefer idle time')
-assert.match(app, /if \(!user \|\| typeof window === 'undefined'\) \{[\s\S]*return undefined[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods or register listeners during logged-out first shell render')
+assert.match(app, /if \(!owner \|\| typeof window === 'undefined'\) return undefined[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'sync banner should not import API methods or register listeners during logged-out or unverified first shell render')
 assert.doesNotMatch(app, /window\.addEventListener\('sync:queue-changed'[\s\S]{0,500}\n\s*refreshPendingSync\(\)\n\s*const timer/, 'sync banner should defer the first pending-sync read instead of running it synchronously')
 assert.match(app, /function useDeferredImportTrackerMount\(user: AppUser \| null\): boolean/, 'background import tracker should mount through an explicit deferred hook')
 assert.match(app, /if \(event\.type === 'import-job:activity'\) return true/, 'deferred import tracker should wake immediately on explicit import-job activity')
@@ -691,7 +692,8 @@ assert.match(contactReadTransport, /await import\('\.\/lazyLocalDb\.ts'\)/, 'POS
 assert.match(contactReadTransport, /await import\('\.\/localMirrors\.ts'\)/, 'POS contact read mirroring should load mirror helpers only after the delayed mirror timer')
 assert.doesNotMatch(contactWriteTransport, /import .*['"]\.\/requestIds\.ts['"]/, 'POS contact quick-create writes should not import the shared app-api-methods request-id owner')
 assert.match(contactWriteTransport, /function ensureContactClientRequestId/, 'POS contact quick-create writes should keep a tiny local request-id helper')
-assert.match(saleWriteTransport, /export async function createSale[\s\S]*queueOfflineSale/, 'sale write transport should own checkout create and offline queue fallback outside the broad API registry')
+assert.match(saleWriteTransport, /export async function createSale[\s\S]*createSaleRequest\(salePayload\)[\s\S]*code: 'sale_confirmation_required'/, 'focused sale transport owns online checkout and preserves uncertain request identity outside the broad API registry')
+assert.doesNotMatch(saleWriteTransport, /queueOfflineSale\(/, 'online-only checkout must never fall back to new offline business writes')
 assert.match(saleWriteTransport, /export function syncPendingSalesQueue/, 'sale write transport should preserve pending offline sale sync through its same-context single-flight wrapper')
 assert.doesNotMatch(saleWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"|from '\.\/salesTransport\.ts'|from "\.\/salesTransport\.ts"|from '\.\/requestIds\.ts'|from "\.\/requestIds\.ts"/, 'sale write transport should not import the broad API registry, sales read/mirror transport, or shared request-id owner')
 assert.match(saleWriteTransport, /function ensureSaleClientRequestId/, 'sale write transport should keep a tiny local request-id helper so checkout does not wake app-api-methods')
@@ -791,7 +793,7 @@ assert.doesNotMatch(offlineSnapshotTransport, /from '\.\/methods\.ts'|from "\.\/
 assert.match(apiMethods, /function loadSaleWriteTransport\(\) \{[\s\S]*import\('\.\/saleWriteTransport\.ts'\)/, 'legacy API registry should lazy-load the focused sale write transport without creating a manual chunk cycle')
 assert.match(apiMethods, /export async function createSale\(d\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return createSaleRequest\(d\)/, 'legacy API registry should delegate createSale to the focused sale write transport')
 assert.match(apiMethods, /function loadPendingSyncTransport\(\) \{[\s\S]*import\('\.\/pendingSyncTransport\.ts'\)/, 'legacy API registry should lazy-load the focused pending sync transport')
-assert.match(apiMethods, /export async function retryPendingSyncNow\(\) \{[\s\S]*await loadPendingSyncTransport\(\)[\s\S]*return retryPendingSyncNowRequest\(\)/, 'legacy pending-sync retry should delegate to the focused pending sync transport')
+assert.match(apiMethods, /export async function retryPendingSyncNow\(reviewToken\?: string\) \{[\s\S]*await loadPendingSyncTransport\(\)[\s\S]*return retryPendingSyncNowRequest\(reviewToken\)/, 'legacy pending-sync recovery should delegate the immutable review token to its focused transport')
 assert.doesNotMatch(apiMethods, /sync_queue|serializePendingSyncPreview|syncPendingSalesQueue\(\{ force: true \}\)/, 'legacy API registry should not keep pending-sync queue Dexie or retry implementation details')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/pendingSyncTransport\.ts'\)\) return 'pending-sync-api'/, 'pending sync queue transport should have a named intent chunk')
 assert.match(apiMethods, /function loadDriveSyncTransport\(\) \{[\s\S]*import\('\.\/driveSync\.ts'\)/, 'legacy API registry should lazy-load the focused Drive sync transport')
@@ -861,7 +863,8 @@ assert.match(webApi, /function isPublicRuntimePath\(\): boolean \{[\s\S]*pathnam
 assert.match(webApi, /const skipOfflineBootstrapDb = isPublicRuntimePath\(\)[\s\S]*if \(!skipOfflineBootstrapDb\) \{\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.delete\('sync_token'\)\)\s*\}/, 'retired token Dexie cleanup should be skipped for public portal startup')
 assert.match(webApi, /scheduleBootstrapStorageMaintenance\(\(\) => \{[\s\S]*localStorage\.setItem\(STORAGE_KEYS\.SYNC_SERVER, url\)[\s\S]*\}\)[\s\S]*if \(!skipOfflineBootstrapDb\) \{\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: url \}\)\)\s*\}/, 'backend-origin sync URL should persist to localStorage while skipping the IndexedDB mirror on public portal')
 assert.match(webApi, /if \(!skipOfflineBootstrapDb\) \{[\s\S]*const db = await getOfflineDb\(\)[\s\S]*const stored = await db\.settings\.bulkGet\(\['sync_server_url'\]\)/, 'Vite dev IndexedDB sync URL fallback should stay available outside public portal startup')
-assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*loadSaleWriteTransportModule\(\)[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/, 'logged-in idle maintenance should retry pending sale sync through the focused sale write transport')
+assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*refreshOfflineSnapshotSoon\(force\)/, 'logged-in idle maintenance may refresh read snapshots outside first paint')
+assert.doesNotMatch(webApi, /module\.syncPendingSalesQueue\(/, 'startup, idle and reconnect must not automatically replay retained business sales')
 assert.match(webApi, /function refreshOfflineSnapshotSoon\(force = false\): void \{[\s\S]*loadOfflineSnapshotTransportModule\(\)[\s\S]*refreshOfflineDeviceSnapshot\(\{ force \}\)/, 'offline snapshot refresh should use the focused offline snapshot transport')
 assert.doesNotMatch(webApi, /getLazyApiMethod\('(?:retryPendingSyncNow|refreshOfflineDeviceSnapshot)'\)/, 'idle offline maintenance should call focused transports instead of the broad API registry')
 assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*const recoverForegroundSession = \(reason: string, force = false, refreshData = false\): boolean => \{[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(force\)\.catch[\s\S]*runOfflineMaintenance\(force\)[\s\S]*window\.addEventListener\('online'[\s\S]*recoverForegroundSession\('network-online', true, false\)[\s\S]*window\.addEventListener\('focus'[\s\S]*recoverAfterBackground\('window-focus'\)[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*recoverAfterBackground\('visibility-resume'\)[\s\S]*window\.addEventListener\('sync:reconnected'/, 'online/focus/visibility recovery listeners should delegate to the centralized throttled foreground-recovery path')
@@ -871,7 +874,9 @@ assert.doesNotMatch(webApi, /setSyncServerUrl\(url: unknown\)[\s\S]{0,900}getOff
 assert.doesNotMatch(webApi, /try \{\s*await dexieDb\.settings\.(?:delete|put)/, 'web API bootstrap should not await Dexie maintenance before connecting')
 assert.doesNotMatch(webApi, /dexieDb\.settings/, 'web API should not call Dexie settings through a startup static import')
 assert.match(webApi, /async function unlockOfflineVault[\s\S]*const offlineDb = await getOfflineDb\(\)[\s\S]*offlineDb\.offline_vault/, 'offline vault should load local DB on demand')
-assert.match(webApi, /async function syncUnlockedOfflineOutbox[\s\S]*const offlineDb = await getOfflineDb\(\)[\s\S]*offlineDb\.sync_outbox/, 'offline outbox sync should load local DB on demand')
+const disabledGenericReplay = webApi.match(/async function syncUnlockedOfflineOutbox[^\n]*\{[\s\S]*?\n\}/)?.[0] || ''
+assert.match(disabledGenericReplay, /code: 'legacy_recovery_required'/, 'legacy generic replay must reject until ownership-verified recovery exists')
+assert.doesNotMatch(disabledGenericReplay, /getOfflineDb\(|apiFetch\(/, 'disabled generic replay must not load local DB or dispatch writes')
 assert.match(webApi, /if \(url\) \{[\s\S]*setSyncServerUrl\(url\)[\s\S]*if \(hasStoredUserSession\(\)\) \{[\s\S]*ensureSessionRecoveryListeners\(\)[\s\S]*scheduleConnectWS\(\)[\s\S]*startHealthCheck\(\)[\s\S]*scheduleInitialOfflineMaintenance\(\)/, 'web API bootstrap should start recovery loops only when a stored session exists and delay the first websocket connect')
 assert.doesNotMatch(webApi, /startHealthCheck\(\)[^\n]*\n\s*runOfflineMaintenance\(\)/, 'web API bootstrap should not run offline maintenance synchronously')
 assert.match(appContext, /getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)[\s\S]*reconnectWS\(\)[\s\S]*startHealthCheck\(\)/, 'successful login should install recovery listeners before reconnecting websocket and health checks')
@@ -2582,12 +2587,12 @@ assert.match(
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(reviewToken\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
   'server queue retry should timeout slow queue actions',
 )
 assert.match(
   serverPage,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\(\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\('Reviewed pending sales were cleared\.', reviewToken\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/,
   'server queue discard should timeout slow queue actions',
 )
 assert.match(
