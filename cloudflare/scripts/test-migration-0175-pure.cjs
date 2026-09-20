@@ -1,6 +1,6 @@
 // Pins migration 0175 (catalog cost recompute backfill) on a SYNTHETIC
-// fixture over the REAL migration chain: the same cases the P10-4 helper
-// test (test-catalog-cost-recompute-native.cjs) pins, applied in bulk.
+// fixture over the REAL migration chain. This pins the historical backfill,
+// not the later prospective catalog rule in test-catalog-cost-recompute-native.cjs.
 //
 // Run: node scripts/test-migration-0175-pure.cjs
 const fs = require('fs')
@@ -64,16 +64,10 @@ assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM catalog_cost_recompute_017
 assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM undo_snapshots WHERE kind = 'catalog.cost_recompute_backfill'").get().c, 1)
 assert.strictEqual(db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE action = 'catalog_cost_recompute_backfill'").get().c, 1)
 
-// Same result as the helper's own statement (single source of formula).
-const { catalogCostRecomputeStatement } = (() => {
-  // The TS helper is not loadable here; assert against the exact SQL twin
-  // text instead so a formula change in either place breaks this test.
-  const ts = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'catalogCostRecompute.ts'), 'utf8')
-  assert.match(ts, /WHEN MAX\(cost\) > 2 \* MIN\(cost\) THEN MAX\(cost\)/)
-  assert.match(ts, /ELSE ROUND\(SUM\(cost\) \* 1\.0 \/ COUNT\(\*\), 4\)/)
-  assert.match(sql0175, /WHEN MAX\(cost\) > 2 \* MIN\(cost\) THEN MAX\(cost\) ELSE ROUND\(SUM\(cost\) \* 1\.0 \/ COUNT\(\*\), 4\)/)
-  return { catalogCostRecomputeStatement: true }
-})()
-assert.ok(catalogCostRecomputeStatement)
+// Historical migration remains immutable: its outlier rule is intentional
+// even though prospective receipts now use every distinct positive price.
+// Runtime behavior has separate native catalog/receipt coverage; never edit
+// this historical migration to match a later business-rule change.
+assert.match(sql0175, /WHEN MAX\(cost\) > 2 \* MIN\(cost\) THEN MAX\(cost\) ELSE ROUND\(SUM\(cost\) \* 1\.0 \/ COUNT\(\*\), 4\)/)
 
 console.log('test-migration-0175-pure: ok (mean/dedup/zero/inactive/outlier/rounding, untouched rows, purchase mirror, snapshot, idempotent)')

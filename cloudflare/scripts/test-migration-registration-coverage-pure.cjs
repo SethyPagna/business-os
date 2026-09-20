@@ -9,7 +9,8 @@
 // companion cloudflare/scripts/test-migration-<NNNN>*-pure.cjs (a single
 // test file may cover more than one number, e.g. test-migration-0165-0166-
 // pure.cjs covers both 0165 and 0166 -- the migration number just has to
-// appear in the filename), OR an explicit ALLOWLIST entry with a reason.
+// appear in the filename), a verified NAMED_COMPANIONS entry, OR an explicit
+// ALLOWLIST entry with a reason.
 // 0165 is the floor because it is the oldest migration already under this
 // convention: earlier migrations (0164 and below) are pinned by
 // differently-named scripts (verify-0164-supplier-clusters.cjs etc.) that
@@ -33,6 +34,12 @@ const ALLOWLIST = {
   // 9999: 'covered instead by scripts/test-something-else-pure.cjs because ...',
 }
 
+// These are real test-*.cjs sweep companions, not coverage exemptions.
+// Require the named file to exist so deleting/renaming it fails this guard.
+const NAMED_COMPANIONS = {
+  184: 'test-product-cost-previous-migration-native.cjs',
+}
+
 function listMigrationNumbers() {
   return fs.readdirSync(MIGRATIONS_DIR)
     .filter((f) => f.endsWith('.sql'))
@@ -47,6 +54,13 @@ function listMigrationNumbers() {
 function listCoveredNumbers() {
   const files = fs.readdirSync(SCRIPTS_DIR).filter((f) => /^test-migration-.*-pure\.cjs$/.test(f))
   const covered = new Set()
+  for (const [number, file] of Object.entries(NAMED_COMPANIONS)) {
+    assert.match(file, /^test-.*\.cjs$/, 'companion must be picked up by the Worker sweep')
+    assert.ok(fs.existsSync(path.join(SCRIPTS_DIR, file)), `missing migration ${number} companion: ${file}`)
+    const source = fs.readFileSync(path.join(SCRIPTS_DIR, file), 'utf8')
+    assert.ok(source.includes(`${String(number).padStart(4, '0')}_`), `companion must reference migration ${number}`)
+    covered.add(Number(number))
+  }
   for (const file of files) {
     // Pull every 4-digit run out of the filename, e.g.
     // "test-migration-0165-0166-pure.cjs" -> [165, 166].
@@ -83,4 +97,4 @@ assert.deepStrictEqual(
   [],
   `migration(s) ${uncovered.map((n) => String(n).padStart(4, '0')).join(', ')} have no test-migration-<NNNN>*-pure.cjs companion and no ALLOWLIST entry -- add a test file or an allowlist reason`,
 )
-console.log(`PASS every migration from 0${FLOOR} up (${migrationNumbers.length} migrations) has a test-migration-*-pure.cjs companion or an allowlisted reason`)
+console.log(`PASS every migration from 0${FLOOR} up (${migrationNumbers.length} migrations) has a numbered or verified named companion, or an allowlisted reason`)
