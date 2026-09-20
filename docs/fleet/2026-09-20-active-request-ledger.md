@@ -12,6 +12,25 @@ entries for that slice only. Other admin/public/Freecapacity items stay open.
 
 ### Active completion goal and next wave
 
+Next integrated local source29a93f46 adds Dashboard timestamp preservation and
+continuous backend bounds, with stale-response masking/fences. Root reruns:
+275 actual SQL/handler checks and frontend executed-loader/state checks pass.
+This postdates the501-file broad run below and is NOT covered by that whole run.
+Returns browser commit9431dc47:12/12 on pinned a789e527 build (3 responsive/time
+cases plus9 native-service-worker auth cases). Synthetic Returns GETs verify UI
+and request contracts, not D1 filtering; desktop/Android/iOS engines, no hardware.
+
+Statement helpers integrated403d2010 include verified supported-year parity;
+endpoint remains unwired. Proposed transfer migration0185/store stays in isolated
+branch233d604d: independent review reproduced a matching child receipt committed
+outside the run wrapper without advancing progress. Fix required before integration;
+backup/restore/reset integration and remote approval also remain blockers.
+Shift candidate01f9a833 remains held: admin visibility passes, but report dates
+were ignored by selected-shift loading. Writer correcting this. Reports partial
+clock silently broadening date ranges is another bounded fix in progress.
+Transfer preliminary lot read is NOT wholly dead: Telegram consumes its takes;
+safe removal must reuse authoritative planner metadata rather than drop details.
+
 Integrated local checkpoint a789e527: frontend test:utils501/501 files, zero skips;
 frontend and Worker typechecks pass; EN/KM5892-key check passes; build269chunks,
 zero cycles, public preload excludes admin/file/import code. This covers Returns
