@@ -72,8 +72,9 @@ export function sealTransferRunChunkStatements(input: RunPosition & {
  * This is API-enforced batching, NOT a schema transaction-bound marker: arbitrary
  * direct SQL can persist an executing status. Do not expose status mutation.
  * Duplicate/lost-ack commit: read committedTransferRunChunk before planning;
- * on CAS/unique failure read it again, never replay effects under another key. */
-export async function commitTransferRunChunk(db: D1Compat, input: RunPosition,
+ * on failure recover in a SUBSEQUENT request, never replay effects under another
+ * key. No same-invocation batch retry or fallback to retrying batch() is allowed. */
+export async function commitTransferRunChunk(db: Pick<D1Compat, 'batchOnce'>, input: RunPosition,
   transferStatements: readonly Statement[], maxAtomicStatements: number): Promise<void> {
   const params = position(input)
   if (!transferStatements.length) throw new Error('Transfer effects required')
@@ -94,7 +95,7 @@ export async function commitTransferRunChunk(db: D1Compat, input: RunPosition,
   if (!Number.isSafeInteger(maxAtomicStatements) || maxAtomicStatements < statements.length) {
     throw new Error('Transfer atomic envelope exceeds reserved statement budget')
   }
-  await db.batch(statements)
+  await db.batchOnce(statements)
 }
 
 export function transitionTransferRunStatements(input: RunPosition & { status: 'active' | 'paused' | 'abandoned' }): Statement[] {
