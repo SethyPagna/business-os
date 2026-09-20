@@ -25,8 +25,6 @@
 //
 // 2. Code that LOOKS dead by this flag but is pinned by another test's exact
 //    source-regex assertion (removing it would turn that test red):
-//    - src/AppContext.tsx LoadingScreen (tests/iosLayoutGuards.test.ts pins
-//      its minHeight calc string)
 //    - src/components/branches/TransferModal.tsx handleTransfer + its two
 //      timeout constants (tests/branchTransferReason.test.ts,
 //      tests/mutationSuccessContract.test.ts,
