@@ -153,12 +153,25 @@ export class D1Compat {
   // (e.g. check stock availability) as a separate read *before* building
   // the batch, then send every write as one atomic unit -- same shape the
   // original backend/src/routes/sales.ts already uses.
-  async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
-    const prepared = statements.map(({ sql, params }) => {
+  private prepareBatch(statements: Array<{ sql: string; params?: BindParams }>): D1PreparedStatement[] {
+    return statements.map(({ sql, params }) => {
       const { sql: translatedSql, values } = translate(sql, params)
       return this.d1.prepare(translatedSql).bind(...values)
     })
+  }
+
+  async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
+    const prepared = this.prepareBatch(statements)
     return withD1Retry(() => this.d1.batch(prepared))
+  }
+
+  /** Explicit single-attempt atomic write. Only callers with durable idempotency
+   * and subsequent-request recovery should opt in. A rejected promise may mean
+   * the batch committed but its acknowledgement was lost; do not infer rollback.
+   * Existing batch/read retry behavior deliberately remains unchanged.
+   */
+  async batchOnce(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
+    return this.d1.batch(this.prepareBatch(statements))
   }
 
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {

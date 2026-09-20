@@ -27,7 +27,7 @@ const execute = statements => db.transaction(() => {
 let batchCalls = 0
 const adapter = {
   prepare(sql) { return { async get(params) { return db.prepare(sql).get(params) } } },
-  async batch(statements) { batchCalls++; execute(statements) },
+  async batchOnce(statements) { batchCalls++; execute(statements) },
 }
 const register = (runId, requestId) => execute(store.registerTransferRunStatements({ ...owner, runId, ...request(requestId), scope: 'branches' }))
 const seal = (runId, child, revision = 0, sequence = 0, final = true) => execute(store.sealTransferRunChunkStatements({
@@ -98,11 +98,14 @@ await assert.rejects(store.commitTransferRunChunk(adapter, position('run-main'),
 await assert.rejects(store.commitTransferRunChunk(adapter, position('run-main'), effects('unrelated-child'), 7), /immutable|CHECK/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline)
 const beforeBudgetCalls = batchCalls
+let fallbackCalls = 0
+await assert.rejects(commit({ async batch() { fallbackCalls++ } }), /batchOnce/)
+assert.equal(fallbackCalls, 0, 'store must never fall back to retrying batch')
 await assert.rejects(commit(adapter, 6), /budget/)
 await assert.rejects(commit(adapter, NaN), /budget/)
 assert.equal(batchCalls, beforeBudgetCalls, 'budget rejection makes no DB call')
 // Fault the atomic adapter after the final progress statement; no prefix leaks.
-await assert.rejects(commit({ ...adapter, async batch(statements) {
+await assert.rejects(commit({ ...adapter, async batchOnce(statements) {
   execute([...statements, { sql: 'INSERT INTO branches(name) VALUES(NULL)' }])
 } }), /NOT NULL/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline)
