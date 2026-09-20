@@ -161,8 +161,26 @@ for (const surface of surfaces) {
   const source = read(surface.file)
   assert.match(source, /import InvoiceDetailFloat from '\.\/InvoiceDetailFloat\.tsx'/, `${surface.file}: uses the shared float, not a private copy`)
 
-  const cell = stateCell(source, surface.cell)
-  assert.equal(cell.initial, null, `${surface.file}: the list opens with no float`)
+  if (surface.file === 'StockInInvoicesSection.tsx') {
+    const hook = read('useStockInInvoiceReport.ts')
+    let view = evaluate(variable(hook, 'emptyView'))()
+    assert.equal(view.detailGroup, null, 'Stock-In starts with no float')
+    const row = { supplier_key: 'id:1', received_day: '2026-09-20' }
+    const requests: unknown[] = []
+    const update = (fn: (v: any) => any) => { view = fn(view) }
+    evaluate(variable(hook, 'openGroup'), { current: () => true, update, view,
+      groupKeyOf: (g: typeof row) => `${g.supplier_key}|${g.received_day}`,
+      loadLines: (...args: unknown[]) => requests.push(args),
+    })(row)
+    assert.equal(view.detailGroup, row, 'executed hook opens the clicked invoice')
+    assert.deepEqual(requests, [[row, 1]], 'opening uncached invoice loads its first page')
+    const close = find(hook, n => ts.isPropertyAssignment(n) && n.name.getText() === 'closeGroup')[0] as ts.PropertyAssignment
+    evaluate(close.initializer.getText(), { update })()
+    assert.equal(view.detailGroup, null, 'executed close clears the selected invoice')
+  } else {
+    const cell = stateCell(source, surface.cell)
+    assert.equal(cell.initial, null, `${surface.file}: the list opens with no float`)
+  }
 
   // The row's own click handler, executed. A grep for the component name would
   // pass on a float that nothing can open.
@@ -179,7 +197,7 @@ for (const surface of surfaces) {
   const element = source.indexOf('<InvoiceDetailFloat')
   assert.ok(guard >= 0, `${surface.file}: the float must be guarded by the ${slot} slot`)
   assert.ok(element > guard, `${surface.file}: the float must render inside the ${slot} guard, never unconditionally`)
-  assert.match(source, /onClose=\{\(\) => set\w+\(null\)\}/, `${surface.file}: closing the float clears its slot`)
+  assert.match(source, surface.file === 'StockInInvoicesSection.tsx' ? /onClose=\{closeGroup\}/ : /onClose=\{\(\) => set\w+\(null\)\}/, `${surface.file}: closing the float clears its slot`)
 }
 
 // The four ledgers must also stop hiding their rows behind a sideways scroll
@@ -240,7 +258,7 @@ for (const file of ['StockInInvoicesSection.tsx', 'ApInvoicesSection.tsx', 'ArIn
   // lines table (its second, inner occurrence) still lives inside the float.
   assert.ok(stockIn.indexOf('data-invoice-ledger-scroll', float) > float, 'the Stock-In lines table is the float\'s content')
   assert.ok(stockIn.indexOf('loadLines(detailGroup, nextPage)') > float, 'and its line pager pages the lines inside the float')
-  assert.match(stockIn, /const \[lineCache, setLineCache\]/, 'the per-group line cache is named for what it is, not for an expand that no longer exists')
+  assert.match(read('useStockInInvoiceReport.ts'), /lineCache: Record<string, LinesState>/, 'the scoped per-group line cache is named for what it is, not for an expand that no longer exists')
 }
 
 console.log(`PASS ${surfaces.length} invoice lists open the shared float from a row click and clear it on close`)

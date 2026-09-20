@@ -40,6 +40,19 @@ function load(name: string, state: Record<string, unknown> = {}): any {
     if (id === 'react/jsx-runtime') return require(id)
     if (id.includes('AppContext')) return { useApp: () => ({ user }) }
     if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts }
+    if (id.includes('useStockInInvoiceReport')) {
+      // Execute the real scoped hook, supplying already-loaded state just as
+      // the other ledgers' useState initializers are supplied above. Keep
+      // prices present even after permission revocation: rendering must omit
+      // them without relying on a fresh server response.
+      const hookSource = readFileSync(new URL('../src/components/contacts/useStockInInvoiceReport.ts', import.meta.url), 'utf8')
+        .replace('({ scope, view: emptyView() })', '({ scope, view: { ...emptyView(), ...testState } })')
+      const hook = { exports: {} as any }
+      const code = ts.transpileModule(hookSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+      new Function('require', 'exports', 'testState', code)(mockedRequire, hook.exports, state)
+      return hook.exports
+    }
+    if (id.includes('actorReadScope')) return { captureActorReadScope: () => ({ authority: 'test', revision: '0' }), isActorReadScopeCurrent: () => true }
     if (id.includes('InvoiceLedgerSummary')) return { default: load('InvoiceLedgerSummary') }
     if (id.includes('InvoiceDetailFloat')) return { default: Detail }
     if (id.includes('formatters')) return { fmtDateOnly: (value: string) => value, fmtDate: (value: string) => value }

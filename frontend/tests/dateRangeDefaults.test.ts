@@ -220,7 +220,9 @@ const todayInvoiceSurfaces = [
 ] as const
 for (const surface of todayInvoiceSurfaces) {
   const dates = todayPair(surface.file, '[fromDate, setFromDate]', '[toDate, setToDate]')
-  const request = evaluate(requestArgs(dates.source, surface.endpoint)[0], {
+  const requestSource = surface.endpoint === 'getStockInInvoiceReport'
+    ? read('contacts/useStockInInvoiceReport.ts') : dates.source
+  const request = evaluate(requestArgs(requestSource, surface.endpoint)[0], {
     ...surface.context, fromDate: dates.from, toDate: dates.to, page: 1, pageSize: 20,
   })
   assert.deepEqual([request.from, request.to], [day1, day1], `${surface.endpoint} first request is Today`)
@@ -356,8 +358,7 @@ const cursorRequest = evaluate(requestArgs(salesExport, 'getSalesExport')[2], {
 assert.deepEqual([cursorRequest.snapshotMaxId, cursorRequest.afterCreatedAt, cursorRequest.afterId],
   ['91', '2026-09-11T04:00:00Z', '44'], 'export paging cursor remains independent from the default range')
 
-const stockInSource = read('contacts/StockInInvoicesSection.tsx')
-const lineRequest = evaluate(requestArgs(stockInSource, 'getStockInInvoiceLines')[0], {
+const lineRequest = evaluate(requestArgs(read('contacts/useStockInInvoiceReport.ts'), 'getStockInInvoiceLines')[0], {
   group: { supplier_key: 'supplier:7', received_day: '2026-08-31' }, branchId: 'all',
   linePage: 3, LINE_PAGE_SIZE: 100,
 })
