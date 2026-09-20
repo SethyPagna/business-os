@@ -29,7 +29,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, readFifoLotAvailability, allocateAcrossLots, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
+import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -2409,30 +2409,12 @@ app.post('/transfer', async (c) => {
       : null)
   if (directionError) return c.json({ error: directionError }, 400)
 
-  // The LOTS move with the quantity (Part-77 CRITICAL, x3 audits): this
-  // route used to move only the plain branch_stock total, leaving every
-  // branch_batch_stock row at the source -- the exact per-branch lot drift
-  // migration 0081 had to repair after the fact. This surface has no lot
-  // picker, so the transferred quantity is auto-allocated across the source
-  // branch's active lots with the SAME FIFO policy checkout uses for an
-  // unpicked line (readFifoLotAvailability/allocateAcrossLots, Z0) -- the
-  // lot rows themselves keep their identity, only which branch holds their
-  // quantity changes. Any `uncovered` remainder is legacy stock the lot
-  // ledger never tracked; it moves on branch_stock alone, exactly like a
-  // sale of untracked stock, so the transfer never CREATES new drift.
-  // Strict (unclamped) source decrements: a concurrent sale that empties a
-  // lot between the read above and this batch violates branch_batch_stock's
-  // CHECK(quantity >= 0) and aborts the WHOLE atomic batch -- a clamped
-  // decrement here would floor the source lot at 0 while the destination
-  // still gained the full take, minting stock out of a race.
-  const sourceLots = await readFifoLotAvailability(db, productId, fromBranchId)
-  const { takes, uncovered } = allocateAcrossLots(sourceLots, quantity)
-  // 0084 blank-honest stamping: one lot truthfully owning the whole
-  // movement stamps it; a multi-lot or partly-untracked transfer stays NULL.
-  const movementBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
-
+  // The provenance planner alone allocates FIFO lots and untracked stock,
+  // guards their preimages, and builds the atomic ledger/movement/undo batch.
+  // Its immutable metadata also drives Telegram after commit: a second FIFO
+  // read here could describe a different allocation than the committed plan.
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
-  const { statements } = await planTransferOperation(db, {
+  const { statements, allocationSummaries } = await planTransferOperation(db, {
     user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
     fromBranchId, toBranchId, reason,
     lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
@@ -2467,8 +2449,8 @@ app.post('/transfer', async (c) => {
         fromBranch: fromBranch?.name || null, toBranch: toBranch?.name || null, note: reason, by: actorSnapshot(user),
         items: [{
           product: product.name, quantity,
-          receivedDate: takes.length === 1 ? takes[0].receivedAt || null : null,
-          lot: takes.length === 1 ? takes[0].lotCode || null : null,
+          receivedDate: allocationSummaries[0].takes.length === 1 ? allocationSummaries[0].takes[0].receivedAt || null : null,
+          lot: allocationSummaries[0].takes.length === 1 ? allocationSummaries[0].takes[0].lotCode || null : null,
           fromOnHand: fromRow ? Number(fromRow.quantity) || 0 : null, toOnHand: toRow ? Number(toRow.quantity) || 0 : null,
           totalOnHand: totalRow ? Number(totalRow.stock_quantity) || 0 : null,
         }],

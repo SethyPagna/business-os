@@ -22,17 +22,17 @@ const ts = require('typescript')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 
-function transpile(relPath) {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'src', relPath), 'utf8')
+function transpile(relPath, transform = source => source) {
+  const src = transform(fs.readFileSync(path.join(__dirname, '..', 'src', relPath), 'utf8'))
   return ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: path.basename(relPath),
   }).outputText
 }
 
-function loadModule(relPath, requireShim) {
+function loadModule(relPath, requireShim, transform) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, requireShim, module)
+  new Function('exports', 'require', 'module', transpile(relPath, transform))(module.exports, requireShim, module)
   return module.exports
 }
 
@@ -69,6 +69,9 @@ let routeDb = null
 let routeUser = null
 let routeAudits = []
 let routeWaits = []
+let telegramInputs = []
+let queryReads = []
+let beforeBatch = null
 const noop = () => null
 const asyncNoop = async () => null
 // The one shared reason-length cap. REAL, not a stub: the point of the
@@ -92,7 +95,7 @@ const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
   if (id === './sqlBinding') return sqlBinding
   return require(id)
 })
-const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
+const inventoryRequire = (id) => {
   if (id === '../lib/acquisitionCostAccess') return loadModule('lib/acquisitionCostAccess.ts', dep => dep === './permissions' ? loadModule('lib/permissions.ts', require) : require(dep))
   if (id === '../lib/stockCondition') return taggedStockCondition
   if (id === '../lib/damagedLotActions') return taggedLotActions
@@ -134,7 +137,8 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
     throw new Error('unexpected transfer dependency '+dep)
   })
   if (id === '../lib/transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)
-  if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop, formatTransferTelegramLines: noop, sendTelegramEvent: asyncNoop }
+  if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop,
+    formatTransferTelegramLines: input => { telegramInputs.push(input); return [] }, sendTelegramEvent: asyncNoop }
   if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
   if (id === '../lib/familyPagination') return { paginateProductFamilies: asyncNoop }
   if (id === '../lib/productSalesLedger') return { buildProductSalesLedgerSql: noop }
@@ -161,7 +165,8 @@ const inventoryRoute = loadModule('routes/inventory.ts', (id) => {
   // runs here), but the module-level import must still resolve.
   if (id === '../lib/catalogCostRecompute') return { recomputeCatalogCost: asyncNoop }
   throw new Error(`unexpected inventory route import ${id}`)
-})
+}
+const inventoryRoute = loadModule('routes/inventory.ts', inventoryRequire)
 const inventoryApp = inventoryRoute.default
 inventoryApp.onError((error) => new Response(JSON.stringify({ error: error.message }), {
   status: 500,
@@ -175,8 +180,8 @@ function wrapDb(sqlite) {
     prepare(sql) {
       const stmt = sqlite.prepare(sql)
       return {
-        get: async (params) => (Array.isArray(params) ? stmt.get(...params) : stmt.get(params || {})),
-        all: async (params) => (Array.isArray(params) ? stmt.all(...params) : stmt.all(params || {})),
+        get: async (params) => { queryReads.push(sql); return Array.isArray(params) ? stmt.get(...params) : stmt.get(params || {}) },
+        all: async (params) => { queryReads.push(sql); return Array.isArray(params) ? stmt.all(...params) : stmt.all(params || {}) },
         run: async (params) => (Array.isArray(params) ? stmt.run(...params) : stmt.run(params || {})),
       }
     },
@@ -190,6 +195,7 @@ function wrapDb(sqlite) {
       })
       // D1's batch() rejects asynchronously; better-sqlite3 throws in place.
       try {
+        if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(sqlite) }
         tx(statements)
         return Promise.resolve()
       } catch (error) {
@@ -216,8 +222,8 @@ function freshDb() {
   return db
 }
 
-async function routeRequest(body) {
-  const response = await inventoryApp.request('/transfer', {
+async function routeRequest(body, app = inventoryApp) {
+  const response = await app.request('/transfer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ transfer_provenance_version: 1, ...body }),
@@ -314,11 +320,10 @@ await check('source lock: the route allocates FIFO, decrements STRICT, and stamp
   const routeAt = src.indexOf("app.post('/transfer'")
   assert.ok(routeAt > -1)
   const body = src.slice(routeAt, src.indexOf("app.post('/", routeAt + 20) === -1 ? undefined : src.indexOf("app.post('/", routeAt + 20))
-  assert.ok(/readFifoLotAvailability\(db, productId, fromBranchId\)/.test(body), 'must read source-lot availability')
-  assert.ok(/allocateAcrossLots\(sourceLots, quantity\)/.test(body), 'must allocate FIFO across the source lots')
+  assert.ok(!/readFifoLotAvailability|allocateAcrossLots/.test(body), 'only the authoritative planner may read/allocate FIFO')
   assert.match(body, /await planTransferOperation\(db,/, 'route uses exact provenance planner')
   assert.match(body, /destProductId: productId/, 'inventory transfer preserves product identity')
-  assert.ok(/takes\.length === 1 && uncovered === 0 \? takes\[0\]\.batchId : null/.test(body), '0084 blank-honest movement stamping')
+  assert.match(body, /allocationSummaries\[0\]\.takes/, 'Telegram uses the authoritative immutable plan summary')
 })
 
 await check('the real Inventory transfer handler applies independent forward and opposite-direction transfers', async () => {
@@ -372,6 +377,7 @@ await check('Inventory transfer replay returns its receipt without moving stock 
   routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
   routeAudits = []
   routeWaits = []
+  telegramInputs = []
   const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'replay-safe inventory move', client_request_id: 'inventory-replay-1' }
   const first = await routeRequest(body)
   assert.strictEqual(first.status, 200, JSON.stringify(first.json))
@@ -384,6 +390,96 @@ await check('Inventory transfer replay returns its receipt without moving stock 
   assert.strictEqual(routeDb.prepare('SELECT COUNT(*) AS total FROM inventory_movements').get().total, 2)
   assert.strictEqual(routeDb.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE action='transfer_intent'").get().total, 1)
   await Promise.all(routeWaits)
+  assert.strictEqual(telegramInputs.length, 1, 'receipt replay never sends a second transfer notice')
+})
+
+await check('real route reads FIFO only once and Telegram matches committed allocations for every tracking shape', async () => {
+  for (const scenario of [
+    { name: 'single', quantity: 2, tracked: [2, 0], uncovered: 0, date: '2026-08-01', lot: 'A' },
+    { name: 'fifo-mixed', quantity: 8, tracked: [6, 2], uncovered: 0, date: null, lot: null },
+    { name: 'mixed-untracked', quantity: 12, tracked: [6, 4], uncovered: 2, date: null, lot: null },
+    { name: 'single-untracked', quantity: 8, tracked: [6, 0], uncovered: 2, date: '2026-08-01', lot: 'A', removeB: true },
+    { name: 'untracked', quantity: 2, tracked: [0, 0], uncovered: 2, date: null, lot: null, removeAll: true },
+  ]) {
+    routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+    routeWaits = []; telegramInputs = []; queryReads = []
+    if (scenario.removeB) routeDb.exec('DELETE FROM branch_batch_stock WHERE batch_id=102')
+    if (scenario.removeAll) routeDb.exec('DELETE FROM branch_batch_stock')
+    const result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2,
+      quantity: scenario.quantity, reason: scenario.name, client_request_id: `metadata-${scenario.name}` })
+    assert.strictEqual(result.status, 200, JSON.stringify(result.json))
+    await Promise.all(routeWaits)
+    const fifoQueries = queryReads.filter(sql => /bbs\.quantity AS available/.test(sql))
+    assert.strictEqual(fifoQueries.length, 1, 'formerly two FIFO queries: route preliminary + authoritative planner')
+    assert.match(fifoQueries[0], /pb\.variant_product_id IN/, 'remaining FIFO read is the batched planner reader')
+    assert.deepStrictEqual([lotQty(routeDb, 101, 2), lotQty(routeDb, 102, 2)], scenario.tracked)
+    const member = routeDb.prepare('SELECT allocations_json,untracked_quantity FROM transfer_operation_members').get()
+    const allocations = JSON.parse(member.allocations_json)
+    assert.strictEqual(member.untracked_quantity, scenario.uncovered)
+    assert.strictEqual(telegramInputs.length, 1)
+    const item = telegramInputs[0].items[0]
+    assert.strictEqual(item.receivedDate, scenario.date)
+    assert.strictEqual(item.lot, scenario.lot)
+    assert.strictEqual(item.receivedDate, allocations.length === 1 ? allocations[0].source_snapshot.received_at : null)
+    assert.strictEqual(item.lot, allocations.length === 1 ? allocations[0].source_snapshot.lot_code : null)
+    assert.strictEqual(item.quantity, scenario.quantity)
+    assert.strictEqual(item.fromOnHand, 12 - scenario.quantity)
+    assert.strictEqual(item.toOnHand, scenario.quantity)
+    assert.strictEqual(item.totalOnHand, 12)
+    routeDb.close()
+  }
+})
+
+await check('actual handler costs exactly one fewer read than the removed preliminary FIFO-read oracle', async () => {
+  // Reinsert only the removed read/allocation in the REAL route body. All
+  // handler/planner/commit/notification behavior and DB wrappers stay identical.
+  const legacyApp = loadModule('routes/inventory.ts', inventoryRequire, source => {
+    const marker = "  const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }"
+    assert.strictEqual(source.split(marker).length, 2)
+    return source.replace(marker, `  const legacyBatches = require('../lib/productBatches')
+  const legacyLots = await legacyBatches.readFifoLotAvailability(db, productId, fromBranchId)
+  legacyBatches.allocateAcrossLots(legacyLots, quantity)
+${marker}`)
+  }).default
+  const counts = []
+  for (const app of [legacyApp, inventoryApp]) {
+    routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+    routeWaits = []; queryReads = []; telegramInputs = []
+    const result = await routeRequest({ productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2,
+      reason: 'query parity', client_request_id: 'query-parity' }, app)
+    assert.strictEqual(result.status, 200, JSON.stringify(result.json))
+    await Promise.all(routeWaits)
+    counts.push(queryReads.length)
+    assert.strictEqual(queryReads.filter(sql => /bbs\.quantity AS available/.test(sql)).length, app === legacyApp ? 2 : 1)
+    assert.strictEqual(telegramInputs[0].items[0].lot, 'A')
+    routeDb.close()
+  }
+  assert.strictEqual(counts[0] - counts[1], 1, JSON.stringify(counts))
+})
+
+await check('real route race rolls back without Telegram; same request retries a fresh guarded plan once', async () => {
+  routeDb = freshDb(); routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+  routeWaits = []; telegramInputs = []
+  beforeBatch = db => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1; UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1')
+  const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'race retry', client_request_id: 'metadata-race-retry' }
+  const failed = await routeRequest(body)
+  assert.strictEqual(failed.status, 500, JSON.stringify(failed.json))
+  await Promise.all(routeWaits)
+  assert.strictEqual(telegramInputs.length, 0)
+  assert.strictEqual(stockQty(routeDb, 1), 9); assert.strictEqual(stockQty(routeDb, 2), 0)
+  assert.strictEqual(routeDb.prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n, 0)
+  assert.strictEqual(routeDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
+  const retried = await routeRequest(body)
+  assert.strictEqual(retried.status, 200, JSON.stringify(retried.json))
+  await Promise.all(routeWaits)
+  assert.strictEqual(telegramInputs.length, 1)
+  assert.strictEqual(telegramInputs[0].items[0].lot, null)
+  assert.strictEqual(stockQty(routeDb, 1), 1); assert.strictEqual(stockQty(routeDb, 2), 8)
+  const replay = await routeRequest(body)
+  assert.strictEqual(replay.json.replayed, true)
+  await Promise.all(routeWaits)
+  assert.strictEqual(telegramInputs.length, 1)
+  assert.strictEqual(stockQty(routeDb, 2), 8)
 })
 
 await check('Inventory rejects same, unknown, inactive, duplicate-role, reasonless, and non-Full transfers without effects', async () => {

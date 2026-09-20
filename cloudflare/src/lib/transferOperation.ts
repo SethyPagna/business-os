@@ -18,6 +18,11 @@ type Lot = { id: number; variant_product_id: number; batch_key: string; lot_code
 type Allocation = { source_batch_id: number; destination_batch_id: number | null; destination_batch_key: string; quantity: number; source_snapshot: Lot; destination_snapshot: Lot | null; cost_snapshot: MovementCostPair }
 type Member = { source_product_id: number; destination_product_id: number; source_branch_id: number; destination_branch_id: number; quantity: number; untracked_quantity: number; source_snapshot: string; destination_snapshot: string; allocations_json: string; ordinal: number }
 export type TransferLine = { productId: number; destProductId: number; quantity: number; batchId?: number | null }
+export type TransferAllocationSummary = Readonly<{
+  ordinal: number
+  takes: readonly Readonly<{ batchId: number; quantity: number; receivedAt: string | null; lotCode: string | null }>[]
+  untrackedQuantity: number
+}>
 export class TransferConflictError extends Error { statusCode = 409 }
 const productSnapshotSql = `json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active)`
 const lotSnapshotSql = `json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_code,'received_at',received_at,'expiry_date',expiry_date,'notes',notes)`
@@ -42,7 +47,7 @@ export async function planTransferOperation(db: D1Compat, args: {
   user: SessionUser; requestId: string; requestJson: string; digest: string;
   scope: Scope; fromBranchId: number; toBranchId: number; reason: string;
   lines: TransferLine[]; response: Record<string, unknown>;
-}): Promise<{ statements: Statement[]; operationId: string }> {
+}): Promise<{ statements: Statement[]; operationId: string; allocationSummaries: readonly TransferAllocationSummary[] }> {
   const operationId = crypto.randomUUID()
   const params = { operation: operationId, actor: args.user.id, name: actorSnapshot(args.user), request: args.requestId,
     requestJson: args.requestJson, digest: args.digest, scope: args.scope }
@@ -51,6 +56,7 @@ export async function planTransferOperation(db: D1Compat, args: {
       VALUES(@actor,@request,@digest,@requestJson,'planning',@operation,1,'applied',0)`, params,
   }, transferIntentAuditStatement({ actorId: args.user.id, actorName: actorSnapshot(args.user), requestId: args.requestId, requestJson: args.requestJson, digest: args.digest, bulk: args.lines.length > 1 })]
   const members: Member[] = []
+  const allocationSummaries: TransferAllocationSummary[] = []
   const pendingLots = new Map<string, string>()
 
   // ---------------------------------------------------------------------
@@ -191,6 +197,14 @@ export async function planTransferOperation(db: D1Compat, args: {
       }
       allocations.push({ source_batch_id: take.batchId, destination_batch_id: destination?.id ?? null, destination_batch_key: key, quantity: take.quantity, source_snapshot: sourceLot, destination_snapshot: destination, cost_snapshot: costSnapshot })
     }
+    // Detached, immutable notification metadata from the exact source snapshots
+    // persisted below. Consumers never allocate again or mutate the SQL plan.
+    allocationSummaries.push(Object.freeze({ ordinal, untrackedQuantity: uncovered,
+      takes: Object.freeze(allocations.map(allocation => Object.freeze({
+        batchId: allocation.source_batch_id, quantity: allocation.quantity,
+        receivedAt: allocation.source_snapshot.received_at, lotCode: allocation.source_snapshot.lot_code,
+      }))),
+    }))
     const member: Member = { ordinal, source_product_id: line.productId, destination_product_id: line.destProductId,
       source_branch_id: args.fromBranchId, destination_branch_id: args.toBranchId, quantity: line.quantity,
       untracked_quantity: uncovered, source_snapshot: JSON.stringify({ ...JSON.parse(snapshots[0]!.snapshot),
@@ -214,7 +228,7 @@ export async function planTransferOperation(db: D1Compat, args: {
     params: { operation: operationId, response: JSON.stringify(args.response), explicit: args.lines.length === 1 && args.lines[0].batchId != null ? 1 : 0 } })
   // D1 bound/query limits are explicit; no partial chunk commits of a transfer.
   if (statements.length > 5000) throw new TransferConflictError('This transfer has too many received dates. Split it into smaller transfers.')
-  return { statements, operationId }
+  return { statements, operationId, allocationSummaries: Object.freeze(allocationSummaries) }
 }
 
 function transferEffectStatements(operation: string, reverse: boolean, generation: number, user: SessionUser, reason: string): Statement[] {
