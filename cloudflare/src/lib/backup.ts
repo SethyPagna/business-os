@@ -277,9 +277,9 @@ type BackupPayload = {
 // Best-effort: a fresh test database (or a very old deployment) may not
 // have d1_migrations at all -- then this is null and the restore-time
 // schema comparison simply doesn't run.
-async function latestAppliedMigration(env: Env): Promise<string | null> {
+async function latestAppliedMigration(env: Env, knownTables?: ReadonlySet<string>): Promise<string | null> {
   try {
-    if (!(await tableExists(env, 'd1_migrations'))) return null
+    if (knownTables ? !knownTables.has('d1_migrations') : !(await tableExists(env, 'd1_migrations'))) return null
     const row = await env.DB.prepare('SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1').first<{ name: string }>()
     return row?.name || null
   } catch (_) {
@@ -1180,11 +1180,29 @@ function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   return requested
 }
 
-async function restoreDependencyError(env: Env, documentTables: ReadonlySet<string>): Promise<string | null> {
-  const liveTables = new Set<string>()
-  for (const table of BACKUP_TABLES) {
-    if (await tableExists(env, table)) liveTables.add(table)
-  }
+type RestoreSchemaRow = { table_name: string; parent_table: string | null; fk_id: number | null; fk_seq: number | null }
+type RestoreSchema = { tables: ReadonlySet<string>; references: readonly RestoreSchemaRow[] }
+const MAX_RESTORE_SCHEMA_ROWS = 10000
+
+// One statement captures all relevant live tables and every FK component from
+// the same schema snapshot. LEFT JOIN retains tables with no foreign keys.
+// The full allowlist (not just this document) is required for absent parents
+// AND children. Internal D1/custom-data tables are not restore targets.
+async function discoverRestoreSchema(env: Env): Promise<RestoreSchema> {
+  const result = await env.DB.prepare(`
+    SELECT m.name AS table_name, f."table" AS parent_table, f.id AS fk_id, f.seq AS fk_seq
+    FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name) AS f ON 1 = 1
+    WHERE m.type = 'table' AND m.name IN (SELECT value FROM json_each(?))
+    ORDER BY m.name, f.id, f.seq
+    LIMIT ${MAX_RESTORE_SCHEMA_ROWS + 1}
+  `).bind(JSON.stringify([...BACKUP_TABLES, 'd1_migrations'])).all<RestoreSchemaRow>()
+  const references = result.results || []
+  if (references.length > MAX_RESTORE_SCHEMA_ROWS) throw new Error('Restore schema exceeds the safe discovery limit; no database rows have been changed.')
+  return { tables: new Set(references.map(row => row.table_name)), references }
+}
+
+function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlySet<string>): string | null {
+  const liveTables = new Set<string>(BACKUP_TABLES.filter(table => schema.tables.has(table)))
   const restored = new Set([...liveTables].filter(table => documentTables.has(table)))
   if (restored.size === liveTables.size) return null
   const missing = new Set<string>()
@@ -1199,12 +1217,10 @@ async function restoreDependencyError(env: Env, documentTables: ReadonlySet<stri
   // Table presence, not current row counts, determines safety: an empty table
   // can gain rows between validation and restore. Unrelated scoped backups
   // (e.g. settings alone) still work.
-  for (const table of liveTables) {
-    const references = await env.DB.prepare(`PRAGMA foreign_key_list(${qid(table)})`).all<{ table: string }>()
-    for (const reference of references.results || []) {
-      if (!liveTables.has(reference.table) || restored.has(table) === restored.has(reference.table)) continue
-      missing.add(restored.has(table) ? reference.table : table)
-    }
+  for (const reference of schema.references) {
+    const table = reference.table_name, parent = reference.parent_table
+    if (!liveTables.has(table) || !parent || !liveTables.has(parent) || restored.has(table) === restored.has(parent)) continue
+    missing.add(restored.has(table) ? parent : table)
   }
   if (!missing.size) return null
   return `Cannot restore this backup: missing dependency tables: ${[...missing].sort().join(', ')}. `
@@ -1229,10 +1245,9 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   //   Pass 2 -- stream rows and INSERT them in batches; capture the small
   //             r2/summary metadata (which follows the tables) for asset restore.
 
-  // Pass 1: which BACKUP_TABLES are present in this document AND exist live.
-  // Also captures the trailing summary meta -- the schema guard below must
-  // run on it BEFORE pass 2 deletes anything.
-  const presentTables: string[] = []
+  // Pass 1 validates the complete document and collects its table names and
+  // trailing summary. Resolve live table presence once after this pass, before
+  // pass 2 deletes anything; do not query D1 once per document table.
   const documentTables = new Set<string>()
   let pass1Summary: BackupPayload['summary'] | null = null
   const validatedSource = await openPinnedBackupSource(env, key)
@@ -1247,9 +1262,6 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       if (ev.type === 'row' && ev.table === 'custom_tables') assertCustomTableName(ev.row?.name)
       if (ev.type === 'table' && !documentTables.has(ev.table)) {
         documentTables.add(ev.table)
-        if ((BACKUP_TABLES as readonly string[]).includes(ev.table) && await tableExists(env, ev.table)) {
-          presentTables.push(ev.table)
-        }
       } else if (ev.type === 'meta' && ev.key === 'summary') {
         pass1Summary = ev.value as BackupPayload['summary']
       }
@@ -1258,6 +1270,11 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   } finally {
     await validatedSource.body.cancel().catch(() => {})
   }
+
+  // Discover once after the complete document has been validated. Every
+  // pre-destructive table/dependency/migration decision uses this live graph.
+  const liveSchema = await discoverRestoreSchema(env)
+  const presentTables = [...documentTables].filter(table => (BACKUP_TABLES as readonly string[]).includes(table) && liveSchema.tables.has(table))
 
   // Schema guard (Part-77): the insert below writes only the intersection of
   // the backup's columns and the live table's columns, so restoring a backup
@@ -1268,7 +1285,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // is reported, not blocked. Backups from before this stamp carry no
   // schemaMigration and skip the comparison.
   const backupMigration = pass1Summary?.schemaMigration ?? null
-  const liveMigration = await latestAppliedMigration(env)
+  const liveMigration = await latestAppliedMigration(env, liveSchema.tables)
   const backupMigrationNumber = migrationNumber(backupMigration)
   const liveMigrationNumber = migrationNumber(liveMigration)
   if (backupMigrationNumber != null && liveMigrationNumber != null && backupMigrationNumber > liveMigrationNumber) {
@@ -1292,7 +1309,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 
   // Recheck against the live schema even if the caller already validated the
   // document. This MUST precede progress callbacks and every DELETE/write.
-  const dependencyError = await restoreDependencyError(env, documentTables)
+  const dependencyError = restoreDependencyError(liveSchema, documentTables)
   if (dependencyError) throw new Error(dependencyError)
 
   // Order by BACKUP_TABLES (the writer's dependency order) so the reverse
@@ -1432,7 +1449,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 export async function validateCloudflareBackup(env: Env, source: string) {
   const key = resolveBackupKey(source)
   const streamed = await inspectCloudflareBackupStream(await openBackupStream(env, key))
-  const dependencyError = await restoreDependencyError(env, new Set(streamed.tableNames))
+  const dependencyError = restoreDependencyError(await discoverRestoreSchema(env), new Set(streamed.tableNames))
   const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
   const lifecycle = await getCloudflareBackupState(env, backupName)
   const copiedCount = lifecycle?.copiedKeys.length ?? streamed.r2?.copiedKeys?.length ?? streamed.summary?.assetsBackedUp ?? 0
