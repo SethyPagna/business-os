@@ -35,13 +35,35 @@ export interface MaintenanceState {
   rowsDone?: number
   error?: string
   updatedAt: string
+  // Read-time observation only; not persisted in the lease or used as owner.
+  revision?: string
+}
+
+async function stateRevision(raw: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 function parseState(raw: unknown): MaintenanceState | null {
   if (typeof raw !== 'string' || !raw) return null
   try {
-    const value = JSON.parse(raw) as MaintenanceState
-    return value && value.mode === 'restore' && value.token ? value : null
+    const value = JSON.parse(raw)
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.mode !== 'restore') return null
+    for (const field of ['token', 'backupKey', 'startedAt', 'startedBy', 'updatedAt']) {
+      if (typeof value[field] !== 'string' || !value[field].trim()) return null
+    }
+    if (!Number.isFinite(Date.parse(value.startedAt)) || !Number.isFinite(Date.parse(value.updatedAt))) return null
+    if (!['deleting', 'inserting', 'assets', 'failed'].includes(value.phase)) return null
+    if (value.table !== undefined && typeof value.table !== 'string') return null
+    if (value.error !== undefined && typeof value.error !== 'string') return null
+    if (value.rowsDone !== undefined && (typeof value.rowsDone !== 'number' || !Number.isFinite(value.rowsDone) || value.rowsDone < 0)) return null
+    // Construct only validated fields; do not reflect unknown stored properties
+    // (including a forged read-time revision) into the API or audit records.
+    return { mode: 'restore', token: value.token, backupKey: value.backupKey,
+      startedAt: value.startedAt, startedBy: value.startedBy, updatedAt: value.updatedAt,
+      phase: value.phase, ...(value.table !== undefined ? { table: value.table } : {}),
+      ...(value.error !== undefined ? { error: value.error } : {}),
+      ...(value.rowsDone !== undefined ? { rowsDone: value.rowsDone } : {}) }
   } catch {
     return null
   }
@@ -51,10 +73,17 @@ export async function getMaintenance(env: Env): Promise<MaintenanceState | null>
   try {
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
-    return parseState(row?.value)
-  } catch {
-    // Fail-open: no system_flags table (pre-0089 local DB) = no maintenance.
-    return null
+    if (!row) return null
+    const state: MaintenanceState = parseState(row.value) || {
+      mode: 'restore', token: '', backupKey: '', startedAt: '', startedBy: '',
+      phase: 'failed', updatedAt: '', error: 'Maintenance state is corrupt. An administrator must inspect and explicitly clear it.',
+    }
+    return { ...state, revision: await stateRevision(row.value) }
+  } catch (error) {
+    // Only the legacy missing-table case is compatible absence. An unavailable
+    // database must not silently admit writes during a potentially held lease.
+    if (/\bno such table:\s*(?:main\.)?system_flags(?:\s*:\s*SQLITE_ERROR)?\s*$/i.test(error instanceof Error ? error.message : String(error))) return null
+    throw error
   }
 }
 
@@ -62,14 +91,6 @@ export async function getMaintenance(env: Env): Promise<MaintenanceState | null>
 // caller decides whether to surface "force clear first"). Returns the state
 // with the holder token the caller uses for updates/end.
 export async function beginMaintenance(env: Env, input: { backupKey: string; startedBy: string }): Promise<MaintenanceState> {
-  const existing = await getMaintenance(env)
-  if (existing) {
-    throw new Error(
-      `A restore is already in progress (or a crashed one was never cleared): started ${existing.startedAt} by ${existing.startedBy}, `
-      + 'last phase ' + existing.phase + (existing.table ? ` on ${existing.table}` : '')
-      + '. Clear maintenance first if that restore is dead.',
-    )
-  }
   const state: MaintenanceState = {
     mode: 'restore',
     token: crypto.randomUUID(),
@@ -79,36 +100,44 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     phase: 'deleting',
     updatedAt: new Date().toISOString(),
   }
-  await writeState(env, state)
+  const result = await env.DB.prepare(`INSERT INTO system_flags (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO NOTHING`)
+    .bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
+  if (result.meta.changes !== 1) throw new Error('A restore is already in progress or requires recovery. Inspect maintenance before clearing it.')
   return state
 }
 
 export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<MaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
-  const current = await getMaintenance(env)
-  if (!current || current.token !== token) return
-  await writeState(env, { ...current, ...patch, updatedAt: new Date().toISOString() })
+  if (!token.trim()) return
+  const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
+    .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
+  if (!row || parseState(row.value)?.token !== token) return
+  // The exact validated snapshot is the CAS fence: malformed state is never
+  // repaired by an old progress callback, and UPDATE cannot resurrect a clear.
+  await env.DB.prepare(`UPDATE system_flags SET value = json_patch(value, ?), updated_at = CURRENT_TIMESTAMP
+    WHERE key = ? AND value = ?`)
+    .bind(JSON.stringify({ phase: patch.phase, table: patch.table, rowsDone: patch.rowsDone,
+      error: patch.error, updatedAt: new Date().toISOString() }), MAINTENANCE_FLAG_KEY, row.value).run()
 }
 
 // Ends maintenance. Token-guarded so only the restore that began it (or a
 // force clear, which passes force: true) removes it -- a concurrent begin
 // attempt can never clear someone else's hold.
-export async function endMaintenance(env: Env, token: string | null, options: { force?: boolean } = {}): Promise<boolean> {
-  const current = await getMaintenance(env)
-  if (!current) return true
-  if (!options.force && current.token !== token) return false
+export async function endMaintenance(env: Env, token: string | null, options: { force?: boolean; expectedRevision?: string } = {}): Promise<boolean> {
   try {
-    await env.DB.prepare('DELETE FROM system_flags WHERE key = ?').bind(MAINTENANCE_FLAG_KEY).run()
+    const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
+      .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
+    if (!row) return true
+    if (options.expectedRevision !== undefined && await stateRevision(row.value) !== options.expectedRevision) return false
+    if (!options.force && (!token || parseState(row.value)?.token !== token)) return false
+    // Even force clear is scoped to the exact observed row. A newer holder or
+    // concurrent progress change requires a fresh operator decision/retry.
+    const result = await env.DB.prepare('DELETE FROM system_flags WHERE key = ? AND value = ?')
+      .bind(MAINTENANCE_FLAG_KEY, row.value).run()
+    return result.meta.changes === 1
   } catch {
     return false
   }
-  return true
-}
-
-async function writeState(env: Env, state: MaintenanceState): Promise<void> {
-  await env.DB.prepare(`
-    INSERT INTO system_flags (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
 }
 
 // The write gate's allowlist. While a restore runs, every state-changing

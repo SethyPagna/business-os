@@ -20,7 +20,7 @@ const tsPath = path.join(tmpDir, 'maintenance.ts')
 const source = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'maintenance.ts'), 'utf8')
   .replace(
     "import type { Env } from '../index'",
-    'type Env = { DB: { prepare(sql: string): { bind(...params: unknown[]): { first<T>(): Promise<T | null>; run(): Promise<unknown> } } } }',
+    'type Env = { DB: { prepare(sql: string): { bind(...params: unknown[]): { first<T>(): Promise<T | null>; run(): Promise<{meta:{changes:number}}> } } } }',
   )
 fs.writeFileSync(tsPath, source)
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
@@ -45,7 +45,7 @@ function d1(dbHandle) {
         bind(...params) {
           return {
             first: async () => dbHandle.prepare(sql).get(...params) ?? null,
-            run: async () => dbHandle.prepare(sql).run(...params),
+            run: async () => ({ meta: { changes: dbHandle.prepare(sql).run(...params).changes } }),
           }
         },
       }
@@ -109,6 +109,14 @@ async function check(name, fn) {
   await check('fail-open: a database without system_flags reads as no-maintenance', async () => {
     const bare = new Database(':memory:')
     assert.equal(await getMaintenance({ DB: d1(bare) }), null)
+  })
+
+  await check('unrelated database failures are not reported as no maintenance', async () => {
+    const unavailable = { DB: { prepare() { throw new Error('D1 unavailable') } } }
+    await assert.rejects(getMaintenance(unavailable), /D1 unavailable/)
+    for (const message of ['no such table: system_flags-other', 'no such table: system_flags.other', 'no such table: other']) {
+      await assert.rejects(getMaintenance({ DB: { prepare() { throw new Error(message) } } }), error => error.message === message)
+    }
   })
 
   await check('the write gate matches state-changing /api requests only, with the allowlist', () => {
