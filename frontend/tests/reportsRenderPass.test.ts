@@ -64,6 +64,7 @@ const fixtureSource = String.raw`
   window.__renders = []
 
   const target = new URLSearchParams(location.search).get('target') || 'periods'
+  window.__fixtureIdentity = { target, epoch: new URLSearchParams(location.search).get('epoch') }
   const viewId =
     target === 'grouped-product' ? 'products' :
     target === 'grouped-courier' ? 'couriers' :
@@ -237,13 +238,26 @@ interface ViewMeasurement {
   clickCommitMs: number | null
 }
 
+let navigationEpoch = 0
 async function measure(target: string, minRows: number): Promise<ViewMeasurement> {
-  await send('Page.navigate', { url: `http://127.0.0.1:${appPort}/reports-render-fixture?target=${target}` })
+  const identity = { target, epoch: String(++navigationEpoch) }
+  const identityCheck = `window.__fixtureIdentity?.target === ${JSON.stringify(target)} && window.__fixtureIdentity?.epoch === ${JSON.stringify(identity.epoch)}`
+  // Page.navigate acknowledges navigation, not fixture readiness. Equal-sized
+  // report tables must never satisfy the next document's readiness barrier.
+  await send('Page.navigate', { url: `http://127.0.0.1:${appPort}/reports-render-fixture?${new URLSearchParams(identity)}` })
   try {
     await waitFor(async () => {
-      const err = await evaluate<string | null>('document.body.dataset.fixtureError || null')
-      if (err) throw new Error(`${target} fixture threw: ${err}`)
-      return (await evaluate<number>('document.querySelectorAll("table tbody tr").length')) >= minRows ? true : null
+      let state: { error: string | null; rows: number } | null
+      try {
+        state = await evaluate(`(${identityCheck}) ? { error: document.body.dataset.fixtureError || null, rows: document.querySelectorAll("table tbody tr").length } : null`)
+      } catch (error) {
+        // The old execution context can disappear while navigation commits.
+        // Other CDP/fixture errors remain failures, not readiness retries.
+        if (error instanceof Error && /Execution context was destroyed|Cannot find context with specified id/.test(error.message)) return null
+        throw error
+      }
+      if (state?.error) throw new Error(`${target} fixture threw: ${state.error}`)
+      return state && state.rows >= minRows ? true : null
     })
   } catch (e) {
     const html = await evaluate<string>('document.body.innerHTML.slice(0, 2000)')
@@ -257,8 +271,19 @@ async function measure(target: string, minRows: number): Promise<ViewMeasurement
   // Establish an active sort first (a report with no sort applied never
   // calls sortRows at all, which would silently hide the waste this harness
   // exists to catch) -- click the first sortable header.
-  await evaluate('document.querySelector("thead th button").click()')
-  await waitFor(async () => (await evaluate<number>('window.__renders.length')) >= 2 ? true : null)
+  const beforeSort = await evaluate<{ renders: number; sorts: number }>(`(() => {
+    if (!(${identityCheck})) throw new Error('Report fixture epoch changed before sort');
+    const before = { renders: window.__renders.length, sorts: window.__probe.sortRows };
+    document.querySelector("thead th button").click();
+    return before;
+  })()`)
+  try {
+    // Mount/data-loading commits already exceed two. A relative commit AND
+    // actual sort work prove the header interaction armed this measurement.
+    await waitFor(async () => (await evaluate<boolean>(`(${identityCheck}) && window.__renders.slice(${beforeSort.renders}).some(render => render.sortRows > ${beforeSort.sorts})`)) ? true : null)
+  } catch (cause) {
+    throw new Error(`${target}: header sort did not commit in the current fixture epoch`, { cause })
+  }
   const sortRowsBeforeClick = await evaluate<number>('window.__probe.sortRows')
   const rendersBeforeClick = await evaluate<number>('window.__renders.length')
 
@@ -267,7 +292,7 @@ async function measure(target: string, minRows: number): Promise<ViewMeasurement
   // rows, sort or columns (a debounced search tick, opening the Filters
   // menu, a resize check -- see the Harness comment in the fixture above).
   await evaluate('window.__bump()')
-  await waitFor(async () => (await evaluate<number>('window.__renders.length')) > rendersBeforeClick ? true : null)
+  await waitFor(async () => (await evaluate<boolean>(`(${identityCheck}) && window.__renders.length > ${rendersBeforeClick}`)) ? true : null)
   const sortRowsAfterClick = await evaluate<number>('window.__probe.sortRows')
   const clickCommitMs = await evaluate<number | null>('window.__renders[window.__renders.length - 1] ? window.__renders[window.__renders.length - 1].actualDuration : null')
 
