@@ -13,7 +13,7 @@
  *   api/methods.ts   - all domain API methods
  */
 
-import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
+import { setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
 import { disconnectWS, resumeWS, scheduleConnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
@@ -35,7 +35,6 @@ type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
 type AuthTransportModule = typeof import('./api/authTransport.ts')
 type PortalTransportModule = typeof import('./api/portalTransport.ts')
 type SystemRuntimeModule = typeof import('./api/systemRuntime.ts')
-type SaleWriteTransportModule = typeof import('./api/saleWriteTransport.ts')
 type OfflineSnapshotTransportModule = typeof import('./api/offlineSnapshotTransport.ts')
 type NotificationSummaryModule = typeof import('./api/notificationSummary.ts')
 type SettingsTransportModule = typeof import('./api/settingsTransport.ts')
@@ -48,17 +47,6 @@ type ActionHistoryTransportModule = typeof import('./api/actionHistoryTransport.
 type NotesTransportModule = typeof import('./api/notesTransport.ts')
 type ProductQueryParams = Parameters<ProductReadTransportModule['searchProducts']>[0]
 type OfflineVaultKey = CryptoKey | null
-type OfflineRow = AnyRecord & {
-  _seq?: number
-  id?: string
-  key?: string
-  value?: any
-  status?: string
-  upload_id?: string
-  chunk_index?: number
-  encrypted_payload?: string
-  iv?: string
-}
 type OfflineOperation = AnyRecord & {
   operation_id?: string
   type?: string
@@ -87,12 +75,8 @@ const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
 const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
-const OFFLINE_OUTBOX_SYNC_LEASE_MS = 60_000
 const FOREGROUND_REFRESH_AFTER_MS = 45_000
 const FOREGROUND_RECOVERY_THROTTLE_MS = 1500
-const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
-const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3
-const PENDING_SYNC_PREVIEW_LIMIT = 25
 let offlineMaintenanceStarted = false
 let initialOfflineMaintenanceScheduled = false
 let lastServiceWorkerUpdateAt = 0
@@ -110,7 +94,6 @@ let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
 let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
 let systemRuntimeModulePromise: Promise<SystemRuntimeModule> | null = null
-let saleWriteTransportModulePromise: Promise<SaleWriteTransportModule> | null = null
 let offlineSnapshotTransportModulePromise: Promise<OfflineSnapshotTransportModule> | null = null
 let notificationSummaryModulePromise: Promise<NotificationSummaryModule> | null = null
 let settingsTransportModulePromise: Promise<SettingsTransportModule> | null = null
@@ -168,11 +151,6 @@ function loadPortalTransportModule(): Promise<PortalTransportModule> {
 function loadSystemRuntimeModule(): Promise<SystemRuntimeModule> {
   if (!systemRuntimeModulePromise) systemRuntimeModulePromise = import('./api/systemRuntime.ts')
   return systemRuntimeModulePromise
-}
-
-function loadSaleWriteTransportModule(): Promise<SaleWriteTransportModule> {
-  if (!saleWriteTransportModulePromise) saleWriteTransportModulePromise = import('./api/saleWriteTransport.ts')
-  return saleWriteTransportModulePromise
 }
 
 function loadOfflineSnapshotTransportModule(): Promise<OfflineSnapshotTransportModule> {
@@ -272,45 +250,6 @@ function getLazyApiMethod(name: string): LazyApiMethod {
   return lazyApiMethodCache.get(name) as LazyApiMethod
 }
 
-function serializePendingSyncPreview(rows: OfflineRow[] = []): AnyRecord[] {
-  const preview: AnyRecord[] = []
-  const limit = Math.min(PENDING_SYNC_PREVIEW_LIMIT, rows.length)
-  for (let index = 0; index < limit; index += 1) {
-    const row = rows[index] || {}
-    preview.push({
-      _seq: row._seq,
-      channel: row.channel,
-      operation: row.operation || null,
-      entity_table: row.entity_table || null,
-      entity_id: row.entity_id ?? null,
-      entity_name: row.entity_name || null,
-      status: String(row.status || 'pending'),
-      created_at: row.created_at || null,
-      updated_at: row.updated_at || null,
-      retry_count: Number(row.retry_count || 0),
-      retry_at: row.retry_at || null,
-      error: row.error || null,
-    })
-  }
-  return preview
-}
-
-async function mapOfflineFileChunkStatusUpdates(
-  rows: OfflineRow[] | unknown,
-  mapper: (row: OfflineRow, index: number) => Promise<unknown> | unknown,
-): Promise<void> {
-  const list = Array.isArray(rows) ? rows : []
-  let nextIndex = 0
-  const workers = Array.from({ length: Math.min(OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY, list.length) }, async () => {
-    while (nextIndex < list.length) {
-      const currentIndex = nextIndex
-      nextIndex += 1
-      await mapper(list[currentIndex], currentIndex)
-    }
-  })
-  await Promise.all(workers)
-}
-
 function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
@@ -333,20 +272,6 @@ function base64ToBytes(value: unknown): Uint8Array {
   return bytes
 }
 
-function stableStringify(value: any): string {
-  if (value == null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
-}
-
-async function sha256Hex(value: unknown): Promise<string> {
-  const bytes = value instanceof Uint8Array
-    ? value
-    : new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
-  const digest = await crypto.subtle.digest('SHA-256', asArrayBuffer(bytes))
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 async function deriveOfflineVaultKey(pin: unknown, saltBase64: unknown): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey(
     'raw',
@@ -362,24 +287,6 @@ async function deriveOfflineVaultKey(pin: unknown, saltBase64: unknown): Promise
     false,
     ['encrypt', 'decrypt'],
   )
-}
-
-async function encryptOfflineVaultValue(value: unknown, key: OfflineVaultKey = offlineVaultKey): Promise<{ iv: string; encrypted_payload: string }> {
-  if (!key) throw new Error('Offline vault is locked.')
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const encoded = new TextEncoder().encode(JSON.stringify(value ?? null))
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: asArrayBuffer(iv) }, key, asArrayBuffer(encoded))
-  return { iv: bytesToBase64(iv), encrypted_payload: bytesToBase64(encrypted) }
-}
-
-async function decryptOfflineVaultValue(record: OfflineRow, key: OfflineVaultKey = offlineVaultKey): Promise<any> {
-  if (!key) throw new Error('Offline vault is locked.')
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: asArrayBuffer(base64ToBytes(record?.iv || '')) },
-    key,
-    asArrayBuffer(base64ToBytes(record?.encrypted_payload || '')),
-  )
-  return JSON.parse(new TextDecoder().decode(decrypted))
 }
 
 async function requestOfflinePersistentStorage(): Promise<{ supported: boolean; persistent: boolean; estimate?: StorageEstimate | null }> {
@@ -434,53 +341,28 @@ async function unlockOfflineVault(pin: unknown): Promise<AnyRecord> {
   return { success: true, unlocked: true, storage }
 }
 
-async function queueBusinessOutboxOperation(operation: OfflineOperation = {}): Promise<AnyRecord> {
+async function queueBusinessOutboxOperation(_operation: OfflineOperation = {}): Promise<AnyRecord> {
   // Retain legacy records unchanged; these paths have no verified recovery owner.
   throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
     code: 'online_required',
   })
 }
 
-async function queueOfflineFileChunks(file: File, ownerOperation: OfflineFileOwner = {}): Promise<AnyRecord> {
+async function queueOfflineFileChunks(_file: File, _ownerOperation: OfflineFileOwner = {}): Promise<AnyRecord> {
   // Retain legacy records unchanged; these paths have no verified recovery owner.
   throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
     code: 'online_required',
   })
 }
 
-function dispatchOutboxProgress(detail: AnyRecord = {}): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_PROGRESS', {
-    detail: { ts: Date.now(), ...detail },
-  }))
-}
-
-function dispatchOutboxFileProgress(detail: AnyRecord = {}): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_FILE_PROGRESS', {
-    detail: { ts: Date.now(), ...detail },
-  }))
-}
-
-function dispatchOutboxConflict(detail: AnyRecord = {}): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
-    detail: { ts: Date.now(), ...detail },
-  }))
-}
-
-function getSyncOutboxKey(row: OfflineRow = {}): string | number | undefined {
-  return row._seq ?? row.id
-}
-
-async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Promise<AnyRecord> {
+async function syncUnlockedOfflineOutbox(_options: OfflineSyncOptions = {}): Promise<AnyRecord> {
   // Retain legacy records unchanged; these paths have no verified recovery owner.
   throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
     code: 'legacy_recovery_required',
   })
 }
 
-async function syncUnlockedOfflineFileChunks(options: OfflineSyncOptions = {}): Promise<AnyRecord> {
+async function syncUnlockedOfflineFileChunks(_options: OfflineSyncOptions = {}): Promise<AnyRecord> {
   // Retain legacy records unchanged; these paths have no verified recovery owner.
   throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
     code: 'legacy_recovery_required',
