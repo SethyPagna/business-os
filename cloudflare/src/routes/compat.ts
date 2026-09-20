@@ -13,7 +13,7 @@ import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
-import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
+import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
@@ -91,6 +91,8 @@ type DashboardDateRange = {
   endDate: string
   granularity: string
   allTime: boolean
+  createdFrom?: string
+  createdTo?: string
 }
 
 // Missing dates retain the legacy TODAY default. An explicit rangeScope=all
@@ -103,16 +105,60 @@ function dateRange(query: Record<string, string>): DashboardDateRange {
     && query.startDate === ''
     && query.endDate === ''
   const range: DashboardDateRange = {
-    startDate: String(query.startDate || today).slice(0, 10),
-    endDate: String(query.endDate || today).slice(0, 10),
+    startDate: String(query.startDate || today),
+    endDate: String(query.endDate || today),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
     allTime,
   }
   if (allTime) {
     range.startDate = ''
     range.endDate = ''
+  } else {
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+      && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+      && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+    if (Boolean(query.startDate) !== Boolean(query.endDate)
+      || !validDate(range.startDate) || !validDate(range.endDate) || range.startDate > range.endDate) {
+      throw new Error('startDate and endDate must be valid, ordered YYYY-MM-DD dates supplied together')
+    }
+  }
+  if (query.createdFrom !== undefined || query.createdTo !== undefined) {
+    // Dashboard endpoints represent UTC instants, not a recurring daily time
+    // mask. Reject rollovers and precision the shared second-resolution SQL
+    // cannot preserve. ISO UTC and SQLite UTC shapes are both accepted.
+    const validBound = (value: string | undefined) => {
+      if (!value || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.000)?Z?$/.test(value)) return null
+      const normalized = shiftWindowBound(value)
+      return normalized === value.slice(0, 19).replace('T', ' ') ? normalized : null
+    }
+    const createdFrom = validBound(query.createdFrom)
+    const createdTo = validBound(query.createdTo)
+    if (allTime || !query.startDate || !query.endDate || !createdFrom || !createdTo || createdFrom >= createdTo) {
+      throw new Error('createdFrom and createdTo must be ordered UTC timestamps supplied together with the date range')
+    }
+    range.createdFrom = createdFrom
+    range.createdTo = createdTo
   }
   return range
+}
+
+function dashboardRangeError(query: Record<string, string>): string | null {
+  try { dateRange(query); return null } catch (error) {
+    return error instanceof Error ? error.message : 'Invalid dashboard date range'
+  }
+}
+
+function dashboardRangeParams(range: DashboardDateRange, branchId?: string | null): Record<string, unknown> {
+  return {
+    ...(range.allTime ? {} : { startDate: range.startDate, endDate: range.endDate }),
+    ...shiftWindowWhere('s', range).params,
+    ...(branchId ? { branchId } : {}),
+  }
+}
+
+function dashboardRangeClause(alias: string, range: DashboardDateRange): string {
+  if (range.allTime) return '1 = 1'
+  return [localDateRangeClause(`${alias}.created_at`), ...shiftWindowWhere(alias, range).clauses].join(' AND ')
 }
 
 function emptySummary() {
@@ -143,18 +189,15 @@ function emptySummary() {
 }
 
 async function dashboardSummary(env: Env, query: Record<string, string>) {
+  const range = dateRange(query)
   const db = getDb(env)
   // The owner's low-stock switch/amount/scope, read once and used by BOTH the
   // badge counts (getFamilyStockStats) and the card's list below them -- the
   // two are rendered together on Dashboard.tsx, so they must be built from
   // the same number or the card contradicts its own heading.
   const lowStockConfig = await loadLowStockConfig(env)
-  const range = dateRange(query)
-  const { startDate, endDate } = range
   const branchId = query.branchId || null
-  const params = range.allTime
-    ? (branchId ? { branchId } : {})
-    : (branchId ? { startDate, endDate, branchId } : { startDate, endDate })
+  const params = dashboardRangeParams(range, branchId)
   const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
   // The selected Start->End range scopes everything that is a MOVEMENT:
   // sales, returns and the recent-sales feed. It deliberately does NOT
@@ -189,7 +232,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+      WHERE ${dashboardRangeClause('sales', range)} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
     `).get(params),
     // RETURN-DATE ACTIVITY, customer scope only: "how many refunds were
     // processed in this window, and for how much". It is NOT the kernel
@@ -204,7 +247,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}
+      WHERE ${dashboardRangeClause('returns', range)}
         AND COALESCE(return_scope, 'customer') = 'customer'
         AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
     `).get(params),
@@ -234,7 +277,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
       SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause('sales')}
+      WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause('sales')}
       ORDER BY created_at DESC, id DESC
       LIMIT 10
     `).all(params),
@@ -276,12 +319,11 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
 async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdmin: boolean, canViewCosts = isAdmin) {
   const db = getDb(env)
   const range = dateRange(query)
-  const { startDate, endDate, granularity } = range
-  const params = range.allTime ? {} : { startDate, endDate }
-  const filters = { startDate, endDate, branchId: query.branchId || null }
-  const analyticsParams = filters.branchId ? { ...params, branchId: filters.branchId } : params
+  const { startDate, endDate, granularity, createdFrom, createdTo } = range
+  const filters = { startDate, endDate, createdFrom, createdTo, branchId: query.branchId || null }
+  const analyticsParams = dashboardRangeParams(range, filters.branchId)
   const branchClause = (alias: string) => filters.branchId ? ` AND ${alias}.branch_id = @branchId` : ''
-  const activeSalesClause = (alias: string) => `${range.allTime ? '1 = 1' : localDateRangeClause(`${alias}.created_at`)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
+  const activeSalesClause = (alias: string) => `${dashboardRangeClause(alias, range)} AND ${recognizedExpr(`${alias}.`)}${branchClause(alias)}`
   // Apportions a sale's net revenue across its lines by each line's share of
   // subtotal_usd. The > 0 guard avoids a divide-by-zero.
   //
@@ -324,7 +366,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
       WITH matching_returns AS (
         SELECT r.id, r.total_refund_usd
         FROM returns r
-        WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
+        WHERE ${dashboardRangeClause('r', range)}
           AND COALESCE(r.return_scope, 'customer') = 'customer'
           AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
       )
@@ -338,7 +380,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>, isAdm
              COALESCE(SUM(r.supplier_compensation_usd), 0) AS supplier_compensation_usd,
              COALESCE(SUM(r.supplier_loss_usd), 0) AS loss_usd
       FROM returns r
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('r.created_at')}
+      WHERE ${dashboardRangeClause('r', range)}
         AND COALESCE(r.return_scope, 'customer') = 'supplier'
         AND COALESCE(r.status, 'completed') <> 'cancelled'${branchClause('r')}
     `).get(analyticsParams),
@@ -459,15 +501,13 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
   const branchId = query.branchId || null
 
   if (kind === 'recent_sales') {
-    const params = range.allTime
-      ? (branchId ? { branchId } : {})
-      : (branchId ? { startDate: range.startDate, endDate: range.endDate, branchId } : { startDate: range.startDate, endDate: range.endDate })
+    const params = dashboardRangeParams(range, branchId)
     const saleBranchClause = branchId ? ' AND sales.branch_id = @branchId' : ''
     const rows = await db.prepare(`
       SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
       FROM sales
-      WHERE ${range.allTime ? '1 = 1' : localDateRangeClause('created_at')}${saleBranchClause}
+      WHERE ${dashboardRangeClause('sales', range)}${saleBranchClause}
       ORDER BY created_at DESC, id DESC
       LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
     `).all(params)
@@ -494,11 +534,9 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
   // already computes every group before the preview's LIMIT 20 truncates it,
   // so raising the limit here costs nothing extra -- it is the SAME query,
   // just kept instead of cut.
-  const analyticsParams = range.allTime
-    ? (branchId ? { branchId } : {})
-    : (branchId ? { startDate: range.startDate, endDate: range.endDate, branchId } : { startDate: range.startDate, endDate: range.endDate })
+  const analyticsParams = dashboardRangeParams(range, branchId)
   const branchClause = branchId ? ' AND s.branch_id = @branchId' : ''
-  const activeSalesClause = `${range.allTime ? '1 = 1' : localDateRangeClause('s.created_at')} AND ${recognizedExpr('s.')}${branchClause}`
+  const activeSalesClause = `${dashboardRangeClause('s', range)} AND ${recognizedExpr('s.')}${branchClause}`
   const attributedLineRevenue = `CASE
     WHEN COALESCE(s.subtotal_usd, 0) > 0
       THEN COALESCE(si.total_usd, 0) / s.subtotal_usd * (${netSaleExpr('s.')} - ${netRefundExpr('s.', 'rf.')})
@@ -544,6 +582,8 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
 app.get('/dashboard', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
+  const rangeError = dashboardRangeError(c.req.query())
+  if (rangeError) return c.json({ error: rangeError }, 400)
   return c.json(await dashboardSummary(c.env, c.req.query()))
 })
 app.get('/dashboard/stock-alerts', async (c) => {
@@ -570,11 +610,15 @@ app.get('/dashboard/stock-alerts', async (c) => {
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
+  const rangeError = dashboardRangeError(c.req.query())
+  if (rangeError) return c.json({ error: rangeError }, 400)
   return c.json(await dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))))
 })
 app.get('/dashboard/insight-list', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
+  const rangeError = dashboardRangeError(c.req.query())
+  if (rangeError) return c.json({ error: rangeError }, 400)
   const kind = String(c.req.query('insight') || '')
   const validKinds: DashboardInsightKind[] = ['recent_sales', 'expiring_products', 'top_products', 'top_products_qty', 'top_customers']
   if (!validKinds.includes(kind as DashboardInsightKind)) {
@@ -585,6 +629,8 @@ app.get('/dashboard/insight-list', async (c) => {
 app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
+  const rangeError = dashboardRangeError(c.req.query())
+  if (rangeError) return c.json({ error: rangeError }, 400)
   const [summary, analytics] = await Promise.all([
     dashboardSummary(c.env, c.req.query()),
     dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
