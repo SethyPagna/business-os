@@ -1,3 +1,23 @@
+## Reviewed source pin, compact pager and report harness integrated — September 20
+
+Local6f608476 integrates source-pin83089233 (candidatecf328f31, independent
+review0a05da0b), compact pager4d070d10/4db5dd97 (008c20f0/741e1f2d) and test-only
+report barrier6f608476 (f21a2edb). Independent UI/harness review004e5aed accepts
+four handler plus ten browser cases, including hydrated oversized draft controls,
+and five report shapes plus missing-sort negative control. No weaker assertions.
+Root source-pin20+old-source negative/nativeR2six/Worker typecheck pass; backup18,
+custom-table33 and stock-session restore/reset gates pass on integrated source.
+Root frontend focused17/17 and typecheck pass. Build chain3064 still running:
+poll existing handle rather than restart. Final full suite, exact built browser
+verification, tier dry runs and deployment remain outstanding. No remote changes.
+
+0189 remains a design, not a migration certificate: exact installation candidates,
+permanent invalidation, immutable evidence separate from mutable replay head,
+and fresh permission checks for early/lost-ack no-ops under review. Avoid broad
+grandfather scans and never reactivate retired retry keys through historical Undo.
+Earlier UI restore confirmation, late assets, Free restore capacity and the full
+remaining goal stay open. Production unchanged cbbebe5841f8 /49b64606.
+
 ## Adversarial verification rejects two false-completion paths — September 20
 
 Previous continuation made concrete progress: integrated mobile browser test

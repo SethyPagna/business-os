@@ -5,6 +5,14 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+Latest local6f608476 adds reviewed source pin83089233, compact pager4d070d10/
+4db5dd97 and stronger report-test barrier6f608476. Root source/native/adjacent
+backup gates and Worker typecheck pass; frontend17focused/typecheck pass.
+Independent004e5aed accepts UI+report corrections. Build3064 remains live at
+last poll; fullsuite, exact-artifact browser, new tier dry runs/deploy pending.
+This supersedes earlier local artifact/held-pager statements below, not the full
+remaining scope. No new remote migration or deployment.
+
 Production: cbbebe5841f8 / Worker49b64606-d25a-4894-b630-6baa371005d1 (Paid).
 Artifact3a71661f5715/hash e80017a0356c231c includes corrected Shift History paging
 and fresh Refresh, namespace protection and proven-dead LoadingScreen removal.
