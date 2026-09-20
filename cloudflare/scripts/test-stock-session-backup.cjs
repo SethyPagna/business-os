@@ -10,9 +10,12 @@ function document(f, tables = backup.BACKUP_TABLES) {
     r2: { assets: [], copiedKeys: [] }, summary: { schemaMigration: '0125_return_bulk_actions.sql' } })
 }
 function restoreEnv(f, text) {
-  return { ...f.env, ASSETS: { async get(key) {
+  const etag = require('node:crypto').createHash('sha256').update(text).digest('hex')
+  return { ...f.env, ASSETS: { async get(key, options) {
     if (!key.endsWith('fixture.json')) return null
-    return { body: new Blob([text]).stream(), customMetadata: { format: 'business-os-cloudflare-backup' } }
+    const metadata = { key, etag, version: 'fixture-upload', size: Buffer.byteLength(text) }
+    if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== etag) return metadata
+    return { ...metadata, body: new Blob([text]).stream(), customMetadata: { format: 'business-os-cloudflare-backup' } }
   } } }
 }
 const maintenance = f => f.sql.exec(`INSERT OR REPLACE INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)

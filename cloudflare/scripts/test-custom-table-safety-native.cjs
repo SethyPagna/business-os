@@ -48,7 +48,12 @@ function fixture(names, chunkSize = 100000, columns = ['id', 'name']) {
     controller.close()
   } })
   const env = { DB: { prepare: prepared, batch: async stmts => { for (const s of stmts) await s.run() } },
-    ASSETS: { get: async key => key === 'backups/cloudflare/probe.json' ? { body: body(), customMetadata: { format: 'business-os-cloudflare-backup' } } : null },
+    ASSETS: { get: async (key, options) => {
+      if (key !== 'backups/cloudflare/probe.json') return null
+      const metadata = { key, etag: require('node:crypto').createHash('sha256').update(document).digest('hex'), version: 'fixture-upload', size: Buffer.byteLength(document) }
+      if (options?.onlyIf?.etagMatches && options.onlyIf.etagMatches !== metadata.etag) return metadata
+      return { ...metadata, body: body(), customMetadata: { format: 'business-os-cloudflare-backup' } }
+    } },
     legacyDb: { prepare: text => ({ all: async () => sql.prepare(text).all(), run: async () => { writes.push(text); sql.prepare(text).run() } }) },
   }
   return { sql, writes, env, body }

@@ -1108,6 +1108,37 @@ async function openBackupStream(env: Env, key: string): Promise<ReadableStream<U
   return object.body
 }
 
+type BackupSourceIdentity = Readonly<{ key: string; etag: string; version: string; size: number }>
+
+// Capture identity from the SAME response as the bytes, not a racy HEAD.
+// R2 version identifies an upload (including same-content replacement); it
+// is not a historical-version selector. Never retry a failed pin unconditionally.
+async function openPinnedBackupSource(env: Env, key: string, expected?: BackupSourceIdentity) {
+  const object = expected
+    ? await env.ASSETS.get(key, { onlyIf: { etagMatches: expected.etag } })
+    : await env.ASSETS.get(key)
+  const body = object && 'body' in object && object.body instanceof ReadableStream ? object.body : null
+  try {
+    if (!object || !body) throw new Error('Backup source is missing or changed; restart validation before restoring.')
+    if (object.key !== key || typeof object.etag !== 'string' || !object.etag.trim()
+      || typeof object.version !== 'string' || !object.version.trim()
+      || !Number.isSafeInteger(object.size) || object.size <= 0) {
+      throw new Error('Backup source identity is unavailable; no database rows have been changed.')
+    }
+    const identity: BackupSourceIdentity = Object.freeze({ key, etag: object.etag, version: object.version, size: object.size })
+    if (expected && (identity.key !== expected.key || identity.etag !== expected.etag
+      || identity.version !== expected.version || identity.size !== expected.size)) {
+      throw new Error('Backup source changed after validation; no database rows have been changed.')
+    }
+    const format = object.customMetadata?.format
+    if (format && format !== 'business-os-cloudflare-backup') throw new Error('Unsupported backup format')
+    return { identity, body }
+  } catch (error) {
+    await body?.cancel().catch(() => {})
+    throw error
+  }
+}
+
 // onProgress (optional): called at phase changes, table boundaries and every
 // few row batches -- routes/backups.ts persists it into the maintenance
 // flag's state so a crashed restore shows exactly where it died. Errors from
@@ -1204,8 +1235,9 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   const presentTables: string[] = []
   const documentTables = new Set<string>()
   let pass1Summary: BackupPayload['summary'] | null = null
-  {
-    for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
+  const validatedSource = await openPinnedBackupSource(env, key)
+  try {
+    for await (const ev of streamBackupEvents(validatedSource.body)) {
       // Custom metadata is backed up, but cannot authorize dropping an
       // arbitrary system table during a later factory reset. Check ALL rows
       // in pass 1, before even the first restore DELETE or progress write.
@@ -1223,6 +1255,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       }
       // rows ignored in pass 1 -- nothing is held.
     }
+  } finally {
+    await validatedSource.body.cancel().catch(() => {})
   }
 
   // Schema guard (Part-77): the insert below writes only the intersection of
@@ -1275,113 +1309,123 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     if (!maintenance) throw new Error('Stock replay restore requires restore maintenance mode to preserve revision counters. No database rows have been changed.')
   }
 
-  let statementCount = 0
-  await onProgress?.({ phase: 'deleting' })
-  for (const table of [...orderedTables].reverse()) {
-    await env.DB.prepare(`DELETE FROM ${qid(table)}`).run()
-    statementCount += 1
-  }
-
-  // Pass 2: stream rows and insert in bounded batches, per table.
-  const CHUNK = 80
-  const liveColumnsCache = new Map<string, Set<string>>()
-  let insertSql = ''
-  let insertColumns: string[] = []
-  let batch: D1PreparedStatement[] = []
-  let restoreTable = ''
-  let r2Meta: BackupPayload['r2'] | null = null
-  let summaryMeta: BackupPayload['summary'] | null = null
-
-  // Progress throttle: report every 10th flush (~800 rows) rather than each
-  // one -- the maintenance-state write behind onProgress is one extra D1
-  // statement, and per-flush reporting would add ~1.25% statement overhead
-  // for no extra crash-visibility.
-  let tableRowsDone = 0
-  let flushesSinceProgress = 0
-
-  const flush = async () => {
-    if (!batch.length) return
-    await env.DB.batch(batch)
-    statementCount += batch.length
-    tableRowsDone += batch.length
-    batch = []
-    flushesSinceProgress += 1
-    if (flushesSinceProgress >= 10) {
-      flushesSinceProgress = 0
-      await onProgress?.({ phase: 'inserting', table: restoreTable || undefined, rowsDone: tableRowsDone })
+  // Acquire and verify the second response BEFORE any destructive callback or
+  // DELETE. A later overwrite cannot substitute bytes into this held response.
+  // Future retirement/admission belongs here, after pinning and inside cleanup.
+  const restoreSource = await openPinnedBackupSource(env, key, validatedSource.identity)
+  try {
+    let statementCount = 0
+    await onProgress?.({ phase: 'deleting' })
+    for (const table of [...orderedTables].reverse()) {
+      await env.DB.prepare(`DELETE FROM ${qid(table)}`).run()
+      statementCount += 1
     }
-  }
 
-  for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
-    if (ev.type === 'table') {
-      await flush()
-      if (orderedTables.includes(ev.table)) {
-        tableRowsDone = 0
+    // Pass 2: stream rows and insert in bounded batches, per table.
+    const CHUNK = 80
+    const liveColumnsCache = new Map<string, Set<string>>()
+    let insertSql = ''
+    let insertColumns: string[] = []
+    let batch: D1PreparedStatement[] = []
+    let restoreTable = ''
+    let r2Meta: BackupPayload['r2'] | null = null
+    let summaryMeta: BackupPayload['summary'] | null = null
+
+    // Progress throttle: report every 10th flush (~800 rows) rather than each
+    // one -- the maintenance-state write behind onProgress is one extra D1
+    // statement, and per-flush reporting would add ~1.25% statement overhead
+    // for no extra crash-visibility.
+    let tableRowsDone = 0
+    let flushesSinceProgress = 0
+
+    const flush = async () => {
+      if (!batch.length) return
+      await env.DB.batch(batch)
+      statementCount += batch.length
+      tableRowsDone += batch.length
+      batch = []
+      flushesSinceProgress += 1
+      if (flushesSinceProgress >= 10) {
         flushesSinceProgress = 0
-        await onProgress?.({ phase: 'inserting', table: ev.table, rowsDone: 0 })
-      }
-      restoreTable = ''
-      if (!orderedTables.includes(ev.table)) { insertSql = ''; insertColumns = []; continue }
-      let liveColumns = liveColumnsCache.get(ev.table)
-      if (!liveColumns) { liveColumns = new Set(await tableColumns(env, ev.table)); liveColumnsCache.set(ev.table, liveColumns) }
-      insertColumns = ev.columns.filter((c) => liveColumns!.has(c))
-      if (!insertColumns.length) { insertSql = ''; continue }
-      // sql-bound-params: bounded by construction -- one parameter per COLUMN,
-      // one statement per row, and a table has far fewer than 100 columns, so
-      // this never nears D1's 100-parameter cap.
-      const placeholders = insertColumns.map(() => '?').join(', ')
-      insertSql = `INSERT INTO ${qid(ev.table)} (${insertColumns.map(qid).join(', ')}) VALUES (${placeholders})`
-      restoreTable = ev.table
-    } else if (ev.type === 'row') {
-      if (!restoreTable || !insertSql) continue
-      if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
-      const values = insertColumns.map((c) => ev.row[c] ?? null)
-      batch.push(env.DB.prepare(insertSql).bind(...values))
-      if (batch.length >= CHUNK) await flush()
-    } else if (ev.type === 'meta') {
-      if (ev.key === 'r2') r2Meta = ev.value as BackupPayload['r2']
-      else if (ev.key === 'summary') summaryMeta = ev.value as BackupPayload['summary']
-    }
-  }
-  await flush()
-  await onProgress?.({ phase: 'assets' })
-
-  // Restore whichever asset bytes this backup actually copied (best-effort;
-  // see createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap). A backup
-  // taken before the asset-copy work, or one whose catalog exceeded the cap,
-  // may have copiedKeys missing/incomplete; restoredAssets/missingAssets makes
-  // that visible instead of silently claiming every image came back.
-  const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
-  const lifecycle = await getCloudflareBackupState(env, backupName)
-  const copiedKeys = lifecycle?.copiedKeys || r2Meta?.copiedKeys || []
-  const assetsPrefix = lifecycle?.assetsPrefix || r2Meta?.assetsPrefix
-  let restoredAssets = 0
-  const missingAssets: string[] = []
-  if (assetsPrefix) {
-    for (const originalKey of copiedKeys) {
-      try {
-        const backedUpKey = `${assetsPrefix}${originalKey.replace(/^uploads\//, '')}`
-        const ok = await copyObject(env.ASSETS, backedUpKey, originalKey)
-        if (ok) restoredAssets += 1
-        else missingAssets.push(originalKey)
-      } catch (_) {
-        missingAssets.push(originalKey)
+        await onProgress?.({ phase: 'inserting', table: restoreTable || undefined, rowsDone: tableRowsDone })
       }
     }
-  }
 
-  return {
-    key,
-    restoredAt: new Date().toISOString(),
-    summary: summaryMeta,
-    tables: orderedTables.length,
-    statements: statementCount,
-    restoredAssets,
-    assetsNotRestored: (lifecycle?.assets?.length || r2Meta?.assets?.length || 0) - restoredAssets,
-    missingAssets: missingAssets.length ? missingAssets : undefined,
-    schemaMigration: backupMigration,
-    schemaMismatch: schemaMismatch || undefined,
-    tablesNotInBackup: tablesNotInBackup.length ? tablesNotInBackup : undefined,
+    for await (const ev of streamBackupEvents(restoreSource.body)) {
+      if (ev.type === 'table') {
+        await flush()
+        if (orderedTables.includes(ev.table)) {
+          tableRowsDone = 0
+          flushesSinceProgress = 0
+          await onProgress?.({ phase: 'inserting', table: ev.table, rowsDone: 0 })
+        }
+        restoreTable = ''
+        if (!orderedTables.includes(ev.table)) { insertSql = ''; insertColumns = []; continue }
+        let liveColumns = liveColumnsCache.get(ev.table)
+        if (!liveColumns) { liveColumns = new Set(await tableColumns(env, ev.table)); liveColumnsCache.set(ev.table, liveColumns) }
+        insertColumns = ev.columns.filter((c) => liveColumns!.has(c))
+        if (!insertColumns.length) { insertSql = ''; continue }
+        // sql-bound-params: bounded by construction -- one parameter per COLUMN,
+        // one statement per row, and a table has far fewer than 100 columns, so
+        // this never nears D1's 100-parameter cap.
+        const placeholders = insertColumns.map(() => '?').join(', ')
+        insertSql = `INSERT INTO ${qid(ev.table)} (${insertColumns.map(qid).join(', ')}) VALUES (${placeholders})`
+        restoreTable = ev.table
+      } else if (ev.type === 'row') {
+        if (!restoreTable || !insertSql) continue
+        if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
+        const values = insertColumns.map((c) => ev.row[c] ?? null)
+        batch.push(env.DB.prepare(insertSql).bind(...values))
+        if (batch.length >= CHUNK) await flush()
+      } else if (ev.type === 'meta') {
+        if (ev.key === 'r2') r2Meta = ev.value as BackupPayload['r2']
+        else if (ev.key === 'summary') summaryMeta = ev.value as BackupPayload['summary']
+      }
+    }
+    await flush()
+    await onProgress?.({ phase: 'assets' })
+
+    // Restore whichever asset bytes this backup actually copied (best-effort;
+    // see createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap). A backup
+    // taken before the asset-copy work, or one whose catalog exceeded the cap,
+    // may have copiedKeys missing/incomplete; restoredAssets/missingAssets makes
+    // that visible instead of silently claiming every image came back.
+    const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
+    const lifecycle = await getCloudflareBackupState(env, backupName)
+    const copiedKeys = lifecycle?.copiedKeys || r2Meta?.copiedKeys || []
+    const assetsPrefix = lifecycle?.assetsPrefix || r2Meta?.assetsPrefix
+    let restoredAssets = 0
+    const missingAssets: string[] = []
+    if (assetsPrefix) {
+      for (const originalKey of copiedKeys) {
+        try {
+          const backedUpKey = `${assetsPrefix}${originalKey.replace(/^uploads\//, '')}`
+          const ok = await copyObject(env.ASSETS, backedUpKey, originalKey)
+          if (ok) restoredAssets += 1
+          else missingAssets.push(originalKey)
+        } catch (_) {
+          missingAssets.push(originalKey)
+        }
+      }
+    }
+
+    return {
+      key,
+      restoredAt: new Date().toISOString(),
+      summary: summaryMeta,
+      tables: orderedTables.length,
+      statements: statementCount,
+      restoredAssets,
+      assetsNotRestored: (lifecycle?.assets?.length || r2Meta?.assets?.length || 0) - restoredAssets,
+      missingAssets: missingAssets.length ? missingAssets : undefined,
+      schemaMigration: backupMigration,
+      schemaMismatch: schemaMismatch || undefined,
+      tablesNotInBackup: tablesNotInBackup.length ? tablesNotInBackup : undefined,
+    }
+  } finally {
+    // Includes callback/SQL/parser failures; never mask the original failure.
+    // The route retains maintenance on failure. No source objects are deleted.
+    await restoreSource.body.cancel().catch(() => {})
   }
 }
 
