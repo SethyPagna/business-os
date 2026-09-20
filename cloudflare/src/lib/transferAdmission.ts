@@ -5,7 +5,7 @@ import { getActionTier, hasPermission, isAdminControlUser } from './permissions'
 type Statement={sql:string;params?:Record<string,unknown>}
 type Principal={actorId:number;organizationId:number|null}
 type Actor={id:number;organization_id:number|null;created_at:string;username:string;role_id:number|null;role_code:string|null;permissions:string|null;role_permissions:string|null;dataset:string;maintenance:string|null}
-type Binding={id:string;scope:'branches'|'inventory';receipt_id:number;history_id:number;self_actor_id:number|null;self_org_id:number|null;self_created_at:string|null;generation:number;replay_state:string;history_status:string;revision:number;self_invalid:number;bundle_valid:number}
+type Binding={id:string;scope:'branches'|'inventory';receipt_id:number;history_id:number;self_actor_id:number|null;self_org_id:number|null;self_created_at:string|null;generation:number;replay_state:string;history_status:string;revision:number;self_invalid:number;bundle_valid:number;response_json:string|null}
 const assertion=(condition:string,params:Record<string,unknown>):Statement=>({sql:`INSERT INTO branches(name) SELECT NULL WHERE COALESCE((${condition}),0)=0`,params})
 export class TransferAdmissionError extends Error { statusCode=409 }
 async function actor(db:D1Compat,principal:Principal):Promise<Actor>{
@@ -16,8 +16,9 @@ async function actor(db:D1Compat,principal:Principal):Promise<Actor>{
  if(!row || row.organization_id!==principal.organizationId || !row.dataset)throw new TransferAdmissionError('Current transfer identity/dataset could not be verified. Refresh before continuing.')
  return row
 }
-async function binding(db:D1Compat,a:Actor,operation:string):Promise<Binding>{
+async function binding(db:D1Compat,a:Actor,operation:string,responseRequest:string|null=null):Promise<Binding>{
  const row=await db.prepare(`SELECT b.*,x.generation,x.replay_state,x.history_status,x.revision,
+ CASE WHEN @responseRequest IS NOT NULL THEN p.response_json ELSE NULL END response_json,
  EXISTS(SELECT 1 FROM transfer_binding_invalidations WHERE binding_id=b.id AND scope='self') self_invalid,
  (NOT EXISTS(SELECT 1 FROM transfer_binding_invalidations WHERE binding_id=b.id AND scope='bundle')
  AND p.identity_json=b.receipt_identity AND h.identity_json=b.history_identity
@@ -29,10 +30,15 @@ async function binding(db:D1Compat,a:Actor,operation:string):Promise<Binding>{
  WHERE b.operation_id=@operation AND b.dataset_generation=@dataset
  AND b.dataset_generation=(SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation')
  AND NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
+ AND (@responseRequest IS NULL OR (
+ b.source='new' AND p.status='committed' AND p.actor_id=@actor AND p.request_id=@responseRequest
+ AND EXISTS(SELECT 1 FROM transfer_owner_admissions o WHERE o.binding_id=b.id AND o.actor_id=@actor AND o.request_id=@responseRequest)
+ AND NOT EXISTS(SELECT 1 FROM transfer_retired_receipt_keys k WHERE k.actor_id=@actor AND k.request_id=@responseRequest)
+ AND NOT EXISTS(SELECT 1 FROM transfer_run_retired_keys k WHERE k.actor_id=@actor AND k.request_id=@responseRequest)))
  AND EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor AND u.is_active=1 AND u.deleted_at IS NULL
  AND u.organization_id IS @org AND u.created_at=@created AND u.username=@username AND u.role_id IS @role
  AND u.permissions IS @permissions AND r.permissions IS @rolePermissions AND r.code IS @roleCode)`)
- .get<Binding>({operation,dataset:a.dataset,actor:a.id,org:a.organization_id,created:a.created_at,username:a.username,role:a.role_id,permissions:a.permissions,rolePermissions:a.role_permissions,roleCode:a.role_code})
+ .get<Binding>({operation,responseRequest,dataset:a.dataset,actor:a.id,org:a.organization_id,created:a.created_at,username:a.username,role:a.role_id,permissions:a.permissions,rolePermissions:a.role_permissions,roleCode:a.role_code})
  if(!row || !row.bundle_valid)throw new TransferAdmissionError('Exact history binding requires administrator recovery; no stock was changed.')
  return row
 }
@@ -91,14 +97,17 @@ export async function readAdmittedTransferResponse(db:D1Compat,input:Principal&{
  const retired=await db.prepare(`SELECT 1 yes FROM transfer_retired_receipt_keys WHERE actor_id=@actor AND request_id=@request
  UNION ALL SELECT 1 FROM transfer_run_retired_keys WHERE actor_id=@actor AND request_id=@request LIMIT 1`).get({actor:a.id,request:input.requestId})
  if(retired)throw new TransferAdmissionError('This retry identity is permanently retired. Use authorized history review, not a new retry key.')
- const row=await db.prepare(`SELECT o.binding_id,p.operation_id,p.response_json FROM transfer_owner_admissions o
+ const row=await db.prepare(`SELECT o.binding_id,p.operation_id FROM transfer_owner_admissions o
  JOIN transfer_history_bindings b ON b.id=o.binding_id JOIN transfer_operation_receipts p ON p.id=b.receipt_id
- WHERE o.actor_id=@actor AND o.request_id=@request AND b.dataset_generation=@dataset AND b.source='new' AND p.status='committed'`).get<{operation_id:string;response_json:string}>({actor:a.id,request:input.requestId,dataset:a.dataset})
+ WHERE o.actor_id=@actor AND o.request_id=@request AND b.dataset_generation=@dataset AND b.source='new' AND p.status='committed'`).get<{operation_id:string}>({actor:a.id,request:input.requestId,dataset:a.dataset})
  if(!row)throw new TransferAdmissionError('Earlier retry ownership is unverified. Open its history or ask an administrator; do not resubmit with a new key.')
- const b=await binding(db,a,row.operation_id)
+ // Read the response only in the final snapshot proving retirement absence,
+ // owner admission, dataset, live principal/permission fingerprint and head.
+ // Historical execution intentionally uses binding without this retry fence.
+ const b=await binding(db,a,row.operation_id,input.requestId)
  authority(a,b)
  if(b.self_invalid||b.self_actor_id!==a.id||b.self_org_id!==a.organization_id||b.self_created_at!==a.created_at)throw new TransferAdmissionError('Receipt owner changed.')
- return JSON.parse(row.response_json)
+ return JSON.parse(b.response_json!)
 }
 
 function materializeBinding(token:Statement,source:'new'|'restored'):Statement[]{

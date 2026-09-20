@@ -13,6 +13,18 @@ export default {async fetch(request,env){
   if(i.lostack)throw new Error('lost acknowledgement');return answer;
  }};
  const db=new D1Compat(raw),principal={actorId:user,organizationId:4};
+ if(i.readRace){
+  const prepare=db.prepare.bind(db);let fired=false;
+  db.prepare=sql=>{const statement=prepare(sql),get=statement.get.bind(statement);
+   statement.get=async params=>{
+    if(!fired&&sql.includes(i.readRace==='final'?'FROM transfer_history_bindings b JOIN':'FROM transfer_owner_admissions o')){
+     fired=true;const raceDb=new D1Compat(env.DB),admin={actorId:8,organizationId:4};
+     await retirement.retireTransferReceiptPage(raceDb,{actual:admin,expected:admin,datasetGeneration:await runs.readBusinessDatasetGeneration(raceDb),user:{id:8,organization_id:4,role_code:'admin'},afterReceiptId:6000,limit:1,maxStatements:8});
+    }
+    return get(params);
+   };return statement;
+  };
+ }
  try{
   if(i.action==='read')result=await admission.readAdmittedTransferResponse(db,{...principal,requestId:i.key});
   else if(i.action==='retire'){
@@ -99,7 +111,9 @@ async function main(){
   assert.equal((await invoke({action:'new'})).result,'new')
   assert.equal((await invoke({action:'read',key:'new-key'})).result.cost,3.123456)
   assert.ok((await invoke({action:'read',key:'key1'})).error)
-  assert.equal((await invoke({action:'retire',user:8,after:6000})).error,null)
+  const racedRead=await invoke({action:'read',key:'new-key',readRace:process.env.ADMISSION_RACE_STAGE??'owner'})
+  assert.ok(racedRead.error,'retirement between initial lookup and final response admission must deny disclosure')
+  assert.equal(racedRead.result,null)
   assert.ok((await invoke({action:'read',key:'new-key'})).error)
   assert.equal((await invoke({op:'new-op'})).result,'committed')
   assert.ok((await invoke({action:'read',key:'new-key'})).error)
