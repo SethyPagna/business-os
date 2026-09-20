@@ -111,6 +111,9 @@ function makeFakeD1(schema) {
   // schema: { tableName: { columns: string[], rows: Record<string, unknown>[] } }
   function run(sql, values) {
     let m
+    if (sql.includes('FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name)')) {
+      return { all: () => ({ results: Object.keys(schema).map(table_name => ({ table_name, parent_table: null, fk_id: null, fk_seq: null })) }) }
+    }
     if ((m = sql.match(/^SELECT name FROM sqlite_master WHERE type = \? AND name = \?$/))) {
       const [, tableName] = values
       return { first: () => (schema[tableName] ? { name: tableName } : null) }

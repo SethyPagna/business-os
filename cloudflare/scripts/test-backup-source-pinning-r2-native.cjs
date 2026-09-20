@@ -22,7 +22,7 @@ async function main() {
       }},DB:{prepare(sql){
         let params=[];const stmt={bind(...p){params=p;return stmt},
           async first(){return sql.includes('sqlite_master') && params[1]==='settings'?{name:'settings'}:null},
-          async all(){return {results:sql.startsWith('PRAGMA table_info')?[{name:'key'},{name:'value'}]:[]}},
+          async all(){return {results:sql.includes('pragma_foreign_key_list(m.name)')?[{table_name:'settings',parent_table:null,fk_id:null,fk_seq:null}]:sql.startsWith('PRAGMA table_info')?[{name:'key'},{name:'value'}]:[]}},
           async run(){if(sql.startsWith('DELETE')){deletes++;value=null}if(sql.startsWith('INSERT'))value=params[1];return {success:true}}};return stmt;
       },async batch(statements){return Promise.all(statements.map(s=>s.run()))}}};
       let error=null;
