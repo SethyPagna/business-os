@@ -82,6 +82,25 @@ test('actual Reports hub validation renders an alert without mounting request/ex
   const initializers = new Map<string, ts.Expression>()
   function visit(node: ts.Node) { if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) initializers.set(node.name.text, node.initializer); ts.forEachChild(node, visit) }
   visit(ast)
+  let range = { startDate: '', endDate: '', startTime: '', endTime: '' }
+  const allDates = () => ({ ...filters(), ...range })
+  assert.deepEqual(reportQueryParams(allDates(), getReportView('sales')), {})
+  let switchEffect: ts.Expression | undefined
+  function findSwitch(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useEffect' && node.arguments[0]?.getText(ast).includes('if (supportsTime) return')) switchEffect = node.arguments[0]
+    ts.forEachChild(node, findSwitch)
+  }
+  findSwitch(ast)
+  assert.ok(switchEffect)
+  const switchCode = ts.transpileModule(`const effect = (${switchEffect.getText(ast)}); effect();`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const runSwitch = (supportsTime: boolean) => new Function('supportsTime', 'setRange', switchCode)(supportsTime, (update: (current: typeof range) => typeof range) => { range = update(range) })
+  runSwitch(false)
+  assert.deepEqual(range, { startDate: '', endDate: '', startTime: '00:00', endTime: '23:59' }, 'actual Shift switch effect normalizes the All-dates clocks')
+  assert.deepEqual(reportQueryParams(allDates(), getReportView('shift')), {})
+  runSwitch(true)
+  assert.deepEqual(reportQueryParams(allDates(), getReportView('sales')), {}, 'All dates survives Shift -> Sales and persisted full-day clocks')
+  assert.throws(() => reportQueryParams({ ...allDates(), endTime: '12:00' }, getReportView('sales')), RangeError)
+  assert.throws(() => reportQueryParams({ ...allDates(), startTime: '09:00' }, getReportView('sales')), RangeError)
   const guard = (initializers.get('rangeError') as ts.CallExpression).arguments[0].getText(ast)
   const body = initializers.get('body')!.getText(ast)
   const evaluate = (expression: string, env: Record<string, unknown>) => {
