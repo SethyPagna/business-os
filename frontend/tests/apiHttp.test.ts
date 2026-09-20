@@ -12,6 +12,7 @@ function createReadableStorage(): Storage {
   }
 }
 import fs from 'node:fs'
+import ts from 'typescript'
 import {
   __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
@@ -75,6 +76,41 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
     console.error(error)
   }
 }
+
+await runTest('both sale-create entries stamp ownership before routing or writing and retain the captured payload', async () => {
+  const source = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
+  const parsed = ts.createSourceFile('salesTransport.ts', source, ts.ScriptTarget.Latest, true)
+  const names = ['createSale', 'createSaleWithoutWriteDedupe']
+  const functions = parsed.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text || '')).map((node) => node.getText(parsed).replace(/^export /, '')).join('\n')
+  const compiled = ts.transpileModule(functions + '\nreturn { createSale, createSaleWithoutWriteDedupe };', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  for (const name of names) {
+    let actor = 1
+    let deny = false
+    const events: string[] = []
+    let sent: Record<string, unknown> | null = null
+    let options: Record<string, unknown> | undefined
+    const api = new Function('stampOfflineSaleOwner', 'route', 'apiFetch', 'SYNC', compiled)(
+      (payload: Record<string, unknown>) => { events.push('stamp'); if (deny) throw Error('owner denied'); return { ...payload, offline_owner: { actor_id: actor } } },
+      (channel: string, write: () => unknown, fallback: unknown, isWrite: boolean) => { events.push('route'); assert.equal(channel, 'sales:create'); assert.equal(fallback, null); assert.equal(isWrite, true); return Promise.resolve().then(write) },
+      (method: string, path: string, payload: Record<string, unknown>, _timeout?: number, requestOptions?: Record<string, unknown>) => { events.push('write'); assert.equal(method, 'POST'); assert.equal(path, '/api/sales'); sent = payload; options = requestOptions; return Promise.resolve({ id: 1 }) },
+      { REQUEST_TIMEOUT_MS: 45000 },
+    )
+    const draft = { client_request_id: 'original-request', items: [{ product_id: 42 }] }
+    const original = structuredClone(draft)
+    const result = api[name](draft)
+    actor = 2
+    await result
+    assert.equal(events[0], 'stamp')
+    assert.deepEqual(events, name === 'createSale' ? ['stamp', 'route', 'write'] : ['stamp', 'write'])
+    assert.deepEqual(sent, { ...draft, offline_owner: { actor_id: 1 } })
+    assert.deepEqual(draft, original, 'owner admission must not rewrite the caller draft')
+    assert.deepEqual(options, name === 'createSaleWithoutWriteDedupe' ? { skipWriteDedupe: true } : undefined)
+    events.length = 0
+    deny = true
+    assert.throws(() => api[name](draft), /owner denied/)
+    assert.deepEqual(events, ['stamp'], 'denied ownership must stop before routing or dispatch')
+  }
+})
 
 function createDeferredResponse(payload: unknown = { ok: true }): { promise: Promise<Response>; resolve: () => void } {
   let resolve!: () => void
@@ -1155,7 +1191,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(dashboardTransportSource, /appendQuery\('\/api\/dashboard\/startup', query\)/)
   assert.match(salesTransportSource, /export function createSale/)
   assert.match(salesTransportSource, /route\(\s*'sales:create'/)
-  assert.match(salesTransportSource, /apiFetch\('POST', '\/api\/sales', payload\)/)
+  assert.match(salesTransportSource, /const ownedPayload = stampOfflineSaleOwner\(payload\)[\s\S]*apiFetch\('POST', '\/api\/sales', ownedPayload\)/)
   assert.match(salesTransportSource, /export function createSaleWithoutWriteDedupe/)
   assert.match(salesTransportSource, /skipWriteDedupe: true/)
   assert.match(salesTransportSource, /export function getSales/)
@@ -1183,11 +1219,15 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(returnsTransportSource, /buildAttemptedReturnItems\(Array\.isArray\(payload\.items\) \? payload\.items : \[\]\)/)
   assert.match(pendingSyncTransportSource, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'/)
   assert.match(pendingSyncTransportSource, /export async function discardPendingSyncQueue/)
-  assert.match(pendingSyncTransportSource, /db\.table\('sync_queue'\)\.clear\(\)/)
+  assert.doesNotMatch(pendingSyncTransportSource, /db\.table\('sync_queue'\)\.clear\(\)/)
+  assert.match(pendingSyncTransportSource, /const review = await validatedReview\(reviewToken\)/)
+  assert.match(pendingSyncTransportSource, /sameQueuedSaleRevision\(current, row\)/)
+  assert.match(pendingSyncTransportSource, /offlineSaleOwnersMatch\(current\?\.payload\?\.offline_owner, review\.owner\)/)
+  assert.match(pendingSyncTransportSource, /await queue\.delete\(row\._seq\)/)
   assert.match(pendingSyncTransportSource, /dispatchSyncUpdates\(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue'\)/)
   assert.match(pendingSyncTransportSource, /export async function getPendingSyncState/)
   assert.match(pendingSyncTransportSource, /serializePendingSyncPreview\(sorted\)/)
-  assert.match(pendingSyncTransportSource, /export function retryPendingSyncNow\(\): Promise<unknown>[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.match(pendingSyncTransportSource, /export async function retryPendingSyncNow\(reviewToken\?: string\): Promise<unknown>[\s\S]*validatedReview\(reviewToken\)[\s\S]*syncPendingSalesQueue\(\{ force: true, manualRecovery: true, expectedOwner: review\.owner, reviewedRows: review\.rows \}\)/)
   assert.doesNotMatch(source, /sync_queue|serializePendingSyncPreview|syncPendingSalesQueue\(\{ force: true \}\)/)
   assert.match(
     queryCacheSource,
