@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import ts from 'typescript'
 import { neutralPrimitiveChunk } from '../build/chunkBoundaries.ts'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -1392,20 +1393,49 @@ assert.doesNotMatch(
   /\(window as unknown as \{ api: DashboardApi \}\)\.api/,
   'dashboard startup should not load the full legacy API registry just to read summary data',
 )
-assert.match(
-  dashboard,
-  /withLoaderTimeout\([\s\S]{0,180}getDashboardApi\(\)\.getDashboard\(\{ startDate: start, endDate: end, granularity \}\)[\s\S]{0,80}DASHBOARD_SUMMARY_TIMEOUT_MS/,
-  'dashboard summary should timeout slow summary reads',
-)
+// Execute the real timeout call expressions: query extraction must not make
+// this gate depend on obsolete inline date-only object formatting.
+const dashboardAst = ts.createSourceFile('Dashboard.tsx', dashboard, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+const dashboardTimeoutValues: Record<string, number> = {}
+function readDashboardTimeouts(node: ts.Node) {
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+    && /^DASHBOARD_(SUMMARY|ANALYTICS|STARTUP)_TIMEOUT_MS$/.test(node.name.text)) {
+    assert.ok(node.initializer && ts.isNumericLiteral(node.initializer), 'Dashboard read budgets remain explicit numeric constants')
+    dashboardTimeoutValues[node.name.text] = Number(node.initializer.text)
+  }
+  ts.forEachChild(node, readDashboardTimeouts)
+}
+readDashboardTimeouts(dashboardAst)
+for (const method of ['getDashboard', 'getAnalytics', 'getDashboardStartup']) {
+  let timeoutCall: ts.CallExpression | undefined
+  function visitDashboardTimeout(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.getText(dashboardAst) === 'withLoaderTimeout'
+      && node.arguments[0]?.getText(dashboardAst).includes(`.${method}(`)) timeoutCall = node
+    ts.forEachChild(node, visitDashboardTimeout)
+  }
+  visitDashboardTimeout(dashboardAst)
+  assert.ok(timeoutCall, `${method} must remain wrapped in withLoaderTimeout`)
+  const query = { startDate: '2026-09-19', endDate: '2026-09-20', createdFrom: '2026-09-19 15:00:00', createdTo: '2026-09-19 19:01:00', granularity: 'day' }
+  const result = Promise.resolve({ method })
+  let dispatched = 0
+  let bounded = 0
+  const env = {
+    query, label: 'Dashboard summary',
+    ...dashboardTimeoutValues,
+    getDashboardApi: () => ({ [method]: (actual: unknown) => { dispatched++; assert.deepEqual(actual, query); return result } }),
+    withLoaderTimeout: (loader: () => unknown, label: string, timeout: number) => {
+      bounded++; assert.ok(label); assert.equal(timeout, 30000, `${method} retains explicit 30-second timeout`); return loader()
+    },
+  }
+  const code = ts.transpileModule(`const result = ${timeoutCall.getText(dashboardAst)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  assert.equal(new Function('env', `with(env){${code};return result}`)(env), result)
+  assert.equal(dispatched, 1, `${method} dispatches the canonical timed range once`)
+  assert.equal(bounded, 1, `${method} dispatch stays inside its timeout wrapper`)
+}
 assert.match(
   dashboard,
   /const DASHBOARD_STARTUP_TIMEOUT_MS = 30000/,
   'dashboard combined startup read should use an explicit timeout',
-)
-assert.match(
-  dashboard,
-  /getDashboardApi\(\)\.getDashboardStartup\(\{ startDate: start, endDate: end, granularity: gran \}\)/,
-  'dashboard initial startup should use the combined summary and analytics transport',
 )
 assert.match(
   dashboard,
@@ -1416,11 +1446,6 @@ assert.match(
   dashboard,
   /\}, \[isActive, loadSummary\]\) \/\/ eslint-disable-line/,
   'dashboard summary effect should not depend on range-bound startup or analytics loaders',
-)
-assert.match(
-  dashboard,
-  /withLoaderTimeout\(\s*\(\) => getDashboardApi\(\)\.getAnalytics\(\{ startDate: start, endDate: end, granularity: gran \}\),\s*'Dashboard analytics',\s*DASHBOARD_ANALYTICS_TIMEOUT_MS,\s*\)/,
-  'dashboard analytics should timeout slow analytics reads',
 )
 assert.doesNotMatch(
   dashboard,
