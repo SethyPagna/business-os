@@ -1,3 +1,21 @@
+## Shift mutation-scope blocker confirmed; export/lifecycle work local — September 20
+
+Shift count/page correction490b46e2 passed independent review05d530c9.
+Root requested another negative control before integration: reviewer870e2144
+executed the real cancel callback/transport and confirmed late mutation success
+can restore old details after a same-user branch/permission scope change.
+Edit/close/reopen share the pattern. Writer is fencing completion, error, finally
+and follow-up detail reads;8326895e/490b46e2 remain isolated, NOT deployed.
+
+Returns export audit80906c82 confirmed revision gaps for customer anonymity,
+replacement items and restore writes. Isolated0187 revision-only implementation
+is assigned; endpoint/UI and complete exports remain unwired. Shared0186 dataset
+generation/transfer retirement remains local; restore/reset integration and exact
+historical receipt-import compatibility are unresolved verification gates.
+Owner approval is recorded, but no0185/0186/0187 remote migration has occurred.
+Production remains cbbebe5841f8 / Worker49b64606-d25a-4894-b630-6baa371005d1.
+Full goal remains active; passing helper tests is not feature completion.
+
 ## Stock-in scope checkpoint deployed; lifecycle tracking approved — September 20
 
 Source `cbbebe5841f8` deployed Paid as Worker
