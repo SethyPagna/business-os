@@ -104,9 +104,12 @@ export async function getPendingSyncState(): Promise<PendingSyncState> {
     return acc
   }, { total: 0, pending: 0, syncing: 0, failed: 0, conflict: 0 })
   const oldest = sorted[0]?.created_at || null
+  const preview = serializePendingSyncPreview(sorted)
   const reviewToken = owner ? crypto.randomUUID() : null
   if (reviewToken && owner) {
-    queueReviews.set(reviewToken, { owner, scope, rows: sorted })
+    // Serialization caps the visible prefix. Unseen rows are not authorized
+    // by this review, even though the summary counts include them.
+    queueReviews.set(reviewToken, { owner, scope, rows: sorted.slice(0, preview.length) })
     while (queueReviews.size > 8) queueReviews.delete(queueReviews.keys().next().value!)
   }
   return {
@@ -116,7 +119,7 @@ export async function getPendingSyncState(): Promise<PendingSyncState> {
     quarantined: items.length - owned.length,
     owner,
     review_token: reviewToken,
-    items: serializePendingSyncPreview(sorted),
+    items: preview,
   }
 }
 
