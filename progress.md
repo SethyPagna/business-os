@@ -1,3 +1,21 @@
+## Admin date/report checkpoint deployed — September 20
+
+Source `e85a45e8616f` is deployed on Paid as Worker
+`3b7e2af5-1b4e-4cd7-a122-ad63e9b90b18`; GitHub main and working branch pushed.
+No new migration or historical data rewrite. Frontend503/503, zero skips;
+21 browser cases across desktop/Android/iOS engines; types, i18n, build,
+focused Worker checks and both tier dry runs pass. Live admin Dashboard,
+Reports/selected Shift Report/Returns and public About render, no captured
+console errors. Live entry script matches the built artifact.
+See `docs/fleet/2026-09-20-admin-range-release.md` for exact evidence/limits.
+
+Full goal remains ACTIVE, not complete. One-year complete statement exports
+remain unwired; tracking migration authority pending. Resumable transfer store
+passes local native atomicity tests but current budgets underestimate whole-batch
+retries; NOT integrated/deployed. Stock-in detail scope fencing is next isolated
+work. Remaining date semantics, hardware/data evidence, Free capacity, public
+work and safe folder consolidation remain open. Older paragraphs are historical.
+
 ## Completion goal active; remaining admin wave — September 20
 
 Owner requested continued goal-backed execution until completion. Goal is active;

@@ -3,6 +3,33 @@
 This supplements, not replaces, earlier issue ledgers and screenshots/video evidence.
 Recorded means tracked; implemented does not mean verified or deployed.
 
+## Current release and newly verified gaps
+
+`e85a45e8616f` deployed Paid as Worker `3b7e2af5-1b4e-4cd7-a122-ad63e9b90b18`.
+See `2026-09-20-admin-range-release.md`. Dashboard/Returns continuous time bounds,
+Reports partial clocks and all-time restoration, shift admin comparison/date
+selection and single-transfer FIFO metadata cleanup are integrated and deployed.
+Frontend503/503; browser21/21; affected Worker/type/build/i18n gates pass. No new
+migration. This supersedes held/unintegrated notes below only for these slices.
+
+Exports remain OPEN: one calendar year maximum custom range, optional shortcuts,
+complete matching rows beyond500/1000, consistent multi-page snapshot and restore
+epoch needed; helpers are not an endpoint. Tracking authority is still pending.
+
+Large transfers remain OPEN: local native workerd/D1 store tests9fa92424 pass
+atomicity/lost-ack/duplicate checks, but actual D1Compat may retry the entire batch.
+Store adds four statements, not two. Reviewer67182905 found conservative lower
+bounds90 statements for accepted Free19-lot scenario and1086 for Paid512-lot
+scenario, before all request overhead. Proposal0694409f: transfer-only batchOnce
+plus subsequent-request recovery using unchanged sealed identity, full auth/read/
+init/retry budgets. Not implemented or deployed; no Free-capacity claim.
+
+Invoice host audit: AR/AP use invoice dates; supplier stock-in uses recorded
+receipt days, with no reliable historical time. Owner date-basis question pending.
+Customer purchase filters currently use recurring daily time bands, not continuous
+endpoints. Stock-in detail cache stale-scope defect has isolated implementation
+in progress. These findings do not change historical dates or money.
+
 LATEST: online-only/cost/account safety checkpoint6a31689f deployed as
 Worker3f5ad76d-5be1-468b-876d-6151239c61d9 with0184 applied once. See
 2026-09-20-online-only-release.md. This supersedes older NOTdeployed/blocker
