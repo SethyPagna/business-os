@@ -79,7 +79,7 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     const isValid = new Function(`${guard}
 return isValidDocumentResponse`)() as (response: unknown) => boolean
     const res = (over: Record<string, unknown>) =>
-      ({ ok: true, type: 'basic', redirected: false, ...over })
+      ({ ok: true, type: 'basic', redirected: false, headers: new Headers({ 'content-type': 'text/html' }), ...over })
     assert.equal(isValid(res({})), true, 'a plain 200 shell is what the cache is for')
     assert.equal(
       isValid(res({ redirected: true })),
@@ -170,7 +170,7 @@ ${probe}
 return priorShellIsUnservable`)(cachesStub, 'business-os-app-shell-new') as
         (keys: string[]) => Promise<boolean>
     }
-    const ok = { ok: true, type: 'basic', redirected: false }
+    const ok = { ok: true, type: 'basic', redirected: false, headers: new Headers({ 'content-type': 'text/html' }) }
     const poison = { ok: true, type: 'basic', redirected: true }
 
     const poisoned = build({

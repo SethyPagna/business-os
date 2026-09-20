@@ -225,11 +225,16 @@ function broadcastSyncEvent(type, detail = {}) {
 // trailing-slash normalisation. `cache.add()` follows redirects silently
 // and stores the result, flag and all, which is how it got in.
 function isValidDocumentResponse(response) {
+  return isValidTransportResponse(response)
+    && String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase() === 'text/html'
+}
+
+function isValidTransportResponse(response) {
   return Boolean(response && response.ok && response.type === 'basic' && !response.redirected)
 }
 
 function isValidStaticResponse(request, response) {
-  if (!isValidDocumentResponse(response)) return false
+  if (!isValidTransportResponse(response)) return false
   const pathname = new URL(request.url || request, self.location.origin).pathname.toLowerCase()
   const contentType = String(response.headers.get('content-type') || '').toLowerCase()
   if (pathname.endsWith('.js')) return contentType.includes('javascript') || contentType.includes('ecmascript')
@@ -304,11 +309,14 @@ async function precacheAppShell() {
   await Promise.allSettled(APP_SHELL_URLS.map(async (url) => {
     const request = new Request(url, { cache: 'reload' })
     const response = await fetch(request)
-    if (!isValidDocumentResponse(response)) throw new Error(`Unusable shell response: ${url}`)
+    const valid = url === '/' || url === '/index.html'
+      ? isValidDocumentResponse(response)
+      : isValidStaticResponse(request, response)
+    if (!valid) throw new Error(`Unusable shell response: ${url}`)
     await cache.put(request, response.clone())
   }))
   const shell = await cache.match('/index.html') || await cache.match('/')
-  if (!shell) throw new Error('Application shell could not be cached')
+  if (!isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
 
   // The worker is registered after the first page load, so those entry files
   // were fetched before this worker controlled the page. Discover the hashed
@@ -752,6 +760,15 @@ function isNeverCachedPath(pathname) {
     || pathname.startsWith('/portal/uploads/')
 }
 
+function isAppDocumentPath(pathname) {
+  // Match the app router's resource suffix rule, preserving deep SPA routes.
+  // Query strings/fragments do not change whether a path is a document.
+  let path
+  try { path = decodeURIComponent(pathname).replace(/\/+$/g, '') || '/' } catch { return false }
+  return path === '/index.html' || (!isNeverCachedPath(path)
+    && !path.startsWith('/assets/') && !/\.[a-z0-9]+$/i.test(path))
+}
+
 function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
     || pathname === '/icon.png'
@@ -794,10 +811,10 @@ async function appShellFallback(request, event) {
   if (cached && !isValidDocumentResponse(cached)) {
     await cache.delete('/index.html').catch(() => {})
     await cache.delete('/').catch(() => {})
-    return fetchAndCacheShell(request, cache)
+    return fetchAndCacheShell(new Request(new URL('/index.html', self.location.origin)), cache)
   }
   if (cached) {
-    const revalidate = fetch(request, { cache: 'no-store' })
+    const revalidate = fetch('/index.html', { cache: 'no-store' })
       .then(async (response) => {
         // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
         // error overwrite a good cached shell -- only a real 200 updates it.
@@ -917,6 +934,7 @@ self.addEventListener('fetch', (event) => {
   if (isNeverCachedPath(url.pathname)) return
 
   if (request.mode === 'navigate') {
+    if (!isAppDocumentPath(url.pathname)) return
     event.respondWith(appShellFallback(request, event))
     return
   }
