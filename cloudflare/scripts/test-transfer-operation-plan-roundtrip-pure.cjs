@@ -278,6 +278,29 @@ async function main() {
   const newCounter = countingDb(newRawDb)
   const newResult = await withDeterministicUuid(() => transferOperation.planTransferOperation(newCounter.db, BASE_ARGS))
   const newStats = newCounter.stats()
+  check('allocation summaries are immutable detached views of the persisted source allocations', () => {
+    const before = JSON.stringify(newResult.statements)
+    const memberStatements = newResult.statements.filter(statement => statement.sql.startsWith('INSERT INTO transfer_operation_members'))
+    assert.equal(newResult.allocationSummaries.length, LINES.length)
+    assert.ok(Object.isFrozen(newResult.allocationSummaries))
+    newResult.allocationSummaries.forEach((summary, ordinal) => {
+      const member = memberStatements[ordinal].params
+      const allocations = JSON.parse(member.allocations)
+      assert.deepEqual(summary, { ordinal, untrackedQuantity: member.untracked,
+        takes: allocations.map(a => ({ batchId: a.source_batch_id, quantity: a.quantity,
+          receivedAt: a.source_snapshot.received_at, lotCode: a.source_snapshot.lot_code })) })
+      assert.ok(Object.isFrozen(summary)); assert.ok(Object.isFrozen(summary.takes))
+      summary.takes.forEach(take => {
+        assert.ok(Object.isFrozen(take))
+        assert.equal(Reflect.set(take, 'receivedAt', 'mutated'), false)
+        assert.equal(Reflect.set(take, 'quantity', 999), false)
+      })
+      assert.equal(Reflect.set(summary, 'untrackedQuantity', 999), false)
+      assert.throws(() => summary.takes.push({}), TypeError)
+    })
+    assert.throws(() => newResult.allocationSummaries.push({}), TypeError)
+    assert.equal(JSON.stringify(newResult.statements), before)
+  })
 
   // Both plans embed the same operationId (from the deterministic UUID
   // sequence) -- normalize it out along with the params object's `operation`
