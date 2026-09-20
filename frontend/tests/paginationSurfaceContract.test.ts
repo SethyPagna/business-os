@@ -181,7 +181,7 @@ check('server-paged mutable/filterable lists correct an empty former last page',
   for (const file of [
     'frontend/src/components/contacts/ApInvoicesSection.tsx',
     'frontend/src/components/contacts/ArInvoicesSection.tsx',
-    'frontend/src/components/contacts/StockInInvoicesSection.tsx',
+    'frontend/src/components/contacts/useStockInInvoiceReport.ts',
     'frontend/src/components/fees/FeesPage.tsx',
     'frontend/src/components/files/FilePickerModal.tsx',
     'frontend/src/components/products/StockInSessionsSection.tsx',

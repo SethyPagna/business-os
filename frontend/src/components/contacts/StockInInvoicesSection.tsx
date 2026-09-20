@@ -1,14 +1,14 @@
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
-import { getStockInInvoiceLines, getStockInInvoiceReport } from '../../api/contactReadTransport.ts'
+import { useStockInInvoiceReport, groupKeyOf, LINE_PAGE_SIZE, type InvoiceGroup, type InvoiceLine } from './useStockInInvoiceReport.ts'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -30,74 +30,8 @@ type TranslateFn = (key: string) => string | undefined
 // the honest grouping. Lots with no recorded branch/date/supplier show
 // under explicit "not recorded" labels instead of being hidden.
 
-type InvoiceGroup = {
-  supplier_key: string
-  supplier_name?: string | null
-  received_day: string
-  line_count: number
-  units_received: number | null
-  cost_usd: number | null
-  lines_without_cost: number
-  credit_lines: number
-  branch_ids?: string | null
-}
-
-type ReportTotals = {
-  invoices?: number
-  lines?: number
-  units_received?: number
-  cost_usd?: number
-  lines_without_cost?: number
-  credit_lines?: number
-  invoices_without_branch?: number
-}
-
-type ReportPayload = {
-  invoices?: InvoiceGroup[]
-  totals?: ReportTotals
-  page?: number
-  page_size?: number
-  total_invoices?: number
-  meta?: {
-    branches?: Array<{ id: number; name?: string | null }>
-    suppliers?: Array<{ key: string; name?: string | null }>
-  }
-}
-
-type InvoiceLine = {
-  id: number
-  batch_number?: number | null
-  lot_code?: string | null
-  received_at?: string | null
-  received_quantity?: number | null
-  unit_cost_usd?: number | null
-  line_total_usd?: number | null
-  payment_status?: string | null
-  credit_due_date?: string | null
-  received_branch_name?: string | null
-  product_name?: string | null
-  barcode?: string | null
-  unit?: string | null
-  remaining_quantity?: number | null
-}
-
-type LinesState = {
-  lines: InvoiceLine[]
-  page: number
-  pageSize: number
-  total: number
-  loading: boolean
-  error: string
-}
-
 type StockInInvoicesSectionProps = {
   t: TranslateFn
-}
-
-const LINE_PAGE_SIZE = 100
-
-function groupKeyOf(group: InvoiceGroup): string {
-  return `${group.supplier_key}|${group.received_day || 'none'}`
 }
 
 export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProps) {
@@ -113,125 +47,11 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
-  const [data, setData] = useState<ReportPayload | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [lineCache, setLineCache] = useState<Record<string, LinesState>>({})
-  // P3-2: the invoice group whose detail float is open (user: "i meant float
-  // when clicked on the invoice rows click to view details and sections").
-  // Its product lines live in `lineCache`, keyed by group -- the float renders
-  // that slot, so the loader/pager below is unchanged. There is no inline
-  // expand any more: a row opens the float and nothing else (owner: "the
-  // invoice is doing click to expand. instead it should be click to open view
-  // detail float"), so the cache is named for what it is.
-  const [detailGroup, setDetailGroup] = useState<InvoiceGroup | null>(null)
-  const aliveRef = useRef(true)
-  const requestRef = useRef(0)
-
-  useEffect(() => {
-    aliveRef.current = true
-    return () => { aliveRef.current = false }
-  }, [])
-
-  useEffect(() => {
-    const requestId = ++requestRef.current
-    setLoading(true)
-    setError('')
-    getStockInInvoiceReport({
-      branch_id: branchId === 'all' ? '' : branchId,
-      supplier: supplierKey === 'all' ? '' : supplierKey,
-      from: fromDate,
-      to: toDate,
-      page,
-      page_size: pageSize,
-    })
-      .then((result) => {
-        if (!aliveRef.current || requestRef.current !== requestId) return
-        const nextData = (result || {}) as ReportPayload
-        const nextPage = clampPage(page, Number(nextData.total_invoices) || 0, pageSize)
-        if (nextPage !== page) {
-          setPage(nextPage)
-          return
-        }
-        setData(nextData)
-        // A filter change makes the open group's line set stale (the branch
-        // filter also scopes lines), so the cache is dropped and the float
-        // closes with it rather than showing lines from the old filter.
-        setLineCache({})
-        setDetailGroup(null)
-      })
-      .catch((err: unknown) => {
-        if (!aliveRef.current || requestRef.current !== requestId) return
-        setError(err instanceof Error ? err.message : tr('stock_in_invoices_failed', 'Failed to load the stock-in invoice report'))
-      })
-      .finally(() => {
-        if (aliveRef.current && requestRef.current === requestId) setLoading(false)
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId, supplierKey, fromDate, toDate, page, pageSize, refreshToken])
-
-  const loadLines = useCallback((group: InvoiceGroup, linePage: number) => {
-    const key = groupKeyOf(group)
-    setLineCache((current) => ({
-      ...current,
-      [key]: {
-        lines: current[key]?.lines || [],
-        page: linePage,
-        pageSize: LINE_PAGE_SIZE,
-        total: current[key]?.total || 0,
-        loading: true,
-        error: '',
-      },
-    }))
-    getStockInInvoiceLines({
-      supplier_key: group.supplier_key,
-      day: group.received_day || 'none',
-      branch_id: branchId === 'all' ? '' : branchId,
-      page: linePage,
-      page_size: LINE_PAGE_SIZE,
-    })
-      .then((result) => {
-        if (!aliveRef.current) return
-        const payload = (result || {}) as { lines?: InvoiceLine[]; total_lines?: number }
-        const total = Number(payload.total_lines) || 0
-        const nextPage = clampPage(linePage, total, LINE_PAGE_SIZE)
-        if (nextPage !== linePage) {
-          window.setTimeout(() => loadLines(group, nextPage), 0)
-          return
-        }
-        setLineCache((current) => (current[key] ? {
-          ...current,
-          [key]: {
-            lines: Array.isArray(payload.lines) ? payload.lines : [],
-            page: linePage,
-            pageSize: LINE_PAGE_SIZE,
-            total,
-            loading: false,
-            error: '',
-          },
-        } : current))
-      })
-      .catch((err: unknown) => {
-        if (!aliveRef.current) return
-        setLineCache((current) => (current[key] ? {
-          ...current,
-          [key]: {
-            ...current[key],
-            loading: false,
-            error: err instanceof Error ? err.message : tr('stock_in_invoices_failed', 'Failed to load the stock-in invoice report'),
-          },
-        } : current))
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branchId])
-
-  // Clicking an invoice row opens its float. The lines are fetched on open
-  // unless this group's page is already cached, so re-opening the same invoice
-  // shows its rows immediately instead of flashing a loader.
-  const openGroup = (group: InvoiceGroup) => {
-    setDetailGroup(group)
-    if (!lineCache[groupKeyOf(group)]) loadLines(group, 1)
-  }
+  const { data, loading, error, lineCache, detailGroup, closeGroup, openGroup, loadLines } = useStockInInvoiceReport({
+    branchId, supplierKey, fromDate, toDate, page, pageSize, refreshToken,
+    actorKey: JSON.stringify(user ?? null), setPage,
+    errorText: tr('stock_in_invoices_failed', 'Failed to load the stock-in invoice report'),
+  })
 
   const totals = data?.totals || {}
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
@@ -478,7 +298,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           <InvoiceDetailFloat
             t={t}
             wide
-            onClose={() => setDetailGroup(null)}
+            onClose={closeGroup}
             title={`${tr('invoice_details', 'Invoice details')} -- ${supplierLabel(detailGroup)}`}
             idLabel={tr('received_date', 'Received date')}
             idValue={detailGroup.received_day ? fmtDateOnly(detailGroup.received_day) : tr('no_date_recorded', 'No date recorded')}
