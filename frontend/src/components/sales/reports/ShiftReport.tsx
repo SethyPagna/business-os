@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3.js'
@@ -6,6 +6,8 @@ import { fetchShiftHistory, listShifts, type ShiftHistoryResult, type ShiftListR
 import { useApp } from '../../../AppContext.tsx'
 import { isAdminControlUser, type PermissionUser } from '../../../utils/permissions.ts'
 import AppSelect from '../../shared/AppSelect.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../../shared/PaginationControls.tsx'
+import { SHIFT_STATE_CHANGED_EVENT } from '../../pos/ShiftGate.tsx'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
@@ -24,15 +26,24 @@ export default function ShiftReport(p: ReportViewProps) {
   // scoped to actor/permissions/branch, and load expensive figures on demand.
   const depsKey = JSON.stringify([branchId, filters.startDate, filters.endDate, user?.id, user?.username, user?.role_code, user?.permissions, user?.role_permissions])
   const [selection, setSelection] = useState({ scope: '', id: '' })
+  const [paging, setPaging] = useState({ scope: '', page: 1, size: DEFAULT_PAGE_SIZE })
+  const page = paging.scope === depsKey ? paging.page : 1
+  const pageSize = paging.size
+  const listKey = `${depsKey}:${page}:${pageSize}`
   // Dates select complete shift records by business_date, not clipped sales windows.
-  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, limit: 200 }), depsKey)
+  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, page, pageSize }), listKey)
   const shifts = listing.data?.shifts ?? []
-  const selected = selection.scope === depsKey ? shifts.find((row) => String(row.id) === selection.id) : undefined
+  const selected = selection.scope === listKey ? shifts.find((row) => String(row.id) === selection.id) : undefined
   const selectedId = selected?.id ?? shifts[0]?.id
   const state = useReportData<ShiftHistoryResult>(
-    () => fetchShiftHistory(selectedId!), `${depsKey}:${selectedId ?? ''}`, selectedId != null,
+    () => fetchShiftHistory(selectedId!), `${listKey}:${selectedId ?? ''}`, selectedId != null,
   )
   const receivedShift = state.data?.shift ?? null
+  useEffect(() => {
+    const refresh = () => { listing.reload(); state.reload() }
+    window.addEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
+  }, [listing.reload, state.reload])
   const shift = receivedShift && !isAdminControlUser(user)
     ? { ...receivedShift, reconciliation: null, figures: null } : receivedShift
 
@@ -81,10 +92,14 @@ export default function ShiftReport(p: ReportViewProps) {
       titleControl={p.titleControl}
       hint={{ label: tr('shift_report', 'Shift Report'), text: tr('shift_report_hint', 'Registered OPEN and END cash is report-only. Business results come from sales, COGS, profit, delivery, expenses, refunds, and positive Not Paid.') }}
       secondaryActions={<div className="flex min-w-0 flex-wrap gap-2">
-        <AppSelect value={selectedId ?? ''} onChange={(id) => setSelection({ scope: depsKey, id })}
+        <AppSelect value={selectedId ?? ''} onChange={(id) => setSelection({ scope: listKey, id })}
           ariaLabel={tr('shift_history', 'Shift history')} disabled={listing.loading || !shifts.length}
           options={shifts.map((row) => ({ value: row.id, label: `${row.business_date} · ${row.user_name || tr('shift_staff', 'Staff')} · ${row.shift_code}` }))}
           className="min-w-0 max-w-full" />
+        {!listing.loading && listing.data ? <PaginationControls compact page={listing.data.page ?? page} pageSize={pageSize}
+          totalItems={listing.data.total ?? shifts.length} t={(key) => tr(key, key)}
+          onPageChange={(next) => setPaging({ scope: depsKey, page: next, size: pageSize })}
+          onPageSizeChange={(size) => setPaging({ scope: depsKey, page: 1, size })} /> : null}
         <ShiftHistoryPanel branchId={branchId} compact label={tr('shift_history', 'Shift history')} />
       </div>}
       menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> }).map((item) => ({ ...item, disabled: !shift }))} /> : null}

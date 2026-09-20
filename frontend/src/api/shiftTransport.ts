@@ -298,7 +298,7 @@ export type ShiftAmendment = {
   created_at: string
 }
 
-export type ShiftListResult = { shifts: Shift[]; scope: 'all' | 'own' }
+export type ShiftListResult = { shifts: Shift[]; scope: 'all' | 'own'; page?: number; page_size?: number; total?: number; has_more?: boolean }
 /**
  * One shift RECORD: the segment that was asked for, every segment of its
  * lineage oldest first (a reopen continues a shift into a new row), and the
@@ -498,6 +498,8 @@ export async function fetchShiftPolicy(): Promise<ShiftPolicy> {
 }
 
 export async function listShifts(filters: {
+  page?: number
+  pageSize?: number
   branchId?: number | null
   userId?: number | string | null
   from?: string
@@ -510,6 +512,8 @@ export async function listShifts(filters: {
     from: filters.from,
     to: filters.to,
     limit: filters.limit ?? 50,
+    page: filters.page,
+    page_size: filters.pageSize,
   })
   const result = await route<ShiftListResult>(`shifts:list:${query}`, () => apiFetch('GET', `/api/shifts${query}`), null)
   if (!result) throw new Error('Could not read shift history')

@@ -566,6 +566,12 @@ app.get('/', async (c) => {
     return c.json({ error: 'Invalid shift business date range.' }, 400)
   }
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
+  const paged = c.req.query('page') != null || c.req.query('page_size') != null
+  const page = Number(c.req.query('page') ?? 1)
+  const pageSize = Number(c.req.query('page_size') ?? 20)
+  if (paged && (!/^\d+$/.test(c.req.query('page') ?? '1') || !/^\d+$/.test(c.req.query('page_size') ?? '20') || !Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 200 || !Number.isSafeInteger((page - 1) * pageSize))) {
+    return c.json({ error: 'Invalid shift pagination.' }, 400)
+  }
   const visibility = shiftVisibility(user, await readShiftPolicy(db))
   // ---- ONE ROW PER SHIFT RECORD (owner ruling, Sep 14 2026) --------------
   //
@@ -591,6 +597,16 @@ app.get('/', async (c) => {
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
   const params = { ...visibility.params, requestedUserId, branchId, from, to, limit }
+  if (paged) {
+    const counts = await db.prepare(`SELECT COUNT(*) AS total FROM shift_sessions WHERE ${filters}`).get<{ total: number }>(params)
+    const total = Number(counts?.total || 0)
+    const effectivePage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)))
+    const rows = await db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters}
+      ORDER BY CASE WHEN closed_at IS NULL AND cancelled_at IS NULL THEN 0 ELSE 1 END,
+        business_date DESC, opened_at DESC, id DESC LIMIT @pageSize OFFSET @offset`).all<ShiftDbRow>({ ...params, pageSize, offset: (effectivePage - 1) * pageSize })
+    return c.json({ shifts: rows.map((shift) => responseShift(user, shift)), scope: visibility.scope,
+      page: effectivePage, page_size: pageSize, total, has_more: effectivePage * pageSize < total })
+  }
   const [openShifts, closedShifts] = await Promise.all([
     db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND closed_at IS NULL AND cancelled_at IS NULL
       ORDER BY business_date DESC, opened_at DESC, id DESC`).all<ShiftDbRow>(params),

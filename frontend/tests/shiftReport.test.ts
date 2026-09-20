@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { transformSync } from 'esbuild'
 import type { Shift } from '../src/api/shiftTransport.ts'
 import {
   shiftCountedPairText,
@@ -10,6 +12,87 @@ import {
   shiftRegisteredCash,
   type ShiftFiguresShape,
 } from '../src/components/shifts/shiftReportModel.ts'
+
+test('mounted Shift selection pages beyond200 and revokes old detail before date/page effects', async () => {
+  const require = createRequire(import.meta.url)
+  const slots: any[] = []
+  let cursor = 0
+  let writes = 0
+  let pending: Array<() => void> = []
+  const hooks = {
+    useState(initial: any) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial
+      return [slots[i], (next: any) => { writes++; slots[i] = typeof next === 'function' ? next(slots[i]) : next }] },
+    useRef(initial: any) { const i = cursor++; return slots[i] ??= { current: initial } },
+    useCallback(fn: any, deps: any[]) { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i].deps[j]))) slots[i] = { fn, deps }; return slots[i].fn },
+    useMemo(fn: any) { return fn() },
+    useEffect(fn: any, deps: any[]) { const i = cursor++; if (!slots[i] || deps.some((v, j) => !Object.is(v, slots[i].deps[j]))) pending.push(() => { slots[i]?.cleanup?.(); slots[i] = { deps, cleanup: fn() } }) },
+  }
+  const frameSource = fs.readFileSync(new URL('../src/components/sales/reports/ReportFrame.tsx', import.meta.url), 'utf8')
+  const hookBody = frameSource.slice(frameSource.indexOf('export function useReportData')).replace('export function', 'function')
+  const useReportData = new Function('useState', 'useRef', 'useCallback', 'useEffect', `${stripTypeScriptTypes(hookBody)}; return useReportData`)(hooks.useState, hooks.useRef, hooks.useCallback, hooks.useEffect)
+  const Frame = 'ReportFrame', Pager = 'Pager', Summary = 'Summary'
+  const listCalls: any[] = [], detailCalls: number[] = [], exports: any[] = []
+  let lateResolve: (value: any) => void = () => {}
+  let holdDetail = false
+  let user: any = { id: 1, role_code: 'admin' }
+  const shift = (id: number) => ({ id, shift_code: `S-${id}`, business_date: '2020-01-01', opening_float_usd: id, opening_float_khr: null, closing_counted_usd: null, closing_counted_khr: null })
+  const mod: any = { exports: {} }
+  const reportSource = fs.readFileSync(new URL('../src/components/sales/reports/ShiftReport.tsx', import.meta.url), 'utf8')
+  new Function('require', 'module', 'exports', transformSync(reportSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code)((id: string) => {
+    if (id === 'react') return hooks
+    if (id === 'react/jsx-runtime') return { jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) }
+    if (id.includes('ReportFrame')) return { __esModule: true, default: Frame, useReportData }
+    if (id.includes('PaginationControls')) return { __esModule: true, default: Pager, DEFAULT_PAGE_SIZE: 20 }
+    if (id.includes('AppContext')) return { useApp: () => ({ user }) }
+    if (id.includes('permissions')) return { isAdminControlUser: (u: any) => u.role_code === 'admin' }
+    if (id.includes('shiftTransport')) return {
+      listShifts: async (input: any) => { listCalls.push(input); return { shifts: [shift(input.page === 1 ? 1 : 250)], page: input.page, total: 275, page_size: 20 } },
+      fetchShiftHistory: async (id: number) => { detailCalls.push(id); return holdDetail ? new Promise((resolve) => { lateResolve = resolve }) : { shift: shift(id) } },
+    }
+    if (id.includes('shiftReportModel')) return require('../src/components/shifts/shiftReportModel.ts')
+    if (id.includes('ShiftSummary')) return { __esModule: true, default: Summary }
+    if (id.includes('reportModel')) return { reportFileName: (name: string) => name }
+    if (id.includes('reportTypes')) return { exportMenuItems: (_t: any, _can: any, csv: any) => [{ onClick: csv }] }
+    if (id.includes('/csv')) return { downloadCSV: (...args: any[]) => exports.push(args) }
+    if (id.includes('ShiftGate')) return { SHIFT_STATE_CHANGED_EVENT: 'shift:test' }
+    if (id.includes('/kit')) return { OverflowMenu: 'Menu', Skeleton: 'Skeleton', EmptyState: 'Empty' }
+    return { default: id }
+  }, mod, mod.exports)
+  const oldWindow = globalThis.window
+  globalThis.window = new EventTarget() as any
+  const props: any = { filters: { startDate: '', endDate: '', branchId: '' }, tr: (key: string) => key, view: { labelKey: 'shift', fallback: 'Shift' }, canExport: () => true }
+  const render = () => { cursor = 0; return mod.exports.default(props) }
+  const settle = async () => { for (let i = 0; i < 6; i++) { render(); const jobs = pending; pending = []; jobs.forEach((fn) => fn()); await new Promise((resolve) => setImmediate(resolve)) } return render() }
+  const nodes = (node: any): any[] => Array.isArray(node) ? node.flatMap(nodes) : node?.props ? [node, ...Object.values(node.props).flatMap(nodes)] : []
+  try {
+    let tree = await settle()
+    assert.equal(nodes(tree).find((n) => n.type === Summary).props.shift.id, 1)
+    nodes(tree).find((n) => n.type === Pager).props.onPageChange(13)
+    tree = render()
+    assert.ok(!nodes(tree).some((n) => n.type === Summary), 'previous detail vanishes in first page-change render')
+    tree = await settle()
+    assert.equal(listCalls.at(-1).page, 13)
+    assert.equal(nodes(tree).find((n) => n.type === Summary).props.shift.id, 250)
+    nodes(tree).find((n) => n.type === 'Menu').props.items[0].onClick()
+    assert.equal(exports.at(-1)[0], 'shift-S-250', 'older selected shift is exported, not the first page')
+    assert.equal(exports.at(-1)[1][0].USD, 250, 'export retains full selected shift registration')
+    holdDetail = true
+    nodes(tree).find((n) => n.type === Pager).props.onPageChange(2)
+    await settle()
+    props.filters = { ...props.filters, startDate: '2021-01-01', endDate: '2021-01-01' }
+    tree = render()
+    lateResolve({ shift: shift(999) })
+    holdDetail = false
+    tree = await settle()
+    assert.equal(listCalls.at(-1).page, 1, 'range change resets page')
+    assert.equal(listCalls.at(-1).from, '2021-01-01')
+    assert.notEqual(nodes(tree).find((n) => n.type === Summary)?.props.shift.id, 999, 'late previous page cannot replace current detail')
+    user = { id: 2, role_code: 'staff' }
+    tree = render()
+    assert.ok(!nodes(tree).some((n) => n.type === Summary), 'actor change synchronously revokes previous selected detail')
+    assert.ok(writes > 0 && detailCalls.includes(250))
+  } finally { slots.forEach((slot) => slot?.cleanup?.()); globalThis.window = oldWindow }
+})
 
 test('comparison export preserves the authorized server numbers and nulls, including refunds', () => {
   assert.deepEqual(shiftComparisonRows({ reconciliation: null }), [])
@@ -34,8 +117,10 @@ test('Reports uses authorized selection/detail and shared comparison rows rather
   assert.match(report, /listShifts\(/)
   assert.match(report, /from: filters.startDate, to: filters.endDate/, 'server filters records before applying its limit')
   assert.match(report, /JSON.stringify\(\[branchId, filters.startDate, filters.endDate,/, 'range changes invalidate list, selection and detail scope')
-  assert.match(report, /selection.scope === depsKey/, 'old selection is discarded outside its report scope')
-  assert.match(report, /`\$\{depsKey\}:\$\{selectedId \?\? ''\}`/, 'detail invalidation includes the same date scope')
+  assert.match(report, /selection.scope === listKey/, 'old selection is discarded outside its report page scope')
+  assert.match(report, /`\$\{listKey\}:\$\{selectedId \?\? ''\}`/, 'detail invalidation includes the same date and page scope')
+  assert.match(report, /from: filters.startDate, to: filters.endDate, page, pageSize/)
+  assert.match(report, /totalItems=\{listing.data.total \?\? shifts.length\}/)
   assert.match(report, /fetchShiftHistory\(selectedId!/)
   assert.doesNotMatch(report, /fetchCurrentShift/)
   assert.match(report, /shiftComparisonRows\(shift\)/)

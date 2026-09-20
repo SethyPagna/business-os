@@ -6,6 +6,7 @@ import { useApp } from '../../AppContext.tsx'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import Modal from '../shared/Modal.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
 import ShiftSummary from './ShiftSummary.tsx'
@@ -178,8 +179,8 @@ export function AmendmentList({ rows, segments = [] }: { rows: ShiftAmendment[];
   )
 }
 
-export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer = 'default', label, buttonClassName = 'btn-secondary min-h-11 text-xs', notify }: Props) {
-  const app = useApp() as { user?: { id: number | string }; t: (key: string) => string; notify?: (message: string, tone?: string) => void }
+export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PAGE_SIZE, layer = 'default', label, buttonClassName = 'btn-secondary min-h-11 text-xs', notify }: Props) {
+  const app = useApp() as { user?: { id: number | string; username?: unknown; role_code?: unknown; permissions?: unknown; role_permissions?: unknown }; t: (key: string) => string; notify?: (message: string, tone?: string) => void }
   const { t } = app
   const sendNotice = notify || app.notify
   const listRequest = useRef(0)
@@ -205,6 +206,26 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   const [cancelReason, setCancelReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [pending, setPending] = useState(false)
+  const actorScope = JSON.stringify([activeBranchId, userId, app.user?.id, app.user?.username, app.user?.role_code, app.user?.permissions, app.user?.role_permissions])
+  const [paging, setPaging] = useState({ scope: actorScope, page: 1, size: Math.min(200, Math.max(1, limit)) })
+  const page = paging.scope === actorScope ? paging.page : 1
+  const pageSize = paging.size
+  const [pageInfo, setPageInfo] = useState({ page: 1, total: 0 })
+  const listScope = `${actorScope}:${page}:${pageSize}:${open}`
+  const scopeRef = useRef(listScope)
+  if (scopeRef.current !== listScope) {
+    scopeRef.current = listScope
+    listRequest.current += 1
+    detailsRequest.current += 1
+    setRows([])
+    setSelected(null)
+    setAmendments([])
+    setSegments([])
+    setAction(null)
+    setError('')
+    setDetailsError('')
+    setPageInfo({ page, total: 0 })
+  }
 
   useEffect(() => {
     if (branchId !== undefined || !open) return
@@ -219,26 +240,29 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   }, [branchId, open])
 
   const load = useCallback(async () => {
+    if (scopeRef.current !== listScope) return
     const requestId = ++listRequest.current
     setLoading(true)
     setError('')
     try {
-      const result = await listShifts({ branchId: activeBranchId, userId, limit })
-      if (requestId === listRequest.current) {
+      const result = await listShifts({ branchId: activeBranchId, userId, page, pageSize })
+      if (requestId === listRequest.current && scopeRef.current === listScope) {
         setRows(orderShiftRows(result.shifts))
         setScope(result.scope)
+        setPageInfo({ page: result.page ?? page, total: result.total ?? result.shifts.length })
       }
     } catch (cause) {
-      if (requestId === listRequest.current) setError(cause instanceof Error ? cause.message : t('shift_history_failed'))
+      if (requestId === listRequest.current && scopeRef.current === listScope) setError(cause instanceof Error ? cause.message : t('shift_history_failed'))
     } finally {
-      if (requestId === listRequest.current) setLoading(false)
+      if (requestId === listRequest.current && scopeRef.current === listScope) setLoading(false)
     }
-  }, [activeBranchId, limit, t, userId])
+  }, [activeBranchId, page, pageSize, t, userId, actorScope, listScope])
 
   useEffect(() => {
     if (!open) return
     void load()
-    return () => { listRequest.current += 1; detailsRequest.current += 1 }
+    window.addEventListener(SHIFT_STATE_CHANGED_EVENT, load)
+    return () => { window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, load); listRequest.current += 1; detailsRequest.current += 1 }
   }, [load, open])
 
   const resetAction = () => {
@@ -250,6 +274,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
   }
 
   const openDetails = async (shift: Shift) => {
+    if (scopeRef.current !== listScope) return
     const requestId = ++detailsRequest.current
     setSelected(shift)
     setEdit(editDraft(shift))
@@ -260,7 +285,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
     setDetailsError('')
     try {
       const result = await fetchShiftHistory(shift.id)
-      if (requestId === detailsRequest.current) {
+      if (requestId === detailsRequest.current && scopeRef.current === listScope) {
         setSelected(result.shift)
         setEdit(editDraft(result.shift))
         setAmendments(result.amendments)
@@ -277,9 +302,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
         } else setPending(false)
       }
     } catch (cause) {
-      if (requestId === detailsRequest.current) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
+      if (requestId === detailsRequest.current && scopeRef.current === listScope) setDetailsError(cause instanceof Error ? cause.message : t('shift_history_failed'))
     } finally {
-      if (requestId === detailsRequest.current) setDetailsLoading(false)
+      if (requestId === detailsRequest.current && scopeRef.current === listScope) setDetailsLoading(false)
     }
   }
 
@@ -579,6 +604,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = 50, layer 
                 : error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>
                 : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{t('shift_history_empty')}</p>
                 : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => void openDetails(shift)} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
+              {!loading && !error ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
+                onPageChange={(next) => setPaging({ scope: actorScope, page: next, size: pageSize })}
+                onPageSizeChange={(size) => setPaging({ scope: actorScope, page: 1, size })} /> : null}
             </div>
           )}
         </Modal>

@@ -180,6 +180,60 @@ function scenario() {
 
 async function main() {
   assertOpeningPresenceMigration()
+  {
+    const { call, actAs, sqlite } = scenario()
+    const insert = sqlite.prepare(`INSERT INTO shift_sessions
+      (shift_code,user_id,scope_mode,branch_id,business_date,opened_at,closed_at)
+      VALUES (?,?,'per_account',1,?,?,?)`)
+    for (let i = 0; i < 275; i++) {
+      const date = new Date(Date.UTC(2020, 0, i + 1)).toISOString().slice(0, 10)
+      insert.run(`page-${i}`, 7, date, `${date}T01:00:00.000Z`, i < 25 ? null : `${date}T02:00:00.000Z`)
+    }
+    insert.run('other-actor', 8, '2020-12-01', '2020-12-01T01:00:00.000Z', '2020-12-01T02:00:00.000Z')
+    for (const query of ['page=0', 'page=-1', 'page=1.2', 'page=no', 'page_size=0', 'page_size=201', 'page_size=1.1', 'page=9007199254740992']) {
+      assert.equal((await call('GET', `/?${query}`)).status, 400, query)
+    }
+    const ids = []
+    for (let page = 1; page <= 14; page++) {
+      const response = await call('GET', `/?page=${page}&page_size=20`)
+      assert.equal(response.status, 200)
+      const result = await response.json()
+      assert.equal(result.total, 275, 'count obeys actor visibility')
+      assert.equal(result.page, page)
+      assert.equal(result.page_size, 20)
+      assert.equal(result.has_more, page < 14)
+      assert.ok(result.shifts.length <= 20, 'open shifts also obey bounded page size')
+      ids.push(...result.shifts.map((row) => row.id))
+    }
+    const expected = sqlite.prepare(`SELECT id FROM shift_sessions WHERE user_id=7
+      ORDER BY CASE WHEN closed_at IS NULL THEN 0 ELSE 1 END,business_date DESC,opened_at DESC,id DESC`).all().map((row) => row.id)
+    assert.deepEqual(ids, expected, 'all records beyond200 are reachable exactly once in deterministic order')
+    const last = await (await call('GET', '/?page=999&page_size=20')).json()
+    assert.equal(last.page, 14, 'shrinking results clamp out-of-range pages')
+    const empty = await (await call('GET', '/?page=2&page_size=20&from=1999-01-01&to=1999-01-02')).json()
+    assert.deepEqual([empty.total, empty.page, empty.shifts.length], [0, 1, 0])
+    actAs({ ...user, role_code: 'admin' })
+    const admin = await (await call('GET', '/?page=1&page_size=20')).json()
+    assert.equal(admin.total, 276)
+    const narrowed = await (await call('GET', '/?page=1&page_size=20&user_id=8')).json()
+    assert.equal(narrowed.total, 1)
+    const old = await (await call('GET', `/${ids.at(-1)}/history`)).json()
+    assert.equal(old.shift.id, ids.at(-1), 'a shift beyond the former cap still supports exact detail')
+    assert.ok(old.shift.reconciliation, 'admin detail remains whole-shift comparison, not page aggregation')
+    insert.run('tie-a', 9, '2020-12-01', '2020-12-01T01:00:00.000Z', '2020-12-01T02:00:00.000Z')
+    insert.run('tie-b', 10, '2020-12-01', '2020-12-01T01:00:00.000Z', '2020-12-01T02:00:00.000Z')
+    const ties = await (await call('GET', '/?page=1&page_size=20&from=2020-12-01&to=2020-12-01')).json()
+    assert.deepEqual(ties.shifts.map((row) => row.shift_code), ['tie-b', 'tie-a', 'other-actor'], 'id breaks equal time ties deterministically')
+    const parent = sqlite.prepare('SELECT * FROM shift_sessions WHERE shift_code=?').get('page-25')
+    sqlite.prepare(`INSERT INTO shift_sessions (shift_code,user_id,scope_mode,branch_id,business_date,opened_at,closed_at,parent_shift_id,reopened_by_user_id,reopen_reason)
+      VALUES ('continued',7,'per_account',1,?,?,NULL,?,7,'test continuation')`).run(parent.business_date, parent.closed_at, parent.id)
+    const lineage = await (await call('GET', `/?page=1&page_size=20&from=${parent.business_date}&to=${parent.business_date}`)).json()
+    assert.equal(lineage.total, 1, 'count excludes superseded lineage ancestors')
+    assert.equal(lineage.shifts[0].shift_code, 'continued')
+    actAs(user)
+    const deniedCount = await (await call('GET', '/?page=1&page_size=20&user_id=8')).json()
+    assert.equal(deniedCount.total, 0, 'user filter can never widen staff count visibility')
+  }
   // Shared operational counts are intentional, but the comparison is not a
   // shop-wide staff capability. Check real routes and same-request replay.
   {
@@ -195,6 +249,10 @@ async function main() {
     const excluded = await (await call('GET', '/?from=2000-01-01&to=2000-12-31&limit=1')).json()
     assert.deepEqual(excluded.shifts, [], 'range excludes current shifts before selection')
     actAs({ id: 8, username: 'colleague', permissions: JSON.stringify({ pos: true, products_cost_view: true }) })
+    const sharedPage = await (await call('GET', '/?page=1&page_size=20')).json()
+    assert.equal(sharedPage.total, 1, 'shop-wide staff count matches authorized shared operational records')
+    assert.equal(sharedPage.shifts[0].id, shift.id)
+    assert.ok(!sharedPage.shifts[0].reconciliation, 'paging never adds derived comparison to list rows')
     for (const url of ['/current?branch_id=1', `/${shift.id}/history`]) {
       const body = await (await call('GET', url)).json()
       assert.equal(body.shift.opening_float_usd, 10, 'shared registered cash stays visible')
