@@ -1,4 +1,4 @@
-import { apiFetch, route } from './http.ts'
+import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
@@ -505,7 +505,7 @@ export async function listShifts(filters: {
   from?: string
   to?: string
   limit?: number
-} = {}): Promise<ShiftListResult> {
+} = {}, options: { fresh?: boolean } = {}): Promise<ShiftListResult> {
   const query = queryString({
     branch_id: filters.branchId,
     user_id: filters.userId,
@@ -515,7 +515,11 @@ export async function listShifts(filters: {
     page: filters.page,
     page_size: filters.pageSize,
   })
-  const result = await route<ShiftListResult>(`shifts:list:${query}`, () => apiFetch('GET', `/api/shifts${query}`), null)
+  // Explicit user/event refresh discards only this list read's cache/in-flight
+  // ownership. Keep the normal actor-fenced transport and write invalidation.
+  const channel = `shifts:list:${query}`
+  if (options.fresh) cacheInvalidate(channel)
+  const result = await route<ShiftListResult>(channel, () => apiFetch('GET', `/api/shifts${query}`), null)
   if (!result) throw new Error('Could not read shift history')
   return result
 }

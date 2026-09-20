@@ -210,7 +210,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const [paging, setPaging] = useState({ scope: actorScope, page: 1, size: Math.min(200, Math.max(1, limit)) })
   const page = paging.scope === actorScope ? paging.page : 1
   const pageSize = paging.size
-  const [pageInfo, setPageInfo] = useState({ page: 1, total: 0 })
+  const [pageInfo, setPageInfo] = useState<{ page: number; total: number | null }>({ page: 1, total: null })
   const listScope = `${actorScope}:${page}:${pageSize}:${open}`
   const scopeRef = useRef(listScope)
   const scopeGeneration = useRef({})
@@ -229,7 +229,8 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setAction(null)
     setError('')
     setDetailsError('')
-    setPageInfo({ page, total: 0 })
+    setPageInfo({ page, total: null })
+    setLoading(true)
     setEdit(null)
     setClose(blankClose())
     setReopen(blankReopen())
@@ -260,13 +261,13 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     }
   }, [branchId, open])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (fresh = false) => {
     if (scopeRef.current !== listScope) return
     const requestId = ++listRequest.current
     setLoading(true)
     setError('')
     try {
-      const result = await listShifts({ branchId: activeBranchId, userId, page, pageSize })
+      const result = await listShifts({ branchId: activeBranchId, userId, page, pageSize }, { fresh })
       if (requestId === listRequest.current && scopeRef.current === listScope) {
         setRows(orderShiftRows(result.shifts))
         setScope(result.scope)
@@ -281,9 +282,12 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
 
   useEffect(() => {
     if (!open) return
-    void load()
-    window.addEventListener(SHIFT_STATE_CHANGED_EVENT, load)
-    return () => { window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, load); listRequest.current += 1; detailsRequest.current += 1 }
+    // Opening or navigating a page is an explicit read, like Refresh. A page
+    // cached before another page's refresh must not revive obsolete totals.
+    void load(true)
+    const refresh = () => { void load(true) }
+    window.addEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
+    return () => { window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refresh); listRequest.current += 1; detailsRequest.current += 1 }
   }, [load, open])
 
   const resetAction = () => {
@@ -628,15 +632,17 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{scope === 'all' ? t('shift_history_all') : t('shift_history_own')}</p>
-                <button type="button" onClick={() => void load()} className="btn-secondary min-h-11 shrink-0 px-3 text-xs" disabled={loading}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />{t('refresh')}</button>
+                <button type="button" onClick={() => void load(true)} className="btn-secondary min-h-11 shrink-0 px-3 text-xs" disabled={loading}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />{t('refresh')}</button>
               </div>
               {loading ? <p role="status" className="py-6 text-center text-sm text-gray-500">{t('shift_current_loading')}</p>
                 : error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>
                 : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{t('shift_history_empty')}</p>
                 : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => void openDetails(shift)} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
-              {!loading && !error ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
+              <div className="min-h-11">
+              {!loading && !error && pageInfo.total != null ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
                 onPageChange={(next) => setPaging({ scope: actorScope, page: next, size: pageSize })}
                 onPageSizeChange={(size) => setPaging({ scope: actorScope, page: 1, size })} /> : null}
+              </div>
             </div>
           )}
         </Modal>
