@@ -5,6 +5,18 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+LIVE SMOKE BLOCKER: metadata navigation can cache JSON as the service-worker HTML
+shell; subsequent Returns reload shows JSON. Livec970f084 and source confirm.
+Current deployment below is not fully smoke-green. Same defect in prior version;
+isolated correction/realSW regression and poisoned-cache recovery in progress.
+No clearing user storage. Earlier15browserpass used SWblocked; scope insufficient.
+
+CURRENT LIVE5b81a2c344bd /Workerf2539627-98f6-45b8-a908-7910ae2f0dce(Paid),
+frontend6f608476ed25/d73469dc0c9c67d5. Fullfrontend507/507 and exactbrowser15/15
+pass; types/i18n/build/dryruns pass. No migration. Live smoke completing; see
+2026-09-20-shift-restore-release.md. This supersedes earlier production/local
+snapshots below. BroadWorker sweep ongoing, c2807725 isolated,0189 prototype only.
+
 Latest local6f608476 adds reviewed source pin83089233, compact pager4d070d10/
 4db5dd97 and stronger report-test barrier6f608476. Root source/native/adjacent
 backup gates and Worker typecheck pass; frontend17focused/typecheck pass.

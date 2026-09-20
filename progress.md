@@ -1,3 +1,36 @@
+## Live smoke found existing service-worker cache poisoning — September 20
+
+Deployment remains5b81a2c3/f2539627, but NOT a clean live-smoke verdict. Normal
+metadata navigation followed by Returns warmreload rendered raw buildJSON at the
+Sales URL (evidencec970f084). Source confirms isValidDocumentResponse omits MIME
+checking and navigation revalidation caches arbitrary successful responses at
+/index.html. Same defect exists in prior version, so rollback is not a remedy.
+completion_backlog owns isolated runtime/generatedSW/test fix; release_comparison
+independently diagnoses/reviews. Must preserve static precache via separate basic
+response validation and recover already-poisoned shell without clearinguserstorage.
+Full507 and browser15 passed with SWblocked and did NOT cover this real condition.
+That coverage gap is now explicit; service-worker-enabled negative control required.
+
+Independent schemadiscoveryc2807725 passes nativegraph178migrations/85tables/106rows
+and226subset comparisons; remains isolated while broadWorker sweep runs. No new
+remote migration. Transfer0189 prototype continues. Full goal remains active.
+
+## Verified checkpoint deployed; live smoke completing — September 20
+
+Source5b81a2c344bd deployed Workerf2539627-98f6-45b8-a908-7910ae2f0dce,
+Paid, hashbe6b7506eebe419b,2026-09-20T11:41:22.535Z. Frontend6f608476ed25/
+d73469dc0c9c67d5. Main and working branch pushed. No migrations/secrets sync.
+Fullfrontend57621 TERMINAL507/507,zero skips; browser90516 TERMINAL15/15 in
+one uninterrupted desktop/Android/iOS run. Dryrun19765 TERMINAL0 both tiers.
+Signed-in live Dashboard/Shift/History and exact entry load; remaining live smoke
+underway. RawHTTP challenge and browser metadata blocking are not app-failure or
+metadata-success evidence. Read docs/fleet/2026-09-20-shift-restore-release.md.
+
+Broader safe Worker sweep94498 is owned by archive_safety_review and still running.
+Source stable5b81a2c3 (later docs only). Excluded write-capable orphan-audit test will
+be checked through write-blocked harness. Schema consolidationc2807725 isolated,
+independent review underway.0189 prototype local only. Full goal stays active.
+
 ## Exact artifact built; final certification running — September 20
 
 Build3064 TERMINAL0: artifact6f608476ed25/hashd73469dc0c9c67d5,
