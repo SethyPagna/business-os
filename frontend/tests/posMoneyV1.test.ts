@@ -16,6 +16,7 @@ import { runSaleLineMutation, loadPendingDirectMutation, withSaleLineMutationLoc
 import { stagedLineFromSheetPick, stagedLinePricingIntent, mergeStagedAddLine } from '../src/components/sales/saleAddLines.ts'
 import { nativeChangeAmounts, sumMoney4, multiplyMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../src/utils/moneyPrecision.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
+import { normalizeOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE } from '../src/api/offlineQueueOwnership.ts'
 
 const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345, total_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23, subtotal_khr: 4938, discount_khr: 0, membership_discount_khr: 0, tax_khr: 0, total_khr: 4920, delivery_fee_usd: 0, delivery_fee_khr: 0, change_usd: 0, change_khr: 0 }
 const pricingJson = serializeSaleItemPricing({ version: 1, pool_key: 'callback-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [], lines: [{ line_key: 'callback-line', source: 'manual', product: { id: 7, selling_price_usd: 1.24 }, selling_price_input_usd: 1.24, manual: { type: 'fixed', value: 0.0055 } }] }, { 'callback-line': 1 }, 'callback-line', { version: 1, lines: [{ line_key: 'callback-line', amount: 1.2345 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
@@ -23,7 +24,8 @@ Object.assign(saved.items[0], { ...JSON.parse(pricingJson).amounts, product_id: 
 Object.assign(saved.items[0], { manual_discount_type: 'fixed', manual_discount_value: 0.0055, product_discount_usd: 0, product_discount_khr: 0, manual_discount_usd: 0.0055, manual_discount_khr: 22 })
 Object.assign(saved.items[0], { price_mode: 'manual', product_discount_type: null, product_discount_label: null })
 const original = { client_request_id: 'request-1', money_precision_version: 1, items: [{ quantity: 1, applied_price_usd: 1.2345 }], subtotal_usd: 1.2345, total_usd: 1.23, amount_paid_usd: 1.23, amount_paid_khr: 0, exchange_rate: 4000, sale_status: 'completed' }
-const frozen = frozenSaleCheckoutBody('request-1', undefined, () => original)
+const checkoutOwner = { version: 1, actor_id: 71, organization_id: null, authority: 'https://shop.example', runtime: 'cloudflare-workers' }
+const frozen = frozenSaleCheckoutBody('request-1', undefined, () => ({ ...original, offline_owner: checkoutOwner }))
 const capturedPool = { version: 1 as const, pool_key: 'original-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [normalizePromotionRule({ id: 1, rule_type: 'quantity_save', min_quantity: 3, save_usd: 1, product_ids: [7], scope_type: 'products', is_active: 1 }, 1)!], lines: [{ line_key: 'original-line', source: 'promotion' as const, product: { id: 7, selling_price_usd: 10 }, selling_price_input_usd: null, manual: { type: 'none' as const, value: 0 } }] }
 const capturedRow = materializeCapturedPricingRow({ id: 70, product_id: 7 }, capturedPool, { 'original-line': 3 }, 'original-line', { version: 1, lines: [{ line_key: 'original-line', amount: 29 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
 const capturedSale = { id: 17, money_precision_version: 1, items: [capturedRow], exchange_rate: 4000, subtotal_usd: 29, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 }
@@ -48,6 +50,11 @@ assert.throws(() => posV1Tender([{ method: 'Cash', usd: '-0.0000001', khr: '' }]
 // Execute the production checkout callback with controlled transport outcomes.
 // These are callback/state tests, not source-string presence assertions.
 const posSource = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const ownerGuardStart = posSource.indexOf('function assertPosCheckoutOwner(')
+const ownerGuardEnd = posSource.indexOf('\n}\n', ownerGuardStart) + 2
+assert.ok(ownerGuardStart > 0 && ownerGuardEnd > ownerGuardStart)
+const ownerGuardCode = transformSync(posSource.slice(ownerGuardStart, ownerGuardEnd), { loader: 'tsx' }).code
+const assertPosCheckoutOwner = new Function('env', `with(env) { ${ownerGuardCode}; return assertPosCheckoutOwner }`)({ normalizeOfflineSaleOwner, offlineSaleOwnersMatch, captureOfflineSaleOwner: () => checkoutOwner, OFFLINE_OWNER_REVIEW_MESSAGE })
 const tagStart = posSource.indexOf('  const toggleTierTag = '), tagEnd = posSource.indexOf('\n  }\n', tagStart) + 4
 let tagged: any
 new Function('env', `with(env) { ${transformSync(posSource.slice(tagStart, tagEnd), { loader: 'tsx' }).code}; toggleTierTag('original-line') }`)({
@@ -104,6 +111,7 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
   const sent: unknown[] = [], printed: unknown[] = [], notices: string[] = [], closed: unknown[] = []
   let generation = 1
   const env: any = {
+    user: { id: 71, organization_id: null }, assertPosCheckoutOwner,
     loading: false, checkoutInFlightRef: { current: false }, resolvedActiveId: 'order1',
     active: { checkoutRequestId: 'request-1', checkoutPayload: options.body, cart: [{ intentionallyChanged: true }] },
     checkoutRequestIdsRef: { current: new Map() },
@@ -124,12 +132,14 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
   return { sent, printed, notices, closed, env }
 }
 const idOnly = await checkoutProbe({})
-assert.equal(idOnly.sent.length, 0); assert.deepEqual(idOnly.notices, ['money_checkout_recovery_required'])
+assert.equal(idOnly.sent.length, 0); assert.deepEqual(idOnly.notices, [OFFLINE_OWNER_REVIEW_MESSAGE])
+const ownerless = await checkoutProbe({ body: original, proof: { committed: true, response: { id: 17, sale: saved } } })
+assert.equal(ownerless.sent.length, 0); assert.equal(ownerless.printed.length, 0); assert.deepEqual(ownerless.notices, [OFFLINE_OWNER_REVIEW_MESSAGE])
 const denied = await checkoutProbe({ body: frozen, lookupError: true })
 assert.equal(denied.sent.length, 0); assert.equal(denied.printed.length, 0)
 const retried = await checkoutProbe({ body: frozen })
 assert.deepEqual(retried.sent, [frozen]); assert.deepEqual(retried.printed, [saved]); assert.deepEqual(retried.closed, [['order1', true]])
-const recovered = await checkoutProbe({ proof: { committed: true, response: { id: 17, sale: saved } } })
+const recovered = await checkoutProbe({ body: frozen, proof: { committed: true, response: { id: 17, sale: saved } } })
 assert.equal(recovered.sent.length, 0); assert.deepEqual(recovered.printed, [saved])
 const switched = await checkoutProbe({ body: frozen, switchActor: true })
 assert.equal(switched.sent.length, 0); assert.equal(switched.printed.length, 0); assert.equal(switched.notices.length, 0)
@@ -339,6 +349,7 @@ async function reviewProbe(options: { proof?: unknown; marker?: boolean; denied?
   let generation = 1
   const env: any = {
     resolvedActiveId: 'order1', ordersRef, loading: false, checkoutInFlightRef: { current: false },
+    user: { id: 71, organization_id: null }, assertPosCheckoutOwner,
     captureActorReadScope: () => generation, isActorReadScopeCurrent: (scope: number) => scope === generation,
     assertActorSessionDispatchAllowed: (scope: number) => { if (scope !== generation) throw new Error('stale actor') },
     setLoading: () => {}, moneyCapability: { assertReady: () => {} }, canonicalSaleReceipt, SaleCheckoutRecoveryRequiredError,
