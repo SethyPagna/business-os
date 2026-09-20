@@ -63,6 +63,9 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
   assert.notEqual(oldSource, source)
   let worker = oldSource.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'old-poison')
   let failSales = false
+  let heldMetadata: http.ServerResponse | undefined
+  let holdMetadata = true
+  const metadata = JSON.stringify({ metadata: true, assets: [], eager: [], required: [] })
   const html = '<!doctype html><title>shell</title><main id="app">REAL APP SHELL</main>'
   const server = http.createServer((req, res) => {
     const path = new URL(req.url!, 'http://localhost').pathname
@@ -70,7 +73,11 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     if (path === '/sales' && failSales) { res.writeHead(503); res.end('temporarily offline'); return }
     if (/^\/(api|files|uploads)\//.test(path)) { res.setHeader('Content-Type', 'application/json'); res.end('{"private":true}'); return }
     if (path === '/sw.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(worker); return }
-    if (path.endsWith('.json')) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ metadata: true, assets: [], eager: [], required: [] })); return }
+    if (path.endsWith('.json')) {
+      res.setHeader('Content-Type', 'application/json')
+      if (path === '/business-os-build.json' && holdMetadata) { heldMetadata = res; return }
+      res.end(metadata); return
+    }
     if (path.endsWith('.png')) { res.setHeader('Content-Type', 'image/png'); res.end('icon'); return }
     res.setHeader('Content-Type', 'text/html'); res.end(html)
   })
@@ -89,8 +96,19 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     assert.deepEqual(await page.evaluate(probeControllerVersion, true), { version: null, reason: 'deadline' })
     assert.equal((await page.evaluate(probeControllerVersion, false)).version, 'business-os-app-shell-old-poison')
     await page.goto(origin + '/business-os-build.json')
-    await page.waitForFunction(async () => (await (await caches.open('business-os-app-shell-old-poison')).match('/index.html'))?.headers.get('content-type')?.includes('application/json'))
+    await expect.poll(() => !!heldMetadata).toBe(true)
+    const cachedOldBody = () => page.evaluate(async () => (await (await caches.open('business-os-app-shell-old-poison')).match('/index.html'))?.text())
+    assert.equal(await cachedOldBody(), html, 'held network JSON has not reached the cache yet')
+    // Negative oracle control: this installed Playwright version treats the
+    // predicate Promise as truthy, then resolves its false value without retry.
+    // The former asynchronous waitForFunction was not a cache-write barrier.
+    const premature = await page.waitForFunction(async () => (await (await caches.open('business-os-app-shell-old-poison')).match('/index.html'))?.headers.get('content-type')?.includes('application/json'))
+    assert.equal(await premature.jsonValue(), false)
+    await premature.dispose()
     failSales = true // keep the already-poisoned cache when background refresh fails
+    holdMetadata = false
+    heldMetadata!.end(metadata) // release a real network response, never write cache directly
+    await expect.poll(cachedOldBody).toBe(metadata)
     await page.goto(origin + '/sales')
     assert.match(await page.locator('body').innerText(), /"metadata":true/, 'old worker must reproduce the observed poisoning')
 
@@ -98,7 +116,7 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     // installs the replacement; its prior-shell check must activate unaided.
     worker = source.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'fixed-shell')
     await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration())!.update() })
-    await page.waitForFunction(async () => (await caches.keys()).includes('business-os-app-shell-fixed-shell'))
+    await expect.poll(() => page.evaluate(async () => (await caches.keys()).includes('business-os-app-shell-fixed-shell'))).toBe(true)
     const probes: Array<{ version: string | null, reason: string }> = []
     try {
       await expect.poll(async () => {
@@ -144,6 +162,7 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     await assert.rejects(page.goto(origin + '/business-os-build.json'), 'offline metadata must not masquerade as the app')
     await context.close()
   } finally {
+    heldMetadata?.destroy()
     await browser?.close()
     await new Promise<void>(resolve => server.close(() => resolve()))
   }
