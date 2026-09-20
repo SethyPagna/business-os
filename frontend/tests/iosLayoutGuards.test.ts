@@ -337,7 +337,7 @@ function codeOnly(source: string): string {
 /** Raw `NNvh` values -- the ones dvh/svh/lvh and --app-vh replaced.
  *  `var(--app-vh, 1vh)` is the ONE permitted spelling of a raw vh: the
  *  fallback for surfaces that must render when the CSS bundle itself failed
- *  (RootErrorBoundary, the bootstrap LoadingScreen), where --app-vh does not
+ *  (the live RootErrorBoundary), where --app-vh does not
  *  exist. Everywhere else the bare `var(--app-vh)` form is required. */
 const APP_VH_WITH_FALLBACK = /var\(--app-vh, 1vh\)/g
 function rawViewportHeights(source: string): string[] {
@@ -420,7 +420,7 @@ runTest('D4 -- the surfaces this lane converted route through the helper', () =>
   assert.match(read('src/components/shared/AppSelect.tsx'), /max-h-\[min\(18rem,calc\(100\*var\(--app-vh\)_-_1rem\)\)\]/)
   assert.match(read('src/components/shared/ActionHistoryBar.tsx'), /max-h-\[min\(28rem,calc\(70\*var\(--app-vh\)\)\)\]/)
   assert.match(read('src/components/sales/reports/PeriodReport.tsx'), /maxHeight="calc\(70 \* var\(--app-vh\)\)"/)
-  assert.match(read('src/AppContext.tsx'), /minHeight:'calc\(100 \* var\(--app-vh, 1vh\)\)'/, 'the bootstrap LoadingScreen renders before main.css can be trusted, so it carries the 1vh fallback')
+  assert.match(read('src/components/shared/RootErrorBoundary.tsx'), /minHeight: 'calc\(100 \* var\(--app-vh, 1vh\)\)'/, 'the live root error boundary renders even when CSS fails; rootErrorBoundary.test.ts also executes this viewport contract')
 })
 
 // ---------------------------------------------------------------------------
