@@ -299,7 +299,9 @@ test('Part 564: the top date range drives the LIST too on Sales/Returns/Fees (on
   assert.ok(/returnsDateRange[\s\S]{0,220}stripRange\.startDate/.test(returns), 'the Returns list is scoped by stripRange')
   const fees = read('src/components/fees/FeesPage.tsx')
   assert.ok(!/const \[fromDate/.test(fees) && !/const \[toDate/.test(fees), 'Fees no longer keeps from/to date state')
-  assert.ok(/from: stripRange\.startDate/.test(fees), 'the Fees list is scoped by stripRange')
+  assert.match(fees, /getFeesRequest\(\{[^}]*\.\.\.feeRangeParams\(stripRange\)/, 'the Fees list uses the shared date/time scope')
+  assert.match(fees, /getFeesReport\(\{[^}]*\.\.\.feeRangeParams\(stripRange\)/, 'the Fees statistics use the same date/time scope')
+  assert.match(fees, /getAllFeesForExport\(scope === 'filtered' \? \{[^}]*\.\.\.feeRangeParams\(stripRange\)/, 'the filtered Fees export uses the same date/time scope')
 })
 
 test('Sales statistics keep COGS, gross profit, and permitted expenses visible', () => {
