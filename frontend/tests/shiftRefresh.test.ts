@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 
 const require = createRequire(import.meta.url)
-const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
+const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const storage = () => { const values = new Map<string, string>(); return { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => values.set(k, String(v)), removeItem: (k: string) => values.delete(k) } }
 const jsx = (type: any, props: any) => ({ type, props })
 const nodes = (node: any): any[] => Array.isArray(node) ? node.flatMap(nodes) : node?.props ? [node, ...nodes(node.props.children)] : []
@@ -49,7 +49,11 @@ async function exercise(mutant = false) {
   }
   const pager = compile(read('components/shared/PaginationControls.tsx'), (id) => id.includes('pagerState') ? require('../src/utils/pagerState.ts') : { default: id })
   let modal = read('components/shifts/ShiftHistoryModal.tsx')
-  if (mutant) modal = modal.replace('setPageInfo({ page, total: null })\n    setLoading(true)', 'setPageInfo({ page, total: 0 })')
+  if (mutant) {
+    const original = modal
+    modal = modal.replace('setPageInfo({ page, total: null })\n    setLoading(true)', 'setPageInfo({ page, total: 0 })')
+    assert.notEqual(modal, original, 'negative control must actually remove the unloaded-state guard')
+  }
   const component = compile(modal, (id) => {
     if (id.includes('PaginationControls')) return { __esModule: true, default: pager.default, DEFAULT_PAGE_SIZE: 20 }
     if (id.includes('AppContext')) return { useApp: () => ({ user: { id: 7 }, t }) }
