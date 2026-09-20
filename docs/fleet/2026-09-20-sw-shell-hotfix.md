@@ -63,6 +63,14 @@ exited0;13ms Worker startup. Main and working branch pushed. Independent final
 test reviewef0adba6 passes5/5 focused plus3/3 native. The built frontend above
 differs from deployment source only in test/documentation files.
 
-Live retained-tab smoke is running; do not claim recovered yet. No new migration
-or secret sync. Full application goal remains active; broad Worker sweep and
-isolated transfer/export work continue.
+Initial retained-tab smoke failed again after metadata navigation (0db22f18).
+Independent two-tab native reproductionbaf03c4a proves the missing order: install
+fixed replacement while incumbent cache is healthy, leave it waiting, then let
+incumbent poison its cache. New HTML is not proof of a new controlling worker.
+
+On the user's subsequent retry, preserved Returns tab460569392 recovered and
+another warm reload passed exact new entry (b59050a5). No storage clearing,
+logout or worker manipulation. This does not close the metadata/late-upgrade gap.
+Follow-up runtime correction is not implemented. No migration or secret sync.
+Full application goal remains active. Broad Worker suite now has484 files with
+passing evidence after five isolated reruns, not one uninterrupted green sweep.

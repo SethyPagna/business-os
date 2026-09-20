@@ -1,3 +1,21 @@
+## Requested retry recovered; late-upgrade defect remains open — September 20
+
+User requested another ordinary retry. Preserved Returns tab460569392 recovered
+and one additional warm reload passed with exact index-DIiWCqvT.js. No storage
+clear/logout/SW manipulation. Durableb59050a5. This bounded success does NOT close
+the earlier metadata-navigation defect0db22f18: independent two-tab native proof
+baf03c4a and writer8c2fe343 confirm replacement installed while incumbent cache
+healthy can remain waiting, then incumbent later poisons cache. New HTML alone
+does not prove a new controller. Corrective migration contract6d4dc092 requires
+no forced page reload, actual incumbent asset retention and safe old-chunk fallback;
+no follow-up runtime fix applied yet. Production remains590a6239/fe1e59bf.
+
+Broad Worker certification complete5e26bfaf: all484 files have passing evidence.
+478 ordinary passes, three timeouts/two native crashes later passed isolated;
+protected orphan audit passed with unchanged SQL. NOT one uninterrupted green run.
+1613-file comparison confirms unchanged Worker/shared sources. Source freeze may
+now release for reviewed integration; no broad completion claim or new migration.
+
 ## HTML shell hotfix deployed; retained-tab smoke running — September 20
 
 Current live590a62399d22/Workerfe1e59bf-2c86-4b10-a687-2f08241310e6 Paid,
