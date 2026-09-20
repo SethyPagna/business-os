@@ -37,6 +37,19 @@ const ownership = load(source('api/offlineQueueOwnership.ts'), {
   '../constants.ts': { STORAGE_KEYS: { USER: 'user' } },
   './httpState.ts': { getSyncServerUrl: () => currentOwner.authority },
 })
+for (const user of [{ organization_id: 7 }, { organizationId: 7 }, { organization_id: 7, organizationId: 7 }]) {
+  assert.equal(ownership.authenticatedOrganizationId(user), 7)
+}
+for (const user of [{}, { organization_id: null }, { organizationId: null }]) assert.equal(ownership.authenticatedOrganizationId(user), null)
+for (const user of [{ organization_id: null, organizationId: 7 }, { organization_id: 8, organizationId: 7 }, { organizationId: '7' }, { organization_id: undefined }]) {
+  assert.throws(() => ownership.authenticatedOrganizationId(user), /Keep this pending sale/)
+}
+const originalAuthRead = authStore.getItem
+authStore.getItem = () => JSON.stringify({ id: 71, organizationId: 7 })
+assert.equal(ownership.captureOfflineSaleOwner().organization_id, 7, 'login/OTP/OAuth trusted camel shape retains positive organization')
+authStore.getItem = () => JSON.stringify({ id: 71, organization_id: null, organizationId: 7 })
+assert.throws(() => ownership.captureOfflineSaleOwner(), /Keep this pending sale/)
+authStore.getItem = originalAuthRead
 const scope = { captureActorReadScope: () => generation, isActorReadScopeCurrent: (value: number) => value === generation }
 const http = {
   route: (_name: string, run: () => unknown) => run(),

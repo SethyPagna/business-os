@@ -1,4 +1,5 @@
 import { getSyncServerUrl } from './httpState.ts'
+import { SIGNOUT_INTENT_EVENT, SIGNOUT_INTENT_KEY, assertSignoutIntentCurrent, isSignoutBlocked, releaseConfirmedSignoutForAuthentication, signoutStatus } from './unresolvedSignout.ts'
 
 const SESSION_MARKER = 'businessos_read_session'
 const runtimeId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
@@ -110,13 +111,16 @@ function pendingCookieOwner(): string | null {
 
 /** Call immediately before the browser request that can change the shared
  * HttpOnly cookie. No elapsed-time lease may release an unfinished request. */
-export async function beginActorCookieMutation(): Promise<string> {
+export async function beginActorCookieMutation(signoutToken?: string): Promise<string> {
   const beforeAdmission = captureActorReadScope()
   if (typeof window === 'undefined') return AUTH_PENDING_PREFIX + runtimeId
   const locks = window.navigator?.locks
   if (!locks?.request) throw Object.assign(new Error('Secure cross-tab sign-in is unavailable in this browser. Use a supported browser. / ការចូលគណនីដោយសុវត្ថិភាពរវាងផ្ទាំងមិនអាចប្រើបានទេ។ សូមប្រើកម្មវិធីរុករកដែលគាំទ្រ។'), { code: 'auth_lock_unavailable', status: 409, outcome: 'not_dispatched' })
   return locks.request(AUTH_ADMISSION_LOCK, { mode: 'exclusive' }, () => {
-    assertActorSessionDispatchAllowed(beforeAdmission)
+    if (signoutToken) {
+      assertSignoutIntentCurrent(signoutToken)
+      if (isActorCookieMutationPending()) throw new Error('Another authentication request is still running.')
+    } else assertActorSessionDispatchAllowed(beforeAdmission)
     const marker = AUTH_PENDING_PREFIX + (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`)
     // Independent of generic generation resets: they cannot erase this
     // durable owner while fetch or a full-page OAuth redirect is pending.
@@ -138,6 +142,13 @@ export async function beginActorCookieMutation(): Promise<string> {
     expectedPending = marker
     expectedMarker = marker
     localSession++
+    try {
+      if (!signoutToken) releaseConfirmedSignoutForAuthentication()
+    } catch (error) {
+      // Admission never dispatched: settle only this owned cookie marker.
+      finishActorCookieMutation(marker)
+      throw error
+    }
     return marker
   })
 }
@@ -173,6 +184,7 @@ export function finishActorCookieMutation(marker: string, ownerReconciliation = 
  * authorize the normal explicit sign-in handoff. A late, unconsumed result
  * leaves old UI quarantined; no timer assumes the caller applied it. */
 export function acknowledgeActorCookieUser(user: unknown): boolean {
+  if (isSignoutBlocked()) return false
   if (!user || typeof user !== 'object' || cookieUsers.get(user) !== sessionMarker() || isActorCookieMutationPending()) return false
   cookieUsers.delete(user)
   quarantined = false
@@ -216,6 +228,7 @@ export function prepareActorOauthCookieRedirect(marker: string, redirectTo: stri
 }
 
 export function finishActorOauthCookieRedirect(returnedMarker: string | null): boolean {
+  if (isSignoutBlocked()) return false
   const owned = readScopeStorage('session', OAUTH_COOKIE_OWNER) || readScopeStorage('local', OAUTH_COOKIE_OWNER)
   if (!owned) return false
   // Two independent conditions, both of which predate the localStorage mirror:
@@ -262,9 +275,17 @@ function observeSessionMarker(): void {
 if (typeof window !== 'undefined') {
   expectedMarker = sessionMarker()
   expectedPending = pendingCookieOwner()
-  if (isActorCookieMutationPending()) quarantined = true
+  if (isActorCookieMutationPending() || isSignoutBlocked()) quarantined = true
   window.addEventListener('storage', (event) => {
+    if (event.key === SIGNOUT_INTENT_KEY || event.key === null) {
+      if (isSignoutBlocked()) quarantined = true
+      quarantineListeners.forEach((listener) => listener())
+    }
     if (event.key === SESSION_MARKER || event.key === AUTH_PENDING_OWNER || event.key === null) observeSessionMarker()
+  })
+  window.addEventListener(SIGNOUT_INTENT_EVENT, () => {
+    if (isSignoutBlocked()) quarantined = true
+    quarantineListeners.forEach((listener) => listener())
   })
 }
 
@@ -273,7 +294,7 @@ export function subscribeActorSessionQuarantine(listener: () => void): () => voi
   return () => { quarantineListeners.delete(listener) }
 }
 
-export function isActorSessionQuarantined(): boolean { observeSessionMarker(); return quarantined }
+export function isActorSessionQuarantined(): boolean { observeSessionMarker(); return quarantined || isSignoutBlocked() }
 export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void {
   if (isActorSessionQuarantined() || isActorCookieMutationPending() || (scope && !isActorReadScopeCurrent(scope, false))) {
     throw Object.assign(new Error('The sign-in changed. Resolve the locked session before retrying this action.'), {
@@ -281,13 +302,14 @@ export function assertActorSessionDispatchAllowed(scope?: ActorReadScope): void 
     })
   }
 }
-export function actorSessionQuarantineStatus(): string { return quarantineStatus }
+export function actorSessionQuarantineStatus(): string { return isSignoutBlocked() ? signoutStatus() : quarantineStatus }
 export function actorSessionReconciliationMarker(): string | null { observeSessionMarker(); return pendingCookieOwner() || expectedMarker || null }
 export function setActorSessionQuarantineStatus(status: string): void {
   quarantineStatus = status
   quarantineListeners.forEach((listener) => listener())
 }
 export function completeActorSessionReconciliation(marker: string | null): boolean {
+  if (isSignoutBlocked()) return false
   observeSessionMarker()
   if (marker !== expectedMarker || isActorCookieMutationPending()) return false
   quarantined = false
@@ -342,7 +364,7 @@ export function captureActorReadScope(channel = ''): ActorReadScope {
 
 export function isActorReadScopeCurrent(scope: ActorReadScope, includeInvalidation = true, allowQuarantine = false): boolean {
   const current = captureActorReadScope(scope.channel)
-  return (allowQuarantine || !quarantined) && current.authority === scope.authority && (!includeInvalidation || current.revision === scope.revision)
+  return (allowQuarantine || (!quarantined && !isSignoutBlocked())) && current.authority === scope.authority && (!includeInvalidation || current.revision === scope.revision)
 }
 
 export function assertActorReadScope(scope: ActorReadScope, includeInvalidation = true, allowQuarantine = false): void {

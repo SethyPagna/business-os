@@ -3,8 +3,10 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import type { ReactNode } from 'react'
 import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
-import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
+import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
+import { recoverUnresolvedSignout } from './api/http.ts'
+import { SIGNOUT_RETRY_EVENT, acknowledgeConfirmedSignout, assertNoUnresolvedSignout, beginUnresolvedSignout, isSignoutBlocked, prepareConfirmedSignoutUi, readSignoutIntent } from './api/unresolvedSignout.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -60,7 +62,6 @@ export { isBrokenLocalizedString, useApp, useLowStockConfig, useSync, useT }
 const APP_SETTINGS_LOAD_TIMEOUT_MS = 9000
 const APP_BOOTSTRAP_TIMEOUT_MS = 9000
 const APP_LOGIN_TIMEOUT_MS = 15000
-const APP_LOGOUT_TIMEOUT_MS = 10000
 const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
 const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
 const APP_SESSION_DURATION_TIMEOUT_MS = 12000
@@ -879,6 +880,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     system: BootstrapSystemPayload | null
     user: AppUser | null
   }> => {
+    assertNoUnresolvedSignout()
     if (isActorSessionQuarantined() && !options.actorReconciliation) throw new Error('Session reconciliation is required.')
     const safePayload = payload || {}
     const fallbackUser = options.fallbackUser || null
@@ -974,6 +976,16 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [clearLocalBusinessState])
 
   const reconciledActorRef = useRef<{ marker: string | null; user: AppUser } | null>(null)
+  const confirmedSignoutRef = useRef<string | null>(null)
+  useEffect(() => {
+    const token = confirmedSignoutRef.current
+    if (!token || user !== null) return
+    confirmedSignoutRef.current = null
+    if (acknowledgeConfirmedSignout(token)) {
+      completeActorSessionReconciliation(actorSessionReconciliationMarker())
+      setAuthReady(true)
+    }
+  }, [user])
   useEffect(() => {
     const reconciled = reconciledActorRef.current
     if (!reconciled || reconciled.user !== user) return
@@ -990,8 +1002,37 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     let disposed = false
     let running = 0
     let requestedMarker: string | null | undefined
+    let requestedSignout: string | undefined
     const reconcile = async (force = false) => {
       if (!isActorSessionQuarantined()) return
+      const signout = readSignoutIntent()
+      if (signout?.phase === 'confirmed' && !isSignoutBlocked()) return
+      if (signout && isSignoutBlocked()) {
+        flushPendingWorkDrafts()
+        disconnectWS()
+        if (signout.phase === 'confirmed') {
+          // Keep all work/cache data; only remove local auth after the server
+          // proved this cookie is no longer authenticated.
+          const prepared = await prepareConfirmedSignoutUi(signout.token, () => {
+            if (disposed) return
+            clearPersistedAuthState()
+            confirmedSignoutRef.current = signout.token
+            setUser(null)
+            setPage('dashboard')
+          })
+          if (!prepared || disposed) return
+          if (user === null && acknowledgeConfirmedSignout(signout.token)) {
+            confirmedSignoutRef.current = null
+            completeActorSessionReconciliation(actorSessionReconciliationMarker())
+            setAuthReady(true)
+          }
+          return
+        }
+        if (!force && requestedSignout === signout.token) return
+        requestedSignout = signout.token
+        await recoverUnresolvedSignout(signout, force).catch(() => {})
+        return
+      }
       const marker = actorSessionReconciliationMarker()
       if (!force && requestedMarker === marker) return
       requestedMarker = marker
@@ -1031,8 +1072,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const unsubscribe = subscribeActorSessionQuarantine(() => { void reconcile() })
     const retry = () => { void reconcile(true) }
     window.addEventListener(ACTOR_SESSION_RETRY_EVENT, retry)
+    window.addEventListener(SIGNOUT_RETRY_EVENT, retry)
     void reconcile()
-    return () => { disposed = true; running++; unsubscribe(); window.removeEventListener(ACTOR_SESSION_RETRY_EVENT, retry) }
+    return () => { disposed = true; running++; unsubscribe(); window.removeEventListener(ACTOR_SESSION_RETRY_EVENT, retry); window.removeEventListener(SIGNOUT_RETRY_EVENT, retry) }
   }, [applyBootstrapPayload, publicMode, user])
 
   // Sync event listeners (loadSettings is defined above).
@@ -1319,9 +1361,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         return
       }
       authRecoveryRef.current = true
+      const recoveryScope = captureActorReadScope()
       window.setTimeout(async () => {
+        if (disposed || !isActorReadScopeCurrent(recoveryScope, false)) { authRecoveryRef.current = false; return }
         try {
           const bootstrap = await readAppBootstrap('Auth recovery bootstrap')
+          if (disposed || !isActorReadScopeCurrent(recoveryScope, false)) { authRecoveryRef.current = false; return }
           if (bootstrap?.user) {
             await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
             authRecoveryRef.current = false
@@ -1334,6 +1379,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           }
         } catch (_) {}
         authRecoveryRef.current = false
+        if (disposed || !isActorReadScopeCurrent(recoveryScope, false)) return
         await handleUnauthorizedSession(message)
       }, 180)
     }
@@ -1396,7 +1442,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
       setAuthReady(false)
       authEstablishedAtRef.current = Date.now()
+      const otpScope = captureActorReadScope()
+      const otpMarker = actorSessionReconciliationMarker()
       const bootstrap = await readAppBootstrap('OTP login bootstrap')
+      if (!isActorReadScopeCurrent(otpScope, false)) return
       if (bootstrap?.unauthorized) {
         await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
       } else if (bootstrap) {
@@ -1405,6 +1454,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         setUser(safeUser)
         await loadSettings()
       }
+      if (isActorSessionQuarantined() || otpMarker !== actorSessionReconciliationMarker()) return
       setAuthReady(true)
       // settingsRef, not the settings state var, so this reads whatever
       // loadSettings()/applyBootstrapPayload() just wrote above rather than
@@ -1750,6 +1800,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   // Authentication helpers.
   const persistAuthenticatedUser = useCallback(async (nextUser: AppUser, sessionDuration = 'session', sessionExpiresAt = ''): Promise<void> => {
+    assertNoUnresolvedSignout()
     if (isActorSessionQuarantined() && !acknowledgeActorCookieUser(nextUser)) throw new Error('Resolve the changed session before signing in here.')
     resetActorReadSession()
     const expiryTime = computeSessionExpiryMs(sessionDuration, sessionExpiresAt)
@@ -1787,7 +1838,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()
     setUser(nextUser)
+    const loginScope = captureActorReadScope()
+    const loginMarker = actorSessionReconciliationMarker()
     const bootstrap = await readAppBootstrap('Login bootstrap')
+    assertNoUnresolvedSignout()
+    if (!isActorReadScopeCurrent(loginScope, false)) return
     if (bootstrap?.unauthorized) {
       await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
     } else if (bootstrap) {
@@ -1795,6 +1850,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     } else {
       await loadSettings()
     }
+    if (isActorSessionQuarantined() || loginMarker !== actorSessionReconciliationMarker()) return
     setAuthReady(true)
     // See the OTP login handler's matching comment above -- settingsRef,
     // not the settings state var, to pick up what was just loaded.
@@ -1836,26 +1892,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const logout = useCallback(async () => {
     if (isActorSessionQuarantined()) return
+    if (!user) return
+    const intent = beginUnresolvedSignout(user)
+    flushPendingWorkDrafts()
     resetActorReadSession()
     disconnectWS()
-    try {
-      const api = getAppApi()
-      await withLoaderTimeout(() => api.logout?.(), 'Logout', APP_LOGOUT_TIMEOUT_MS)
-    } catch (_) {}
-    if (isActorSessionQuarantined()) return
-    await clearLocalBusinessState({
-      clearAuth: true,
-      preserveSyncServer: true,
-      preserveSessionDuration: true,
-      preserveRuntimeMeta: true,
-      preserveOfflineWork: true,
-    })
-    if (isActorSessionQuarantined()) return
-    setUser(null)
-    setAuthReady(true)
-    setPage('dashboard')
-    clearPersistedAuthState()
-  }, [clearLocalBusinessState])
+    // No generic runtime cleanup: unresolved logout must retain every draft,
+    // encrypted/file record and cache behind the independent locked surface.
+    await recoverUnresolvedSignout(intent, true).catch(() => {})
+  }, [user])
 
   // Notifications.
   const notify = useCallback((message: unknown, type: NotificationKind | string = 'success', duration = 3500) => {

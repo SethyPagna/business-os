@@ -14,6 +14,7 @@
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
 import { createSyncErrorId } from '../utils/syncProblemLifecycle.ts'
+import { assertNoUnresolvedSignout, assertSignoutIntentCurrent, confirmSignoutIntent, setSignoutStatus, signoutError, type SignoutIntent } from './unresolvedSignout.ts'
 import { assertActorReadScope, assertActorSessionDispatchAllowed, beginActorCookieMutation, finishActorCookieMutation, prepareActorOauthCookieRedirect, isActorCookieMutationPending, captureActorReadScope, invalidateActorReadChannel, isActorReadScopeCurrent, markActorReadResult, type ActorReadScope } from './actorReadScope.ts'
 import {
   getSyncServerUrl,
@@ -45,13 +46,58 @@ type InflightWrite = { promise: Promise<any>; startedAt: number }
 // existing route() caller, only the ones that opt into a searchGroup.
 type RouteFn<T = any> = (signal?: AbortSignal) => T | Promise<T>
 const ACTOR_RECOVERY_READ = Symbol('actor-recovery-read')
-type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol }
+type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal; actorRecovery?: symbol; signoutRecovery?: string }
 
 /** The sole quarantine exception: no shared route cache, local fallback,
  * embedded bootstrap, mutation or general private-read bypass. */
 export function readActorSessionRecoveryBootstrap(): Promise<any> {
+  assertNoUnresolvedSignout()
   if (isActorCookieMutationPending()) return Promise.reject(Object.assign(new Error('Authentication is still in progress in another tab.'), { code: 'actor_session_quarantined', outcome: 'not_dispatched' }))
   return apiFetch('GET', '/api/auth/bootstrap', undefined, 8000, { actorRecovery: ACTOR_RECOVERY_READ })
+}
+
+/** Never use cached/embedded bootstrap or the broad invalid-session classifier
+ * to prove logout. This exact no-store endpoint confirms the current cookie. */
+export async function recoverUnresolvedSignout(intent: SignoutIntent, retryLogout = false): Promise<void> {
+  const token = intent.token
+  const probe = async (): Promise<boolean> => {
+    const current = assertSignoutIntentCurrent(token)
+    if (isActorCookieMutationPending()) throw signoutError()
+    try {
+      const response = await apiFetch('GET', '/api/sync/owner', undefined, 8000, { signoutRecovery: token })
+      assertSignoutIntentCurrent(token)
+      if (response?.owner?.actor_id !== current.actor_id || response?.owner?.organization_id !== current.organization_id
+        || response?.owner?.authority !== current.authority) {
+        throw Object.assign(signoutError(), { code: 'signout_actor_changed' })
+      }
+      return false
+    } catch (error) {
+      const detail = error as { status?: unknown; code?: unknown }
+      assertSignoutIntentCurrent(token)
+      if (detail.status === 401 && detail.code === 'invalid_session' && !isActorCookieMutationPending()) {
+        await confirmSignoutIntent(token)
+        return true
+      }
+      throw error
+    }
+  }
+  try {
+    setSignoutStatus('signout-checking')
+    if (await probe()) return
+    if (retryLogout) {
+      const current = assertSignoutIntentCurrent(token)
+      try {
+        await apiFetch('POST', '/api/auth/logout', {
+          expected_actor_id: current.actor_id, expected_organization_id: current.organization_id,
+        }, 8000, { signoutRecovery: token, skipWriteDedupe: true })
+      } catch { /* An unknown acknowledgment is resolved by the fresh probe below. */ }
+      if (await probe()) return
+    }
+    throw signoutError()
+  } catch (error) {
+    setSignoutStatus((error as { code?: string })?.code === 'signout_actor_changed' ? 'signout-different-account' : 'signout-unresolved')
+    throw error
+  }
 }
 type RouteOptions = {
   isWrite?: boolean
@@ -744,8 +790,15 @@ export const WRITE_REQUEST_TIMEOUT_MS = 45_000
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs?: number, options: ApiFetchOptions = {}): Promise<any> {
   const readScope = ['GET', 'HEAD'].includes(String(method || 'GET').toUpperCase()) ? captureActorReadScope() : null
   const sideEffectScope = readScope || captureActorReadScope()
-  const recoveryRead = options.actorRecovery === ACTOR_RECOVERY_READ && method === 'GET' && path === '/api/auth/bootstrap'
-  if (!recoveryRead) assertActorSessionDispatchAllowed()
+  const signoutProbe = !!options.signoutRecovery && method === 'GET' && path === '/api/sync/owner'
+  const signoutWrite = !!options.signoutRecovery && method === 'POST' && path === '/api/auth/logout'
+  if (signoutProbe || signoutWrite) {
+    const intent = assertSignoutIntentCurrent(options.signoutRecovery!)
+    if (isActorCookieMutationPending()) throw signoutError()
+    if (signoutWrite && ((body as LooseRecord)?.expected_actor_id !== intent.actor_id || (body as LooseRecord)?.expected_organization_id !== intent.organization_id)) throw signoutError()
+  } else assertNoUnresolvedSignout()
+  const recoveryRead = (options.actorRecovery === ACTOR_RECOVERY_READ && method === 'GET' && path === '/api/auth/bootstrap') || signoutProbe
+  if (!recoveryRead && !signoutWrite) assertActorSessionDispatchAllowed()
   const normalizedMethod = String(method || 'GET').toUpperCase()
   const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(normalizedMethod)
   timeoutMs = timeoutMs ?? (isMutation ? WRITE_REQUEST_TIMEOUT_MS : SYNC.REQUEST_TIMEOUT_MS)
@@ -812,18 +865,21 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       credentials: 'include',
       redirect: 'manual',
       signal: ctrl.signal,
+      ...(signoutProbe ? { cache: 'no-store' as const } : {}),
     }
     if (methodAllowsRequestBody(normalizedMethod) && body !== undefined) {
       requestInit.body = JSON.stringify(body)
     }
     if (oauthLogin || (normalizedMethod === 'POST' && ['/api/auth/login', '/api/auth/otp/verify', '/api/auth/logout', '/api/auth/session-duration'].includes(path))) {
-      cookieMutation = await beginActorCookieMutation()
+      cookieMutation = await beginActorCookieMutation(signoutWrite ? options.signoutRecovery : undefined)
     }
     if (oauthLogin && cookieMutation) {
       const payload = (body || {}) as Record<string, unknown>
       requestInit.body = JSON.stringify({ ...payload, redirectTo: prepareActorOauthCookieRedirect(cookieMutation, String(payload.redirectTo || window.location.href)) })
     }
+    if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     const res = await fetch(`${base}${path}`, requestInit)
+    if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
     if (readScope) assertActorReadScope(readScope, false, recoveryRead)
     if (isCloudflareAccessRedirectResponse(res)) {

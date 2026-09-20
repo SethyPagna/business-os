@@ -383,7 +383,9 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   }
   var pathname = normalizePath(window.location && window.location.pathname);
   var routeKey = routePreloadKey(pathname);
-  if (!isPublicCatalogPath(pathname) && !isLoginPath(pathname) && !hasEmbeddedAuthBootstrap() && typeof window.fetch === 'function' && !window.__businessOsAuthBootstrapPromise) {
+  var signoutFenced = true;
+  try { signoutFenced = !!window.localStorage.getItem('businessos_unresolved_signout_v1'); } catch (_) {}
+  if (!signoutFenced && !isPublicCatalogPath(pathname) && !isLoginPath(pathname) && !hasEmbeddedAuthBootstrap() && typeof window.fetch === 'function' && !window.__businessOsAuthBootstrapPromise) {
     window.__businessOsAuthBootstrapStartedAt = Date.now();
     window.__businessOsAuthBootstrapPromise = window.fetch('/api/auth/bootstrap', {
       credentials: 'include',
@@ -640,6 +642,9 @@ function manualChunks(id: string): string | undefined {
       return 'api-http-core'
     }
     if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
+    // Shared by HTTP and actor fences; never pull the broad method registry
+    // back into these lower-level chunks.
+    if (normalized.endsWith('/src/api/unresolvedSignout.ts') || normalized.endsWith('/src/api/offlineQueueOwnership.ts')) return 'auth-intent'
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
