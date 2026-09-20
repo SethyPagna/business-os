@@ -1,3 +1,15 @@
+## HTML shell hotfix deployed; retained-tab smoke running — September 20
+
+Current live590a62399d22/Workerfe1e59bf-2c86-4b10-a687-2f08241310e6 Paid,
+hashb985da3b86bde911, built2026-09-20T12:15:38.468Z; deploy55076 TERMINAL0.
+Frontendcf805522d2fd/hash76b9ca111ec0b69f/index-DIiWCqvT.js. Main/branchpushed.
+Corrected test1629f1ef (a5c59ef3) now root12/12pass and independentef0adba6
+focused5/5+native3/3. Types/i18n/build40826 TERMINAL0, clean Paid/Free dryruns0.
+No new migration/businessdata/UI changes. preview_safety now checks preserved
+poisonedtab460569392 without clearingstorage; live recovery NOT yet claimed.
+See docs/fleet/2026-09-20-sw-shell-hotfix.md. Earlier red remains recorded below.
+Full goal and broader Worker sweep remain active; Cloudflare source unchanged.
+
 ## Compact/debloat rules retained; hotfix integration gate held — September 20
 
 Owner reaffirmed the standing AGENTS.md acceptance gates: proven-dead cleanup,

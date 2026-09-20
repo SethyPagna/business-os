@@ -57,5 +57,12 @@ also has the old defect, so it is not a claimed remedy for cache poisoning.
 
 ## Deployment / live result
 
-Pending. No new migration or secret sync is part of this hotfix. Full application
-goal remains active; broad Worker sweep and isolated transfer/export work continue.
+Deployed source590a62399d22, Workerfe1e59bf-2c86-4b10-a687-2f08241310e6,
+Paid, hashb985da3b86bde911, built2026-09-20T12:15:38.468Z. Deployment55076
+exited0;13ms Worker startup. Main and working branch pushed. Independent final
+test reviewef0adba6 passes5/5 focused plus3/3 native. The built frontend above
+differs from deployment source only in test/documentation files.
+
+Live retained-tab smoke is running; do not claim recovered yet. No new migration
+or secret sync. Full application goal remains active; broad Worker sweep and
+isolated transfer/export work continue.
