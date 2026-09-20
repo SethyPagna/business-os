@@ -1,3 +1,18 @@
+## Dataset lifecycle prerequisites under implementation — September 21
+
+Previous turn made progress: deployedce945bb4 and recorded partialsmoke. New read-only
+planabe43bfa confirms full reset/restore/export retirement needs durable phased
+coordination, not merely migrationmetadata. See September21 dataset-lifecycle plan.
+Isolated writer sw_upgrade_fix now owns maintenanceCAS module/tests and bounded
+backups route outcome parity; sw_upgrade_review independently audits. No new remote
+action. Root traced clear/restore handlers ignoring release outcome, included in scope.
+
+Live follow-up: separate Chrome460569514 renders authenticated Returns; metadata
+navigation explicitly ERR_BLOCKED_BY_CLIENT/Chrome errorpage. No bypass. Back
+returned to working Returns; attempted warmreload later lost debugger before final
+observation. Metadata/controller/warmreload proof remains unverified, not app-failure
+proof. User POS remains untouched. Full goal remains active.
+
 ## Browser upgrade deployed; live smoke partially verified — September 21
 
 Sourcece945bb4ed15 deployed Paid Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991,

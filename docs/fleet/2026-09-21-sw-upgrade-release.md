@@ -47,3 +47,9 @@ Returns, Today21/09/2026, normal controls and no blank page. New-version notific
 visible; document rendering alone does not prove controller version. Metadata
 navigation and reattachment then failed with browser-tool "Debugger unattached";
 metadata-cycle/warm-reload/controller proof remains incomplete, not a green claim.
+
+Follow-up Chrome460569514 loaded Returns. Metadata navigation produced explicit
+Chrome ERR_BLOCKED_BY_CLIENT, not a server/API response; do not bypass it. Back
+returned to working Returns. Warmreload observation then lost debugger. Thus the
+live metadata cycle/controller proof is still unavailable, while local native
+negative-control evidence remains separate and valid.
