@@ -7,6 +7,14 @@ INSERT INTO system_flags(key,value) VALUES('business_dataset_generation',json_ob
   lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-a'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6)))))
 ON CONFLICT(key) DO NOTHING;
 ALTER TABLE transfer_runs ADD COLUMN dataset_generation TEXT NOT NULL DEFAULT '';
+-- Preserve even generations with no transfers. This set must be unioned from
+-- backups, never cleared/restored destructively: A -> B -> A revives stale proofs.
+CREATE TABLE business_dataset_generations (
+  generation TEXT PRIMARY KEY NOT NULL,
+  recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO business_dataset_generations(generation)
+  SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation';
 CREATE TABLE transfer_run_retired_keys (
   actor_id INTEGER NOT NULL,
   request_id TEXT NOT NULL,
@@ -27,6 +35,21 @@ CREATE TABLE transfer_run_lifecycle_guard (
   kind TEXT NOT NULL CHECK(kind IN ('restore','reset','union')),
   generation_before TEXT NOT NULL, generation_after TEXT NOT NULL
 );
+CREATE TRIGGER transfer_generation_history_insert BEFORE INSERT ON business_dataset_generations
+WHEN NOT EXISTS(SELECT 1 FROM transfer_run_lifecycle_guard g JOIN system_flags f ON f.key='business_dataset_generation'
+  WHERE g.id=1 AND g.generation_before=json_extract(f.value,'$.generation'))
+BEGIN SELECT RAISE(ABORT,'generation history requires lifecycle authority'); END;
+CREATE TRIGGER transfer_generation_history_update BEFORE UPDATE ON business_dataset_generations
+BEGIN SELECT RAISE(ABORT,'generation history is immutable'); END;
+CREATE TRIGGER transfer_generation_history_delete BEFORE DELETE ON business_dataset_generations
+BEGIN SELECT RAISE(ABORT,'generation history is permanent'); END;
+CREATE TRIGGER transfer_generation_record BEFORE UPDATE ON system_flags
+WHEN OLD.key='business_dataset_generation' AND json_extract(NEW.value,'$.generation') IS NOT json_extract(OLD.value,'$.generation')
+BEGIN
+  -- Plain INSERT intentionally fails for every consumed/imported generation.
+  -- Trigger and the entire retirement operation roll back together on conflict.
+  INSERT INTO business_dataset_generations(generation) VALUES(json_extract(NEW.value,'$.generation'));
+END;
 CREATE TRIGGER transfer_generation_no_delete BEFORE DELETE ON system_flags
 WHEN OLD.key='business_dataset_generation'
 BEGIN SELECT RAISE(ABORT,'dataset generation cannot be deleted'); END;
