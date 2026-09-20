@@ -48,6 +48,7 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
+import { readReturnStatement, ReturnStatementError } from '../lib/returnsStatementExport'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -772,6 +773,19 @@ export function returnRangePredicate(query: Record<string, string>, column: 'r.c
   if (endDate) { clauses.push(localDateAtOrBefore(column)); params.endDate = endDate }
   return { sql: clauses.length ? clauses.join(' AND ') : '1=1', params }
 }
+
+// Complete statement pages are separate from the intentionally bounded list.
+// Registered before /:id; every page and final verification rechecks authority.
+app.get('/export', async (c) => {
+  c.header('Cache-Control', 'no-store')
+  if (getActionTier(c.get('user'), 'returns', 'export') === 'none') {
+    return c.json({ error: 'You do not have permission to export returns' }, 403)
+  }
+  try { return c.json(await readReturnStatement(c.env, c.get('user'), c.req.query())) } catch (error) {
+    if (error instanceof ReturnStatementError) return c.json({ error: error.message }, error.status)
+    throw error
+  }
+})
 
 // GET /api/returns
 app.get('/', async (c) => {
