@@ -75,10 +75,14 @@ export function commitTransferRunChunkStatements(input: RunPosition, transferSta
   if (!transferStatements.length) throw new Error('Transfer effects required')
   return [guard(`EXISTS(SELECT 1 FROM transfer_runs r JOIN transfer_run_chunks c ON c.run_id=r.id
       AND c.sequence=r.next_sequence WHERE ${ownedPosition} AND r.status='active' AND c.status='planned')`, params),
+    // An old route can know the exact child body/key. Its receipt must still
+    // fail unless this marker was acquired INSIDE this same atomic batch.
+    // No public API exposes marker acquisition as a separate operation.
+    { sql: "UPDATE transfer_run_chunks SET status='executing' WHERE run_id=@run AND sequence=@sequence AND status='planned'", params },
     ...transferStatements,
     { sql: `UPDATE transfer_run_chunks SET status='committed',receipt_id=(SELECT p.id FROM transfer_operation_receipts p
         WHERE p.actor_id=transfer_run_chunks.actor_id AND p.request_id=transfer_run_chunks.request_id)
-      WHERE run_id=@run AND sequence=@sequence AND status='planned'`, params },
+      WHERE run_id=@run AND sequence=@sequence AND status='executing'`, params },
     { sql: `UPDATE transfer_runs SET next_sequence=next_sequence+1,revision=revision+1,
         cursor_json=(SELECT cursor_after FROM transfer_run_chunks WHERE run_id=@run AND sequence=@sequence),
         status=CASE WHEN (SELECT is_final FROM transfer_run_chunks WHERE run_id=@run AND sequence=@sequence)=1 THEN 'completed' ELSE 'active' END,

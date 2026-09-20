@@ -30,12 +30,14 @@ CREATE TABLE transfer_run_chunks (
   cursor_before TEXT NOT NULL CHECK(json_valid(cursor_before) AND length(cursor_before)<=4096),
   cursor_after TEXT NOT NULL CHECK(json_valid(cursor_after) AND length(cursor_after)<=4096),
   is_final INTEGER NOT NULL CHECK(is_final IN (0,1)),
-  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','committed')),
+  -- executing is an internal transaction marker: wrapper acquires it, writes
+  -- effects, links receipt and advances run in ONE batch. Never persist alone.
+  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','executing','committed')),
   receipt_id INTEGER REFERENCES transfer_operation_receipts(id),
   PRIMARY KEY(run_id,sequence),
   UNIQUE(actor_id,request_id),
   UNIQUE(receipt_id),
-  CHECK((status='planned' AND receipt_id IS NULL) OR (status='committed' AND receipt_id IS NOT NULL))
+  CHECK((status IN ('planned','executing') AND receipt_id IS NULL) OR (status='committed' AND receipt_id IS NOT NULL))
 );
 CREATE TRIGGER transfer_runs_reserve_insert BEFORE INSERT ON transfer_runs
 WHEN NEW.status<>'active' OR NEW.revision<>0 OR NEW.next_sequence<>0 OR NEW.cursor_json<>'{}'
@@ -58,19 +60,25 @@ CREATE TRIGGER transfer_run_child_receipt_guard BEFORE INSERT ON transfer_operat
 WHEN EXISTS(SELECT 1 FROM transfer_run_chunks WHERE actor_id=NEW.actor_id AND request_id=NEW.request_id)
  AND NOT EXISTS(SELECT 1 FROM transfer_run_chunks c JOIN transfer_runs r ON r.id=c.run_id
    WHERE c.actor_id=NEW.actor_id AND c.request_id=NEW.request_id AND c.request_digest=NEW.request_digest
-   AND c.request_json=NEW.request_json AND c.status='planned' AND r.status='active'
+   AND c.request_json=NEW.request_json AND c.status='executing' AND r.status='active'
    AND r.next_sequence=c.sequence AND r.cursor_json=c.cursor_before)
 BEGIN SELECT RAISE(ABORT,'transfer child receipt does not match active intent'); END;
 CREATE TRIGGER transfer_run_chunks_update_guard BEFORE UPDATE ON transfer_run_chunks
 WHEN NEW.run_id IS NOT OLD.run_id OR NEW.sequence IS NOT OLD.sequence OR NEW.actor_id IS NOT OLD.actor_id
  OR NEW.request_id IS NOT OLD.request_id OR NEW.request_digest IS NOT OLD.request_digest OR NEW.request_json IS NOT OLD.request_json
  OR NEW.cursor_before IS NOT OLD.cursor_before OR NEW.cursor_after IS NOT OLD.cursor_after OR NEW.is_final IS NOT OLD.is_final
- OR OLD.status<>'planned' OR NEW.status<>'committed'
- OR NOT EXISTS(SELECT 1 FROM transfer_operation_receipts p JOIN transfer_runs r ON r.id=NEW.run_id
+ OR NOT (
+   (OLD.status='planned' AND NEW.status='executing' AND NEW.receipt_id IS NULL
+     AND EXISTS(SELECT 1 FROM transfer_runs r WHERE r.id=NEW.run_id AND r.status='active'
+       AND r.next_sequence=NEW.sequence AND r.cursor_json=NEW.cursor_before)
+     AND NOT EXISTS(SELECT 1 FROM transfer_operation_receipts p WHERE p.actor_id=NEW.actor_id AND p.request_id=NEW.request_id))
+   OR (OLD.status='executing' AND NEW.status='committed'
+     AND EXISTS(SELECT 1 FROM transfer_operation_receipts p JOIN transfer_runs r ON r.id=NEW.run_id
    WHERE p.id=NEW.receipt_id AND p.actor_id=NEW.actor_id AND p.request_id=NEW.request_id
    AND p.request_digest=NEW.request_digest AND p.request_json=NEW.request_json AND p.status='committed'
    AND p.provenance_version=1 AND p.action_history_id IS NOT NULL AND p.response_json IS NOT NULL
-   AND r.status='active' AND r.next_sequence=NEW.sequence AND r.cursor_json=NEW.cursor_before)
+   AND r.status='active' AND r.next_sequence=NEW.sequence AND r.cursor_json=NEW.cursor_before))
+ )
 BEGIN SELECT RAISE(ABORT,'transfer child is immutable or lacks committed receipt'); END;
 CREATE TRIGGER transfer_runs_update_guard BEFORE UPDATE ON transfer_runs
 WHEN NEW.id IS NOT OLD.id OR NEW.actor_id IS NOT OLD.actor_id OR NEW.organization_id IS NOT OLD.organization_id
