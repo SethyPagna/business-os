@@ -1,5 +1,22 @@
 import { transferStatementAllowance, transferStatementEstimate, type TransferInvocationBudget } from './transferRunBudget'
 import type { TransferLotCursor, TransferLotPage } from './transferRunLots'
+import { subtractDecimalSum } from './moneyPrecision'
+
+// Existing transfer routes have no quantity scale/range contract beyond finite
+// positive numbers. This UNUSED planner deliberately fails closed above the safe
+// integer magnitude, and on any derived decimal that cannot roundtrip through
+// a JSON number. This is a proposed planner admission rule, not a route change.
+export const MAX_TRANSFER_PLANNING_QUANTITY = Number.MAX_SAFE_INTEGER
+function validQuantity(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && value <= MAX_TRANSFER_PLANNING_QUANTITY
+}
+function subtractQuantity(total: number, part: number): number {
+  const exact = subtractDecimalSum(total, [part])
+  const result = Number(exact)
+  if (!Number.isFinite(result) || result < 0 || result > MAX_TRANSFER_PLANNING_QUANTITY
+    || subtractDecimalSum(exact, [result]) !== '0') throw new Error('Transfer quantity cannot be represented exactly')
+  return result
+}
 
 export type TransferRunFragment = {
   productId: number; quantity: number
@@ -25,7 +42,9 @@ export function planTransferRunFragment(input: {
     || (page.selectedBatchId !== null && (!Number.isSafeInteger(page.selectedBatchId) || page.selectedBatchId <= 0))) {
     throw new Error('Invalid lot page scope')
   }
-  if (!Number.isFinite(input.remainingQuantity) || input.remainingQuantity <= 0) throw new Error('Invalid remaining transfer quantity')
+  if (!validQuantity(input.remainingQuantity)) throw new Error('Invalid remaining transfer quantity')
+  // Validate the existing exact-decimal kernel resource limits before planning.
+  subtractQuantity(input.remainingQuantity, 0)
   const allowance = transferStatementAllowance(budget)
   const base = transferStatementEstimate(1, 0, 0)
   if (allowance < base) throw new Error('No transfer fits the invocation reserve')
@@ -33,10 +52,11 @@ export function planTransferRunFragment(input: {
   const seen = new Set<number>()
   for (const lot of page.lots) {
     if (!Number.isSafeInteger(lot.batchId) || lot.batchId <= 0 || seen.has(lot.batchId)
-      || !Number.isFinite(lot.available) || lot.available <= 0
+      || !validQuantity(lot.available)
       || lot.cursor.productId !== page.productId || lot.cursor.branchId !== page.branchId
       || lot.cursor.batchId !== lot.batchId) throw new Error('Invalid lot page')
     seen.add(lot.batchId)
+    subtractQuantity(lot.available, 0)
   }
   if (page.selectedBatchId !== null && (!page.exhausted || page.lots.length !== 1
     || page.lots[0].batchId !== page.selectedBatchId || page.lots[0].available < input.remainingQuantity)) {
@@ -50,13 +70,13 @@ export function planTransferRunFragment(input: {
     const quantity = Math.min(remaining, lot.available)
     allocations.push({ batchId: lot.batchId, quantity })
     after = { ...lot.cursor }
-    remaining -= quantity
+    remaining = subtractQuantity(remaining, quantity)
   }
   // A budget-clipped page is NOT exhausted. Never mint an untracked remainder.
   const untrackedQuantity = page.selectedBatchId === null && page.exhausted
     && allocations.length === page.lots.length ? remaining : 0
-  remaining -= untrackedQuantity
-  const quantity = input.remainingQuantity - remaining
+  remaining = subtractQuantity(remaining, untrackedQuantity)
+  const quantity = subtractQuantity(input.remainingQuantity, remaining)
   if (!(quantity > 0)) throw new Error('No transfer progress fits this page and budget')
   return { productId: page.productId, quantity, allocations, untrackedQuantity,
     remainingQuantity: remaining, after, complete: remaining === 0,
