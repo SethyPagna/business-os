@@ -22,9 +22,10 @@ export default function ShiftReport(p: ReportViewProps) {
   const branchId = filters.branchId ? Number(filters.branchId) : undefined
   // The authorized list works for admin-exempt reviewers too. Keep selection
   // scoped to actor/permissions/branch, and load expensive figures on demand.
-  const depsKey = JSON.stringify([branchId, user?.id, user?.username, user?.role_code, user?.permissions, user?.role_permissions])
+  const depsKey = JSON.stringify([branchId, filters.startDate, filters.endDate, user?.id, user?.username, user?.role_code, user?.permissions, user?.role_permissions])
   const [selection, setSelection] = useState({ scope: '', id: '' })
-  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, limit: 200 }), depsKey)
+  // Dates select complete shift records by business_date, not clipped sales windows.
+  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, limit: 200 }), depsKey)
   const shifts = listing.data?.shifts ?? []
   const selected = selection.scope === depsKey ? shifts.find((row) => String(row.id) === selection.id) : undefined
   const selectedId = selected?.id ?? shifts[0]?.id

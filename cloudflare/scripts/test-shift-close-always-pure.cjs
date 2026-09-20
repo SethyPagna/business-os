@@ -187,6 +187,13 @@ async function main() {
     sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_scope_mode','shop_wide') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     sqlite.prepare("INSERT INTO settings(key,value) VALUES ('shift_admin_exempt','false') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
     const shift = await open()
+    for (const range of ['from=garbage', 'from=2026-02-30', 'to=2026-13-01', 'from=2026-09-21&to=2026-09-20', 'from=2026-09-20T00:00:00Z']) {
+      assert.equal((await call('GET', `/?${range}`)).status, 400, `reject invalid business date bounds: ${range}`)
+    }
+    const sameDay = await (await call('GET', `/?from=${shift.business_date}&to=${shift.business_date}&limit=1`)).json()
+    assert.deepEqual(sameDay.shifts.map((row) => row.id), [shift.id], 'business date bounds include both endpoints')
+    const excluded = await (await call('GET', '/?from=2000-01-01&to=2000-12-31&limit=1')).json()
+    assert.deepEqual(excluded.shifts, [], 'range excludes current shifts before selection')
     actAs({ id: 8, username: 'colleague', permissions: JSON.stringify({ pos: true, products_cost_view: true }) })
     for (const url of ['/current?branch_id=1', `/${shift.id}/history`]) {
       const body = await (await call('GET', url)).json()
