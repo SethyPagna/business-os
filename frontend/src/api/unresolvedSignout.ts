@@ -44,6 +44,7 @@ export function signoutError(): Error {
 export function assertNoUnresolvedSignout(): void { if (isSignoutBlocked()) throw signoutError() }
 export function signoutStatus(): string {
   if (readSignoutIntent()?.token === 'unreadable') return 'signout-storage-unavailable'
+  if (status === 'signout-storage-unavailable') return status
   return readSignoutIntent()?.phase === 'confirmed' ? 'signout-confirmed' : status
 }
 export function setSignoutStatus(value: string): void { status = value; changed() }
@@ -91,10 +92,12 @@ export async function confirmSignoutIntent(token: string): Promise<void> {
   if (!window.navigator?.locks?.request) throw signoutError()
   await window.navigator.locks.request('businessos-auth-cookie-admission', { mode: 'exclusive' }, () => {
     const intent = assertSignoutIntentCurrent(token)
-    if (window.localStorage.getItem('businessos_auth_cookie_pending')) throw signoutError()
-    const confirmed = { ...intent, phase: 'confirmed' as const }
-    window.localStorage.setItem(SIGNOUT_INTENT_KEY, JSON.stringify(confirmed))
-    if (window.localStorage.getItem(SIGNOUT_INTENT_KEY) !== JSON.stringify(confirmed)) throw signoutError()
+    try {
+      if (window.localStorage.getItem('businessos_auth_cookie_pending')) throw signoutError()
+      const confirmed = { ...intent, phase: 'confirmed' as const }
+      window.localStorage.setItem(SIGNOUT_INTENT_KEY, JSON.stringify(confirmed))
+      if (window.localStorage.getItem(SIGNOUT_INTENT_KEY) !== JSON.stringify(confirmed)) throw signoutError()
+    } catch { throw signoutError() }
   })
   changed()
 }
@@ -104,7 +107,19 @@ export async function prepareConfirmedSignoutUi(token: string, clearAuth: () => 
   if (!window.navigator?.locks?.request) return false
   return window.navigator.locks.request('businessos-auth-cookie-admission', { mode: 'exclusive' }, () => {
     const intent = readSignoutIntent()
-    if (intent?.token !== token || intent.phase !== 'confirmed' || intent.authority !== authority() || window.localStorage.getItem('businessos_auth_cookie_pending')) return false
+    if (intent?.token !== token || intent.phase !== 'confirmed' || intent.authority !== authority()) return false
+    try {
+      if (window.localStorage.getItem('businessos_auth_cookie_pending')) return false
+    } catch {
+      // Called by background reconciliation: remain locked without an unhandled
+      // storage rejection. Notify only on transition, avoiding retry loops.
+      if (status !== 'signout-storage-unavailable') {
+        status = 'signout-storage-unavailable'
+        changed()
+      }
+      return false
+    }
+    status = 'signout-confirmed'
     clearAuth()
     return true
   })
@@ -123,7 +138,9 @@ export function releaseConfirmedSignoutForAuthentication(): void {
   const intent = readSignoutIntent()
   if (!intent) return
   if (intent.phase !== 'confirmed' || acknowledgedToken !== intent.token || intent.authority !== authority()) throw signoutError()
-  window.localStorage.removeItem(SIGNOUT_INTENT_KEY)
-  if (window.localStorage.getItem(SIGNOUT_INTENT_KEY)) throw signoutError()
+  try {
+    window.localStorage.removeItem(SIGNOUT_INTENT_KEY)
+    if (window.localStorage.getItem(SIGNOUT_INTENT_KEY)) throw signoutError()
+  } catch { throw signoutError() }
   changed()
 }

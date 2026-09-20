@@ -21,9 +21,10 @@ function visit(node: ts.Node) {
 }
 visit(tree)
 assert.ok(messageExpression)
-const messageFor = new Function('status', `return (${messageExpression});`)
+const messageFor = new Function('status', `const signingOut = status.startsWith('signout-'); return (${messageExpression});`)
 const message = messageFor(scope.actorCookieMutationPendingStatus())
 assert.match(message, /Enable cookies and site data/)
+assert.match(messageFor(scope.actorSessionQuarantineStatus()), /Enable cookies and site data/, 'actual displayed sign-out storage status must provide actionable recovery')
 assert.match(message, /[ក-៿]/)
 assert.doesNotMatch(message, /another tab/)
 assert.match(messageFor('authentication-pending'), /another tab/)
@@ -52,3 +53,18 @@ assert.equal(scope.isActorSessionQuarantined(), true)
 assert.equal(scope.completeActorSessionReconciliation(scope.actorSessionReconciliationMarker()), false)
 assert.throws(() => scope.assertActorSessionDispatchAllowed(), (error: any) => error.outcome === 'not_dispatched')
 console.log('PASS blocked storage has actionable bilingual recovery text while synthetic and real pending fences remain closed')
+
+// A mid-reconciliation storage failure must return a closed UI decision, not
+// reject the provider's fire-and-forget reconciliation task.
+const signout = await import('../src/api/unresolvedSignout.ts')
+const intent = { version: 1, token: 'confirmed-storage-fixture', authority: 'https://blocked.test', actor_id: 71, organization_id: null, phase: 'confirmed' }
+let clears = 0
+let statusEvents = 0
+Object.assign(globalThis, { window: { dispatchEvent() { statusEvents++ }, location: { origin: intent.authority }, navigator: { locks: { request: async (_name: string, _options: unknown, action: () => unknown) => action() } }, localStorage: { getItem(key: string) { if (key === 'businessos_auth_cookie_pending') return blocked(); return JSON.stringify(intent) } } } })
+assert.equal(await signout.prepareConfirmedSignoutUi(intent.token, () => { clears++ }), false)
+assert.equal(clears, 0)
+assert.equal(signout.isSignoutBlocked(), true)
+assert.equal(signout.signoutStatus(), 'signout-storage-unavailable')
+assert.equal(await signout.prepareConfirmedSignoutUi(intent.token, () => { clears++ }), false)
+assert.equal(statusEvents, 1, 'one status update shows recovery copy without a repeated notification/retry loop')
+console.log('PASS confirmed sign-out storage failure retains the fence without rejecting UI reconciliation')

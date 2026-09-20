@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, '..')
 function storage() { const rows = new Map(); return { getItem: k => rows.get(k) ?? null, setItem: (k,v) => rows.set(k,String(v)), removeItem: k => rows.delete(k) } }
 const window = { localStorage: storage(), sessionStorage: storage(), location: { origin: 'https://app.test' }, addEventListener() {}, removeEventListener() {}, setTimeout: () => 1, clearTimeout() {} }
 let server = 'https://one.test'
-let hooks, scope, pickerOptionsCache, supplierReply, shiftReply, historyReply, usersReply = async () => []
+let hooks, scope, signout, ownership, pickerOptionsCache, supplierReply, shiftReply, historyReply, usersReply = async () => []
 function harness() {
   const values = []; let cursor = 0; let effects = []
   return {
@@ -25,6 +25,8 @@ function load(relative, extra = {}) {
     if (extra[name]) return extra[name]
     if (name === 'react') return hooks
     if (name.includes('actorReadScope')) return scope
+    if (name.includes('unresolvedSignout')) return signout
+    if (name.includes('offlineQueueOwnership')) return ownership
     if (name.includes('pickerOptionsCache')) return pickerOptionsCache
     if (name.includes('httpState')) return { getSyncServerUrl: () => server }
     if (name.includes('contactsTransport')) return { getSuppliers: () => supplierReply() }
@@ -42,7 +44,11 @@ function actor(name) { window.sessionStorage.setItem('businessos_user', name); s
 function deferred() { let resolve, reject; const promise = new Promise((yes,no) => { resolve=yes; reject=no }); return { promise, resolve, reject } }
 const tick = () => new Promise(resolve => setImmediate(resolve))
 async function main() {
-  hooks = harness(); scope = load('src/api/actorReadScope.ts')
+  hooks = harness(); ownership = load('src/api/offlineQueueOwnership.ts'); signout = load('src/api/unresolvedSignout.ts'); scope = load('src/api/actorReadScope.ts')
+  const preSignoutScope = scope.captureActorReadScope()
+  window.localStorage.setItem(signout.SIGNOUT_INTENT_KEY, JSON.stringify({ version: 1, token: 'pending-other-tab', authority: server, actor_id: 71, organization_id: null, phase: 'pending' }))
+  assert.equal(scope.isActorReadScopeCurrent(preSignoutScope), false, 'actual durable sign-out fence invalidates private cache reads before storage event')
+  window.localStorage.removeItem(signout.SIGNOUT_INTENT_KEY)
   // pickerOptionsCache.ts is the shared P9-12 module SupplierPickerField's
   // loadSupplierNames now routes through (was its own private module cache
   // before) -- loaded for real here too, over the SAME `scope` mock above,
