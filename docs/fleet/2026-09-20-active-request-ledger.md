@@ -12,6 +12,16 @@ entries for that slice only. Other admin/public/Freecapacity items stay open.
 
 ### Active completion goal and next wave
 
+Owner export decision: use bank-statement-style periods: monthly, three months,
+six months, and at most one year per download. Longer history requires multiple
+downloads. Apply first to the open Returns export-completeness work; do not cap
+the downloaded data at the currently loaded 500/1000 rows. Backend must enforce
+the range bound, with bounded sequential reads and original-account fences.
+Calendar/business-timezone boundaries (including leap years), full matching-row
+coverage, and visible failure rather than partial-success files are acceptance
+criteria. This is a requested design, not yet implemented/deployed. A period cap
+alone does not establish Free-tier capacity or freeze concurrent record edits.
+
 The completion goal is ACTIVE following the owner's instruction to continue until
 finished. Earlier blocked-goal wording below is historical, not current state.
 The latest online-only release above supersedes older undeployed status only for
