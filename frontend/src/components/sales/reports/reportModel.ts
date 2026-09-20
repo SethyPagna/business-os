@@ -200,12 +200,18 @@ export function reportQueryParams(f: ReportFilters, view: ReportViewDef): Record
   if (f.startDate) q.startDate = f.startDate
   if (f.endDate) q.endDate = f.endDate
   if (f.branchId) q.branchId = f.branchId
-  if (view.supportsTime && f.startDate && f.endDate && CLOCK_RE.test(f.startTime) && CLOCK_RE.test(f.endTime) && !(f.startTime === '00:00' && f.endTime === '23:59')) {
-    const createdFrom = reportUtcBound(f.startDate, f.startTime)
-    const createdTo = reportUtcBound(f.endDate, f.endTime, 1)
+  if (view.supportsTime && (f.startTime || f.endTime)) {
+    // Clearing one clock means the corresponding day edge, not permission to
+    // discard the other boundary. Populated invalid clocks must fail closed.
+    const startTime = f.startTime || '00:00'
+    const endTime = f.endTime || '23:59'
+    const createdFrom = reportUtcBound(f.startDate, startTime)
+    const createdTo = reportUtcBound(f.endDate, endTime, 1)
     if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Report end date/time must be after the start date/time')
-    q.createdFrom = createdFrom
-    q.createdTo = createdTo
+    if (startTime !== '00:00' || endTime !== '23:59') {
+      q.createdFrom = createdFrom
+      q.createdTo = createdTo
+    }
   }
   if (view.supportsSaleFilters) {
     if (f.status) q.status = f.status

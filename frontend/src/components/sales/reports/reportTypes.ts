@@ -53,7 +53,9 @@ export function tableLabels(tr: Tr): ReportTableLabels {
 /** "dd/mm/yyyy – dd/mm/yyyy" (or "all dates") for export subtitles and fold titles. */
 export function rangeSubtitle(filters: { startDate: string; endDate: string; startTime?: string; endTime?: string }, tr: Tr): string {
   const dates = filters.startDate || filters.endDate ? `${filters.startDate ? fmtDateOnly(filters.startDate) : '…'} – ${filters.endDate ? fmtDateOnly(filters.endDate) : '…'}` : tr('rpt_all_dates', 'All dates')
-  const times = filters.startTime && filters.endTime && !(filters.startTime === '00:00' && filters.endTime === '23:59') ? ` ${filters.startTime}–${filters.endTime}` : ''
+  const startTime = filters.startTime || '00:00'
+  const endTime = filters.endTime || '23:59'
+  const times = (filters.startTime || filters.endTime) && !(startTime === '00:00' && endTime === '23:59') ? ` ${startTime}–${endTime}` : ''
   return `${dates}${times}`
 }
 
