@@ -332,7 +332,14 @@ export default function PaginationControls({
   }
 
   if (compact) {
-    const compactDigits = Math.max(1, String(pageDraft).length)
+    // Keep blank edits usable, but an oversized paste cannot grow the pill
+    // beyond the available page range. Normalize leading zeroes as well.
+    const boundedDraft = (value: string) => {
+      const digits = value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '')
+      return Number(digits) > totalPages ? String(totalPages) : digits
+    }
+    const compactDraft = boundedDraft(pageDraft)
+    const compactDigits = Math.max(1, compactDraft.length)
     return (
       <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-1 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
         {/* Keep one useful row when it fits. Large counts wrap between the
@@ -361,9 +368,9 @@ export default function PaginationControls({
                   aria-label={pageLabel}
                   style={{ width: `max(2.25rem, calc(${compactDigits}ch + 0.5rem))` }}
                   className="h-7 min-w-9 border-0 bg-transparent px-0 text-center text-[11px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                  value={pageDraft}
+                  value={compactDraft}
                   onChange={(event) => {
-                    setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')
+                    setPageDraft(boundedDraft(event.target.value))
                   }}
                   onBlur={(event) => commitPageDraft(event.currentTarget.value)}
                   onKeyDown={handlePageInputKeyDown}

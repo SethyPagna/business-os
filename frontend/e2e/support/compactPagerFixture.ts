@@ -8,11 +8,25 @@ const React = require('react')
 const sourcePath = path.resolve(process.cwd(), 'src/components/shared/PaginationControls.tsx')
 export const pagerSource = fs.readFileSync(sourcePath, 'utf8')
 
-export function compactPager(props: Record<string, unknown>, source = pagerSource) {
+export function compactPager(props: Record<string, unknown>, source = pagerSource, onDraft = (_value: string) => {}) {
   const compiled = buildSync({ stdin: { contents: source, sourcefile: sourcePath, resolveDir: path.dirname(sourcePath), loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', jsx: 'automatic', external: ['react', 'react/jsx-runtime'], write: false }).outputFiles[0].text
   const mod: any = { exports: {} }
-  new Function('require', 'module', 'exports', compiled)((id: string) => id === 'react' ? { ...React, useState: (initial: any) => [initial, () => {}], useEffect: () => {} } : require(id), mod, mod.exports)
+  new Function('require', 'module', 'exports', compiled)((id: string) => id === 'react' ? { ...React, useState: (initial: any) => [initial, onDraft], useEffect: () => {} } : require(id), mod, mod.exports)
   return mod.exports.default({ compact: true, page: 13, pageSize: 20, totalItems: 245, ...props })
+}
+
+export function hydrationScript(props: Record<string, unknown>, pack: Record<string, string>, source = pagerSource) {
+  const entry = `${source}
+import { createElement } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+const fixtureProps = ${JSON.stringify(props)}, fixturePack = ${JSON.stringify(pack)};
+function Fixture() {
+  const [selected, select] = useState(fixtureProps.page);
+  useEffect(() => { document.body.dataset.hydrated = 'true' }, []);
+  return createElement(PaginationControls, {...fixtureProps, page:selected, onPageChange:select, t:key=>fixturePack[key]});
+}
+hydrateRoot(document.querySelector('[data-fixture]'), createElement(Fixture));`
+  return buildSync({ stdin: { contents: entry, sourcefile: sourcePath, resolveDir: path.dirname(sourcePath), loader: 'tsx' }, bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic', write: false }).outputFiles[0].text
 }
 
 export const markup = (element: any): string => require('react-dom/server').renderToStaticMarkup(element)
