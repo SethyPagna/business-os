@@ -90,7 +90,9 @@ app.post('/maintenance/clear', async (c) => {
       maintenance,
     }, 400)
   }
-  await endMaintenance(c.env, null, { force: true })
+  const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
+  if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
+    error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
   await audit(c.env, user.id, user.username || null, 'update', 'backup', 'maintenance-clear', {
     cleared_state: maintenance,
   })
@@ -197,12 +199,20 @@ app.post('/', async (c) => {
         await updateMaintenance(c.env, maintenance.token, { phase: 'failed', error: message })
         throw error
       }
-      await endMaintenance(c.env, maintenance.token)
+      const maintenanceReleased = await endMaintenance(c.env, maintenance.token)
       // The whole database just rolled back to this backup -- the single most
       // consequential action in the app, and until now the one with no trail.
       await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {
         restored_key: restore.key,
+        maintenance_released: maintenanceReleased,
       })
+      if (!maintenanceReleased) {
+        const message = 'Backup data was restored, but maintenance could not be released. Inspect maintenance before allowing writes or retrying the restore.'
+        const job = await storeSystemJob(c.env, { id: crypto.randomUUID(), status: 'failed', progress: 100,
+          message, error: message, result: { success: false, data_restored: true, maintenance_released: false, restore },
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        return c.json({ job_id: job.id, item: job, error: message, code: 'maintenance_not_released', data_restored: true }, 409)
+      }
       const job = await storeSystemJob(c.env, completedJob('Cloudflare backup restored', {
         success: true,
         packageId: restore.key.replace(/^backups\/cloudflare\//, ''),
