@@ -45,15 +45,16 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', as
   assert.match(pos, /finally \{[\s\S]*checkoutInFlightRef\.current = false[\s\S]*setLoading\(false\)/)
 
   assert.match(methods, /export async function createSale\(d\) \{[\s\S]*loadSaleWriteTransport\(\)/)
-  assert.match(saleWriteTransport, /ensureSaleClientRequestId\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}, 'sale'\)/)
+  assert.match(saleWriteTransport, /ensureSaleClientRequestId\(stampOfflineSaleOwner\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}\), 'sale'\)/)
   assert.match(saleWriteTransport, /return await createSaleRequest\(salePayload\)/)
-  assert.match(saleWriteTransport, /return queueOfflineSale\(salePayload, err\?\.reason \|\| 'server_offline'\)/)
-  assert.match(salesTransport, /route\(\s*'sales:create',[\s\S]*apiFetch\('POST', '\/api\/sales', payload\)[\s\S]*null,[\s\S]*true,/)
+  assert.doesNotMatch(saleWriteTransport, /queueOfflineSale\(/)
+  assert.match(saleWriteTransport, /code: 'sale_confirmation_required', client_request_id: salePayload.client_request_id/)
+  assert.match(salesTransport, /route\(\s*'sales:create',[\s\S]*apiFetch\('POST', '\/api\/sales', ownedPayload\)[\s\S]*null,[\s\S]*true,/)
   assert.match(salesTransport, /export function createSaleWithoutWriteDedupe/)
   assert.match(salesTransport, /skipWriteDedupe: true/)
 
   assert.match(salesRoute, /function normalizeClientRequestId\(value: unknown\)/)
-  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true, sale: await authoritativeSaleSnapshot\(db, existingSale\.id\) \}\)/)
+  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) \{[\s\S]*existingSale.cashier_id !== offlineOwner.actor_id[\s\S]*sale_incomplete[\s\S]*return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot\(db, existingSale\.id\) \}\)/)
   assert.match(salesRoute, /INSERT INTO sales \([\s\S]*receipt_number, client_request_id/)
 })
 
