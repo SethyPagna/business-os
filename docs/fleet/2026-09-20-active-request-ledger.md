@@ -5,6 +5,30 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Latest owner priority and release truth
 
+### Approved online-first goal refinement
+
+Owner explicitly approved online-only business writes with account isolation.
+Disable new offline sales/stock/action admission and automatic mutation replay;
+retain cached reads and drafts within actor boundaries. Keep exact request IDs,
+timestamps, audit/provenance, conflict checks and safe lost-response retries.
+Existing sales queue recovery must be explicit, original-account scoped, and
+limited to the reviewed records. Ownerless/mismatched work is retained without
+exposing another account's payload; generic encrypted/file work is retained but
+not replayable until ownership is verifiable. Do not fabricate ownership.
+
+Candidate66c6a48a implements this sales/generic-queue slice. Server requires owner
+metadata before sale admission/duplicate lookup; old clients fail closed with
+recovery/update guidance. Actor-scoped preview and CAS prevent stale deletion.
+Independent review found25visible/26discarded mismatch;134d26da fixes visible-set
+tokens, with26/40-row tests. No new deployment yet. Full integrated gates running.
+Same-origin database replacement with reused actor/org IDs is a remaining identity
+epoch limitation; authorized admin private receipt reads remain intentionally
+available, distinct from original-owner queued-write recovery.
+
+Free/Paid transfer audit re-confirmed actual planner work exceeds tier budgets:
+200products/3lots yields1017batch statements before planning/auth overhead.
+Tier-aware resumable budgeting remains open; no no-impact downgrade claim.
+
 - Complete remaining admin work first, then public work; retain all historical tasks.
 - Public decision supersedes the temporary hide-all interpretation: retain optional selling-price display and reasonable copy friction. Costs, wholesale prices and internal/personal business data must not reach public responses or the public AI. Visible selling prices cannot be guaranteed uncopiable.
 - Completion requires regression evidence, adversarial review, deployment provenance and real Free/Paid capacity assessment, not merely successful bundle builds. Existing goal-tool state remains blocked from earlier archival work; this does not mean the broadened completion goal was achieved.

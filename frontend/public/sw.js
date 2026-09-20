@@ -19,6 +19,49 @@ const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
 const RETRY_DELAY_MS = 30_000;
 const SYNC_LEASE_MS = 60_000;
+const OFFLINE_OWNER_REVIEW_MESSAGE = 'Keep this pending sale. Sign in to its original account and server to sync it. Older unowned sales need review in the current app; do not recreate or discard them.';
+// Standalone public runtime: parity-tested against offlineQueueOwnership.ts.
+function normalizeOfflineSaleOwner(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return null;
+    const owner = value;
+    if (owner.version !== 1 || !Number.isSafeInteger(owner.actor_id) || Number(owner.actor_id) <= 0)
+        return null;
+    if (owner.organization_id !== null && (!Number.isSafeInteger(owner.organization_id) || Number(owner.organization_id) <= 0))
+        return null;
+    if (owner.runtime !== 'cloudflare-workers' || typeof owner.authority !== 'string')
+        return null;
+    try {
+        const url = new URL(owner.authority);
+        if (!/^https?:$/.test(url.protocol) || url.origin !== owner.authority)
+            return null;
+    }
+    catch {
+        return null;
+    }
+    return { version: 1, actor_id: Number(owner.actor_id), organization_id: owner.organization_id, authority: owner.authority, runtime: 'cloudflare-workers' };
+}
+function offlineSaleOwnersMatch(left, right) {
+    const a = normalizeOfflineSaleOwner(left);
+    const b = normalizeOfflineSaleOwner(right);
+    return Boolean(a && b && a.actor_id === b.actor_id && a.organization_id === b.organization_id && a.authority === b.authority && a.runtime === b.runtime);
+}
+function sameQueuedSaleRevision(left, right) {
+    return Boolean(left && left._seq === right._seq && left.id === right.id && left.updated_at === right.updated_at
+        && left.status === right.status && left.sync_lease === right.sync_lease
+        && JSON.stringify(left.payload) === JSON.stringify(right.payload));
+}
+async function currentSaleReplayOwner(base) {
+    const response = await fetch(`${base}/api/sync/owner`, { credentials: 'include', cache: 'no-store', redirect: 'error' });
+    if (!response.ok)
+        return null;
+    const owner = normalizeOfflineSaleOwner((await response.json()).owner);
+    return owner?.authority === new URL(base).origin ? owner : null;
+}
+async function saleReplayAuthorityUnchanged(db, base) {
+    const current = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '');
+    return current === base;
+}
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024;
 const PRECACHE_CONCURRENCY = 4;
 // P4-4b fix 5: the deferred (non-eager) chunks are never a paint-blocking or
@@ -122,7 +165,7 @@ async function readQueuedSales(db) {
 }
 function isReplayEligible(row) {
     const status = String(row?.status || 'pending');
-    if (!['pending', 'failed', 'retry', 'syncing'].includes(status))
+    if (!['pending', 'failed', 'retry', 'syncing', 'quarantined'].includes(status))
         return false;
     if (status === 'syncing') {
         const claimedAt = Date.parse(String(row?.updated_at || row?.created_at || ''));
@@ -132,23 +175,39 @@ function isReplayEligible(row) {
     const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0;
     return !Number.isFinite(retryAt) || retryAt <= Date.now();
 }
-async function putQueueRow(db, row, updates = {}) {
-    if (!db.objectStoreNames.contains('sync_queue'))
-        return;
-    const tx = db.transaction('sync_queue', 'readwrite');
-    tx.objectStore('sync_queue').put({
-        ...row,
-        ...updates,
-        updated_at: new Date().toISOString(),
-    });
-    await txDone(tx);
+async function putQueueRow(db, row, updates = {}, tableName = 'sync_queue') {
+    if (!db.objectStoreNames.contains(tableName) || row?._seq == null)
+        return null;
+    const tx = db.transaction(tableName, 'readwrite');
+    const done = txDone(tx);
+    const store = tx.objectStore(tableName);
+    let next = null;
+    const request = store.get(row._seq);
+    request.onsuccess = () => {
+        if (!sameQueuedSaleRevision(request.result, row))
+            return;
+        next = { ...request.result, ...updates, updated_at: new Date().toISOString() };
+        store.put(next);
+    };
+    await done;
+    return next;
 }
 async function deleteQueueRow(db, row) {
     if (!db.objectStoreNames.contains('sync_queue') || row?._seq == null)
-        return;
+        return false;
     const tx = db.transaction('sync_queue', 'readwrite');
-    tx.objectStore('sync_queue').delete(row._seq);
-    await txDone(tx);
+    const done = txDone(tx);
+    const store = tx.objectStore('sync_queue');
+    let deleted = false;
+    const request = store.get(row._seq);
+    request.onsuccess = () => {
+        if (!sameQueuedSaleRevision(request.result, row))
+            return;
+        store.delete(row._seq);
+        deleted = true;
+    };
+    await done;
+    return deleted;
 }
 function broadcastSyncEvent(type, detail = {}) {
     return self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
@@ -365,86 +424,114 @@ async function markQueueFailure(db, row, error, reason = 'sync_failed') {
     });
 }
 async function replayQueuedSale(db, row, base) {
-    await putQueueRow(db, row, { status: 'syncing', error: null });
-    // Round-trip through JSON so the digest is computed over the SAME bytes the
-    // server will re-digest from the parsed request body. A structured-clone of
-    // the sale keeps undefined-valued keys (POS sets `delivery_actual_cost_usd:
-    // undefined` on every non-delivery sale), but `JSON.stringify` on the wire
-    // drops them -- so digesting `row.payload` directly produced a hash the
-    // server could never reproduce and EVERY such sale came back
-    // `payload_digest_failed`. Cleaning first makes both sides agree.
-    const payload = JSON.parse(JSON.stringify(row.payload || {}));
-    const operation = {
-        id: row.id,
-        client_request_id: row.client_request_id || row.id || `legacy_sale_${row._seq || Date.now()}`,
-        operation_id: 'sales.create',
-        schema_version: 1,
-        base_updated_at: row.base_updated_at || row.created_at || new Date().toISOString(),
-        payload_digest: await sha256(payload),
-        payload,
-    };
-    const response = await fetch(`${base}/api/sync/outbox`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            'bypass-tunnel-reminder': 'true',
-        },
-        body: JSON.stringify({ operations: [operation] }),
-    });
-    const text = await response.text().catch(() => '');
-    const responsePayload = (() => { try {
-        return JSON.parse(text);
-    }
-    catch (_) {
-        return null;
-    } })();
-    const status = Number(response.status || 0);
-    // CRITICAL: the outbox endpoint returns HTTP 200 with { success:false,
-    // results:[...] } for a per-operation rejection or failure -- only a true
-    // write conflict is 409. So `response.ok` is NOT proof the sale was applied.
-    // Inspect the per-operation result and delete the queued sale ONLY when it
-    // genuinely landed (status === 'applied'); otherwise the sale is preserved
-    // and retried. Deleting on a bare 200 discarded digest-rejected/validation-
-    // rejected sales as "synced" and lost the revenue with no trace.
-    const result = Array.isArray(responsePayload?.results) ? responsePayload.results[0] : null;
-    const applied = status < 400 && (result ? result.status === 'applied' : response.ok && result === null && responsePayload?.success !== false);
-    if (applied) {
-        await deleteQueueRow(db, row);
-        broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', {
-            channel: row.channel,
-            entity_name: row.entity_name || responsePayload?.receiptNumber || responsePayload?.receipt_number || null,
-        });
-        return true;
-    }
-    if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
-        await putQueueRow(db, row, {
-            status: 'conflict',
-            retry_at: null,
-            conflict: true,
-            reason: 'server_newer_version',
-            error: result?.error || responsePayload?.error || text || 'Server has a newer version. Review before syncing.',
-        });
-        broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
-            channel: row.channel,
-            entity_name: row.entity_name || null,
-        });
+    const quarantine = (target) => putQueueRow(db, target, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE });
+    const owner = normalizeOfflineSaleOwner(row.payload?.offline_owner);
+    if (!owner || owner.authority !== new URL(base).origin || !await saleReplayAuthorityUnchanged(db, base)) {
+        await quarantine(row);
         return false;
     }
-    if (status === 401 || status === 403 || result?.code === 'auth_required') {
-        await putQueueRow(db, row, {
-            status: 'failed',
-            retry_at: null,
-            reason: 'auth_required',
-            error: result?.error || responsePayload?.error || text || 'Sign in again before background sync can continue.',
-        });
-        broadcastSyncEvent('BUSINESS_OS_OUTBOX_AUTH_REQUIRED', { channel: row.channel });
+    const before = await currentSaleReplayOwner(base).catch(() => null);
+    if (!offlineSaleOwnersMatch(owner, before)) {
+        await quarantine(row);
         return false;
     }
-    // Anything else -- a digest rejection, a validation failure, a transient
-    // error -- keeps the sale queued (markQueueFailure preserves the row with
-    // backoff), so it is retried rather than silently dropped.
-    throw new Error(result?.error || result?.code || responsePayload?.error || text || `Sync failed with HTTP ${status || 'error'}`);
+    const claimed = await putQueueRow(db, row, { status: 'syncing', error: null, sync_lease: crypto.randomUUID() });
+    if (!claimed)
+        return false;
+    row = claimed;
+    try {
+        if (!await saleReplayAuthorityUnchanged(db, base)) {
+            await quarantine(row);
+            return false;
+        }
+        // Round-trip through JSON so the digest is computed over the SAME bytes the
+        // server will re-digest from the parsed request body. A structured-clone of
+        // the sale keeps undefined-valued keys (POS sets `delivery_actual_cost_usd:
+        // undefined` on every non-delivery sale), but `JSON.stringify` on the wire
+        // drops them -- so digesting `row.payload` directly produced a hash the
+        // server could never reproduce and EVERY such sale came back
+        // `payload_digest_failed`. Cleaning first makes both sides agree.
+        const payload = JSON.parse(JSON.stringify(row.payload || {}));
+        const operation = {
+            id: row.id,
+            client_request_id: row.client_request_id || row.id || `legacy_sale_${row._seq || Date.now()}`,
+            operation_id: 'sales.create',
+            schema_version: 1,
+            base_updated_at: row.base_updated_at || row.created_at || new Date().toISOString(),
+            payload_digest: await sha256(payload),
+            payload,
+        };
+        const response = await fetch(`${base}/api/sync/outbox`, {
+            method: 'POST',
+            credentials: 'include',
+            redirect: 'error',
+            headers: {
+                'Content-Type': 'application/json',
+                'bypass-tunnel-reminder': 'true',
+            },
+            body: JSON.stringify({ operations: [operation] }),
+        });
+        const text = await response.text().catch(() => '');
+        const responsePayload = (() => { try {
+            return JSON.parse(text);
+        }
+        catch (_) {
+            return null;
+        } })();
+        const status = Number(response.status || 0);
+        // CRITICAL: the outbox endpoint returns HTTP 200 with { success:false,
+        // results:[...] } for a per-operation rejection or failure -- only a true
+        // write conflict is 409. So `response.ok` is NOT proof the sale was applied.
+        // Inspect the per-operation result and delete the queued sale ONLY when it
+        // genuinely landed (status === 'applied'); otherwise the sale is preserved
+        // and retried. Deleting on a bare 200 discarded digest-rejected/validation-
+        // rejected sales as "synced" and lost the revenue with no trace.
+        const result = Array.isArray(responsePayload?.results) ? responsePayload.results.find((entry) => entry.client_request_id === operation.client_request_id && entry.operation_id === 'sales.create') : null;
+        const applied = response.ok && result?.status === 'applied'
+            && result.response?.client_request_id === operation.client_request_id && offlineSaleOwnersMatch(owner, result.response?.offline_owner);
+        if (applied) {
+            const after = await currentSaleReplayOwner(base).catch(() => null);
+            if (!offlineSaleOwnersMatch(owner, after) || !await saleReplayAuthorityUnchanged(db, base)) {
+                await quarantine(row);
+                return false;
+            }
+            if (!await deleteQueueRow(db, row))
+                return false;
+            broadcastSyncEvent('BUSINESS_OS_OUTBOX_SYNCED', {
+                channel: row.channel,
+                entity_name: row.entity_name || responsePayload?.receiptNumber || responsePayload?.receipt_number || null,
+            });
+            return true;
+        }
+        if (status === 401 || status === 403 || result?.code === 'auth_required' || String(result?.code || '').startsWith('offline_owner_')) {
+            await quarantine(row);
+            return false;
+        }
+        if (status === 409 || result?.status === 'conflict' || result?.code === 'write_conflict') {
+            await putQueueRow(db, row, {
+                status: 'conflict',
+                retry_at: null,
+                conflict: true,
+                reason: 'server_newer_version',
+                error: result?.error || responsePayload?.error || text || 'Server has a newer version. Review before syncing.',
+            });
+            broadcastSyncEvent('BUSINESS_OS_OUTBOX_CONFLICT', {
+                channel: row.channel,
+                entity_name: row.entity_name || null,
+            });
+            return false;
+        }
+        // Anything else -- a digest rejection, a validation failure, a transient
+        // error -- keeps the sale queued (markQueueFailure preserves the row with
+        // backoff), so it is retried rather than silently dropped.
+        throw new Error(result?.error || result?.code || responsePayload?.error || text || `Sync failed with HTTP ${status || 'error'}`);
+    }
+    catch (error) {
+        // Only the exact claimed revision may be failed; never resurrect a row
+        // that another runtime completed or replaced while this request waited.
+        await markQueueFailure(db, row, error);
+        return false;
+    }
 }
 async function syncOutbox() {
     let db = null;
@@ -466,6 +553,13 @@ async function syncOutbox() {
         }
         const plaintextRows = businessRows.filter((row) => row.payload && !row.encrypted_payload);
         for (const row of plaintextRows) {
+            // Current sale admission uses sales:create in sync_queue, with its
+            // owner-scoped lease and exact receipt checks above. Never send a legacy
+            // generic outbox sale through the less strict generic acknowledgement.
+            if (row.operation_id === 'sales.create') {
+                await putQueueRow(db, row, { status: 'quarantined', retry_at: null, reason: 'offline_owner_review', error: OFFLINE_OWNER_REVIEW_MESSAGE }, 'sync_outbox');
+                continue;
+            }
             await putBusinessOutboxRow(db, row, { status: 'syncing', error: null });
             const response = await fetch(`${base}/api/sync/outbox`, {
                 method: 'POST',
@@ -531,19 +625,8 @@ async function syncOutbox() {
                 error: 'Encrypted file chunks are queued and will sync after vault unlock.',
             });
         }
-        const rows = await readQueuedSales(db);
-        const dueRows = rows.filter((row) => {
-            const retryAt = row.retry_at ? Date.parse(row.retry_at) : 0;
-            return !Number.isFinite(retryAt) || retryAt <= Date.now();
-        });
-        for (const row of dueRows) {
-            try {
-                await replayQueuedSale(db, row, base);
-            }
-            catch (error) {
-                await markQueueFailure(db, row, error);
-            }
-        }
+        // Do not replay legacy POS sales in a background event. Keep sync_queue
+        // intact for explicit original-account recovery in the foreground.
     }
     catch (error) {
         broadcastSyncEvent('BUSINESS_OS_OUTBOX_WAITING', {
@@ -558,14 +641,10 @@ async function syncOutbox() {
         catch (_) { }
     }
 }
-let syncOutboxPromise = null;
 function syncOutboxOnce() {
-    if (!syncOutboxPromise) {
-        syncOutboxPromise = syncOutbox().finally(() => {
-            syncOutboxPromise = null;
-        });
-    }
-    return syncOutboxPromise;
+    // Registrations/messages left by older clients must not replay ANY business
+    // writes after this upgrade. Existing rows remain available for review.
+    return Promise.resolve({ success: false, manual_recovery_required: true });
 }
 // DEPLOY-TIME CONFLICT, spelled out because the three handlers below all
 // touch it: the moment a deploy lands, a phone still running the OLD build
