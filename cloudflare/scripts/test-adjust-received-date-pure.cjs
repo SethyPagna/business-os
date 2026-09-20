@@ -383,8 +383,21 @@ async function main() {
       productId: 1, type: 'add', unitCostUsd: 0.1, quantity: 0.2,
       reason: 'fractional top-up', branchId: 1, batchId: first.json.batchId, receivedDate: '2026-09-13',
     })
-    assert.strictEqual(second.status, 200, JSON.stringify(second.json))
-    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 3.7238)
+    assert.strictEqual(second.status, 400, 'a different price cannot overwrite the selected existing lot')
+    assert.match(second.json.error, /batch price or override baseline changed/)
+    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 3.7038)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 1, 'rejected repricing writes no movement')
+    const pricedReceipt = {
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 0.1, quantity: 0.2,
+      reason: 'fractional receipt', branchId: 1, batchId: 'new', receivedDate: '2026-09-13',
+    }
+    const newPrice = await req('POST', '/adjust', pricedReceipt)
+    assert.strictEqual(newPrice.status, 200, JSON.stringify(newPrice.json))
+    assert.notStrictEqual(newPrice.json.batchId, first.json.batchId, 'new price receives into its own lot')
+    const topUp = await req('POST', '/adjust', { ...pricedReceipt, batchId: newPrice.json.batchId })
+    assert.strictEqual(topUp.status, 200, JSON.stringify(topUp.json))
+    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([newPrice.json.batchId]).received_cost_usd, 0.04, 'same-price fractional top-ups accumulate exact cost')
+    assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 3.7038, 'original nearest-four cost remains unchanged')
     assert.strictEqual(rawDb.prepare('SELECT total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get().total_cost_usd, 0.02)
   })
 
@@ -457,9 +470,9 @@ async function main() {
     rawDb.prepare('UPDATE products SET selling_price_usd=0 WHERE id=1').run()
     const beforeTopUp = durableState()
     const topUp = await req('POST', '/adjust', {
-      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
+      productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1e11, batchId: initial.json.batchId,
       quantity: 1, reason: 'overflowing cumulative top-up', branchId: 1, receivedDate: '2026-09-13',
-      unlockPricing: true, pricing: { selling_price_usd: 99, cost_usd: 1, cost_khr: 0, barcode: 'B123' },
+      unlockPricing: true, pricing: { selling_price_usd: 99, cost_usd: 1e11, cost_khr: 0, barcode: 'B123' },
     })
     assert.strictEqual(topUp.status, 400, JSON.stringify(topUp.json))
     assert.deepStrictEqual(durableState(), beforeTopUp, 'cumulative overflow must precede the unlocked catalog-price update')
@@ -516,7 +529,7 @@ async function main() {
       rawDb.prepare('UPDATE product_batches SET received_cost_usd=99 WHERE id=?').run([first.json.batchId])
     }
     const raced = await req('POST', '/adjust', {
-      productId: 1, type: 'add', unitCostUsd: 2, quantity: 1,
+      productId: 1, type: 'add', unitCostUsd: 1, quantity: 1,
       reason: 'stale top-up', branchId: 1, batchId: first.json.batchId, receivedDate: '2026-09-13',
     })
     assert.strictEqual(raced.status, 400, JSON.stringify(raced.json))
@@ -772,7 +785,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM products').get().n, countBefore)
   })
 
-  await check('same barcode + same batch shares the option and preserves each receipt cost', async () => {
+  await check('same barcode + same day shares the product but distinct prices retain separate lots and mean catalog cost', async () => {
     seed()
     rawDb.prepare('UPDATE products SET cost_price_usd = 1, purchase_price_usd = 1, selling_price_usd = 4 WHERE id = 1').run()
     const first = await req('POST', '/adjust', {
@@ -789,10 +802,13 @@ async function main() {
     assert.strictEqual(second.json.productId, 1)
     assert.strictEqual(second.json.createdSibling, false)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1)
-    assert.strictEqual(rawDb.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 1, 'catalog cost is never overwritten by a receipt')
+    assert.strictEqual(rawDb.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 1.75, 'catalog cost is the distinct positive price mean, not last receipt or quantity weighted')
     assert.strictEqual(rawDb.prepare('SELECT selling_price_usd FROM products WHERE id = 1').get().selling_price_usd, 4, 'merge keeps the highest selling price')
-    const lot = rawDb.prepare('SELECT received_quantity, received_cost_usd, unit_cost_usd FROM product_batches WHERE variant_product_id = 1').get()
-    assert.deepStrictEqual({ ...lot }, { received_quantity: 5, received_cost_usd: 9.5, unit_cost_usd: 1 })
+    const lots = rawDb.prepare('SELECT received_quantity, received_cost_usd, unit_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()
+    assert.deepStrictEqual(lots.map(lot => ({ ...lot })), [
+      { received_quantity: 2, received_cost_usd: 2, unit_cost_usd: 1 },
+      { received_quantity: 3, received_cost_usd: 7.5, unit_cost_usd: 2.5 },
+    ])
     assert.deepStrictEqual(
       rawDb.prepare("SELECT unit_cost_usd, total_cost_usd FROM inventory_movements WHERE movement_type = 'add' ORDER BY id").all().map((row) => ({ ...row })),
       [{ unit_cost_usd: 1, total_cost_usd: 2 }, { unit_cost_usd: 2.5, total_cost_usd: 7.5 }],

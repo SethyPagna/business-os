@@ -2,7 +2,7 @@
 // offline replay's client-supplied sale timestamp (the Part-77 "offline
 // sale timestamps recorded at sync time" finding). Behavior + the wiring
 // source-locks: the sales INSERT COALESCEs the sanitized value, and the
-// offline queue stamps payload.created_at at queue time.
+// explicit legacy recovery preserves the original timestamp without restamping.
 //
 // Run: node scripts/test-client-timestamp-pure.cjs
 const assert = require('node:assert/strict')
@@ -76,9 +76,23 @@ check('wiring: the sales INSERT COALESCEs the sanitized client stamp, updated_at
   assert.match(salesRoute, /COALESCE\(@created_at, CURRENT_TIMESTAMP\), CURRENT_TIMESTAMP\s+WHERE @customer_guard_id/)
 })
 
-check('wiring: the offline queue stamps payload.created_at at queue time', () => {
+check('wiring: online-only sales do not mint offline timestamps; explicit recovery preserves the original stamp', () => {
   const saleWrite = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'api', 'saleWriteTransport.ts'), 'utf8')
-  assert.match(saleWrite, /salePayload\.created_at = asText\(salePayload\.created_at\) \|\| now/)
+  assert.doesNotMatch(saleWrite, /queueOfflineSale|salePayload\.created_at\s*=/)
+  assert.match(saleWrite, /options\.manualRecovery !== true/)
+  assert.match(saleWrite, /const payload = \{ \.\.\.\(\(row\.payload as SalePayload\) \|\| \{\}\) \}/)
+  assert.match(saleWrite, /await createSaleWithoutWriteDedupe\(payload\)/)
+  const ts = require('typescript')
+  const ast = ts.createSourceFile('sale.ts', saleWrite, ts.ScriptTarget.Latest, true)
+  const node = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'createSaleWithoutWriteDedupe')
+  assert.ok(node, 'actual recovery dispatch function exists')
+  const code = ts.transpileModule(node.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  let sent
+  const dispatch = new Function('apiFetch', `${code}; return createSaleWithoutWriteDedupe`)((method, url, payload) => { sent = { method, url, payload }; return Promise.resolve({}) })
+  const original = { client_request_id: 'original-request', created_at: '2026-08-01T09:00:00Z', offline_owner: { actor_id: 71 } }
+  dispatch(structuredClone(original))
+  assert.deepEqual(sent, { method: 'POST', url: '/api/sales', payload: original }, 'recovery sends the exact historical timestamp, not retry time')
+  assert.equal(sanitizeClientCreatedAt(sent.payload.created_at, NOW), '2026-08-01 09:00:00')
 })
 
 if (failed > 0) process.exitCode = 1
