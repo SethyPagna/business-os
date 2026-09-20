@@ -12,8 +12,9 @@ entries for that slice only. Other admin/public/Freecapacity items stay open.
 
 ### Active completion goal and next wave
 
-Owner export decision: use bank-statement-style periods: monthly, three months,
-six months, and at most one year per download. Longer history requires multiple
+Owner export decision: allow custom start/end date ranges with at most one year
+per download. Monthly, three-month, six-month and one-year statement presets are
+convenience shortcuts, not required calendar blocks. Longer history requires multiple
 downloads. Apply first to the open Returns export-completeness work; do not cap
 the downloaded data at the currently loaded 500/1000 rows. Backend must enforce
 the range bound, with bounded sequential reads and original-account fences.
