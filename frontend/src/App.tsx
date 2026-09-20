@@ -29,6 +29,7 @@ import { claimChunkReload, clearChunkReloadMarker } from './utils/chunkReloadGua
 import { hasDirtyWork } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
 import { ACTOR_SESSION_RETRY_EVENT, actorSessionQuarantineStatus, captureActorReadScope, isActorReadScopeCurrent, isActorSessionQuarantined, subscribeActorSessionQuarantine, type ActorReadScope } from './api/actorReadScope.ts'
+import { SIGNOUT_RETRY_EVENT, isSignoutBlocked } from './api/unresolvedSignout.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from './api/offlineQueueOwnership.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
@@ -1825,12 +1826,18 @@ export function installActorSessionQuarantineDom(): () => void {
     hidden.clear()
   }
   const update = () => {
-    const blocked = isActorSessionQuarantined()
+    const blocked = !isPublicCatalogPath(window.location.pathname) && isActorSessionQuarantined()
     host.style.display = blocked ? 'block' : 'none'
     if (blocked) {
       hideOldUi()
       const status = actorSessionQuarantineStatus()
-      message.textContent = status === 'storage-unavailable' ? 'This site’s data is blocked or unavailable. Enable cookies and site data for this site in your browser, then retry. This screen stays locked until the session can be checked safely. / ទិន្នន័យគេហទំព័រនេះត្រូវបានរារាំង ឬមិនអាចប្រើបាន។ សូមអនុញ្ញាតខូឃី និងទិន្នន័យគេហទំព័រនេះនៅក្នុងកម្មវិធីរុករក រួចព្យាយាមម្ដងទៀត។ អេក្រង់នេះនៅតែចាក់សោ រហូតដល់អាចពិនិត្យវគ្គចូលគណនីដោយសុវត្ថិភាព។'
+      const signingOut = status.startsWith('signout-')
+      title.textContent = signingOut ? 'Sign-out needs confirmation / ត្រូវបញ្ជាក់ការចាកចេញពីគណនី' : 'Sign-in changed / ការចូលគណនីបានផ្លាស់ប្ដូរ'
+      retry.textContent = signingOut ? 'Finish signing out / បញ្ចប់ការចាកចេញពីគណនី' : 'Retry / ព្យាយាមម្ដងទៀត'
+      reload.hidden = signingOut
+      message.textContent = status === 'signout-different-account' ? 'Another account is signed in. This request did not sign that account out. Resolve the account change before retrying. / គណនីផ្សេងបានចូល។ សំណើនេះមិនបានឱ្យគណនីនោះចាកចេញទេ។ សូមដោះស្រាយការផ្លាស់ប្ដូរគណនី មុនព្យាយាមម្ដងទៀត។'
+        : signingOut ? 'Sign-out is not yet confirmed. Reconnect and finish signing out before handing over this device. Drafts and retained work stay locked here; nothing is submitted automatically. / ការចាកចេញមិនទាន់បានបញ្ជាក់ទេ។ សូមភ្ជាប់អ៊ីនធឺណិត ហើយបញ្ចប់ការចាកចេញ មុនប្រគល់ឧបករណ៍នេះ។ សេចក្ដីព្រាងនៅតែរក្សាទុក ហើយមិនមានអ្វីត្រូវបានផ្ញើដោយស្វ័យប្រវត្តិទេ។'
+        : status === 'storage-unavailable' ? 'This site’s data is blocked or unavailable. Enable cookies and site data for this site in your browser, then retry. This screen stays locked until the session can be checked safely. / ទិន្នន័យគេហទំព័រនេះត្រូវបានរារាំង ឬមិនអាចប្រើបាន។ សូមអនុញ្ញាតខូឃី និងទិន្នន័យគេហទំព័រនេះនៅក្នុងកម្មវិធីរុករក រួចព្យាយាមម្ដងទៀត។ អេក្រង់នេះនៅតែចាក់សោ រហូតដល់អាចពិនិត្យវគ្គចូលគណនីដោយសុវត្ថិភាព។'
         : status === 'authentication-pending' ? 'Sign-in is still in progress in another tab. Finish it there, then retry. / ការចូលគណនីនៅកំពុងដំណើរការក្នុងផ្ទាំងផ្សេង។ សូមបញ្ចប់នៅទីនោះ រួចព្យាយាមម្ដងទៀត។'
         : status === 'checking' ? 'Checking the current session… / កំពុងពិនិត្យវគ្គចូលគណនីបច្ចុប្បន្ន…'
           : status === 'different-account' ? 'Another account is signed in. Sign back into the original account in the other tab, then retry. Reload only when no unfinished editor work remains. / គណនីផ្សេងបានចូល។ សូមចូលគណនីដើមវិញក្នុងផ្ទាំងផ្សេង រួចព្យាយាមម្ដងទៀត។ ផ្ទុកឡើងវិញតែពេលគ្មានការកែប្រែមិនទាន់បញ្ចប់។'
@@ -1840,7 +1847,7 @@ export function installActorSessionQuarantineDom(): () => void {
     wasBlocked = blocked
   }
   const act = (button: HTMLElement | null) => {
-    if (button?.dataset.sessionAction === 'retry') window.dispatchEvent(new CustomEvent(ACTOR_SESSION_RETRY_EVENT))
+    if (button?.dataset.sessionAction === 'retry') window.dispatchEvent(new CustomEvent(isSignoutBlocked() ? SIGNOUT_RETRY_EVENT : ACTOR_SESSION_RETRY_EVENT))
     if (button?.dataset.sessionAction === 'reload') {
       flushPendingWorkDrafts()
       if (hasDirtyWork()) {
@@ -1851,19 +1858,19 @@ export function installActorSessionQuarantineDom(): () => void {
     }
   }
   const blockInput = (event: Event) => {
-    if (!isActorSessionQuarantined()) return
+    if (isPublicCatalogPath(window.location.pathname) || !isActorSessionQuarantined()) return
     const target = event.target instanceof HTMLElement ? event.target : null
     event.preventDefault(); event.stopImmediatePropagation()
     if (!target || !host.contains(target)) return
     if (event.type === 'click') act(target.closest('button'))
     if (event instanceof KeyboardEvent && event.type === 'keydown') {
-      if (event.key === 'Tab') (document.activeElement === retry ? reload : retry).focus()
+      if (event.key === 'Tab') (reload.hidden ? retry : document.activeElement === retry ? reload : retry).focus()
       else if (event.key === 'Enter' || event.key === ' ') act(target.closest('button'))
     }
   }
   const events = ['keydown', 'keyup', 'keypress', 'click', 'dblclick', 'pointerdown', 'pointerup', 'touchstart', 'touchend', 'contextmenu', 'submit', 'input', 'change']
   events.forEach((name) => window.addEventListener(name, blockInput, { capture: true, passive: false }))
-  const observer = new MutationObserver(() => { if (isActorSessionQuarantined()) hideOldUi() })
+  const observer = new MutationObserver(() => { if (!isPublicCatalogPath(window.location.pathname) && isActorSessionQuarantined()) hideOldUi() })
   observer.observe(document.body, { childList: true })
   const unsubscribe = subscribeActorSessionQuarantine(update)
   update()

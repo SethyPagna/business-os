@@ -19,6 +19,7 @@ Object.assign(globalThis, { window: {
   dispatchEvent: events.dispatchEvent.bind(events), setTimeout, clearTimeout,
 } })
 const scope = await import('../src/api/actorReadScope.ts')
+const signout = await import('../src/api/unresolvedSignout.ts')
 const http = await import('../src/api/http.ts')
 http.setSyncServerUrl('https://quarantine.test')
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((r) => { resolve = r }); return { resolve, promise } }
@@ -69,7 +70,7 @@ try {
   const code = ts.transpileModule(block, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   function harness(response: Promise<any>) {
     const env: any = {
-      ...scope, user: { id: 1, permissions: { sales: true } }, publicMode: false, effects: [], applied: [], flushed: 0,
+      ...scope, ...signout, user: { id: 1, permissions: { sales: true } }, publicMode: false, effects: [], applied: [], flushed: 0,
       useRef: (current: unknown) => ({ current }),
       useEffect: (fn: () => unknown) => { env.effects.push(fn) },
       flushPendingWorkDrafts: () => { env.flushed++ }, disconnectWS: () => {}, resumeWS: () => {}, startHealthCheck: () => {},
@@ -79,8 +80,8 @@ try {
       applyBootstrapPayload: async (payload: any) => { env.applied.push(payload); env.user = payload.user },
     }
     new Function('env', `with(env){${code}}`)(env)
-    const cleanup = env.effects[1]()
-    return { env, commit: () => env.effects[0](), cleanup }
+    const cleanup = env.effects[2]()
+    return { env, commit: () => { env.effects[0](); env.effects[1]() }, cleanup }
   }
   const other = harness(Promise.resolve({ user: { id: 2 } }))
   await flush()
@@ -114,7 +115,7 @@ try {
   const logoutBlock = source.slice(source.indexOf('  const logout = useCallback'), source.indexOf('  // Notifications.'))
   const logoutCode = ts.transpileModule(logoutBlock, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const logoutResponse = deferred<void>()
-  const logoutEnv: any = { ...scope, useCallback: (fn: any) => fn, disconnectWS: () => {}, getAppApi: () => ({ logout: () => logoutResponse.promise }),
+  const logoutEnv: any = { ...scope, user: { id: 1 }, beginUnresolvedSignout: () => ({ token: 'fixture' }), recoverUnresolvedSignout: () => logoutResponse.promise, flushPendingWorkDrafts() {}, useCallback: (fn: any) => fn, disconnectWS: () => {}, getAppApi: () => ({ logout: () => logoutResponse.promise }),
     withLoaderTimeout: (fn: any) => fn(), APP_LOGOUT_TIMEOUT_MS: 1000, cleared: 0,
     clearLocalBusinessState: async () => { logoutEnv.cleared++ }, setUser: () => { logoutEnv.cleared++ },
     setAuthReady: () => {}, setPage: () => {}, clearPersistedAuthState: () => { logoutEnv.cleared++ } }

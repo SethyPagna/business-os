@@ -9,6 +9,7 @@
 
 import { SYNC } from '../constants.ts'
 import { getSyncServerUrl } from './http.ts'
+import { isSignoutBlocked } from './unresolvedSignout.ts'
 
 let ws: WebSocket | null = null
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -79,6 +80,7 @@ function logWs(level: 'debug' | 'warn', ...args: unknown[]): void {
 }
 
 export function connectWS(): void {
+  if (isSignoutBlocked()) { disconnectWS(); return }
   ensureWebSocketLifecycleListeners()
   clearDeferredConnectTimer()
   const syncServerUrl = getSyncServerUrl()
@@ -222,11 +224,13 @@ export function disconnectWS(): void {
 }
 
 export function reconnectWS(): void {
+  if (isSignoutBlocked()) { disconnectWS(); return }
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
   connectWS()
 }
 
 export function resumeWS(): void {
+  if (isSignoutBlocked()) { disconnectWS(); return }
   wsSuppressReconnectUntil = 0
   reconnectAttempts = 0
   if (ws && ws.readyState === WebSocket.OPEN && wsLastPongAt > 0 && Date.now() - wsLastPongAt > WS_PONG_TIMEOUT_MS) {

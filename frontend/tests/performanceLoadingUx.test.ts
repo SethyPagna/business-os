@@ -249,7 +249,7 @@ assert.match(httpApi, /fallbackTimer = window\.setTimeout\(async \(\) => \{[\s\S
 assert.match(httpApi, /raceServerReadWithLocalFallback\(channel, promise, localFn, token, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS, callerSignal\)/, 'fresh healthy server reads should retain invalidation ownership, tuned local fallback delay and caller cancellation signal')
 assert.doesNotMatch(httpApi, /const localPromise = Promise\.resolve\(\)\s*\.then\(\(\) => localFn\(\)\)/, 'healthy server reads should not eagerly start the local fallback promise')
 assert.match(websocketApi, /let wsLifecycleListenersRegistered = false/, 'websocket lifecycle listeners should be one-shot and not module-load work')
-assert.match(websocketApi, /export function connectWS\(\): void \{\s*ensureWebSocketLifecycleListeners\(\)/, 'websocket lifecycle listeners should install only when an authenticated websocket connection starts')
+assert.match(websocketApi, /export function connectWS\(\): void \{\s*if \(isSignoutBlocked\(\)\) \{ disconnectWS\(\); return \}\s*ensureWebSocketLifecycleListeners\(\)/, 'unresolved sign-out must stop connections before installing authenticated websocket lifecycle listeners')
 assert.match(websocketApi, /export function resumeWS\(\): void \{[\s\S]*wsSuppressReconnectUntil = 0[\s\S]*reconnectAttempts = 0[\s\S]*reconnectWS\(\)/, 'central session recovery should have a websocket resume helper that clears reconnect suppression')
 assert.match(websocketApi, /export function ensureWebSocketLifecycleListeners\(\): void \{[\s\S]*!hasStoredAuthSession\(\)[\s\S]*window\.addEventListener\('auth:unauthorized'/, 'websocket auth lifecycle listener should live behind an authenticated explicit installer')
 assert.doesNotMatch(websocketApi, /window\.addEventListener\('online'[\s\S]{0,160}connectWS/, 'websocket module should not duplicate web-api online recovery listeners')
@@ -1025,7 +1025,9 @@ assert.match(appContext, /window\.location\.replace\(url\.toString\(\)\)/, 'runt
 assert.match(appContext, /const APP_SETTINGS_LOAD_TIMEOUT_MS = 9000/, 'app settings should use an explicit timeout constant')
 assert.match(appContext, /const APP_BOOTSTRAP_TIMEOUT_MS = 9000/, 'app bootstrap should use an explicit timeout constant')
 assert.match(appContext, /const APP_LOGIN_TIMEOUT_MS = 15000/, 'app login should use an explicit timeout constant')
-assert.match(appContext, /const APP_LOGOUT_TIMEOUT_MS = 10000/, 'app logout should use an explicit timeout constant')
+assert.match(httpApi, /apiFetch\('GET', '\/api\/sync\/owner', undefined, 8000, \{ signoutRecovery: token \}\)/, 'sign-out verification must bound the actual HTTP request')
+assert.match(httpApi, /apiFetch\('POST', '\/api\/auth\/logout',[\s\S]*?\}, 8000, \{ signoutRecovery: token, skipWriteDedupe: true \}\)/, 'guarded sign-out must bound the actual cookie-changing request')
+assert.match(appContext, /await recoverUnresolvedSignout\(intent, true\)/, 'logout must reconcile uncertain responses instead of treating a UI deadline as success')
 assert.match(appContext, /const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000/, 'Google OAuth completion should use an explicit timeout constant')
 assert.match(appContext, /const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000/, 'settings save should use an explicit timeout constant')
 assert.match(appContext, /const APP_SESSION_DURATION_TIMEOUT_MS = 12000/, 'session duration refresh should use an explicit timeout constant')
@@ -1073,8 +1075,8 @@ assert.match(
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\(\) => api\.logout\?\.\(\), 'Logout', APP_LOGOUT_TIMEOUT_MS\)/,
-  'logout should timeout slow auth cleanup requests',
+  /beginUnresolvedSignout\(user\)[\s\S]*await recoverUnresolvedSignout\(intent, true\)/,
+  'logout must establish a durable fence before bounded server recovery',
 )
 assert.match(
   appContext,
