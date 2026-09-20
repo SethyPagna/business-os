@@ -58,6 +58,7 @@ function wrapDb(raw) {
 let currentDb = null
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const core = loadReal('lib/coreDataInvariants.ts', {
+  './customTableName': loadReal('lib/customTableName.ts'),
   './db': { getDb: () => currentDb },
   './sqlBinding': sqlBinding,
   '../index': {},

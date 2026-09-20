@@ -62,6 +62,7 @@ function load(relPath, stubs = {}) {
 // touches neither, so they are inert stubs here (test-backup-pure.cjs
 // exercises the real ones).
 const { R2StreamWriter, R2_PART_BYTES } = load('lib/backup.ts', {
+  './customTableName': load('lib/customTableName.ts'),
   './r2': {},
   './backupRestoreStream': {},
   // Real: planTier.ts is pure and is what backup.ts's asset cap now reads.

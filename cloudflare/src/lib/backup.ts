@@ -2,6 +2,7 @@ import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
+import { assertCustomTableName } from './customTableName'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -1205,6 +1206,13 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   let pass1Summary: BackupPayload['summary'] | null = null
   {
     for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
+      // Custom metadata is backed up, but cannot authorize dropping an
+      // arbitrary system table during a later factory reset. Check ALL rows
+      // in pass 1, before even the first restore DELETE or progress write.
+      if (ev.type === 'table' && ev.table === 'custom_tables' && !ev.columns.includes('name')) {
+        throw new Error('Invalid custom table metadata: missing name column.')
+      }
+      if (ev.type === 'row' && ev.table === 'custom_tables') assertCustomTableName(ev.row?.name)
       if (ev.type === 'table' && !documentTables.has(ev.table)) {
         documentTables.add(ev.table)
         if ((BACKUP_TABLES as readonly string[]).includes(ev.table) && await tableExists(env, ev.table)) {
@@ -1326,6 +1334,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       restoreTable = ev.table
     } else if (ev.type === 'row') {
       if (!restoreTable || !insertSql) continue
+      if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
       const values = insertColumns.map((c) => ev.row[c] ?? null)
       batch.push(env.DB.prepare(insertSql).bind(...values))
       if (batch.length >= CHUNK) await flush()
@@ -1432,6 +1441,10 @@ export async function inspectCloudflareBackupStream(
   let rowCount = 0
   const tableNames: string[] = []
   for await (const event of streamBackupEvents(body)) {
+    if (event.type === 'table' && event.table === 'custom_tables' && !event.columns.includes('name')) {
+      throw new Error('Invalid custom table metadata: missing name column.')
+    }
+    if (event.type === 'row' && event.table === 'custom_tables') assertCustomTableName(event.row?.name)
     if (event.type === 'table') { tableCount += 1; tableNames.push(event.table) }
     else if (event.type === 'row') rowCount += 1
     else if (event.key === 'format') format = String(event.value || '')

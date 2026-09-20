@@ -114,6 +114,7 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/r2': { listObjects: async () => [], deleteObject: async () => {}, deleteObjectsBulk: async (_bucket, keys) => ({ deleted: keys.length, errors: [] }) },
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
   '../lib/coreDataInvariants': loadReal('lib/coreDataInvariants.ts', {
+    './customTableName': loadReal('lib/customTableName.ts'),
     './db': { getDb: () => db },
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
   }),

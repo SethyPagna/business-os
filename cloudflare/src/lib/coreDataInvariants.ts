@@ -17,6 +17,7 @@
 // way an equivalent Docker/Postgres instance would after first boot.
 
 import { getDb } from './db'
+import { assertCustomTableName } from './customTableName'
 import { buildInClause } from './sqlBinding'
 import type { Env } from '../index'
 import bcrypt from 'bcryptjs'
@@ -550,10 +551,12 @@ export const PRODUCTS_RESET_TABLES = [
 export async function dropAllCustomTables(env: Env): Promise<string[]> {
   const db = getDb(env)
   const rows = await db.prepare(`SELECT name FROM custom_tables`).all<{ name: string }>()
+  // Validate the entire set before the first DDL. A later invalid row must
+  // not leave an earlier valid custom table already dropped.
+  for (const row of rows) assertCustomTableName(row.name)
   const dropped: string[] = []
   for (const row of rows) {
-    const safeName = String(row.name || '').replace(/"/g, '""')
-    if (!safeName) continue
+    const safeName = row.name.replace(/"/g, '""')
     await db.prepare(`DROP TABLE IF EXISTS "${safeName}"`).run()
     dropped.push(row.name)
   }

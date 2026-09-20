@@ -86,6 +86,7 @@ const systemRoute = loadReal('routes/system.ts', {
   // K4: orphan-staging engine has its own pure test -- irrelevant here.
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
   '../lib/coreDataInvariants': loadReal('lib/coreDataInvariants.ts', {
+    './customTableName': loadReal('lib/customTableName.ts'),
     './db': { getDb: () => db },
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
   }),

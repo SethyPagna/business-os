@@ -55,10 +55,14 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', planTier
 )
 
 const backup = transpile('lib/backup.ts')
+const customTableName = transpile('lib/customTableName.ts')
+const customTableNameModule = { exports: {} }
+new Function('exports', customTableName.outputText)(customTableNameModule.exports)
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './planTier') return planTierModuleObj.exports // real limit tables
+  if (request === './customTableName') return customTableNameModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
   return originalLoad.call(this, request, parent, isMain)

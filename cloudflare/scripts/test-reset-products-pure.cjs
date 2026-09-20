@@ -58,6 +58,7 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 // source drifts (a table added/removed), this import picks up the change
 // automatically instead of this test silently checking a stale copy.
 const coreDataInvariants = loadReal('lib/coreDataInvariants.ts', {
+  './customTableName': loadReal('lib/customTableName.ts', {}),
   './db': { getDb: () => db },
   // Real helper: coreDataInvariants routes its previous-identity IN-lists
   // through sqlBinding (the one place the 100-param rule lives).
