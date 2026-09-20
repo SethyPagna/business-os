@@ -31,7 +31,7 @@ export default function ShiftReport(p: ReportViewProps) {
   const pageSize = paging.size
   const listKey = `${depsKey}:${page}:${pageSize}`
   // Dates select complete shift records by business_date, not clipped sales windows.
-  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, page, pageSize }), listKey)
+  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, page, pageSize }, { fresh: true }), listKey)
   const shifts = listing.data?.shifts ?? []
   const selected = selection.scope === listKey ? shifts.find((row) => String(row.id) === selection.id) : undefined
   const selectedId = selected?.id ?? shifts[0]?.id
