@@ -140,7 +140,7 @@ const logoutBlock = appContextSource.slice(logoutStart, logoutEnd)
 assert.ok(logoutStart >= 0 && logoutEnd > logoutStart, 'logout block is missing')
 assert.ok(
   logoutBlock.indexOf('disconnectWS()') >= 0
-    && logoutBlock.indexOf('disconnectWS()') < logoutBlock.indexOf('api.logout?.()'),
+    && logoutBlock.indexOf('disconnectWS()') < logoutBlock.indexOf('await recoverUnresolvedSignout(intent, true)'),
   'logout must cancel WebSocket reconnect work before the server logout request',
 )
 
