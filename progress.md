@@ -1,3 +1,19 @@
+## Compact/debloat rules retained; hotfix integration gate held — September 20
+
+Owner reaffirmed the standing AGENTS.md acceptance gates: proven-dead cleanup,
+Council challenge review, useful-one-row-first layouts, useful two-column pairings,
+shared button heights, and responsive EN/KM checks. Do not simplify away financial,
+permission, audit, recovery or historical guarantees. No UI redesign in this hotfix.
+
+Integrated runtime7688a20a/test1fb7c7f1 (isolated92e17a06/7ecd502c). Independent
+reviewd4f72f08 passed, but root integrated SW/cache/account gate40873 exited1:
+11/12 passed; native old-worker negative control saw HTML instead of expectedJSON.
+Deployment held. Writer found async waitForFunction predicate prematurely accepts
+a truthy Promise; correcting test synchronization, not weakening assertions or
+rerunning until green. Exact-old-source independent native proof remains separate.
+Root frontend type/i18n/build40826 running; Worker source unchanged for broad sweep.
+No new deployment, migration or data change. Full goal remains active.
+
 ## Live smoke found existing service-worker cache poisoning — September 20
 
 Deployment remains5b81a2c3/f2539627, but NOT a clean live-smoke verdict. Normal
