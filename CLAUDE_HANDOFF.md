@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST September21:** Local21bf39ce restore-query consolidation verified by root90946 and independent8558, both terminal0 (pure18, native schema/eight restore cases/overflow, six source-pin cases, types). Durable2bf11fb4. Not deployed. SW late-upgrade correction now approved for bounded isolated implementation; architecture74e02b5c, runtime/native certification pending. Production still590a6239/fe1e59bf. Full Free restore and broader ledger remain open. See progress.md first; older status entries below are historical.
+
 > **LATEST retry:** Returns preserved tab recovered and second warm reload passed exact newentryDIi (b59050a5), without clearing storage. Earlier metadata/late-upgrade failure remains OPEN: replacement waiting behind healthy oldcontroller cannot prevent later poisoning. Independent nativebaf03c4a confirms. Corrective contract6d4dc092 not implemented. Worker sweep complete484 files with passing evidence after5 isolated reruns, not uninterrupted green; durable5e26bfaf. Runtime production unchanged590a6239/fe1e59bf. Full goal active.
 
 > **CURRENT LIVE hotfix:**590a62399d22/Workerfe1e59bf-2c86-4b10-a687-2f08241310e6 Paid; frontendcf805522/76b9ca111ec0b69f/index-DIiWCqvT.js. Deployment55076 TERMINAL0; corrected root12/12, independentef0adba6, types/i18n/build40826 and tierdryruns pass. Main/branch pushed. Retained poisoned-tab live smoke running: do not claim recovery yet. No migration/data/UI changes. See docs/fleet/2026-09-20-sw-shell-hotfix.md; earlier holds below are historical.

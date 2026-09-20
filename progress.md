@@ -1,3 +1,21 @@
+## Restore-query integration verified; upgrade correction implementing — September 21
+
+Local runtime commit21bf39ce integrates reviewed c2807725: one bounded allowlisted
+restore schema query, preserving full pre-write dependency validation and R2 source
+pinning. Root90946 TERMINAL0: pure18, native178 migrations/85 tables/106 graph rows,
+eight restore cases plus overflow refusal, six native R2 pinning cases, Worker types.
+Fresh independent8558 TERMINAL0 matches all four integrated files; durable2bf11fb4.
+No remote deployment/migration/data changes. Full restore atomicity/resumability and
+actual Free-plan capacity remain OPEN; prior484-file baseline predates this change.
+
+SW writer has conditional design approval, independent architecture74e02b5c:
+direct incumbent MessageChannel proof, known legacy capability absence only,
+complete precache before one-time activation, no forced reload or writes, preserve
+incumbent assets with strict exact-URL/MIME fallback. Unknown identity fails closed
+without guessed cache deletion; future capable updates retain consentful waiting.
+Native draft/multitab/superseded-waiting tests and final review are still pending.
+Production remains590a62399d22/Workerfe1e59bf; full goal remains active.
+
 ## Late-upgrade correction design resumed — September 20
 
 Previous turn classified as progress: retry evidence changed the observed state,

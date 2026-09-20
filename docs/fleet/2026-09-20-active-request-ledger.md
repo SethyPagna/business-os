@@ -5,6 +5,14 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+September21: local21bf39ce restore schema consolidation now integrated and verified
+by root90946 plus independent8558 (terminal0; durable2bf11fb4). No deployment yet.
+SW late-upgrade migration approved for isolated implementation after architecture
+review74e02b5c, but native safety gates and candidate certification remain pending.
+No financial/UI/business-data changes. Full Free-tier backup/restore continuation,
+transfer admission and return export integrations remain open; prior484-file Worker
+baseline is not a new full sweep of21bf39ce. Current production below is unchanged.
+
 September20 latest: live590a62399d22/Workerfe1e59bf-2c86-4b10-a687-2f08241310e6
 (Paid), frontendcf805522d2fd/hash76b9ca111ec0b69f. HTML MIME/resource guards are
 deployed, but late-upgrade behavior remains OPEN. Replacement installed while
