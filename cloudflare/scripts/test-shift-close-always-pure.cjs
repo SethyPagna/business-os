@@ -54,14 +54,14 @@ function loadReal(relPath, overrides = {}) {
   return mod.exports
 }
 
-function d1(sqlite) {
+function d1(sqlite, afterRead = () => {}) {
   const translate = (sql, params = {}) => {
     const values = []
     return { sql: sql.replace(/@(\w+)/g, (_m, key) => { values.push(params[key] ?? null); return '?' }), values }
   }
   const statement = (sql) => ({
-    async get(params) { const q = translate(sql, params); return sqlite.prepare(q.sql).get(...q.values) },
-    async all(params) { const q = translate(sql, params); return sqlite.prepare(q.sql).all(...q.values) },
+    async get(params) { const q = translate(sql, params); const result = sqlite.prepare(q.sql).get(...q.values); afterRead(sql, sqlite); return result },
+    async all(params) { const q = translate(sql, params); const result = sqlite.prepare(q.sql).all(...q.values); afterRead(sql, sqlite); return result },
     async run(params) { const q = translate(sql, params); const info = sqlite.prepare(q.sql).run(...q.values); return { changes: info.changes, meta: { changes: info.changes } } },
   })
   return {
@@ -146,12 +146,12 @@ const reconciliationFor = async (_env, shift) => recon.computeShiftReconciliatio
 // database rather than trying to reset one. Same route module, same fixture.
 const user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
 
-function scenario() {
+function scenario(afterRead = () => {}) {
   const sqlite = database()
   let actor = user
   const route = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
-    '../lib/db': { getDb: () => d1(sqlite) },
+    '../lib/db': { getDb: () => d1(sqlite, afterRead) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
@@ -180,6 +180,40 @@ function scenario() {
 
 async function main() {
   assertOpeningPresenceMigration()
+  {
+    const insert = (db, code, date) => db.prepare(`INSERT INTO shift_sessions
+      (shift_code,user_id,scope_mode,branch_id,business_date,opened_at,closed_at)
+      VALUES (?,7,'per_account',1,?,?,?)`).run(code, date, `${date}T01:00:00Z`, `${date}T02:00:00Z`)
+    let injected = false
+    const injectBetweenReads = (sql, db) => {
+      if (!injected && (/WITH matched AS/.test(sql) || /^SELECT COUNT\(\*\) AS total FROM shift_sessions/.test(sql))) {
+        injected = true
+        insert(db, 'concurrent', '2020-01-02')
+      }
+    }
+    const { call, sqlite } = scenario(injectBetweenReads)
+    insert(sqlite, 'original', '2020-01-01')
+    const result = await (await call('GET', '/?page=1&page_size=20')).json()
+    assert.equal(injected, true, 'concurrent writer really commits at the read boundary')
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM shift_sessions').get().n, 2)
+    assert.equal(result.total, 1, 'count belongs to the page read snapshot')
+    assert.equal(result.shifts.length, 1, 'later insert cannot enter the already-counted page')
+    assert.equal(result.has_more, false)
+    assert.ok(!('pagination_total' in result.shifts[0]), 'internal metadata does not leak into operational rows')
+    const refreshed = await (await call('GET', '/?page=1&page_size=20')).json()
+    assert.equal(refreshed.total, 2)
+    assert.equal(refreshed.shifts.length, 2, 'next request sees the committed write normally')
+    // Negative control: the former separate-await algorithm MUST violate the
+    // same assertion under the same injected writer, proving this is not a
+    // fixture that accidentally serializes away the reviewed race.
+    const negative = database()
+    insert(negative, 'original', '2020-01-01')
+    injected = false
+    const unsafe = d1(negative, injectBetweenReads)
+    const count = await unsafe.prepare('SELECT COUNT(*) AS total FROM shift_sessions').get()
+    const page = await unsafe.prepare('SELECT * FROM shift_sessions ORDER BY id').all()
+    assert.throws(() => assert.equal(count.total, page.length), /AssertionError/, 'negative control detects old split-read mismatch')
+  }
   {
     const { call, actAs, sqlite } = scenario()
     const insert = sqlite.prepare(`INSERT INTO shift_sessions
