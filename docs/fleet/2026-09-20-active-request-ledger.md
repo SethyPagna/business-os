@@ -5,6 +5,19 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current release and newly verified gaps
 
+Next local sourceac0104747552: stock-in report/detail cache now masks immediately
+on query/account/authority/permission changes, rejects stale line-page/results.
+Independent reviewer4fd541e3 ran34 cases and negative controls for removed render
+masking/per-group fence and actual baseline. Root focused reruns/types/i18n/build
+pass. Full chain/browser pending; NOT deployed. No recorded-date or money change.
+
+Shift completeness audit0922eadd confirms all open plus at most200 closed/cancelled
+with no total; two callers only (ShiftReport, ShiftHistoryModal). Selected-shift
+CSV/print exports whole selected shift, not list. Isolated pagination implementation
+assigned: authorized exact totals, stable open-first ordering and scoped selection
+controls; no generic report-document pager, no new history Today filter that hides
+older open shifts, no intraday/cash arithmetic changes.
+
 `e85a45e8616f` deployed Paid as Worker `3b7e2af5-1b4e-4cd7-a122-ad63e9b90b18`.
 See `2026-09-20-admin-range-release.md`. Dashboard/Returns continuous time bounds,
 Reports partial clocks and all-time restoration, shift admin comparison/date

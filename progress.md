@@ -1,3 +1,18 @@
+## Stock-in scope fix integrated; verification running — September 20
+
+Local source `ac0104747552` integrates independently reviewed stock-in invoice
+report/detail scope masking and stale-response fencing. Root reran34 loader/state
+cases, cost visibility, invoice float, date defaults and pagination gates; all pass.
+Frontend typecheck, EN/KM5892-key check and build269/zero cycles pass. Build hash
+`0d9d8251b11689ec`, built2026-09-20T09:50:48.649Z. Browser verification and full
+frontend chain are still running; do not restart live processes or claim deployed.
+Full-chain handle80353; browser owner preview_safety. Production remains e85a45e8.
+
+Next isolated work: transfer-only single-attempt batch adapter/store tests, and
+complete authorized Shift list pagination beyond200 in selection/history controls
+(not report document). No new migration/production authority assumed. Full goal
+and all previous open items remain active.
+
 ## Admin date/report checkpoint deployed — September 20
 
 Source `e85a45e8616f` is deployed on Paid as Worker
