@@ -24,6 +24,11 @@ const request = requestId => { const requestJson = JSON.stringify({ productId: 1
 const execute = statements => db.transaction(() => {
   for (const statement of statements) db.prepare(statement.sql).run(statement.params || {})
 })()
+let batchCalls = 0
+const adapter = {
+  prepare(sql) { return { async get(params) { return db.prepare(sql).get(params) } } },
+  async batch(statements) { batchCalls++; execute(statements) },
+}
 const register = (runId, requestId) => execute(store.registerTransferRunStatements({ ...owner, runId, ...request(requestId), scope: 'branches' }))
 const seal = (runId, child, revision = 0, sequence = 0, final = true) => execute(store.sealTransferRunChunkStatements({
   ...position(runId, revision, sequence), ...request(child), cursorBefore: sequence ? JSON.stringify({ done: sequence }) : '{}',
@@ -68,6 +73,8 @@ assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001')
 assert.throws(() => register('duplicate-run', 'original-reserved'), /UNIQUE/)
 console.log('PASS both original-receipt/registration race orderings and duplicate reservation')
 
+async function main() {
+assert.equal(store.commitTransferRunChunkStatements, undefined, 'no splittable execution prefix is exported')
 register('run-main', 'original-main')
 seal('run-main', 'child-main-000', 0, 0, false)
 assert.throws(() => db.exec("UPDATE transfer_runs SET request_json='{}' WHERE id='run-main'"), /transition/)
@@ -84,30 +91,37 @@ assert.equal(db.prepare('SELECT COUNT(*) n FROM action_history').get().n, histor
 assert.equal(db.prepare("SELECT COUNT(*) n FROM transfer_operation_receipts WHERE request_id='child-main-000'").get().n, 0)
 assert.equal(db.prepare("SELECT status FROM transfer_run_chunks WHERE run_id='run-main'").get().status, 'planned')
 assert.equal(db.prepare("SELECT next_sequence FROM transfer_runs WHERE id='run-main'").get().next_sequence, 0)
-const commit = store.commitTransferRunChunkStatements(position('run-main'), effects('child-main-000'))
+const commit = (target = adapter, limit = 7) => store.commitTransferRunChunk(target, position('run-main'), effects('child-main-000'), limit)
 const mismatched = effects('child-main-000').map(statement => statement.params
   ? { ...statement, params: { ...statement.params, body: '{"quantity":999}' } } : statement)
-assert.throws(() => execute(store.commitTransferRunChunkStatements(position('run-main'), mismatched)), /active intent/)
-assert.throws(() => execute(store.commitTransferRunChunkStatements(position('run-main'), effects('unrelated-child'))), /immutable|CHECK/)
+await assert.rejects(store.commitTransferRunChunk(adapter, position('run-main'), mismatched, 7), /active intent/)
+await assert.rejects(store.commitTransferRunChunk(adapter, position('run-main'), effects('unrelated-child'), 7), /immutable|CHECK/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline)
-assert.throws(() => execute([...commit, { sql: 'INSERT INTO branches(name) VALUES(NULL)' }]), /NOT NULL/)
+const beforeBudgetCalls = batchCalls
+await assert.rejects(commit(adapter, 6), /budget/)
+await assert.rejects(commit(adapter, NaN), /budget/)
+assert.equal(batchCalls, beforeBudgetCalls, 'budget rejection makes no DB call')
+// Fault the atomic adapter after the final progress statement; no prefix leaks.
+await assert.rejects(commit({ ...adapter, async batch(statements) {
+  execute([...statements, { sql: 'INSERT INTO branches(name) VALUES(NULL)' }])
+} }), /NOT NULL/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline)
 assert.equal(db.prepare("SELECT status FROM transfer_run_chunks WHERE run_id='run-main'").get().status, 'planned')
 assert.equal(db.prepare("SELECT revision FROM transfer_runs WHERE id='run-main'").get().revision, 0)
 assert.equal(db.prepare("SELECT COUNT(*) n FROM transfer_operation_receipts WHERE request_id='child-main-000'").get().n, 0)
-execute(commit)
+const beforeCommitCalls = batchCalls
+await commit()
+assert.equal(batchCalls, beforeCommitCalls + 1, 'exactly one awaited atomic batch')
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline - 1)
 assert.deepEqual(db.prepare("SELECT revision,next_sequence,status,cursor_json FROM transfer_runs WHERE id='run-main'").get(),
   { revision: 1, next_sequence: 1, status: 'active', cursor_json: '{"done":1}' })
-assert.throws(() => execute(commit), /NOT NULL/)
+await assert.rejects(commit(), /NOT NULL/)
 // Opposite race ordering: wrapped commit wins; a delayed legacy attempt still
 // rolls back, cannot move stock twice or strand progress.
 assert.throws(() => execute(effects('child-main-000')), /active intent|UNIQUE/)
 assert.equal(db.prepare('SELECT stock_quantity n FROM products WHERE id=900001').get().n, baseline - 1)
 console.log('PASS unwrapped matching child rolls back; wrapped commit wins exactly once; atomic rollback clears execution marker')
 
-const adapter = { prepare(sql) { return { async get(params) { return db.prepare(sql).get(params) } } } }
-async function main() {
   const ack = await store.committedTransferRunChunk(adapter, { ...owner, runId: 'run-main', sequence: 0 })
   assert.ok(ack.receipt_id)
   assert.equal(ack.request_id, 'child-main-000')
@@ -124,9 +138,9 @@ async function main() {
 
   seal('run-main', 'child-main-001', 1, 1)
   execute(store.transitionTransferRunStatements({ ...position('run-main', 1, 1), status: 'paused' }))
-  assert.throws(() => execute(store.commitTransferRunChunkStatements(position('run-main', 2, 1), effects('child-main-001'))), /NOT NULL/)
+  await assert.rejects(store.commitTransferRunChunk(adapter, position('run-main', 2, 1), effects('child-main-001'), 7), /NOT NULL/)
   execute(store.transitionTransferRunStatements({ ...position('run-main', 2, 1), status: 'active' }))
-  execute(store.commitTransferRunChunkStatements(position('run-main', 3, 1), effects('child-main-001')))
+  await store.commitTransferRunChunk(adapter, position('run-main', 3, 1), effects('child-main-001'), 7)
   assert.equal(db.prepare("SELECT status FROM transfer_runs WHERE id='run-main'").get().status, 'completed')
   assert.throws(() => execute(store.transitionTransferRunStatements({ ...position('run-main', 4, 2), status: 'active' })), /transition/)
   execute(store.transitionTransferRunStatements({ ...position('registered-winner'), status: 'abandoned' }))
