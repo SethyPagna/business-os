@@ -201,10 +201,16 @@ export async function retireTransferRunsForDatasetChange(db: Pick<D1Compat, 'bat
  */
 export async function unionRetiredTransferKeys(db: Pick<D1Compat, 'batchOnce'>, input: LifecycleProof & {
   keys: readonly RetiredTransferKey[]; maxStatements: number
+  /** Include backup generations with no keys; permanent set union, not activation. */
+  generations?: readonly string[]
 }): Promise<void> {
-  if (input.keys.length > 100) throw new Error('Retirement union page too large')
+  if (input.keys.length > 100 || (input.generations?.length ?? 0) > 100) throw new Error('Retirement union page too large')
   const params = { ...lifecycle(input), after: input.datasetGeneration, kind: 'union' }
   const statements = lifecycleStart(params)
+  for (const generation of input.generations ?? []) {
+    if (!uuid.test(generation)) throw new Error('Invalid retired generation')
+    statements.push({ sql: 'INSERT INTO business_dataset_generations(generation) VALUES(@generation) ON CONFLICT(generation) DO NOTHING', params: { generation } })
+  }
   for (const key of input.keys) {
     request({ requestId: key.requestId, requestJson: key.requestJson, digest: key.digest }, 131072)
     json(key.snapshotJson, 262144)
@@ -214,7 +220,8 @@ export async function unionRetiredTransferKeys(db: Pick<D1Compat, 'batchOnce'>, 
       || (key.datasetGeneration !== '' && !uuid.test(key.datasetGeneration))) throw new Error('Invalid retired identity')
     const p = { actor: key.actorId, org: key.organizationId, request: key.requestId, run: key.runId, sequence: key.sequence,
       generation: key.datasetGeneration, digest: key.digest, body: key.requestJson, snapshot: key.snapshotJson }
-    statements.push(guard(`NOT EXISTS(SELECT 1 FROM transfer_runs WHERE actor_id=@actor AND request_id=@request)
+    statements.push({ sql: "INSERT INTO business_dataset_generations(generation) SELECT @generation WHERE @generation<>'' ON CONFLICT(generation) DO NOTHING", params: { generation: key.datasetGeneration } },
+      guard(`NOT EXISTS(SELECT 1 FROM transfer_runs WHERE actor_id=@actor AND request_id=@request)
       AND NOT EXISTS(SELECT 1 FROM transfer_run_chunks WHERE actor_id=@actor AND request_id=@request)
       AND (NOT EXISTS(SELECT 1 FROM transfer_operation_receipts WHERE actor_id=@actor AND request_id=@request)
         OR EXISTS(SELECT 1 FROM transfer_run_retired_keys WHERE actor_id=@actor AND request_id=@request))`, p),
