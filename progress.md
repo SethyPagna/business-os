@@ -1,3 +1,13 @@
+## Browser upgrade deployed; live smoke partially verified — September 21
+
+Sourcece945bb4ed15 deployed Paid Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991,
+hashf3fc40464e0e082f;7351 TERMINAL0. Frontenda1ed5ca3/23cc431e6e86d05e,
+entryindex-VgYymt04.js. No migration/secret sync/business-data writes.
+Separate live Chrome tab460569510 rendered authenticated Returns normally. Old
+preservedtab460569392 is gone; user's POS untouched. Browser connection failed
+before metadata cycle/controller/warm-reload proof: live smoke PARTIAL, not closure.
+Full objective remains active. See September21 release record for failure evidence.
+
 ## Legacy browser upgrade integrated and release gates passed — September 21
 
 Previous goal turn made progress: restore21bf39ce verified/pushed and upgrade

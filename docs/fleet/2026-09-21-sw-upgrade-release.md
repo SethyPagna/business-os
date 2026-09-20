@@ -37,4 +37,13 @@ full Free backup/restore budgets, public backlog and full-goal acceptance remain
 
 ## Deployment
 
-Pending. Record exact deployment ID, source and live smoke; never infer from main.
+Paid deployment7351 TERMINAL0: sourcece945bb4ed15, hashf3fc40464e0e082f,
+built2026-09-20T19:51:18.400Z, Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991.
+Frontend provenance above; entryindex-VgYymt04.js. No migration/secret sync/data writes.
+
+Live Chrome: original preserved tab460569392 no longer exists. User POS tab460569495
+left untouched. Separate same-profile smoke tab460569510 rendered authenticated
+Returns, Today21/09/2026, normal controls and no blank page. New-version notification
+visible; document rendering alone does not prove controller version. Metadata
+navigation and reattachment then failed with browser-tool "Debugger unattached";
+metadata-cycle/warm-reload/controller proof remains incomplete, not a green claim.

@@ -5,6 +5,11 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+September21 deployed:ce945bb4ed15/Worker7fb32ac1-98ac-42f9-8fe8-c057e0376991
+Paid;7351 terminal0. Separate live Returns tab loads; original preserved tab gone,
+browser connection stopped before metadata cycle/warm-reload/controller verification.
+Live smoke remains partial; no broad completion claim. No remote migration/data writes.
+
 September21 later: browser upgrade integrateda1ed5ca3/testaa5762b4; twelve focused
 root files and independent corrected six-file sequence pass. Types/i18n/build and
 both packaging dry runs pass. Deployment pending, previous production unchanged.
