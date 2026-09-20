@@ -162,7 +162,7 @@ await test('SW two concurrent claims accept only one exact revision', async () =
   assert.equal(claims.filter(Boolean).length, 1)
   assert.equal(queues.get(1)?.sync_lease, 'first')
 })
-await test('legacy generic foreground sale is retained before decrypt or network dispatch, with revision fence', async () => {
+await test('legacy generic foreground sale is retained without decrypt, dispatch or any revision mutation', async () => {
   const text = source('web-api.ts')
   const parsed = ts.createSourceFile('web-api.ts', text, ts.ScriptTarget.Latest, true)
   const functions = parsed.statements.filter((node) => ts.isFunctionDeclaration(node) && ['syncUnlockedOfflineOutbox', 'getSyncOutboxKey'].includes(node.name?.text || '')).map((node) => node.getText(parsed)).join('\n')
@@ -181,9 +181,11 @@ await test('legacy generic foreground sale is retained before decrypt or network
     }
     const compiled = ts.transpileModule(functions + '\nreturn syncUnlockedOfflineOutbox;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
     const run = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
-    await run({ force: true })
-    if (removedDuringRead) assert.equal(queues.size, 0)
-    else { assert.equal(queues.get(1)?.status, 'quarantined'); assert.equal(queues.get(1)?.encrypted_payload, original.encrypted_payload); assert.equal(queues.get(1)?.iv, original.iv) }
+    await assert.rejects(run({ force: true }), (error: any) => error.code === 'legacy_recovery_required')
+    // A disabled replay must not even read the queue, hence the simulated
+    // concurrent read hook never runs; ciphertext and status remain exact.
+    assert.equal(queues.size, 1)
+    assert.deepEqual(queues.get(1), original)
   }
 })
 console.log(`${passed} offline ownership behavioral checks passed`)

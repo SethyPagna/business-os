@@ -20,7 +20,6 @@ import {
   emitSyncQueueChanged,
   FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,
   hasStoredUserSession,
-  registerOutboxBackgroundSync,
 } from './api/syncRuntime.ts'
 import { STORAGE_KEYS }            from './constants.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
@@ -436,116 +435,17 @@ async function unlockOfflineVault(pin: unknown): Promise<AnyRecord> {
 }
 
 async function queueBusinessOutboxOperation(operation: OfflineOperation = {}): Promise<AnyRecord> {
-  const operation_id = String(operation.operation_id || operation.type || '').trim()
-  if (!operation_id) throw new Error('Offline operation id is required.')
-  if (!offlineVaultKey) {
-    dispatchVaultLocked('queue_requires_unlock')
-    return { success: false, locked: true, status: 'vault_locked' }
-  }
-  scheduleOfflineVaultIdleLock()
-  const offlineDb = await getOfflineDb()
-  const now = new Date().toISOString()
-  const payload = operation.payload || {}
-  const encrypted = await encryptOfflineVaultValue(payload)
-  const payload_digest = await sha256Hex(payload)
-  const id = operation.id || operation.client_request_id || `business_outbox_operation_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  await offlineDb.sync_outbox.put({
-    id,
-    client_request_id: operation.client_request_id || id,
-    operation_id,
-    schema_version: Number(operation.schema_version || 1),
-    base_updated_at: operation.base_updated_at || operation.updated_at || now,
-    status: 'pending',
-    created_at: now,
-    updated_at: now,
-    retry_at: null,
-    entity_table: operation.entity_table || operation.entity || '',
-    entity_id: operation.entity_id || payload.id || null,
-    entity_label: operation.entity_label || payload.name || operation_id,
-    payload_digest,
-    encrypted_payload: encrypted.encrypted_payload,
-    iv: encrypted.iv,
-    business_outbox_operation: true,
+  // Retain legacy records unchanged; these paths have no verified recovery owner.
+  throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
+    code: 'online_required',
   })
-  registerOutboxBackgroundSync()
-  emitSyncQueueChanged({ reason: 'business_outbox_operation', operation_id })
-  return { success: true, queued: true, id, payload_digest }
 }
 
 async function queueOfflineFileChunks(file: File, ownerOperation: OfflineFileOwner = {}): Promise<AnyRecord> {
-  if (!file?.slice) throw new Error('A file is required for offline file sync.')
-  if (!offlineVaultKey) {
-    dispatchVaultLocked('file_queue_requires_unlock')
-    return { success: false, locked: true, status: 'vault_locked' }
-  }
-  scheduleOfflineVaultIdleLock()
-  const offlineDb = await getOfflineDb()
-  const upload_id = ownerOperation.upload_id || `offline_file_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  const chunkCount = Math.ceil(Number(file.size || 0) / OFFLINE_FILE_CHUNK_SIZE)
-  const createdAt = new Date().toISOString()
-  const buildingManifest = {
-    upload_id,
-    file_name: file.name || 'offline-upload.bin',
-    mime: file.type || '',
-    size: Number(file.size || 0),
-    sha256: '',
-    chunk_count: chunkCount,
-    chunk_size: OFFLINE_FILE_CHUNK_SIZE,
-    owner_operation_id: ownerOperation.operation_id || '',
-    created_at: createdAt,
-    staging_status: 'building',
-  }
-  const encryptedManifest = await encryptOfflineVaultValue(buildingManifest)
-  await offlineDb.offline_file_chunks.put({
-    upload_id,
-    chunk_index: -1,
-    status: 'building',
-    created_at: createdAt,
-    updated_at: createdAt,
-    payload_digest: await sha256Hex(buildingManifest),
-    encrypted_payload: encryptedManifest.encrypted_payload,
-    iv: encryptedManifest.iv,
+  // Retain legacy records unchanged; these paths have no verified recovery owner.
+  throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
+    code: 'online_required',
   })
-  for (let index = 0; index < chunkCount; index += 1) {
-    const start = index * OFFLINE_FILE_CHUNK_SIZE
-    // Read and persist one slice at a time. This keeps large uploads from being
-    // duplicated in memory and leaves an explicit `building` marker if iOS
-    // suspends or terminates the process between chunk commits.
-    const chunk = new Uint8Array(await file.slice(start, start + OFFLINE_FILE_CHUNK_SIZE).arrayBuffer())
-    const encrypted = await encryptOfflineVaultValue({ chunk: bytesToBase64(chunk), chunk_index: index })
-    await offlineDb.offline_file_chunks.put({
-      upload_id,
-      chunk_index: index,
-      status: 'pending',
-      created_at: createdAt,
-      updated_at: createdAt,
-      payload_digest: await sha256Hex(chunk),
-      encrypted_payload: encrypted.encrypted_payload,
-      iv: encrypted.iv,
-    })
-  }
-  // WebCrypto does not expose an incremental SHA-256 API. Compute the whole-
-  // file digest only after every encrypted chunk is durable, then atomically
-  // promote the manifest to `ready`. A kill during this final calculation is
-  // recoverable: sync refuses the incomplete `building` upload and asks the
-  // user to reselect the source file instead of completing corrupt data.
-  const fileSha256 = await sha256Hex(new Uint8Array(await file.arrayBuffer()))
-  const manifest = { ...buildingManifest, sha256: fileSha256, staging_status: 'ready' }
-  const readyManifest = await encryptOfflineVaultValue(manifest)
-  const manifestRow = await offlineDb.offline_file_chunks
-    .where('upload_id').equals(upload_id)
-    .filter((row: OfflineRow) => Number(row.chunk_index) === -1)
-    .first()
-  if (!manifestRow?._seq) throw new Error('Offline upload manifest was lost while staging.')
-  await offlineDb.offline_file_chunks.update(manifestRow._seq, {
-    status: 'ready',
-    updated_at: new Date().toISOString(),
-    payload_digest: await sha256Hex(manifest),
-    encrypted_payload: readyManifest.encrypted_payload,
-    iv: readyManifest.iv,
-  })
-  registerOutboxBackgroundSync()
-  return { success: true, upload_id, chunkCount, sha256: fileSha256 }
 }
 
 function dispatchOutboxProgress(detail: AnyRecord = {}): void {
@@ -574,239 +474,17 @@ function getSyncOutboxKey(row: OfflineRow = {}): string | number | undefined {
 }
 
 async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Promise<AnyRecord> {
-  if (!offlineVaultKey) {
-    dispatchVaultLocked('sync_requires_unlock')
-    return { success: false, locked: true, status: 'vault_locked' }
-  }
-  scheduleOfflineVaultIdleLock()
-  const offlineDb = await getOfflineDb()
-  const now = Date.now()
-  const rows = ((await offlineDb.sync_outbox.toArray().catch(() => [])) as OfflineRow[])
-    .filter((row) => {
-      const status = String(row?.status || 'pending')
-      if (!['pending', 'failed', 'retry', 'syncing'].includes(status)) return false
-      if (status === 'syncing') {
-        const claimedAt = Date.parse(String(row?.updated_at || row?.created_at || ''))
-        if (Number.isFinite(claimedAt) && now - claimedAt < OFFLINE_OUTBOX_SYNC_LEASE_MS) return false
-      }
-      const retryAt = row?.retry_at ? Date.parse(String(row.retry_at)) : 0
-      return options.force || !Number.isFinite(retryAt) || retryAt <= now
-    })
-    .sort((a, b) => String(a?.created_at || '').localeCompare(String(b?.created_at || '')))
-    .slice(0, Math.max(1, Number(options.limit || 25)))
-  if (!rows.length) return { success: true, synced: 0, conflicts: 0, failed: 0 }
-
-  const operations = []
-  for (const row of rows) {
-    // POS sales use the dedicated owner-scoped queue. Legacy generic sales
-    // must not reach the generic replay/acknowledgement path or be reassigned.
-    // Retain the original encrypted/plaintext payload for explicit review.
-    if (row.operation_id === 'sales.create') {
-      await offlineDb.transaction('rw', offlineDb.sync_outbox, async () => {
-        const key = getSyncOutboxKey(row)
-        const current = await offlineDb.sync_outbox.get(key)
-        if (!current || JSON.stringify(current) !== JSON.stringify(row)) return
-        await offlineDb.sync_outbox.update(key, {
-          status: 'quarantined', retry_at: null, reason: 'offline_owner_review',
-          error: 'Keep this pending sale. Its original account and server must review it in the current app; do not recreate or discard it.',
-          updated_at: new Date().toISOString(),
-        })
-      })
-      continue
-    }
-    try {
-      const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
-      operations.push({
-        id: row.id,
-        row_key: getSyncOutboxKey(row),
-        client_request_id: row.client_request_id || row.id,
-        operation_id: row.operation_id,
-        schema_version: Number(row.schema_version || 1),
-        base_updated_at: row.base_updated_at,
-        entity_table: row.entity_table || '',
-        entity_id: row.entity_id || null,
-        payload_digest: row.payload_digest || await sha256Hex(payload),
-        payload,
-      })
-      await offlineDb.sync_outbox.update(getSyncOutboxKey(row), {
-        status: 'syncing',
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-    } catch (error: any) {
-      await offlineDb.sync_outbox.update(getSyncOutboxKey(row), {
-        status: 'integrity_failed',
-        error: error?.message || 'Encrypted offline edit could not be opened.',
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-    }
-  }
-  if (!operations.length) return { success: false, synced: 0, conflicts: 0, failed: rows.length }
-
-  dispatchOutboxProgress({ status: 'syncing', total: operations.length, completed: 0 })
-  let response = null
-  try {
-    response = await apiFetch('POST', '/api/sync/outbox', { operations })
-  } catch (error: any) {
-    if (Number(error?.status || 0) === 423 || error?.code === 'system_busy') {
-      for (const operation of operations) {
-        await offlineDb.sync_outbox.update(operation.row_key, {
-          status: 'retry',
-          error: error?.message || 'System maintenance is running. Offline sync will retry.',
-          retry_at: new Date(Date.now() + 60_000).toISOString(),
-          updated_at: new Date().toISOString(),
-        }).catch(() => {})
-      }
-      dispatchOutboxProgress({ status: 'paused', code: 'system_busy', total: operations.length, failed: 0 })
-      return { success: false, paused: true, status: 'system_busy', synced: 0, conflicts: 0, failed: 0 }
-    }
-    for (const operation of operations) {
-      await offlineDb.sync_outbox.update(operation.row_key, {
-        status: 'failed',
-        error: error?.message || 'Offline sync failed.',
-        retry_at: new Date(Date.now() + 30_000).toISOString(),
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-    }
-    dispatchOutboxProgress({ status: 'failed', total: operations.length, failed: operations.length })
-    return { success: false, synced: 0, conflicts: 0, failed: operations.length }
-  }
-
-  const results = Array.isArray(response?.results) ? response.results : []
-  // Offline sync batches can grow into the hundreds after an extended
-  // period offline; looking up each result's matching operation with
-  // `.find()` was an O(operations x results) scan (they're typically
-  // close to the same size), same shape as other per-item-scan fixes in
-  // this project's Big-O sweep. A Map keyed by client_request_id gives
-  // O(1) lookups instead.
-  const operationsByClientRequestId = new Map(operations.map((operation) => [operation.client_request_id, operation]))
-  const completedOperationKeys = new Set<string | number>()
-  let synced = 0
-  let conflicts = 0
-  let failed = 0
-  for (const result of results) {
-    const matched = operationsByClientRequestId.get(result.client_request_id)
-    const id = matched?.row_key
-    if (id == null) continue
-    completedOperationKeys.add(id)
-    if (result.status === 'applied') {
-      synced += 1
-      await offlineDb.sync_outbox.update(id, {
-        status: 'synced',
-        server_response: result.response || null,
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-    } else if (result.code === 'write_conflict' || result.status === 'conflict') {
-      conflicts += 1
-      await offlineDb.sync_outbox.update(id, {
-        status: 'conflict',
-        conflict: result,
-        error: result.error || 'Server value changed.',
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-      dispatchOutboxConflict({ id, result })
-    } else {
-      failed += 1
-      await offlineDb.sync_outbox.update(id, {
-        status: 'failed',
-        error: result.error || result.code || 'Offline sync failed.',
-        retry_at: new Date(Date.now() + 30_000).toISOString(),
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-    }
-  }
-  // A partial/invalid 2xx response must not leave omitted operations stuck in
-  // `syncing` forever after an iOS process kill. Return them to retry state.
-  for (const operation of operations) {
-    if (operation.row_key == null) continue
-    if (completedOperationKeys.has(operation.row_key)) continue
-    failed += 1
-    await offlineDb.sync_outbox.update(operation.row_key, {
-      status: 'failed',
-      error: 'Sync response did not include this operation.',
-      retry_at: new Date(Date.now() + 30_000).toISOString(),
-      updated_at: new Date().toISOString(),
-    }).catch(() => {})
-  }
-  dispatchOutboxProgress({ status: conflicts ? 'conflict' : (failed ? 'failed' : 'synced'), total: operations.length, synced, conflicts, failed })
-  return { success: failed === 0 && conflicts === 0, synced, conflicts, failed }
+  // Retain legacy records unchanged; these paths have no verified recovery owner.
+  throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
+    code: 'legacy_recovery_required',
+  })
 }
 
 async function syncUnlockedOfflineFileChunks(options: OfflineSyncOptions = {}): Promise<AnyRecord> {
-  if (!offlineVaultKey) {
-    dispatchVaultLocked('file_sync_requires_unlock')
-    return { success: false, locked: true, status: 'vault_locked' }
-  }
-  scheduleOfflineVaultIdleLock()
-  const offlineDb = await getOfflineDb()
-  const allRows = (await offlineDb.offline_file_chunks.toArray().catch(() => [])) as OfflineRow[]
-  const uploadIds = [...new Set(allRows
-    .filter((row) => row.status !== 'synced')
-    .map((row) => row.upload_id)
-    .filter((value): value is string => Boolean(value)))]
-    .slice(0, Math.max(1, Number(options.limit || 5)))
-  let completed = 0
-  let failed = 0
-  for (const uploadId of uploadIds) {
-    const rows = allRows.filter((row) => row.upload_id === uploadId)
-    const manifestRow = rows.find((row) => Number(row.chunk_index) === -1)
-    if (!manifestRow) continue
-    if (manifestRow.status !== 'ready' && manifestRow.status !== 'manifest') {
-      failed += 1
-      dispatchOutboxFileProgress({
-        upload_id: uploadId,
-        status: 'incomplete',
-        error: 'Offline file staging was interrupted. Reselect the file to queue it again.',
-      })
-      continue
-    }
-    try {
-      const manifest = await decryptOfflineVaultValue(manifestRow.encrypted_payload ? manifestRow : { encrypted_payload: manifestRow.encrypted_payload, iv: manifestRow.iv })
-      const allChunks = rows
-        .filter((row) => Number(row.chunk_index) >= 0)
-        .sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index))
-      const expectedChunkCount = Math.max(0, Number(manifest.chunk_count || 0))
-      const hasCompleteChunkSet = allChunks.length === expectedChunkCount
-        && allChunks.every((row, index) => Number(row.chunk_index) === index)
-      if (!manifest.sha256 || !hasCompleteChunkSet) {
-        throw new Error('Offline file staging is incomplete. Reselect the file to queue it again.')
-      }
-      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'initializing', completed, total: uploadIds.length })
-      await apiFetch('POST', '/api/sync/files/chunks/init', { manifest })
-      const chunks = allChunks.filter((row) => row.status !== 'synced')
-      for (const row of chunks) {
-        const payload = await decryptOfflineVaultValue(row.encrypted_payload ? row : { encrypted_payload: row.encrypted_payload, iv: row.iv })
-        const chunkBytes = base64ToBytes(payload.chunk)
-        const chunkSha256 = await sha256Hex(chunkBytes)
-        await apiFetch('POST', `/api/sync/files/chunks/${encodeURIComponent(uploadId)}/chunk`, {
-          chunk_index: Number(row.chunk_index),
-          chunk_sha256: chunkSha256,
-          chunk: payload.chunk,
-        })
-        await offlineDb.offline_file_chunks.update(row._seq, {
-          status: 'synced',
-          updated_at: new Date().toISOString(),
-        }).catch(() => {})
-        dispatchOutboxFileProgress({ upload_id: uploadId, status: 'chunk', chunk_index: row.chunk_index, chunk_count: manifest.chunk_count })
-      }
-      await apiFetch('POST', `/api/sync/files/chunks/${encodeURIComponent(uploadId)}/complete`, { upload_id: uploadId })
-      await offlineDb.offline_file_chunks.update(manifestRow._seq, {
-        status: 'synced',
-        updated_at: new Date().toISOString(),
-      }).catch(() => {})
-      completed += 1
-      dispatchOutboxFileProgress({ upload_id: uploadId, status: 'synced', completed, total: uploadIds.length })
-    } catch (error: any) {
-      failed += 1
-      const paused = Number(error?.status || 0) === 423 || error?.code === 'system_busy'
-      await mapOfflineFileChunkStatusUpdates(rows, (row) => offlineDb.offline_file_chunks.update(row._seq, {
-        status: row.status === 'synced' ? 'synced' : (paused ? 'pending' : 'failed'),
-        error: error?.message || (paused ? 'System maintenance is running. Offline file sync will retry.' : 'Offline file sync failed.'),
-        updated_at: new Date().toISOString(),
-      }).catch(() => {}))
-      dispatchOutboxFileProgress({ upload_id: uploadId, status: paused ? 'paused' : 'failed', error: error?.message || (paused ? 'System maintenance is running.' : 'Offline file sync failed.') })
-    }
-  }
-  return { success: failed === 0, completed, failed }
+  // Retain legacy records unchanged; these paths have no verified recovery owner.
+  throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
+    code: 'legacy_recovery_required',
+  })
 }
 
 function refreshOfflineSnapshotSoon(force = false): void {
@@ -853,13 +531,9 @@ function refreshServiceWorkerSoon(force = false): void {
 function runOfflineMaintenance(force = false): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   if (!hasStoredUserSession()) return
-  if (offlineVaultKey) {
-    syncUnlockedOfflineOutbox({ force }).catch(() => {})
-    syncUnlockedOfflineFileChunks({ force }).catch(() => {})
-  }
   refreshOfflineSnapshotSoon(force)
-  // Legacy sales are never replayed by startup, timers or reconnect events.
-  // Their original account must explicitly review and request recovery.
+  // Maintenance refreshes reads/app-shell only, never business writes.
+  // Legacy encrypted/file records remain untouched pending verified recovery.
   refreshServiceWorkerSoon(force)
 }
 

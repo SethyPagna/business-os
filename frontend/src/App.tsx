@@ -1510,11 +1510,11 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   const reconnecting = offline && !!transientOutage
   const label = ready
     ? (total
-      ? (t('offline_mode_ready_sync') || 'Server is back online. Offline actions can sync now.')
+      ? (t('offline_mode_ready_sync') || 'Server is online. Review retained sales in their original account before recovery.')
       : (t('server_back_online') || 'Server is back online. You can keep working.'))
     : reconnecting
       ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
-      : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
+      : (t('offline_mode_active') || 'You are offline. Writes require a connection. Keep your drafts; retained offline records are not sent automatically.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
   // appUpdate no longer feeds this banner's own "Update ready" priority
   // state -- that used to pop this floating banner on effectively every
@@ -1525,9 +1525,9 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
   // conflicts-need-review/vault-locked/offline-sync states, just not
   // app-update anymore.
   const priority = conflictsNeedReview
-    ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
+    ? { title: 'Conflicts need review', message: 'Retained records need ownership review before recovery.', tone: 'danger' }
     : vaultLocked
-      ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
+      ? { title: 'Vault locked', message: 'Encrypted records are retained. Unlocking does not send them; ownership review is required.', tone: 'warning' }
       : null
   const toneClass = priority?.tone === 'danger'
     ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200'
@@ -2050,7 +2050,7 @@ export default function App() {
       if (offlineNoticeRef.current.queued === key) return
       offlineNoticeRef.current.queued = key
       const receipt = detail.receiptNumber ? ` ${detail.receiptNumber}` : ''
-      const messageTemplate = t('offline_sale_saved_notice') || 'Offline sale {receipt} saved at {time}. It will sync when the server is online.'
+      const messageTemplate = t('offline_sale_saved_notice') || 'Retained sale {receipt}, saved at {time}, needs review in its original account.'
       notify(messageTemplate
         .replace('{receipt}', receipt.trim() || '')
         .replace('{time}', formatSyncTimestamp(detail.ts || Date.now()))
