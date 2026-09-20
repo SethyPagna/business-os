@@ -89,6 +89,9 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+
+const { unusedCompilerDiagnostics } = createRequire(import.meta.url)('../../ops/scripts/lib/compiler-result.cjs')
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(here, '..')
@@ -112,16 +115,14 @@ const result = spawnSync(
     '--noEmit',
     '--noUnusedLocals',
     '--noUnusedParameters',
+    '--pretty', 'false',
     '-p',
     'tsconfig.json',
   ],
   { cwd: root, encoding: 'utf8' },
 )
 
-const output = `${result.stdout || ''}${result.stderr || ''}`
-const diagnosticLines = output
-  .split(/\r?\n/)
-  .filter((line) => /error TS6133:|error TS6196:/.test(line))
+const diagnosticLines: string[] = unusedCompilerDiagnostics(result)
 
 assert.ok(
   diagnosticLines.length <= BUDGET,
