@@ -32,6 +32,8 @@ CREATE TABLE transfer_run_chunks (
   is_final INTEGER NOT NULL CHECK(is_final IN (0,1)),
   -- executing is an internal transaction marker: wrapper acquires it, writes
   -- effects, links receipt and advances run in ONE batch. Never persist alone.
+  -- The store API enforces that batch boundary; SQLite does not prohibit an
+  -- arbitrary direct SQL writer from persisting this intermediate status.
   status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','executing','committed')),
   receipt_id INTEGER REFERENCES transfer_operation_receipts(id),
   PRIMARY KEY(run_id,sequence),

@@ -64,16 +64,20 @@ export function sealTransferRunChunkStatements(input: RunPosition & {
       before: input.cursorBefore, after: input.cursorAfter, final: input.final ? 1 : 0 } }]
 }
 
-/** Compose the EXISTING transfer planner's receipt, stock, provenance and audit
- * SQL inside this atomic envelope. Do not execute transferStatements separately.
+/** Execute the EXISTING transfer planner's receipt, stock, provenance and audit
+ * SQL in ONE awaited batch. Do not execute transferStatements separately.
  * Their request must equal the sealed chunk (enforced by receipt/link triggers).
- * Budget the returned full array plus handler reads/retries before db.batch.
+ * Caller supplies its remaining atomic-statement allowance after reserving all
+ * handler reads/retries. No public statement-builder exposes a split prefix.
+ * This is API-enforced batching, NOT a schema transaction-bound marker: arbitrary
+ * direct SQL can persist an executing status. Do not expose status mutation.
  * Duplicate/lost-ack commit: read committedTransferRunChunk before planning;
  * on CAS/unique failure read it again, never replay effects under another key. */
-export function commitTransferRunChunkStatements(input: RunPosition, transferStatements: readonly Statement[]): Statement[] {
+export async function commitTransferRunChunk(db: D1Compat, input: RunPosition,
+  transferStatements: readonly Statement[], maxAtomicStatements: number): Promise<void> {
   const params = position(input)
   if (!transferStatements.length) throw new Error('Transfer effects required')
-  return [guard(`EXISTS(SELECT 1 FROM transfer_runs r JOIN transfer_run_chunks c ON c.run_id=r.id
+  const statements: Statement[] = [guard(`EXISTS(SELECT 1 FROM transfer_runs r JOIN transfer_run_chunks c ON c.run_id=r.id
       AND c.sequence=r.next_sequence WHERE ${ownedPosition} AND r.status='active' AND c.status='planned')`, params),
     // An old route can know the exact child body/key. Its receipt must still
     // fail unless this marker was acquired INSIDE this same atomic batch.
@@ -87,6 +91,10 @@ export function commitTransferRunChunkStatements(input: RunPosition, transferSta
         cursor_json=(SELECT cursor_after FROM transfer_run_chunks WHERE run_id=@run AND sequence=@sequence),
         status=CASE WHEN (SELECT is_final FROM transfer_run_chunks WHERE run_id=@run AND sequence=@sequence)=1 THEN 'completed' ELSE 'active' END,
         updated_at=CURRENT_TIMESTAMP WHERE id=@run`, params }]
+  if (!Number.isSafeInteger(maxAtomicStatements) || maxAtomicStatements < statements.length) {
+    throw new Error('Transfer atomic envelope exceeds reserved statement budget')
+  }
+  await db.batch(statements)
 }
 
 export function transitionTransferRunStatements(input: RunPosition & { status: 'active' | 'paused' | 'abandoned' }): Statement[] {
