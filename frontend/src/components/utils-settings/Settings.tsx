@@ -2161,6 +2161,35 @@ export default function Settings() {
                   />
                 </label>
               ))}
+              <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+                <div className="min-w-0 pr-3">
+                  <label htmlFor="settings-telegram-language" className="block text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
+                    {t('telegram_language_label') || 'Report language'}
+                  </label>
+                  <div className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    {t('telegram_language_desc') || 'Language of every Telegram report and alert.'}
+                  </div>
+                </div>
+                <AppSelect
+                  id="settings-telegram-language"
+                  name="telegram_language"
+                  // Display-only default: an empty or unrecognised stored value shows
+                  // "both" and writes nothing, the same convention the category
+                  // switches use with String(form[key] ?? 'true'). The owner's first
+                  // explicit pick is the first value ever saved for this key.
+                  value={form.telegram_language === 'en' || form.telegram_language === 'km' ? String(form.telegram_language) : 'both'}
+                  onChange={(nextValue) => setValue('telegram_language', nextValue)}
+                  ariaLabel={t('telegram_language_label') || 'Report language'}
+                  disabled={!canEditSettings}
+                  buttonClassName="h-10 min-w-[11rem] text-sm"
+                  menuClassName="min-w-[12rem]"
+                  options={[
+                    { value: 'both', label: t('telegram_language_both') || 'Khmer + English' },
+                    { value: 'en', label: t('english') || 'English' },
+                    { value: 'km', label: t('khmer') || 'Khmer' },
+                  ]}
+                />
+              </div>
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
                   {telegramAction === 'test' ? (t('telegram_sending_test') || 'Sending test...') : (t('telegram_send_test') || 'Send test message')}

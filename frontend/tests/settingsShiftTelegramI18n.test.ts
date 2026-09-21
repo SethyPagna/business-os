@@ -118,6 +118,16 @@ const telegramKeys = [
   'telegram_test_sent',
   'telegram_summary_sent',
   'telegram_action_failed',
+  // Report-language chooser (owner, 21 Sep 2026: "Khmer + english, option to
+  // choose one or the other language or both and both as default. In
+  // settings."). Its strings are held to the same rule as the rest of the
+  // section: keyed, present in both packs, really translated. The `en` / `km`
+  // options reuse the packs' existing `english` / `khmer` keys.
+  'telegram_language_label',
+  'telegram_language_desc',
+  'telegram_language_both',
+  'english',
+  'khmer',
 ]
 
 for (const key of [...shiftKeys, ...telegramKeys]) {
@@ -146,6 +156,55 @@ assert.ok(
   "km.json 'telegram_cat_stock_in_desc' must not use the rival spelling ឡូត",
 )
 
+// --- Report-language chooser wiring ----------------------------------------
+//
+// The keys above only prove the five strings are translatable. This pins the
+// control itself: it writes the `telegram_language` setting, offers exactly
+// the three values the Worker understands, defaults to `both` for display
+// without writing anything, and is view-only for a non-full settings role
+// like every other mutating Telegram input. `both`/`en`/`km` are the same
+// three values the receipt-language chooser already uses
+// (ReceiptSettings.tsx), so the two surfaces stay in parity.
+
+const selectStart = src.indexOf('id="settings-telegram-language"')
+assert.ok(selectStart > 0, 'Settings.tsx must render an AppSelect with id="settings-telegram-language"')
+const selectEnd = src.indexOf('/>', selectStart)
+assert.ok(selectEnd > selectStart, 'the telegram language AppSelect must be a self-closing element')
+const languageSelect = src.slice(selectStart, selectEnd)
+
+assert.ok(
+  languageSelect.includes('name="telegram_language"'),
+  'the telegram language control must post the `telegram_language` setting key',
+)
+assert.ok(
+  languageSelect.includes("setValue('telegram_language'"),
+  "the telegram language control must save through setValue('telegram_language', ...)",
+)
+assert.match(
+  languageSelect,
+  /value=\{[^\n]*form\.telegram_language[^\n]*'both'\}/,
+  'the telegram language control must fall back to `both` when form.telegram_language is empty or unknown',
+)
+assert.ok(
+  languageSelect.includes('disabled={!canEditSettings}'),
+  'the telegram language control must be disabled without full Settings access',
+)
+for (const [value, key] of [
+  ['both', 'telegram_language_both'],
+  ['en', 'english'],
+  ['km', 'khmer'],
+] as const) {
+  assert.ok(
+    languageSelect.includes(`{ value: '${value}', label: t('${key}')`),
+    `the telegram language control must offer '${value}' labelled by t('${key}')`,
+  )
+}
+assert.equal(
+  (languageSelect.match(/\bvalue: '/g) || []).length,
+  3,
+  'the telegram language control must offer exactly three options (both, en, km)',
+)
+
 console.log(
-  'PASS Settings.tsx shift-registration and Telegram-automation mini-sections route through t() with real Khmer text (i18n:4, i18n:5)',
+  'PASS Settings.tsx shift-registration and Telegram-automation mini-sections route through t() with real Khmer text, and the Telegram report-language chooser wires both/en/km with `both` as the default (i18n:4, i18n:5)',
 )
