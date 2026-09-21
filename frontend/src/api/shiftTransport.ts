@@ -289,6 +289,19 @@ export type ShiftState = {
    *  Answered only by GET /current: `undefined` means the server did not say
    *  (older Worker, or a write response), never "none". */
   previous_open_shift?: Shift | null
+  /**
+   * The opening of the segment that follows `previous_open_shift`, as the
+   * Worker's OWN interval guard computes it -- the instant a close of that row
+   * must not pass, or `POST /:id/close` answers 409 "Closing time overlaps the
+   * next shift segment."
+   *
+   * Not today's opening. With two or more stale days still open, the segment
+   * after the offered row is the NEXT STALE DAY, and seeding the form against
+   * today's shift refused every drain but the last. Null when nothing follows
+   * the offered row (today is not registered yet), in which case only the
+   * clock bounds the close. `undefined` is "the server did not say".
+   */
+  previous_open_close_before?: string | null
 }
 
 export type ShiftAmendment = {

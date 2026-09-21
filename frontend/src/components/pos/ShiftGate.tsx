@@ -287,20 +287,34 @@ function NoteFold({ note, onChange, disabled }: { note: string; onChange: (value
 }
 
 /**
- * The closing moment the carry-over form OPENS with.
+ * The closing moment the carry-over form OPENS with, between the two bounds
+ * the Worker actually enforces on `POST /shifts/:id/close`.
  *
- * NOT simply "now". The Worker refuses a carry-over close stamped after the
- * NEXT segment's opening -- `intervalError` in cloudflare/src/routes/shifts.ts
- * answers 409 "Closing time overlaps the next shift segment." -- and the POS
- * header offers this close only once today's shift already exists. Seeded
- * from the bare clock, the default press therefore failed every single time.
- * One minute before that opening is the latest moment the server accepts.
- * `now` is used only when there is no later shift: the registration prompt's
- * own step, where today has not been opened yet.
+ * UPPER -- `closeBefore`, the opening of the segment that FOLLOWS this row, as
+ * `/current` reports it (`previous_open_close_before`). `intervalError` in
+ * cloudflare/src/routes/shifts.ts answers 409 "Closing time overlaps the next
+ * shift segment." for anything past it. It is NOT today's opening: with two or
+ * more stale days still open, the next segment is the next STALE day, and a
+ * form seeded against today's shift was refused on every drain but the last.
+ * One minute before the bound is the latest moment the server accepts; `now`
+ * is used only when nothing follows this row at all (the registration
+ * prompt's own step, before today has been opened).
+ *
+ * LOWER -- the row's OWN opening. `closedAtMs < opened_at` is a 400 ("Closing
+ * time cannot be before opening time."), and a row opened in the last minute
+ * before midnight with the next segment seconds later made the upper bound
+ * land before it. The clamp rounds that opening UP to a whole minute, because
+ * the field itself holds minutes (shiftLocalDateTimeFromMs slices to `:mm`)
+ * and a 23:59:30 opening floored to 23:59 is still before itself.
+ *
+ * Both bounds inside one minute of each other is the one case no minute-
+ * resolution value satisfies; the Worker's own sentence names it.
  */
-function carryOverCloseSeedMs(nextOpenedAt: string | null | undefined, nowMs: number): number {
-  const nextMs = parseServerTimestampMs(nextOpenedAt)
-  return Number.isFinite(nextMs) ? Math.min(nowMs, nextMs - 60_000) : nowMs
+function carryOverCloseSeedMs(closeBefore: string | null | undefined, ownOpenedAt: string | null | undefined, nowMs: number): number {
+  const boundMs = parseServerTimestampMs(closeBefore)
+  const seedMs = Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs
+  const ownMs = parseServerTimestampMs(ownOpenedAt)
+  return Number.isFinite(ownMs) ? Math.max(seedMs, Math.ceil(ownMs / 60_000) * 60_000) : seedMs
 }
 
 /** What both entry points hold: one draft, one submit, one set of reasons. */
@@ -325,7 +339,7 @@ type CarryOverCloseForm = {
  * reported the unresolved write as a red error toast instead of leaving it to
  * the shared unresolved banner. One definition is the fix for both.
  */
-function useCarryOverClose(shift: Shift | null, nextOpenedAt: string | null | undefined, onClosed: () => void): CarryOverCloseForm {
+function useCarryOverClose(shift: Shift | null, closeBefore: string | null | undefined, onClosed: () => void): CarryOverCloseForm {
   const { t, notify, fmtUSD, fmtKHR, user } = useApp() as ShiftGateContext
   const actorId = user?.id ?? undefined
   const [draft, setDraft] = useState<CarryOverCloseDraft>(
@@ -333,6 +347,7 @@ function useCarryOverClose(shift: Shift | null, nextOpenedAt: string | null | un
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState(false)
   const shiftId = shift?.id
+  const ownOpenedAt = shift?.opened_at
 
   useEffect(() => {
     if (shiftId == null) return
@@ -348,12 +363,12 @@ function useCarryOverClose(shift: Shift | null, nextOpenedAt: string | null | un
     // Seeded ONCE per row rather than from the live wall clock: a value that
     // kept re-seeding would overwrite the moment while it is being typed.
     setDraft({
-      closedAt: shiftLocalDateTimeFromMs(Number.isFinite(savedMs) ? savedMs : carryOverCloseSeedMs(nextOpenedAt, Date.now())),
+      closedAt: shiftLocalDateTimeFromMs(Number.isFinite(savedMs) ? savedMs : carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())),
       countedUsd: text('closing_counted_usd'), countedKhr: text('closing_counted_khr'),
       additionalUsd: text('additional_cash_usd'), additionalKhr: text('additional_cash_khr'),
       note: text('closing_note'),
     })
-  }, [shiftId, nextOpenedAt, actorId])
+  }, [shiftId, closeBefore, ownOpenedAt, actorId])
 
   // The closing time is REQUIRED here (unlike the live close, which lets the
   // server stamp its own clock), so a missing one is its own reason.
@@ -367,9 +382,9 @@ function useCarryOverClose(shift: Shift | null, nextOpenedAt: string | null | un
     const counts = shiftClosingCounts(draft.countedUsd, draft.countedKhr)
     setBusy(true)
     try {
-      // ALWAYS the explicit closed_at, never the server's clock: once today's
-      // shift is open the Worker refuses a close stamped after that opening,
-      // so the moment the drawer actually stopped is the only one it takes.
+      // ALWAYS the explicit closed_at, never the server's clock: the Worker
+      // refuses a close stamped after the next segment's opening, so the
+      // moment the drawer actually stopped is the only one it takes.
       const result = await closeShiftById(shift.id, {
         actorId,
         expectedRevision: shift.revision,
@@ -416,12 +431,22 @@ function useCarryOverClose(shift: Shift | null, nextOpenedAt: string | null | un
 
 /**
  * WHICH shift this is, from first paint: the code, when it was opened (the
- * formatted day-first stamp names the earlier day) and the drawer it started
- * with -- the three facts the cashier needs to recognise the row before they
- * put a closing time on it. Both entry points show it, and so does the locked
- * state that offers no close at all.
+ * formatted day-first stamp names the earlier day), WHO opened it and the
+ * drawer it started with -- the facts the cashier needs to recognise the row
+ * before they put a closing time on it. Both entry points show it, and so does
+ * the locked state that offers no close at all.
+ *
+ * The username is on it because every history surface in this app names the
+ * acting account, and this one decides whether the locked message ("only the
+ * shift owner or an administrator") is about you. It is the same `user_name`
+ * the row already carries (the Worker's displayName prefers the username) and
+ * the same one the shift summary prints, so nothing new is exposed.
+ *
+ * And the BOUND, when the server states one: the instant this close has to
+ * precede. Without it the prefilled time is a number the cashier cannot check,
+ * and a 409 naming "the next shift segment" names a segment they never saw.
  */
-function CarryOverIntro({ shift }: { shift: Shift }) {
+function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: string | null }) {
   const { t, fmtUSD, fmtKHR } = useApp() as ShiftGateContext
   return (
     <>
@@ -431,7 +456,9 @@ function CarryOverIntro({ shift }: { shift: Shift }) {
       <ShiftFactStrip facts={[
         !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
         { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
+        !!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },
         { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },
+        !!closeBefore && { label: t('shift_previous_open_close_before'), value: fmtDateTime24(closeBefore) },
       ]}
       />
     </>
@@ -449,10 +476,12 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   return (
     <>
       {/* Required, and prefilled to the latest moment the server will accept
-          (carryOverCloseSeedMs), so the common case -- the till was simply
-          never closed on an earlier day and is closed on arrival -- is one
-          press. The row itself is whichever open shift /current names, oldest
-          first; nothing here assumes it was yesterday. */}
+          (carryOverCloseSeedMs, between the row's own opening and the bound
+          /current stated), so the common case -- the till was simply never
+          closed on an earlier day and is closed on arrival -- is one press.
+          The row itself is whichever open shift /current names, oldest first;
+          nothing here assumes it was yesterday, and the strip above prints
+          the bound so the prefill is a number the cashier can check. */}
       <div>
         <span className="block text-xs font-medium leading-relaxed text-zinc-700 dark:text-zinc-200">{t('shift_close_time_required')}</span>
         <DateTimeEntryInput
@@ -538,11 +567,12 @@ export default function ShiftGate({ children, branchId = null, branchName = null
     setRegisterStep(carryOver ? 'carry_over' : 'open')
   }, [carryOver?.id])
 
-  // ONE carry-over close form, the same one the POS header panel renders.
-  // Today's shift does not exist while this prompt is up, so the seeded
-  // closing time is simply the clock -- the rule for when a later shift DOES
-  // exist belongs to the form, not to either caller.
-  const carryForm = useCarryOverClose(carryOver, state?.shift?.opened_at, () => setRegisterStep('open'))
+  // ONE carry-over close form, the same one the POS header panel renders,
+  // handed the bound the WORKER computed rather than a guess made here.
+  // Today's shift usually does not exist while this prompt is up, but a
+  // second stale day does, and that -- not the clock -- is what the close
+  // has to precede.
+  const carryForm = useCarryOverClose(carryOver, state?.previous_open_close_before, () => setRegisterStep('open'))
 
   const submitOpen = async () => {
     if (busy) return
@@ -597,7 +627,7 @@ export default function ShiftGate({ children, branchId = null, branchName = null
         >
           {registerStep === 'carry_over' && carryOver ? (
           <div className="space-y-3">
-            <CarryOverIntro shift={carryOver} />
+            <CarryOverIntro shift={carryOver} closeBefore={state?.previous_open_close_before} />
 
             {carryOverClosable ? (
               <CarryOverCloseFields
@@ -716,10 +746,10 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
   // chose "open today's shift instead" must still be able to reach it here.
   const carryOver = state?.previous_open_shift ?? null
   const canCloseCarryOver = carryOver?.capabilities.can_close === true
-  // The shared form, seeded against TODAY's opening: the Worker refuses a
-  // carry-over close stamped after it, and this control is only reachable
-  // once today's shift exists to refuse it.
-  const carryForm = useCarryOverClose(carryTarget, state?.shift?.opened_at, () => { setCarryTarget(null); setOpen(false) })
+  // The shared form, seeded against the bound /current reported: the opening
+  // of whichever segment follows the offered row -- today's when today is
+  // next, the next STALE day's when another one is still open behind it.
+  const carryForm = useCarryOverClose(carryTarget, state?.previous_open_close_before, () => { setCarryTarget(null); setOpen(false) })
 
   const endBlocker = closingCountInvalid(countedUsd) || closingCountInvalid(countedKhr)
     || closingCountInvalid(additionalUsd) || closingCountInvalid(additionalKhr) ? 'invalid' as const : null
@@ -886,7 +916,7 @@ export function EndShiftButton({ onEnded, branchId = null }: { onEnded?: () => v
           unsavedChanges={{ dirty: carryForm.dirty }}
         >
           <div className="space-y-3">
-            <CarryOverIntro shift={carryTarget} />
+            <CarryOverIntro shift={carryTarget} closeBefore={state?.previous_open_close_before} />
             <CarryOverCloseFields form={carryForm} />
           </div>
         </Modal>
