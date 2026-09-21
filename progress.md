@@ -1,3 +1,20 @@
+## Import transaction fence integrated; product scope fix held — September 21
+
+d787f440/6f307472 integrate b99a38eb/1d7ae8ac after independent7b77744f.
+Reviewer reproduced maintenance-release classification race; correction uses stable
+guard error identity and no automatic deterministic retry, with native refusal/no
+cursor-failure drift cases. Root20652 actual native D1/Hono+backup regression/types
+terminal0. This does not certify cross-DB/R2 atomicity, full lifecycle or tier capacity.
+Backup test baseline error-message drift reproducedc52073; correction asserts exact
+0188 rejection plus nonempty unchanged members; independent82644951 and root2ba3f2
+PASS. Initial draft used wrong operation_key column (c1c5bf), corrected to receipt_id.
+
+Product actor fix4ae9e142/6a5df8c5 remains isolated: reviewer found likely normal-close
+authority invalidation suppressing post-save undo enrichment; reproduction/correction
+required, not integrated. Sales-reset planb739bdfc identifies concrete remaining route,
+continuation, backup completion and bounded retirement wiring. No new deployment or
+remote migration; full goal remains open.
+
 ## Product debloat verified; six further worktrees reclaimed — September 21
 
 586cfce8 integrates c039ceec after independent2a4405dd: obsolete product save

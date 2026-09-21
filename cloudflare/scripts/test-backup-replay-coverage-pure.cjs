@@ -124,7 +124,12 @@ console.log('PASS: historical finance and durable reversal backup coverage')
   }
   restored.exec("DELETE FROM system_flags WHERE key='maintenance'")
   for(const {table,rows} of bundle) assert.deepEqual(restored.prepare(`SELECT * FROM ${table}`).all(),rows,table)
-  assert.throws(()=>restored.exec('DELETE FROM transfer_operation_members'),/immutable/)
+  // 0188 requires permanent retirement evidence before member deletion. Assert
+  // the current guard, then prove its refusal preserved the restored records.
+  const protectedMembers=restored.prepare('SELECT * FROM transfer_operation_members ORDER BY receipt_id,ordinal').all()
+  assert.ok(protectedMembers.length > 0, 'round trip must contain protected members')
+  assert.throws(()=>restored.exec('DELETE FROM transfer_operation_members'),/exact member retirement required before delete/)
+  assert.deepEqual(restored.prepare('SELECT * FROM transfer_operation_members ORDER BY receipt_id,ordinal').all(),protectedMembers)
   assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check,'ok')
   restored.close()
   console.log('PASS executable production-schema transfer receipt/member/history/lot backup restore round trip')
