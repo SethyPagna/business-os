@@ -110,7 +110,10 @@ async function main() {
       ['DELETE FROM product_batches WHERE id=1', /provenance|immutable|Cannot delete a received lot with positive branch stock/],
       ['UPDATE product_batches SET variant_product_id=2 WHERE id=1', /provenance|immutable/],
       ['UPDATE transfer_operation_members SET quantity=20', /provenance|immutable/],
-      ['DELETE FROM transfer_operation_members', /provenance|immutable/],
+      // 0188 refuses a bare member delete before the older provenance guard
+      // sees it: members retire through an exact retirement row first. Either
+      // denial is fail-closed and leaves the replay snapshot untouched.
+      ['DELETE FROM transfer_operation_members', /provenance|immutable|exact member retirement required/],
     ]
     for(const [mutation, expectedError] of mutations) {
       assert.throws(()=>sql().exec(mutation),expectedError)

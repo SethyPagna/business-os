@@ -25,7 +25,7 @@ CREATE TABLE sale_items(
 );
 CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0);
 CREATE TRIGGER sale_revision_sales_update AFTER UPDATE ON sales
-WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+WHEN NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
 BEGIN
  INSERT INTO sale_write_revisions(sale_id,revision) VALUES(NEW.id,1)
  ON CONFLICT(sale_id) DO UPDATE SET revision=revision+1;

@@ -245,7 +245,9 @@ runTest('the inventory transfer is refused before its atomic write', () => {
   assert.ok(routeAt > 0, 'the inventory transfer route must still exist')
   const guardAt = inventorySource.indexOf('transferDirectionError(', routeAt)
   const planAt = inventorySource.indexOf('await planTransferOperation(', routeAt)
-  const batchAt = inventorySource.indexOf('await db.batch(statements)', routeAt)
+  // The atomic write now goes through the ordinary maintenance guard batch
+  // (lib/businessMaintenanceGuard.ts); the direction check still precedes it.
+  const batchAt = inventorySource.indexOf('await ordinaryBusinessBatch(db, statements)', routeAt)
   assert.ok(guardAt > routeAt, 'the guard must live inside the transfer route')
   assert.ok(planAt > routeAt && batchAt > planAt)
   assert.ok(guardAt < planAt, 'the direction check must precede construction of the atomic write')

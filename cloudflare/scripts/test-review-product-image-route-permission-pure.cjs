@@ -34,6 +34,14 @@ function loadMoneyDependency(name) {
   const loaded = { exports: {} }
   const dependency = request => {
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
+    // lib/db.ts re-exports the import maintenance fence, which imports db back;
+    // the money-policy graph never reaches it, so it is a throwing stand-in.
+    if (request === './importMaintenanceFence') return {
+      getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+      withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+      isImportMaintenanceFenceError: () => false,
+      ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+    }
     const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)

@@ -290,7 +290,10 @@ await check('both transfer routes use the shared read-only provenance planner an
   for (const marker of ["app.post('/transfer',", "app.post('/transfer-bulk',"]) {
     const body = routeBody(src, marker)
     assert.match(body, /await planTransferOperation\(db,/)
-    assert.match(body, /await db.batch\(statements\)/)
+    // The statements ride in ONE batch whose final statement is the ordinary
+    // maintenance guard, so a maintenance marker arriving after admission rolls
+    // the whole transfer back (lib/businessMaintenanceGuard.ts).
+    assert.match(body, /await db.batch\(\[\.\.\.statements, ordinaryBusinessMaintenanceGuard\]\)/)
     assert.doesNotMatch(body, /await resolveDestinationBatch\(/)
   }
 })

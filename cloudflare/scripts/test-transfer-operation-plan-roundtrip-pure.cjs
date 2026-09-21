@@ -64,7 +64,12 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-const dbModule = loadReal('lib/db.ts')
+const dbModule = loadReal('lib/db.ts', { './importMaintenanceFence': {
+    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+    withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+    isImportMaintenanceFenceError: () => false,
+    ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+  } })
 const batchCode = loadReal('lib/batchCode.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')

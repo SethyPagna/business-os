@@ -38,6 +38,12 @@ const ALLOWLIST = {
 // Require the named file to exist so deleting/renaming it fails this guard.
 const NAMED_COMPANIONS = {
   184: 'test-product-cost-previous-migration-native.cjs',
+  // 0188/0190/0191 are unapplied, unwired foundations (transfer receipt
+  // retirement, dataset operation journal and its generation transition); their
+  // schema and triggers are exercised by these native/pure companions.
+  188: 'test-transfer-receipt-retirement-native.cjs',
+  190: 'test-dataset-operation-native.cjs',
+  191: 'test-dataset-operation-transition-native.cjs',
 }
 
 function listMigrationNumbers() {

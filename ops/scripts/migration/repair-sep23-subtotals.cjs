@@ -298,7 +298,7 @@ function buildPayload(rawManifest) {
   const applyAudit = auditCount('repair_subtotal_usd')
   const recoveryHistory = historyCount(RECOVERY_ENTITY)
   const recoveryAudit = auditCount('recover_subtotal_usd')
-  const maintenanceGuard = `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')`
+  const maintenanceGuard = `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')`
   const applyEntry = `${maintenanceGuard} AND (((${applyHistory})=0 AND (${applyAudit})=0 AND ${stateCount('before')}=22) OR ((${applyHistory})=1 AND (${applyAudit})=1 AND ${stateCount('after')}=22))`
   const applyFinal = `${maintenanceGuard} AND ${stateCount('after')}=22 AND (${applyHistory})=1 AND (${applyAudit})=1`
   const recoveryEntry = `${maintenanceGuard} AND (${applyHistory})=1 AND (${applyAudit})=1 AND ((((${recoveryHistory})=0 AND (${recoveryAudit})=0 AND ${stateCount('after')}=22)) OR ((${recoveryHistory})=1 AND (${recoveryAudit})=1 AND ${stateCount('recovered')}=22))`

@@ -203,7 +203,7 @@ CREATE TABLE audit_logs (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TRIGGER sale_revision_sales_update AFTER UPDATE ON sales
-WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+WHEN NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
 BEGIN
   INSERT INTO sale_write_revisions(sale_id, revision)
   SELECT sale_id, 1 FROM (SELECT OLD.id AS sale_id UNION SELECT NEW.id) WHERE sale_id IS NOT NULL

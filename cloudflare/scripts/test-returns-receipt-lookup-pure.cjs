@@ -124,6 +124,9 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/db': { getDb: () => db },
+  // The ordinary maintenance guard is REAL: its statement rides in the same
+  // batch as the write and must be the actual SQL, not a stand-in.
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   '../lib/sqlBinding': sqlBinding,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },

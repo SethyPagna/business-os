@@ -15,8 +15,16 @@ const output = ts.transpileModule(source, {
   fileName: sourcePath,
 }).outputText
 const loaded = { exports: {} }
+// lib/db.ts re-exports the import maintenance fence; the retry kernel under
+// test never reaches it, so the re-export is satisfied with a throwing stand-in.
+const requireForDb = (id) => id === './importMaintenanceFence' ? {
+  getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+  withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+  isImportMaintenanceFenceError: () => false,
+  ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+} : require(id)
 new Function('exports', 'require', 'module', '__filename', '__dirname', output)(
-  loaded.exports, require, loaded, sourcePath, path.dirname(sourcePath),
+  loaded.exports, requireForDb, loaded, sourcePath, path.dirname(sourcePath),
 )
 const { D1Compat } = loaded.exports
 

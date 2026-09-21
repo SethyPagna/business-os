@@ -129,7 +129,12 @@ function loadReal(relPath, requireOverrides = {}) {
 // can't silently drift from lib/db.ts's real implementation the way the
 // old routes/branches.ts-local copy drifted from lib/reviewApply.ts's own
 // naive `value ? 1 : 0` before this session's fix.
-const { toDbBool } = loadReal('lib/db.ts')
+const { toDbBool } = loadReal('lib/db.ts', { './importMaintenanceFence': {
+    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+    withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+    isImportMaintenanceFenceError: () => false,
+    ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+  } })
 const dbStub = { './db': { getDb: () => db, toDbBool }, '../lib/db': { getDb: () => db, toDbBool } }
 const auditStub = { './audit': { audit: async () => {} }, '../lib/audit': { audit: async () => {} } }
 const broadcastStub = {

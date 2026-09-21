@@ -39,7 +39,14 @@ const media = loadTs('lib/media.ts')
 const sqlBinding = loadTs('lib/sqlBinding.ts')
 const imagePermission = loadTs('lib/productImagePermission.ts', { './media': media, './sqlBinding': sqlBinding })
 const permissions = loadTs('lib/permissions.ts')
-const dbLib = loadTs('lib/db.ts')
+// lib/db.ts re-exports the import maintenance fence; this permission test never
+// reaches it, so the re-export is satisfied with a throwing stand-in.
+const dbLib = loadTs('lib/db.ts', { './importMaintenanceFence': {
+    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+    withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+    isImportMaintenanceFenceError: () => false,
+    ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+  } })
 const realProductWrites = loadTs('lib/productWrites.ts', {
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,

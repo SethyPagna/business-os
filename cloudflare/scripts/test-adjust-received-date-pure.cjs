@@ -103,7 +103,15 @@ const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
-  './db': loadReal('lib/db.ts'),
+  // lib/db.ts re-exports the import maintenance fence; these pure tests never
+  // reach it, so the re-export is satisfied with a throwing stand-in, the same
+  // way the bulk-delete and import-authority harnesses do.
+  './db': loadReal('lib/db.ts', { './importMaintenanceFence': {
+    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by this pure test') },
+    withImportMaintenanceWriteFence: async () => { throw new Error('withImportMaintenanceWriteFence should not be called by this pure test') },
+    isImportMaintenanceFenceError: () => false,
+    ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
+  } }),
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
@@ -193,6 +201,9 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/movementReference': movementReferenceKernel,
   '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
+  // The ordinary maintenance guard is REAL: its statement rides in the same
+  // batch as the write and must be the actual SQL, not a stand-in.
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   // routes/inventory.ts buckets movement dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': businessDateWindow,
@@ -277,6 +288,9 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
+  // The ordinary maintenance guard is REAL: its statement rides in the same
+  // batch as the write and must be the actual SQL, not a stand-in.
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,
