@@ -34,6 +34,15 @@ privateTransportScope; identical at ebafdada) plus 2 contention flakes that pass
 standalone. Stale assertions and loaders repinned to the product-save actor fence,
 no source change; full chain now test:utils: 512 passed, 0 red of 512 executed files (0 skipped; 320520 ms), i18n and build green. The
 earlier "test:utils green on 80f379ff" claim is withdrawn in the release record.
+Telegram lane (3d213998 Worker, 22554ff6 Settings): shift/day/period reports and
+/report replies use the owner's reference layout (title, numbered sections, rule
+dividers, gross-sales row, payment/courier/expense breakdowns); report language
+is the telegram_language setting (both/en/km, default both) chosen in Settings.
+Gates on 22554ff6: frontend 511 passed, 1 red of 512 executed files (0 skipped; 380034 ms)
+(swShellContent only, environmental Playwright navigation timeout, sources identical
+to HEAD, chip task_e8f6d763), i18n and build green; Worker tsc 0, 492/497 green,
+reds: the three disclosed baseline files (dated-stock-count apply/decisions, reset-products)
+plus product-conflict-action apply/remove native, both green standalone (contention).
 Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

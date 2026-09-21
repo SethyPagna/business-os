@@ -198,6 +198,67 @@ the auto-mode permission classifier. No `deploy:full`, `migrate:remote` or
   smoke on a real device is the owner's remaining check.
 - Previous production: `85a3e752` / `0bdfffc5-b4a9-48a6-9db3-3c0958979f1b`.
 
+## Telegram reports — sectioned layout and language mode (3d213998, 22554ff6)
+
+Owner request (21 September): the shift report follows the pasted reference
+layout, every Telegram report is "smarter and compact" with a title, dividers and
+numbered sections, and the language is a Settings choice — Khmer, English or both,
+both by default.
+
+- **Worker (`3d213998`, `cloudflare/src/lib/telegram.ts`, `telegramLang.ts`):**
+  `formatShiftReport` renders six numbered sections in the reference order —
+  title "Shift report — open/closed", shop / cashier / from / to, invoice counts
+  (total, deleted, edited), Sales (revenue, discount on items, discount on
+  invoices, gross sales when a cut exists, profit), Actual count (registered cash,
+  final amount, additional used), Payment methods, Delivery service, Other
+  expenses — under a shared rule line. `shiftFigures` reads the payment-method
+  and courier breakdowns from the existing `salesAnalytics` readers (cap 8 rows
+  plus "Other"); `gross_sales_usd` comes from the report kernel. Day and period
+  reports and `/report` replies use the same section helpers. Language mode:
+  `telegram_language` setting (`both` | `en` | `km`, junk → `both`) is read
+  in the existing settings SELECT and applied through a synchronous
+  `withLanguage` scope that restores the previous mode in `finally`; `pair()`
+  emits both, English or Khmer labels. Khmer glossary checked against
+  `km.json` (`gross_sales` reused).
+- **Settings (`22554ff6`):** one `AppSelect` row "Report language" (both /
+  English / Khmer, display default both, disabled without full settings
+  access) writing `telegram_language` through the existing `POST /api/settings`
+  path; three new keys in both packs (`telegram_language_label`, `_desc`,
+  `_both`); the en/km options reuse the existing `english` / `khmer` keys.
+- **Council / dead-code / debloat (simulated, five labelled perspectives):** the
+  duplicated rule constant collapsed to one exported `RULE`; `expenseBlock`
+  folded into `expenseTotals`; the language normaliser lives in one place
+  (`normalizeTelegramLanguage`, used by both the setting reader and
+  `setTelegramLanguage`); the duplicate `telegram_language_en/_km` keys were
+  removed in favour of the existing keys; no new module, listener or request-path
+  allocation. Free/paid: no plan-sensitive capability touched (one settings row,
+  same message count). Retired copy ("Gross sale", "still open" wording) is
+  pinned as retired in the tests.
+- **Tests (`3d213998`):** `test-telegram-shift-report-pure.cjs` renders the
+  fixture in both / en / km and pins the reference order, the gross-sales row and
+  the 38-line cap; `test-shift-report-pure.cjs` repinned to the six sections
+  with a strict-after order loop and a swapped-order positive control, and its
+  stale "no breakdown queries" assertion (vacuous: the stub answered from a
+  snapshot) replaced by a call-count pin on both breakdown readers (removing one
+  increment fails it); bilingual, day-report and messages tests extended
+  (glossary, mode restoration, junk fallback, `withLanguage` source check).
+  Frontend: `settingsShiftTelegramI18n.test.ts` pins the keys and the wiring
+  (name, `setValue`, both fallback, disabled, exactly three options).
+- **Gates on the tip `22554ff6`:** frontend **test:utils: 511 passed, 1 red of 512 executed files (0 skipped; 380034 ms)**, `verify:i18n` and
+  `build` exit 0. The one red is `swShellContent.test.ts`: its Playwright
+  navigation to `/business-os-build.json` times out (30 s, `waitUntil: commit`)
+  three of three standalone runs and in both full chains, with every source it
+  reads byte-identical to HEAD; it passed in the 23:38 chain on the same sources.
+  Restoring the CRLF endings of `frontend/public/sw.js` (the build rewrites the
+  trio to LF) did not change the result. Classified environmental, not a
+  regression; chip `task_e8f6d763` holds the evidence. Latent weakness noted:
+  the test's source-replace of the app-document guard silently no-ops on CRLF.
+  Worker gate on `22554ff6`: `tsc --noEmit` exit 0; 492 of 497 `scripts/test-*.cjs` green; red: `test-dated-stock-count-apply-pure.cjs`, `test-dated-stock-count-decisions-pure.cjs`, `test-reset-products-pure.cjs` (the three disclosed baseline reds); `test-product-conflict-action-apply-native.cjs`, `test-product-conflict-action-remove-native.cjs` red in the sweep, green standalone (contention).
+- **Chips:** `task_e8f6d763` (swShellContent navigation timeout),
+  `task_dc150fae` (ReceiptSettings hard-codes its language labels).
+- Not in this lane: `telegram_help_paragraph` "switches" wording untouched;
+  `/stock` and `/inventory` keep the single-block layout.
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300
