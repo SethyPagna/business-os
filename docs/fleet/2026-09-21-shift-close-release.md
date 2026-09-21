@@ -427,6 +427,38 @@ dead-code, free/paid) and at least one refutation attempt.
   `build` exit 0 — the first fully green frontend chain of this program.
   Worker gate on `4d1bb37f`: `tsc --noEmit` exit 0; 496 of 498 `scripts/test-*.cjs` green; `test-queue-fallback-native.cjs`, `test-record-orphans-native.cjs` red in the sweep, green standalone (workerd contention while the frontend chain ran).
 
+### Deployment — DONE (Paid), 21 September 2026 21:38Z (carry-over shift close checkpoint)
+
+Deployed from an isolated worktree detached at `f98754b3` (the docs record on
+top of code tip `4d1bb37f`; tracked tree clean after restoring the public trio,
+`npm ci` in both packages, Worker typecheck exit 0, frontend built from that tip,
+Paid and Free dry-runs exit 0) with `npm run deploy` (wrangler.toml, Paid) under
+the owner's "fix and make deploy" direction and the standing checkpoint
+authorization. No `deploy:full`, `migrate:remote` or `secrets:sync`; no
+production D1 write. Pushed first: `origin/main` and
+`origin/codex/supplier-settlement-20260918` both at `f98754b3`.
+
+- Source: `f98754b364ba` (code tip `4d1bb37f`).
+- Worker version: `c77d84db-2d7a-4308-8b97-674b60bdb439`; live `/api/runtime/version`:
+  revision `f98754b364ba`, hash `aea0cc55ceb3a067`, built `2026-09-21T21:35:49.659Z`,
+  booted `21:38:34Z`, tier `paid`. Upload 131 s, triggers 11 s; exit 0.
+- Frontend: `business-os-build.json` revision `f98754b364ba`, hash `858e11877a4da3a1`,
+  built `2026-09-21T21:34:54.691Z`.
+- Live smoke (browser pane, signed out): admin shell renders the login screen with
+  only the expected 401 session probes; public storefront: the pane's cached shell
+  from the previous build asked for a retired chunk, the Worker answered 404 "Stale
+  build asset" and the stale-chunk guard reloaded once onto the live build
+  (`__bos_reason=nested-chunk:public-catalog-secondary-tabs:live-build-first-attempt`),
+  after which the About and Products tabs render (3 586 results, page 1 of 72;
+  portal bootstrap, search and promotions 200). The anonymous client-error report
+  answered 401 as before. No sign-in, no transaction, no shift touched. Owner's
+  remaining check: on a phone with a shift left open from an earlier day, the POS
+  prompt offers "close it first" with the closing time prefilled a minute before
+  the next opening, and the amber header button does the same once today is open.
+- Previous production: `c5b20a80` / `0093be5b-5ea6-4926-841e-fe6caa0f6e1a`.
+- Deploy worktree removed after the smoke (`git worktree remove`, then the long-path
+  residue deleted and the registration pruned).
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300
@@ -442,6 +474,20 @@ removed with archive evidence (293 clean, 7 left empty directory shells from the
 race that were then deleted). The 11 plain folders (review snapshots, QA tooling,
 an unpushed-lanes bundle, a pre-ChatGPT source copy) and 6 loose zips/logs were
 moved, not deleted, into `BusinessOS-Recovery/2026-09-21/plain/` and `loose/`.
+
+22 September, owner's "delete the many folders ... push what is done and needed":
+`bos-business-maintenance-guards-20260921` (branch
+`codex/business-maintenance-guards-20260921`, four commits beyond the checkpoint
+tip including the rejected adjust candidate `a22d3b1e`, one uncommitted change to
+`ops/scripts/audit/orphan-audit.sql`) had its dirty file committed as-is
+(`284536b7`, wip) and the whole branch pushed to
+`origin/archive/bos-business-maintenance-guards-20260921` before the worktree was
+removed; nothing merged, the REJECT stands. The 78 stale `bos-rc-workers/*`
+registrations whose folders were already gone were pruned. Remaining under
+Downloads: `business-os-v1` (the shared checkout with peer work, never removed),
+`bos-supplier-settlement-20260918` (this program's workspace, to be removed once its
+untracked `outputs/` evidence is moved to `BusinessOS-Recovery/2026-09-22/`) and
+`bos-shift-modal-bound-20260922` (the D12 lane in progress).
 The temporary `bos-baseline-ebafdada-tmp` and `bos-deploy-20260921` worktrees
 were removed after the deploy. Downloads now holds exactly three checkouts:
 `business-os-v1` (primary `.git`, still backs 98 worktrees under `.codex`,

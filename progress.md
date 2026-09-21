@@ -64,6 +64,12 @@ Telegram /stock and /inventory sectioned (8d4db70e). Three baseline Worker reds 
 as harness defects (41bc3abe) plus five more harnesses (91e2f69b) and four
 dormant siblings found by audit (2d95bfc9). Gates: frontend on
 4d1bb37f 514 passed, 0 red of 514 executed files (0 skipped; 338273 ms), i18n/build 0; Worker tsc 0, 496/498 green (test-queue-fallback-native.cjs, test-record-orphans-native.cjs contention, green standalone).
+Pushed (both branches at f98754b3) and deployed (Paid) 21:38Z: Worker
+c77d84db-2d7a-4308-8b97-674b60bdb439, live revision f98754b364ba, frontend hash
+858e11877a4da3a1; no remote migration; smoke green (stale-chunk guard reloaded the
+pane's cached shell once, then storefront and admin shell render). Downloads: guards
+worktree archived (origin/archive/bos-business-maintenance-guards-20260921, 284536b7)
+and removed; D12 Shifts-popup close bound lane in progress.
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

@@ -52,7 +52,8 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   `closeShiftById`, prefilled a minute before that bound) or open today's shift;
   the header offers the same close through one shared hook with
   `pendingShiftMutation` replay; admin-exempt users receive the row too.
-  `readCurrent` and the daily prompt are unchanged.
+  `readCurrent` and the daily prompt are unchanged. Deployed (Paid) as Worker
+  `c77d84db`, live revision `f98754b364ba`, frontend hash `858e11877a4da3a1`.
 - Reset blocker: migration 0188's retirement trigger refuses the reset route's
   `transfer_operation_members` delete; wire the retirement kernel into the
   route before applying 0185–0191.
