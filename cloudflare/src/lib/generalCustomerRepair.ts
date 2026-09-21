@@ -168,7 +168,7 @@ function assertRepairableIdentity(manifest: CanonicalManifest): void {
 }
 
 async function readMaintenance(db: Pick<D1Compat, 'prepare'>): Promise<boolean> {
-  const row = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").get()
+  const row = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance'").get()
   return Boolean(row)
 }
 
@@ -373,7 +373,7 @@ function atomicGuard(before: boolean): string {
     : CUSTOMER_COLUMNS.map((column) => column === 'updated_at'
       ? 'updated_at IS @mutation_stamp'
       : column === 'is_anonymous' ? 'is_anonymous=1' : `${column} IS @customer_${column}`).join(' AND ')
-  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_REPAIR_TARGET_ID} AND ${rowPredicate})
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_REPAIR_PROTECTED_ID} AND COALESCE(is_anonymous,0)=0)
     AND NOT EXISTS(SELECT 1 FROM portal_accounts WHERE contact_id=${GENERAL_CUSTOMER_REPAIR_TARGET_ID})

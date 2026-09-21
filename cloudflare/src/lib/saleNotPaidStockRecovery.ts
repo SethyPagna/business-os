@@ -372,7 +372,7 @@ function buildStatements(manifest: CanonicalManifest, request: SaleNotPaidStockR
   const guardConditions: string[] = [
     `(SELECT COUNT(*) FROM sale_not_paid_stock_recovery_receipts WHERE incident_key=@incident)=0`,
     `(SELECT COUNT(*) FROM sale_not_paid_stock_recovery_guards)=0`,
-    `NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')`,
+    `NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')`,
     `(SELECT COUNT(*) FROM sales WHERE id=16951 AND sale_status='completed')=1`,
     `(SELECT COUNT(*) FROM inventory_movements WHERE reference_id=16951 AND movement_type='sale' AND quantity=-36)=1`,
   ]

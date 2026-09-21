@@ -691,6 +691,24 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT COUNT(*) count FROM stock_session_operations').get().count, 0)
   })
 
+  await check('maintenance markers arriving after stock-session admission roll back every business row', async () => {
+    for (const mode of ['reset', 'restore', 'corrupt']) {
+      const f = fixture()
+      const request = receiveRequest(`stock-maintenance-${mode}`, 5)
+      f.beforeCommit((sql) => sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode })))
+      await assert.rejects(() => commitStockSession(f.env, user, request))
+      assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0)
+      assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
+      for (const table of ['stock_session_operations', 'product_batches', 'action_history', 'undo_snapshots', 'audit_logs']) {
+        assert.equal(f.sql.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, `${mode} must not write ${table}`)
+      }
+      f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+      const receipt = await commitStockSession(f.env, user, request)
+      assert.equal(receipt.replayed, false)
+      assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 5)
+    }
+  })
+
   await check('create_receive commits every durable row together', async () => {
     const f = fixture()
     const receipt = await commitStockSession(f.env, user, {

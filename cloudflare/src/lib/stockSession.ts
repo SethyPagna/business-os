@@ -855,7 +855,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     revisions: Object.fromEntries(revisions),
   }
   const statements: StockWriteStatement[] = [
-    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"),
+    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
   ]
   const receiptTotalCostUsd = sumMoney4(request.items.flatMap((line) =>
     line.unit_cost_usd == null || line.quantity <= 0 ? [] : [multiplyMoney4(line.unit_cost_usd, line.quantity)]))
@@ -1204,7 +1204,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   const before = snapshot.before as Record<string, Row[]>
   const stateSql = await stockReplayStateSql(env)
   const statements: StockWriteStatement[] = [
-    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')"),
+    assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
       JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),

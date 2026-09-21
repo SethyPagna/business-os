@@ -9,7 +9,7 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const compile = file => ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib', file), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText.replace("from './permissions'", "from './permissions.js'")
+}).outputText.replace("from './permissions'", "from './permissions.js'").replace("from './importMaintenanceFence'", "from './importMaintenanceFence.js'").replace("from './db'", "from './db.js'")
 const worker = `
 import { D1Compat } from './db.js';
 import { registerTransferRunStatements,sealTransferRunChunkStatements,commitTransferRunChunk,committedTransferRunChunk } from './store.js';
@@ -27,6 +27,12 @@ export default { async fetch(request,env) {
     await env.DB.prepare('INSERT INTO native_stock(key,quantity,cost) VALUES(?,20,3.123456)').bind(mode).run();
   }
   if (phase==='setup') return Response.json({ready:true});
+  // Simulate maintenance arriving after route admission and after the run
+  // and child were sealed, but immediately before the actual business batch.
+  if (phase==='first' && mode.startsWith('maintenance-')) {
+    const marker = mode==='maintenance-corrupt' ? '{corrupt' : JSON.stringify({mode:mode.slice('maintenance-'.length)});
+    await env.DB.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(marker).run();
+  }
   const effects = [
     {sql:'UPDATE native_stock SET quantity=quantity-1 WHERE key=@mode',params:{mode}},
     {sql:"INSERT INTO action_history(scope,entity,entity_id,label,reversible,status) VALUES('branches','stock_transfer',@key,'native',1,'undoable')",params:{key}},
@@ -76,6 +82,7 @@ async function main() {
   const mf = new Miniflare({ modules:[
     {type:'ESModule',path:'entry.js',contents:worker},
     {type:'ESModule',path:'db.js',contents:compile('db.ts')},
+    {type:'ESModule',path:'importMaintenanceFence.js',contents:compile('importMaintenanceFence.ts')},
     {type:'ESModule',path:'store.js',contents:compile('transferRunStore.ts')},
     {type:'ESModule',path:'permissions.js',contents:compile('permissions.ts')},
   ], compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR) })
@@ -104,10 +111,11 @@ async function main() {
         assert.ok(result.receipt.receipt_id)
       }
     }
-    for (const mode of ['normal','rollback','lostack','transient','old','budget']) {
+    for (const mode of ['normal','rollback','lostack','transient','old','budget','maintenance-reset','maintenance-restore','maintenance-corrupt']) {
       const result = await fetchCase(mode)
       const committed = ['normal','lostack'].includes(mode)
       check(result,committed)
+      if (mode.startsWith('maintenance-')) assert.match(result.error, /NOT NULL|constraint/i, 'any maintenance marker refuses the atomic business batch')
       assert.equal(result.counts.attempts,mode==='old'?2:mode==='budget'?0:1)
       if (mode==='normal') assert.equal(result.error,null)
       if (mode==='rollback') { assert.match(result.error,/NOT NULL|constraint/i); assert.deepEqual(result.counts.submitted,[8]) }
@@ -124,6 +132,12 @@ async function main() {
       check(recovered,committed)
       assert.equal(recovered.counts.attempts,0)
       assert.deepEqual(recovered.receipt,result.receipt)
+      if (mode.startsWith('maintenance-')) {
+        const stillHeld = await fetchCase(mode,'commit')
+        check(stillHeld,false)
+        assert.match(stillHeld.error,/NOT NULL|constraint/i)
+        await db.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+      }
       const retried = await fetchCase(mode,'commit')
       check(retried,true)
       assert.equal(retried.counts.attempts,1)

@@ -503,7 +503,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
       stock: [],
     }
     if (changed) {
-      guards.push(guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision", { id: expected.id, revision: Number(row.write_revision) || 0 }))
+      guards.push(guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM returns WHERE id=@id) AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision", { id: expected.id, revision: Number(row.write_revision) || 0 }))
       guards.push(guard(`${movementFingerprint('@id')}=@fingerprint`, { id: expected.id, fingerprint: row.movement_fingerprint }))
     }
 
@@ -672,7 +672,7 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
   const snapshotStatus = direction === 'undo' ? 'applied' : 'reversed'
   const directionSign: 1 | -1 = direction === 'undo' ? -1 : 1
   const stamp = new Date().toISOString()
-  const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
+  const statements: Statement[] = [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM return_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@operation AND o.generation=@generation AND h.id=@history AND h.status=@expectedStatus AND s.kind=@kind AND s.status=@snapshotStatus AND s.payload_json=@snapshot)", { operation: operation.id, generation, history: historyId, expectedStatus, kind: RETURN_BULK_ACTION_KIND, snapshotStatus, snapshot: operation.payload_json })]
   const replayEntitlement = await v1EntitlementGuards(db, snapshot.members, direction === 'undo' ? 'before' : 'after')
   statements.push(...replayEntitlement.guards)
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {

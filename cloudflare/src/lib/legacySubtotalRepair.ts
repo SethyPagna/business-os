@@ -277,7 +277,7 @@ export const LEGACY_SUBTOTAL_PREVIEW_SQL = `SELECT
   FROM sales s WHERE s.id IN (SELECT value FROM json_each(@ids)) ORDER BY s.id`
 
 export async function previewLegacySubtotalRepair(db: Pick<D1Compat, 'prepare'>, actor: { id?: unknown; name?: unknown }) {
-  const maintenance = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").get()
+  const maintenance = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance'").get()
   if (maintenance) throw new LegacySubtotalRepairConflictError()
   const sales = await db.prepare(LEGACY_SUBTOTAL_PREVIEW_SQL).all({ ids: JSON.stringify(EXPECTED_IDS) })
   const manifest = canonicalizeManifest({
@@ -424,7 +424,7 @@ export async function prepareLegacySubtotalRepair(rawRequest: unknown, actor: { 
   })
   const applyHistory = historyCount()
   const applyAudit = auditCount()
-  const maintenanceGuard = `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')`
+  const maintenanceGuard = `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')`
   const applyEntry = `${maintenanceGuard} AND (((${applyHistory})=0 AND (${applyAudit})=0 AND ${stateCount('before')}=22) OR ((${applyHistory})=1 AND (${applyAudit})=1 AND ${stateCount('after')}=22))`
   const applyFinal = `${maintenanceGuard} AND ${stateCount('after')}=22 AND (${applyHistory})=1 AND (${applyAudit})=1`
   const updates = updateStatements(manifest.sales)
