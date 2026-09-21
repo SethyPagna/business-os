@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL:**Product actor fix43f656d3/9069767b/6324e286 integrated after independent normal-close correction reviewbe080a3b. Root54098 six focusedfiles/types/i18n/build PASS. Native transfer retirement13402 PASS after loading real reexport dependency in harness. Ordinarymaintenance PhaseABC and atomicadjusta22d3b1e isolated under review; no resetenablement/deployment. See current progress.md, not superseded holds below.
+
 > **LATEST LOCAL:**Import fence d787f440/6f307472 independently accepted7b77744f after release-race correction. Root20652 native D1/Hono/backup/types PASS. Backup assertion correction independently accepted82644951. Product actor fix remains isolated pending normal-close/undo-history regression review. No deployment/migration. Real lifecycle continuation planb739bdfc remains to implement; read progress.md.
 
 > **LATEST VERIFIED LOCAL:**586cfce8 removes proven-unused product handler after independent2a4405dd. Root56973 full510 frontend tests+preflights PASS;4752 i18n/build/startup/public closure PASS. Separate async account fix ongoing; import fenceb99a38eb independent review pending. Six more dormant checkouts removed recoverably, nowten total. No production release; all open lifecycle/public/data/Free gates remain.

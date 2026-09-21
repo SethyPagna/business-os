@@ -1,3 +1,20 @@
+## Product actor protection integrated; adjustment atomicity in review — September 21
+
+43f656d3/9069767b/6324e286 integrate4ae9e142/6a5df8c5/56024767 after
+independentbe080a3b accepts corrected normal-close lifetime. Root54098 terminal0:
+six focused frontend files, typecheck, i18n, build/startup guards. Previous full510
+gate predates these edits; not re-labelled current full certification. UI/financial
+rules unchanged. Native retirement harness missing real importMaintenanceFence
+module corrected (actual module loaded, not stubbed); root13402 terminal0.
+
+Ordinary maintenance guard candidates0b67b0f6/279b3b67/3a6ea807 remain isolated
+under independent review. Real /adjust interleaving proved partial stock under
+per-transaction guards; unsafe attempt excluded. Writer a22d3b1e instead composes
+core stock/lot/hold/movement/cost-recompute in one guarded batch; independent review
+assigned, not integrated. Postcommit audit/read uncertainty and concurrent new-barcode
+sibling identity remain open. No reset enablement, deployment or remote migration.
+Original correction agent was idle after send_message; explicit followup resumed it.
+
 ## Free/Paid packaging rechecked; product review blocker confirmed — September 21
 
 Root18433 terminal0 at7280560c: all52 plan-tier/config/queue/surface checks and
