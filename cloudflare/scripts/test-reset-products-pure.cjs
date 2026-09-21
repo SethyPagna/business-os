@@ -3,11 +3,12 @@
 // branch/batch stock, KEEP sales/returns/inventory-movement/contact/
 // customer/supplier data untouched. Same approach as test-returns-batch-
 // restock-pure.cjs: transpile the REAL route file and lib/coreDataInvariants.ts,
-// run them against a real in-memory SQLite database with every real
-// migration applied, and call the actual Hono app.request() the same way
-// the real Worker would. Auth/audit/broadcast/cache/R2 are stubbed to
-// permissive fakes (there's no real R2/D1 in this sandbox); everything
-// about which rows get deleted vs. kept is the real, shipped logic.
+// run them against a real in-memory SQLite database with the migrations
+// actually applied to production D1, and call the actual Hono app.request()
+// the same way the real Worker would. Auth/audit/broadcast/cache/R2 are
+// stubbed to permissive fakes (there's no real R2/D1 in this sandbox);
+// everything about which rows get deleted vs. kept is the real, shipped
+// logic.
 //
 // Run (from cloudflare/): node scripts/test-reset-products-pure.cjs
 
@@ -17,9 +18,43 @@ const ts = require('typescript')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
-const { loadAll } = require('./harness/load_migrations.cjs')
 
-const rawDbHandle = openDb(loadAll())
+// Repinned 2026-09-22: this used to build its schema from harness/
+// load_migrations.cjs's loadAll(), every .sql file checked into
+// cloudflare/migrations regardless of production status. That silently
+// included 0185_transfer_runs.sql/0186_transfer_run_retirement.sql/
+// 0188_transfer_receipt_retirement.sql/0190_dataset_operation_journal.sql/
+// 0191_dataset_operation_generation_transition.sql -- a transfer-run/
+// receipt-retirement/dataset-operation lifecycle kernel that is checked
+// into the repo but deliberately NOT applied to production D1 yet
+// (docs/fleet/2026-09-21-shift-close-release.md, "migrations .../0188/...
+// remain unapplied by design"; progress.md's 2026-09-21 entry says the
+// same). 0188's own top-of-file comment calls it a "local unwired
+// lifecycle kernel": its
+// `transfer_receipt_member_retirement_delete` trigger (BEFORE DELETE ON
+// transfer_operation_members, requiring prior retirement evidence) is a
+// real, working guard -- test-backup-replay-coverage-pure.cjs already
+// asserts that exact refusal on a schema WITH 0188 applied -- but no
+// route, including this reset route, has been wired to satisfy it yet.
+// mode='products' deletes transfer_operation_members as its very first
+// PRODUCTS_RESET_TABLES entry (coreDataInvariants.ts), so building this
+// test's DB from the FULL local migration set (post-0188) exercised a
+// schema that does not exist anywhere the reset route actually runs
+// today, and wrongly read as "reset-products is broken". Loading only
+// the migrations chain currently applied in production (file name below
+// '0185_') matches what the deployed route actually faces, and is the
+// same production-schema cutoff test-dataset-operation-native.cjs and
+// test-migration-0185-transfer-runs-pure.cjs already use for the same
+// reason. If 0188 is ever applied to production, the reset route must
+// first learn to retire the members it deletes through that same kernel
+// -- this cutoff should not move past '0185_' until that lands.
+const migrationsDir = path.join(__dirname, '..', 'migrations')
+const appliedMigrationSqls = fs.readdirSync(migrationsDir)
+  .filter((file) => file.endsWith('.sql') && file < '0185_')
+  .sort()
+  .map((file) => fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
+
+const rawDbHandle = openDb(appliedMigrationSqls)
 const db = rawDbHandle
 const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 

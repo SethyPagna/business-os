@@ -36,11 +36,21 @@ function freshDb() {
         beforeBatch = null
         hook(rawDb)
       }
-      const results = await rawDb.batch(items)
-      return results.map((result) => ({
-        changes: result.meta?.changes ?? 0,
-        lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
-      }))
+      // Pass the raw D1Result[] through unmapped, exactly like the real
+      // D1Compat.batch() (cloudflare/src/lib/db.ts's batch()). Callers that
+      // need a batched write's row id read `results[i].meta.last_row_id`
+      // off that raw shape -- here, lib/importBranchAuthority.ts's
+      // withCanonicalImportBranchWriteGuard.prepare().run(), which this
+      // module's guardedDb.prepare(...).run() (create_new/create_child
+      // inserts) goes through. This used to flatten each result to a
+      // top-level {changes, lastInsertRowid} pair -- the shape ONLY
+      // db.prepare().run() actually has -- which silently dropped `.meta`
+      // from every batched write and made a batch-based insert read back
+      // last_row_id as 0. Found 2026-09-22: `create_new`/`create_child`
+      // then look up the inserted product by that bogus id 0 and get
+      // undefined, same root cause as
+      // test-dated-stock-count-apply-pure.cjs's two provenance failures.
+      return rawDb.batch(items)
     },
     async transaction(fn) { return fn(this) },
   }

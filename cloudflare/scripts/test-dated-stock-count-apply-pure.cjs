@@ -39,11 +39,23 @@ function freshDb() {
         beforeBatch = null
         hook(rawDb)
       }
-      const results = await rawDb.batch(items)
-      return results.map((result) => ({
-        changes: result.meta?.changes ?? 0,
-        lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
-      }))
+      // Pass the raw D1Result[] through unmapped, exactly like the real
+      // D1Compat.batch() (cloudflare/src/lib/db.ts's batch(), which returns
+      // `this.d1.batch(prepared)` verbatim). Every production caller that
+      // needs a batched write's row id reads `results[i].meta.last_row_id`
+      // off that raw shape (lib/importBranchAuthority.ts's
+      // withCanonicalImportBranchWriteGuard.prepare().run(), which this
+      // module's guardedDb.prepare(...).run() goes through; also
+      // lib/productBatches.ts:883, lib/businessMaintenanceGuard.ts:26-28).
+      // This used to flatten each result to a top-level {changes,
+      // lastInsertRowid} pair -- the shape ONLY db.prepare().run() actually
+      // has (db.ts:117-121) -- which silently dropped `.meta` from every
+      // batched write and made any batch-based insert read back
+      // last_row_id as 0. Found 2026-09-22 via the two "records ...
+      // provenance" cases below, which insert a movement row through
+      // withCanonicalImportBranchWriteGuard (a db.batch([guard, insert])
+      // internally) and then look up its batch-action rows by that id.
+      return rawDb.batch(items)
     },
     async transaction(fn) { return fn(this) },
   }
