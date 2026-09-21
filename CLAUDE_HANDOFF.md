@@ -27,6 +27,11 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
 - Adjust candidate `a22d3b1e` REJECTED with reproduced defects (release record).
   Its worktree and stash are kept.
 - Three baseline red Worker tests (dated-stock-count ×2, reset-products) disclosed.
+- Frontend: four baseline reds left by Codex's `43f656d3`/`6324e286` (stale
+  assertions against the product-save actor fence) repaired as test-only changes;
+  the full chain is now green on the tip. Two Playwright/startup files flake only
+  under chain CPU load. The workspace `frontend/node_modules` is a real `npm ci`
+  install now, not a junction.
 - Yesterday-open-shift trap: `readCurrent` is today-only, so a shift left open
   yesterday cannot be closed from POS. Needs an owner ruling.
 - Reset lifecycle blockers unchanged; destructive reset stays disabled.

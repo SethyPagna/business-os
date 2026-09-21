@@ -391,5 +391,6 @@ fresh runtime provenance was blocked by HTTP403. Migration0183 is already applie
 - Inherited maintenance guard commits verified on the root; harness repairs `680ba83a`/`80f379ff`. Three baseline Worker reds disclosed (dated-stock-count ×2, reset-products).
 - Adjust candidate `a22d3b1e`: REJECT, not integrated.
 - Downloads cleanup done after owner permission: 300 worktrees archived then removed, plain folders and loose files moved to the recovery archive; three checkouts remain.
+- Frontend gate corrected: first full chain on the tip found 4 baseline reds from `43f656d3`/`6324e286` (test-only repairs, no source change) and 2 contention flakes; chain, i18n and build now green. Earlier green claim withdrawn.
 - Open: yesterday-open-shift POS gate trap; reset blockers unchanged.
 - Full record: `docs/fleet/2026-09-21-shift-close-release.md`.

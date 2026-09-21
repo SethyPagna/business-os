@@ -57,7 +57,11 @@ at day end versus surfacing yesterday's open shift in the gate.
 
 ## Verification on the committed tip
 
-- Frontend: `npm run test:utils` (every file), `verify:i18n`, `build` exit 0.
+- Frontend: `verify:i18n` and `build` exit 0. **Correction:** the earlier claim that
+  `test:utils` (every file) was green on `80f379ff` was not backed by a full-chain run
+  in this session; the first full run (below) found four baseline reds that Codex's
+  own progress note had already flagged as "previous full510 gate predates these
+  edits". See "Frontend gate correction".
 - Worker: `tsc --noEmit` exit 0; every shift test; the maintenance-guard route tests.
 - Full Worker sweep, every `scripts/test-*.cjs` run individually. Reds classified:
   - Baseline (present on `origin/main` before this session): `lib/db.ts` re-exports the
@@ -84,6 +88,43 @@ at day end versus surfacing yesterday's open shift in the gate.
     the 0188/0190/0191 tables; that regeneration is committed in `80f379ff`.
 - Paid and Free Wrangler dry-runs exit 0 at the tip. Packaging only; not a Free-plan
   capacity certification.
+
+## Frontend gate correction — first full chain on the tip
+
+The full frontend chain (`npm run test:utils`, 512 files) was run for the first
+time this session on `f5c9866c` after the workspace's `frontend/node_modules`
+was rebuilt with `npm ci` (its `@playwright/test` had been a symlink into a
+worktree the cleanup removed). Result: 506 passed, 6 red. Classification, each
+rerun standalone and then at the pre-session tip `ebafdada` in a temporary
+worktree sharing the same dependencies:
+
+- **Contention flakes (2):** `builtStartupGate` and `helpPopoverResponsive`
+  (Playwright) pass standalone; they exceeded their time budget under the chain's
+  CPU load. No change.
+- **Baseline reds (4), identical at `ebafdada`:** all four were left red by Codex's
+  `43f656d3` (product save actor fence: `createProduct`/`updateProduct`/
+  `uploadProductImage` gained an `assertCurrent` fence and `productWriteTransport`
+  now imports `actorReadScope`) and `6324e286` (Products.tsx line drift). Codex's
+  progress note disclosed that the full gate was not rerun after those edits.
+  - `apiHttp`: source-shape regexes for `createProduct`/`updateProduct` predated
+    the fence parameter. Repinned to the fenced shape (the check runs inside the
+    route closure before dispatch).
+  - `hookDepsFilterState`: the `filtered` useMemo moved from :3359 to :3435, past
+    the 60-line drift budget. Re-verified (object key, `effectiveStockState` in deps)
+    and repinned with a dated reason.
+  - `leadingZeroMergeUi`: loader lacked a stub for the new `actorReadScope` import.
+    Stub added.
+  - `privateTransportScope`: expected the quarantine code on a session change during
+    compression; the read-scope fence now rejects first with `stale_read_scope`
+    (still not dispatched, `sent === 0` kept). It also expected a product image
+    upload to keep its response after a session change; since `43f656d3` that upload
+    is fenced to the actor that started the save and rejects after dispatch, which
+    Codex's `productSaveActorFence.test.ts` pins deliberately (phase `response`).
+    The older test now asserts that exception explicitly and keeps the
+    keep-response contract for the generic file/form transports.
+- Assertion and loader changes only; no source behaviour changed. The four
+  repaired files, `productSaveActorFence`, and then the full chain were rerun:
+  **test:utils: 512 passed, 0 red of 512 executed files (0 skipped; 320520 ms)**, `verify:i18n` and `build` exit 0.
 
 ## AI Council and debloat gates (simulated: one model, five labelled perspectives)
 

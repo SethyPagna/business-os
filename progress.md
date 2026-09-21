@@ -27,7 +27,14 @@ storefront render. Signed-in POS End Shift smoke remains the owner check.
 Downloads cleanup DONE after owner permission: 300 worktrees archived (diffs,
 untracked, archive/<name> branches) then removed; 11 plain folders and 6 loose files
 moved to BusinessOS-Recovery/2026-09-21; Downloads keeps business-os-v1, the
-workspace and the rejected-candidate worktree only. Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
+workspace and the rejected-candidate worktree only. Frontend gate correction: the first full test:utils run this session (after npm ci
+rebuilt the workspace frontend install) found 4 baseline reds left by Codex's
+43f656d3/6324e286 (apiHttp, hookDepsFilterState, leadingZeroMergeUi,
+privateTransportScope; identical at ebafdada) plus 2 contention flakes that pass
+standalone. Stale assertions and loaders repinned to the product-save actor fence,
+no source change; full chain now test:utils: 512 passed, 0 red of 512 executed files (0 skipped; 320520 ms), i18n and build green. The
+earlier "test:utils green on 80f379ff" claim is withdrawn in the release record.
+Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 
 ## Product actor protection integrated; adjustment atomicity in review — September 21
