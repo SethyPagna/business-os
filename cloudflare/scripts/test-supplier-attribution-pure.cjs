@@ -37,13 +37,8 @@ const db = {
     }
   },
   async batch(items) {
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
-    return results
+    const results = await rawDb.batch(items)
+    return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
   },
   async transaction(fn) { return fn(this) },
 }
@@ -80,6 +75,8 @@ const batchCode = loadReal('lib/batchCode.ts')
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
+const maintenanceGuard = loadReal('lib/businessMaintenanceGuard.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
@@ -95,7 +92,7 @@ const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
-  './db': loadReal('lib/db.ts'),
+  './db': { getDb: () => db },
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
@@ -188,19 +185,20 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/lowStockSettings': lowStockStub,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
-  '../lib/telegram': { sendTelegramEvent: async () => false },
+  '../lib/telegram': { sendTelegramEvent: async () => false, formatStockChangeTelegramLines: () => [] },
   '../lib/permissions': permissions,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  '../lib/productIdentity': { findIdentityMatch: async () => null },
+  '../lib/productIdentity': { findIdentityMatch: async () => null, identityBarcodeKey: productDetailRule.identityBarcodeKey },
+  '../lib/businessMaintenanceGuard': maintenanceGuard,
   // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {
     './db': { getDb: () => db },
     './moneyPrecision': moneyPrecision,
-    './productDetailRule': loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision }),
+    './productDetailRule': productDetailRule,
   }),
   // routes/products.ts + inventory.ts now build their search tail from the
   // one shared implementation (lib/productSearchQuery.ts). These tests

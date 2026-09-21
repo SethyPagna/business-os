@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
-import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
+import { ordinaryBusinessBatch, ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -30,7 +30,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
+import { planReceiveBatchStock, planClampedRemoveStockFromBatch, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockAcrossBatches, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -40,7 +40,7 @@ import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/dated
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
-import { recomputeCatalogCost } from '../lib/catalogCostRecompute'
+import { catalogCostRecomputeStatement } from '../lib/catalogCostRecompute'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -1284,7 +1284,8 @@ async function resolveAddStockTarget(
     barcode: string | null
   },
   preflightReceiptCost: (target: Pick<ProductIdentityRow, 'id' | 'cost_price_usd' | 'cost_price_khr'>) => void | Promise<void>,
-): Promise<{ productId: number; created: boolean }> {
+): Promise<{ productId: number; created: boolean; pendingInsert?: StockWriteStatement; clientRequestId?: string;
+  initialCost?: { cost_price_usd: number; cost_price_khr: number } }> {
   const db = getDb(env)
   const candidate: ProductIdentityRow = {
     id: source.id,
@@ -1383,11 +1384,15 @@ async function resolveAddStockTarget(
     stock_quantity: 0,
   }
   const columns = Object.keys(insertPayload)
-  const result = await db.prepare(`
-    INSERT INTO products (${columns.join(', ')}, created_at, updated_at)
-    VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `).run(insertPayload)
-  return { productId: Number(result.lastInsertRowid), created: true }
+  const clientRequestId = `adjust-sibling:${crypto.randomUUID()}`
+  return { productId: 0, created: true, clientRequestId,
+    initialCost: { cost_price_usd: overrides.costUsd, cost_price_khr: overrides.costKhr },
+    pendingInsert: {
+      sql: `INSERT INTO products (${columns.join(', ')}, client_request_id, created_at, updated_at)
+        VALUES (${columns.map((col) => `@${col}`).join(', ')}, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      params: { ...insertPayload, clientRequestId },
+    },
+  }
 }
 
 async function defaultBranchId(env: Env): Promise<number | null> {
@@ -1421,7 +1426,11 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // body only, no logic changed. The route registration right below is now a
 // three-line wrapper: parse the body, call this, done. Exported for that one
 // other caller; nothing else should import it (use POST /adjust).
-export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+function isAdjustMaintenanceRejection(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('ordinary_business_maintenance_active')
+}
+
+async function runAdjustActionImpl(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -1558,7 +1567,9 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // still the correct row to read current stock from at this point.
   const originalType = type
   let setToNote: string | null = null
+  let setTargetQuantity: number | null = null
   if (type === 'set') {
+    setTargetQuantity = quantity
     const current = await branchStockQty(c.env, productId, branchId)
     const diff = quantity - current
     if (diff === 0) {
@@ -1612,6 +1623,9 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   let unlockedReceiptCostPreimage: ReceiptCostPreimage | undefined
   let unlockedReceiptLotTarget: ReceiptLotTarget | undefined
   let mergedPricingStatement: { sql: string; params: Record<string, unknown> } | null = null
+  let pendingSiblingInsert: StockWriteStatement | null = null
+  let pendingSiblingRequestId: string | null = null
+  let pendingSiblingCost: { cost_price_usd: number; cost_price_khr: number } | null = null
   if (unlockPricing) {
     const pricing = body.pricing as Record<string, unknown>
     const source = product as StockRowFields
@@ -1679,6 +1693,9 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     }
     targetProductId = resolved.productId
     createdSibling = resolved.created
+    pendingSiblingInsert = resolved.pendingInsert ?? null
+    pendingSiblingRequestId = resolved.clientRequestId ?? null
+    pendingSiblingCost = resolved.initialCost ?? null
     if (!createdSibling) {
       // Selling/wholesale price is mergeable data: an explicit unlocked receipt
       // may raise it, but never lower it. Cost remains untouched here.
@@ -1691,9 +1708,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         WHERE id = @id`, params: { id: targetProductId, ...overrides } }
     }
     if (createdSibling) {
-      const created = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
-      targetProductName = created?.name ?? source.name
-      c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id: targetProductId }))
+      targetProductName = source.name
     } else if (targetProductId !== productId) {
       const matched = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: targetProductId })
       targetProductName = matched?.name ?? source.name
@@ -1703,7 +1718,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // Snapshot catalog cost before moving stock. It is only the fallback for a
   // receipt/removal that has no more specific entered/lot cost; it is never
   // consulted later when this historical row is displayed or reverted.
-  const productCostSnapshot = await db.prepare(`
+  const productCostSnapshot = pendingSiblingCost || await db.prepare(`
     SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id
   `).get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: targetProductId })
   const receiptUnitCostUsd = correctionLot ? correctionLot.unit_cost_usd : unitCostUsd ?? productCostSnapshot?.cost_price_usd ?? null
@@ -1712,14 +1727,10 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // rows) rides on this same endpoint rather than a separate one, so undo/
   // redo, action-history replay, and every other existing caller of POST
   // /adjust keep working unchanged. `batchId` is opt-in at the wire level:
-  // absent -> the original applyStockDelta path, untouched (though see
-  // below -- add/remove now auto-routes through the ledger regardless).
+  // absent -> the auto-routed batch ledger path below.
   // Present for 'add'/'remove' -> routed
-  // through receiveBatchStock/removeStockFromBatch instead, which already
-  // do the same aggregate write (branch_stock/products.stock_quantity)
-  // atomically alongside the batch ledger -- calling applyStockDelta *as
-  // well* would double-count, so the two paths are mutually exclusive, not
-  // layered.
+  // through the selected-lot receipt/removal plans. The lot, aggregate and
+  // movement writes must all share one D1 batch.
   //
   // Price-unlock case: a batch belongs to one specific product row, and an
   // unlocked add can resolve to a *different* row than the one the person
@@ -1741,7 +1752,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   // (addStockToProducts), and "clear stock to zero"
   // (clearProductStockByIds) have no interactive picker to source a
   // batchId from, so without this they'd silently fall through to the
-  // plain applyStockDelta path below -- moving the aggregate figure while
+  // aggregate-only path -- moving the aggregate figure while
   // every batch row (and the FIFO list the POS/ProductDetailSheet pickers
   // read) stays frozen at its old quantity.
   let autoBatchDrainIds: number[] | null = null
@@ -1768,7 +1779,21 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   let addMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = preflightAddMovementCost
   let removeMovementCost: ReturnType<typeof resolveMovementCostSnapshot> | null = null
   let movementWrittenAtomically = false
+  let taggedRestockWrittenAtomically = false
   let capturedRemovalAllocations: Array<{ batchId: number; quantity: number }> | undefined
+  const removalStatements: StockWriteStatement[] = []
+  const setPostconditionGuard: StockWriteStatement | null = setTargetQuantity == null ? null : {
+    sql: `SELECT CASE WHEN COALESCE((SELECT quantity FROM branch_stock
+      WHERE product_id=@productId AND branch_id=@branchId),0)=@targetQuantity
+      THEN 1 ELSE json_extract('stock_set_target_changed','$') END AS stock_set_guard`,
+    params: { productId: targetProductId, branchId, targetQuantity: setTargetQuantity },
+  }
+  if (type === 'remove') removalStatements.push({
+    sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM branch_stock
+      WHERE product_id=@productId AND branch_id=@branchId AND quantity>=@quantity)
+      THEN 1 ELSE json_extract('stock_remove_aggregate_conflict','$') END AS stock_remove_guard`,
+    params: { productId: targetProductId, branchId, quantity },
+  })
   if (type === 'add') {
     delta = quantity
   } else {
@@ -1788,7 +1813,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
           SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
           FROM product_batches pb
           JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id AND bbs.branch_id=@branchId
-          WHERE pb.id = @batchId AND pb.variant_product_id = @productId AND pb.is_active = 1
+          WHERE pb.id = @batchId AND pb.variant_product_id = @productId
         `).all<{ id: number; unit_cost_usd: number | null; available: number }>({ batchId: batchIdRequested, branchId, productId: targetProductId })
       : await db.prepare(`
           SELECT pb.id, pb.unit_cost_usd, bbs.quantity AS available
@@ -1833,7 +1858,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     // A physical count correction is not a new purchase. Preserve lot price,
     // supplier/payment, cumulative received money and the catalog override.
     // Both stock ledgers and the non-purchase movement share the lot guard.
-    await db.batch([
+    await ordinaryBusinessBatch(db, [
       { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
           SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId
             AND unit_cost_usd IS @unitCostUsd) THEN 1 ELSE 0 END`,
@@ -1851,6 +1876,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         params: { productId: targetProductId, productName: targetProductName, branchId, branchName: branch?.name || null,
           quantity, ...addMovementCost, reason: setToNote ? `${reason} (${setToNote})` : reason,
           referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: correctionLot.id } },
+      ...(setPostconditionGuard ? [setPostconditionGuard] : []),
       { sql: 'DELETE FROM stock_session_guards', params: {} },
     ])
     resolvedBatchId = correctionLot.id
@@ -1859,7 +1885,62 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     movementWrittenAtomically = true
   } else if (useBatchLedger && type === 'add') {
     try {
-      if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
+      if (createdSibling && (!pendingSiblingInsert || !pendingSiblingRequestId || !addMovementCost)) {
+        throw new Error('A new sibling receipt could not be planned safely')
+      }
+      if (createdSibling && pendingSiblingInsert && pendingSiblingRequestId && addMovementCost) {
+        const siblingRequestId = pendingSiblingRequestId
+        const plan = planReceiveBatchStock({
+          productClientRequestId: siblingRequestId,
+          branchId, quantity, receivedDate, expiryDate, supplierId, supplierName,
+          unitCostUsd: receiptUnitCostUsd, preserveHistoricalUnitCost: unitCostUsd == null,
+          paymentStatus, creditDueDate,
+          receiptCostPreimage: receiptUnitCostUsd == null ? undefined : { batchExists: false, receivedCostUsd: null },
+        })
+        const receiptParams = { ...plan.params, productClientRequestId: siblingRequestId }
+        const statements: StockWriteStatement[] = [pendingSiblingInsert, ...plan.statements, {
+          sql: `INSERT INTO inventory_movements (product_id,product_name,branch_id,branch_name,movement_type,quantity,
+            unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
+            VALUES (${plan.productIdSql},@productName,@branchId,@branchName,'add',@quantity,
+            @unitCostUsd,@unitCostKhr,@totalCostUsd,@totalCostKhr,@reason,@referenceId,@userId,@userName,CURRENT_TIMESTAMP,${plan.batchIdSql})`,
+          params: { ...receiptParams, productName: targetProductName, branchName: branch?.name || null,
+            ...addMovementCost, reason: appendReceiptNotes(`${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`, reasonNotes),
+            referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user) },
+        }]
+        if (conditionTag) {
+          statements.push(
+            { sql: `UPDATE branch_batch_stock SET quantity=quantity-@quantity,updated_at=CURRENT_TIMESTAMP
+                WHERE batch_id=${plan.batchIdSql} AND branch_id=@branchId`, params: receiptParams },
+            { sql: `UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=${plan.productIdSql} AND branch_id=@branchId`, params: receiptParams },
+            { sql: `UPDATE products SET stock_quantity=stock_quantity-@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=${plan.productIdSql}`, params: receiptParams },
+          )
+          statements.push(...planHoldAsTagged({ productId: 0, productName: targetProductName,
+            branchId, branchName: branch?.name || null, batchId: null, quantity,
+            tag: conditionTag, source: 'restock', reason, cost: addMovementCost,
+            referenceId: sessionId, actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+          }).map((statement) => ({
+            sql: statement.sql.replace(/@product_id\b|@productId\b/g, plan.productIdSql)
+              .replace(/@batch_id\b|@batchId\b/g, plan.batchIdSql),
+            params: { ...(statement.params as Record<string, unknown>), ...receiptParams },
+          })))
+        }
+        statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} }, ordinaryBusinessMaintenanceGuard)
+        await db.batch(statements)
+        const created = await db.prepare('SELECT id,name FROM products WHERE client_request_id=@clientRequestId')
+          .get<{ id: number; name: string }>({ clientRequestId: siblingRequestId })
+        if (!created) throw new Error('Created sibling product was not found after commit')
+        targetProductId = created.id
+        targetProductName = created.name
+        const received = await db.prepare('SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey')
+          .get<{ id: number; batch_number: number | null; lot_code: string | null }>({ productId: targetProductId, batchKey: plan.batchKey })
+        if (!received) throw new Error('Created sibling batch was not found after commit')
+        resolvedBatchId = received.id
+        batchNumber = received.batch_number
+        lotCode = received.lot_code
+        movementWrittenAtomically = true
+        taggedRestockWrittenAtomically = Boolean(conditionTag)
+        c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id: targetProductId }))
+      } else if (unlockPricing && !createdSibling && mergedPricingStatement && addMovementCost) {
         const plan = planReceiveBatchStock({
           productId: targetProductId,
           branchId,
@@ -1899,7 +1980,24 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
               batchKey: plan.batchKey,
             },
           },
+          ...(conditionTag ? [
+            { sql: `UPDATE branch_batch_stock SET quantity=quantity-@quantity,updated_at=CURRENT_TIMESTAMP
+                WHERE batch_id=${plan.batchIdSql} AND branch_id=@branchId`,
+              params: { ...plan.params } },
+            { sql: 'UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId',
+              params: { productId: targetProductId, branchId, quantity } },
+            { sql: 'UPDATE products SET stock_quantity=stock_quantity-@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=@productId',
+              params: { productId: targetProductId, quantity } },
+            ...planHoldAsTagged({ productId: targetProductId, productName: targetProductName,
+              branchId, branchName: branch?.name || null, batchId: null, quantity,
+              tag: conditionTag, source: 'restock', reason, cost: addMovementCost,
+              referenceId: sessionId, actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+            }).map((statement) => ({ sql: statement.sql.replace(/@batch_id\b|@batchId\b/g, plan.batchIdSql),
+              params: { ...(statement.params as Record<string, unknown>), ...plan.params } })),
+          ] : []),
+          catalogCostRecomputeStatement(targetProductId),
           ...(receiptUnitCostUsd == null && !unlockedReceiptLotTarget ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
+          ordinaryBusinessMaintenanceGuard,
         ])
         const received = await db.prepare(
           'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
@@ -1909,6 +2007,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         resolvedBatchId = received.id
         lotCode = received.lot_code
         movementWrittenAtomically = true
+        taggedRestockWrittenAtomically = Boolean(conditionTag)
       } else {
       const received = await receiveBatchStock(db, {
         productId: targetProductId,
@@ -1933,12 +2032,54 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
         preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
+        buildBatchStatements: ({ resolvedBatchIdSql, batchKey }) => {
+          const addCost = addMovementCost || resolveMovementCostSnapshot({
+            quantity, components: [{ quantity, unitCostUsd: receiptUnitCostUsd }],
+            fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+            fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+          })
+          const statements: StockWriteStatement[] = [{
+            sql: `INSERT INTO inventory_movements (product_id,product_name,branch_id,branch_name,movement_type,quantity,
+              unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
+              VALUES (@productId,@productName,@branchId,@branchName,'add',@quantity,
+              @unitCostUsd,@unitCostKhr,@totalCostUsd,@totalCostKhr,@reason,@referenceId,@userId,@userName,CURRENT_TIMESTAMP,${resolvedBatchIdSql})`,
+            params: { productId: targetProductId, productName: targetProductName, branchId,
+              branchName: branch?.name || null, quantity, ...addCost,
+              reason: appendReceiptNotes(setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
+              referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user),
+              batchId: batchIdRequested, batchKey },
+          }]
+          if (conditionTag) {
+            const params = { productId: targetProductId, branchId, quantity, batchId: batchIdRequested, batchKey }
+            statements.push(
+              { sql: `UPDATE branch_batch_stock SET quantity=quantity-@quantity,updated_at=CURRENT_TIMESTAMP
+                  WHERE batch_id=${resolvedBatchIdSql} AND branch_id=@branchId`, params },
+              { sql: 'UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId', params },
+              { sql: 'UPDATE products SET stock_quantity=stock_quantity-@quantity,updated_at=CURRENT_TIMESTAMP WHERE id=@productId', params },
+            )
+            const held = planHoldAsTagged({ productId: targetProductId, productName: targetProductName,
+              branchId, branchName: branch?.name || null, batchId: null, quantity,
+              tag: conditionTag, source: 'restock', reason, cost: addCost,
+              referenceId: sessionId, actor: { userId: user?.id ?? null, userName: actorSnapshot(user) }, })
+            statements.push(...held.map((statement) => ({
+              sql: statement.sql.replace(/@batch_id\b|@batchId\b/g, resolvedBatchIdSql),
+              params: { ...(statement.params as Record<string, unknown>), batchId: batchIdRequested, batchKey },
+            })))
+          }
+          if (!createdSibling) statements.push(catalogCostRecomputeStatement(targetProductId))
+          if (setPostconditionGuard) statements.push(setPostconditionGuard)
+          statements.push(ordinaryBusinessMaintenanceGuard)
+          return statements
+        },
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
       lotCode = received.lotCode
+      movementWrittenAtomically = true
+      taggedRestockWrittenAtomically = Boolean(conditionTag)
       }
     } catch (err) {
+      if (isAdjustMaintenanceRejection(err)) throw err
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
     // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
@@ -1954,11 +2095,27 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     // vs. the literal per-unit invoice price). Recomputing here would
     // silently overwrite that explicit first entry with the lot figure.
     // Every LATER receipt onto this same row still recomputes normally.
-    if (!createdSibling) await recomputeCatalogCost(db, targetProductId)
+    // The recompute now runs inside the same receipt batch above.
   } else if (useBatchLedger && type === 'remove') {
     if (batchIdRequested != null) {
       try {
-        await removeStockFromBatch(db, { batchId: batchIdRequested, productId: targetProductId, branchId, quantity })
+        const captured = capturedRemovalAllocations?.[0]
+        if (!captured || captured.batchId !== batchIdRequested) {
+          const belongs = await db.prepare('SELECT id FROM product_batches WHERE id=@batchId AND variant_product_id=@productId')
+            .get<{ id: number }>({ batchId: batchIdRequested, productId: targetProductId })
+          if (belongs) throw new InsufficientBatchStockError(0)
+          return c.json({ error: 'Selected received date does not belong to this product' }, 400)
+        }
+        const available = await db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=@batchId AND branch_id=@branchId')
+          .get<{ quantity: number }>({ batchId: batchIdRequested, branchId })
+        if (quantity > Number(available?.quantity ?? 0)) throw new InsufficientBatchStockError(Number(available?.quantity ?? 0))
+        removalStatements.push({
+          sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+            WHERE pb.id=@batchId AND pb.variant_product_id=@productId
+              AND bbs.branch_id=@branchId AND bbs.quantity>=@quantity)
+            THEN 1 ELSE json_extract('selected_batch_allocation_conflict','$') END AS selected_batch_guard`,
+          params: { batchId: batchIdRequested, productId: targetProductId, branchId, quantity },
+        }, ...planClampedRemoveStockFromBatch({ batchId: batchIdRequested, productId: targetProductId, branchId, quantity }))
         removedBatchQuantities = [{ batchId: batchIdRequested, quantity }]
       } catch (err) {
         if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
@@ -1978,26 +2135,36 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       // provenance stock, see removeStockAcrossBatches) falls through to
       // the same plain decrement a batch-less product already used.
       try {
-        const drained = await removeStockAcrossBatches(db, {
+        const drained = await planRemoveStockAcrossBatches(db, {
           productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations,
         })
+        removalStatements.push(...drained.statements)
         autoBatchDrainIds = drained.batchIds
         removedBatchQuantities = drained.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
-        if (drained.remainder > 0) await applyStockDelta(c.env, targetProductId, branchId, -drained.remainder)
+        if (drained.remainder > 0) removalStatements.push(
+          { sql: `UPDATE branch_stock SET quantity=quantity-@quantity WHERE product_id=@productId AND branch_id=@branchId AND quantity>=@quantity`,
+            params: { productId: targetProductId, branchId, quantity: drained.remainder } },
+          { sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId),updated_at=CURRENT_TIMESTAMP WHERE id=@productId`,
+            params: { productId: targetProductId } },
+        )
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
     }
   } else if (delta !== 0) {
-    await applyStockDelta(c.env, targetProductId, branchId, delta)
+    // Every positive add/remove was routed to a lot plan above. Fail closed
+    // if a future caller changes that invariant; an aggregate-only fallback
+    // would reintroduce stock-without-movement partial commits.
+    throw new Error('Stock adjustment requires a batch-ledger plan')
   }
 
-  // P3-L6 HOLD (remove): the units have just left sellable stock above. A
+  // P3-L6 HOLD (remove): the units leave sellable stock in the single batch
+  // assembled below. A
   // tagged removal records them as still-owned held stock instead of a
-  // destruction: one db.batch writes the damage_out movement AND the
+  // destruction: one db.batch writes the decrement, damage_out movement AND the
   // damaged_stock_lots row, so there is no state where stock left sellable
   // with no held row to restore it from. The movement carries the same cost
   // snapshot the plain removal would have carried, so the units are valued
@@ -2013,7 +2180,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
       fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
     })
-    await db.batch(planHoldAsTagged({
+    removalStatements.push(...planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2030,37 +2197,28 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     movementWrittenAtomically = true
   }
 
-  if (delta !== 0 && !movementWrittenAtomically) {
+  if (type === 'add' && !movementWrittenAtomically) throw new Error('Receipt movement was not committed atomically')
+  if (type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
     let costComponents: MovementCostComponent[] = []
-    if (type === 'add') {
-      // An entered receipt cost, including an explicit free-goods zero, is
-      // the strongest action-time fact. KHR has no request/lot field; zero
-      // is defensible for explicitly free goods, otherwise use the catalog
-      // KHR snapshot without inventing an exchange conversion.
-      costComponents = [{
-        quantity: Math.abs(delta),
-        unitCostUsd: receiptUnitCostUsd,
-        unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
-      }]
-    } else if (removedBatchQuantities.length) {
+    if (removedBatchQuantities.length) {
       costComponents = removedBatchQuantities.map((entry) => ({
         quantity: entry.quantity,
         unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
       }))
     }
-    const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
+    const movementCost = removeMovementCost || resolveMovementCostSnapshot({
         quantity: Math.abs(delta),
         components: costComponents,
         fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
         fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
       })
-    await db.prepare(`
+    const movementStatement: StockWriteStatement = { sql: `
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
         unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
       VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
         @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
         @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
-    `).run({
+    `, params: {
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2068,9 +2226,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       movementType,
       quantity: Math.abs(delta),
       ...movementCost,
-      reason: appendReceiptNotes(createdSibling
-        ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
-        : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
+      reason: appendReceiptNotes(setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
       referenceId: sessionId,
       userId: user?.id ?? null,
       userName: actorSnapshot(user),
@@ -2078,59 +2234,20 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       // add, the explicit pick or fully-covering single auto-drained lot
       // on remove; NULL when no single lot owns the whole movement.
       batchId: useBatchLedger ? resolvedBatchId : null,
-    })
+    } }
+    removalStatements.push(movementStatement)
   }
 
-  // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
-  // product_batches lot carrying supplier_id/supplier_name, received
-  // quantity/cost and payment state, plus its own 'add' movement. That is
-  // deliberate and is the least-bloat choice of the two on the table:
-  //
-  //   (a) a "non-sellable lot" flag on product_batches -- a new column, a new
-  //       state every lot reader (POS FIFO, pickers, transfers, merges, the
-  //       0154/0155 activation invariants) would have to learn, and a second
-  //       meaning for is_active;
-  //   (b) receive, then immediately hold -- zero new concepts, and every
-  //       supplier-facing column is written by receiveBatchStock, the SAME
-  //       writer the supplier mirror pins as W3
-  //       (scripts/test-supplier-mirror-writers-pure.cjs). Contacts sees the
-  //       purchase, the invoice, the cost and the "not paid" balance exactly
-  //       as it does for any other stock-in.
-  //
-  // (b) is what runs here. The ledger tells the honest story too -- goods
-  // arrived and were immediately found broken -- rather than a receipt that
-  // silently never became sellable.
-  if (conditionTag && type === 'add' && delta !== 0) {
-    const heldBatchId = useBatchLedger ? resolvedBatchId : null
-    try {
-      if (heldBatchId != null) {
-        await removeStockFromBatch(db, { batchId: heldBatchId, productId: targetProductId, branchId, quantity: Math.abs(delta) })
-      } else {
-        await applyStockDelta(c.env, targetProductId, branchId, -Math.abs(delta))
-      }
-    } catch (err) {
-      if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
-      return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
-    }
-    await db.batch(planHoldAsTagged({
-      productId: targetProductId,
-      productName: targetProductName,
-      branchId,
-      branchName: branch?.name || null,
-      batchId: heldBatchId,
-      quantity: Math.abs(delta),
-      tag: conditionTag,
-      source: 'restock',
-      reason,
-      cost: addMovementCost || resolveMovementCostSnapshot({
-        quantity: Math.abs(delta),
-        components: [{ quantity: Math.abs(delta), unitCostUsd: receiptUnitCostUsd }],
-        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
-      }),
-      referenceId: sessionId,
-      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    }))
+  if (type === 'remove' && delta !== 0) {
+    if (setPostconditionGuard) removalStatements.push(setPostconditionGuard)
+    await ordinaryBusinessBatch(db, removalStatements)
+  }
+
+  // A tagged receipt still records a real purchase lot and both add/damage
+  // movements, but all four stock/held ledgers now commit in the receipt's
+  // single guarded batch above. No post-receipt hold may run separately.
+  if (conditionTag && type === 'add' && delta !== 0 && !taggedRestockWrittenAtomically) {
+    throw new Error('Tagged receipt hold was not committed atomically')
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
@@ -2199,6 +2316,18 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     lotCode,
     autoBatchDrainIds,
   })
+}
+
+export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+  try {
+    return await runAdjustActionImpl(c, body)
+  } catch (error) {
+    if (isAdjustMaintenanceRejection(error)) {
+      return c.json({ error: 'Dataset maintenance is active. Retry this stock adjustment after maintenance ends.',
+        code: 'maintenance_active' }, 503)
+    }
+    throw error
+  }
 }
 
 app.post('/adjust', async (c) => {

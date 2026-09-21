@@ -112,13 +112,14 @@ const batchCode = loadReal('lib/batchCode.ts')
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
+const maintenanceGuard = loadReal('lib/businessMaintenanceGuard.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
-  './db': loadReal('lib/db.ts'),
+  './db': { getDb: () => db },
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
@@ -272,6 +273,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     findIdentityMatch: async () => null,
     identityBarcodeKey: productDetailRule.identityBarcodeKey,
   },
+  '../lib/businessMaintenanceGuard': maintenanceGuard,
   // P10-4: REAL, not stubbed -- see routes/inventory.ts's own comment above
   // recomputeCatalogCost's call site.
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', {

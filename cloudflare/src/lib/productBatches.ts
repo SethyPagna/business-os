@@ -780,6 +780,29 @@ export function planUnreceiveBatchStock(input: { batchId: number; quantity: numb
 // write as receiveBatchStock, decrementing instead of incrementing, with
 // the same MAX(0, ...) floor guard routes/inventory.ts's own decrement
 // path already uses so a race can never push either figure negative.
+// Keep the interactive selected-lot path's historical floor/subtract policy.
+// The strict planner above is for writers that recompute the catalog scalar;
+// swapping it into /adjust would silently erase pre-existing scalar drift.
+export function planClampedRemoveStockFromBatch(input: {
+  batchId: number; productId: number; branchId: number; quantity: number
+}): StockWriteStatement[] {
+  return [
+    {
+      sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
+            WHERE batch_id = @batchId AND branch_id = @branchId`,
+      params: { batchId: input.batchId, branchId: input.branchId, quantity: input.quantity },
+    },
+    {
+      sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,
+      params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
+    },
+    {
+      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params: { productId: input.productId, quantity: input.quantity },
+    },
+  ]
+}
+
 export async function removeStockFromBatch(db: D1Compat, input: {
   batchId: number
   productId: number
@@ -801,21 +824,7 @@ export async function removeStockFromBatch(db: D1Compat, input: {
   const available = Number(batch.available) || 0
   if (input.quantity > available) throw new InsufficientBatchStockError(available)
 
-  await db.batch([
-    {
-      sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
-            WHERE batch_id = @batchId AND branch_id = @branchId`,
-      params: { batchId: input.batchId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,
-      params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
-    },
-    {
-      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: input.productId, quantity: input.quantity },
-    },
-  ])
+  await db.batch(planClampedRemoveStockFromBatch(input))
 
   return { productName: batch.productName, lotCode: batch.lotCode, batchNumber: batch.batchNumber }
 }
@@ -1091,13 +1100,13 @@ export async function productHasBatchHistory(db: D1Compat, productId: number): P
 // routes/inventory.ts's /adjust applies the remainder through the
 // ordinary applyStockDelta decrement, same as it always did for a
 // product with no batch ledger at all.
-export async function removeStockAcrossBatches(db: D1Compat, input: {
+export async function planRemoveStockAcrossBatches(db: D1Compat, input: {
   productId: number
   branchId: number
   quantity: number
   /** Exact FIFO allocation captured by a caller that must bind metadata to it. */
   allocations?: Array<{ batchId: number; quantity: number }>
-}): Promise<{ batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
+}): Promise<{ statements: StockWriteStatement[]; batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
   let remaining = input.quantity
   const touched: { batchId: number; take: number }[] = []
   if (input.allocations) {
@@ -1126,8 +1135,7 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
   }
   const drained = input.quantity - remaining
 
-  if (touched.length) {
-    await db.batch([
+  const statements: StockWriteStatement[] = touched.length ? [
       // The exact pre-read allocation and its cost snapshot travel together.
       // Fail the entire D1 batch before any decrement if a concurrent write
       // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
@@ -1150,10 +1158,10 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
         sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
         params: { productId: input.productId, quantity: drained },
       },
-    ])
-  }
+    ] : []
 
   return {
+    statements,
     batchIds: touched.map((entry) => entry.batchId),
     // Signed negative (this is a removal) so a caller recording
     // provenance (datedStockCountApply.ts) can store these rows
@@ -1163,4 +1171,15 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
     drained,
     remainder: remaining,
   }
+}
+
+export async function removeStockAcrossBatches(db: D1Compat, input: {
+  productId: number
+  branchId: number
+  quantity: number
+  allocations?: Array<{ batchId: number; quantity: number }>
+}): Promise<{ batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
+  const { statements, ...result } = await planRemoveStockAcrossBatches(db, input)
+  if (statements.length) await db.batch(statements)
+  return result
 }

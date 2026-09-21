@@ -142,6 +142,10 @@ const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './mon
 const productBatchesMod = loadReal('lib/productBatches.ts', {
   './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod,
 })
+const maintenanceGuardMod = loadReal('lib/businessMaintenanceGuard.ts')
+const catalogCostMod = loadReal('lib/catalogCostRecompute.ts', {
+  './db': dbOverride, './moneyPrecision': moneyMod,
+})
 
 // audit() calls are recorded, not written to a real audit_logs row -- same
 // pattern as test-returns-batch-restock-pure.cjs, since what this test needs
@@ -166,6 +170,8 @@ const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/cache': cacheStub,
   '../durable-objects/broadcastHub': broadcastStub,
   '../lib/productBatches': productBatchesMod,
+  '../lib/businessMaintenanceGuard': maintenanceGuardMod,
+  '../lib/catalogCostRecompute': catalogCostMod,
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/productIdentity': productIdentityMod,
