@@ -399,6 +399,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
   if (request === './planTier') return planTierModule
+  if (request === './db') return { isImportMaintenanceFenceError: () => false }
   if (request === './queueDispatch') return queueDispatchModule
   if (request === './permissions') return permissionsModule
   if (request === './acquisitionCostAccess') return acquisitionCostAccessModule

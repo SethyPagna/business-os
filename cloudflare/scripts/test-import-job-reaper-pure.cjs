@@ -104,6 +104,7 @@ const output = ts.transpileModule(source, {
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === '../lib/db') return { getDb: () => activeDb }
+  if (request === '../lib/importMaintenanceFence') return { getImportFencedDb: async () => activeDb, isImportMaintenanceFenceError: () => false }
   if (request === '../lib/auth') return auth
   if (request === '../lib/permissions') return permissions
   if (request === '../lib/acquisitionCostAccess') return acquisitionCostAccess

@@ -17,7 +17,7 @@
 // concept as BullMQ's job.retry()/job.moveToCompleted().
 
 import type { Env } from './index'
-import { getDb } from './lib/db'
+import { getImportFencedDb, isImportMaintenanceFenceError } from './lib/importMaintenanceFence'
 import { runImportAnalyze, runImportApply, markJobFailed, isImportApplyAuthorizationError } from './lib/importEngine'
 import { runBulkDeleteJob } from './lib/bulkDeleteEngine'
 import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './lib/backup'
@@ -128,7 +128,7 @@ export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, e
 // from routes/importJobs.ts's /:id/retry starts clean either way since
 // that route always sets status='queued' before re-enqueueing).
 export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobMessage>, env: Env): Promise<void> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   for (const message of batch.messages) {
     try {
       const { jobId, kind } = message.body
@@ -147,7 +147,10 @@ export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobM
           SET status = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
               last_error = 'Bulk delete failed after repeated retries (a persistent infrastructure error). Already-processed ids stay deleted; safe to retry the rest.'
           WHERE id = @id AND finished_at IS NULL
-        `).run({ id: jobId }).catch((writeError) => console.error('[import-queue] could not record bulk-delete DLQ failure', jobId, writeError))
+        `).run({ id: jobId }).catch((writeError) => {
+          if (isImportMaintenanceFenceError(writeError)) throw writeError
+          console.error('[import-queue] could not record bulk-delete DLQ failure', jobId, writeError)
+        })
       } else {
         await markJobFailed(
           db,
@@ -164,6 +167,10 @@ export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobM
         await db.prepare(`UPDATE import_jobs SET finished_at = CURRENT_TIMESTAMP WHERE id = @id AND finished_at IS NULL`).run({ id: jobId }).catch(() => { /* best-effort -- markJobFailed's own write already recorded the failure */ })
       }
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) {
+        message.retry()
+        continue
+      }
       // markJobFailed is designed not to throw, so reaching here means
       // something more fundamental (e.g. message.body itself is malformed)
       // -- log it and ack anyway. Retrying a DLQ message that's already

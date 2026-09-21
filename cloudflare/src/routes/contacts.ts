@@ -1,6 +1,7 @@
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
@@ -1838,6 +1839,7 @@ function registerContactRoutes(config: ContactConfig) {
       const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
       return c.json({ success: true, jobId, totalCount }, 202)
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
       return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
     }
   })
@@ -1876,7 +1878,12 @@ function registerContactRoutes(config: ContactConfig) {
     const entityType = contactBulkDeleteEntityType(config)
     const job = await getBulkDeleteJob(c.env, c.req.param('id'))
     if (!job || job.entity_type !== entityType) return c.json({ error: 'Bulk delete job not found' }, 404)
-    await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND entity_type = @entityType AND status IN ('pending', 'processing')`).run({ id: c.req.param('id'), entityType })
+    try {
+      await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND entity_type = @entityType AND status IN ('pending', 'processing')`).run({ id: c.req.param('id'), entityType })
+    } catch (error) {
+      if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
+      throw error
+    }
     return c.json({ success: true })
   })
 

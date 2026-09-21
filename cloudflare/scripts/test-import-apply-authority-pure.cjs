@@ -121,7 +121,11 @@ function makeState(actor) {
 let activeState = makeState(null)
 const exactStubs = {
   '../index': {},
-  './db': { getDb: () => activeState.db },
+  './db': {
+    getDb: () => activeState.db,
+    getImportFencedDb: async () => activeState.db,
+    isImportMaintenanceFenceError: () => false,
+  },
   './permissions': permissions,
   './auth': {},
   './media': media,
@@ -235,6 +239,7 @@ async function main() {
   const permanent = Object.assign(new Error('revoked'), { code: 'import_apply_permission_revoked' })
   const queue = load('queue.ts', {
     './index': {},
+    './lib/importMaintenanceFence': { getImportFencedDb: async () => activeState.db, isImportMaintenanceFenceError: () => false },
     // queue.ts registers the inline fallback runner at module load; this
     // test drives the CONSUMER, so the registration just has to not throw.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
@@ -264,6 +269,7 @@ async function main() {
   retried = 0
   const transientQueue = load('queue.ts', {
     './index': {},
+    './lib/importMaintenanceFence': { getImportFencedDb: async () => activeState.db, isImportMaintenanceFenceError: () => false },
     // Same registration-only stub as the permanent-failure queue above.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
     './lib/db': { getDb: () => activeState.db },

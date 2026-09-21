@@ -20,6 +20,14 @@
 // had to work around Postgres syntax differences that don't apply here.
 
 export type BindParams = Record<string, unknown> | unknown[] | undefined
+// Workflow-specific fenced adapter shares this entrypoint with D1Compat.
+export { getImportFencedDb, withImportMaintenanceWriteFence, isImportMaintenanceFenceError, ImportMaintenanceFenceError } from './importMaintenanceFence'
+
+export interface D1CompatPreparedStatement {
+  get<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined>
+  all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]>
+  run(params?: BindParams): Promise<{ changes: number; lastInsertRowid: number }>
+}
 
 function translate(sql: string, params: BindParams): { sql: string; values: unknown[] } {
   if (Array.isArray(params)) {
@@ -135,7 +143,7 @@ export class D1Compat {
     this.staging = this
   }
 
-  prepare(sql: string): D1CompatStatement {
+  prepare(sql: string): D1CompatPreparedStatement {
     return new D1CompatStatement(this.d1, sql)
   }
 

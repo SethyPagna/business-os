@@ -33,7 +33,7 @@ function realLib(name) {
 }
 function shim(request) {
   if (request === '../index') return {}
-  if (request === './db') return { getDb: (env) => env.DB }
+  if (request === './db') return { getDb: (env) => env.DB, getImportFencedDb: async (env) => env.DB, isImportMaintenanceFenceError: () => false }
   if (request === './cache') return { bumpVersion: async () => {} }
   if (request === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
   if (request.startsWith('./')) {

@@ -153,6 +153,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => dbShim },
+  '../lib/importMaintenanceFence': { getImportFencedDb: async () => dbShim, isImportMaintenanceFenceError: () => false },
   '../lib/lowStockSettings': lowStockStub,
   // routes/products.ts buckets the sales drill-down in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.

@@ -23,9 +23,10 @@ async function main() {
   mod._compile(bundle.outputFiles[0].text, mod.filename)
   const app = mod.exports.default
   for (const scenario of ['clear-ok', 'clear-replaced', 'corrupt-clear-replaced', 'restore-ok', 'restore-release-failed',
-    'restore-import-error', 'restore-import-missing', 'restore-import-negative', 'restore-import-fractional', 'restore-import-string', 'restore-import-active']) {
+    'restore-import-error', 'restore-import-missing', 'restore-import-negative', 'restore-import-fractional', 'restore-import-string', 'restore-import-active',
+    'restore-race-import', 'restore-race-bulk', 'restore-race-lease']) {
     const db = new Database(':memory:')
-    db.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);CREATE TABLE import_jobs(status TEXT)')
+    db.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);CREATE TABLE import_jobs(status TEXT,lease_token TEXT,lease_expires_at TEXT);CREATE TABLE bulk_delete_jobs(status TEXT)')
     const state = { mode: 'restore', token: 'original', phase: 'failed', backupKey: 'backup', startedBy: 'admin', startedAt: '2026-09-21T00:00:00Z', updatedAt: '2026-09-21T00:00:00Z' }
     const original = JSON.stringify(state)
     if (scenario.startsWith('clear') || scenario.startsWith('corrupt')) db.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('maintenance', scenario.startsWith('corrupt') ? '{broken' : original)
@@ -44,7 +45,14 @@ async function main() {
         const row = db.prepare(sql).get(...params) || null
         if (sql.startsWith('SELECT value') && ++reads === 1 && scenario.endsWith('replaced')) env.replace()
         return row
-      }, run: async () => ({ meta: { changes: db.prepare(sql).run(...params).changes } }) })
+      }, run: async () => {
+        if (sql.startsWith('INSERT INTO system_flags') && scenario.startsWith('restore-race-')) {
+          if (scenario === 'restore-race-import') db.prepare("INSERT INTO import_jobs(status) VALUES('queued')").run()
+          if (scenario === 'restore-race-bulk') db.prepare("INSERT INTO bulk_delete_jobs(status) VALUES('pending')").run()
+          if (scenario === 'restore-race-lease') db.prepare("INSERT INTO import_jobs(status,lease_token,lease_expires_at) VALUES('failed','held','2099-01-01T00:00:00.000Z')").run()
+        }
+        return { meta: { changes: db.prepare(sql).run(...params).changes } }
+      } })
       return { ...bind([]), bind: (...params) => bind(params) }
     } } }
     const restore = scenario.startsWith('restore')
@@ -56,6 +64,12 @@ async function main() {
       assert.equal(env.restoreCalls, 0, 'uncertain or active imports must never enter restore')
       assert.equal(env.events.length, 0, 'rejected admission must not create a success job/audit')
       assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined, 'rejected admission must not acquire maintenance')
+    } else if (scenario.startsWith('restore-race-')) {
+      assert.equal(response.status, 409)
+      assert.equal(result.code, 'maintenance_admission_conflict')
+      assert.equal(env.restoreCalls, 0)
+      assert.equal(env.events.length, 0, 'raced admission must not record job or audit')
+      assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
     } else if (scenario.endsWith('replaced')) {
       assert.equal(response.status, 409); assert.equal(result.cleared, false)
       assert.equal(env.events.length, 0, 'failed clear must not claim success in audit')

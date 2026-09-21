@@ -62,6 +62,10 @@ function stubRequire(id) {
   if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
   if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
   if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
+  if (id === './importMaintenanceFence') return {
+    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by these pure tests') },
+    isImportMaintenanceFenceError: () => false,
+  }
   if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('runD1BatchInChunks should not be called by these pure tests') } }
   if (id === './cache') return { bumpVersion: async () => { throw new Error('bumpVersion should not be called by these pure tests') } }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => { throw new Error('broadcast should not be called by these pure tests') } }

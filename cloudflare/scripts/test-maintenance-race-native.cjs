@@ -51,6 +51,8 @@ async function main() {
   try {
     const db = await mf.getD1Database('DB')
     await db.prepare('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT)').run()
+    await db.prepare('CREATE TABLE import_jobs(status TEXT,lease_token TEXT,lease_expires_at TEXT)').run()
+    await db.prepare('CREATE TABLE bulk_delete_jobs(status TEXT)').run()
     const call = async input => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify(input) })
       assert.equal(response.status, 200, await response.clone().text())

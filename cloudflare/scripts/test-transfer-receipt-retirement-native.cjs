@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const ts=require('typescript'),Database=require('better-sqlite3')
 const {Miniflare,Log,LogLevel}=require('miniflare')
 const {unstable_splitSqlQuery:split}=require('wrangler')
-const compile=file=>ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace("from './permissions'","from './permissions.js'")
+const compile=file=>ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace("from './permissions'","from './permissions.js'").replace("from './importMaintenanceFence'","from './importMaintenanceFence.js'").replace("from './db'","from './db.js'")
 const worker=`
 import {D1Compat} from './db.js';
 import * as kernel from './kernel.js';
@@ -26,7 +26,7 @@ async function main(){
  const dir=path.join(__dirname,'../migrations'),sqlite=new Database(':memory:')
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort())sqlite.exec(fs.readFileSync(path.join(dir,file),'utf8'))
  const schema=sqlite.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN (SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all();sqlite.close()
- const mf=new Miniflare({modules:[{type:'ESModule',path:'entry.js',contents:worker},{type:'ESModule',path:'kernel.js',contents:compile('transferReceiptRetirement.ts')},...['db','permissions'].map(n=>({type:'ESModule',path:n+'.js',contents:compile(n+'.ts')}))],compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
+ const mf=new Miniflare({modules:[{type:'ESModule',path:'entry.js',contents:worker},{type:'ESModule',path:'kernel.js',contents:compile('transferReceiptRetirement.ts')},...['db','permissions','importMaintenanceFence'].map(n=>({type:'ESModule',path:n+'.js',contents:compile(n+'.ts')}))],compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
  try{
   const db=await mf.getD1Database('DB')
   for(let i=0;i<schema.length;i+=25)await db.batch(schema.slice(i,i+25).map(r=>db.prepare(r.sql)))
