@@ -56,6 +56,45 @@
 /** Separator between the two labels of one line. */
 export const BILINGUAL_SEPARATOR = ' / '
 
+// ---------------------------------------------------------------------------
+// Language mode (owner, Sep 21 2026: "Khmer + english, option to choose one or
+// the other language or both and both as default. In settings.")
+// ---------------------------------------------------------------------------
+// ONE module-level variable, read by every pair-producing function below, so
+// the choice is applied while a message is COMPOSED rather than by stripping a
+// language out of finished text -- values (product names, notes, money) can
+// contain ' / ' themselves, and a post-hoc split would cut them in half.
+//
+// WHY A MODULE-LEVEL MODE IS SAFE ON A WORKER: `telegram_language` is a
+// SHOP-WIDE setting, so two requests that overlap in one isolate are reading
+// the same value and set the same mode; and lib/telegram.ts only ever sets it
+// around a SYNCHRONOUS compose (withLanguage there), restoring the previous
+// value in a `finally`. There is no point at which one message can observe
+// another message's mode.
+
+export type TelegramLanguage = 'both' | 'en' | 'km'
+
+let currentLanguage: TelegramLanguage = 'both'
+
+/** Unknown/empty settings values fall back to the bilingual default. */
+export function normalizeTelegramLanguage(mode: string | null | undefined): TelegramLanguage {
+  const value = String(mode ?? '').trim().toLowerCase()
+  return value === 'en' || value === 'km' ? value : 'both'
+}
+export function setTelegramLanguage(mode: string | null | undefined): void {
+  currentLanguage = normalizeTelegramLanguage(mode)
+}
+export function getTelegramLanguage(): TelegramLanguage {
+  return currentLanguage
+}
+
+/** The one place the mode turns two strings into what the chat receives. */
+function pair(en: string, km: string): string {
+  if (currentLanguage === 'en') return en
+  if (currentLanguage === 'km') return km
+  return `${en}${BILINGUAL_SEPARATOR}${km}`
+}
+
 type LabelEntry = {
   en: string
   km: string
@@ -206,6 +245,32 @@ const LABELS = {
   // and formatDaySummary. This label is deliberately separate from supplier
   // and store credit, which are different financial concepts.
   credit: { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },
+
+  // --- sectioned layout (owner, Sep 21 2026: "just smarter and compact ...
+  // enough spacing and separations that it feels easy to read and clean,
+  // using dividers, numbered list, etc... title etc...") -------------------
+  // Section TITLES. Every Khmer here is COPIED from frontend/src/lang/km.json
+  // (the key it came from is named beside it) and
+  // scripts/test-telegram-bilingual-pure.cjs re-checks it against the pack.
+  shiftReport: { en: 'Shift report', km: 'របាយការណ៍វេន' },        // km.json shift_report
+  cashCount: { en: 'Cash count', km: 'ការរាប់សាច់ប្រាក់' },          // km.json shift_counted_close (រាប់) + cash (សាច់ប្រាក់)
+  paymentMethods: { en: 'Payment methods', km: 'វិធីទូទាត់' },      // km.json rpt_payments
+  delivery: { en: 'Delivery', km: 'ការដឹកជញ្ជូន' },                 // km.json delivery
+  stock: { en: 'Stock', km: 'ស្តុក' },                              // km.json stock
+  eachExpense: { en: 'Each expense', km: 'ចំណាយនីមួយៗ' },          // km.json rpt_each_expense
+  // Section FIGURES.
+  // "Sales" names the section; the money inside it is the canonical revenue,
+  // under the word the owner's own reference layout uses ("Revenue: $ 0.00").
+  revenue: { en: 'Revenue', km: 'ចំណូល' },                          // km.json revenue
+  // The owner's reference splits the cut two ways -- "Discount on Items" and
+  // "Discount on Invoices" -- so the two figures keep their own names instead
+  // of collapsing into the receipt summary's single `discount` label.
+  itemDiscount: { en: 'Discount on items', km: 'ការបញ្ចុះតម្លៃលើទំនិញ' },        // km.json rpt_item_discounts
+  invoiceDiscount: { en: 'Discount on invoices', km: 'ការបញ្ចុះតម្លៃលើវិក្កយបត្រ' }, // km.json rpt_hint_total_sales ("...លើទំនិញ និងវិក្កយបត្រ")
+  // The pre-discount figure the reference lists right under the two cuts.
+  grossSales: { en: 'Gross sales', km: 'ការលក់សរុប' },                // km.json gross_sales
+  // The fold row when a breakdown has more rows than one phone screen holds.
+  other: { en: 'Other', km: 'ផ្សេងទៀត' },                           // km.json other
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -279,7 +344,7 @@ const BY_ENGLISH = new Map<string, LabelEntry>(Object.values(LABELS).map((entry)
 /** `'Cashier / អ្នកគិតប្រាក់'` -- the label pair on its own. */
 export function label(key: TelegramLabelKey): string {
   const entry = LABELS[key]
-  return `${entry.en}${BILINGUAL_SEPARATOR}${entry.km}`
+  return pair(entry.en, entry.km)
 }
 
 /** `'Cashier / អ្នកគិតប្រាក់: Za'` -- a whole bilingual line. */
@@ -289,12 +354,13 @@ export function labeled(key: TelegramLabelKey, value: unknown): string {
 
 /** Ad-hoc pair for copy that is not a field label (help text, notices). */
 export function bi(en: string, km: string): string {
-  return `${en}${BILINGUAL_SEPARATOR}${km}`
+  return pair(en, km)
 }
 
 /** Translate the enumerated words inside one value. */
 export function localizeTelegramValue(value: string): string {
-  return value.replace(VALUE_PHRASE_RE, (match) => `${match}${BILINGUAL_SEPARATOR}${VALUE_PHRASES[match]}`)
+  if (currentLanguage === 'en') return value
+  return value.replace(VALUE_PHRASE_RE, (match) => pair(match, VALUE_PHRASES[match]))
 }
 
 /**
@@ -317,14 +383,19 @@ export function localizeTelegramLine(line: string): string {
   // gives the whole feed ONE date convention without editing that route.
   if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
   if (entry.localizeValue) value = localizeTelegramValue(value)
-  return `${entry.en}${BILINGUAL_SEPARATOR}${entry.km}: ${value}`
+  return `${pair(entry.en, entry.km)}: ${value}`
 }
 
 /** Make a message heading bilingual, keeping its emoji in front. */
 export function localizeTelegramHeading(heading: string): string {
   const text = String(heading ?? '').trim()
   const km = HEADINGS[text as keyof typeof HEADINGS]
-  return km ? `${text}${BILINGUAL_SEPARATOR}${km}` : text
+  // The emoji belongs to the heading itself, so the Khmer-only rendering keeps
+  // it and drops only the English words after it.
+  if (!km) return text
+  const emoji = text.match(/^(\S+)\s+(.*)$/)
+  if (currentLanguage === 'km' && emoji) return `${emoji[1]} ${km}`
+  return pair(text, km)
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +406,13 @@ export function localizeTelegramHeading(heading: string): string {
 // hanging indent -- all of which survive Telegram's phone-width wrapping,
 // which `*bold*` would not (it would render as literal asterisks).
 
-const RULE = '━━━━━━━━━━━━━━━━━━'
+// The ONE section rule every report draws, and the whole of what replaced the
+// explanatory sentences the owner asked us to delete ("no explanation just
+// arrange all reports more concise with breakdowns clearly"). A bare rule
+// reads as a break at phone width; a section heading would cost a line per
+// block and a blank line reads as an accident rather than a divider. Exported
+// so lib/telegram.ts draws the SAME rule -- two copies drift by one glyph.
+export const RULE = '━'.repeat(18)
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 
@@ -399,24 +476,33 @@ export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
  * `/`-joined sentence pair is wider than a phone-width Telegram bubble and
  * wraps into a mush, which is why the two languages still get a line each.
  */
+/**
+ * Two lines in 'both' mode -- the English carries the icon, the Khmer sits
+ * under it on a hanging indent -- and ONE line in a single-language mode, with
+ * the icon moved onto whichever language survives. Composed per mode, so a
+ * single-language reference never leaves an orphaned indent line behind.
+ */
+function referenceLines(head: string, en: string, km: string): string[] {
+  if (currentLanguage === 'en') return [`${head}${en}`]
+  if (currentLanguage === 'km') return [`${head}${km}`]
+  return [`${head}${en}`, `     ${km}`]
+}
+
 export function telegramCommandReference(): string {
   const lines = [
-    '🤖 Business OS — Reports',
-    '     របាយការណ៍ Business OS',
+    ...referenceLines('🤖 ', 'Business OS — Reports', 'របាយការណ៍ Business OS'),
     RULE,
   ]
   for (const doc of TELEGRAM_COMMANDS) {
-    lines.push(
-      `${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${doc.en}`,
-      `     ${doc.km}`,
-    )
+    lines.push(...referenceLines(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — `, doc.en, doc.km))
   }
   lines.push(
     RULE,
+    // The accepted date forms are VALUES, not labels: they are exactly what the
+    // reader types, so they stay identical in every mode.
     '🗓 dd/mm/yyyy · today · yesterday',
     `     ${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
-    '🔒 Only this shop chat receives data.',
-    '     មានតែឆាតហាងនេះទេ ដែលទទួលទិន្នន័យ។',
+    ...referenceLines('🔒 ', 'Only this shop chat receives data.', 'មានតែឆាតហាងនេះទេ ដែលទទួលទិន្នន័យ។'),
   )
   return lines.join('\n')
 }

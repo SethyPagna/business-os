@@ -75,7 +75,52 @@ assert.equal(new Set(englishLabels).size, englishLabels.length, 'two label keys 
 assert.deepEqual(lang.TELEGRAM_LABELS.cashEnd, { en: 'Closing cash', km: 'សាច់ប្រាក់បិទវេន' })
 assert.deepEqual(lang.TELEGRAM_LABELS.credit, { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' })
 assert.deepEqual(lang.TELEGRAM_LABELS.cashReview, { en: 'Cash review needed', km: 'ត្រូវពិនិត្យសាច់ប្រាក់' })
+// The Sep 21 2026 section titles and figures.
+assert.deepEqual(lang.TELEGRAM_LABELS.shiftReport, { en: 'Shift report', km: 'របាយការណ៍វេន' })
+assert.deepEqual(lang.TELEGRAM_LABELS.revenue, { en: 'Revenue', km: 'ចំណូល' })
+assert.deepEqual(lang.TELEGRAM_LABELS.paymentMethods, { en: 'Payment methods', km: 'វិធីទូទាត់' })
 console.log(`PASS dictionary: ${englishLabels.length} labels, ${Object.keys(lang.TELEGRAM_HEADINGS).length} headings, all bilingual`)
+
+// --- 1b. the language mode (owner, Sep 21 2026) ------------------------------
+// "Khmer + english, option to choose one or the other language or both and
+// both as default. In settings." ONE module-level mode, applied while a
+// message is COMPOSED. Everything the shop CHOSE is a label; everything the
+// shop TYPED is a value, and a value is never translated or cut.
+const inMode = (mode, build) => {
+  const previous = lang.getTelegramLanguage()
+  lang.setTelegramLanguage(mode)
+  try { return build() } finally { lang.setTelegramLanguage(previous) }
+}
+assert.equal(lang.getTelegramLanguage(), 'both', 'the shipped default is bilingual')
+assert.equal(inMode('both', () => lang.label('cashier')), `Cashier${SEP}អ្នកគិតប្រាក់`)
+assert.equal(inMode('en', () => lang.label('cashier')), 'Cashier')
+assert.equal(inMode('km', () => lang.label('cashier')), 'អ្នកគិតប្រាក់')
+assert.equal(inMode('en', () => lang.bi('still open', 'នៅបើកនៅឡើយ')), 'still open')
+assert.equal(inMode('km', () => lang.bi('still open', 'នៅបើកនៅឡើយ')), 'នៅបើកនៅឡើយ')
+// An enumerated word INSIDE a value follows the same mode.
+assert.equal(inMode('en', () => lang.localizeTelegramValue('unpaid')), 'unpaid')
+assert.equal(inMode('km', () => lang.localizeTelegramValue('unpaid')), 'មិនទាន់បង់')
+assert.equal(inMode('both', () => lang.localizeTelegramValue('unpaid')), `unpaid${SEP}មិនទាន់បង់`)
+assert.equal(inMode('km', () => lang.localizeTelegramLine('Cashier: Za')), 'អ្នកគិតប្រាក់: Za', 'the VALUE is never translated')
+assert.equal(inMode('en', () => lang.localizeTelegramLine('Cashier: Za')), 'Cashier: Za')
+// The reason a mode is applied at composition and never by splitting finished
+// text: a value can contain the separator itself.
+assert.equal(
+  inMode('km', () => lang.localizeTelegramLine('Note: deliver 9 / 10 boxes')),
+  'កំណត់ចំណាំ: deliver 9 / 10 boxes',
+  'a value containing " / " must survive a single-language rendering intact',
+)
+// The heading keeps its emoji in every mode; only the words change.
+assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ បានកត់ត្រាការលក់')
+assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ Sale recorded')
+// Anything that is not one of the three values is the bilingual default: a
+// typo in a settings row must not blank the shop's reports.
+for (const junk of ['', null, undefined, 'klingon', 'EN-GB', 'both ']) {
+  assert.equal(inMode(junk, () => lang.getTelegramLanguage()), 'both', `"${junk}" must fall back to both`)
+}
+assert.equal(inMode('EN', () => lang.label('cashier')), 'Cashier', 'the value is case-insensitive')
+assert.equal(lang.getTelegramLanguage(), 'both', 'the mode is restored after every render')
+console.log('PASS language mode: both/en/km applied at composition, values untouched, junk falls back to both')
 
 // --- 2. the Khmer agrees with the app's language pack -----------------------
 
@@ -349,6 +394,45 @@ assert.ok(!reference.includes('mm/dd/yyyy'), 'the month-first order is no longer
 const graphemes = new Intl.Segmenter('km', { granularity: 'grapheme' })
 const widest = reference.split('\n').reduce((max, line) => Math.max(max, [...graphemes.segment(line)].length), 0)
 assert.ok(widest <= 52, `the reference must stay phone-width; widest line is ${widest} graphemes`)
+
+// The riel sign lives in the Khmer block, so strip it before probing.
+const khmerText = (text) => KHMER.test(String(text).replace(/៛/g, ''))
+// The reference is composed per mode, not trimmed afterwards: a single
+// language gets ONE line per command, with the icon moved onto the language
+// that survives, and no orphaned hanging-indent line left behind.
+const referenceEn = inMode('en', () => lang.telegramCommandReference())
+const referenceKm = inMode('km', () => lang.telegramCommandReference())
+for (const [mode, single] of [['en', referenceEn], ['km', referenceKm]]) {
+  assert.equal(single.split('\n').length, reference.split('\n').length - lang.TELEGRAM_COMMANDS.length - 2,
+    `the '${mode}' reference must drop exactly one line per pair:\n${single}`)
+  assert.ok(!single.split('\n').some((line) => line.trim() === ''), `the '${mode}' reference left an empty line behind`)
+  for (const doc of lang.TELEGRAM_COMMANDS) {
+    assert.ok(single.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${mode === 'en' ? doc.en : doc.km}`),
+      `${doc.command} has no usage line in '${mode}':\n${single}`)
+  }
+  // The accepted date FORMS are what the reader types; they never change.
+  assert.ok(single.includes('dd/mm/yyyy') && single.includes('today'), `the '${mode}' reference dropped the date forms`)
+  assert.ok(!/[<>]|\*\*|__/.test(single), `the '${mode}' reference must stay plain text`)
+}
+assert.ok(!khmerText(referenceEn), `the 'en' reference still carries Khmer:\n${referenceEn}`)
+assert.ok(referenceKm.startsWith('🤖 របាយការណ៍ Business OS'), `the 'km' reference lost its icon:\n${referenceKm}`)
+// A bad date answers in the shop's language too -- and still names both forms.
+const refusalKm = inMode('km', () => lang.parseReportDate('12/25/2026', '2026-09-04'))
+const refusalEn = inMode('en', () => lang.parseReportDate('12/25/2026', '2026-09-04'))
+assert.equal(refusalKm.ok, false)
+assert.ok(!/[A-Za-z]/.test(refusalKm.message.split('\n')[0].replace(/12\/25\/2026/g, '')), refusalKm.message)
+assert.ok(refusalKm.message.includes('dd/mm/yyyy') && refusalEn.message.includes('dd/mm/yyyy'), 'both modes name the accepted forms')
+assert.ok(!khmerText(refusalEn.message), refusalEn.message)
+// So does the refusal an unapproved chat gets -- and it still leaks nothing.
+const refusalKmChat = inMode('km', () => lang.telegramUnauthorizedReply('-1009988'))
+assert.ok(refusalKmChat.includes('-1009988'), refusalKmChat)
+assert.ok(khmerText(refusalKmChat), `the 'km' refusal must be Khmer:
+${refusalKmChat}`)
+assert.ok(!/[A-Za-z]/.test(refusalKmChat.replace(/Business OS|Settings|Telegram|-1009988/g, '')), refusalKmChat)
+for (const leak of ['$', '៛', 'Sale', 'Receipt', 'Total', 'Revenue', 'Cashier', 'Product', '/report']) {
+  assert.ok(!refusalKmChat.includes(leak), `the Khmer refusal must not contain "${leak}"`)
+}
+console.log(`PASS reference modes: 'en' ${referenceEn.split('\n').length} lines, 'km' ${referenceKm.split('\n').length} lines, no orphan indents, refusals follow the mode`)
 console.log(`PASS reference: ${lang.TELEGRAM_COMMANDS.length} commands, ${reference.split('\n').length} lines, widest ${widest} chars, plain text`)
 
 // --- 6. arguments: helpful, never thrown -------------------------------------
@@ -573,6 +657,23 @@ const lastSent = () => sent[sent.length - 1].body.text
   }
   console.log(`PASS commands: ${sent.length} composed replies, allow-list enforced, nothing sent for non-commands`)
 
+  // The shop chooses ONE language for the whole chat in Settings. The setting
+  // travels the real path: settings row -> getTelegramConfig -> the compose
+  // scope, so the reply a group actually receives changes, and the mode is
+  // put back afterwards so the next compose is not poisoned by this one.
+  for (const [value, wants, rejects] of [['km', 'Khmer', 'English'], ['en', 'English', 'Khmer']]) {
+    settingsRows.push({ key: 'telegram_language', value })
+    await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: { id: -100111 } } })
+    const reply = lastSent()
+    assert.ok(!reply.includes(SEP), `with telegram_language=${value} the chat must not get both languages:\n${reply}`)
+    assert.equal(khmerText(reply), value === 'km', `telegram_language=${value} must answer in ${wants}, not ${rejects}:\n${reply}`)
+    assert.ok(reply.includes('📊'), `telegram_language=${value} lost the report itself:\n${reply}`)
+    assert.equal(lang.getTelegramLanguage(), 'both', 'the compose scope must restore the module mode')
+    settingsRows.pop()
+  }
+  await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: { id: -100111 } } })
+  assert.ok(lastSent().includes(SEP), 'removing the setting returns the chat to the bilingual default')
+  console.log('PASS language setting: telegram_language km/en/unset reaches the composed reply and restores the mode')
   // Business day, business date shape.
   assert.equal(wired.formatBusinessDay('2026-09-01'), '01/09/2026', 'report headers use the pinned dd/mm/yyyy')
   assert.equal(wired.formatBusinessDay('2026-12-25'), '25/12/2026', 'and a day past the 12th proves the order')

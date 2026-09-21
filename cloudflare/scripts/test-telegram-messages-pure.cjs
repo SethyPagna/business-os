@@ -186,10 +186,12 @@ const cancelledFigures = {
   cash: { usd: 25, khr: 0, needsReview: false },
 }
 const cancelledReport = telegram.formatShiftReport('Shop', cancelledShift, cancelledFigures, Date.parse('2026-09-04T12:00:00.000Z'))
-assert.ok(cancelledReport.includes('cancelled / បានបោះបង់'), cancelledReport)
+// SECTIONED Sep 21 2026: the state moved from a tag on the To line into the
+// report TITLE, the way the owner's reference layout states it.
+assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Cancelled / បានបោះបង់'), cancelledReport)
 assert.ok(cancelledReport.includes('Cancelled by / បោះបង់ដោយ: Manager'), cancelledReport)
 assert.ok(cancelledReport.includes('Reason / មូលហេតុ: Duplicate opening'), cancelledReport)
-assert.ok(cancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), cancelledReport)
+assert.ok(cancelledReport.includes('1. Invoices / វិក្កយបត្រ\nTotal / សរុប: 3'), cancelledReport)
 assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
 assert.ok(!cancelledReport.includes('still open'), cancelledReport)
 assert.ok(!cancelledReport.includes('Counted /'), cancelledReport)
@@ -213,7 +215,7 @@ assert.ok(closedCancelledReport.includes('Closing cash / សាច់ប្រ�
 assert.ok(!closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់:'), closedCancelledReport)
 // ... beside the OPENING count, which is the half the owner said was missing.
 assert.ok(closedCancelledReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('Invoices / វិក្កយបត្រ: 3'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('1. Invoices / វិក្កយបត្រ\nTotal / សរុប: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
 
@@ -416,8 +418,10 @@ assert.equal(lossLines[lossAt], 'Loss / ខាតបង់: $30.00', lossReport)
 // Numbers only -- no sentence explaining what a loss is (the owner's standing
 // "no explanation just arrange all reports more concise").
 assert.equal(lossLines[lossAt].split(':').length, 2, lossLines[lossAt])
-// The canonical totals above are untouched by it.
-assert.ok(lossLines.includes('Sales / ការលក់: $25.00'), lossReport)
+// The canonical totals above are untouched by it. (The money line is labelled
+// `Revenue` since Sep 21 2026 -- `Sales` names the SECTION it sits in.)
+assert.ok(lossLines.includes('2. Sales / ការលក់'), lossReport)
+assert.ok(lossLines.includes('Revenue / ចំណូល: $25.00'), lossReport)
 assert.ok(lossLines.includes('Profit / ចំណេញ: $15.00'), lossReport)
 
 // Zero, and ABSENT, both print nothing: a $0.00 Loss row would assert that

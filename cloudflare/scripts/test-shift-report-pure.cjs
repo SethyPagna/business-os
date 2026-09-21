@@ -1,23 +1,34 @@
 // S4-7. The shift report message: its shape, its arithmetic, and the two
 // places it must refuse to guess. No D1, no bot token, no network.
 //
-// REDESIGNED Sep 2026 (N42/N38). The owner: "for telegram message can be made
-// more clearly, summary, less text, no explanation just arrange all reports
-// more concise with breakdowns clearly. like i see shift report is so long,
-// much more simpler so easy to understand at a glance", and separately "you
-// didn't mention the registered cash dollar and khr in open vs end", and on
-// credit "just use credit ... instead of $-n ... just $n".
+// REDESIGNED Sep 6 2026 (N42/N38), then RE-SECTIONED Sep 21 2026. The owner's
+// Sep 6 review: "for telegram message can be made more clearly, summary, less
+// text, no explanation just arrange all reports more concise with breakdowns
+// clearly. like i see shift report is so long, much more simpler so easy to
+// understand at a glance", and separately "you didn't mention the registered
+// cash dollar and khr in open vs end", and on credit "just use credit ...
+// instead of $-n ... just $n". On Sep 21 2026 the owner pasted the old POS's
+// shift report as a LAYOUT reference (information order only, never its
+// wording or branding) and asked for "dividers, numbered list, etc... title
+// etc...", which turned the flat line set from Sep 6 into SIX numbered
+// sections -- Invoices, Sales, Cash count, Payment methods, Delivery,
+// Expenses -- each opened by a rule and a title, with two reinstated
+// breakdown sections (payment methods, delivery) as bullets rather than the
+// prose blocks the pre-Sep-6 report used.
 //
-// What this file guards AFTER that redesign:
+// What this file guards AFTER the Sep 21 layout:
 //
-//   * The line set and the ORDER the redesign fixed: id/time/shop/cashier, then the
-//     header totals, then invoices, then registered opening/closing cash, then
-//     the context block. Order is content here -- a cashier reads this on a
-//     phone at closing time -- so it is asserted, not just membership.
-//   * Registered OPENING and CLOSING cash, both currencies, side by side. That block
-//     is the owner's named gap and it is a FACTUAL readout: nothing here
-//     compares it against a target, and the words "shortage" and "must match"
-//     appear nowhere.
+//   * The ORDER the redesign fixed, at two levels: the identity block
+//     (Shop, ID, Cashier, From, To) before the six sections, and the six
+//     sections themselves in their fixed sequence. Order is content here --
+//     a cashier reads this on a phone at closing time -- so it is asserted,
+//     not just membership, and a positive control (a deliberately swapped
+//     pair of lines) proves the assertion actually rejects a reordering
+//     rather than passing vacuously.
+//   * Registered OPENING and CLOSING cash, both currencies, side by side, in
+//     the Cash count section. That block is the owner's named gap and it is
+//     a FACTUAL readout: nothing here compares it against a target, and the
+//     words "shortage" and "must match" appear nowhere.
 //   * Not Paid prints as a positive memo and is NOT subtracted from
 //     anything above it. Unpaid credit was never collected, so it is not in
 //     the drawer figure to begin with; subtracting it would take the money
@@ -36,10 +47,12 @@
 //   * The wiring: /shift binds the shift window into every sales query, sees
 //     cancelled receipts, and every figure reads the kernel column it claims.
 //
-// The LAYOUT budget of the redesign (line cap, exact rendered lines,
-// bilingual structure parity, retired-string sweep) is pinned separately in
-// scripts/test-telegram-shift-report-pure.cjs. This file is the wiring and
-// the arithmetic; that one is the shape.
+// The LAYOUT budget of the redesign (line cap, exact rendered lines including
+// the Khmer text, bilingual structure parity, retired-string sweep) is pinned
+// separately in scripts/test-telegram-shift-report-pure.cjs. This file is the
+// wiring and the arithmetic; that one is the shape, which is why the checks
+// below read section and field labels through lang.label()/lang.labeled()
+// rather than re-typing the Khmer.
 //
 // Run (from cloudflare/): node scripts/test-shift-report-pure.cjs
 const fs = require('fs')
@@ -129,6 +142,9 @@ const telegram = loadReal('lib/telegram.ts', {
 
 const KHMER = /[ក-៿]/
 const SEP = lang.BILINGUAL_SEPARATOR
+// A section with no rows still prints, marked rather than missing (the
+// owner's Sep 21 2026 reference shows every section, empty ones included).
+const EMPTY_SECTION_MARKER = '—'
 
 // A closed shift: opened 08:15 local (01:15Z), counted 17:02 local (10:02Z).
 const CLOSED = {
@@ -180,30 +196,88 @@ const lineWith = (english) => {
   return found
 }
 const valueOf = (english) => lineWith(english).slice(lineWith(english).indexOf(': ') + 2)
+// A bullet reads `• Label / ស្លាក — value` (an em dash, never ': '), so the
+// two expense/delivery/payment breakdown rows need their own reader.
+const bulletValue = (english) => {
+  const prefix = `• ${english}${SEP}`
+  const found = lines.find((line) => line.startsWith(prefix))
+  assert.ok(found, `the report has no "${english}" bullet:\n${report}`)
+  return found.slice(found.indexOf(' — ') + 3)
+}
+// The rows between `N. <title>` and the next rule (or the end) -- one
+// section's own lines, so a label that repeats across sections ("Total" is
+// both the invoice-count row and the expense total) can be read at its own
+// occurrence instead of the first one anywhere in the message.
+const sectionBlock = (text, key) => {
+  const rows = text.split('\n')
+  const title = rows.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
+  assert.ok(title >= 0, `the report has no "${key}" section:\n${text}`)
+  const next = rows.findIndex((row, index) => index > title && row === lang.RULE)
+  return rows.slice(title + 1, next < 0 ? rows.length : next)
+}
 
-// --- 1. the redesigned line set, in the redesigned order --------------------
+// --- 1. the Sep 21 2026 sectioned layout, in its fixed order -----------------
+// The owner's reference: identity block, then six numbered sections --
+// Invoices, Sales, Cash count, Payment methods, Delivery, Expenses -- each
+// opened by a rule and a title. Both levels of order are content: a cashier
+// reads top to bottom on a phone at closing time.
 
+const SECTION_KEYS = ['invoices', 'sales', 'cashCount', 'paymentMethods', 'delivery', 'expenses']
+const sectionTitleLines = (text) => text.split('\n').filter((line) => /^\d+\.\s/.test(line))
+assert.deepEqual(sectionTitleLines(report), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`),
+  `the six sections are not in the Sep 21 2026 order:\n${report}`)
+
+// Inside the identity block and inside each section, the field order the
+// layout fixed. Matched strictly AFTER the previous hit (not from the top of
+// the message) so the repeated "Total" label -- once for the invoice counts,
+// once for the expense sum -- is checked at its own occurrence each time.
 const ORDER = [
-  // The fixed phone reading order: id and time before the shop and cashier.
-  'ID', 'From', 'To', 'Shop', 'Cashier',
-  // The header block: the totals the owner reads first. Not Paid is the LAST
-  // of them and is a positive figure, never a deduction.
-  'Sales', 'Profit', 'Expenses', 'Delivery fee', 'Not Paid',
-  'Invoices',
-  'Opening cash', 'Additional change used', 'Closing cash',
-  'Actual delivery cost', 'Other expenses', 'Expected cash', 'Difference',
+  // The identity block, id and time inside shop/cashier the way the owner's
+  // reference orders it.
+  'Shop', 'ID', 'Cashier', 'From', 'To',
+  // 1. Invoices -- the one compact counts row.
+  'Total',
+  // 2. Sales -- Not Paid is the last of the header totals and is a positive
+  // figure, never a deduction.
+  'Revenue', 'Profit', 'Delivery fee', 'Not Paid', 'Refunds',
+  // 3. Cash count -- opening, the change used, closing, then the one
+  // informational expected/difference pair.
+  'Opening cash', 'Additional change used', 'Closing cash', 'Expected cash', 'Difference',
+  // 6. Expenses -- the total, after its own bullets.
+  'Total',
 ]
 let cursor = -1
 for (const english of ORDER) {
-  const at = lines.findIndex((line) => line.startsWith(`${english}${SEP}`))
-  assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the redesign fixed this sequence:\n${report}`)
+  const at = lines.findIndex((line, index) => index > cursor && line.startsWith(`${english}${SEP}`))
+  assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the Sep 21 2026 layout fixed this sequence:\n${report}`)
   cursor = at
 }
-// And nothing else: a labelled line that is not on the list is a line the
-// redesign did not budget for.
+// And nothing else labelled: a line with ': ' that is not on the list (and is
+// not a bullet or a section title) is a line the layout did not budget for.
 const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('•') && !line.startsWith('  '))
-assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the redesign did not budget for:\n${report}`)
-console.log(`PASS order: exactly the ${ORDER.length} redesigned lines, in the redesigned sequence`)
+assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the layout did not budget for:\n${report}`)
+console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines within them, in the fixed sequence`)
+
+// A positive control: prove the order loop above actually discriminates
+// rather than passing on any input. Swapping the Shop/ID lines in a LOCAL
+// copy of the already-rendered text (never the source) must make the same
+// loop fail -- if it did not, the loop above would be checking membership,
+// not order.
+{
+  const swapped = [...lines]
+  const shopAt = swapped.findIndex((line) => line.startsWith(`Shop${SEP}`))
+  const idAt = swapped.findIndex((line) => line.startsWith(`ID${SEP}`));
+  [swapped[shopAt], swapped[idAt]] = [swapped[idAt], swapped[shopAt]]
+  let brokenCursor = -1
+  let rejected = false
+  for (const english of ORDER) {
+    const at = swapped.findIndex((line, index) => index > brokenCursor && line.startsWith(`${english}${SEP}`))
+    if (!(at > brokenCursor)) { rejected = true; break }
+    brokenCursor = at
+  }
+  assert.ok(rejected, 'the order check does not discriminate: a swapped Shop/ID pair still passed it')
+}
+console.log('PASS order is a real discriminator: a swapped Shop/ID pair fails the same check')
 
 // --- 2. every label is bilingual --------------------------------------------
 
@@ -219,25 +293,31 @@ console.log(`PASS bilingual: ${labelled.length} labelled lines carry both langua
 
 assert.equal(valueOf('Shop'), 'Sok Meng Shop')
 assert.equal(valueOf('ID'), 'S-20260904-0815')
-assert.equal(valueOf('Sales'), '$210.00')
+assert.equal(valueOf('Revenue'), '$210.00')
 assert.equal(valueOf('Profit'), '$93.00')
 assert.equal(valueOf('Delivery fee'), '$6.00')
-assert.equal(valueOf('Actual delivery cost'), '$3.50')
-assert.equal(valueOf('Other expenses'), '$4.00')
-assert.equal(valueOf('Invoices'), '12')
+// The two Expenses-section bullets: the recorded courier payout, and (since
+// this fixture has no per-expense rows) the fallback "Other expenses" bullet.
+assert.equal(bulletValue('Actual delivery cost'), '$3.50')
+assert.equal(bulletValue('Other expenses'), '$4.00')
+// The Invoices section is ONE row: the total, and the two counts that
+// qualify it, joined by ' · ' rather than printed on their own lines.
+const invoicesRow = sectionBlock(report, 'invoices')[0]
+assert.equal(invoicesRow, `${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
 
-// THE EXPENSE TOTAL is the sum of the two lines that explain it, and only of
-// those two -- a header figure that does not equal its own breakdown is the
-// failure this file exists for.
-assert.equal(valueOf('Expenses'), '$7.50')
+// THE EXPENSE TOTAL is the sum of the two bullets that explain it, and only
+// of those two -- a section total that does not equal its own breakdown is
+// the failure this file exists for.
+const expensesTotal = sectionBlock(report, 'expenses').at(-1)
+assert.equal(expensesTotal, lang.labeled('total', '$7.50'))
 assert.equal(Math.round((FIGURES.otherExpenseUsd + FIGURES.deliveryCostUsd) * 100) / 100, 7.5)
 
 // THE CREDIT RULING, on the value: positive, the word "credit", and NOT
-// removed from any total above it. Sales stays $210.00 with an $18.00 credit
-// in the window; a report that subtracted credit would print $192.00.
+// removed from any total above it. Revenue stays $210.00 with an $18.00
+// credit in the window; a report that subtracted credit would print $192.00.
 assert.equal(valueOf('Not Paid'), '$18.00')
 assert.ok(!/-\$|\$-/.test(report), `credit (or anything else) rendered as a negative dollar amount:\n${report}`)
-assert.notEqual(valueOf('Sales'), '$192.00', 'credit was subtracted from sales -- it is revenue, it was simply not collected')
+assert.notEqual(valueOf('Revenue'), '$192.00', 'credit was subtracted from revenue -- it is revenue, it was simply not collected')
 assert.ok(!/\bCredit\b|ឥណទាន/.test(report), 'the superseded Credit wording must not render')
 
 // Both currencies, never folded together -- the drawer holds dollars and riel
@@ -259,10 +339,11 @@ console.log('PASS figures: money, both currencies, dd/mm/yyyy 24-hour local time
 for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Final amount', 'discrepanc']) {
   assert.ok(!new RegExp(banned, 'i').test(report), `the report reintroduced "${banned}" -- the cash block is a readout, not a check:\n${report}`)
 }
-// And no explanatory sentence anywhere: every line is a label and a figure,
-// a bullet, a rule, or the title.
+// And no explanatory sentence anywhere: every line is a label and a figure, a
+// bullet, a rule, a numbered section title, an empty-section marker, or the
+// report's own title line.
 for (const line of lines.slice(1)) {
-  if (!line.trim() || /^[━]+$/.test(line) || line.startsWith('•')) continue
+  if (!line.trim() || line === lang.RULE || line.startsWith('•') || line === EMPTY_SECTION_MARKER || /^\d+\.\s/.test(line)) continue
   assert.ok(line.includes(': '), `"${line}" is prose, not a labelled figure`)
   assert.ok(!/\. /.test(line), `"${line}" reads as a sentence`)
 }
@@ -280,8 +361,8 @@ const noCost = telegram.formatShiftReport('Shop', CLOSED, {
 assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
 assert.ok(noCostLines.some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
-assert.ok(noCostLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': $4.00'),
-  'an unrecorded courier cost must not be folded into the expense total as a zero')
+assert.deepEqual(sectionBlock(noCost, 'expenses'), [`• ${lang.label('expensesOther')} — $4.00`, lang.labeled('total', '$4.00')],
+  'an unrecorded courier cost must not be folded into the expense total as a zero, nor as its own bullet')
 console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
 
 // --- 4. the difference is the shared formula's number, once ------------------
@@ -322,10 +403,10 @@ const rielReport = telegram.formatShiftReport('Shop', {
 const rielLines = rielReport.split('\n')
 assert.ok(rielLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $0.00 · 283,700៛'))
 assert.ok(rielLines.find((line) => line.startsWith(`Closing cash${SEP}`)).endsWith(': $0.00 · 133,700៛'))
-assert.ok(rielLines.find((line) => line.startsWith(`Expenses${SEP}`)).endsWith(': 150,000៛'))
+assert.equal(sectionBlock(rielReport, 'expenses').at(-1), lang.labeled('total', '150,000៛'))
 assert.ok(rielLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
-// The per-expense list is gone: the header total and the "Other expenses"
-// line are the breakdown the owner asked for, and six bullets under them is
+// The per-expense list is gone: the section total and its single fallback
+// bullet are the breakdown the owner asked for, and six bullets under them is
 // the length he asked us to cut.
 assert.ok(!rielReport.includes('30,000៛'), 'the report re-grew a per-expense list')
 
@@ -448,10 +529,17 @@ const OPEN = { ...CLOSED, closed_at: null, closing_counted_usd: null, closing_co
 const openReport = telegram.formatShiftReport('Sok Meng Shop', OPEN, FIGURES, NOW)
 const openLines = openReport.split('\n')
 const openTo = openLines.find((line) => line.startsWith(`To${SEP}`))
-// Reported up to NOW (12:00Z = 19:00 local), and SAID to be still running.
+// Reported up to NOW (12:00Z = 19:00 local).
 assert.ok(openTo.includes('04/09/2026 19:00'), `an open shift reports up to now, got: ${openTo}`)
-assert.ok(openTo.includes('still open'), 'an open shift must say so')
-assert.ok(KHMER.test(openTo), 'the "still open" note is English-only')
+// UPDATED Sep 21 2026: "still open" used to be a tag appended to this very To
+// line; the sectioned layout states the shift's state ONCE, in the title, so
+// repeating it here would be the redundant fact the redesign removed. The
+// exact rendered title (English, Khmer and both) is pinned in
+// scripts/test-telegram-shift-report-pure.cjs; this only checks that an open
+// shift's title says so and stays bilingual.
+assert.ok(!openTo.includes('still open'), 'the open state moved to the title -- it must not still be repeated on the To line')
+assert.ok(openLines[0].includes('Open'), 'an open shift must say so in the title')
+assert.ok(KHMER.test(openLines[0]), 'the title is not bilingual')
 // No closing count exists yet, so neither line may appear -- a "Difference" of
 // -$256.00 on every open till would read as an alarm.
 assert.ok(!openLines.some((line) => line.startsWith(`Closing cash${SEP}`)), 'an open shift must not print a closing count that has not been taken')
@@ -461,10 +549,14 @@ assert.ok(openLines.some((line) => line.startsWith(`Expected cash${SEP}`)), 'an 
 // point of showing open vs end.
 assert.ok(openLines.some((line) => line.startsWith(`Opening cash${SEP}`)), 'an open shift still reports its registered opening cash')
 // Everything else still renders: this is a real report, not a placeholder.
-for (const english of ORDER.filter((entry) => entry !== 'Closing cash' && entry !== 'Difference')) {
+// (De-duplicated: ORDER lists "Total" twice, once per section it labels.)
+const stillExpected = [...new Set(ORDER)].filter((entry) => entry !== 'Closing cash' && entry !== 'Difference')
+for (const english of stillExpected) {
   assert.ok(openLines.some((line) => line.startsWith(`${english}${SEP}`)), `open shift dropped the "${english}" line`)
 }
-console.log(`PASS open shift: renders ${ORDER.length - 2} lines up to now, without inventing a closing count`)
+assert.deepEqual(sectionTitleLines(openReport), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`),
+  'an open shift still renders all six sections, in order')
+console.log(`PASS open shift: renders ${stillExpected.length} lines up to now, without inventing a closing count`)
 
 // --- 6. a shift with nothing in it -------------------------------------------
 // The first POS use of a day registers the float; the report can legitimately
@@ -480,13 +572,21 @@ const empty = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_us
 }, NOW)
 const emptyLines = empty.split('\n')
 assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken value:\n${empty}`)
-// Sales and Profit print even at zero -- a day that took nothing is a fact --
-// while every optional line is gone.
-assert.ok(emptyLines.find((line) => line.startsWith(`Sales${SEP}`)).endsWith(': $0.00'))
+// Revenue and Profit print even at zero -- a day that took nothing is a fact
+// -- while every optional line is gone.
+assert.ok(emptyLines.find((line) => line.startsWith(`Revenue${SEP}`)).endsWith(': $0.00'))
 assert.ok(emptyLines.find((line) => line.startsWith(`Profit${SEP}`)).endsWith(': $0.00'))
-for (const dropped of ['Expenses', 'Delivery fee', 'Not Paid', 'Cancelled', 'Edited', 'Actual delivery cost', 'Other expenses', 'Refunds']) {
+for (const dropped of ['Delivery fee', 'Not Paid', 'Refunds']) {
   assert.ok(!emptyLines.some((line) => line.startsWith(`${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
 }
+// The Invoices row drops its zero-valued Cancelled/Edited qualifiers but
+// still states the total -- a day with nothing is a fact, not a blank.
+assert.equal(sectionBlock(empty, 'invoices')[0], lang.labeled('total', 0))
+// All six sections still print, the ones with nothing marked rather than
+// missing (the owner's reference shows every section, empty ones included).
+assert.deepEqual(sectionTitleLines(empty), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`))
+assert.deepEqual(sectionBlock(empty, 'expenses'), [EMPTY_SECTION_MARKER],
+  'a quiet shift must mark the Expenses section empty rather than print a $0.00 bullet or total')
 // The float is still in the drawer and nothing was taken out of it.
 assert.ok(emptyLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $50.00 · 100,000៛'))
 assert.ok(emptyLines.find((line) => line.startsWith(`Expected cash${SEP}`)).endsWith(': $60.00 · 105,000៛'))
@@ -533,6 +633,16 @@ const stubDb = {
 const stubAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
   './db': { getDb: () => stubDb }, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow, ...analyticsPrecision,
 })
+// The Sep 21 2026 reference REINSTATED the payment-method and delivery
+// sections, read through the same two kernel entry points routes/reports.ts
+// uses. Counted at the function boundary: the kernel answers them from a
+// report snapshot when one exists, so the SQL text is not a reliable witness.
+const breakdownCalls = { payments: 0, couriers: 0 }
+const analyticsForShift = {
+  ...stubAnalytics,
+  async getPaymentMethodBreakdown(env, filters) { breakdownCalls.payments += 1; return stubAnalytics.getPaymentMethodBreakdown(env, filters) },
+  async getDeliveryContactTotals(env, filters) { breakdownCalls.couriers += 1; return stubAnalytics.getDeliveryContactTotals(env, filters) },
+}
 const wired = loadReal('lib/telegram.ts', {
   './lowStockSettings': lowStockStub,
   './db': { getDb: () => stubDb },
@@ -540,7 +650,7 @@ const wired = loadReal('lib/telegram.ts', {
   './telegramLang': lang,
   './saleTotals': saleTotals,
   './nativeSaleChange': nativeSaleChange,
-  './salesAnalytics': stubAnalytics,
+  './salesAnalytics': analyticsForShift,
   './shiftReconciliation': reconciliationFor(() => stubDb, stubAnalytics),
 })
 
@@ -567,12 +677,12 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(counts, 'no invoice-count query was issued')
   assert.ok(!/<> 'cancelled'/.test(counts.sql), 'the count query inherited the hide-cancelled guard, so it can only ever report 0 cancelled')
   assert.ok(/sale_amendments/.test(counts.sql), '"edited" is not counted from the amendment ledger')
-  // The two breakdown queries the redesign dropped must not come back: they
-  // were the longest part of the message and the owner asked for it short.
-  const groupedBreakdowns = statements.filter((statement) => /\bGROUP\s+BY\b/i.test(statement.sql))
-  assert.ok(!groupedBreakdowns.some((statement) => /\bpayment_method\b/i.test(statement.sql)), '/shift re-issued the payment-method breakdown query')
-  assert.ok(!groupedBreakdowns.some((statement) => /\bdelivery_contact_(?:id|name)\b/i.test(statement.sql)), '/shift re-issued the delivery-contact breakdown query')
-  console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts, no breakdown queries`)
+  // Sections 4 and 5 (payment methods, delivery) come from the kernel's two
+  // breakdown readers, once each per shift -- the Sep 6 redesign had dropped
+  // them; the Sep 21 reference put them back.
+  assert.equal(breakdownCalls.payments, 1, '/shift must read the payment-method breakdown exactly once per shift')
+  assert.equal(breakdownCalls.couriers, 1, '/shift must read the delivery-contact breakdown exactly once per shift')
+  console.log(`PASS wiring: /shift issued ${statements.length} statements, ${windowed.length} of them window-bound, counts see cancelled receipts, both breakdown readers called once`)
 
   const shopWide = { ...CLOSED, scope_mode: 'shop_wide' }
   assert.equal(telegram.shiftFilters(shopWide, NOW).cashierId, null, 'shop-wide reports do not narrow sales to the opener')
@@ -694,20 +804,35 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     assert.ok(found, `the report has no "${english}" line:\n${reply}`)
     return found.slice(found.indexOf(': ') + 2)
   }
+  // A bullet's label is either a lang.label() pair (deliveryCost) or a raw
+  // DB row label (the expense query's own "Example expense"), so this takes
+  // the already-rendered prefix rather than a TelegramLabelKey.
+  const mappedBulletValue = (renderedPrefix) => {
+    const prefix = `• ${renderedPrefix} — `
+    const found = mapped.find((line) => line.startsWith(prefix))
+    assert.ok(found, `the report has no "${renderedPrefix}" bullet:\n${reply}`)
+    return found.slice(prefix.length)
+  }
+  const mappedSection = (key) => {
+    const title = mapped.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
+    assert.ok(title >= 0, `the report has no "${key}" section:\n${reply}`)
+    const next = mapped.findIndex((row, index) => index > title && row === lang.RULE)
+    return mapped.slice(title + 1, next < 0 ? mapped.length : next)
+  }
   // Each of these is a DIFFERENT number, so a line reading from the wrong
   // kernel column cannot coincidentally match.
-  assert.equal(mappedValue('Sales'), '$210.00', 'sales is recognized net sales minus refunds')
+  assert.equal(mappedValue('Revenue'), '$210.00', 'revenue is recognized net sales minus refunds')
   // revenue 210 - cost 120 + delivery net (6 - 3.5) = 92.50, the kernel's own
   // profit definition. Asserted as a VALUE so a second profit rule invented
   // here would show up as a different number.
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
-  assert.equal(mappedValue('Other expenses'), '$4.00', 'the expense total comes from the grouped query')
+  assert.equal(mappedBulletValue('Example expense'), '$4.00', 'the per-expense bullet comes from the grouped query, by its own label')
   assert.equal(mappedValue('Not Paid'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
-  assert.equal(mappedValue('Actual delivery cost'), '$3.50', 'the courier money actually paid out')
-  // 4.00 other + 3.50 courier, the two lines under it.
-  assert.equal(mappedValue('Expenses'), '$7.50', 'the header expense total is its own two lines')
-  assert.equal(mappedValue('Invoices'), '12')
+  assert.equal(mappedBulletValue(lang.label('deliveryCost')), '$3.50', 'the courier money actually paid out')
+  // 4.00 other + 3.50 courier, the two bullets above it.
+  assert.equal(mappedSection('expenses').at(-1), lang.labeled('total', '$7.50'), 'the section total is its own two bullets')
+  assert.equal(mappedSection('invoices')[0], `${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
   assert.equal(mappedValue('Opening cash'), '$50.00 · 100,000៛', 'the registered opening cash is the shift row, both currencies')
   assert.equal(mappedValue('Closing cash'), '$256.00 · 100,000៛', 'and the closing cash is the shift row too')
   // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50 = 30.50,

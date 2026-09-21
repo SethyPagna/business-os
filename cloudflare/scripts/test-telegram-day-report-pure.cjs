@@ -146,6 +146,9 @@ const telegram = loadReal('lib/telegram.ts', {
 
 let passed = 0
 const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`PASS ${label}`) }
+const SEP = lang.BILINGUAL_SEPARATOR
+// The riel SIGN is Khmer script but it is a currency symbol, not a word.
+const khmerText = (value) => /[ក-៿]/.test(String(value).replace(/៛/g, ''))
 
 ;(async () => {
 // ---- POSITIVE CONTROL: what the reports used to say --------------------------
@@ -168,24 +171,31 @@ check(`the kernel's revenue for the day is $${totals.revenue_usd} (net sales $13
 // ---- the rendered message ----------------------------------------------------
 const report = await telegram.telegramCommandReply({}, '/report 10/08/2026')
 check('the day report renders', report.includes('10/08/2026') && report.length > 40)
-check(`the Sales line carries the KERNEL revenue, not the old gross ($115.00 present, $643.00 absent)`,
+check(`the Revenue line carries the KERNEL revenue, not the old gross ($115.00 present, $643.00 absent)`,
   report.includes('$115.00') && !report.includes('$643.00'))
-// REDESIGNED Sep 6 2026: one figure per line, so the count is its own line
-// under its own label instead of riding on the money line behind a bilingual
-// "receipt(s) / វិក្កយបត្រ" counter.
+// SECTIONED Sep 21 2026 (owner: "same for other telegram report enough
+// spacing and separations ... using dividers, numbered list, etc... title
+// etc..."). A title line, then numbered titled sections, in the same
+// vocabulary the shift report uses.
+const sectionTitles = report.split('\n').filter((line) => /^\d\. /.test(line))
+check(`the day summary is a title line and ${sectionTitles.length} numbered sections`,
+  /^📊 Business summary \/ [^\n]+ — 10\/08\/2026$/.test(report.split('\n')[0])
+  && sectionTitles.every((line) => line.includes(SEP)), report)
+// REDESIGNED Sep 6 2026: one figure per line. The counts of the SAME thing
+// share one compact row (Sep 21 2026), under the Invoices section.
 check('and the kernel receipt count, not the count that included the void',
-  /^Invoices \/ [^\n]*: 2$/m.test(report) && !/: 3$/m.test(report))
+  /^Total \/ [^\n]*: 2 · /m.test(report) && !/: 3 · /m.test(report) && !/: 3$/m.test(report))
 check('the refund that produced the difference is printed, so the number explains itself',
   /^Refunds \/ [^\n]*: \$15\.00$/m.test(report))
 check('the voided receipt is REPORTED as voided rather than silently counted or silently dropped',
-  /^Cancelled \/ [^\n]*: 1$/m.test(report))
+  /Cancelled \/ [^\n]*: 1/.test(report))
 // The whole point of the redesign, stated as a measurement rather than a
 // claim: the pre-redesign message spread the same day over prose-tagged
-// lines. This one is a header block, a count block, stock and cashiers.
+// lines. This one is sections of figures, each under its own title.
 check(`the day summary fits one phone screen (${report.split('\n').length} lines)`,
-  report.split('\n').length <= 20)
-check('and it leads with the five totals every report now leads with',
-  /^Sales \/ [^\n]*: \$115\.00$/m.test(report) && /^Profit \/ /m.test(report))
+  report.split('\n').length <= 26)
+check('and its Sales section leads with revenue and profit, the two that always print',
+  /^Revenue \/ [^\n]*: \$115\.00$/m.test(report) && /^Profit \/ /m.test(report))
 check('the tax and the delivery fee are not inside the sales figure',
   !report.includes('$103.00') && !report.includes('$128.00'))
 
@@ -196,6 +206,29 @@ check('and sok shows the refunded sale net, $25.00', report.includes('sok') && r
 // figures add up to the headline. They could not before -- one of them
 // included a void.
 check('the per-cashier revenues sum to the day revenue (90 + 25 = 115)', 90 + 25 === totals.revenue_usd)
+
+// ---- the shop's language choice, end to end ---------------------------------
+// Settings → Telegram → language ('both' by default). The mode is applied
+// while the message is COMPOSED, so the same query path produces one report in
+// three renderings and no figure moves between them.
+const reportEn = await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'en')
+const reportKm = await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'km')
+check("'en' drops the Khmer half of every label and keeps every figure",
+  !khmerText(reportEn) && reportEn.includes('$115.00')
+  && reportEn.split('\n').includes('Revenue: $115.00')
+  && reportEn.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === sectionTitles.map((line) => line.split(SEP)[0]).join(' | '))
+check("'km' drops the English half and still carries the same figures",
+  reportKm.includes('$115.00') && reportKm.startsWith('📊 ')
+  && reportKm.split('\n').every((line) => {
+    const split = line.indexOf(': ')
+    return line.startsWith('•') || split <= 0 || !/[A-Za-z]/.test(line.slice(0, split))
+  }))
+check('all three renderings have the same number of lines -- one report, three languages',
+  report.split('\n').length === reportEn.split('\n').length
+  && report.split('\n').length === reportKm.split('\n').length)
+// A cashier NAME is data: it is not a label and is never translated.
+check('cashier names survive every mode untouched',
+  reportEn.includes('aza') && reportKm.includes('aza'))
 
 // ---- /sales ------------------------------------------------------------------
 const salesMsg = await telegram.telegramCommandReply({}, '/sales 10/08/2026')

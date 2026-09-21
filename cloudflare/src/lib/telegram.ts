@@ -3,12 +3,12 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue,
-  parseReportDate, telegramCommandReference, telegramUnauthorizedReply,
+  bi, getTelegramLanguage, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, normalizeTelegramLanguage, RULE,
+  parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
-import type { TelegramLabelKey } from './telegramLang'
+import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
 import {
-  getSalesGroupedTotals, getSalesTotals,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
   recognizedExpr, shiftWindowWhere, type SalesFilters,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
@@ -29,14 +29,16 @@ export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?
 type TelegramConfig = {
   enabled: boolean; chatId: string; chatIds: string[]; token: string
   categories: Record<TelegramEventType, boolean>
+  /** Settings → Telegram → language: 'both' (default), 'en' or 'km'. */
+  language: TelegramLanguage
 }
 type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string } }
 type TelegramUpdate = { message?: TelegramMessage }
 
-// sql-bound-params: bounded by construction -- this fixed seven-key enum is
+// sql-bound-params: bounded by construction -- this fixed eight-key enum is
 // owned by this module and never grows from request or database input.
 const SETTING_KEYS = [
-  'telegram_automation_enabled', 'telegram_chat_id',
+  'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
 ] as const
 
@@ -67,18 +69,27 @@ function registeredMoney(usdValue: number | null, khrValue: number | null): stri
   return `${dollars} · ${rielAmount}`
 }
 
-// The ONE section rule every report draws, and the whole of what replaced the
-// explanatory sentences the owner asked us to delete ("no explanation just
-// arrange all reports more concise with breakdowns clearly"). A bare rule
-// reads as a break at phone width; a section heading would cost a line per
-// block and a blank line reads as an accident rather than a divider.
-const RULE = '━'.repeat(18)
-
 // The alerts chat id setting doubles as the COMMAND ALLOW-LIST. A Telegram
 // chat id is digits with an optional leading '-', so a comma/space separated
 // list is unambiguous and an existing single-id setting keeps working
 // untouched -- no new setting, no Settings-screen change, and the owner can
 // approve a second manager group by typing one more id.
+/**
+ * Compose one message in the shop's chosen Telegram language.
+ *
+ * The mode itself is ONE module-level variable in lib/telegramLang.ts (see the
+ * note there), and this is the only way this file sets it: the callback is
+ * SYNCHRONOUS -- every `format*` builder is -- so nothing can await between
+ * setting the mode and restoring it, and the previous value always comes back
+ * even if a builder throws. `telegram_language` is shop-wide besides, so two
+ * overlapping requests in one isolate are asking for the same mode anyway.
+ */
+function withLanguage<T>(language: string | null | undefined, compose: () => T): T {
+  const previous = getTelegramLanguage()
+  setTelegramLanguage(language)
+  try { return compose() } finally { setTelegramLanguage(previous) }
+}
+
 function parseChatIds(value: string | undefined): string[] {
   return String(value || '').split(/[,;\s]+/).map((entry) => cleanLine(entry, 40)).filter((entry) => /^-?\d+$/.test(entry))
 }
@@ -92,6 +103,7 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     // chatId is where ALERTS are pushed (the first id); chatIds is who may ASK.
     chatId: chatIds[0] || '', chatIds,
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
+    language: normalizeTelegramLanguage(values.telegram_language),
     // Everything is live after the first setup; individual category switches
     // remain available when a less noisy chat is preferred.
     categories: {
@@ -143,10 +155,10 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   // still assemble their lines inline -- routes/sales.ts's status change and
   // routes/fees.ts's fee -- are covered without editing files other lanes own,
   // and any line added later is covered the moment its label is in the table.
-  await postTelegram(config, [
+  await postTelegram(config, withLanguage(config.language, () => [
     localizeTelegramHeading(event.heading || heading[event.type]),
     ...event.lines.map((line) => localizeTelegramLine(cleanLine(line, 400))),
-  ].filter(Boolean).join('\n'))
+  ].filter(Boolean).join('\n')))
   return true
 }
 
@@ -162,11 +174,11 @@ export async function sendTelegramTest(env: Env): Promise<void> {
   // off in Settings" -- explained Settings to a reader who was standing in
   // Settings, having just pressed the button there. It was the last
   // explanatory sentence the bot sent.
-  await postTelegram(config, [
+  await postTelegram(config, withLanguage(config.language, () => [
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
     '',
     telegramCommandReference(),
-  ].join('\n'))
+  ].join('\n')))
   await configureTelegramWebhook(env)
 }
 
@@ -196,7 +208,7 @@ type SalesBucket = {
   // recorded any (a missing cost is NULL, never 0 -- deliveryActualCostExpr,
   // which is why the count exists). It rides along for ONE reason: the day
   // header and the shift header print the same word "Expenses", so they have
-  // to add up the same two things. See expenseBlock() below.
+  // to add up the same two things. See expenseTotals() below.
   deliveryCostUsd: number; deliveryCostRecorded: number
   /**
    * Stock removed entirely over the window, priced at cost -- the owner's
@@ -323,33 +335,65 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
  * zero there keeps delivery out of the total entirely rather than claiming
  * delivery was free.
  *
- * The two component lines print only when the total really has two parts.
- * With one part the total IS that part, and printing it twice under two names
- * is the repeated figure the owner asked us to take out ("no explanation just
- * arrange all reports more concise").
+ * ARITHMETIC ONLY (Sep 21 2026). It used to hand back two rendered lines as
+ * well; each report now draws its own Expenses SECTION -- the shift lists the
+ * individual expenses, the day summary has no per-fee rows to list -- so the
+ * shared thing is the sum, not the layout. One definition, two renderings,
+ * no second way of adding delivery to fees.
  */
-function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { header: string | null; components: string[] } {
+function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { courierUsd: number; otherUsd: number; otherKhr: number; totalUsd: number } {
   const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
   const otherUsd = round2(Number(input.otherUsd) || 0)
   const otherKhr = Number(input.otherKhr) || 0
-  const totalUsd = round2(otherUsd + courierUsd)
-  const split = courierUsd > 0 && (otherUsd > 0 || otherKhr > 0)
-  return {
-    header: totalUsd || otherKhr ? labeled('expenses', money(totalUsd, otherKhr)) : null,
-    components: split ? [labeled('deliveryCost', usd(courierUsd)), labeled('expensesOther', money(otherUsd, otherKhr))] : [],
-  }
+  return { courierUsd, otherUsd, otherKhr, totalUsd: round2(otherUsd + courierUsd) }
+}
+
+// ---- The sectioned layout (owner, Sep 21 2026) -----------------------------
+// "Shift should look something like this ... just smarter and compact, same
+// for other telegram report enough spacing and separations that it feels easy
+// to read and clean, using dividers, numbered list, etc... title etc..."
+//
+// Every report is now: a TITLE line, then numbered, titled sections separated
+// by the one RULE this file draws. A section is `N. <bilingual title>` and
+// then one figure per line, or bullets when it is a list. Nothing else
+// changed: the figures, their sources and the zero-line rules are untouched.
+
+/** `1. Invoices / វិក្កយបត្រ` -- the divider and the numbered section title. */
+const sectionTitle = (index: number, key: TelegramLabelKey): string[] => [RULE, `${index}. ${label(key)}`]
+
+/** A section the shop has no rows for still prints, so the numbering and the
+ *  shape of the message never move (the owner's reference shows every
+ *  section, empty ones included). */
+const EMPTY_SECTION = '—'
+
+/**
+ * `Total: 24 · Cancelled: 1 · Edited: 2` -- one compact row for counts of the
+ * SAME thing. The first entry always prints (a shift that rang nothing up
+ * still states it); the rest only when they are non-zero.
+ */
+const countRow = (entries: Array<[TelegramLabelKey, number]>): string =>
+  entries.filter(([, value], index) => index === 0 || value > 0).map(([key, value]) => labeled(key, value)).join(' · ')
+
+/**
+ * At most `limit` rows; everything past it folds into ONE "Other" row, so a
+ * capped breakdown still adds up to the section's own total instead of
+ * quietly losing the tail.
+ */
+function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
+  return rows.length <= limit ? rows : [...rows.slice(0, limit - 1), fold(rows.slice(limit - 1))]
 }
 
 /**
  * The day summary -- `/report`, and the scheduled push.
  *
  * SAME SHAPE AS THE SHIFT REPORT, deliberately (owner, Sep 6 2026: "arrange
- * all reports more concise with breakdowns clearly"): a header block of the
- * key totals in one fixed order -- Sales, Profit, Expenses, Delivery fee,
- * Credit -- then compact labelled sections, one figure per line, a zero-value
- * line simply not printed, and not one explanatory sentence. Two people
- * reading the evening `/report` and tonight's shift message see the same five
- * words in the same order.
+ * all reports more concise with breakdowns clearly", and Sep 21 2026: "same
+ * for other telegram report ... using dividers, numbered list, etc... title
+ * etc..."): a title line, then numbered titled sections -- Sales, Invoices,
+ * Expenses, Stock, Cashiers -- one figure per line, a zero-value line simply
+ * not printed, and not one explanatory sentence. Two people reading the
+ * evening `/report` and tonight's shift message see the same section titles
+ * carrying the same figures in the same order.
  *
  * Credit is a POSITIVE "Credit $n" line, never a negative and never
  * subtracted from the totals above it: it is unpaid revenue that already
@@ -364,58 +408,65 @@ function expenseBlock(input: { otherUsd: unknown; otherKhr: unknown; deliveryCos
 export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
+  // Sections are numbered as they APPEAR: a category the owner switched off
+  // takes its section out entirely rather than leaving a gap in the numbering.
+  let index = 0
+  const section = (key: TelegramLabelKey, rows: string[]): void => {
+    if (!rows.length) return
+    index += 1
+    lines.push(...sectionTitle(index, key), ...rows)
+  }
 
-  const header: string[] = []
-  // Sales and Profit print even at $0.00: a day that took nothing is a fact
-  // the owner wants stated, not a blank. Every other header line is dropped
-  // when it is zero.
-  if (showSales) header.push(labeled('sales', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd)))
-  // The SAME sum the shift header prints, through the same function: the fees
-  // of the day plus the courier money actually paid out. The `fees` switch
-  // still governs whether the line exists at all.
-  const expenses = expenseBlock({
+  // 1. Sales -- Revenue and Profit print even at $0.00: a day that took
+  // nothing is a fact the owner wants stated, not a blank. Every other line
+  // is dropped when it is zero.
+  if (showSales) {
+    const sales = [labeled('revenue', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd))]
+    if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
+    if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
+    // Directly below Not Paid, the owner's "also add one row below unpaid in
+    // reports as well". One number, no sentence. Like Not Paid it is a
+    // POSITIVE memo and is never subtracted from the lines above -- those stay
+    // the canonical figures the app's own stats show.
+    if (stats.sales?.removalLossUsd) sales.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
+    if (stats.sales?.refundUsd) sales.push(labeled('refunds', usd(stats.sales.refundUsd)))
+    section('sales', sales)
+    // 2. Invoices -- the counts, on their own. They are the breakdown of the
+    // Revenue above (refunds subtracted, voids contributing nothing), never a
+    // second total.
+    section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
+  }
+
+  // 3. Expenses -- the SAME sum the shift report prints, through the same
+  // function: the fees of the day plus the courier money actually paid out.
+  // The `fees` switch still governs whether the section exists at all.
+  const expenses = expenseTotals({
     otherUsd: categories?.fees === false ? 0 : stats.fees?.usd,
     otherKhr: categories?.fees === false ? 0 : stats.fees?.khr,
     deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
     deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
   })
-  if (expenses.header) header.push(expenses.header)
-  if (showSales && stats.sales?.deliveryFeeUsd) header.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
-  if (showSales && stats.sales?.creditUsd) header.push(labeled('credit', usd(stats.sales.creditUsd)))
-  // Directly below Not Paid, the owner's "also add one row below unpaid in
-  // reports as well". One number, no sentence. Like Credit it is a POSITIVE
-  // memo and is never subtracted from the Sales/Profit lines above -- those
-  // stay the canonical figures the app's own stats show.
-  if (showSales && stats.sales?.removalLossUsd) header.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
-  if (header.length) lines.push(RULE, ...header)
-
-  if (showSales) {
-    // The counts, on their own. They are the breakdown of the header's Sales
-    // (refunds subtracted, voids contributing nothing), never a second total.
-    const counts = [labeled('invoices', Number(stats.sales?.count) || 0)]
-    if (stats.sales?.cancelled) counts.push(labeled('cancelled', Number(stats.sales.cancelled) || 0))
-    lines.push(RULE, ...counts)
+  const expenseRows: string[] = []
+  // The two component lines print only when the total really has two parts.
+  // With one part the total IS that part, and printing it twice under two
+  // names is the repeated figure the owner asked us to take out.
+  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
+    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
   }
+  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
+  section('expenses', expenseRows)
 
-  // Then the money breakdown, in the shift report's order: the expense split
-  // (only when there are two parts of it), then the ONE refunds figure.
-  const breakdown = [...expenses.components]
-  if (showSales && stats.sales?.refundUsd) breakdown.push(labeled('refunds', usd(stats.sales.refundUsd)))
-  if (breakdown.length) lines.push(RULE, ...breakdown)
-
+  // 4. Stock
   const stock: string[] = []
   if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
   if (categories?.stock_out !== false && (stats.stockOut?.count || stats.stockOut?.quantity)) stock.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
-  if (stock.length) lines.push(RULE, ...stock)
+  section('stock', stock)
 
-  if (cashiers.length) {
-    lines.push(RULE, `${label('cashiers')}:`)
-    // Name, receipts, money. The bilingual "receipt(s)" counter is dropped
-    // here and only here: the section is a list of cashiers, so the count
-    // needs no noun, and repeating a two-language word on every bullet is
-    // what made this block long.
-    for (const row of cashiers) lines.push(`• ${cleanLine(row.cashier, 60)} — ${Number(row.count) || 0} · ${usd(row.usd)}`)
-  }
+  // 5. Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
+  // is dropped here and only here: the section is a list of cashiers, so the
+  // count needs no noun, and repeating a two-language word on every bullet is
+  // what made this block long.
+  section('cashiers', cashiers.map((row) => `• ${cleanLine(row.cashier, 60)} — ${Number(row.count) || 0} · ${usd(row.usd)}`))
   return lines.join('\n')
 }
 
@@ -423,71 +474,90 @@ export async function sendTelegramTodaySummary(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw new Error(problem)
   const today = businessToday()
-  await postTelegram(config, formatDaySummary(await dayStats(env, today), await cashierTotals(env, today), config.categories))
+  const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
+  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)))
 }
 
-async function dayReport(env: Env, date: string): Promise<string> {
+async function dayReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
   const [stats, cashiers] = await Promise.all([dayStats(env, date), cashierTotals(env, date)])
-  return formatDaySummary(stats, cashiers)
+  return withLanguage(language, () => formatDaySummary(stats, cashiers))
 }
 
-async function salesReport(env: Env, date: string): Promise<string> {
+async function salesReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
   const db = getDb(env); const stats = await dayStats(env, date)
   // Voided receipts are excluded here for the same reason they contribute 0
   // to the total above: listing one under a total it is not part of invites
   // exactly the reconciliation the owner asked us to end. The count of them
   // is printed by formatDaySummary instead.
   const sales = await db.prepare(`SELECT id, receipt_number, cashier_name, total_usd, total_khr FROM sales WHERE ${dayClause('created_at')} AND ${recognizedExpr('')} ORDER BY created_at DESC LIMIT 5`).all<{ id: number; receipt_number: string | null; cashier_name: string | null; total_usd: number; total_khr: number }>({ date })
-  const title = reportTitle('🛍️', 'Sales', 'ការលក់', date)
-  if (!sales.length) return `${title}\n${bi('No sales recorded on this day.', 'គ្មានការលក់បានកត់ត្រាក្នុងថ្ងៃនេះទេ។')}`
+  if (!sales.length) {
+    return withLanguage(language, () => `${reportTitle('🛍️', 'Sales', 'ការលក់', date)}\n${bi('No sales recorded on this day.', 'គ្មានការលក់បានកត់ត្រាក្នុងថ្ងៃនេះទេ។')}`)
+  }
   const ids = sales.map((sale) => sale.id)
   const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
   const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
-  // The same header shape as every other report: the money first, the count
-  // under it, one figure per line, then the list.
-  const lines = [title, RULE, labeled('sales', usd(stats.sales?.usd)), labeled('invoices', Number(stats.sales?.count) || 0), RULE, `${label('latestReceipts')}:`]
-  for (const sale of sales) {
-    lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
-    const saleItems = bySale.get(sale.id) || []
-    for (const item of saleItems.slice(0, 4)) lines.push(`   ${Number(item.quantity)} × ${cleanLine(item.product_name || 'Item', 100)} — ${money(item.applied_price_usd, item.applied_price_khr)}`)
-    if (saleItems.length > 4) lines.push(`   + ${saleItems.length - 4} more ${localizeTelegramValue('item(s)')}`)
-  }
-  return lines.join('\n')
+  // The same sectioned shape as every other report (Sep 21 2026): the money,
+  // the count, then the list -- each under its own numbered title.
+  return withLanguage(language, () => {
+    const lines = [
+      reportTitle('🛍️', 'Sales', 'ការលក់', date),
+      ...sectionTitle(1, 'sales'), labeled('revenue', usd(stats.sales?.usd)),
+      ...sectionTitle(2, 'invoices'), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
+      ...sectionTitle(3, 'latestReceipts'),
+    ]
+    for (const sale of sales) {
+      lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
+      const saleItems = bySale.get(sale.id) || []
+      for (const item of saleItems.slice(0, 4)) lines.push(`   ${Number(item.quantity)} × ${cleanLine(item.product_name || 'Item', 100)} — ${money(item.applied_price_usd, item.applied_price_khr)}`)
+      if (saleItems.length > 4) lines.push(`   + ${saleItems.length - 4} more ${localizeTelegramValue('item(s)')}`)
+    }
+    return lines.join('\n')
+  })
 }
 
-async function feesReport(env: Env, date: string): Promise<string> {
+async function feesReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
   const db = getDb(env); const stats = await dayStats(env, date)
   const fees = await db.prepare('SELECT fee_type, label, amount_usd, amount_khr FROM fees WHERE fee_date = @date ORDER BY id DESC LIMIT 8').all<{ fee_type: string; label: string | null; amount_usd: number; amount_khr: number }>({ date })
   // Total, then the records themselves. The record COUNT is gone: the bullets
   // under it are the records, so printing how many of them there are is the
   // repeated figure the owner asked us to drop.
-  const lines = [reportTitle('💸', 'Expenses', 'ចំណាយ', date), RULE, labeled('expenses', money(stats.fees?.usd, stats.fees?.khr)), RULE]
-  if (!fees.length) lines.push(bi('No expense recorded on this day.', 'គ្មានចំណាយបានកត់ត្រាក្នុងថ្ងៃនេះទេ។'))
-  for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
-  return lines.join('\n')
+  return withLanguage(language, () => {
+    const lines = [
+      reportTitle('💸', 'Expenses', 'ចំណាយ', date),
+      ...sectionTitle(1, 'expenses'), labeled('total', money(stats.fees?.usd, stats.fees?.khr)),
+      ...sectionTitle(2, 'eachExpense'),
+    ]
+    if (!fees.length) lines.push(EMPTY_SECTION)
+    for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
+    return lines.join('\n')
+  })
 }
 
-async function inventoryReport(env: Env): Promise<string> {
+async function inventoryReport(env: Env, language: TelegramLanguage): Promise<string> {
   const db = getDb(env)
   // Same OR as the notification bell: /stock and /lowstock report BOTH tiers
   // in one list, so filtering on the low fragment alone would take the
   // out-of-stock rows down with the low ones when the alert is switched off.
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
   const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }>()
-  const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
-  if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
-  // The same shape as the other six reports (Sep 7 2026): the figure block
-  // between rules, then the list. It was the only report still running its
-  // count straight into its bullets with no break.
-  const lines = [title, RULE, labeled('products', rows.length), RULE]
-  for (const row of rows) {
-    const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-    lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
-  }
-  return lines.join('\n')
+  return withLanguage(language, () => {
+    const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
+    if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
+    // The same shape as the other six reports (Sep 7 2026): the figure block
+    // between rules, then the list. It was the only report still running its
+    // count straight into its bullets with no break. It keeps the ONE figure
+    // and ONE list shape rather than numbered sections: there is nothing here
+    // for a second section to separate.
+    const lines = [title, RULE, labeled('products', rows.length), RULE]
+    for (const row of rows) {
+      const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
+      lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
+    }
+    return lines.join('\n')
+  })
 }
 
-async function inventorySummaryReport(env: Env): Promise<string> {
+async function inventorySummaryReport(env: Env, language: TelegramLanguage): Promise<string> {
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
   const row = await getDb(env).prepare(`SELECT
     COUNT(*) AS products,
@@ -508,46 +578,58 @@ async function inventorySummaryReport(env: Env): Promise<string> {
   // drops a zero line.
   const lowStock = Number(row?.low_stock || 0)
   const outOfStock = Number(row?.out_of_stock || 0)
-  const lines = [
-    reportTitle('🏷️', 'Inventory', 'ស្តុក'),
-    RULE,
-    labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
-    labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
-  ]
-  const health: string[] = []
-  if (lowStock) health.push(labeled('lowStock', lowStock))
-  if (outOfStock) health.push(labeled('outOfStock', outOfStock))
-  if (health.length) lines.push(RULE, ...health)
-  return lines.join('\n')
+  return withLanguage(language, () => {
+    const lines = [
+      reportTitle('🏷️', 'Inventory', 'ស្តុក'),
+      RULE,
+      labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
+      labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
+    ]
+    const health: string[] = []
+    if (lowStock) health.push(labeled('lowStock', lowStock))
+    if (outOfStock) health.push(labeled('outOfStock', outOfStock))
+    if (health.length) lines.push(RULE, ...health)
+    return lines.join('\n')
+  })
 }
 
-// ---- Shift report (S4-7, redesigned Sep 6 2026) ----------------------------
+// ---- Shift report (S4-7, redesigned Sep 6 and Sep 21 2026) -----------------
 //
-// The owner's own review, verbatim: "for telegram message can be made more
+// The owner's Sep 6 review, verbatim: "for telegram message can be made more
 // clearly, summary, less text, no explanation just arrange all reports more
 // concise with breakdowns clearly. like i see shift report is so long, much
 // more simpler so easy to understand at a glance" -- and, on the same report,
 // "you didn't mention the registered cash dollar and khr in open vs end."
 //
-// The line set is now SHORT and grouped, one figure per line, nothing
-// explained in a sentence, no zero line printed:
+// On Sep 21 2026 the owner pasted the old POS's shift report as a LAYOUT
+// reference (information order only, never its wording or branding) and said
+// "Shift should look something like this... just smarter and compact ...
+// enough spacing and separations that it feels easy to read and clean, using
+// dividers, numbered list, etc... title etc...". So the message is now a
+// TITLE line carrying the shift's state, a short identity block, and SIX
+// numbered, titled sections:
 //
-//   1. identity: shop, cashier, [branch], shift code, from/to
-//   2. the header block of key totals: sales, profit, [expenses], [delivery
-//      fee], [credit] -- credit is ALWAYS a plain positive figure, never a
-//      subtraction, per the owner's separate ruling ("just use credit ...
-//      instead of $-n ... just $n").
-//   3. invoice counts: invoices, [cancelled], [edited]
-//   4. registered cash, open vs end, both currencies, as ONE small block --
-//      the owner's specific gap above. This is a factual readout, not a
-//      claim that it must reconcile to anything.
-//   5. expenses split into exactly two plain lines (delivery cost, other
-//      expenses -- no itemised fee list), at most one refunds line, and ONE
-//      informational difference line. The difference is counted cash minus
-//      the expected drawer (lib/shiftReconciliation.ts, the one shared
-//      definition with the close routes and the shift screen), but it is
-//      printed as a single fact, never as "shortage" or a must-match claim,
-//      and the five-part formula behind it is not spelled out any more.
+//   1. Invoices     total · cancelled · edited, one compact row
+//   2. Sales        revenue, the two discount cuts, profit, delivery fee,
+//                   Not Paid, Loss, refunds -- Not Paid and Loss are ALWAYS
+//                   plain positive memos, never a subtraction, per the
+//                   owner's separate ruling ("just use credit ... instead of
+//                   $-n ... just $n")
+//   3. Cash count   registered opening / additional change / closing, both
+//                   currencies, then the expected drawer and ONE
+//                   informational difference line. The difference is counted
+//                   cash minus the expected drawer
+//                   (lib/shiftReconciliation.ts, the one shared definition
+//                   with the close routes and the shift screen), printed as a
+//                   single fact -- never "shortage", never a must-match
+//                   claim, and never as its five-part formula.
+//   4. Payment methods  reinstated by the Sep 21 reference
+//   5. Delivery         reinstated by the Sep 21 reference
+//   6. Expenses     every expense as its own bullet, then the total
+//
+// Sections 4-6 print their title and a single "—" when the shift has no rows
+// for them: the owner's reference shows every section, so the shape of the
+// message never moves between one shift and the next.
 //
 // Per-account vs shop-wide scope, and which sales the window covers, are
 // unchanged -- see lib/shiftReconciliation.ts and shiftFilters() below.
@@ -603,6 +685,29 @@ export type ShiftReportFigures = {
   refundUsd: number
   creditUsd: number
   /**
+   * The two discount cuts the owner's reference names separately -- "Discount
+   * on Items" (sale_items' product + manual discounts) and "Discount on
+   * Invoices" (the store and membership cuts taken on the receipt). Straight
+   * off getSalesTotals' item_discount_usd and discount_usd; optional so a
+   * caller without the kernel (the pure test) still renders, and each line is
+   * printed only when it is non-zero.
+   */
+  itemDiscountUsd?: number
+  invoiceDiscountUsd?: number
+  /** The kernel's gross_sales_usd (item subtotals before discounts): the
+   *  "Gross Sale" row the reference lists right under the two cuts. */
+  grossSalesUsd?: number
+  /**
+   * The Sep 21 2026 reference reinstates both breakdowns. Compact rows only --
+   * the method/courier, how many, and the money -- capped by shiftFigures with
+   * the remainder folded into one "Other" row so the list still adds up.
+   */
+  paymentMethods?: Array<{ method: string; count: number; usd: number }>
+  deliveries?: Array<{ name: string; count: number; feeUsd: number; costUsd: number }>
+  /** One row per expense paid out of this drawer (lib/shiftReconciliation.ts's
+   *  shiftExpenses(...).details, already capped and folded there). */
+  expenseDetails?: Array<{ label: string; usd: number; khr: number }>
+  /**
    * Stock removed entirely during the shift, at cost. Optional: absent means
    * the kernel could not scope the window to stock movements, not that
    * nothing was destroyed, so the row is omitted rather than printed as $0.00.
@@ -638,71 +743,77 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // financial window. The original close remains the operational end; only
   // an open-cancelled row uses cancellation as its terminal bound.
   const endedAt = shift.closed_at || shift.cancelled_at
+  // The TITLE states the shift's state, the way the owner's reference does
+  // ("Shift Report - Open or Closed"). It used to be a tag on the To line;
+  // saying it twice is the repeated fact the redesign takes out.
+  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : open ? bi('Open', 'កំពុងបើក') : bi('Closed', 'បានបិទ')
   const lines = [
-    reportTitle('🧑‍💼', 'Shift', 'វេន', shift.business_date),
-    labeled('shift', cleanLine(shift.shift_code, 40)),
-    labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
-  ]
-  lines.push(
-    // An open shift reports up to NOW and says so, rather than printing a
-    // closing time that has not happened. A shift left running overnight is
-    // the honest record -- migration 0116 refuses to close one on a timer --
-    // so the report has to be able to render one. A cancelled shift's "To"
-    // line carries the cancellation tag; nothing else needs to repeat it.
-    open
-      ? `${label('to')}: ${formatBusinessDateTime(new Date(nowMs).toISOString(), nowMs)} — ${bi('still open', 'នៅបើកនៅឡើយ')}`
-      : `${labeled('to', formatBusinessDateTime(endedAt, nowMs))}${cancelled ? ` — ${bi('cancelled', 'បានបោះបង់')}` : ''}`,
+    `🧑‍💼 ${label('shiftReport')} — ${state} · ${formatBusinessDay(shift.business_date)}`,
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('shift', cleanLine(shift.shift_code, 40)),
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
-  )
+    labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
+    // An open shift reports up to NOW rather than printing a closing time that
+    // has not happened; the title already says the shift is still open. A
+    // shift left running overnight is the honest record -- migration 0116
+    // refuses to close one on a timer -- so the report has to render one.
+    labeled('to', formatBusinessDateTime(open ? new Date(nowMs).toISOString() : endedAt, nowMs)),
+  ]
   if (cancelled) {
     if (shift.closed_at) lines.push(`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`)
     lines.push(`${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`)
     lines.push(`${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`)
   }
 
-  // The header block: the five totals the owner named, each dropped when it
-  // is zero -- Sales and Profit are the two the shop always wants, so they
-  // print unconditionally even at $0.00 (a quiet shift is still a real one).
-  const expenses = expenseBlock({
-    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
-    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
-  })
-  lines.push(RULE, labeled('sales', usd(figures.revenueUsd)), labeled('profit', usd(figures.profitUsd)))
-  if (expenses.header) lines.push(expenses.header)
-  if (figures.deliveryFeeUsd) lines.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
+  // 1. Invoices -- total, and the two counts that qualify it.
+  lines.push(...sectionTitle(1, 'invoices'), countRow([
+    ['total', Number(figures.invoices) || 0],
+    ['cancelled', Number(figures.cancelled) || 0],
+    ['edited', Number(figures.edited) || 0],
+  ]))
+
+  // 2. Sales -- Revenue and Profit print unconditionally, even at $0.00 (a
+  // quiet shift is still a real one); every other line is dropped when zero.
+  const sales = [labeled('revenue', usd(figures.revenueUsd))]
+  if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
+  if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
+  // Gross sales explains the two cuts above it, so it prints only when there
+  // is a cut to explain; with none it IS the revenue line, and the same figure
+  // twice under two names is the repetition the redesign takes out.
+  if ((figures.itemDiscountUsd || figures.invoiceDiscountUsd) && figures.grossSalesUsd != null) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
+  sales.push(labeled('profit', usd(figures.profitUsd)))
+  if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
   // Always positive, always labelled "Not Paid" -- never "$-n", never
   // subtracted from anything above it (see the owner's separate ruling).
-  if (figures.creditUsd) lines.push(labeled('credit', usd(figures.creditUsd)))
+  if (figures.creditUsd) sales.push(labeled('credit', usd(figures.creditUsd)))
   // Directly below Not Paid (owner, Sep 14 2026: "also add one row below
   // unpaid in reports as well"). A POSITIVE memo, one number and no sentence:
-  // Sales and Profit above stay the canonical figures and are never reduced
-  // by it, exactly as Credit behaves.
-  if (figures.removalLossUsd) lines.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
+  // Revenue and Profit above stay the canonical figures and are never reduced
+  // by it, exactly as Not Paid behaves.
+  if (figures.removalLossUsd) sales.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
+  if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
+  lines.push(...sectionTitle(2, 'sales'), ...sales)
 
-  lines.push(RULE, labeled('invoices', figures.invoices))
-
-  // The owner's specific gap: registered opening and closing cash, both currencies,
-  // as one small block. A factual readout -- it is not compared to anything
-  // here, and an open shift (no count taken yet) shows only the open half.
+  // 3. Cash count -- the owner's specific gap: registered opening and closing
+  // cash, both currencies. A factual readout, and an open shift (no count
+  // taken yet) simply has no closing half.
   // Opening -> additional change used -> closing, the order the drawer
   // actually moves in and the order every shift surface in the app reads
   // (ShiftGate, the report figures, the amend form): the extra change went in
   // and was spent BEFORE the final count was taken. Printing it after the
   // closing cash made the phone message tell a different story from the app.
-  lines.push(RULE, labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr)))
+  const cash = [labeled('cashOpen', registeredMoney(shift.opening_float_usd, shift.opening_float_khr))]
   const additionalCash = shift.additional_cash_usd || shift.additional_cash_khr
     ? registeredMoney(shift.additional_cash_usd ?? 0, shift.additional_cash_khr ?? 0)
     : ''
-  if (additionalCash) lines.push(labeled('additionalCash', additionalCash))
-  if (shift.closed_at) lines.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
+  if (additionalCash) cash.push(labeled('additionalCash', additionalCash))
+  if (shift.closed_at) cash.push(labeled('cashEnd', registeredMoney(shift.closing_counted_usd, shift.closing_counted_khr)))
 
-  // Expenses split into exactly two plain lines and one informational
-  // difference line -- none of it an
-  // expected-must-match check. The reconciliation is still computed (ONE
-  // shared definition, lib/shiftReconciliation.ts) but only to answer the
-  // single question "does the count differ from what it should be", not to
-  // print its own five-part formula any more.
+  // One informational difference line -- not an expected-must-match check.
+  // The reconciliation is still computed (ONE shared definition,
+  // lib/shiftReconciliation.ts) but only to answer the single question "does
+  // the count differ from what it should be", not to print its own five-part
+  // formula.
   const recon = figures.reconciliation ?? computeShiftReconciliation({
     opening: { usd: shift.opening_float_usd, khr: shift.opening_float_khr },
     additionalCash: figures.additionalCash ?? { usd: shift.additional_cash_usd ?? 0, khr: shift.additional_cash_khr ?? 0 },
@@ -713,14 +824,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     counted: { usd: shift.closing_counted_usd, khr: shift.closing_counted_khr },
     reviewCodes: !figures.cash || figures.cash.needsReview ? ['tender_incomplete'] : [],
   })
-  const context: string[] = [...expenses.components]
   // Expected is shown for both open and closed shifts. An open drawer has no
   // counted value (and therefore no difference), but the employee still needs
   // the current target while trading.
   const expected = recon.expected.usd == null && recon.expected.khr == null
     ? '—'
     : `${recon.expected.usd == null ? '—' : usd(recon.expected.usd)} · ${recon.expected.khr == null ? '—' : riel(recon.expected.khr)}`
-  context.push(labeled('expectedCash', expected))
+  cash.push(labeled('expectedCash', expected))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
   // never taken -- that would read as a missing-cash alarm on every open till.
@@ -729,7 +839,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     const difference = recon.difference.usd == null && recon.difference.khr == null
       ? '—'
       : `${recon.difference.usd == null ? '—' : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? '—' : signed(recon.difference.khr, riel)}`
-    context.push(labeled('difference', difference))
+    cash.push(labeled('difference', difference))
     if (recon.needs_review) {
       const reviewLabels: Partial<Record<string, TelegramLabelKey>> = {
         tender_incomplete: 'reviewTender',
@@ -741,10 +851,51 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
         .map((code) => reviewLabels[code])
         .filter((key): key is TelegramLabelKey => !!key)
         .map((key) => label(key))
-      context.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
+      cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
     }
   }
-  if (context.length) lines.push(RULE, ...context)
+  lines.push(...sectionTitle(3, 'cashCount'), ...cash)
+
+  // 4. Payment methods and 5. Delivery -- both reinstated by the owner's
+  // Sep 21 2026 reference. Bullets, because they are lists: the name, how
+  // many, and the money.
+  lines.push(...sectionTitle(4, 'paymentMethods'))
+  const paymentMethods = figures.paymentMethods || []
+  lines.push(...(paymentMethods.length
+    ? paymentMethods.map((row) => `• ${cleanLine(row.method, 40)} — ${Number(row.count) || 0} · ${usd(row.usd)}`)
+    : [EMPTY_SECTION]))
+
+  lines.push(...sectionTitle(5, 'delivery'))
+  const deliveries = figures.deliveries || []
+  lines.push(...(deliveries.length
+    ? deliveries.map((row) => `• ${cleanLine(row.name, 40)} — ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`
+      // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
+      // would claim the courier worked for free, so it is left off instead.
+      + (Number(row.costUsd) > 0 ? ` · ${usd(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : ''))
+    : [EMPTY_SECTION]))
+
+  // 6. Expenses -- every expense paid out of this drawer as its own bullet,
+  // then the ONE total. The total is expenseTotals(): the fees plus the
+  // courier money actually paid out, the same sum the day summary prints, so
+  // the courier payout is a bullet here rather than a figure with no row.
+  const expenses = expenseTotals({
+    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
+    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
+  })
+  const expenseRows: string[] = []
+  if (expenses.courierUsd > 0) expenseRows.push(`• ${label('deliveryCost')} — ${usd(expenses.courierUsd)}`)
+  const details = figures.expenseDetails || []
+  if (details.length) {
+    for (const detail of details) expenseRows.push(`• ${cleanLine(detail.label, 60)} — ${money(detail.usd, detail.khr)}`)
+  } else if (expenses.otherUsd || expenses.otherKhr) {
+    // A caller that has the total but no per-expense rows still shows where
+    // the money is, under the same word the day summary uses for it.
+    expenseRows.push(`• ${label('expensesOther')} — ${money(expenses.otherUsd, expenses.otherKhr)}`)
+  }
+  lines.push(...sectionTitle(6, 'expenses'))
+  lines.push(...(expenseRows.length
+    ? [...expenseRows, labeled('total', money(expenses.totalUsd, expenses.otherKhr))]
+    : [EMPTY_SECTION]))
 
   return lines.join('\n')
 }
@@ -784,19 +935,24 @@ async function shiftInvoiceCounts(env: Env, shift: ShiftReportSession, nowMs: nu
   return { invoices: Number(row?.invoices || 0), cancelled: Number(row?.cancelled || 0), edited: Number(row?.edited || 0) }
 }
 
-async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number): Promise<ShiftReportFigures> {
+async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage): Promise<ShiftReportFigures> {
   const filters = shiftFilters(shift, nowMs)
-  const overflowLabel = bi('Other expenses', 'ចំណាយផ្សេងទៀត')
-  // Payment-method and delivery-contact breakdowns are no longer part of the
-  // shift report (see the redesign header comment above formatShiftReport),
-  // so those two queries are gone -- getPaymentMethodBreakdown and
-  // getDeliveryContactTotals remain in lib/salesAnalytics.ts for
-  // routes/reports.ts, just no longer called from here.
-  const [totals, counts, expenses, reconciliation] = await Promise.all([
+  // The two fold labels are the only text this DATA function produces, so they
+  // are composed here, in the shop's language, before the awaits -- everything
+  // else on these rows is a name or a figure and is never translated.
+  const overflowLabel = withLanguage(language, () => bi('Other expenses', 'ចំណាយផ្សេងទៀត'))
+  const otherLabel = withLanguage(language, () => label('other'))
+  // The payment-method and delivery-contact breakdowns came BACK on Sep 21
+  // 2026: the owner's reference layout has a section for each. They are the
+  // SAME kernel entry points routes/reports.ts reads, so the phone message and
+  // the Reports hub cannot disagree about a method's takings.
+  const [totals, counts, expenses, reconciliation, payments, couriers] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
     shiftExpenses(env, shift, nowMs, { overflowLabel }),
     loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
+    getPaymentMethodBreakdown(env, filters),
+    getDeliveryContactTotals(env, filters),
   ])
   return {
     invoices: counts.invoices,
@@ -821,12 +977,48 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number):
     // but never in collected cash. Always printed as a positive "Credit"
     // figure -- see the owner's ruling in the header comment.
     creditUsd: totals.pending_revenue_usd,
+    // The owner's two discount rows, straight off the kernel: the per-item
+    // cuts, and the store + membership cuts taken on the receipt.
+    itemDiscountUsd: totals.item_discount_usd,
+    invoiceDiscountUsd: totals.discount_usd,
+    grossSalesUsd: totals.gross_sales_usd,
     // Stock destroyed during the shift, at cost -- the same kernel field the
     // day summary and the Reports hub read, so the surfaces cannot disagree.
     removalLossUsd: totals.removal_loss_usd,
     removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
     otherExpenseUsd: expenses.usd,
     otherExpenseKhr: expenses.khr,
+    expenseDetails: expenses.details,
+    // Eight rows each at most -- a phone message is not a report page -- with
+    // the tail folded into ONE "Other" row so the section still adds up to the
+    // money above it.
+    paymentMethods: foldRows(
+      payments.map((row) => ({ method: row.payment_method || 'Unknown', count: row.tx_count, usd: row.collected_usd })),
+      8,
+      (rest) => ({
+        method: otherLabel,
+        count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+        usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+      }),
+    ),
+    deliveries: foldRows(
+      couriers.map((row) => ({
+        name: row.delivery_contact_name || 'Unknown',
+        count: row.deliveries,
+        feeUsd: row.charged_fee_usd,
+        // Kept NULL-honest: actual_cost_count is how many of these deliveries
+        // recorded a courier payout at all, so a contact with none shows no
+        // cost rather than a $0.00 that would read as free delivery.
+        costUsd: Number(row.actual_cost_count) > 0 ? row.actual_cost_usd : 0,
+      })),
+      8,
+      (rest) => ({
+        name: otherLabel,
+        count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+        feeUsd: round2(rest.reduce((sum, row) => sum + (Number(row.feeUsd) || 0), 0)),
+        costUsd: round2(rest.reduce((sum, row) => sum + (Number(row.costUsd) || 0), 0)),
+      }),
+    ),
     // Refunds and courier payouts no longer suppress the estimate: they are
     // subtracted components of it now (lib/shiftReconciliation.ts), so a shop
     // that takes one return a day stops seeing a permanent dash.
@@ -841,9 +1033,9 @@ async function shopName(env: Env): Promise<string> {
   return cleanLine(row?.value || 'Business OS', 80)
 }
 
-async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number): Promise<string> {
-  const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs)])
-  return formatShiftReport(name, shift, figures, nowMs)
+async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number, language: TelegramLanguage): Promise<string> {
+  const [name, figures] = await Promise.all([shopName(env), shiftFigures(env, shift, nowMs, language)])
+  return withLanguage(language, () => formatShiftReport(name, shift, figures, nowMs))
 }
 
 /**
@@ -857,20 +1049,20 @@ async function shiftReportFor(env: Env, shift: ShiftReportSession, nowMs: number
  * time is every till, so the day's shifts are what the command answers with.
  * The single-shift message is what `sendTelegramShiftReport` pushes.
  */
-async function shiftReport(env: Env, date: string, nowMs: number): Promise<string> {
+async function shiftReport(env: Env, date: string, nowMs: number, language: TelegramLanguage): Promise<string> {
   const shifts = await getDb(env).prepare(`
     SELECT ${SHIFT_COLUMNS} FROM shift_sessions
     WHERE business_date = @date
     ORDER BY opened_at DESC LIMIT 12
   `).all<ShiftReportSession>({ date })
   if (!shifts.length) {
-    return [
-      reportTitle('🧑‍💼', 'Shift', 'វេន', date),
+    return withLanguage(language, () => [
+      `🧑‍💼 ${label('shiftReport')} — ${formatBusinessDay(date)}`,
       bi('No shift was registered on this day.', 'គ្មានវេនណាមួយបានចុះបញ្ជីក្នុងថ្ងៃនេះទេ។'),
-    ].join('\n')
+    ].join('\n'))
   }
   const blocks: string[] = []
-  for (const shift of shifts) blocks.push(await shiftReportFor(env, shift, nowMs))
+  for (const shift of shifts) blocks.push(await shiftReportFor(env, shift, nowMs, language))
   return blocks.join(`\n${RULE}\n`)
 }
 
@@ -890,7 +1082,7 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
     if (!config.enabled || configurationProblem(config)) return false
     const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
     if (!shift) return false
-    await postTelegram(config, await shiftReportFor(env, shift, nowMs))
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language))
     return true
   } catch (error) {
     console.error('[telegram] shift report could not be sent', error)
@@ -914,26 +1106,26 @@ function unknownCommandReply(command: string): string {
   ].join('\n')
 }
 
-export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now()): Promise<string> {
+export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both'): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
   // Group chats deliver "/report@shop_bot"; strip the bot mention.
   const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
   const argument = parts.slice(1).join(' ')
 
-  if (command === '/help' || command === '/start') return telegramCommandReference()
-  if (command === '/inventory') return inventorySummaryReport(env)
-  if (command === '/stock' || command === '/lowstock') return inventoryReport(env)
-  if (!DATED_COMMANDS.has(command)) return unknownCommandReply(command.slice(0, 32))
+  if (command === '/help' || command === '/start') return withLanguage(language, telegramCommandReference)
+  if (command === '/inventory') return inventorySummaryReport(env, language)
+  if (command === '/stock' || command === '/lowstock') return inventoryReport(env, language)
+  if (!DATED_COMMANDS.has(command)) return withLanguage(language, () => unknownCommandReply(command.slice(0, 32)))
 
-  const parsed = parseReportDate(argument, businessToday(nowMs))
+  const parsed = withLanguage(language, () => parseReportDate(argument, businessToday(nowMs)))
   if (!parsed.ok) return parsed.message
-  if (command === '/sales') return salesReport(env, parsed.date)
-  if (command === '/fees') return feesReport(env, parsed.date)
+  if (command === '/sales') return salesReport(env, parsed.date, language)
+  if (command === '/fees') return feesReport(env, parsed.date, language)
   // `/shifts` is accepted as well as `/shift`: the reply is a list, and a
   // manager who types the plural should get the report rather than the
   // unknown-command help.
-  if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs)
-  return dayReport(env, parsed.date)
+  if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs, language)
+  return dayReport(env, parsed.date, language)
 }
 
 
@@ -959,10 +1151,10 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
   // Any chat that is not on the owner's allow-list gets a refusal carrying
   // nothing but its own chat id -- never a figure, a receipt or a product.
   if (!config.chatIds.includes(chatId)) {
-    await postTelegram(config, telegramUnauthorizedReply(chatId), chatId)
+    await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId)
     return
   }
-  await postTelegram(config, await telegramCommandReply(env, text), chatId)
+  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language), chatId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
