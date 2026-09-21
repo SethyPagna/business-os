@@ -56,12 +56,26 @@ test('HTML shell admission is independent of static transport admission', () => 
 // Discovered by test:utils, deliberately using a real browser and worker rather
 // than page routing (which bypasses the cache behavior this regression needs).
 test('native SW metadata poisoning negative control, upgrade, recovery and offline shell', { timeout: 60000 }, async () => {
-  const oldSource = source
+  // sw.js is checked in with CRLF line endings; a literal '\n' inside the
+  // guard-removal needle below silently failed to match against '\r\n' and
+  // the guard removal became a no-op (root cause of the metadata-navigation
+  // hang: with the app-document guard still in place, the legacy worker
+  // never called respondWith() for the /business-os-build.json navigation,
+  // so the browser fell through to the real network request, which the
+  // fixture below deliberately never answers while holdMetadata is true).
+  // Normalize once so every literal '\n' needle is line-ending agnostic.
+  const normalizedSource = source.replace(/\r\n/g, '\n')
+  const guardNeedle = 'if (!isAppDocumentPath(url.pathname))\n            return;'
+  // Prove the needle matches BEFORE replacing. A needle that never matched
+  // would no-op silently and surface 30 s later as a page.goto timeout on the
+  // metadata navigation (replace-then-!includes is always true and proves nothing).
+  assert.ok(normalizedSource.includes(guardNeedle), 'app-document guard needle must match sw.js so the legacy fixture really drops the guard')
+  const oldSource = normalizedSource
     .replace(', shellPolicy: SHELL_POLICY', '')
     .replace(/return isValidTransportResponse\(response\)[\s\S]*?=== 'text\/html';/, 'return isValidTransportResponse(response);')
-    .replace('if (!isAppDocumentPath(url.pathname))\n            return;', '')
+    .replace(guardNeedle, '')
     .replace("const revalidate = fetch('/index.html',", 'const revalidate = fetch(request,')
-  assert.notEqual(oldSource, source)
+  assert.notEqual(oldSource, normalizedSource)
   let worker = oldSource.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'old-poison')
   let failSales = false
   let heldMetadata: http.ServerResponse | undefined
