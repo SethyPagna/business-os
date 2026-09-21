@@ -129,6 +129,7 @@ function days(sqlite) {
   return {
     today: sqlite.prepare("SELECT date('now', '+7 hours') AS d").get().d,
     yesterday: sqlite.prepare("SELECT date('now', '+7 hours', '-1 day') AS d").get().d,
+    threeDaysAgo: sqlite.prepare("SELECT date('now', '+7 hours', '-3 day') AS d").get().d,
   }
 }
 function insertShift(sqlite, row) {
@@ -136,15 +137,17 @@ function insertShift(sqlite, row) {
   sqlite.prepare(`INSERT INTO shift_sessions (${columns.join(',')}) VALUES (${columns.map((c) => '@' + c).join(',')})`).run(row)
   return sqlite.prepare('SELECT * FROM shift_sessions WHERE shift_code=?').get(row.shift_code)
 }
-function openYesterday(sqlite, overrides = {}) {
-  const { yesterday } = days(sqlite)
+function openOnDate(sqlite, businessDate, overrides = {}) {
   return insertShift(sqlite, {
     shift_code: `S-CARRY-${Math.random().toString(36).slice(2, 8)}`, scope_mode: 'per_account',
     user_id: 7, user_name: 'cashier', branch_id: 1, branch_name: 'Shop',
-    business_date: yesterday, opened_at: `${yesterday}T13:00:00.000Z`,
+    business_date: businessDate, opened_at: `${businessDate}T13:00:00.000Z`,
     opening_float_usd: 20, opening_float_khr: 40000,
     opening_float_usd_registered: 1, opening_float_khr_registered: 1, revision: 0, ...overrides,
   })
+}
+function openYesterday(sqlite, overrides = {}) {
+  return openOnDate(sqlite, days(sqlite).yesterday, overrides)
 }
 
 // ==========================================================================
@@ -168,6 +171,15 @@ assert.match(readPreviousOpenSource, /AND closed_at IS NULL AND cancelled_at IS 
   'readPreviousOpen offers only a row that is still open and not cancelled')
 assert.match(readPreviousOpenSource, /NOT EXISTS \(SELECT 1 FROM shift_sessions later WHERE later\.parent_shift_id = shift_sessions\.id\)/,
   'readPreviousOpen offers the LAST segment of a lineage, like the list read')
+// When more than one earlier business day is still open (the daily-open flow
+// never checks for one -- see POST /open), the row offered is whichever the
+// ORDER BY names, and it must be the OLDEST: intervalError refuses to close a
+// later segment while an earlier one is still open, so newest-first is the
+// one order the POS cannot drain. Every other case in this file has only ONE
+// open earlier-day candidate, so ASC and DESC agree there; see section (j)
+// and the DESC discriminator below for the pin that distinguishes them.
+assert.ok(readPreviousOpenSource.includes('ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 1'),
+  'readPreviousOpen orders by business_date ASC (the OLDEST earlier open day first), tie-broken by opened_at/id ASC')
 // The same continuation guard the list read uses -- copied, not invented.
 assert.ok(source.includes('AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)'),
   'the list read carries the same continuation guard')
@@ -197,6 +209,16 @@ for (const [name, clause] of Object.entries(CLAUSES)) {
  * instrument that makes every "null" pin below falsifiable. */
 function withoutClause(sqlite, clause, params) {
   return sqlite.prepare(CARRY_SQL.replace(clause, '')).get({ branchId: null, userId: null, scopeMode: null, ...params })
+}
+const ORDER_CLAUSE = 'ORDER BY business_date ASC, opened_at ASC, id ASC'
+assert.ok(CARRY_SQL.includes(ORDER_CLAUSE), `the filled SQL still contains the order clause verbatim: ${ORDER_CLAUSE}`)
+/** The real query with ASC swapped for DESC on every ordering column, run on
+ * the same database. Every "null"/"one candidate" pin above and below would
+ * stay green under this swap; this is the instrument that would not. */
+function withDescendingOrder(sqlite, params) {
+  const flipped = CARRY_SQL.replace(ORDER_CLAUSE, 'ORDER BY business_date DESC, opened_at DESC, id DESC')
+  assert.notEqual(flipped, CARRY_SQL, 'the DESC swap actually changed the SQL under test')
+  return sqlite.prepare(flipped).get({ branchId: null, userId: null, scopeMode: null, ...params })
 }
 function carryQuery(sqlite, params) {
   return sqlite.prepare(CARRY_SQL).get({ branchId: null, userId: null, scopeMode: null, ...params })
@@ -401,6 +423,65 @@ async function main() {
   const plain = openYesterday(chainDb, { shift_code: 'S-PLAIN', branch_id: 2, branch_name: 'Second' })
   assert.equal(carryQuery(chainDb, { scopeMode: 'per_account', userId: 7, branchId: 2 }).id, plain.id,
     'positive control: an un-continued open row on the same database IS returned')
+
+  // ========================================================================
+  // (j) TWO earlier open days: the offer is the OLDEST one, not the nearest
+  // ========================================================================
+  // POST /open never checks for an earlier still-open row (only readCurrent,
+  // scoped to TODAY, gates it -- see the route above), so two earlier days
+  // can genuinely both sit open at once. Every case so far has exactly one
+  // open earlier-day candidate, so ASC and DESC agree everywhere else in
+  // this file; this is the only case that tells them apart.
+  const orderDb = database()
+  const order = harness(orderDb)
+  const { yesterday: orderYesterday, threeDaysAgo } = days(orderDb)
+  const olderDay = openOnDate(orderDb, threeDaysAgo, { shift_code: 'S-OLDER-CARRY' })
+  const newerDay = openOnDate(orderDb, orderYesterday, { shift_code: 'S-NEWER-CARRY' })
+
+  // Why oldest first: shifts.ts enforces (in intervalError, account/branch-
+  // wide, not just within one lineage) that a still-open earlier segment must
+  // close before a later one can. Closing the NEWER row while the older one is
+  // still open is refused, so an offer that named the newer day first would
+  // hand the cashier a close that can only fail.
+  const closeNewerFirst = await order.json('POST', `/${newerDay.id}/close`, {
+    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+  })
+  assert.equal(closeNewerFirst.status, 409, 'closing the nearer day first is refused while an older day is still open')
+  assert.equal(closeNewerFirst.body.error, 'Opening time overlaps the previous shift segment.')
+
+  const firstOffer = await order.json('GET', '/current?branch_id=1')
+  assert.equal(firstOffer.body.previous_open_shift.id, olderDay.id,
+    'business_date ASC offers the OLDEST earlier day (three days ago) first, the only one that can close')
+  assert.equal(firstOffer.body.previous_open_shift.business_date, threeDaysAgo)
+
+  // Close the offered (older) day; the offer moves to the nearer day.
+  const closeOlder = await order.json('POST', `/${olderDay.id}/close`, {
+    expected_revision: olderDay.revision, closed_at: `${threeDaysAgo}T14:00:00.000Z`,
+  })
+  assert.equal(closeOlder.status, 200, `closing the offered older day succeeds: ${JSON.stringify(closeOlder.body)}`)
+  const secondOffer = await order.json('GET', '/current?branch_id=1')
+  assert.equal(secondOffer.body.previous_open_shift.id, newerDay.id,
+    'the nearer day is offered next once the older day is closed')
+
+  // Now the nearer day closes cleanly (the previous segment is closed before
+  // it opened), and nothing is left to drain: the chain drains oldest to newest.
+  const closeNewerSecond = await order.json('POST', `/${newerDay.id}/close`, {
+    expected_revision: newerDay.revision, closed_at: new Date().toISOString(),
+  })
+  assert.equal(closeNewerSecond.status, 200, `closing the nearer day succeeds once the older day is closed: ${JSON.stringify(closeNewerSecond.body)}`)
+  assert.equal((await order.json('GET', '/current?branch_id=1')).body.previous_open_shift, null,
+    'once both earlier days are closed, nothing is left to offer')
+
+  // DISCRIMINATING NEGATIVE: the real SQL with ASC swapped for DESC, run on
+  // a fresh two-open-row database, picks the NEWER day -- the one the route
+  // refuses to close first -- proving the ASC pin above is falsifiable.
+  const descDb = database()
+  const descOlder = openOnDate(descDb, threeDaysAgo, { shift_code: 'S-OLDER-DESC' })
+  const descNewer = openOnDate(descDb, orderYesterday, { shift_code: 'S-NEWER-DESC' })
+  const descPick = withDescendingOrder(descDb, { scopeMode: 'per_account', userId: 7, branchId: 1 })
+  assert.equal(descPick.id, descNewer.id,
+    'swapping ASC for DESC would offer the NEWER day first -- the close the route refuses; this is the gap the real ORDER BY closes')
+  assert.notEqual(descPick.id, descOlder.id)
 
   console.log('PASS a shift left open on a previous business day is discoverable, closable once, and never replaces the daily prompt')
 }

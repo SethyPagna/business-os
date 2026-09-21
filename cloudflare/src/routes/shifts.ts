@@ -397,6 +397,10 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
  * Scope, branch and continuation rules are the list read's: cancelled rows are
  * not offered, and a segment that has already been continued is not either --
  * the row that stands for the record is the last one of its lineage.
+ *
+ * OLDEST first, not most recent: intervalError refuses to close a later
+ * segment while an earlier one is still open, so with two stale days the only
+ * order the POS can drain is oldest to newest.
  */
 async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
@@ -406,7 +410,7 @@ async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: numbe
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
       AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId)
-    ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT 1`)
+    ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 1`)
     .get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
 }
 async function readShiftById(db: D1Compat, id: number) {
