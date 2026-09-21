@@ -37,9 +37,13 @@ const dbShim = {
     }
   },
   async batch(statements) {
+    // Found 2026-09-22: production D1Compat.batch() returns the raw
+    // D1Result[] and callers read results[i].meta.last_row_id; a shim that
+    // flattened it to { changes, lastInsertRowid } dropped .meta. Shape each
+    // better-sqlite3 result like D1 does.
     return db.transaction(() => statements.map(({ sql, params }) => {
       const result = db.prepare(sql).run(params ?? {})
-      return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) }
+      return { success: true, results: [], meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     }))()
   },
 }

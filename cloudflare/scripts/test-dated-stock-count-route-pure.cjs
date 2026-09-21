@@ -33,13 +33,11 @@ function freshDb() {
       }
     },
     async batch(items) {
-      const results = []
-      for (const item of items) {
-        const stmt = rawDb.prepare(item.sql)
-        const r = stmt.run(item.params || {})
-        results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-      }
-      return results
+      // Found 2026-09-22: production D1Compat.batch() returns the raw
+      // D1Result[] and callers read results[i].meta.last_row_id; a shim that
+      // flattened it to { changes, lastInsertRowid } dropped .meta. Pass the
+      // real results through unchanged.
+      return rawDb.batch(items)
     },
     async transaction(fn) { return fn(this) },
   }
