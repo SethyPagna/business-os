@@ -77,6 +77,9 @@ it. Gates on e2c744bf: frontend 515 passed, 0 red of 515 executed files (0 skipp
 tsc 0, 497/499 green (test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs contention, green standalone). Shared checkout: dangling @playwright/test link
 replaced (typecheck there green again). Open: shift 20 closing-count amendment (needs a
 signed-in session); popup closeDirty chip task_4683ad2f.
+D12 pushed (both branches at fee0a315) and deployed (Paid) 23:10Z: Worker
+4d263940-1996-43d6-aeac-19514c8080b0, live revision fee0a315baf3, frontend hash
+1bef2af49779c663; no remote migration; smoke green (admin login shell, storefront).
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

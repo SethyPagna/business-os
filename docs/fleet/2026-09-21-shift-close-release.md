@@ -513,6 +513,34 @@ reviewed by the coordinator and cherry-picked onto the branch:
   checkout were deleted as links only (entry counts unchanged) before
   `git worktree remove`.
 
+### Deployment — DONE (Paid), 21 September 2026 23:10Z (D12 Shifts popup checkpoint)
+
+Deployed from an isolated worktree detached at `fee0a315` (the D12 docs record on
+top of code tip `e2c744bf`; tracked tree clean after restoring the public trio,
+`npm ci` in both packages, Worker typecheck exit 0, frontend built from that tip,
+Paid and Free dry-runs exit 0) with `npm run deploy` (wrangler.toml, Paid) under
+the owner's "fix and make deploy" direction and the standing checkpoint
+authorization. No `deploy:full`, `migrate:remote` or `secrets:sync`; no
+production D1 write. Pushed first: `origin/main` and
+`origin/codex/supplier-settlement-20260918` both at `fee0a315`; the merged lane
+branch `codex/shift-modal-bound-20260922` deleted locally (its two commits are
+`f69e81f1` and `e2c744bf` on both branches).
+
+- Source: `fee0a315baf3` (code tip `e2c744bf`).
+- Worker version: `4d263940-1996-43d6-aeac-19514c8080b0`; live `/api/runtime/version`:
+  revision `fee0a315baf3`, hash `914e1ac2b2ee6afe`, built `2026-09-21T23:07:39.083Z`,
+  booted `23:10:02Z`, tier `paid`. Upload 101 s, triggers 11 s; exit 0.
+- Frontend: `business-os-build.json` revision `fee0a315baf3`, hash `1bef2af49779c663`,
+  built `2026-09-21T23:06:23.162Z`.
+- Live smoke (browser pane, signed out): admin shell renders the login screen with
+  only the expected 401 session probes; public storefront About and Products tabs
+  render on the new build with no console errors. No sign-in, no transaction, no
+  shift touched. Owner's remaining check: Shifts popup → an open row from an earlier
+  day → Close: the closing time is prefilled a minute before the next shift's opening
+  and that bound is shown above the form.
+- Previous production: `f98754b3` / `c77d84db-2d7a-4308-8b97-674b60bdb439`.
+- Deploy worktree removed after the smoke.
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300

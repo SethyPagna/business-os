@@ -60,7 +60,8 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   `shiftTransport.ts`, and the popup's Close form seeds a minute before the
   bound and shows it. Gates green on `e2c744bf`. Open: shift 20 (21.09.2026)
   closing count amendment (500៛ counted, additional 0, note) once the owner
-  signs in; popup `closeDirty` prefill chip `task_4683ad2f`.
+  signs in; popup `closeDirty` prefill chip `task_4683ad2f`. Deployed (Paid) as
+  Worker `4d263940`, live revision `fee0a315baf3`, frontend hash `1bef2af49779c663`.
 - Reset blocker: migration 0188's retirement trigger refuses the reset route's
   `transfer_operation_members` delete; wire the retirement kernel into the
   route before applying 0185–0191.
