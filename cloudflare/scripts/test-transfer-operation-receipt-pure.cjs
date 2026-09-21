@@ -168,17 +168,17 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT SUM(quantity) AS n FROM branch_stock').get().n, 30)
     sqlite.close()
   })
-  for (const mode of ['reset', 'restore', 'corrupt']) for (const route of ['/transfer', '/transfer-bulk']) {
-    await check(`${route}: ${mode} marker after admission blocks the entire transfer`, async () => {
+  for (const mode of ['reset', 'restore', 'corrupt']) for (const [app, route] of [['branches', '/transfer'], ['branches', '/transfer-bulk'], ['inventory', '/transfer']]) {
+    await check(`${app}${route}: ${mode} marker after admission blocks the entire transfer`, async () => {
       fresh()
       const body = intent(1, route.endsWith('bulk') ? 3 : 1, `maintenance_${mode}_${route.endsWith('bulk') ? 'bulk' : 'single'}`, route.endsWith('bulk'))
       beforeBatch = () => sqlite.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
-      const blocked = await request('branches', route, body)
+      const blocked = await request(app, route, body)
       assert.notEqual(blocked.status, 200)
       assert.deepEqual(counts(), { transfer_operation_receipts: 0, audit_logs: 0, stock_transfers: 0, inventory_movements: 0 })
       assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
       sqlite.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
-      const retry = await request('branches', route, body)
+      const retry = await request(app, route, body)
       assert.equal(retry.status, 200, JSON.stringify(retry))
       assert.equal(retry.body.replayed, false)
       assert.equal(counts().transfer_operation_receipts, 1)

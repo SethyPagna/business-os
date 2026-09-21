@@ -32,6 +32,7 @@ function deactivatePre0154LegacyLot(batchId) {
   try { deactivate() } finally { rawDb.exec(guard) }
 }
 let beforeBatchHook = null
+let beforeOrdinaryWrite = null
 let corruptNextReturnReceipt = false
 let corruptNextReturnCreateReceipt = false
 let corruptNextSaleRecordEvent = false
@@ -67,6 +68,11 @@ const db = {
     }
   },
   async batch(items) {
+    if (beforeOrdinaryWrite && items.some((item) => item.sql.includes('ordinary_business_maintenance_guard'))) {
+      const hook = beforeOrdinaryWrite
+      beforeOrdinaryWrite = null
+      await hook()
+    }
     if (beforeBatchHook && items.some((item) => /INSERT INTO return_(?:mutation|create)_receipts/i.test(item.sql)
       || (/INSERT INTO returns/i.test(item.sql) && /supplier_return/.test(item.sql)))) {
       const hook = beforeBatchHook
@@ -944,10 +950,11 @@ async function main() {
       movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
       audit: auditCalls.length,
     }
-    beforeBatchHook = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+    beforeBatchHook = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
     const blocked = await req('POST', '/supplier', body)
     assert.notStrictEqual(blocked.status, 200, JSON.stringify(blocked.json))
     assert.strictEqual(beforeBatchHook, null, 'marker must be installed at the supplier business batch')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, before.returns)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, before.movements)
     assert.strictEqual(auditCalls.length, before.audit)
@@ -956,6 +963,23 @@ async function main() {
     const retry = await req('POST', '/supplier', body)
     assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
+  })
+
+  for (const mode of ['reset', 'restore', 'corrupt']) await check(`return reason presets ${mode} marker after admission refuses one-statement write`, async () => {
+    seed()
+    const beforeAudit = auditCalls.length
+    const beforeSetting = rawDb.prepare("SELECT value FROM settings WHERE key='return_reason_presets'").get()?.value ?? null
+    beforeOrdinaryWrite = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
+    const body = { presets: { customer: ['Damaged'], supplier: ['Expired'] } }
+    const blocked = await req('POST', '/reason-presets', body)
+    assert.notStrictEqual(blocked.status, 200, JSON.stringify(blocked.json))
+    assert.strictEqual(beforeOrdinaryWrite, null)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
+    assert.strictEqual(rawDb.prepare("SELECT value FROM settings WHERE key='return_reason_presets'").get()?.value ?? null, beforeSetting)
+    assert.strictEqual(auditCalls.length, beforeAudit)
+    rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    const accepted = await req('POST', '/reason-presets', body)
+    assert.strictEqual(accepted.status, 200, JSON.stringify(accepted.json))
   })
 
   await check('K2: the three-way stock_action lands end-to-end -- none/restock/damaged in one return', async () => {

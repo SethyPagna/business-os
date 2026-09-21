@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
-import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
+import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
@@ -208,10 +208,10 @@ async function registerUsedPaymentMethods(env: Env, sale: { payment_method?: unk
     const configured = parseConfiguredMethods(row?.value)
     const merged = mergePaymentMethods(configured, used)
     if (!merged.changed) return []
-    await db.prepare(
+    await runOrdinaryBusinessWrite(db,
       `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-    ).run({ value: JSON.stringify(merged.methods) })
+      { value: JSON.stringify(merged.methods) })
     return merged.added
   } catch (error) {
     console.error('[payment-methods] could not register methods used on a sale', error)

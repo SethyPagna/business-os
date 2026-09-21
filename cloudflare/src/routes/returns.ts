@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
-import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
+import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -1092,10 +1092,10 @@ app.post('/reason-presets', async (c) => {
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const presets = normalizeReturnReasonPresets(body.presets ?? body)
-  await getDb(c.env).prepare(`
+  await runOrdinaryBusinessWrite(getDb(c.env), `
     INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).run({ key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(presets) })
+  `, { key: RETURN_REASON_PRESETS_KEY, value: JSON.stringify(presets) })
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return_reason_presets', null, {
     customerCount: presets.customer.length,
     supplierCount: presets.supplier.length,

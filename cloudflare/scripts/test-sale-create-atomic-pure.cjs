@@ -360,7 +360,7 @@ async function assertNativeD1TriggerMetadata() {
       beforeBatch(db, statements) {
         if (inject && statements.some(({ sql }) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) {
           inject = false
-          db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+          db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })])
         }
       },
     })
@@ -368,6 +368,7 @@ async function assertNativeD1TriggerMetadata() {
     const before = creationState(f.raw)
     const blocked = await postSale(f.route, body)
     assert.equal(inject, false, `${mode} marker must be installed at the business batch`)
+    assert.equal(f.raw.prepare("SELECT COUNT(*) n FROM system_flags WHERE key='maintenance'").get().n, 1)
     assert.notEqual(blocked.status, 200, JSON.stringify(blocked.body))
     assert.deepEqual(creationState(f.raw), before, `${mode} marker must roll back sale, stock, receipt, and audit`)
     f.raw.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
