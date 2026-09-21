@@ -23,6 +23,26 @@ async function main() {
       try { return { ok: true, value: await operation() }; }
       catch (error) { return { ok: false, code: error?.code || null, message: String(error?.message || error) }; }
     }
+    async function releaseBeforeCatch(env, operation, insertBeforeBatch = 0) {
+      const raw = env.DB;
+      let batches = 0;
+      const intercepted = new Proxy(raw, { get(target, key) {
+        if (key === 'batch') return async (statements) => {
+          batches++;
+          if (batches === insertBeforeBatch) {
+            await target.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance','{}')").run();
+          }
+          try { return await target.batch(statements); }
+          catch (error) {
+            await target.prepare("DELETE FROM system_flags WHERE key='maintenance'").run();
+            throw error;
+          }
+        };
+        const member = target[key];
+        return typeof member === 'function' ? member.bind(target) : member;
+      }});
+      return { ...await outcome(() => operation({ ...env, DB: intercepted })), batches };
+    }
     export default { async fetch(request, env) {
       const { mode } = await request.json();
       if (mode === 'begin') return Response.json(await outcome(() => beginMaintenance(env, { backupKey: 'test', startedBy: 'admin' })));
@@ -31,9 +51,12 @@ async function main() {
         return row ? endMaintenance(env, JSON.parse(row.value).token) : true;
       }));
       if (mode === 'analyze') return Response.json(await outcome(() => runImportAnalyze(env, 'job-1')));
+      if (mode === 'analyze-release-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runImportAnalyze(racedEnv, 'job-1')));
       if (mode === 'apply') return Response.json(await outcome(() => runImportApply(env, 'job-1')));
       if (mode === 'bulk-create') return Response.json(await outcome(() => createBulkDeleteJob(env, 'products', [1], 'test', { id: 1, name: 'admin' })));
       if (mode === 'bulk-run') return Response.json(await outcome(() => runBulkDeleteJob(env, 'bulk-1')));
+      if (mode === 'bulk-release-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runBulkDeleteJob(racedEnv, 'bulk-1')));
+      if (mode === 'bulk-mid-race') return Response.json(await releaseBeforeCatch(env, (racedEnv) => runBulkDeleteJob(racedEnv, 'bulk-1'), 2));
       if (mode === 'bulk-reap') return Response.json(await outcome(() => reapStalledBulkDeleteJobs(env)));
       if (mode === 'product') return Response.json(await outcome(async () => ensureUnifiedStockProduct(await getImportFencedDb(env), product)));
       if (mode === 'stock-add') return Response.json(await outcome(async () => applyUnifiedStockAdd(await getImportFencedDb(env), stockAdd)));
@@ -100,6 +123,12 @@ async function main() {
       const denied = await call(mode)
       assert.equal(denied.code, 'import_maintenance_active', mode)
     }
+    const importReleaseRace = await call('analyze-release-race')
+    assert.equal(importReleaseRace.code, 'import_maintenance_active', 'release before catch retains maintenance identity')
+    assert.equal(importReleaseRace.batches, 1, 'deterministic maintenance guard must not retry D1 batch')
+    assert.equal((await db.prepare('SELECT status FROM import_jobs WHERE id=?').bind('job-1').first()).status, 'failed')
+    assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM system_flags WHERE key=?').bind('maintenance').first()).n, 0)
+    await db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(JSON.stringify(held.value)).run()
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM products').first()).n, 0)
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM effects').first()).n, 0)
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM bulk_delete_jobs').first()).n, 0)
@@ -136,7 +165,9 @@ async function main() {
     assert.equal((await call('branch-once')).ok, true)
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM effects').first()).n, 3)
     await db.prepare("UPDATE branches SET name='Other' WHERE id=1").run()
-    assert.equal((await call('branch-once')).ok, false, 'canonical branch batchOnce still enforces branch guard')
+    const branchDenied = await call('branch-once')
+    assert.equal(branchDenied.ok, false, 'canonical branch batchOnce still enforces branch guard')
+    assert.notEqual(branchDenied.code, 'import_maintenance_active', 'unrelated integer overflow remains a branch error')
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM effects').first()).n, 3)
     // An unexpired lease blocks restore even when status is 'failed'.
     await db.prepare("UPDATE import_jobs SET lease_token='held',lease_expires_at='2099-01-01T00:00:00.000Z'").run()
@@ -153,10 +184,19 @@ async function main() {
     // advance status or cursor, even though the bulk row already exists.
     await db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(JSON.stringify(held.value)).run()
     assert.equal((await call('bulk-run')).code, 'import_maintenance_active')
+    const bulkReleaseRace = await call('bulk-release-race')
+    assert.equal(bulkReleaseRace.code, 'import_maintenance_active', 'bulk failure must not be misclassified after release')
+    assert.equal(bulkReleaseRace.batches, 1, 'bulk guard must not retry D1 batch')
+    const bulkMidRace = await call('bulk-mid-race')
+    assert.equal(bulkMidRace.code, 'import_maintenance_active', 'mid-chunk maintenance must remain retryable after release')
+    assert.equal(bulkMidRace.batches, 2, 'bulk runner must not retry a fenced delete chunk')
+    const afterMidRace = await db.prepare("SELECT status,processed_count,failed_count FROM bulk_delete_jobs WHERE id='bulk-1'").first()
+    assert.deepEqual([afterMidRace.status, afterMidRace.processed_count, afterMidRace.failed_count], ['processing', 0, 0])
+    await db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(JSON.stringify(held.value)).run()
     await db.prepare("UPDATE bulk_delete_jobs SET updated_at='2000-01-01 00:00:00' WHERE id='bulk-1'").run()
     assert.equal((await call('bulk-reap')).ok, true)
     const bulk = await db.prepare("SELECT status,processed_count,failed_count FROM bulk_delete_jobs WHERE id='bulk-1'").first()
-    assert.deepEqual([bulk.status, bulk.processed_count, bulk.failed_count], ['pending', 0, 0])
+    assert.deepEqual([bulk.status, bulk.processed_count, bulk.failed_count], ['processing', 0, 0])
     await db.prepare('DELETE FROM bulk_delete_jobs').run()
     await db.prepare('DELETE FROM system_flags').run()
     const raced = await Promise.all([call('begin'), call('bulk-create')])

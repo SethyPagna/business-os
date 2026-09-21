@@ -7,7 +7,7 @@ type Statement = { sql: string; params?: BindParams }
 const maintenanceGuard: Statement = {
   sql: `SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM system_flags WHERE key = 'maintenance'
-  ) THEN 1 ELSE abs(-9223372036854775808) END AS import_maintenance_guard`,
+  ) THEN 1 ELSE json_extract('[1]', '$[import_maintenance_active]') END AS import_maintenance_guard`,
 }
 
 export class ImportMaintenanceFenceError extends Error {
@@ -45,12 +45,12 @@ export function withImportMaintenanceWriteFence(db: D1Compat): D1Compat {
       const results = await (once ? db.batchOnce([maintenanceGuard, ...statements]) : db.batch([maintenanceGuard, ...statements]))
       return results.slice(1)
     } catch (error) {
-      // The branch-authority guard also uses integer overflow. Attribute it
-      // to maintenance only when the flag actually exists; preserve other
-      // failures and their retry semantics.
-      if (/integer overflow/i.test(error instanceof Error ? error.message : String(error))) {
-        const held = await db.prepare("SELECT 1 AS held FROM system_flags WHERE key = 'maintenance'").get<{ held: number }>()
-        if (held) throw new ImportMaintenanceFenceError()
+      // SQLite includes the invalid path verbatim in the error. Unlike a
+      // follow-up flag read, that identity survives a maintenance release
+      // between batch rejection and this catch. Never classify the separate
+      // canonical-branch integer-overflow guard as maintenance.
+      if (/bad JSON path: ['"]\$\[import_maintenance_active\]['"]/i.test(error instanceof Error ? error.message : String(error))) {
+        throw new ImportMaintenanceFenceError()
       }
       throw error
     }
