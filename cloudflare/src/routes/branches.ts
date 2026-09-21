@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -285,7 +286,7 @@ app.post('/stock-integrity/repair', async (c) => {
       params: ids.params,
     })
   }
-  await db.batch(statements)
+  await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
 
   const remaining = await readStockIntegrityIssues(db)
   const repairedRows = Math.max(0, issues.length - remaining.length)
@@ -471,7 +472,7 @@ app.post('/transfer', async (c) => {
   })
 
   try {
-    await db.batch(statements)
+    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -737,7 +738,7 @@ app.post('/transfer-bulk', async (c) => {
     response: responsePayload,
   })
   try {
-    await db.batch(statements)
+    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -1044,7 +1045,7 @@ app.put('/:id', async (c) => {
 
   // Field write shared with the server-side undo/redo applier -- see
   // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch(branchUpdateStatements(id, body, current))
+  await db.batch([...branchUpdateStatements(id, body, current), ordinaryBusinessMaintenanceGuard])
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))

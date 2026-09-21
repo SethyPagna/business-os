@@ -695,7 +695,7 @@ async function main() {
     for (const mode of ['reset', 'restore', 'corrupt']) {
       const f = fixture()
       const request = receiveRequest(`stock-maintenance-${mode}`, 5)
-      f.beforeCommit((sql) => sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(JSON.stringify({ mode })))
+      f.beforeCommit((sql) => sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })))
       await assert.rejects(() => commitStockSession(f.env, user, request))
       assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, 0)
       assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)

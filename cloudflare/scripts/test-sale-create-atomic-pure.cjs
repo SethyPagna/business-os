@@ -354,6 +354,29 @@ async function assertNativeD1TriggerMetadata() {
     console.log('PASS customer identity race aborts the complete create batch with its typed 409')
   }
 
+  for (const mode of ['reset', 'restore', 'corrupt']) {
+    let inject = true
+    const f = fixture({
+      beforeBatch(db, statements) {
+        if (inject && statements.some(({ sql }) => /INSERT\s+INTO\s+sales\s*\(/i.test(sql))) {
+          inject = false
+          db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+        }
+      },
+    })
+    const body = request(`maintenance-${mode}`)
+    const before = creationState(f.raw)
+    const blocked = await postSale(f.route, body)
+    assert.equal(inject, false, `${mode} marker must be installed at the business batch`)
+    assert.notEqual(blocked.status, 200, JSON.stringify(blocked.body))
+    assert.deepEqual(creationState(f.raw), before, `${mode} marker must roll back sale, stock, receipt, and audit`)
+    f.raw.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    const retry = await postSale(f.route, body)
+    assert.equal(retry.status, 200, JSON.stringify(retry.body))
+    assert.equal(creationState(f.raw).sales, 1)
+  }
+  console.log('PASS reset/restore/corrupt markers after sale admission roll back and preserve same-key retry')
+
   const injectedFailures = [
     ['header', "CREATE TRIGGER fail_create_effect BEFORE INSERT ON sales BEGIN SELECT RAISE(ABORT,'forced header'); END"],
     ['line', "CREATE TRIGGER fail_create_effect BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT,'forced line'); END"],

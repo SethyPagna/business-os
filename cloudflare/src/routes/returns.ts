@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
+import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -1169,7 +1170,7 @@ app.post('/reasons/replace', async (c) => {
       params: { to, returnScope, from: fromKey },
     })
   }
-  const results = await db.batch(statements)
+  const results = await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   const linkedChanged = replaceScope === 'linked' ? Number(results[1]?.meta?.changes || 0) : 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'return_reason', null, {
     from, to, returnScope, scope: replaceScope, linkedChanged,
@@ -2173,7 +2174,7 @@ app.post('/', async (c) => {
     return c.json({ error: (error as Error).message, code: 'return_too_large' }, 400)
   }
   try {
-    await db.batch(statements)
+    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     try {
       const receipt = await readReceipt()
@@ -2302,7 +2303,11 @@ app.post('/supplier', async (c) => {
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : null
 
-  const returnInsert = await db.prepare(`
+  // A server key also covers legacy callers without an idempotency key, so
+  // every child can resolve the header within one atomic D1 batch.
+  const supplierWriteKey = clientRequestId || `supplier-return:${crypto.randomUUID()}`
+  const returnIdExpression = '(SELECT id FROM returns WHERE client_request_id=@supplier_write_key)'
+  const returnHeaderStatement = { sql: `
     INSERT INTO returns (
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
       return_scope, reason, return_type, notes, total_refund_usd, total_refund_khr, exchange_rate,
@@ -2312,9 +2317,9 @@ app.post('/supplier', async (c) => {
       @return_scope, @reason, 'supplier_return', @notes, 0, 0, @exchange_rate,
       @supplier_id, @supplier_name, @settlement, @supplier_compensation_usd, @supplier_compensation_khr,
       @supplier_loss_usd, @supplier_loss_khr, 'completed', @search_normalized)
-  `).run({
+  `, params: {
     return_number: returnNumber,
-    client_request_id: clientRequestId,
+    client_request_id: supplierWriteKey,
     cashier_id: user?.id ?? null,
     cashier_name: actorSnapshot(user),
     branch_id: body.branch_id || null,
@@ -2337,8 +2342,7 @@ app.post('/supplier', async (c) => {
     supplier_compensation_khr: supplierCompensationKhr,
     supplier_loss_usd: supplierLossUsd,
     supplier_loss_khr: supplierLossKhr,
-  })
-  const returnId = returnInsert.lastInsertRowid
+  } }
 
   const productIds = [...new Set(body.items.map((i) => Number(i.product_id)))]
   const productNameMap = new Map<number, string>()
@@ -2347,8 +2351,9 @@ app.post('/supplier', async (c) => {
     for (const row of rows) productNameMap.set(row.id, row.name)
   }
 
+  let returnId = 0
   try {
-    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = [returnHeaderStatement]
     const touchedProductIds = new Set<number>()
     const supplierPerItemBatchSplits: ReturnBatchSplit[][] = []
     // Draw the deducted units out of the product's active lots FIFO, same as a
@@ -2398,9 +2403,9 @@ app.post('/supplier', async (c) => {
 
       statements.push({
         sql: `INSERT INTO return_items (return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, branch_id)
-              VALUES (@return_id, NULL, @product_id, @product_name, @quantity, @unit_cost_usd, @unit_cost_khr, @unit_cost_usd, @unit_cost_khr, @total_usd, @total_khr, 0, @branch_id)`,
+              VALUES (${returnIdExpression}, NULL, @product_id, @product_name, @quantity, @unit_cost_usd, @unit_cost_khr, @unit_cost_usd, @unit_cost_khr, @total_usd, @total_khr, 0, @branch_id)`,
         params: {
-          return_id: returnId,
+          supplier_write_key: supplierWriteKey,
           product_id: item.product_id,
           product_name: safeProductName,
           quantity: qty,
@@ -2447,7 +2452,7 @@ app.post('/supplier', async (c) => {
       })))
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-              VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+              VALUES (@product_id, @product_name, @branch_id, 'supplier_return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, ${returnIdExpression}, @user_id, @user_name, @batch_id)`,
         params: {
           product_id: item.product_id,
           product_name: safeProductName,
@@ -2456,7 +2461,7 @@ app.post('/supplier', async (c) => {
           unit_cost_usd: unitCostUsd,
           unit_cost_khr: unitCostKhr,
           reason: `Supplier return (${settlement}): ${body.reason}`,
-          reference_id: returnId,
+          supplier_write_key: supplierWriteKey,
           user_id: user?.id ?? null,
           user_name: actorSnapshot(user),
           // 0084: attributable only when one lot covered the whole deduction.
@@ -2470,9 +2475,9 @@ app.post('/supplier', async (c) => {
         statements.push({
           sql: `INSERT INTO return_item_batch_allocations (return_item_id, sale_item_id, batch_id, branch_id, quantity)
                 SELECT id, NULL, @batch_id, @branch_id, @quantity
-                FROM return_items WHERE return_id = @return_id ORDER BY id ASC LIMIT 1 OFFSET @item_index`,
+                FROM return_items WHERE return_id = ${returnIdExpression} ORDER BY id ASC LIMIT 1 OFFSET @item_index`,
           params: {
-            return_id: returnId,
+            supplier_write_key: supplierWriteKey,
             item_index: itemIndex,
             batch_id: split.batchId,
             branch_id: split.branchId,
@@ -2487,9 +2492,17 @@ app.post('/supplier', async (c) => {
         params: { productId },
       })
     }
-    await db.batch(statements)
+    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
+      .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
+    if (!committed?.id) throw new Error('supplier_return_identity_missing')
+    returnId = Number(committed.id)
   } catch (error) {
-    await db.prepare('DELETE FROM returns WHERE id = ?').run([returnId])
+    if (clientRequestId) {
+      const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
+        .get<{ id: number; return_number: string }>([clientRequestId])
+      if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+    }
     // An availability refusal is the caller's input problem (400), not a
     // server failure -- everything composed after it never ran (the one
     // atomic batch at the end is all-or-nothing).

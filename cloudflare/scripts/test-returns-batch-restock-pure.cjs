@@ -67,7 +67,8 @@ const db = {
     }
   },
   async batch(items) {
-    if (beforeBatchHook && items.some((item) => /INSERT INTO return_(?:mutation|create)_receipts/i.test(item.sql))) {
+    if (beforeBatchHook && items.some((item) => /INSERT INTO return_(?:mutation|create)_receipts/i.test(item.sql)
+      || (/INSERT INTO returns/i.test(item.sql) && /supplier_return/.test(item.sql)))) {
       const hook = beforeBatchHook
       beforeBatchHook = null
       await hook()
@@ -184,7 +185,7 @@ const saleBulkStatusKernel = {
   bulkAssertion: (predicate, params = {}) => ({ sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }),
   saleRevisionGuard: (id, revision) => ({
     sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (
-      NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+      NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
       AND EXISTS(SELECT 1 FROM sales WHERE id=@id)
       AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0)=@revision
     ) THEN 1 ELSE 0 END`,
@@ -203,6 +204,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
   '../lib/anonymousCustomer': anonymousCustomerKernel,
   '../lib/db': { getDb: () => db },
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   // routes/returns.ts buckets return dates in UTC+7 through the pure
   // businessDateWindow helpers; provide the real module so its date SQL resolves.
   '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
@@ -927,6 +929,33 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(aggQty(), 6, 'branch_stock drops by the 4 that left')
     assert.strictEqual(lotQty(), 6, 'the lot ledger drops in step -- not left stranded at 10 (the pre-fix drift)')
+  })
+
+  for (const mode of ['reset', 'restore', 'corrupt']) await check(`supplier return ${mode} marker after admission has no header, stock, movement, or audit`, async () => {
+    seed()
+    await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    const body = {
+      client_request_id: `supplier-maintenance-${mode}`,
+      items: [{ product_id: 1, quantity: 4, branch_id: 1, cost_price_usd: 2 }],
+      branch_id: 1, reason: 'Supplier maintenance race', settlement: 'refund', supplier_name: 'Acme',
+    }
+    const before = {
+      returns: rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n,
+      movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
+      audit: auditCalls.length,
+    }
+    beforeBatchHook = () => rawDb.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+    const blocked = await req('POST', '/supplier', body)
+    assert.notStrictEqual(blocked.status, 200, JSON.stringify(blocked.json))
+    assert.strictEqual(beforeBatchHook, null, 'marker must be installed at the supplier business batch')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, before.returns)
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, before.movements)
+    assert.strictEqual(auditCalls.length, before.audit)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
+    rawDb.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    const retry = await req('POST', '/supplier', body)
+    assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
   })
 
   await check('K2: the three-way stock_action lands end-to-end -- none/restock/damaged in one return', async () => {

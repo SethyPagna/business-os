@@ -15,6 +15,7 @@ const actual = new Set([
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
   'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus',
   'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
+  'businessMaintenanceGuard',
 ])
 
 function load(rel) {
@@ -77,7 +78,9 @@ function fixture() {
     async batch(statements) {
       if (beforeBatch) { const barrier = beforeBatch; beforeBatch = null; await barrier() }
       return sql.transaction(() => statements.map((statement) => {
-        const result = sql.prepare(statement.text).run(...statement.params)
+        const prepared = sql.prepare(statement.text)
+        if (prepared.reader) return { results: [prepared.get(...statement.params)], meta: { changes: 0 } }
+        const result = prepared.run(...statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },
@@ -211,6 +214,21 @@ async function run() {
   assert.equal(JSON.stringify(['sales', 'returns', 'sale_record_events'].map((table) => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())), beforeFailure)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_bulk_guards').get().n, 0)
   console.log('PASS event failure rolls back sale and linked return snapshots with no leaked guard')
+
+  for (const mode of ['reset', 'restore', 'corrupt']) {
+    f = fixture()
+    const body = request({ client_request_id: `customer-maintenance-${mode}` })
+    const before = JSON.stringify(['sales', 'returns', 'sale_record_events', 'audit_logs'].map((table) => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
+    f.barrier(() => f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode })))
+    const blocked = await f.call(1, body)
+    assert.notEqual(blocked.status, 200, JSON.stringify(blocked))
+    assert.equal(JSON.stringify(['sales', 'returns', 'sale_record_events', 'audit_logs'].map((table) => f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())), before)
+    f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    const retry = await f.call(1, body)
+    assert.equal(retry.status, 200, JSON.stringify(retry))
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='sale_customer'").get().n, 1)
+  }
+  console.log('PASS reset/restore/corrupt markers at direct customer commit preserve every row and same-key retry')
 }
 
 run().catch((error) => { console.error(error); process.exit(1) })
