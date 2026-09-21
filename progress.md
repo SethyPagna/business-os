@@ -1,3 +1,14 @@
+## Maintenance/admission deployed; live warm reload passed — September 21
+
+Source85a3e7525ef2 deployed Paid Worker0bdfffc5-b4a9-48a6-9db3-3c0958979f1b,
+hashfe29238f46ffdbe2;95421 terminal0. Frontend remainsa1ed5ca3/23cc431e6e86d05e.
+Fresh native maintenance races/corrupt-state checks and52tier checks passed6d8e83;
+Paid/Free dry60156 terminal0. No migrations, secret sync or business-data writes.
+Separate live tab460569656 rendered authenticated Returns and normal warmreload
+returned to the app. User POS untouched. No runtime-metadata/controller-cycle claim.
+See docs/fleet/2026-09-21-maintenance-admission-release.md for exact scope/evidence.
+Journal/transfer/reset/restore/export lifecycle and full backlog remain OPEN.
+
 ## Restore admission verified; journal implementation continues — September 21
 
 Commit 2c6a1e38 refuses destructive restore when the import activity lookup fails,
