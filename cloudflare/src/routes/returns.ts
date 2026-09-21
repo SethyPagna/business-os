@@ -3037,7 +3037,7 @@ app.patch('/:id', async (c) => {
     {
       sql: `INSERT INTO return_bulk_guards(guard_value)
             SELECT CASE WHEN (
-              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+              NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
               AND EXISTS(SELECT 1 FROM returns WHERE id=@id)
               AND COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0)=@revision
             ) THEN 1 ELSE 0 END`,

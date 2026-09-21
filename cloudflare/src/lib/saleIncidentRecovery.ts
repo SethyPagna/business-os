@@ -372,7 +372,7 @@ function buildStatements(
   const statements: Statement[] = [{
     sql: `INSERT INTO sale_incident_recovery_guards(id,guard_value)
       SELECT 1,CASE WHEN
-        NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+        NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
         AND (SELECT COUNT(*) FROM sale_incident_recovery_receipts WHERE incident_key=@incident)=0
         AND (SELECT COUNT(*) FROM sales WHERE id IN (16951,16952,16953))=3
         AND (SELECT COUNT(*) FROM sale_items WHERE sale_id IN (16951,16952,16953))=0

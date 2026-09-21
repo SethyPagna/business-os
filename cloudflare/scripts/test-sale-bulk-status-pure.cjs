@@ -73,6 +73,18 @@ function snapshot(f) {
 }
 async function replay(f,id,direction='undo',generation=0) {return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 async function run() {
+  for (const marker of ['{"mode":"reset"}', '{"mode":"restore"}', '{corrupt']) {
+    const f = fixture(); seed(f, 1)
+    const input = request(f, 'completed', 'maintenance-status-0001')
+    const before = snapshot(f)
+    f.barrier(() => f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(marker))
+    const refused = await f.call(sales, '/bulk-status', input)
+    assert.notEqual(refused.status, 200, 'maintenance arriving after HTTP precheck must refuse commit')
+    assert.equal(snapshot(f), before, 'refusal must leave stock, audit, receipt and history untouched')
+    f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    assert.equal((await f.call(sales, '/bulk-status', input)).status, 200, 'same request succeeds after release')
+  }
+  console.log('PASS actual Hono bulk status rejects reset/restore/corrupt marker inserted at commit without effect drift')
   for (const inactiveSql of ['0', 'NULL']) for (const restoringFirst of [true, false]) {
     const f=fixture();seed(f,1)
     f.sql.exec(`UPDATE sales SET sale_status='${restoringFirst?'completed':'cancelled'}',status_before_cancel='completed' WHERE id=1;

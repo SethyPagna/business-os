@@ -79,6 +79,18 @@ function snapshot(f) {return JSON.stringify(['sales','returns','fees','inventory
 async function replay(f,id,direction='undo',generation=0){return f.call(history,`/${id}/${direction}`,{require_applied:true,expected_generation:generation})}
 
 async function run(){
+  for (const marker of ['{"mode":"reset"}', '{"mode":"restore"}', '{corrupt']) {
+    const f=fixture()
+    const input=request(f,{kind:'payment_method',source:'Cash',target:'Card'},'maintenance-update-0001',[1])
+    const before=snapshot(f)
+    f.barrier(()=>f.sql.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(marker))
+    const refused=await f.call(sales,'/bulk-update',input)
+    assert.notEqual(refused.status,200,'maintenance arriving after HTTP precheck must refuse commit')
+    assert.equal(snapshot(f),before,'refusal must leave sale, audit, receipt and history untouched')
+    f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    assert.equal((await f.call(sales,'/bulk-update',input)).status,200,'same request succeeds after release')
+  }
+  console.log('PASS actual Hono bulk update rejects reset/restore/corrupt marker inserted at commit without effect drift')
   let f=fixture()
   const payment=request(f,{kind:'payment_method',source:'Cash',target:'card'},'payment-request-1')
   payment.items[2].expected_updated_at='stale-but-source-mismatch'

@@ -588,6 +588,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     items: members.map((member) => ({ id: member.id, receipt_number: member.receipt, before: member.before, after: member.after, changed: member.changed, reason: member.reason })),
   }
   const statements: StockStatement[] = [
+    bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')", {}),
     ...guards,
     { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } },
   ]
@@ -640,7 +641,7 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
   const expected = direction === 'undo' ? 'undoable' : 'redoable'
   const next = direction === 'undo' ? 'redoable' : 'undoable'
   const stamp = new Date().toISOString()
-  const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_UPDATE_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })]
+  const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_UPDATE_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })]
   const assignmentPlan = snapshot.action.kind === 'customer'
     ? await prepareCustomerAssignments(db, snapshot.members.filter(member => member.changed).map(member => {
       const source = direction === 'undo' ? member.after : member.before

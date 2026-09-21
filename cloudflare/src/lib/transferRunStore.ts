@@ -35,6 +35,7 @@ function guard(condition: string, params: Record<string, unknown>): Statement {
   return { sql: `INSERT INTO branches(name) SELECT NULL WHERE COALESCE((${condition}),0)=0`, params }
 }
 const ownedPosition = `r.id=@run AND r.actor_id=@actor AND r.organization_id IS @org
+  AND NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
   AND r.revision=@revision AND r.next_sequence=@sequence AND r.dataset_generation=@datasetGeneration
   AND r.dataset_generation=(SELECT json_extract(value,'$.generation') FROM system_flags WHERE key='business_dataset_generation')`
 
@@ -47,7 +48,8 @@ export function registerTransferRunStatements(input: TransferRunOwnerProof & {
   const identity = owner(input)
   request(input, 131072)
   if (!input.runId || !['branches', 'inventory'].includes(input.scope)) throw new Error('Invalid transfer run')
-  return [{ sql: `INSERT INTO transfer_runs(id,actor_id,organization_id,request_id,request_digest,request_json,scope,dataset_generation)
+  return [guard("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')", {}),
+    { sql: `INSERT INTO transfer_runs(id,actor_id,organization_id,request_id,request_digest,request_json,scope,dataset_generation)
     VALUES(@run,@actor,@org,@request,@digest,@body,@scope,@datasetGeneration)`, params: { run: input.runId, actor: identity.actorId,
     org: identity.organizationId, request: input.requestId, digest: input.digest, body: input.requestJson, scope: input.scope, datasetGeneration: input.datasetGeneration } }]
 }

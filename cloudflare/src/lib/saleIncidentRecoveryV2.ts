@@ -354,7 +354,7 @@ function buildStatements(
   return [{
     sql: `INSERT INTO sale_incident_recovery_guards(id,guard_value)
       SELECT 1,CASE WHEN
-        NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+        NOT EXISTS (SELECT 1 FROM system_flags WHERE key='maintenance')
         AND (SELECT COUNT(*) FROM sale_incident_recovery_receipts WHERE incident_key=@incident)=0
         AND EXISTS (SELECT 1 FROM sales s JOIN sale_write_revisions r ON r.sale_id=s.id
           WHERE s.id=16954 AND s.receipt_number=@receipt_number AND s.branch_id=2 AND s.sale_status='awaiting_payment'

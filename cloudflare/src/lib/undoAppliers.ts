@@ -794,7 +794,7 @@ async function replayAtomicSaleAddItems(
   const expectedSnapshotStatus = ctx.direction === 'undo' ? 'applied' : 'reversed'
   if (snapshotStatus !== expectedSnapshotStatus) throw new UndoConflictError('These added items were already replayed.')
   const guard = saleMutationGuard(`
-    NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+    NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
     AND EXISTS(
       SELECT 1 FROM sale_mutation_receipts r
       JOIN action_history h ON h.id=r.history_id

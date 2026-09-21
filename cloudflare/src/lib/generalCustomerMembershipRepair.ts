@@ -144,7 +144,7 @@ function assertTarget(manifest: Manifest): void {
 async function digest(manifest: Manifest): Promise<string> { return sha256(JSON.stringify(manifest)) }
 
 async function readMaintenance(db: Pick<D1Compat, 'prepare'>): Promise<boolean> {
-  const row = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore'").get<{ active?: unknown }>()
+  const row = await db.prepare("SELECT 1 AS active FROM system_flags WHERE key='maintenance'").get<{ active?: unknown }>()
   return Boolean(row)
 }
 
@@ -235,7 +235,7 @@ function params(manifest: Manifest, request: GeneralCustomerMembershipRepairRequ
 }
 
 function beforeGuard(): string {
-  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
     AND NOT EXISTS(SELECT 1 FROM portal_accounts WHERE contact_id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID})
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID} AND lower(trim(name))=@expected_name AND trim(COALESCE(phone,''))=@expected_phone AND membership_number=@expected_membership AND is_anonymous=@expected_anonymous AND updated_at IS @expected_updated_at)
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_PROTECTED_ID} AND COALESCE(is_anonymous,0)=0)
@@ -244,7 +244,7 @@ function beforeGuard(): string {
 }
 
 function afterGuard(): string {
-  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance' AND json_extract(value,'$.mode')='restore')
+  return `NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
     AND NOT EXISTS(SELECT 1 FROM portal_accounts WHERE contact_id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID})
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID} AND lower(trim(name))='general' AND trim(COALESCE(phone,''))='' AND membership_number IS NULL AND is_anonymous=1 AND updated_at=@mutation_stamp)
     AND EXISTS(SELECT 1 FROM customers WHERE id=${GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_PROTECTED_ID} AND COALESCE(is_anonymous,0)=0)
