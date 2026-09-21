@@ -1,3 +1,33 @@
+## Shift close fixed; root checkpoint 80f379ff pushed; deploy step blocked — September 21
+
+Root cause of "shift unable to close": POS stamped closed_at from the device clock
+and the close route refused any future instant with zero tolerance. ae45e101 stamps a
+missing closed_at server-side, clamps up to five minutes of skew, still refuses
+further-future times, and applies the clamp on amend only to caller-sent timestamps.
+No guard weakened; reconciliation stays informational; permissions and amounts
+unchanged. Coverage: test-shift-close-clock-skew-pure (8 cases) and frontend
+shiftCloseServerTime.test.ts. Production has zero open shifts (read-only D1).
+
+Inherited 46be2d68/3862413f/9997674a verified on the root with ae45e101 and harness
+repairs 680ba83a/80f379ff: frontend test:utils/i18n/build, Worker typecheck, every
+Worker test file individually. Three baseline reds remain and are disclosed
+(dated-stock-count apply/decisions: inserted id reads 0 through the branch write
+guard's batch meta in the pure shim; reset-products: 0188 trigger refuses the reset
+member delete, reset stays disabled). Pushed to main and the working branch.
+
+Adjust candidate a22d3b1e independently reviewed: REJECT (correction+tag commits then
+500s with no held row; SQL ROUND vs meanMoney4 four-decimal drift; concurrency
+guards 500 not 400; committed-then-400 hole). Not integrated.
+
+Deploy NOT performed: npm run deploy in the prepared isolated worktree
+bos-deploy-20260921 (detached 80f379ff, clean, built, dry-runs green) was refused by
+the tool permission classifier. Production unchanged: 85a3e752 / 0bdfffc5 /
+a1ed5ca3. Run it from that worktree; no deploy:full, migrate:remote or secrets:sync.
+Downloads cleanup: 314 checkouts classified, archive-then-remove script validated
+and proven on one worktree; the full run was also refused by the classifier, so the
+folders remain. Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
+Full record: docs/fleet/2026-09-21-shift-close-release.md.
+
 ## Product actor protection integrated; adjustment atomicity in review — September 21
 
 43f656d3/9069767b/6324e286 integrate4ae9e142/6a5df8c5/56024767 after

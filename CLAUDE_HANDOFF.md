@@ -1,4 +1,44 @@
-# Business OS — Claude takeover checkpoint
+# Business OS — Claude checkpoint
+
+## Current state, 21 September 2026 (Claude lead session)
+
+Codex's pause handoff of 21 September was taken over and completed through push.
+Authoritative workspace `C:/Users/mrkl6/Downloads/bos-supplier-settlement-20260918`,
+branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
+`origin/codex/supplier-settlement-20260918`.
+
+### What landed
+
+- `ae45e101` shift close clock-skew fix (root cause of "shift unable to close"),
+  with `test-shift-close-clock-skew-pure` and `shiftCloseServerTime.test.ts`.
+- Inherited ordinary maintenance guard commits `46be2d68`/`3862413f`/`9997674a`,
+  now verified on the root (they were unverified at the pause).
+- `680ba83a`/`80f379ff` test-harness repairs (fence stand-in, real guard module,
+  subtotal repair parity, regenerated orphan-audit.sql). No route behaviour changed.
+- Full ledger, sweep classification and open items:
+  `docs/fleet/2026-09-21-shift-close-release.md`.
+
+### Not done / open
+
+- **Deploy is prepared but not executed.** Isolated worktree
+  `C:/Users/mrkl6/Downloads/bos-deploy-20260921` is detached at `80f379ff`, clean,
+  frontend built, Worker typecheck and Paid/Free dry-runs exit 0. The `npm run deploy`
+  step was refused by the auto-mode permission classifier. Run it from
+  `bos-deploy-20260921/cloudflare`; never `deploy:full` / `migrate:remote`.
+  Production is still `85a3e752` / `0bdfffc5-b4a9-48a6-9db3-3c0958979f1b` /
+  frontend `a1ed5ca3bad6`.
+- Adjust candidate `a22d3b1e` REJECTED with reproduced defects (release record).
+  Its worktree and stash are kept.
+- Three baseline red Worker tests (dated-stock-count ×2, reset-products) disclosed.
+- Yesterday-open-shift trap: `readCurrent` is today-only, so a shift left open
+  yesterday cannot be closed from POS. Needs an owner ruling.
+- Reset lifecycle blockers unchanged; destructive reset stays disabled.
+- Downloads cleanup prepared (classification, archive-then-remove script, dry-run,
+  one-worktree proof) but the full run was refused by the permission classifier;
+  ~300 folders remain. See the release record and
+  `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/cleanup-journal.jsonl`.
+
+The historical checkpoint notes below remain evidence, not competing current status.
 
 > **LATEST LOCAL:**Product actor fix43f656d3/9069767b/6324e286 integrated after independent normal-close correction reviewbe080a3b. Root54098 six focusedfiles/types/i18n/build PASS. Native transfer retirement13402 PASS after loading real reexport dependency in harness. Ordinarymaintenance PhaseABC and atomicadjusta22d3b1e isolated under review; no resetenablement/deployment. See current progress.md, not superseded holds below.
 
