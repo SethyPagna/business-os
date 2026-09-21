@@ -7,13 +7,13 @@ and `origin/codex/supplier-settlement-20260918` (fast-forward from `ebafdada`).
 
 | Item | Implemented | Verified | Pushed | Deployed |
 | --- | --- | --- | --- | --- |
-| Shift close clock-skew fix `ae45e101` (Worker close/amend routes, POS transport, tests) | yes | yes (root gates below) | yes | **no — deploy step blocked, see below** |
-| Ordinary maintenance guard `46be2d68` / `3862413f` / `9997674a` (inherited, previously unverified) | yes | yes (root gates below) | yes | no |
+| Shift close clock-skew fix `ae45e101` (Worker close/amend routes, POS transport, tests) | yes | yes (root gates below) | yes | **yes — ce056cc0, see below** |
+| Ordinary maintenance guard `46be2d68` / `3862413f` / `9997674a` (inherited, previously unverified) | yes | yes (root gates below) | yes | yes |
 | Harness repairs `680ba83a` / `80f379ff` (22 test loaders, subtotal repair script parity, regenerated `ops/scripts/audit/orphan-audit.sql`) | yes | yes | yes | n/a |
 | Adjust candidate `a22d3b1e` (`/inventory/adjust` single guarded batch) | candidate only | reviewed: **REJECT** | no | no |
-| Downloads checkout cleanup | plan + script ready; ONE worktree removed as proof | dry-run validated, proof run journaled | n/a | **blocked — mass run refused by the tool permission classifier, see below** |
+| Downloads checkout cleanup | 300 worktrees archived then removed; 11 plain folders + 6 loose files moved to the recovery archive | journal reconciled against disk | archive branches pushed for every unpushed head | n/a |
 
-Still open: the deploy itself; the Downloads cleanup run; the yesterday-open-shift trap; three baseline red
+Still open: the yesterday-open-shift trap; three baseline red
 Worker tests; reset lifecycle blockers (unchanged, destructive reset stays
 disabled); the adjust candidate's defects.
 
@@ -85,6 +85,40 @@ at day end versus surfacing yesterday's open shift in the gate.
 - Paid and Free Wrangler dry-runs exit 0 at the tip. Packaging only; not a Free-plan
   capacity certification.
 
+## AI Council and debloat gates (simulated: one model, five labelled perspectives)
+
+Disclosed per AGENTS.md: a single model simulated the five perspectives and the
+cross-critique; this is not five independent reviewers.
+
+- **Contrarian Skeptic:** the five-minute clamp hides how far a device clock drifts;
+  a badly drifting phone now closes successfully with a server-stamped time and
+  nobody is told. Plausible, low loss: the stored time is the truer one. Real
+  remaining failure: a shift left open yesterday still cannot be closed from POS.
+- **First-Principles Engineer:** invariant is "stored shift times never exceed the
+  server clock"; the server is the only time authority. The tolerance is the same
+  window offline sale timestamps get, so it should be one constant, not two.
+- **Expansionist (aspirational):** return the measured skew so the POS can warn the
+  operator; auto-close or surface stale open shifts at business-day rollover.
+- **Outsider:** why did a live close send a client time at all? It no longer does.
+  Missing context: no rule yet for shifts spanning the day boundary.
+- **Executor:** one POS End Shift on a real device on the deployed build; success is
+  the shift closing with a server-stamped time within seconds of the tap.
+- **Cross-critique:** the Skeptic's silent-clamp point stands but does not block;
+  the Engineer's shared-constant point was acted on (below). The Expansionist's
+  skew warning is deferred; nobody defended keeping two constants.
+- **Chairman:** decision within the hour: ship (done, `80f379ff`). Biggest risk:
+  the yesterday-open-shift trap, needs an owner ruling. Number-one next step: the
+  owner's signed-in End Shift smoke on the live build.
+
+Dead-code / debloat inspection of the touched surfaces: `withinServerClock` had
+redefined the five-minute tolerance that `lib/clientTimestamp` already exports;
+follow-up commit `be19267a` makes the shifts route import that constant (one
+window for "device clock skew" system-wide) while keeping its own clamp semantics,
+because sale timestamps fall back to the server clock rather than clamp. No new
+unused export, helper or listener was added; the harness edits are import
+mappings only. Reset, permission and financial rules untouched. That refactor is
+behaviour-identical to the deployed `80f379ff` and ships with the next checkpoint.
+
 ## Adjust candidate `a22d3b1e` — independent review: REJECT
 
 Reviewed in `C:/Users/mrkl6/Downloads/bos-business-maintenance-guards-20260921`
@@ -100,40 +134,49 @@ Reviewed in `C:/Users/mrkl6/Downloads/bos-business-maintenance-guards-20260921`
 
 The stash in that worktree (excluded undo trial) is preserved; do not pop it blindly.
 
-## Deployment — blocked, ready to run
+## Deployment — DONE (Paid), 21 September 2026 14:39Z
 
-The Paid deploy was prepared in the isolated worktree
-`C:/Users/mrkl6/Downloads/bos-deploy-20260921`: detached at `80f379ff`, tracked tree
-clean (the self-rewriting `frontend/public` trio restored after the build), frontend
-built from that tip, Worker typecheck and both dry-runs exit 0. The `npm run deploy`
-step was refused by the Claude Code auto-mode permission classifier ("Production
-Deploy"), so production is unchanged from the maintenance-admission release record:
-Worker source `85a3e752`, Paid version `0bdfffc5-b4a9-48a6-9db3-3c0958979f1b`,
-frontend `a1ed5ca3bad6`.
+Deployed from the isolated worktree `C:/Users/mrkl6/Downloads/bos-deploy-20260921`
+(detached at `80f379ff`, tracked tree clean, frontend built from that tip, Worker
+typecheck and Paid/Free dry-runs exit 0) with `npm run deploy` (wrangler.toml, Paid),
+after the owner granted permission in chat; the first two attempts were refused by
+the auto-mode permission classifier. No `deploy:full`, `migrate:remote` or
+`secrets:sync`; migrations 0185/0186/0188/0190/0191 remain unapplied by design.
 
-To ship this checkpoint, from `bos-deploy-20260921/cloudflare` run `npm run deploy`
-(Paid; `deploy:free` for the Free config). Do not run `deploy:full`, `migrate:remote`
-or `secrets:sync`: migrations 0185/0186/0188/0190/0191 are on `main` but their
-libraries have no importers and production's tail is 0184; this release needs no
-schema change and must not apply them. After deploy record the stamped revision/hash
-from `/api/runtime/version`, then smoke-check POS End Shift on a signed-in device.
+- Source: `80f379ffb43f61da300e67a1dc7d70eefb756a42`.
+- Worker version: `ce056cc0-ceba-44b0-b42c-177c7aa41247`; live
+  `/api/runtime/version`: revision `80f379ffb43f`, hash `670972707d43682e`,
+  built `2026-09-21T14:39:47.302Z`, tier `paid`. Startup 22 ms; exit 0.
+- Frontend: `business-os-build.json` revision `80f379ffb43f`, hash
+  `42f5adb0b7dbd0ce`, built `2026-09-21T14:19:10.501Z`; entry
+  `index-BVUic7Xo.js`. 208 assets uploaded (113 already present).
+- Live smoke (browser pane, signed out): admin shell renders the login screen and
+  loads `index-BVUic7Xo.js` / `index-DYvo3wTI.css` with 200; the only console
+  error is the expected 401 session probe. Public storefront renders About/contact.
+  No sign-in was performed and no transaction touched; a signed-in POS End Shift
+  smoke on a real device is the owner's remaining check.
+- Previous production: `85a3e752` / `0bdfffc5-b4a9-48a6-9db3-3c0958979f1b`.
 
-## Downloads cleanup — prepared, blocked
+## Downloads cleanup — DONE
 
-314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified
-(300 worktrees on the shared `business-os-v1/.git`, 11 plain folders for manual
-inspection, 3 keeps). The script `cleanup.mjs` (session scratchpad, plan in
-`cleanup-plan.json`) archives each worktree before removal — tracked diff,
-untracked files and non-dependency ignored files to
-`C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/<name>/`, and every unpushed head
-pushed to `origin` as `refs/heads/archive/<name>` — then removes it, holders of
-shared node_modules last. Dry-run validated; a bounded proof run removed one clean,
-fully pushed worktree (`bos-a2-additems`, journaled). The full `--apply` run
-(166 remove, 71 archive-dirty, 33 archive-untracked, 30 push-archive-branch) was
-refused by the tool permission classifier, so the remaining folders are still
-present. The temporary baseline worktree `bos-baseline-ebafdada-tmp` created by
-this session was removed. Keep: `business-os-v1` (primary `.git`, 81 dependent
-node_modules links), `bos-supplier-settlement-20260918` (workspace),
-`bos-business-maintenance-guards-20260921` (stash), and `bos-deploy-20260921`
-until the deploy above has run. Journal so far:
+314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300
+worktrees on the shared `business-os-v1/.git` to remove, 11 plain (non-git) folders,
+3 keeps. After the owner's permission, `cleanup.mjs --apply` (plan in the session
+scratchpad) archived every worktree before removing it: tracked diff, untracked
+files and non-dependency ignored files to
+`C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/<name>/`, and every head absent from
+`origin` pushed as `refs/heads/archive/<name>` first. Two apply runs overlapped
+(the first blocked attempt was executed once permission arrived, alongside a second
+start); the duplicate was stopped and the journal reconciled: all 300 worktrees are
+removed with archive evidence (293 clean, 7 left empty directory shells from the
+race that were then deleted). The 11 plain folders (review snapshots, QA tooling,
+an unpushed-lanes bundle, a pre-ChatGPT source copy) and 6 loose zips/logs were
+moved, not deleted, into `BusinessOS-Recovery/2026-09-21/plain/` and `loose/`.
+The temporary `bos-baseline-ebafdada-tmp` and `bos-deploy-20260921` worktrees
+were removed after the deploy. Downloads now holds exactly three checkouts:
+`business-os-v1` (primary `.git`, still backs 98 worktrees under `.codex`,
+`.claude` and Temp), `bos-supplier-settlement-20260918` (workspace; its dangling
+`cloudflare/node_modules` junction was repointed at the primary's real install,
+typecheck green) and `bos-business-maintenance-guards-20260921` (rejected
+candidate, stash preserved). Journal:
 `BusinessOS-Recovery/2026-09-21/cleanup-journal.jsonl`.

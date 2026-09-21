@@ -20,23 +20,20 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
 
 ### Not done / open
 
-- **Deploy is prepared but not executed.** Isolated worktree
-  `C:/Users/mrkl6/Downloads/bos-deploy-20260921` is detached at `80f379ff`, clean,
-  frontend built, Worker typecheck and Paid/Free dry-runs exit 0. The `npm run deploy`
-  step was refused by the auto-mode permission classifier. Run it from
-  `bos-deploy-20260921/cloudflare`; never `deploy:full` / `migrate:remote`.
-  Production is still `85a3e752` / `0bdfffc5-b4a9-48a6-9db3-3c0958979f1b` /
-  frontend `a1ed5ca3bad6`.
+- **Deployed (Paid)**: source `80f379ff`, Worker `ce056cc0-ceba-44b0-b42c-177c7aa41247`,
+  live hash `670972707d43682e`; frontend `80f379ffb43f` / `42f5adb0b7dbd0ce`. No remote
+  migration (0185–0191 still unapplied by design). Signed-in POS End Shift smoke is the
+  owner's remaining check.
 - Adjust candidate `a22d3b1e` REJECTED with reproduced defects (release record).
   Its worktree and stash are kept.
 - Three baseline red Worker tests (dated-stock-count ×2, reset-products) disclosed.
 - Yesterday-open-shift trap: `readCurrent` is today-only, so a shift left open
   yesterday cannot be closed from POS. Needs an owner ruling.
 - Reset lifecycle blockers unchanged; destructive reset stays disabled.
-- Downloads cleanup prepared (classification, archive-then-remove script, dry-run,
-  one-worktree proof) but the full run was refused by the permission classifier;
-  ~300 folders remain. See the release record and
-  `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/cleanup-journal.jsonl`.
+- Downloads cleanup done: 300 worktrees archived then removed, plain folders and
+  loose files moved to `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/`; only
+  `business-os-v1`, this workspace and the candidate worktree remain. Journal in
+  that folder (`cleanup-journal.jsonl`).
 
 The historical checkpoint notes below remain evidence, not competing current status.
 

@@ -387,9 +387,9 @@ fresh runtime provenance was blocked by HTTP403. Migration0183 is already applie
 
 ## Checkpoint 80f379ff — 21 September 2026
 
-- Shift unable to close: fixed (`ae45e101`, POS clock skew), tested, pushed to main and the working branch. Not deployed: the deploy command was refused by the tool permission classifier; the isolated worktree `bos-deploy-20260921` is prepared at the tip. Production unchanged (`85a3e752` / `0bdfffc5`).
+- Shift unable to close: fixed (`ae45e101`, POS clock skew), tested, pushed to main and the working branch. Deployed (Paid) after owner permission: Worker `ce056cc0-ceba-44b0-b42c-177c7aa41247`, live revision `80f379ffb43f`, frontend hash `42f5adb0b7dbd0ce`. No remote migration.
 - Inherited maintenance guard commits verified on the root; harness repairs `680ba83a`/`80f379ff`. Three baseline Worker reds disclosed (dated-stock-count ×2, reset-products).
 - Adjust candidate `a22d3b1e`: REJECT, not integrated.
-- Downloads cleanup: prepared and proven on one worktree; full run refused by the permission classifier, folders remain.
+- Downloads cleanup done after owner permission: 300 worktrees archived then removed, plain folders and loose files moved to the recovery archive; three checkouts remain.
 - Open: yesterday-open-shift POS gate trap; reset blockers unchanged.
 - Full record: `docs/fleet/2026-09-21-shift-close-release.md`.

@@ -1,4 +1,4 @@
-## Shift close fixed; root checkpoint 80f379ff pushed; deploy step blocked — September 21
+## Shift close fixed; checkpoint 80f379ff deployed (Worker ce056cc0) — September 21
 
 Root cause of "shift unable to close": POS stamped closed_at from the device clock
 and the close route refused any future instant with zero tolerance. ae45e101 stamps a
@@ -19,13 +19,15 @@ Adjust candidate a22d3b1e independently reviewed: REJECT (correction+tag commits
 500s with no held row; SQL ROUND vs meanMoney4 four-decimal drift; concurrency
 guards 500 not 400; committed-then-400 hole). Not integrated.
 
-Deploy NOT performed: npm run deploy in the prepared isolated worktree
-bos-deploy-20260921 (detached 80f379ff, clean, built, dry-runs green) was refused by
-the tool permission classifier. Production unchanged: 85a3e752 / 0bdfffc5 /
-a1ed5ca3. Run it from that worktree; no deploy:full, migrate:remote or secrets:sync.
-Downloads cleanup: 314 checkouts classified, archive-then-remove script validated
-and proven on one worktree; the full run was also refused by the classifier, so the
-folders remain. Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
+DEPLOYED (Paid) from isolated worktree bos-deploy-20260921 at 80f379ff after owner
+permission: Worker ce056cc0-ceba-44b0-b42c-177c7aa41247, live revision 80f379ffb43f
+hash 670972707d43682e; frontend 80f379ffb43f / 42f5adb0b7dbd0ce (index-BVUic7Xo.js).
+No remote migration or secret sync. Signed-out smoke: admin login shell and public
+storefront render. Signed-in POS End Shift smoke remains the owner check.
+Downloads cleanup DONE after owner permission: 300 worktrees archived (diffs,
+untracked, archive/<name> branches) then removed; 11 plain folders and 6 loose files
+moved to BusinessOS-Recovery/2026-09-21; Downloads keeps business-os-v1, the
+workspace and the rejected-candidate worktree only. Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 
 ## Product actor protection integrated; adjustment atomicity in review — September 21
