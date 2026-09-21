@@ -379,6 +379,36 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
       AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId)
     ORDER BY opened_at DESC, id DESC LIMIT 1`).get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
 }
+/**
+ * ---- The shift left OPEN on an earlier business day ----------------------
+ *
+ * A cashier who never pressed End Shift yesterday could not close it from the
+ * POS at all: `readCurrent` answers with today only, so /current returned
+ * `shift: null` and nothing in the payload carried the id that
+ * `POST /:id/close` (which already accepts any business date) needs.
+ *
+ * This is a SECOND query on purpose. Widening `readCurrent` to reach back in
+ * time would delete the daily prompt the owner ruled must always appear --
+ * yesterday's row would answer as "current", `needs_registration` would go
+ * false, and `POST /open` would return `already_registered` on that stale row
+ * instead of creating today's. So the carry-over is reported ALONGSIDE the
+ * prompt, never instead of it.
+ *
+ * Scope, branch and continuation rules are the list read's: cancelled rows are
+ * not offered, and a segment that has already been continued is not either --
+ * the row that stands for the record is the last one of its lineage.
+ */
+async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
+  const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
+  return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+    WHERE scope_mode = @scopeMode ${accountClause}
+      AND business_date < ${localTodayExpr()}
+      AND closed_at IS NULL AND cancelled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
+      AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId)
+    ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT 1`)
+    .get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
+}
 async function readShiftById(db: D1Compat, id: number) {
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftDbRow>({ id })
 }
@@ -558,11 +588,14 @@ app.get('/current', async (c) => {
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
+  // The carry-over is a BANNER, not a report: no reconciliation and no figures
+  // on it, for the same reason /current carries none (see figuresFor).
+  const carryOver = exempt ? undefined : await readPreviousOpen(db, policy, user.id, requestedBranchId)
   const body = currentResponse(user, shift, policy, exempt)
   // Admin comparison may include an open shift. Staff retain only registered
   // counts; no report calculation is needed to enter or close their drawer.
   const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
-  return c.json({ ...body, shift: presented })
+  return c.json({ ...body, shift: presented, previous_open_shift: carryOver ? responseShift(user, carryOver) : null })
 })
 
 app.get('/', async (c) => {
