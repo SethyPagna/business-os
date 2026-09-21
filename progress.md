@@ -1,3 +1,23 @@
+## Product debloat verified; six further worktrees reclaimed — September 21
+
+586cfce8 integrates c039ceec after independent2a4405dd: obsolete product save
+closure removed, actual gallery handler unchanged, tests bound to actual handler.
+Root56973 terminal0:510/510 frontend test files plus typecheck/public-runtime/source
+preflights. Invoking runner with --help unexpectedly selected full gate; it finished
+successfully, not a help command. i18n/build4752 terminal0, built startup/public
+closure guards pass; 992 unreferenced-key candidates and large language-chunk
+warnings retained for measured debloat, not deleted on search evidence. Separate
+post-upload account/permission race reproduced3cfdf90a; isolated fix underway across
+component/lazy transport/revision lookup, not solved by deadcode removal.
+
+Cleanup24465 terminal0 removed six further dormant dependency-only checkouts after
+live GitHub/clean-state/inbound-link/process/claim checks.42,522 dependency files
+moved intact and hash-verified in private recovery. Combined ten checkout removals,
+43,722 local files preserved; not disk-space reclamation or whole cleanup completion.
+Exact private recovery ledger remains Downloads/Organization Records.
+Import maintenance transaction-fence b99a38eb in isolated independent review;
+no new production migration/deployment. Remaining active ledger unchanged in scope.
+
 ## Reviewed atomic transition integrated and locally verified — September 21
 
 0dee5a64 integrates exactly acbebdb6 (0191 migration, journal transition module,
