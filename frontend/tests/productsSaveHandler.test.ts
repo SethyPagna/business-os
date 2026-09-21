@@ -34,10 +34,12 @@ function deferred() {
   return { promise, resolve }
 }
 type Row = Record<string, unknown>
-function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred> } = {}) {
+function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
   const calls: Array<{ kind: string; payload?: Row }> = []
   const notices: unknown[] = [], history: unknown[] = []
   const guard = { current: false }
+  let actor = 7
+  const authority = { current: { key: 'initial', revision: 0 } }
   const user = { id: 7, name: 'Staff', role_code: 'staff', permissions: { product_cost_edit: options.granted === true } }
   const api = async (kind: string, payload: Row) => {
     calls.push({ kind, payload })
@@ -46,7 +48,9 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     return options.failure === 'response' ? { success: false, error: 'write refused' } : { success: true, id: 12 }
   }
   const scope = {
-    user, selected: options.edit ? { id: 12, name: 'Before' } : null,
+    user, isActive: true, can: () => true, productSaveAuthorityRef: authority,
+    captureProductWriteGuard: (extra?: () => void) => { const captured = actor; return () => { if (actor !== captured) throw new Error('stale actor'); extra?.() } },
+    selected: options.edit ? { id: 12, name: 'Before' } : null,
     omitUnauthorizedCatalogCosts, beginSingleAction, finishSingleAction, productSaveInFlightRef: guard,
     t: (key: string) => key, tr: (_key: string, fallback: string) => fallback,
     cloneHistorySnapshot, normalizeProductGallery, extractHistoryResultId, resolveCreatedHistorySnapshot,
@@ -57,12 +61,14 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
       updateProduct: (_id: number, payload: Row) => api('update', payload),
       uploadProductImage: async () => {
         calls.push({ kind: 'upload' })
+        if (options.holdUpload) await options.holdUpload.promise
         if (options.failure === 'upload') throw new Error('upload refused')
         return { path: 'uploads/saved.png' }
       },
     },
     notify: (...args: unknown[]) => notices.push(args),
     fetchProductsByIds: async () => {
+      if (options.holdRefresh) await options.holdRefresh.promise
       if (options.failure === 'refresh') throw new Error('refresh failed after commit')
       return [{ id: 12, name: 'After' }]
     },
@@ -75,7 +81,7 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     console: { error() {}, warn() {} },
   }
   const save = new Function(...Object.keys(scope), javascript)(...Object.values(scope)) as (form: Row) => Promise<void>
-  return { save, guard, calls, notices, history }
+  return { save, guard, calls, notices, history, switchActor: () => { actor = 99 }, revoke: () => { authority.current.revision++ } }
 }
 const form = { name: 'After', cost_price_usd: 3.1234, cost_price_khr: 12345.6789, purchase_price_usd: 4.5678, purchase_price_khr: 22222.3333, selling_price_usd: 9.12 }
 for (const edit of [false, true]) {
@@ -115,3 +121,27 @@ await assert.rejects(empty.save({ name: '  ' }), /required/)
 assert.equal(empty.calls.length, 0)
 assert.equal(empty.guard.current, false)
 console.log('PASS actual wired product save: single-flight create/edit, failure propagation, upload refusal, cost grants and post-commit refresh isolation')
+
+
+for (const edit of [false, true]) for (const change of ['switchActor', 'revoke'] as const) {
+  const upload = deferred(), f = fixture({ edit, holdUpload: upload })
+  const saving = f.save({ ...form, image_gallery: Array.from({ length: 5 }, () => 'data:image/png;base64,AA==') })
+  await tick(); f[change](); upload.resolve()
+  await assert.rejects(saving)
+  assert.equal(f.calls.some(call => call.kind === 'create' || call.kind === 'update'), false, 'stale upload must not dispatch product write')
+  assert.ok(f.calls.filter(call => call.kind === 'upload').length <= 3, 'remaining workers cannot dispatch after authority loss')
+  assert.equal(f.notices.length, 0)
+  assert.equal(f.history.length, 0)
+  assert.equal(f.guard.current, false)
+}
+const pendingWrite = deferred(), staleWrite = fixture({ hold: pendingWrite })
+const writing = staleWrite.save(form)
+await tick(); staleWrite.switchActor(); pendingWrite.resolve()
+await assert.rejects(writing)
+assert.equal(staleWrite.notices.length, 0)
+assert.equal(staleWrite.history.length, 0)
+const pendingRefresh = deferred(), staleRefresh = fixture({ holdRefresh: pendingRefresh })
+await staleRefresh.save(form)
+staleRefresh.switchActor(); pendingRefresh.resolve(); await tick()
+assert.equal(staleRefresh.history.length, 0, 'late enrichment must not publish old-account undo history')
+console.log('PASS delayed product uploads, committed response and enrichment reject changed account/permission')
