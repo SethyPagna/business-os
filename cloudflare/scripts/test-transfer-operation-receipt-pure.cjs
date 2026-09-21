@@ -18,7 +18,8 @@ function wrapDb() {
       if (beforeBatch) { const mutate = beforeBatch; beforeBatch = null; mutate() }
       return sqlite.transaction(() => statements.map(({ sql, params }) => {
         if (failStatement && sql.includes(failStatement)) throw new Error('injected statement failure')
-        return sqlite.prepare(sql).run(params || {})
+        const statement = sqlite.prepare(sql)
+        return statement.reader ? { results: [statement.get(params || {})], meta: { changes: 0 } } : statement.run(params || {})
       }))()
     },
   }
@@ -26,6 +27,7 @@ function wrapDb() {
 const realLibraries = new Set(['movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 realLibraries.add('moneyPrecision')
 realLibraries.add('acquisitionCostAccess')
+realLibraries.add('businessMaintenanceGuard')
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }
@@ -166,6 +168,23 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT SUM(quantity) AS n FROM branch_stock').get().n, 30)
     sqlite.close()
   })
+  for (const mode of ['reset', 'restore', 'corrupt']) for (const route of ['/transfer', '/transfer-bulk']) {
+    await check(`${route}: ${mode} marker after admission blocks the entire transfer`, async () => {
+      fresh()
+      const body = intent(1, route.endsWith('bulk') ? 3 : 1, `maintenance_${mode}_${route.endsWith('bulk') ? 'bulk' : 'single'}`, route.endsWith('bulk'))
+      beforeBatch = () => sqlite.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
+      const blocked = await request('branches', route, body)
+      assert.notEqual(blocked.status, 200)
+      assert.deepEqual(counts(), { transfer_operation_receipts: 0, audit_logs: 0, stock_transfers: 0, inventory_movements: 0 })
+      assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
+      sqlite.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+      const retry = await request('branches', route, body)
+      assert.equal(retry.status, 200, JSON.stringify(retry))
+      assert.equal(retry.body.replayed, false)
+      assert.equal(counts().transfer_operation_receipts, 1)
+      sqlite.close()
+    })
+  }
   console.log(`${checks} transfer operation route scenarios passed`)
 }
 module.exports = { fresh, request, intent, counts, load, wrapDb, apps,

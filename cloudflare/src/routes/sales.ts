@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
+import { ordinaryBusinessMaintenanceGuard } from '../lib/businessMaintenanceGuard'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
@@ -1569,6 +1570,7 @@ app.post('/', async (c) => {
         sale_write_key: saleWriteKey,
       },
     })
+    statements.push(ordinaryBusinessMaintenanceGuard)
     await db.batch(statements)
     const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
       WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
@@ -2505,6 +2507,7 @@ app.patch('/:id/status', async (c) => {
 
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
+  statements.push(ordinaryBusinessMaintenanceGuard)
   if (settlementSnapshot || directStatusResponse) {
     assertSaleRecordBatchBounds(statements.length, settlementSnapshot || {
       saleId: Number(id), before: oldStatus, after: saleStatus, response: directStatusResponse,
@@ -2836,6 +2839,7 @@ app.patch('/:id/customer', async (c) => {
       ...(assignmentPlan ? [assignmentPlan.post] : []),
       eventInsert.statement,
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ordinaryBusinessMaintenanceGuard,
     ])
   } catch (error) {
     if (assignmentPlan && /malformed JSON/i.test(String(error))) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
@@ -3416,6 +3420,7 @@ app.post('/:id/items', async (c) => {
       },
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ordinaryBusinessMaintenanceGuard,
     )
     batchResults = await db.batch(atomicStatements) as typeof batchResults
   } catch (error) {
@@ -4016,6 +4021,7 @@ app.post('/:id/amendments', async (c) => {
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
@@ -4121,6 +4127,7 @@ app.post('/:id/amendments', async (c) => {
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
@@ -4254,6 +4261,7 @@ app.post('/:id/amendments', async (c) => {
         }),
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        ordinaryBusinessMaintenanceGuard,
       ])
     } catch (error) {
       const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
@@ -4728,6 +4736,7 @@ app.post('/:id/amendments', async (c) => {
         params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      ordinaryBusinessMaintenanceGuard,
     ])
   } catch (error) {
     const retry = await db.prepare(`SELECT request_digest,response_json FROM sale_mutation_receipts
