@@ -255,7 +255,14 @@ both by default.
   the test's source-replace of the app-document guard silently no-ops on CRLF.
   Worker gate on `22554ff6`: `tsc --noEmit` exit 0; 492 of 497 `scripts/test-*.cjs` green; red: `test-dated-stock-count-apply-pure.cjs`, `test-dated-stock-count-decisions-pure.cjs`, `test-reset-products-pure.cjs` (the three disclosed baseline reds); `test-product-conflict-action-apply-native.cjs`, `test-product-conflict-action-remove-native.cjs` red in the sweep, green standalone (contention).
 - **Chips:** `task_e8f6d763` (swShellContent navigation timeout),
-  `task_dc150fae` (ReceiptSettings hard-codes its language labels).
+  `task_dc150fae` (ReceiptSettings hard-codes its language labels) — fixed in
+  `1d9c7004` (committed, not pushed, not deployed, per the owner's task brief):
+  one shared `RECEIPT_LANGUAGE_OPTIONS` feeds the Settings cards, both preview
+  pill rows and the printable receipt's switcher with keyed labels, English
+  fallbacks and real Khmer; the receipt toolbar shows EN / KM / EN/KM below `sm`
+  to keep its one-line phone layout (Opus verifier found the widening). Sweep
+  leftovers, disclosed not changed: the header toggle's EN/KM code badge and
+  the storefront translate list's English/Khmer entries among 26 language names.
 - Not in this lane: `telegram_help_paragraph` "switches" wording untouched;
   `/stock` and `/inventory` keep the single-block layout.
 
