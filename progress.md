@@ -69,7 +69,14 @@ c77d84db-2d7a-4308-8b97-674b60bdb439, live revision f98754b364ba, frontend hash
 858e11877a4da3a1; no remote migration; smoke green (stale-chunk guard reloaded the
 pane's cached shell once, then storefront and admin shell render). Downloads: guards
 worktree archived (origin/archive/bos-business-maintenance-guards-20260921, 284536b7)
-and removed; D12 Shifts-popup close bound lane in progress.
+and removed; the D12 lane worktree removed after cherry-pick.
+D12 FIXED (f69e81f1 Worker, e2c744bf POS): every presented shift row carries close_before
+(the next segment's opening, null when closed/cancelled/last), one shared seed rule in
+shiftTransport, the Shifts popup's Close form prefilled a minute before it and showing
+it. Gates on e2c744bf: frontend 515 passed, 0 red of 515 executed files (0 skipped; 508104 ms), i18n/build 0; Worker
+tsc 0, 497/499 green (test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs contention, green standalone). Shared checkout: dangling @playwright/test link
+replaced (typecheck there green again). Open: shift 20 closing-count amendment (needs a
+signed-in session); popup closeDirty chip task_4683ad2f.
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

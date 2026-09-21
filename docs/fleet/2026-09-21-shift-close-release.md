@@ -459,6 +459,60 @@ production D1 write. Pushed first: `origin/main` and
 - Deploy worktree removed after the smoke (`git worktree remove`, then the long-path
   residue deleted and the registration pruned).
 
+### D12 — Shifts popup close seeded from the Worker bound — FIXED (`f69e81f1` Worker, `e2c744bf` POS)
+
+Sibling-surface parity for the carry-over close. The admin Shifts popup's Close
+form seeded its closing time from the bare clock and posted to the same
+`POST /shifts/:id/close`, so for any open row with a later segment the default
+press met the same 409 the POS had. Lane (Opus, own detached worktree, one writer),
+reviewed by the coordinator and cherry-picked onto the branch:
+
+- **Worker:** `closeBoundFor(db, row)` returns `readAdjacentShift(..., 'next')?.opened_at`
+  for an OPEN row and `null` without a query for a closed or cancelled one;
+  `presentShift` = `responseShift` + `close_before` on every surface that offers a
+  close (plain and paged list, `/:id/history` segments, the record read, and the
+  close / cancel / reopen / amend responses the popup replaces its selected row
+  from). `/current` unchanged. One extra D1 read per open row only; a correlated
+  subquery would have duplicated the adjacency rule in SQL, the drift the
+  carry-over test pins against. New `test-shift-list-close-bound-pure.cjs`
+  (29 checks: bound on an open row with a later segment, null on the last open
+  row, on a closed row and on a cancelled row that does have a later segment;
+  paged list; the seeded close accepted; source pins through `readAdjacentShift`).
+- **Frontend:** `carryOverCloseSeedMs` moved verbatim from `ShiftGate.tsx` into
+  `shiftTransport.ts` as the single exported definition (the gate imports it, no
+  behaviour change); `Shift.close_before` documented; `blankClose(shift)` seeds an
+  open row at min(now, bound − 60 s) clamped to its own opening, closed rows and
+  the popup's reset keep the current minute; the bound shown in one compact row
+  with the existing `shift_previous_open_close_before` key and `fmtDateTime24`
+  (no pack change). New `shiftModalCloseBound.test.ts` (12 checks, executed
+  component; negative controls: a clock-seeded copy of the component fails the
+  same assertion, the bound row hidden when the server states none, the form
+  reads the record response rather than the list); `shiftCarryOverClose.test.ts`
+  clamp control now injects a mutated seed through the transport mock.
+- **Gates on `e2c744bf`:** focused shift suite 18 files green in both packages
+  first; then frontend **test:utils: 515 passed, 0 red of 515 executed files (0 skipped; 508104 ms)**, `verify:i18n` and `build` exit 0, public trio
+  restored; Worker `tsc --noEmit` exit 0, 497 of 499 `scripts/test-*.cjs` green; `test-product-conflict-action-apply-native.cjs`, `test-product-conflict-action-remove-native.cjs` red in the sweep, green standalone (workerd contention).
+- **Simulated council (one model, five perspectives):** product — the popup's
+  default press is now accepted and the operator sees the bound it was seeded
+  from; security — `close_before` is the opening time of an adjacent row the
+  same user can already list, no new permission path; debloat — one helper, one
+  seed definition, closed majority costs nothing; dead-code — the gate's private
+  copy of the seed is gone, `ShiftPresentedRow` has one consumer; free/paid — D1
+  reads not CPU, bounded by open rows per page. Accepted.
+- **Registered, not fixed here:** the popup counts its always-prefilled
+  `closedAt` as an unsaved change, so opening the Close form disables the other
+  actions and arms the unsaved-changes guard before anything is typed
+  (pre-existing, `ShiftHistoryModal.tsx` `closeDirty`; chip `task_4683ad2f`).
+- **Shared checkout repair, environment only:** `business-os-v1/frontend/node_modules/@playwright/test`
+  was a dangling symlink into a folder removed by the 21 September cleanup
+  (`bos-precision-final-candidate-20260914`) and `playwright` / `playwright-core`
+  were absent, so `npm run typecheck` there failed TS2307 in four test files for
+  every session. The three packages were copied at the lockfile's 1.63.0 from
+  this workspace's install (no `npm install` in the shared tree); typecheck exit 0
+  there afterwards. The lane worktree's `node_modules` junctions into the shared
+  checkout were deleted as links only (entry counts unchanged) before
+  `git worktree remove`.
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300
@@ -487,7 +541,9 @@ registrations whose folders were already gone were pruned. Remaining under
 Downloads: `business-os-v1` (the shared checkout with peer work, never removed),
 `bos-supplier-settlement-20260918` (this program's workspace, to be removed once its
 untracked `outputs/` evidence is moved to `BusinessOS-Recovery/2026-09-22/`) and
-`bos-shift-modal-bound-20260922` (the D12 lane in progress).
+`bos-shift-modal-bound-20260922` (the D12 lane, removed once its two commits were
+cherry-picked onto the branch). After that: only `business-os-v1` and the
+settlement workspace remain.
 The temporary `bos-baseline-ebafdada-tmp` and `bos-deploy-20260921` worktrees
 were removed after the deploy. Downloads now holds exactly three checkouts:
 `business-os-v1` (primary `.git`, still backs 98 worktrees under `.codex`,
