@@ -54,13 +54,7 @@ const db = {
     }
   },
   async batch(items) {
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
-    return results
+    return rawDb.batch(items)
   },
   async transaction(fn) { return fn(this) },
 }
@@ -104,7 +98,7 @@ const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
 const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', {
-  './db': loadReal('lib/db.ts'),
+  './db': loadReal('lib/db.ts', { './importMaintenanceFence': {} }),
   './branchRoles': branchRoles,
 })
 const businessDateWindow = loadReal('lib/businessDateWindow.ts')
@@ -156,6 +150,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/movementReference': movementReferenceKernel,
   '../lib/movementSearch': movementSearchKernel,
   '../lib/db': { getDb: () => db },
+  '../lib/businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/salesAnalytics': salesAnalytics,
   '../lib/productSalesLedger': productSalesLedger,

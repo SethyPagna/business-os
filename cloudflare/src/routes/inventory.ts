@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
+import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -1137,7 +1138,7 @@ app.post('/reasons/replace', async (c) => {
     sql: `UPDATE inventory_movements SET reason = @to WHERE lower(trim(COALESCE(reason,''))) = @from`,
     params: { from: from.toLowerCase(), to },
   })
-  const results = await db.batch(statements)
+  const results = await ordinaryBusinessBatch(db, statements)
   const linkedResult = results[1] as unknown as { changes?: number; meta?: { changes?: number } } | undefined
   const changed = scope === 'linked' ? Number(linkedResult?.meta?.changes ?? linkedResult?.changes ?? 0) : 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'replace', 'inventory_reason', null, { type, from, to, scope, changed })
@@ -1175,10 +1176,10 @@ app.put('/reasons', async (c) => {
   }
 
   const db = getDb(c.env)
-  await db.prepare(`
+  await runOrdinaryBusinessWrite(db, `
     INSERT INTO settings (key, value, updated_at) VALUES ('inventory_saved_reasons', @value, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).run({ value: JSON.stringify(items) })
+  `, { value: JSON.stringify(items) })
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'inventory_reason', null, { count: items.length })
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'reasons_update' }))
   return c.json({ items })
@@ -2420,7 +2421,7 @@ app.post('/transfer', async (c) => {
     lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
   })
   try {
-    await db.batch(statements)
+    await ordinaryBusinessBatch(db, statements)
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
@@ -2612,7 +2613,7 @@ app.patch('/movements/:id/reason', async (c) => {
   const mv = await db.prepare('SELECT id, product_id, reason FROM inventory_movements WHERE id = @id')
     .get<{ id: number; product_id: number; reason: string | null }>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
-  await db.prepare('UPDATE inventory_movements SET reason = @reason WHERE id = @id').run({ id, reason })
+  await runOrdinaryBusinessWrite(db, 'UPDATE inventory_movements SET reason = @reason WHERE id = @id', { id, reason })
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_movement_reason_edit', 'product', productId || null, {
     movementId: id, from: mv.reason ?? null, to: reason,
@@ -2697,7 +2698,7 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
   }
   try {
-    await db.batch(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change))
+    await ordinaryBusinessBatch(db, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change))
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)

@@ -102,6 +102,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/moneyPrecision') return moneyPrecision
   if (id === 'hono') return require('hono')
   if (id === '../lib/db') return { getDb: () => wrapDb(routeDb) }
+  if (id === '../lib/businessMaintenanceGuard') return loadModule('lib/businessMaintenanceGuard.ts', require)
   if (id === '../lib/auth') return {
     requireAuth: async (c, next) => {
       if (!routeUser) return c.json({ error: 'Unauthorized' }, 401)
@@ -186,18 +187,15 @@ function wrapDb(sqlite) {
       }
     },
     batch(statements) {
-      const tx = sqlite.transaction((stmts) => {
-        for (const s of stmts) {
+      const tx = sqlite.transaction((stmts) => stmts.map((s) => {
           const st = sqlite.prepare(s.sql)
-          if (s.params == null) st.run()
-          else st.run(s.params)
-        }
-      })
+          return st.reader ? { results: [st.get(s.params || {})], meta: { changes: 0 } }
+            : st.run(s.params || {})
+      }))
       // D1's batch() rejects asynchronously; better-sqlite3 throws in place.
       try {
         if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook(sqlite) }
-        tx(statements)
-        return Promise.resolve()
+        return Promise.resolve(tx(statements))
       } catch (error) {
         return Promise.reject(error)
       }
