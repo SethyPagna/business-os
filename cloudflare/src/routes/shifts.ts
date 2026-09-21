@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
+import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
@@ -236,14 +237,14 @@ async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ i
  * while the Shifts popup -- where the operator picks an earlier minute --
  * still worked. Production shift 20 (2026-09-21) was closed exactly that way.
  *
- * A requested time within this window ahead of the server is what the client
+ * A requested time within the shared client-clock tolerance (lib/clientTimestamp,
+ * the same window offline sale timestamps get) ahead of the server is what the client
  * meant by "now" and is clamped to the server's now; only a time further
  * ahead is a genuine future timestamp and is still refused. A missing
  * closed_at on the close route means "now" and is stamped server-side.
  */
-const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000
 function withinServerClock(requestedMs: number, now: number): number | null {
-  if (!Number.isFinite(requestedMs) || requestedMs > now + CLOCK_SKEW_TOLERANCE_MS) return null
+  if (!Number.isFinite(requestedMs) || requestedMs > now + CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS) return null
   return Math.min(requestedMs, now)
 }
 function utcMs(value: string): number {

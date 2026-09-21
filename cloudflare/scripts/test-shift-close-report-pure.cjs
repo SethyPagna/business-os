@@ -141,6 +141,7 @@ const primaryD1 = d1(sqlite)
 let activeD1 = primaryD1
 const shiftsRoute = loadReal('routes/shifts.ts', {
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => activeD1 },
   '../lib/auth': {
     requireAuth: async (c, next) => { c.set('user', { id: currentUserId, name: 'Za', username: 'za' }); await next() },
@@ -305,6 +306,7 @@ async function main() {
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(empty) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 9, name: 'Nobody' }); await next() } },
     '../lib/permissions': { isAdminControlUser: () => false, hasPermission: () => false, hasAnyPermission: () => true },

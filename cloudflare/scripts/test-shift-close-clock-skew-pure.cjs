@@ -114,6 +114,7 @@ function scenario() {
   let actor = owner
   const route = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),

@@ -151,6 +151,7 @@ function scenario(afterRead = () => {}) {
   let actor = user
   const route = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
+    '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite, afterRead) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),

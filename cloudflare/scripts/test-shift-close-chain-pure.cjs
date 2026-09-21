@@ -123,6 +123,7 @@ let user = { id: 21, username: 'za', name: 'Roune Rath', permissions: JSON.strin
 let telegramReportsFor = []
 const route = loadReal('routes/shifts.ts', {
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
   '../lib/permissions': loadReal('lib/permissions.ts'),

@@ -132,6 +132,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   const permissions = loadReal('lib/permissions.ts')
   const route = loadReal('routes/shifts.ts', {
     '../lib/businessDateWindow': businessDateWindow,
+  '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': dbModule,
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } },
     '../lib/permissions': permissions,
