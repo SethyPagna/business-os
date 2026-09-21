@@ -4,7 +4,7 @@ import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, ty
 import { useApp } from '../../AppContext'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import { fmtDate, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters.ts'
-import { closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
+import { carryOverCloseSeedMs, closeShift, closeShiftById, fetchCurrentShift, openShift, pendingShiftMutation, shiftClosingCounts, shiftCountPairBlocker, shiftLocalDateTimeFromMs, shiftLocalDateTimeToIso, shiftOpeningCounts, type Shift, type ShiftState } from '../../api/shiftTransport.ts'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
@@ -284,37 +284,6 @@ function NoteFold({ note, onChange, disabled }: { note: string; onChange: (value
       />
     </label>
   )
-}
-
-/**
- * The closing moment the carry-over form OPENS with, between the two bounds
- * the Worker actually enforces on `POST /shifts/:id/close`.
- *
- * UPPER -- `closeBefore`, the opening of the segment that FOLLOWS this row, as
- * `/current` reports it (`previous_open_close_before`). `intervalError` in
- * cloudflare/src/routes/shifts.ts answers 409 "Closing time overlaps the next
- * shift segment." for anything past it. It is NOT today's opening: with two or
- * more stale days still open, the next segment is the next STALE day, and a
- * form seeded against today's shift was refused on every drain but the last.
- * One minute before the bound is the latest moment the server accepts; `now`
- * is used only when nothing follows this row at all (the registration
- * prompt's own step, before today has been opened).
- *
- * LOWER -- the row's OWN opening. `closedAtMs < opened_at` is a 400 ("Closing
- * time cannot be before opening time."), and a row opened in the last minute
- * before midnight with the next segment seconds later made the upper bound
- * land before it. The clamp rounds that opening UP to a whole minute, because
- * the field itself holds minutes (shiftLocalDateTimeFromMs slices to `:mm`)
- * and a 23:59:30 opening floored to 23:59 is still before itself.
- *
- * Both bounds inside one minute of each other is the one case no minute-
- * resolution value satisfies; the Worker's own sentence names it.
- */
-function carryOverCloseSeedMs(closeBefore: string | null | undefined, ownOpenedAt: string | null | undefined, nowMs: number): number {
-  const boundMs = parseServerTimestampMs(closeBefore)
-  const seedMs = Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs
-  const ownMs = parseServerTimestampMs(ownOpenedAt)
-  return Number.isFinite(ownMs) ? Math.max(seedMs, Math.ceil(ownMs / 60_000) * 60_000) : seedMs
 }
 
 /** What both entry points hold: one draft, one submit, one set of reasons. */

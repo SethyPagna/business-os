@@ -191,8 +191,19 @@ ok(/shiftOpeningCounts\(edit\.openingUsd, edit\.openingKhr\)/.test(modal)
 // control's `required` attribute went with it and is not missed -- nothing here
 // submits a <form>, so the only thing that ever gated the save is the
 // closeReason blocker printed beside the button, which is asserted instead.
-ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close uses the shared date+time field and preserves the current local minute by default')
-ok(/const blankClose = \(\): CloseDraft => \(\{ closedAt: dateTimeLocal\(new Date\(\)\.toISOString\(\)\)/.test(modal), 'historic close pre-fills its required timestamp while leaving report-only counts blank')
+ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*value=\{close\.closedAt\}/.test(modal), 'historic close uses the shared date+time field and opens with a closing moment already in it')
+// The prefill of an OPEN row is the latest moment the WORKER will accept for
+// it -- a minute before the close bound it states on the row (close_before),
+// through the same one rule the POS carry-over close seeds from. Seeded from
+// the bare clock instead, the default press was refused 409 on every row that
+// had a later segment. A row with no bound, and the popup's own reset, still
+// open on the current local minute.
+ok(/const blankClose = \(shift\?: Shift \| null\): CloseDraft => \(\{/.test(modal)
+  && /closedAt: shift && !shift\.closed_at\s*\n\s*\? shiftLocalDateTimeFromMs\(carryOverCloseSeedMs\(shift\.close_before, shift\.opened_at, Date\.now\(\)\)\)\s*\n\s*: dateTimeLocal\(new Date\(\)\.toISOString\(\)\),/.test(modal),
+  'historic close pre-fills its required timestamp from the server-stated bound, leaving report-only counts blank')
+ok(/setClose\(blankClose\(selected\)\); setAction\('close'\)/.test(modal), 'and the Close action seeds that draft from the SELECTED row, not from an empty one')
+ok(/\{selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
+  'the close form shows that bound -- only when the server stated one -- with the same key and formatter the POS strip uses')
 ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')
 ok(!/type="datetime-local"/.test(modal), 'no shift timestamp may fall back to the native control that rejects a typed 9032026')
 ok(/shiftLocalDateTimeToIso\(close\.closedAt\)/.test(modal), 'entered historical close time is converted from Phnom Penh wall time to explicit ISO')

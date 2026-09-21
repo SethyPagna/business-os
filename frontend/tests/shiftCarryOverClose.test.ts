@@ -32,7 +32,11 @@
 //   5. ONE form: one closeShiftById call site, one closing-time field, one
 //      component rendered by both entry points.
 //   6. The prefill is min(now, THE BOUND - 60 s), clamped up to the offered
-//      row's own opening. The bound is `previous_open_close_before` from
+//      row's own opening. The rule itself lives in shiftTransport.ts
+//      (carryOverCloseSeedMs) because the Shifts popup's close form seeds
+//      through the very same function; this file pins it there, and pins the
+//      gate to CALL it rather than keep a copy. The bound here is
+//      `previous_open_close_before` from
 //      /current -- the opening of whatever segment follows the offered row,
 //      which with two stale days is the NEXT STALE DAY and not today's shift.
 //      Seeded from the bare clock the header's default press could only ever
@@ -75,7 +79,9 @@ function between(source: string, from: string, to: string): string {
 
 // The regions the rules live in. Recomputed from whatever source is passed,
 // so a mutant is sliced the same way the real file is.
-const carrySeed = (g: string) => between(g, 'function carryOverCloseSeedMs', 'type CarryOverCloseForm')
+// The seed rule is transport-side now (one definition, two forms); every
+// other region below is still sliced out of the gate.
+const carrySeed = (t: string) => between(t, 'export function carryOverCloseSeedMs', 'export function shiftLocalDateTimeToIso')
 const carryHook = (g: string) => between(g, 'function useCarryOverClose', 'function CarryOverIntro')
 const carryFields = (g: string) => between(g, 'function CarryOverCloseFields', 'export default function ShiftGate')
 const openSubmit = (g: string) => between(g, 'const submitOpen', 'const needsRegistration')
@@ -99,6 +105,14 @@ function editRegion(source: Source, region: (g: string) => string, find: string,
   assert.ok(slice.length > 100, 'the negative control could not locate its region in ShiftGate.tsx')
   assert.ok(slice.includes(find), `the negative control's target text is gone: ${find}`)
   return { ...source, gate: source.gate.replace(slice, slice.replace(find, replace)) }
+}
+
+/** The same, for a region of the TRANSPORT. */
+function editTransportRegion(source: Source, region: (t: string) => string, find: string, replace: string): Source {
+  const slice = region(source.transport)
+  assert.ok(slice.length > 100, 'the negative control could not locate its region in shiftTransport.ts')
+  assert.ok(slice.includes(find), `the negative control's target text is gone: ${find}`)
+  return { ...source, transport: source.transport.replace(slice, slice.replace(find, replace)) }
 }
 
 /** Rewrite the first occurrence anywhere in the gate. */
@@ -202,29 +216,34 @@ const pins: Pin[] = [
   // ---- 5. the prefilled closing moment the Worker will actually accept ----
   {
     label: "the prefill is a minute before the SERVER-STATED bound, never a bare clock reading",
-    holds: ({ gate: g }) => {
-      const seed = carrySeed(g)
+    holds: ({ transport: t }) => {
+      const seed = carrySeed(t)
       return /parseServerTimestampMs\(closeBefore\)/.test(seed)
         && /Math\.min\(nowMs, boundMs - 60_000\)/.test(seed)
         && /: nowMs/.test(seed)
     },
-    mutate: (source) => editRegion(source, carrySeed,
+    mutate: (source) => editTransportRegion(source, carrySeed,
       'Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs', 'nowMs'),
   },
   {
     label: "and it is clamped up to the row's OWN opening, on the whole minute the field can hold",
-    holds: ({ gate: g }) => {
-      const seed = carrySeed(g)
+    holds: ({ transport: t }) => {
+      const seed = carrySeed(t)
       return /parseServerTimestampMs\(ownOpenedAt\)/.test(seed)
         && /Math\.max\(seedMs, Math\.ceil\(ownMs \/ 60_000\) \* 60_000\)/.test(seed)
     },
-    mutate: (source) => editRegion(source, carrySeed,
+    mutate: (source) => editTransportRegion(source, carrySeed,
       'Number.isFinite(ownMs) ? Math.max(seedMs, Math.ceil(ownMs / 60_000) * 60_000) : seedMs', 'seedMs'),
   },
   {
     label: 'the form seeds through that ONE rule, not through Date.now() directly',
-    holds: ({ gate: g }) => /shiftLocalDateTimeFromMs\([\s\S]{0,140}?carryOverCloseSeedMs\(closeBefore, ownOpenedAt, Date\.now\(\)\)\)/.test(carryHook(g))
-      && (g.match(/carryOverCloseSeedMs\(/g) || []).length === 2,
+    // ONE definition, in the transport, IMPORTED here: the Shifts popup's
+    // close form seeds through the same function, and a second copy in the
+    // gate is how the two POS forms drifted apart the last time.
+    holds: ({ gate: g, transport: t }) => /shiftLocalDateTimeFromMs\([\s\S]{0,140}?carryOverCloseSeedMs\(closeBefore, ownOpenedAt, Date\.now\(\)\)\)/.test(carryHook(g))
+      && (g.match(/carryOverCloseSeedMs\(/g) || []).length === 1
+      && /import \{ carryOverCloseSeedMs,/.test(g)
+      && (t.match(/export function carryOverCloseSeedMs\(/g) || []).length === 1,
     mutate: (source) => editRegion(source, carryHook, 'carryOverCloseSeedMs(closeBefore, ownOpenedAt, Date.now())', 'Date.now()'),
   },
   {
@@ -427,7 +446,8 @@ const currentShift = {
   previous_open_close_before: NEXT_STALE_OPENED_AT,
 }
 
-function openCarryOverPanel(source: string, saved: unknown, shiftState: object = currentShift) {
+type SeedRule = (closeBefore: string | null | undefined, ownOpenedAt: string | null | undefined, nowMs: number) => number
+function openCarryOverPanel(source: string, saved: unknown, shiftState: object = currentShift, seedRule?: SeedRule) {
   const slots: any[] = []
   let cursor = 0
   const effectQueue: Array<() => void> = []
@@ -480,6 +500,9 @@ function openCarryOverPanel(source: string, saved: unknown, shiftState: object =
     }
     if (name.includes('shiftTransport')) return {
       ...transportModule,
+      // The seed rule is the transport's; a negative control replaces it here
+      // rather than by rewriting the gate, which no longer holds a copy.
+      ...(seedRule ? { carryOverCloseSeedMs: seedRule } : {}),
       fetchCurrentShift: async () => shiftState,
       pendingShiftMutation: () => saved,
       closeShiftById: (id: number, input: any) => { closeCall = { id, input }; return new Promise((resolve) => { resolveClose = resolve }) },
@@ -592,15 +615,23 @@ try {
     'the prefill is clamped up to the first whole minute at or after the row\'s own opening')
   assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(clamped.closedAt)) >= Date.parse(TIGHT_OWN),
     'so the round trip through the minute field never lands before that opening')
-  // ...and the same harness on a source that clamps to the RAW opening, which
-  // is what a minute-truncating field turns back into a 400.
-  const unclamped = gate.replace('Math.ceil(ownMs / 60_000) * 60_000', 'ownMs')
-  assert.notEqual(unclamped, gate, 'the clamp negative control could not find its target')
-  const unclampedSeed = openCarryOverPanel(unclamped, null, {
+  // ...and the same harness on a seed rule that clamps to the RAW opening,
+  // which is what a minute-truncating field turns back into a 400. It is
+  // injected where the real one comes from, because the gate no longer holds
+  // a copy of the rule to rewrite.
+  assert.ok(transport.includes('Math.ceil(ownMs / 60_000) * 60_000'),
+    'the clamp negative control no longer mirrors the real rule')
+  const rawClamp: SeedRule = (closeBefore, ownOpenedAt, nowMs) => {
+    const boundMs = Date.parse(String(closeBefore))
+    const seedMs = Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs
+    const ownMs = Date.parse(String(ownOpenedAt))
+    return Number.isFinite(ownMs) ? Math.max(seedMs, ownMs) : seedMs
+  }
+  const unclampedSeed = openCarryOverPanel(gate, null, {
     ...currentShift,
     previous_open_shift: { ...previousOpenShift, opened_at: TIGHT_OWN },
     previous_open_close_before: TIGHT_BOUND,
-  }).closedAt
+  }, rawClamp).closedAt
   assert.ok(Date.parse(transportModule.shiftLocalDateTimeToIso(unclampedSeed)) < Date.parse(TIGHT_OWN),
     'NOT DISCRIMINATING -- clamping to the raw opening produced an accepted moment too')
   checks += 4

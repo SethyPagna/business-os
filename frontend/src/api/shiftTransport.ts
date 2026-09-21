@@ -1,4 +1,5 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
+import { parseServerTimestampMs } from '../utils/formatters.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
 
 const unresolvedShiftWrites = new Map<string, SyncProblemReference>()
@@ -203,6 +204,20 @@ export type Shift = {
   cancelled_by_user_name: string | null
   cancel_reason: string | null
   parent_shift_id: number | null
+  /**
+   * The instant a close of THIS row must not pass -- the opening of the
+   * segment that follows it, as the Worker's OWN interval guard computes it
+   * (routes/shifts.ts closeBoundFor, the helper intervalError itself calls).
+   * A closing time later than this is answered 409 "Closing time overlaps the
+   * next shift segment."
+   *
+   * Null when nothing follows the row, in which case only the clock bounds
+   * the close; absent means the server did not say (a row from an older
+   * Worker, or a cached response), never "none". Carried by every read and
+   * write response that offers a close, so the form that seeds from it cannot
+   * be handed a row that lost it.
+   */
+  close_before?: string | null
   reopen_reason: string | null
   reopened_by_user_id: number | null
   reopened_by_user_name: string | null
@@ -406,6 +421,40 @@ function optionalShiftCount(value: unknown, label: string): number | null {
  *  parser's own round-trip identity, inverted (Cambodia is UTC+07 year-round). */
 export function shiftLocalDateTimeFromMs(ms: number): string {
   return new Date(ms + 7 * 60 * 60 * 1000).toISOString().slice(0, 16)
+}
+
+/**
+ * The closing moment a close form OPENS with, between the two bounds the
+ * Worker actually enforces on `POST /shifts/:id/close`. ONE definition for
+ * both forms that offer a close -- the POS carry-over step and the Shifts
+ * popup -- because when there were two they immediately disagreed and one of
+ * them seeded a moment the Worker always refused.
+ *
+ * UPPER -- `closeBefore`: the opening of the segment that FOLLOWS this row
+ * (`close_before` on the row, `previous_open_close_before` beside the POS
+ * carry-over). `intervalError` in cloudflare/src/routes/shifts.ts answers 409
+ * "Closing time overlaps the next shift segment." for anything past it. It is
+ * NOT today's opening: with two or more stale days still open, the next
+ * segment is the next STALE day, and a form seeded against today's shift was
+ * refused on every drain but the last. One minute before the bound is the
+ * latest moment the server accepts; `now` is used only when nothing follows
+ * this row at all.
+ *
+ * LOWER -- the row's OWN opening. `closedAtMs < opened_at` is a 400 ("Closing
+ * time cannot be before opening time."), and a row opened in the last minute
+ * before midnight with the next segment seconds later made the upper bound
+ * land before it. The clamp rounds that opening UP to a whole minute, because
+ * the field itself holds minutes (shiftLocalDateTimeFromMs slices to `:mm`)
+ * and a 23:59:30 opening floored to 23:59 is still before itself.
+ *
+ * Both bounds inside one minute of each other is the one case no minute-
+ * resolution value satisfies; the Worker's own sentence names it.
+ */
+export function carryOverCloseSeedMs(closeBefore: string | null | undefined, ownOpenedAt: string | null | undefined, nowMs: number): number {
+  const boundMs = parseServerTimestampMs(closeBefore)
+  const seedMs = Number.isFinite(boundMs) ? Math.min(nowMs, boundMs - 60_000) : nowMs
+  const ownMs = parseServerTimestampMs(ownOpenedAt)
+  return Number.isFinite(ownMs) ? Math.max(seedMs, Math.ceil(ownMs / 60_000) * 60_000) : seedMs
 }
 
 export function shiftLocalDateTimeToIso(value: string): string {

@@ -13,6 +13,7 @@ import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from './ShiftCou
 import {
   amendShift,
   cancelShift,
+  carryOverCloseSeedMs,
   closeShiftById,
   fetchShiftHistory,
   listShifts,
@@ -64,10 +65,26 @@ type ActionMode = 'edit' | 'close' | 'reopen' | 'cancel' | null
 
 // A historic close still needs an explicit closing timestamp so the server can
 // place it in the correct interval.  The drawer counts are report-only and
-// remain blank by default.  Starting the timestamp at the current local
-// minute prevents an otherwise valid close from looking blocked simply
-// because the operator did not retype the time shown by the open shift.
-const blankClose = (): CloseDraft => ({ closedAt: dateTimeLocal(new Date().toISOString()), closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '' })
+// remain blank by default.
+//
+// The moment it opens with is the LATEST one the Worker will accept for THIS
+// row, through the same rule the POS carry-over close seeds from
+// (carryOverCloseSeedMs): a minute before `close_before` -- the opening of the
+// segment that follows this row, which the server states on the row itself --
+// clamped up to the row's own opening. Seeded from the bare clock instead,
+// the default press was answered 409 "Closing time overlaps the next shift
+// segment." for every row that had a later segment, which is every drawer left
+// open on an earlier day once today has been registered.
+//
+// With no row (the popup's own reset) or no bound stated, the current local
+// minute is still the seed: only the clock bounds the close then, and a
+// prefilled time keeps an otherwise valid close from looking blocked.
+const blankClose = (shift?: Shift | null): CloseDraft => ({
+  closedAt: shift && !shift.closed_at
+    ? shiftLocalDateTimeFromMs(carryOverCloseSeedMs(shift.close_before, shift.opened_at, Date.now()))
+    : dateTimeLocal(new Date().toISOString()),
+  closingUsd: '', closingKhr: '', additionalUsd: '', additionalKhr: '', closingNote: '',
+})
 const blankReopen = (): ReopenDraft => ({ reason: '', openingUsd: '', openingKhr: '', openingNote: '' })
 const refreshMountedShiftState = () => window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
 
@@ -533,7 +550,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                 <section className="space-y-3" aria-label={t('shift_actions')}>
                   <div className="flex flex-wrap gap-2">
                     {selected.capabilities.can_edit ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button> : null}
-                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { setClose(blankClose()); setAction('close') } }}>{t('shift_action_close')}</button> : null}
+                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { setClose(blankClose(selected)); setAction('close') } }}>{t('shift_action_close')}</button> : null}
                     {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
                     {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}
                   </div>
@@ -557,7 +574,15 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
 
                   {action === 'close' ? (
                     <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-950/20">
-                      <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p></div>
+                      {/* The bound, when the server states one: the instant
+                          this close has to precede, which is also the instant
+                          the closing time below was prefilled from. Without it
+                          that prefill is a number the operator cannot check,
+                          and the 409 naming "the next shift segment" names a
+                          segment they never saw. One row, with the same key and
+                          formatter the POS carry-over strip uses. */}
+                      <div><h3 className="text-sm font-semibold">{t('shift_close_title')}</h3><p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('shift_close_time_hint')}</p>
+                        {selected.close_before ? <p className="mt-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300"><span className="font-medium">{t('shift_previous_open_close_before')}</span> · {fmtDateTime24(selected.close_before)}</p> : null}</div>
                       <fieldset disabled={saving || pending} className="grid min-w-0 gap-3 sm:grid-cols-2 [&_input]:min-w-0 [&_input]:max-w-full">
                         <div className="text-xs font-semibold sm:col-span-2"><span className="block">{t('shift_close_time_required')}</span><DateTimeEntryInput className="mt-1" value={close.closedAt} onChange={(next) => setClose({ ...close, closedAt: next })} t={t} dateAriaLabel={`${t('shift_close_time_required')} · ${t('date')}`} timeAriaLabel={`${t('shift_close_time_required')} · ${t('time')}`} /></div>
                         <ShiftCountPair className="sm:col-span-2" label={t('shift_additional_cash')} usdLabel={t('shift_additional_usd')} khrLabel={t('shift_additional_khr')} hint={t('shift_additional_cash_hint')} hintDetail={t('shift_additional_cash_example')} usd={close.additionalUsd} khr={close.additionalKhr} onUsd={(value) => setClose({ ...close, additionalUsd: value })} onKhr={(value) => setClose({ ...close, additionalKhr: value })} />
