@@ -543,12 +543,13 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
   return withLanguage(language, () => {
     const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
     if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
-    // The same shape as the other six reports (Sep 7 2026): the figure block
-    // between rules, then the list. It was the only report still running its
-    // count straight into its bullets with no break. It keeps the ONE figure
-    // and ONE list shape rather than numbered sections: there is nothing here
-    // for a second section to separate.
-    const lines = [title, RULE, labeled('products', rows.length), RULE]
+    // The Sep 21 2026 sectioned shape (owner: "same for other telegram
+    // report ... using dividers, numbered list, etc... title etc..."), the
+    // one this reply and /inventory were the two replies left out of when the
+    // rest of the reports took it on. One section -- there is only one thing
+    // here to number -- carrying the count row it already printed, then the
+    // capped list, unchanged.
+    const lines = [title, ...sectionTitle(1, 'stock'), labeled('products', rows.length)]
     for (const row of rows) {
       const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
       lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
@@ -576,19 +577,23 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
   // what the shortened command reference dropped. Both are gone; a shop with
   // nothing low simply has no second section, the same way every other report
   // drops a zero line.
+  //
+  // Sep 22 2026: both sections are now numbered like every other report,
+  // reusing the SAME 'products'/'stock' section titles the day summary and
+  // /stock draw from -- no new label, no new divider.
   const lowStock = Number(row?.low_stock || 0)
   const outOfStock = Number(row?.out_of_stock || 0)
   return withLanguage(language, () => {
     const lines = [
       reportTitle('🏷️', 'Inventory', 'ស្តុក'),
-      RULE,
+      ...sectionTitle(1, 'products'),
       labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
       labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
     ]
     const health: string[] = []
     if (lowStock) health.push(labeled('lowStock', lowStock))
     if (outOfStock) health.push(labeled('outOfStock', outOfStock))
-    if (health.length) lines.push(RULE, ...health)
+    if (health.length) lines.push(...sectionTitle(2, 'stock'), ...health)
     return lines.join('\n')
   })
 }

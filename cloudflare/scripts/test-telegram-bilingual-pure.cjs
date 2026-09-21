@@ -549,12 +549,14 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   // --- the two stock replies -------------------------------------------------
   // `/inventory` and `/stock` were the two replies the Sep 6 2026 redesign
-  // never touched. `/inventory` put two figures on one line
-  // ("Low stock: N · Out of stock: N") and ended with a
+  // never touched, and then the two the Sep 21 2026 sectioned-layout redesign
+  // left as a single un-numbered block while every other reply took on
+  // numbered, titled sections. `/inventory` used to put two figures on one
+  // line ("Low stock: N · Out of stock: N") and ended with a
   // `▸ /stock — the product list` pointer -- exactly the kind of line the
-  // redesign deleted from the command reference and forbids there. Both are
-  // driven here over a stub that actually HAS stock, so there are figures on
-  // the lines to count.
+  // redesign deleted from the command reference and forbids there; both are
+  // still gone. Both are driven here over a stub that actually HAS stock, so
+  // there are figures on the lines to count.
   const inventoryRows = [
     { name: 'Coca-Cola 330ml', stock_quantity: 0, low_threshold: 5, out_of_stock_threshold: 0 },
     { name: 'Rice 5kg', stock_quantity: 3, low_threshold: 5, out_of_stock_threshold: 0 },
@@ -586,20 +588,92 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.deepEqual(inventoryReply.split('\n'), [
     '🏷️ Inventory / ស្តុក',
     RULE,
+    '1. Products / ផលិតផល',
     'Active products / ផលិតផលសកម្ម: 1,240',
     'Units on hand / ឯកតាក្នុងស្តុក: 8,630',
     RULE,
+    '2. Stock / ស្តុក',
     'Low stock / ស្តុកទាប: 12',
     'Out of stock / អស់ស្តុក: 3',
-  ], `/inventory does not have the shared header shape:\n${inventoryReply}`)
+  ], `/inventory does not have the shared numbered-section shape:\n${inventoryReply}`)
   assert.deepEqual(stockReply.split('\n'), [
     '📦 Low stock / ស្តុកទាប',
     RULE,
+    '1. Stock / ស្តុក',
     'Products / ផលិតផល: 2',
-    RULE,
     '• OUT / អស់ស្តុក — Coca-Cola 330ml — 0 (⚠ 5)',
     '• LOW / ស្តុកទាប — Rice 5kg — 3 (⚠ 5)',
-  ], `/stock does not have the shared header shape:\n${stockReply}`)
+  ], `/stock does not have the shared numbered-section shape:\n${stockReply}`)
+
+  // RETIRED (Sep 22 2026): a bare RULE with no numbered header after it -- the
+  // shape both replies had until this pass, and the shape every other report
+  // stopped drawing on Sep 21 2026. Every RULE in a report line is now
+  // immediately followed by an "N. <title>" section header.
+  for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
+    const rows = reply.split('\n')
+    rows.forEach((row, index) => {
+      if (row !== RULE) return
+      assert.ok(/^\d+\.\s/.test(rows[index + 1] || ''), `${command} draws a bare divider with no numbered section after it:\n${reply}`)
+    })
+  }
+  // And the two literally retired sentences stay retired.
+  for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
+    assert.ok(!reply.includes('▸'), `${command} still carries the old pointer line:\n${reply}`)
+    assert.ok(!/Low stock:.*Out of stock:/.test(reply), `${command} put both health figures back on one line:\n${reply}`)
+  }
+
+  // The section order is now content: a strict-after loop (like
+  // scripts/test-shift-report-pure.cjs's ORDER check), never a membership
+  // check. `/inventory` has two sections; `/stock` has one, so its loop is a
+  // single-item sanity check on the same code path.
+  const strictSectionOrder = (reply, keys) => {
+    const rows = reply.split('\n')
+    let cursor = -1
+    for (const key of keys) {
+      const at = rows.findIndex((row, index) => index > cursor && row === `${keys.indexOf(key) + 1}. ${lang.label(key)}`)
+      assert.ok(at > cursor, `"${key}" is out of order in the report:\n${reply}`)
+      cursor = at
+    }
+  }
+  strictSectionOrder(inventoryReply, ['products', 'stock'])
+  strictSectionOrder(stockReply, ['stock'])
+
+  // Positive control: swapping the two /inventory sections in a LOCAL copy of
+  // the already-rendered text must make the same strict-after loop reject it
+  // -- proving the loop checks ORDER and not just presence.
+  {
+    const rows = inventoryReply.split('\n')
+    const productsAt = rows.indexOf('1. Products / ផលិតផល')
+    const stockAt = rows.indexOf('2. Stock / ស្តុក')
+    const swapped = [...rows];
+    [swapped[productsAt], swapped[stockAt]] = [swapped[stockAt], swapped[productsAt]]
+    const swappedText = swapped.join('\n')
+    let rejected = false
+    try { strictSectionOrder(swappedText, ['products', 'stock']) } catch { rejected = true }
+    assert.ok(rejected, 'the /inventory section-order check does not discriminate: a swapped pair of section headers still passed it')
+  }
+
+  // All three language modes, same fixture: every figure survives, and the
+  // section count never changes -- only which half of each label prints.
+  for (const [command, hasSecondSection] of [['/inventory', true], ['/stock', false]]) {
+    const both = await stocked.telegramCommandReply(env, command, Date.now(), 'both')
+    const en = await stocked.telegramCommandReply(env, command, Date.now(), 'en')
+    const km = await stocked.telegramCommandReply(env, command, Date.now(), 'km')
+    const sectionCount = (text) => text.split('\n').filter((row) => /^\d+\.\s/.test(row)).length
+    assert.equal(sectionCount(both), hasSecondSection ? 2 : 1, `${command} both-mode section count:\n${both}`)
+    assert.equal(sectionCount(en), sectionCount(both), `${command} en-mode dropped or added a section:\n${en}`)
+    assert.equal(sectionCount(km), sectionCount(both), `${command} km-mode dropped or added a section:\n${km}`)
+    assert.ok(!KHMER.test(en), `${command} en-mode still carries Khmer:\n${en}`)
+    assert.ok(en.split('\n').some((row) => /^\d+\.\s[A-Za-z]/.test(row)), `${command} en-mode section headers lost their number:\n${en}`)
+    assert.ok(km.split('\n').filter((row) => /^\d+\.\s/.test(row)).every((row) => !/[A-Za-z]/.test(row)), `${command} km-mode section header still carries English:\n${km}`)
+    // Every figure in the both-mode reply also appears in the single-language
+    // renderings -- the mode changes labels only, never a value.
+    for (const figure of both.match(/\d[\d,]*(?:\.\d+)?/g) || []) {
+      assert.ok(en.includes(figure), `${command} en-mode lost the figure ${figure}:\n${en}`)
+      assert.ok(km.includes(figure), `${command} km-mode lost the figure ${figure}:\n${km}`)
+    }
+  }
+  console.log('PASS stock replies: numbered sections, strict order with a positive control, all three language modes, retired wording stays out')
 
   // ONE FIGURE PER LINE, the rule the redesign applied to the other five
   // reports. A labelled line is `English / ខ្មែរ: value`; product bullets are
@@ -619,6 +693,7 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.deepEqual(lastSent().split('\n'), [
     '🏷️ Inventory / ស្តុក',
     RULE,
+    '1. Products / ផលិតផល',
     'Active products / ផលិតផលសកម្ម: 0',
     'Units on hand / ឯកតាក្នុងស្តុក: 0',
   ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)

@@ -75,7 +75,8 @@ db.exec(`
     gender TEXT,
     is_anonymous INTEGER NOT NULL DEFAULT 0 CHECK (is_anonymous IN (0, 1))
   );
-  CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL);
+  CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, category TEXT, stock_quantity REAL,
+    is_active INTEGER NOT NULL DEFAULT 1, low_stock_threshold REAL, out_of_stock_threshold REAL DEFAULT 0);
   CREATE TABLE categories (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE branch_stock (id INTEGER PRIMARY KEY, product_id INTEGER, branch_id INTEGER, quantity REAL);
 `)
@@ -107,6 +108,19 @@ db.prepare('INSERT INTO returns (id, sale_id, total_refund_usd, total_refund_khr
   .run(1, 3, 15, 0, 'completed', 'customer', AT, 1, 'damaged')
 db.prepare('INSERT INTO return_items (id, return_id, quantity, cost_price_usd, return_to_stock, stock_action) VALUES (?,?,?,?,?,?)')
   .run(1, 1, 1, 4, 1, 'restock')
+
+// ---- fixture for /stock and /inventory (Sep 22 2026 sectioned redesign) ----
+// 14 active products qualify as low/out of stock (past the LIMIT 12 cap the
+// query has always applied), one healthy product does not qualify, and one
+// INACTIVE product carries 0 stock so is_active = 1 is proven to still
+// exclude it. All against a REAL SQLite engine, so the LIMIT and the
+// is_active filter are the ones the Worker actually runs, not a stub's idea
+// of them.
+const insProduct = db.prepare('INSERT INTO products (id, name, stock_quantity, is_active, low_stock_threshold, out_of_stock_threshold) VALUES (?,?,?,?,?,?)')
+for (let i = 0; i < 6; i += 1) insProduct.run(300 + i, `Out item ${String(i).padStart(2, '0')}`, 0, 1, 5, 0) // OUT (qty <= out threshold 0)
+for (let i = 0; i < 8; i += 1) insProduct.run(310 + i, `Low item ${String(i).padStart(2, '0')}`, 3, 1, 5, 0) // LOW (qty <= low threshold 5, > out threshold)
+insProduct.run(399, 'Healthy item', 100, 1, 5, 0) // above both thresholds -- never listed
+insProduct.run(398, 'Inactive item', 0, 0, 5, 0)  // is_active = 0 -- must not appear anywhere
 
 // ---- the real modules -------------------------------------------------------
 const dbShim = { getDb: () => db }
@@ -235,6 +249,90 @@ const salesMsg = await telegram.telegramCommandReply({}, '/sales 10/08/2026')
 check('the /sales total is the kernel total too', salesMsg.includes('$115.00') && !salesMsg.includes('$643.00'))
 check('the receipt LIST does not show the voided receipt under a total it is not part of',
   salesMsg.includes('20260810-090000') && salesMsg.includes('20260810-110000') && !salesMsg.includes('20260810-100000'))
+
+// ---- /stock and /inventory: numbered sections, over a REAL LIMIT (Sep 22 2026) ---
+// The Sep 21 2026 sectioned-layout redesign converted five replies and left
+// these two as a single un-numbered block; this closes that gap. Run against
+// the real SQLite engine above (not a regex stub), so the query's
+// `LIMIT 12` and `is_active = 1` are the ones actually executing.
+const stockMsg = await telegram.telegramCommandReply({}, '/stock')
+const inventoryMsg = await telegram.telegramCommandReply({}, '/inventory')
+
+check('the LIMIT 12 the query has always carried still caps the bullet list (14 qualifying rows, 12 shown)',
+  stockMsg.split('\n').filter((line) => line.startsWith('•')).length === 12
+  && /^Products \/ [^\n]*: 12$/m.test(stockMsg))
+check('is_active = 0 still excludes a product from /stock entirely', !stockMsg.includes('Inactive item'))
+check('a product above both thresholds is not listed', !stockMsg.includes('Healthy item'))
+check('/inventory counts only the active catalogue (14 qualifying + 1 healthy = 15), never the inactive row',
+  /Active products \/ [^\n]*: 15$/m.test(inventoryMsg) && /Units on hand \/ [^\n]*: 124$/m.test(inventoryMsg)
+  && /Low stock \/ [^\n]*: 8$/m.test(inventoryMsg) && /Out of stock \/ [^\n]*: 6$/m.test(inventoryMsg))
+
+// The numbered-section shape itself: a title line, then "N. <title>" headers,
+// each immediately preceded by the shared RULE and never left bare.
+for (const [name, msg, sectionKeys] of [['/stock', stockMsg, ['stock']], ['/inventory', inventoryMsg, ['products', 'stock']]]) {
+  const rows = msg.split('\n')
+  check(`${name} opens with its title, not a section`, !/^\d+\.\s/.test(rows[0]))
+  rows.forEach((row, index) => {
+    if (row === lang.RULE) check(`${name}: the divider at line ${index} is followed by a numbered header, never left bare`, /^\d+\.\s/.test(rows[index + 1] || ''))
+  })
+  // Strict-after loop (scripts/test-shift-report-pure.cjs's ORDER pattern):
+  // each section header must be found AFTER the previous one, not merely
+  // present anywhere in the message.
+  let cursor = -1
+  sectionKeys.forEach((key, position) => {
+    const expected = `${position + 1}. ${lang.label(key)}`
+    const at = rows.findIndex((row, index) => index > cursor && row === expected)
+    check(`${name}: section "${key}" appears in order at position ${position + 1}`, at > cursor)
+    cursor = at
+  })
+  // POSITIVE CONTROL: renumbering the FIRST header to look like the LAST
+  // one (a swap that only makes sense when there are two or more sections)
+  // must make the same strict-after loop reject the text -- proving the
+  // check discriminates order, not just membership. With one section this
+  // duplicates the header outright, which the loop must also reject: two
+  // "1. <title>" rows can never satisfy "found strictly after the previous
+  // hit" for a second, distinct key.
+  if (sectionKeys.length > 1) {
+    const first = `1. ${lang.label(sectionKeys[0])}`
+    const last = `${sectionKeys.length}. ${lang.label(sectionKeys[sectionKeys.length - 1])}`
+    const brokenRows = rows.map((row) => (row === first ? last : row === last ? first : row))
+    let brokenCursor = -1
+    let rejected = false
+    for (const [position, key] of sectionKeys.entries()) {
+      const expected = `${position + 1}. ${lang.label(key)}`
+      const at = brokenRows.findIndex((row, index) => index > brokenCursor && row === expected)
+      if (!(at > brokenCursor)) { rejected = true; break }
+      brokenCursor = at
+    }
+    check(`${name}: POSITIVE CONTROL -- swapping the section headers makes the order check fail`, rejected)
+  }
+}
+
+// All three language modes, over the SAME real query path -- the figures
+// (12, 15, 124, 8, 6) must not move between them.
+const stockEn = await telegram.telegramCommandReply({}, '/stock', Date.now(), 'en')
+const stockKm = await telegram.telegramCommandReply({}, '/stock', Date.now(), 'km')
+const inventoryEn = await telegram.telegramCommandReply({}, '/inventory', Date.now(), 'en')
+const inventoryKm = await telegram.telegramCommandReply({}, '/inventory', Date.now(), 'km')
+check("'/stock' en mode keeps the figures and drops the Khmer", !khmerText(stockEn) && /Products: 12$/m.test(stockEn))
+check("'/stock' km mode keeps the figures and drops the English section header letters",
+  khmerText(stockKm) && stockKm.includes(': 12') && !/^\d+\.\s[A-Za-z]/m.test(stockKm))
+check("'/inventory' en mode keeps every figure (15, 124, 8, 6)",
+  !khmerText(inventoryEn) && ['15', '124', '8', '6'].every((n) => inventoryEn.includes(n)))
+check("'/inventory' km mode keeps every figure too", ['15', '124', '8', '6'].every((n) => inventoryKm.includes(n)))
+check('all three /inventory renderings carry the same number of sections',
+  [inventoryMsg, inventoryEn, inventoryKm].every((text) => text.split('\n').filter((row) => /^\d+\.\s/.test(row)).length === 2))
+
+// RETIRED: the "bare divider" shape (a RULE with no numbered header right
+// after it) is already disproven by the divider loop above for every RULE in
+// both replies; these pin the two sentences an earlier redesign (Sep 7 2026)
+// already retired from this pair of replies, so a later change cannot bring
+// them back.
+for (const [name, msg] of [['/stock', stockMsg], ['/inventory', inventoryMsg]]) {
+  check(`${name}: the retired pointer sentence stays out`, !msg.includes('▸'))
+  check(`${name}: the retired combined health line stays out`, !/Low stock:.*Out of stock:/.test(msg))
+}
+console.log('PASS /stock and /inventory: numbered sections, a real LIMIT 12, strict order with a positive control, all three language modes')
 
 // ---- one implementation, not a lookalike ------------------------------------
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
