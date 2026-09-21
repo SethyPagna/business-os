@@ -81,9 +81,13 @@ ok(/const canCloseCurrent = state\?\.is_open === true && state\.shift\?\.capabil
   'the current close action consumes the server can_close capability')
 ok(/SHIFT_STATE_CHANGED_EVENT/.test(gate) && /addEventListener\(SHIFT_STATE_CHANGED_EVENT/.test(gate),
   'mounted current-shift consumers refresh after popup lifecycle writes')
-ok(/if \(!canCloseCurrent && !closed && !open\) return null/.test(gate),
+// Widened for the carry-over close: a shift left open on an EARLIER business
+// day is also something this control has to do, so the early return now has to
+// clear that condition too. The rule is unchanged -- nothing to close and
+// nothing to summarise still renders nothing.
+ok(/if \(!canCloseCurrent && !canCloseCarryOver && !closed && !open\) return null/.test(gate),
   'EndShiftButton renders nothing when there is neither an open shift nor a summary to show')
-const endIdx = gate.indexOf('if (!canCloseCurrent && !closed && !open) return null')
+const endIdx = gate.indexOf('if (!canCloseCurrent && !canCloseCarryOver && !closed && !open) return null')
 ok(endIdx > 0 && gate.indexOf('<button', endIdx) > endIdx,
   'and the early return sits BEFORE the button markup, not after it')
 ok(/\{canCloseCurrent && \(\s*\n\s*<button/.test(gate),

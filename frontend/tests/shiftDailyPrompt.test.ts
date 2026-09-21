@@ -19,6 +19,11 @@ assert.match(gate, /\{needsRegistration && \(\s*<Modal/, 'needs_registration ren
 assert.match(gate, /onClose=\{\(\) => \{ \/\* intentionally not dismissible/, 'the register modal cannot be dismissed -- the prompt holds until the shift is opened')
 assert.doesNotMatch(gate, /needsRegistration && !dismissed|needsRegistration && !snoozed|localStorage[^\n]*shift_register/, 'no dismiss / snooze / remembered flag short-circuits the daily prompt')
 assert.match(gate, /t\('shift_register_hint'\)/, 'the register modal explains itself')
+// The carry-over step is a STEP of this same prompt, never an escape from it:
+// its only non-writing control returns to the register step, so the daily
+// prompt still ends at "today's shift is open".
+assert.match(gate.slice(gate.indexOf("registerStep === 'carry_over' && carryOver"), gate.indexOf("t('shift_register_hint')")),
+  /setRegisterStep\('open'\)/, "the carry-over step can always fall back to today's registration")
 for (const key of ['shift_register_title', 'shift_register_hint']) {
   assert.ok(typeof en[key] === 'string' && en[key].trim(), `en.json has ${key}`)
   assert.ok(typeof km[key] === 'string' && km[key].trim(), `km.json has ${key}`)

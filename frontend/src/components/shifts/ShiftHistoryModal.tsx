@@ -3,7 +3,6 @@ import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import { useApp } from '../../AppContext.tsx'
-import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
 import Modal from '../shared/Modal.tsx'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
@@ -24,6 +23,7 @@ import {
   shiftClosingCounts,
   shiftCountPairBlocker,
   shiftOpeningCounts,
+  shiftLocalDateTimeFromMs,
   shiftLocalDateTimeToIso,
   type Shift,
   type ShiftAmendment,
@@ -81,15 +81,8 @@ function operationalBranchId(): number | null {
 }
 
 function dateTimeLocal(value: string | null): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: BUSINESS_TIME_ZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(date)
-  const get = (type: string) => parts.find((part) => part.type === type)?.value || ''
-  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
+  const ms = value ? new Date(value).getTime() : Number.NaN
+  return Number.isNaN(ms) ? '' : shiftLocalDateTimeFromMs(ms)
 }
 
 const editDraft = (shift: Shift): EditDraft => ({

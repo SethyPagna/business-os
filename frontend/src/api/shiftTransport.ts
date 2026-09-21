@@ -285,6 +285,10 @@ export type ShiftState = {
   can_end: boolean
   already_registered?: boolean
   already_closed?: boolean
+  /** Most recent shift still OPEN from a PREVIOUS business day, same account/branch.
+   *  Answered only by GET /current: `undefined` means the server did not say
+   *  (older Worker, or a write response), never "none". */
+  previous_open_shift?: Shift | null
 }
 
 export type ShiftAmendment = {
@@ -384,6 +388,13 @@ function optionalShiftCount(value: unknown, label: string): number | null {
 // Shift timestamps are entered in the shop's canonical Phnom Penh wall clock.
 // Cambodia is UTC+07 year-round, so attaching the offset prevents a cashier's
 // device timezone from silently moving a historical close by an hour or a day.
+/** The Phnom Penh wall clock of an instant as the 'YYYY-MM-DDTHH:mm' text
+ *  DateTimeEntryInput stores and shiftLocalDateTimeToIso reads back: that
+ *  parser's own round-trip identity, inverted (Cambodia is UTC+07 year-round). */
+export function shiftLocalDateTimeFromMs(ms: number): string {
+  return new Date(ms + 7 * 60 * 60 * 1000).toISOString().slice(0, 16)
+}
+
 export function shiftLocalDateTimeToIso(value: string): string {
   const normalized = value.trim()
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) throw new Error('A shift date and time is required')
