@@ -17,7 +17,7 @@ import Type from 'lucide-react/dist/esm/icons/type.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ErrorBoundary from './ErrorBoundary'
 import { useApp } from '../../AppContext.tsx'
-import { DEFAULT_TEMPLATE } from './constants'
+import { DEFAULT_TEMPLATE, RECEIPT_LANGUAGE_OPTIONS } from './constants'
 import type { ReceiptTemplate, ReceiptQrSocialLink } from './constants'
 import { parseReceiptTemplate, serializeReceiptTemplate } from './template'
 import FieldOrderManager from './FieldOrderManager'
@@ -730,11 +730,11 @@ export default function ReceiptSettings() {
                 {t('receipt_language_desc') || 'Sets the default language for printed receipts.'}
               </div>
               <div className="grid grid-cols-3 gap-3">
-                {[['en', 'English', 'English only'], ['km', 'Khmer', 'Khmer only'], ['both', 'Both', 'Bilingual EN + KH']].map(([code, lbl, desc]) => (
-                  <button key={code} onClick={() => setT('receipt_language', code)}
-                    className={`p-3 rounded-xl border-2 text-left ${(tpl.receipt_language || 'en') === code ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
-                    <div className={`text-sm font-medium mb-1 ${(tpl.receipt_language || 'en') === code ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{lbl}</div>
-                    <div className="text-xs text-gray-400">{desc}</div>
+                {RECEIPT_LANGUAGE_OPTIONS.map((option) => (
+                  <button key={option.value} onClick={() => setT('receipt_language', option.value)}
+                    className={`p-3 rounded-xl border-2 text-left ${(tpl.receipt_language || 'en') === option.value ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
+                    <div className={`text-sm font-medium mb-1 ${(tpl.receipt_language || 'en') === option.value ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{t(option.labelKey) || option.label}</div>
+                    <div className="text-xs text-gray-400">{t(option.descKey) || option.desc}</div>
                   </button>
                 ))}
               </div>
@@ -787,10 +787,10 @@ export default function ReceiptSettings() {
             {t('live_preview')}
           </h2>
           <div className="flex gap-1">
-            {[['en', 'EN'], ['km', 'KH'], ['both', 'Both']].map(([code, lbl]) => (
-              <button key={code} onClick={() => setT('receipt_language', code)}
-                className={`px-2.5 py-1 text-xs rounded-md font-medium ${(tpl.receipt_language || 'en') === code ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
-                {lbl}
+            {RECEIPT_LANGUAGE_OPTIONS.map((option) => (
+              <button key={option.value} onClick={() => setT('receipt_language', option.value)}
+                className={`px-2.5 py-1 text-xs rounded-md font-medium ${(tpl.receipt_language || 'en') === option.value ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                {t(option.labelKey) || option.label}
               </button>
             ))}
           </div>
@@ -810,10 +810,10 @@ export default function ReceiptSettings() {
               </h2>
               <div className="flex items-center gap-2">
                 <div className="flex gap-1">
-                  {[['en', 'EN'], ['km', 'KH'], ['both', 'Both']].map(([code, lbl]) => (
-                    <button key={code} onClick={() => setT('receipt_language', code)}
-                      className={`px-2 py-0.5 text-xs rounded font-medium ${(tpl.receipt_language || 'en') === code ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
-                      {lbl}
+                  {RECEIPT_LANGUAGE_OPTIONS.map((option) => (
+                    <button key={option.value} onClick={() => setT('receipt_language', option.value)}
+                      className={`px-2 py-0.5 text-xs rounded font-medium ${(tpl.receipt_language || 'en') === option.value ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                      {t(option.labelKey) || option.label}
                     </button>
                   ))}
                 </div>

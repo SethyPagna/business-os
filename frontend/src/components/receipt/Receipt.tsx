@@ -11,6 +11,7 @@ import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } from '../../utils/receiptLineMath'
 import { receiptTotalsFigures } from '../../utils/receiptTotals'
 import { parseReceiptTemplate } from '../receipt-settings/template'
+import { RECEIPT_LANGUAGE_OPTIONS } from '../receipt-settings/constants'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
@@ -1078,18 +1079,17 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           </span>
         </button>
         <div className="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-zinc-700">
-          {([
-            ['en', 'EN'],
-            ['km', 'KH'],
-            ['both', 'KH/EN'],
-          ] as Array<[LanguageMode, string]>).map(([code, text]) => (
+          {RECEIPT_LANGUAGE_OPTIONS.map((option) => (
             <button
-              key={code}
+              key={option.value}
               type="button"
-              onClick={() => setLang(code)}
-              className={`whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === code ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
+              onClick={() => setLang(option.value)}
+              aria-label={t?.(option.labelKey) || option.label}
+              title={t?.(option.labelKey) || option.label}
+              className={`whitespace-nowrap rounded-md px-1.5 py-1 text-xs font-medium transition-colors sm:px-2.5 ${lang === option.value ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-zinc-600'}`}
             >
-              {text}
+              <span className="sm:hidden">{option.code}</span>
+              <span className="hidden sm:inline">{t?.(option.labelKey) || option.label}</span>
             </button>
           ))}
         </div>

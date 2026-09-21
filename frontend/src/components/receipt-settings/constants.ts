@@ -83,6 +83,19 @@ export type ReceiptFieldItem = {
 
 type TranslateReceiptLabel = (key: string, fallback?: string) => string
 
+// Receipt language chooser, shared by the Receipt Settings cards and preview
+// pills and by the printable receipt's own switcher so every surface shows the
+// same keyed (Khmer-capable) labels. `label`/`desc` are the English fallbacks
+// the packs carry: t() returns the bare key until the lazy pack resolves.
+// `code` is the ISO-style badge the printable receipt's toolbar shows below
+// `sm` (same badge as the app-language toggle) so that row stays one line on
+// a phone.
+export const RECEIPT_LANGUAGE_OPTIONS = [
+  { value: 'en', labelKey: 'english', label: 'English', descKey: 'receipt_language_en_desc', desc: 'English only', code: 'EN' },
+  { value: 'km', labelKey: 'khmer', label: 'Khmer', descKey: 'receipt_language_km_desc', desc: 'Khmer only', code: 'KM' },
+  { value: 'both', labelKey: 'both', label: 'Both', descKey: 'receipt_language_both_desc', desc: 'Bilingual EN + KH', code: 'EN/KM' },
+] as const
+
 export const DEFAULT_TEMPLATE: ReceiptTemplate = {
   font_family: 'monospace',
   font_size: 12,
