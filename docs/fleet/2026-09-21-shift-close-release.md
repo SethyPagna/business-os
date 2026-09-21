@@ -331,6 +331,102 @@ first: `origin/main` and `origin/codex/supplier-settlement-20260918` both at
   in Khmer when the app language is Khmer.
 - Previous production: `ee226065` / `d6851e03-5548-488a-8fc7-28720c2da15e`.
 
+## 22 September checkpoint — carry-over shift close, Telegram sections, test repairs
+
+Ten commits on the tip, each one lane, each reviewed by the coordinator with a
+rerun of the lane's tests, a simulated council pass (product, security, debloat,
+dead-code, free/paid) and at least one refutation attempt.
+
+- **Yesterday-open-shift trap — FIXED (`9335232b`, `77b740c1`, `4f932d49` Worker; `b3ccd9a8`, `db2158d7`, `4d1bb37f` POS).**
+  Owner ruling applied: the daily prompt stays; nothing closes a shift on a
+  timer; no fabricated closing time. `GET /api/shifts/current` gains one
+  additive key, `previous_open_shift` (the OLDEST still-open, uncancelled,
+  uncontinued shift from an earlier business date for the same scope, account
+  and branch; no reconciliation; `77b740c1` corrected the first cut's newest-first
+  order, which the interval guard could only refuse with a 409 while an older day
+  was open; the test drains two stale days oldest to newest with a DESC
+  discriminator), read by a second query beside the unchanged
+  today-only `readCurrent`. The non-dismissible registration modal is now two
+  steps in one modal: close the earlier shift first (fact strip, required
+  closing time prefilled to now, the shared count fields, `closeShiftById` with
+  an explicit `closed_at`) or "Open today's shift instead" (a step switch, not
+  a close). With today already registered, the POS header offers the same close
+  beside End Shift whenever the earlier row is closable (the coordinator widened
+  the implementer's `!canCloseCurrent` gate, which had made the row unreachable
+  once today's shift was open). The live current-day close still sends no
+  `closed_at` (`ae45e101`). Ordering rule surfaced to the cashier: once today's
+  shift is open, the Worker refuses a carry-over close stamped after that
+  opening (409, verbatim in the toast). Four keys per pack. Not changed, noted:
+  `shop_wide` rows owned by someone else render the locked reason (pre-existing
+  `canMutateShift` inconsistency); a carry-over on another branch is visible
+  only from that branch's POS or the Shifts popup; a mistaken carry-over close
+  is corrected through amend, not reopen. One shared `shiftLocalDateTimeFromMs`
+  replaced the Shifts popup's Intl copy. The first verifier pass on `b3ccd9a8`
+  found the header prefill always refused once today's shift was open (D1), no
+  `pendingShiftMutation` replay parity with an unknown outcome shown as a red
+  toast (D2), two identical buttons (D4), the form implemented twice (D5) and the
+  ORDER BY unpinned (D6). `db2158d7` folds both entry points onto one
+  `useCarryOverClose` hook and one `CarryOverCloseFields` body (D2, D5), seeds
+  the header prefill at min(now, today's opened_at − 60 s) (D1), and gives the
+  header an amber button naming the earlier day (D4); `77b740c1` pins and
+  corrects the order (D6). The carry-over test now executes the component:
+  prefill, submitted body, toast and frozen replay, 83 checks. The second
+  verifier pass on `db2158d7` (Opus, read-only) re-proved D1, D2, D4, D5 and D6
+  with reverted-fix controls and found that the D1 seed and the D6 order did not
+  compose (D7, high): the POS seeded against today's opening while the Worker's
+  interval guard binds against the segment opened right after the offered row,
+  so with two or more stale days the default press was refused with 409 and the
+  hint named the wrong rule. Root cause, fixed at the source: `GET /current` now
+  also returns `previous_open_close_before`, the bound computed by the same
+  `readAdjacentShift` the guard uses (`4f932d49`), and the POS seeds
+  min(now, bound − 60 s), clamped to the row's own opening (D9), shows the bound
+  and the acting username on the fact strip (D10), and the hint states the real
+  rule in both packs (`4d1bb37f`). D8 (medium): admin-exempt users never
+  received the carry-over row although they are the only ones who can close a
+  foreign shop-wide one; the read is now unconditional, so the header button
+  surfaces it for admins while their registration exemption is unchanged. D11
+  (low, observation): End Shift keeps its own replay read because its body
+  genuinely differs (no `closed_at`); left as is. The third pass (Opus, read-only)
+  re-proved D7, D8, D9 and D10 on `4d1bb37f` with the old seed as positive control
+  (409 on every multi-day drain, 200 with the bound), showed the sub-minute residue
+  is unreachable under the per-day unique indexes of 0123, and found: D12 (medium)
+  the Shifts popup's historic close still seeds from the clock and meets the same
+  409 (pre-existing since `3f9a6b56`, 10 September; sibling-surface lane in
+  progress, chip `task_40e6bb0a`); D13 (low) the bound query scans
+  `shift_sessions` on `opened_at` without an index (runs only when a stale row
+  exists; 20 rows in production; index migration if the table grows); D14 (low)
+  the hint no longer warns that today's End Shift is refused while a stale row is
+  open (the amber close button beside End Shift is the remedy); D15 the POS half
+  must not ship without the Worker half (this checkpoint ships both). Verdict:
+  every claim made by 4f932d49 and 4d1bb37f holds under execution — D7, D8, D9/[O2] and D10 are genuinely fixed, with positive controls proving the probes and the tests discriminate — but the lane leaves one sibling surface, ShiftHistoryModal, still seeding a historical close from the bare clock (D12, pre-existing, now its own lane).
+  Production facts (read-only D1, 22 September): `shift_scope_mode = shop_wide`,
+  `shift_admin_exempt = true`, 20 shift rows, 0 open, 0 stale-open. Under
+  `shop_wide` the carry-over query walks `idx_shift_sessions_business_date`
+  with a correlated subquery (20 rows today, one more per day); revisit with an
+  index only if the table grows by orders of magnitude. **Follow-up registered:**
+  under `shop_wide` a stale row left open by another cashier is shown locked and
+  today's End Shift then fails with the pre-existing "Opening time overlaps the
+  previous shift segment" 409; `canMutateShift` is owner-or-admin while the
+  setting's own hint promises any staff member can close a shop-wide shift. That
+  widening is an owner decision (chip `task_4c313434`), not part of this lane.
+- **Telegram `/stock` and `/inventory` — DONE (`8d4db70e`):** numbered, ruled
+  sections through the existing helpers and labels; `telegram_help_paragraph`
+  checked sentence by sentence against current behaviour and left as is.
+- **Three baseline Worker reds — REPAIRED, test-only (`41bc3abe`):** the two
+  dated-stock-count harnesses flattened `db.batch()` results and dropped the
+  row id; `test-reset-products` built its schema from the unapplied 0185–0191
+  migrations, whose 0188 retirement trigger correctly refuses the reset route's
+  member delete. **Reset blocker recorded:** before 0188 is ever applied to
+  production the reset route must retire `transfer_operation_members` through
+  that kernel. Five more harnesses with the same flattening repaired
+  (`91e2f69b`); six named files already passed raw results through. An independent
+  audit (Sonnet, read-only) then found the same dormant shim in four sibling
+  harnesses; repaired the same way (`2d95bfc9`), closing the class in the tree.
+- **swShellContent** root-caused and repaired earlier today (`54926130`).
+- **Gates:** frontend on `4d1bb37f` **test:utils: 514 passed, 0 red of 514 executed files (0 skipped; 338273 ms)**, `verify:i18n` and
+  `build` exit 0 — the first fully green frontend chain of this program.
+  Worker gate on `4d1bb37f`: `tsc --noEmit` exit 0; 496 of 498 `scripts/test-*.cjs` green; `test-queue-fallback-native.cjs`, `test-record-orphans-native.cjs` red in the sweep, green standalone (workerd contention while the frontend chain ran).
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300

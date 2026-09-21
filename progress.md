@@ -53,7 +53,18 @@ c5b20a8066b8, frontend hash f1187a522235752b; no remote migration; smoke green.
 swShellContent red root-caused (test-only): CRLF sw.js made the fixture's guard-removal
 needle a silent no-op; source normalised to LF and the needle asserted present before
 replacing; green five of five, control fails fast.
-Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
+Yesterday-open-shift trap FIXED (9335232b, 77b740c1, 4f932d49 Worker; b3ccd9a8,
+db2158d7, 4d1bb37f POS): /current adds previous_open_shift (oldest earlier open day
+first, the only order the interval guard lets drain) and previous_open_close_before (the
+guard's own bound, so the POS prefill is always accepted); the registration modal closes
+it first (explicit closing time) or opens today's; the POS header offers the same close
+through one shared form with retry-replay parity; admins see the row too; daily prompt
+unchanged.
+Telegram /stock and /inventory sectioned (8d4db70e). Three baseline Worker reds repaired
+as harness defects (41bc3abe) plus five more harnesses (91e2f69b) and four
+dormant siblings found by audit (2d95bfc9). Gates: frontend on
+4d1bb37f 514 passed, 0 red of 514 executed files (0 skipped; 338273 ms), i18n/build 0; Worker tsc 0, 496/498 green (test-queue-fallback-native.cjs, test-record-orphans-native.cjs contention, green standalone).
+Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 
 ## Product actor protection integrated; adjustment atomicity in review — September 21

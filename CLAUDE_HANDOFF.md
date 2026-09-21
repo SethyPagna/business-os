@@ -44,8 +44,18 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   Settings cards, preview pills and printable receipt switcher with keyed labels
   and EN / KM / EN/KM codes below `sm`. Deployed (Paid) as Worker `0093be5b`,
   live revision `c5b20a8066b8`.
-- Yesterday-open-shift trap: `readCurrent` is today-only, so a shift left open
-  yesterday cannot be closed from POS. Needs an owner ruling.
+- Yesterday-open-shift trap FIXED (`9335232b`, `77b740c1`, `4f932d49` Worker;
+  `b3ccd9a8`, `db2158d7`, `4d1bb37f` POS): `GET /current` carries
+  `previous_open_shift` (oldest earlier open day first) and
+  `previous_open_close_before` (the interval guard's own bound); the POS
+  registration modal offers to close it first (explicit closing time via
+  `closeShiftById`, prefilled a minute before that bound) or open today's shift;
+  the header offers the same close through one shared hook with
+  `pendingShiftMutation` replay; admin-exempt users receive the row too.
+  `readCurrent` and the daily prompt are unchanged.
+- Reset blocker: migration 0188's retirement trigger refuses the reset route's
+  `transfer_operation_members` delete; wire the retirement kernel into the
+  route before applying 0185–0191.
 - Reset lifecycle blockers unchanged; destructive reset stays disabled.
 - Downloads cleanup done: 300 worktrees archived then removed, plain folders and
   loose files moved to `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/`; only
