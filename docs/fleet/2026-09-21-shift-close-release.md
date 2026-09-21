@@ -259,6 +259,31 @@ both by default.
 - Not in this lane: `telegram_help_paragraph` "switches" wording untouched;
   `/stock` and `/inventory` keep the single-block layout.
 
+### Deployment — DONE (Paid), 21 September 2026 17:11Z
+
+Deployed from the isolated worktree `C:/Users/mrkl6/Downloads/bos-deploy-20260922`
+(detached at `ee226065`, tracked tree clean after restoring the build's
+line-ending churn on the `frontend/public` trio, Worker typecheck exit 0, frontend
+built from that tip, Paid and Free dry-runs exit 0 with a clean stamp) with
+`npm run deploy` (wrangler.toml, Paid) under the owner's standing checkpoint
+authorization. No `deploy:full`, `migrate:remote` or `secrets:sync`; the unapplied
+migrations stay unapplied by design. Pushed first: `origin/main` and
+`origin/codex/supplier-settlement-20260918` both at `ee226065`.
+
+- Source: `ee226065610becba09d0fe8f3fa2bd76f8c55f86` (code tip `22554ff6`; `ee226065`
+  is the docs record on top).
+- Worker version: `d6851e03-5548-488a-8fc7-28720c2da15e`; live `/api/runtime/version`:
+  revision `ee226065610b`, hash `e9ef43ac6cbe0809`, built `2026-09-21T17:10:56.699Z`,
+  tier `paid`. Startup 36 ms; exit 0.
+- Frontend: `business-os-build.json` revision `ee226065610b`, hash `9cde5f6b800bd51b`,
+  built `2026-09-21T17:09:14.950Z`. 210 assets uploaded (111 already present).
+- Live smoke (browser pane, signed out): admin shell renders the login screen with
+  only the expected 401 session probes in the console; public storefront renders
+  About/contact. No sign-in, no transaction, no shift touched. The owner's remaining
+  checks: a signed-in shift report on Telegram in the chosen language, and the
+  Settings → "Report language" row.
+- Previous production: `80f379ff` / `ce056cc0-ceba-44b0-b42c-177c7aa41247`.
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300

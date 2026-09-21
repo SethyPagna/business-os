@@ -43,6 +43,8 @@ Gates on 22554ff6: frontend 511 passed, 1 red of 512 executed files (0 skipped; 
 to HEAD, chip task_e8f6d763), i18n and build green; Worker tsc 0, 492/497 green,
 reds: the three disclosed baseline files (dated-stock-count apply/decisions, reset-products)
 plus product-conflict-action apply/remove native, both green standalone (contention).
+Deployed (Paid) 17:11Z from ee226065: Worker d6851e03-5548-488a-8fc7-28720c2da15e, live
+revision ee226065610b, frontend hash 9cde5f6b800bd51b; no remote migration; smoke green.
 Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

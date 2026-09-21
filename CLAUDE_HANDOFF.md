@@ -36,7 +36,8 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   sections and rule dividers; `telegram_language` setting (both/en/km, default
   both) in Settings → "Report language". `swShellContent.test.ts` is red in this
   environment only (Playwright navigation timeout, sources identical; chip
-  `task_e8f6d763`).
+  `task_e8f6d763`). Deployed (Paid) as Worker `d6851e03`, live revision
+  `ee226065610b`.
 - Yesterday-open-shift trap: `readCurrent` is today-only, so a shift left open
   yesterday cannot be closed from POS. Needs an owner ruling.
 - Reset lifecycle blockers unchanged; destructive reset stays disabled.
