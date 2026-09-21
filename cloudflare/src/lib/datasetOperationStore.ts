@@ -50,7 +50,7 @@ const live = `EXISTS(SELECT 1 FROM dataset_operation_current_principals p
  AND EXISTS(SELECT 1 FROM system_flags m WHERE m.key='maintenance' AND m.value=? AND CASE WHEN json_valid(m.value)
  THEN json_extract(m.value,'$.mode')='restore' AND json_extract(m.value,'$.token')=o.maintenance_token ELSE 0 END)
  AND EXISTS(SELECT 1 FROM system_flags g WHERE g.key='business_dataset_generation' AND CASE WHEN json_valid(g.value)
- THEN json_extract(g.value,'$.generation')=o.dataset_generation ELSE 0 END)
+ THEN json_extract(g.value,'$.generation')=COALESCE((SELECT t.generation_after FROM dataset_operation_generation_transitions t WHERE t.operation_id=o.id),o.dataset_generation) ELSE 0 END)
  AND EXISTS(SELECT 1 FROM dataset_operation_head h WHERE h.id=1 AND h.operation_id=o.id AND h.epoch=o.epoch)`
 
 export async function beginDatasetOperation(db: D1Database, input: DatasetActor & {
@@ -141,5 +141,57 @@ export async function executeDatasetChunk(db: D1Database, input: DatasetChunk, m
   batch.push(db.prepare(`UPDATE dataset_operations SET phase=?,cursor_json=?,revision=revision+1,status=? WHERE id=?`).bind(input.nextPhase, after, input.final ? 'completed' : 'active', input.operationId))
   batch.push(db.prepare('DELETE FROM dataset_operation_fence WHERE id=1'))
   await db.batch(batch)
+  return JSON.parse(response)
+}
+
+/** Private fixed transition, not arbitrary control SQL. Required coordinator
+ * order: archive all transfer evidence / retire live runs, rotate, then perform
+ * bounded business deletes. No principal destruction or maintenance release.
+ * Completion anti-joins need measured/indexed workload gates before route use. */
+export async function transitionDatasetGeneration(db: D1Database, input: DatasetPosition & {
+  nextPhase: string; nextCursor: unknown
+}): Promise<unknown> {
+  input = { ...input }
+  actor(input)
+  for (const value of [input.operationId, input.epoch, input.phase, input.nextPhase]) text(value)
+  if (!Number.isSafeInteger(input.sequence) || input.sequence < 0) throw new Error('Invalid transition position')
+  const before = json(input.cursor, 4096), after = json(input.nextCursor, 4096)
+  // UUIDv8-shaped deterministic identity, not a secret. Domain and server-minted
+  // immutable epoch make the same request plan stable after a lost acknowledgement.
+  const hash = await digest('dataset-generation-transition-v1:' + input.epoch)
+  const generation = `${hash.slice(0,8)}-${hash.slice(8,12)}-8${hash.slice(13,16)}-a${hash.slice(17,20)}-${hash.slice(20,32)}`
+  const planDigest = await digest(json({ kind: 'generation-transition-v1', epoch: input.epoch, sequence: input.sequence,
+    phase: input.phase, before, nextPhase: input.nextPhase, after, generation }, 16384))
+  const maintenance = await maintenanceSnapshot(db)
+  const ownerParams = [input.operationId, input.epoch, input.actorId, input.organizationId, maintenance]
+  const owned = `o.id=? AND o.epoch=? AND o.actor_id=? AND o.organization_id IS ? AND ${live}`
+  const replay = await db.prepare(`SELECT c.plan_digest,c.response_json FROM dataset_operation_chunks c JOIN dataset_operations o ON o.id=c.operation_id
+    WHERE ${owned} AND c.sequence=?`).bind(...ownerParams, input.sequence).first<{ plan_digest: string; response_json: string }>()
+  if (replay) {
+    if (replay.plan_digest !== planDigest) throw new DatasetOperationConflict('Transition retry differs from recorded plan')
+    return JSON.parse(replay.response_json)
+  }
+  const position = `${owned} AND o.status='active' AND o.revision=? AND o.phase=? AND o.cursor_json=?`
+  const params = [...ownerParams, input.sequence, input.phase, before]
+  const response = json({ operationId: input.operationId, epoch: input.epoch, sequence: input.sequence, phase: input.nextPhase,
+    cursor: JSON.parse(after), status: 'active', generation }, 16384)
+  // No caller-supplied SQL or split prefix; all nine statements commit together.
+  await db.batch([
+    db.prepare(`INSERT INTO dataset_operation_fence VALUES(1,CASE WHEN EXISTS(SELECT 1 FROM dataset_operations o WHERE ${position})
+      AND NOT EXISTS(SELECT 1 FROM dataset_operation_generation_transitions WHERE operation_id=?)
+      AND (SELECT complete FROM dataset_operation_retirement_complete)=1 THEN 1 ELSE 0 END,?,?,?)`)
+      .bind(...params, input.operationId, input.operationId, input.epoch, input.sequence),
+    db.prepare(`INSERT INTO transfer_run_lifecycle_guard(id,token,kind,generation_before,generation_after)
+      SELECT 1,epoch,kind,dataset_generation,? FROM dataset_operations WHERE id=?`).bind(generation, input.operationId),
+    db.prepare('INSERT INTO dataset_operation_chunks VALUES(?,?,?,?,?,?,?,?,?)')
+      .bind(input.operationId, input.sequence, planDigest, input.phase, before, input.nextPhase, after, 0, response),
+    db.prepare(`INSERT INTO dataset_operation_generation_transitions(operation_id,sequence,epoch,generation_before,generation_after)
+      SELECT id,?,epoch,dataset_generation,? FROM dataset_operations WHERE id=?`).bind(input.sequence, generation, input.operationId),
+    db.prepare("UPDATE system_flags SET value=json_object('generation',?),updated_at=CURRENT_TIMESTAMP WHERE key='business_dataset_generation'").bind(generation),
+    db.prepare(`UPDATE dataset_operation_fence SET ok=CASE WHEN EXISTS(SELECT 1 FROM dataset_operations o WHERE ${position}) THEN 1 ELSE 0 END WHERE id=1`).bind(...params),
+    db.prepare("UPDATE dataset_operations SET phase=?,cursor_json=?,revision=revision+1 WHERE id=?").bind(input.nextPhase, after, input.operationId),
+    db.prepare('DELETE FROM transfer_run_lifecycle_guard WHERE id=1 AND token=?').bind(input.epoch),
+    db.prepare('DELETE FROM dataset_operation_fence WHERE id=1'),
+  ])
   return JSON.parse(response)
 }
