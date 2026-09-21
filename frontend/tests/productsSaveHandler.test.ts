@@ -40,6 +40,7 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
   const guard = { current: false }
   let actor = 7
   const authority = { current: { key: 'initial', revision: 0 } }
+  const formIdentity = { current: { id: options.edit ? 12 : null, revision: 0 } }
   const user = { id: 7, name: 'Staff', role_code: 'staff', permissions: { product_cost_edit: options.granted === true } }
   const api = async (kind: string, payload: Row) => {
     calls.push({ kind, payload })
@@ -48,7 +49,7 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     return options.failure === 'response' ? { success: false, error: 'write refused' } : { success: true, id: 12 }
   }
   const scope = {
-    user, isActive: true, can: () => true, productSaveAuthorityRef: authority,
+    user, isActive: true, can: () => true, productSaveAuthorityRef: authority, productSaveFormRef: formIdentity,
     captureProductWriteGuard: (extra?: () => void) => { const captured = actor; return () => { if (actor !== captured) throw new Error('stale actor'); extra?.() } },
     selected: options.edit ? { id: 12, name: 'Before' } : null,
     omitUnauthorizedCatalogCosts, beginSingleAction, finishSingleAction, productSaveInFlightRef: guard,
@@ -81,7 +82,18 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     console: { error() {}, warn() {} },
   }
   const save = new Function(...Object.keys(scope), javascript)(...Object.values(scope)) as (form: Row) => Promise<void>
-  return { save, guard, calls, notices, history, switchActor: () => { actor = 99 }, revoke: () => { authority.current.revision++ } }
+  // Re-run the actual render authority block, retaining React's ref objects.
+  const renderSource = source.slice(source.indexOf('  const productSaveAuthority ='), source.indexOf('  // A product a person just saved'))
+  const renderJs = ts.transpileModule(renderSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const render = (id: number | null) => {
+    let refIndex = 0
+    new Function('user', 'isActive', 'selected', 'can', 'canEditCosts', 'useRef', 'useEffect', renderJs)(
+      user, true, id == null ? null : { id }, () => true, options.granted === true,
+      () => [authority, formIdentity][refIndex++], () => {},
+    )
+  }
+  render(options.edit ? 12 : null)
+  return { save, guard, calls, notices, history, closeForm: () => render(null), switchActor: () => { actor = 99 }, revoke: () => { authority.current.revision++ } }
 }
 const form = { name: 'After', cost_price_usd: 3.1234, cost_price_khr: 12345.6789, purchase_price_usd: 4.5678, purchase_price_khr: 22222.3333, selling_price_usd: 9.12 }
 for (const edit of [false, true]) {
@@ -145,3 +157,20 @@ await staleRefresh.save(form)
 staleRefresh.switchActor(); pendingRefresh.resolve(); await tick()
 assert.equal(staleRefresh.history.length, 0, 'late enrichment must not publish old-account undo history')
 console.log('PASS delayed product uploads, committed response and enrichment reject changed account/permission')
+
+const normalRefresh = deferred(), normalClose = fixture({ edit: true, holdRefresh: normalRefresh })
+await normalClose.save(form)
+normalClose.closeForm()
+normalRefresh.resolve(); await tick()
+assert.equal(normalClose.notices.length, 1)
+assert.equal(normalClose.history.length, 1, 'normal successful close must retain delayed edit undo history')
+const revokedRefresh = deferred(), revoked = fixture({ edit: true, holdRefresh: revokedRefresh })
+await revoked.save(form)
+revoked.closeForm(); revoked.revoke(); revokedRefresh.resolve(); await tick()
+assert.equal(revoked.history.length, 0, 'post-close permission loss must still suppress enrichment')
+const formUpload = deferred(), changedForm = fixture({ edit: true, holdUpload: formUpload })
+const formSave = changedForm.save({ ...form, image_gallery: ['data:image/png;base64,AA=='] })
+await tick(); changedForm.closeForm(); formUpload.resolve()
+await assert.rejects(formSave)
+assert.equal(changedForm.calls.some(call => call.kind === 'update'), false, 'form change before commit must still block write')
+console.log('PASS actual render normal-close enrichment, post-close revocation and pre-commit form fencing')
