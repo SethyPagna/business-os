@@ -99,6 +99,9 @@ export type ShiftRow = {
 type ShiftDbRow = ShiftRow & { has_reopened_child: number; amendment_count: number }
 export type ShiftCapabilities = { can_edit: boolean; can_close: boolean; can_reopen: boolean; can_cancel: boolean }
 export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities; amendment_count: number }
+/** A presented row plus the close bound (`closeBoundFor` below): the opening of
+ *  the segment that follows an OPEN row, null on a row that cannot be closed. */
+export type ShiftPresentedRow = ShiftResponseRow & { close_before: string | null }
 
 /**
  * ---- The EDITED badge: how many CORRECTIONS this shift record carries ----
@@ -345,6 +348,38 @@ function responseShift(user: SessionUser, row: ShiftDbRow): ShiftResponseRow {
     can_cancel: canManageShifts(user) && !cancelled && !row.has_reopened_child,
   } }
 }
+/**
+ * ---- The instant a close of THIS row must not pass ----------------------
+ *
+ * A row that is still open can be closed from the Shifts popup as well as
+ * from POS, and `intervalError` refuses a closing time later than the opening
+ * of the segment that FOLLOWS it (409 "Closing time overlaps the next shift
+ * segment."). The popup's close form used to prefill the current minute, so
+ * for any stale open row with a later segment -- one forgotten day plus
+ * today, or two forgotten days -- the default press was always refused.
+ *
+ * The bound is read with `readAdjacentShift(..., 'next')`, the very query the
+ * close is validated against, so the prefill and the check cannot disagree.
+ * `/current` already states this bound beside the ONE carry-over row it
+ * offers the POS (see that handler). This one rides on the row itself,
+ * because the Shifts popup closes rows `/current` never names.
+ *
+ * The CLOSED majority of a list costs nothing: a closed or cancelled row
+ * cannot be closed at all, so it answers null without touching D1.
+ */
+async function closeBoundFor(db: D1Compat, shift: ShiftRow): Promise<string | null> {
+  if (shift.closed_at || shift.cancelled_at) return null
+  return (await readAdjacentShift(db, shift, shift.opened_at, 'next'))?.opened_at ?? null
+}
+/** `responseShift` plus that bound -- the presented row every surface which
+ * OFFERS a close returns (the list, the record read and its segments, and the
+ * write responses the popup replaces its selected row from), so none of them
+ * can lose it and leave the next close prefilled with a moment the Worker
+ * refuses. */
+async function presentShift(db: D1Compat, user: SessionUser, row: ShiftDbRow): Promise<ShiftPresentedRow> {
+  const shift = responseShift(user, row)
+  return { ...shift, close_before: await closeBoundFor(db, shift) }
+}
 function batchChanges(value: unknown): number {
   return Number((value as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0)
 }
@@ -569,12 +604,12 @@ async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow): Promise
   if (!canManageShifts(user)) return null
   try { return await loadShiftFigures(env, shift, Date.now()) } catch { return null }
 }
-type ReconciledShift = ShiftResponseRow & {
+type ReconciledShift = ShiftPresentedRow & {
   reconciliation: ShiftReconciliation | null
   figures?: ShiftFigures | null
 }
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
-  const shift = responseShift(user, row)
+  const shift = await presentShift(getDb(env), user, row)
   const [reconciliation, figures] = await Promise.all([
     reconciliationFor(env, user, shift),
     figuresFor(env, user, shift),
@@ -699,7 +734,11 @@ app.get('/', async (c) => {
     `).all<ShiftDbRow & { pagination_total: number; pagination_page: number }>({ ...params, page, pageSize })
     const total = Number(rows[0].pagination_total)
     const effectivePage = Number(rows[0].pagination_page)
-    const shifts = rows.filter((row) => row.id != null).map(({ pagination_total: _total, pagination_page: _page, ...shift }) => responseShift(user, shift))
+    // The close bound is attached here rather than in SQL: only the OPEN rows
+    // of a page pay for it (closeBoundFor answers null on the rest without a
+    // query), and it comes from the same helper the close is validated with.
+    const shifts = await Promise.all(rows.filter((row) => row.id != null)
+      .map(({ pagination_total: _total, pagination_page: _page, ...shift }) => presentShift(db, user, shift)))
     return c.json({ shifts, scope: visibility.scope,
       page: effectivePage, page_size: pageSize, total, has_more: effectivePage * pageSize < total })
   }
@@ -709,7 +748,7 @@ app.get('/', async (c) => {
     db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE ${filters} AND (closed_at IS NOT NULL OR cancelled_at IS NOT NULL)
       ORDER BY business_date DESC, opened_at DESC, id DESC LIMIT @limit`).all<ShiftDbRow>(params),
   ])
-  return c.json({ shifts: [...openShifts, ...closedShifts].map((shift) => responseShift(user, shift)), scope: visibility.scope })
+  return c.json({ shifts: await Promise.all([...openShifts, ...closedShifts].map((shift) => presentShift(db, user, shift))), scope: visibility.scope })
 })
 
 app.get('/:id/history', async (c) => {
@@ -739,7 +778,7 @@ app.get('/:id/history', async (c) => {
     ORDER BY created_at ASC, id ASC`).all(idParams)
   return c.json({
     shift: await reconciledShift(c.env, user, shift),
-    segments: segments.map((segment) => responseShift(user, segment)),
+    segments: await Promise.all(segments.map((segment) => presentShift(db, user, segment))),
     amendments,
   })
 })
@@ -948,7 +987,7 @@ app.post('/:id/cancel', async (c) => {
   if (!cancelled) return c.json({ error: 'Cancelled shift could not be read back.' }, 500)
   const report = sendTelegramShiftReport(c.env, cancelled.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
-  return c.json({ shift: responseShift(user, cancelled), cancelled: true }, 200)
+  return c.json({ shift: await presentShift(db, user, cancelled), cancelled: true }, 200)
 })
 
 app.post('/:id/reopen', async (c) => {
@@ -979,7 +1018,7 @@ app.post('/:id/reopen', async (c) => {
   const reopened = continuation.shift
   const report = sendTelegramShiftReport(c.env, reopened.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
-  return c.json({ shift: responseShift(user, reopened), reopened_from_shift_id: parent.id }, 201)
+  return c.json({ shift: await presentShift(db, user, reopened), reopened_from_shift_id: parent.id }, 201)
 })
 
 app.patch('/:id', async (c) => {
@@ -1099,7 +1138,7 @@ app.patch('/:id', async (c) => {
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, saved.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
-  return c.json({ shift: responseShift(user, saved) }, 200)
+  return c.json({ shift: await presentShift(db, user, saved) }, 200)
 })
 
 export default app
