@@ -14,6 +14,27 @@ Baseline2489fd7a. This document is a plan, not completion or production evidence
 
 ## Ordered implementation and gates
 
+September21 transition refinement: source dependencies through73fb3da1 integrated
+locally; five migration/native tests+types10091 passed. Combined journal test42034
+exposed an invalid fixture overwrite of protected generation; correction required.
+No remote migration. Reviewed transition1017defe requires exact permanent receipt
+and member evidence before rotation while live standalone rows remain intact, then
+guarded paged deletion. Preserve current sales-reset deletion semantics. One private
+atomic transition uses a stable domain-separated hash of the server-minted operation
+epoch for its target generation, immutable receipt plus existing chunk/progress, and
+0186 consumed-generation protection. No second journal or generic SQL endpoint.
+
+Council (one reviewer simulating five perspectives): Skeptic rejects vacuous proofs
+after partial deletion; Engineer requires rotation/receipt/progress in one transaction;
+Expansionist requests future cross-database crash coverage; Outsider requires clear
+archived/rotated/deleted states; Executor tests nonempty archive-to-deletion lost-ACK
+and crash boundaries. Cross-critique: A's failure needs explicit ordering; B needs
+complete evidence beyond empty anti-joins; C cannot certify absent external phases;
+D requires durable state; E must include real triggers, not only mocks. Chairman:
+implement the ordered private transition and fixture correction locally; biggest
+risk remains unbounded scan work. Native tests and indexed workload evidence gate
+route enablement; no Free-capacity claim from statement counts.
+
 Step1 checkpoint: integratedefcfa855/d2adbf04, root6325 terminal0 and independent
 1a391746 pass.11pure checks, native acquisition/progress/release races with12corrupt
 states, five actualHono route cases and Worker types. Exactraw observation revision

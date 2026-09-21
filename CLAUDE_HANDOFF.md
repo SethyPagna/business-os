@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL, PUSH HELD:** Transfer foundations792683cd..73fb3da1 integrated; root10091 five scripts+types PASS. Combined journal schema42034 RED because fixture overwrites0186-protected generation. Writer adapting fixture through legitimate lifecycle, not weakening triggers, alongside approved0191 atomic transition. Council1017defe conditional design only. No remote migration/deployment; production85a3e752 unchanged. Read progress.md for exact remaining gates.
+
 > **LATEST LOCAL:**3c2e9b95 journal foundation integrated exactly fromb436b9bf, independentb50b3542 boundedPASS. Root14714 native postmigration-schema/typecheck terminal0; earlier81268 process crash retained. No remote0190 or route enablement. Plan64642270 next actual sales-reset slice needs atomic generation+retirement+journal transition, not separate rotation. Append-only0191 proposal assigned. Production85a3e752/0bdfffc5 unchanged; full goal open.
 
 > **LATEST LIVE:**85a3e7525ef2 / Paid Worker0bdfffc5-b4a9-48a6-9db3-3c0958979f1b, hashfe29238f46ffdbe2. Deployment95421 terminal0; frontend unchangeda1ed5ca3. Separate authenticated Returns load and normal warmreload passed in460569656. No migrations/business-data writes. Full journal/transfer/reset/restore/export lifecycle remains open. See September21 maintenance-admission release record and progress.md; older status below is historical.

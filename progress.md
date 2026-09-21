@@ -1,3 +1,20 @@
+## Transfer dependencies integrated locally; combined fixture gate held — September 21
+
+Local792683cd through73fb3da1 integrate reviewed233d604d..b5abeb3a exactly; no0189.
+Root10091 terminal0: five transfer migration/native scripts plus Worker types.
+Combined journal migrated-schema42034 exits1: setup attempts INSERT/UPSERT of
+0186-protected generation. This is not waived: writer assigned fixture adaptation
+using real initialized generation/lifecycle, never disabling production triggers.
+Local chain not yet pushed pending combined gate. No remote migration/deployment.
+
+Council design1017defe (one reviewer simulating five perspectives) conditionally
+accepts archive-all/retire-runs -> atomic generation/receipt/progress -> guarded
+paged deletion. Target generation derives deterministically from immutable server
+operation epoch; no caller override. Biggest unresolved risk is global proof-query
+scan work, not statement count. Append-only0191/module/test implementation approved
+locally; native nonempty sequence/lost-ack/crash boundaries required before acceptance.
+Full routes/Free capacity/R2-staging/principal recovery remain open.
+
 ## Journal foundation integrated locally; real lifecycle wiring next — September 21
 
 Root3c2e9b95 integrates pinnedb436b9bf exactly (three files). Independentb50b3542
