@@ -47,7 +47,10 @@ assert.match(historic, /closed_at: input\.closedAt,/, 'the Shifts popup still se
 assert.match(historic, /shiftTimestampIsFuture\(input\.closedAt\)/, 'a clearly future chosen time is still refused before the network')
 
 // 3. Worker parity: one clamp, applied on close and amend.
-assert.match(worker, /const CLOCK_SKEW_TOLERANCE_MS = 5 \* 60_000/, 'tolerance is explicit')
+// One tolerance system-wide: the shifts route reuses the offline-sale window
+// exported by lib/clientTimestamp instead of redefining five minutes.
+assert.match(worker, /import \{ CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS \} from '\.\.\/lib\/clientTimestamp'/, 'tolerance is the shared client-clock window')
+assert.match(worker, /requestedMs > now \+ CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS/, 'clamp uses the shared tolerance')
 assert.match(worker, /function withinServerClock\(requestedMs: number, now: number\): number \| null/, 'one helper decides skew versus future')
 const closeRoute = section(worker, /app\.post\('\/:id\/close'/, /app\.post\('\/:id\/cancel'/)
 assert.match(closeRoute, /body\.closed_at == null \|\| body\.closed_at === '' \? new Date\(now\)/, 'a missing closed_at means the server now')
