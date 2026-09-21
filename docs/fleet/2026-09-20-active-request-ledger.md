@@ -5,6 +5,38 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+As of September 21, the current deployed source is **85a3e7525ef2**, Paid Worker
+**0bdfffc5-b4a9-48a6-9db3-3c0958979f1b**. Deployment95421 exited0; frontend
+remainsa1ed5ca3/23cc431e6e86d05e. Separate authenticated Returns load and normal
+warm reload passed in460569656. No migration or business-data write in this release.
+See `2026-09-21-maintenance-admission-release.md` for bounded evidence.
+
+| Requirement family | Current status | Outstanding gate |
+| --- | --- | --- |
+| Maintenance ownership / uncertain import admission | Deployed; native races,11 actual route cases,11 pure checks, types and independent reviews pass | Full in-flight effect fencing is separate and open |
+| Browser shell / legacy upgrade | Deployed; focused native-browser regressions and latest live Returns warm reload pass | All-device/engine upgrade cycles and runtime readback not universally proved |
+| Online-only writes / original-account recovery / cost rules | Deployed checkpoint6a31689f; see online-only release | Dataset replacement identity epoch, broader device and historical checks |
+| Dashboard/Returns/Expenses/Reports time fixes and shift comparison | Deployed scoped fixes; see admin-range and shift release records | Remaining direct date hosts and universal UI coverage |
+| Transfer run/retirement foundation | Independent source-only PASS3e326b6c; isolated | Actual route integration, backup/reset evidence preservation, complete tier budgets |
+| Dataset journal0190 | Isolated implementation; reviewf43dcbbb held on malformed maintenance acceptance | Correct shared-validator/exact-state fencing and independent native negative controls |
+| Complete Returns exports | Isolated bounded implementation | Generation/lifecycle dependencies and actual browser downloads |
+| Continuous debloat | Active AGENTS.md gate; unused loading component removed, FIFO read removed, restore discovery consolidated | Remaining candidate tracing and equivalent-behavior tests; no blanket deletion approval |
+| Free/Paid |52 configuration/queue/surface checks and both bundles pass | Real workload CPU/query/storage/daily quotas; no no-impact downgrade guarantee |
+| Remaining public/data/printing/folder work | OPEN | See retained requirements below; not closed by infrastructure tests |
+
+The checkpoint paragraphs below are **historical**, not competing current release
+claims. Their open requirements remain active unless a newer scoped record closes
+them. In particular, earlier "not deployed" labels for maintenance CAS, online-only
+writes, costs, Dashboard/Returns and shift fixes are superseded by the releases above.
+
+New journal verification caveat: a native replay attempt stopped at existing0098
+user_aliases compound-SELECT limits (writer84275 exit1). Post-migration schema tests
+must not be presented as full historical migration replay or seed-data verification.
+Historical migrations remain unchanged. AI Council review and compact UI/debloat
+acceptance rules remain mandatory for substantive decisions.
+
+### Historical checkpoint narratives
+
 September21 localefcfa855 maintenance ownership prerequisite verified root6325 and
 independent1a391746, not deployed. No migration. Larger durable reset/restore and
 transfer/export lifecycle remain open; markerCAS alone does not fence running effects.

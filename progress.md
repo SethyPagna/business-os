@@ -1,3 +1,14 @@
+## Active ledger reconciled; journal review hold retained — September 21
+
+Active-request ledger now begins with one current-status matrix and explicitly
+labels older checkpoint narratives historical, preserving every open requirement.
+Journal0190 reviewerf43dcbbb found malformed maintenance state accepted by token;
+writer is correcting it using the existing validator plus exact-state transaction
+fences instead of duplicating validation logic. Not integrated or deployed.
+Native historical migration replay84275 failed at pre-existing0098 compound SELECT;
+schema compatibility is a separate test, not a claim that historical replay passed.
+Latest production remains85a3e752/0bdfffc5. Full goal stays active.
+
 ## Maintenance/admission deployed; live warm reload passed — September 21
 
 Source85a3e7525ef2 deployed Paid Worker0bdfffc5-b4a9-48a6-9db3-3c0958979f1b,
