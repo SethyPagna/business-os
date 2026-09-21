@@ -226,6 +226,26 @@ async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ i
  * failed the business-date check on a shift the caller had every right to
  * amend. Every raw D1 timestamp goes through this before arithmetic.
  */
+/**
+ * ---- Device clocks are not the time authority ---------------------------
+ *
+ * The POS End Shift button used to stamp the closing moment with the phone's
+ * own clock and the route refused anything even one second ahead of the
+ * Worker's clock ("Closing time cannot be in the future."). A device running
+ * a few seconds fast therefore could never end its shift from POS at all,
+ * while the Shifts popup -- where the operator picks an earlier minute --
+ * still worked. Production shift 20 (2026-09-21) was closed exactly that way.
+ *
+ * A requested time within this window ahead of the server is what the client
+ * meant by "now" and is clamped to the server's now; only a time further
+ * ahead is a genuine future timestamp and is still refused. A missing
+ * closed_at on the close route means "now" and is stamped server-side.
+ */
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60_000
+function withinServerClock(requestedMs: number, now: number): number | null {
+  if (!Number.isFinite(requestedMs) || requestedMs > now + CLOCK_SKEW_TOLERANCE_MS) return null
+  return Math.min(requestedMs, now)
+}
 function utcMs(value: string): number {
   const text = value.trim()
   return Date.parse(/[zZ]|[+-]\d{2}:?\d{2}$/.test(text) ? text.replace(' ', 'T') : `${text.replace(' ', 'T')}Z`)
@@ -799,10 +819,14 @@ app.post('/:id/close', async (c) => {
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
   const expectedRevision = Number(body.expected_revision)
   if (body.expected_revision == null || !Number.isInteger(expectedRevision) || expectedRevision < 0) return c.json({ error: 'A valid expected revision is required.' }, 400)
-  const parsedClosedAt = typeof body.closed_at === 'string' ? new Date(body.closed_at) : new Date(Number.NaN)
+  const now = Date.now()
+  // Absent closed_at is the live POS close: the server stamps the moment.
+  const parsedClosedAt = body.closed_at == null || body.closed_at === '' ? new Date(now)
+    : typeof body.closed_at === 'string' ? new Date(body.closed_at) : new Date(Number.NaN)
   if (Number.isNaN(parsedClosedAt.getTime())) return c.json({ error: 'A valid closing time is required.' }, 400)
-  const closedAt = parsedClosedAt.toISOString(); const now = Date.now()
-  if (parsedClosedAt.getTime() > now) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
+  const closedAtMs = withinServerClock(parsedClosedAt.getTime(), now)
+  if (closedAtMs == null) return c.json({ error: 'Closing time cannot be in the future.' }, 400)
+  const closedAt = new Date(closedAtMs).toISOString()
   const countedUsd = countedMoney(body.closing_counted_usd); const countedKhr = countedMoney(body.closing_counted_khr)
   if (!countedUsd.ok || !countedKhr.ok) return c.json({ error: 'Closing counts must be 0 or more, or left blank.' }, 400)
   const additionalUsd = additionalMoney(body.additional_cash_usd); const additionalKhr = additionalMoney(body.additional_cash_khr)
@@ -814,7 +838,7 @@ app.post('/:id/close', async (c) => {
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
   if (expectedRevision !== shift.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
-  if (parsedClosedAt.getTime() < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
+  if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
@@ -918,10 +942,17 @@ app.patch('/:id', async (c) => {
     if (body[key] == null || body[key] === '') return null
     const parsed = new Date(String(body[key])); return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
   }
-  const openedAt = iso('opened_at', before.opened_at); const closedAt = iso('closed_at', before.closed_at)
-  if (!openedAt || closedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
+  const requestedOpenedAt = iso('opened_at', before.opened_at); const requestedClosedAt = iso('closed_at', before.closed_at)
+  if (!requestedOpenedAt || requestedClosedAt === undefined) return c.json({ error: 'Invalid shift timestamp.' }, 400)
   const now = Date.now()
-  if (utcMs(openedAt) > now || (closedAt && utcMs(closedAt) > now)) return c.json({ error: 'Shift time cannot be in the future.' }, 400)
+  const openedMs = withinServerClock(utcMs(requestedOpenedAt), now)
+  const closedMs = requestedClosedAt ? withinServerClock(utcMs(requestedClosedAt), now) : null
+  if (openedMs == null || (requestedClosedAt && closedMs == null)) return c.json({ error: 'Shift time cannot be in the future.' }, 400)
+  // Only a time the caller actually sent is re-stamped. An untouched
+  // timestamp passes through verbatim: rewriting it would register a change
+  // the operator never made, and readAdjacentShift compares the stored text.
+  const openedAt = 'opened_at' in body ? new Date(openedMs).toISOString() : requestedOpenedAt
+  const closedAt = closedMs == null ? null : 'closed_at' in body ? new Date(closedMs).toISOString() : requestedClosedAt
   if (businessDateFor(openedAt) !== before.business_date) return c.json({ error: 'Opening time must remain within the shift business date.' }, 400)
   if (before.closed_at && !closedAt) return c.json({ error: 'Closed shifts cannot be reopened.' }, 400)
   if (!before.closed_at && closedAt) return c.json({ error: 'Open shifts must be closed through the close action.' }, 400)

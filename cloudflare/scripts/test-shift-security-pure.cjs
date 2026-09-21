@@ -198,8 +198,8 @@ async function main() {
   assert.equal(historicBadRevision.status, 409, 'historic close requires the current revision')
   const currentRevision = (await ownAmendment.json()).shift.revision
   assert.equal((await call('POST', `/${id}/close`, { expected_revision: currentRevision,
-    closed_at: new Date(Date.now() + 60_000).toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })).status, 400,
-  'historic close rejects a future timestamp')
+    closed_at: new Date(Date.now() + 10 * 60_000).toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })).status, 400,
+  'historic close rejects a future timestamp beyond the device clock-skew tolerance')
   assert.equal((await call('POST', `/${id}/close`, { expected_revision: currentRevision,
     closed_at: new Date(Date.now() - 60_000).toISOString(), closing_counted_usd: 20, closing_counted_khr: 3000 })).status, 400,
   'historic close rejects a timestamp before opening')

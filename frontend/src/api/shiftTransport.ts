@@ -474,7 +474,11 @@ export async function closeShift(input: CloseShiftInput): Promise<ShiftState> {
     `shifts:close:${input.shiftId}`,
     () => shiftMutationFetch('POST', `/api/shifts/${input.shiftId}/close`, {
       expected_revision: input.expectedRevision,
-      closed_at: input.closedAt || new Date().toISOString(),
+      // The live POS close carries no closing time: the server stamps its own
+      // clock, so a device running seconds fast can no longer be refused with
+      // "Closing time cannot be in the future." An explicit closedAt (a chosen
+      // historic moment) is still sent as typed.
+      ...(input.closedAt ? { closed_at: input.closedAt } : {}),
       closing_counted_usd: closingCountedUsd,
       closing_counted_khr: closingCountedKhr,
       ...(input.additionalCashUsd !== undefined ? { additional_cash_usd: optionalShiftCount(input.additionalCashUsd, 'Additional change used (USD)') } : {}),

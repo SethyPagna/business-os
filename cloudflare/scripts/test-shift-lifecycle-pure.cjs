@@ -479,7 +479,11 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.equal((await call('PATCH', `/${retryChild.id}`, exactAmend)).status, 200)
   assert.deepEqual([auditCount(), historyCount(), sent.length], afterAmendProof)
   assert.equal((await call('PATCH', `/${retryChild.id}`, { ...exactAmend, client_request_id: 'shift-amend-stale-0001' })).status, 409)
-  const future = new Date(Date.now() + 60_000).toISOString()
+  // Ten minutes ahead: beyond the five-minute device clock-skew tolerance
+  // (routes/shifts.ts withinServerClock), so still a genuine future time.
+  // A few seconds ahead is now clamped to the server clock instead --
+  // test-shift-close-clock-skew-pure.cjs pins that side.
+  const future = new Date(Date.now() + 10 * 60_000).toISOString()
   assert.equal((await call('PATCH', `/${retryChild.id}`, { expected_revision: 1, reason: 'Future open', opened_at: future })).status, 400)
   assert.equal((await call('PATCH', `/${retryOpened.id}`, { expected_revision: 1, reason: 'Future close', closed_at: future })).status, 400)
   user = { ...user, permissions: '{}' }
