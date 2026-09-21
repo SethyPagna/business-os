@@ -8,10 +8,13 @@ const root = path.resolve(__dirname, '..')
 async function main() {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: `
     import {beginDatasetOperation,executeDatasetChunk} from './src/lib/datasetOperationStore.ts';
+    import {retireTransferRunsForDatasetChange} from './src/lib/transferRunStore.ts';
+    import {D1Compat} from './src/lib/db.ts';
     export default {async fetch(request,env){
       const input=await request.json();let batches=0;
       const db={prepare:sql=>env.DB.prepare(sql),batch:async statements=>{
         batches++;
+        if(input.rotateGeneration)await retireTransferRunsForDatasetChange(new D1Compat(env.DB),input.rotateGeneration);
         if(input.beforeBatch)await env.DB.prepare(input.beforeBatch.sql).bind(...input.beforeBatch.params).run();
         if(Number.isInteger(input.crashBoundary))statements.splice(input.crashBoundary,0,env.DB.prepare('INSERT INTO effects(actor_id,amount)VALUES(NULL,NULL)'));
         const result=await env.DB.batch(statements);
@@ -39,18 +42,26 @@ async function main() {
       const SQLite = require('better-sqlite3'), migrated = new SQLite(':memory:')
       try {
         console.log('Building actual post-migration schema in SQLite')
-        for(const file of fs.readdirSync(path.join(root,'migrations')).filter(file=>file.endsWith('.sql')&&!file.startsWith('0190_')).sort()) migrated.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
+        for(const file of fs.readdirSync(path.join(root,'migrations')).filter(file=>file.endsWith('.sql')&&file<'0185_').sort()) migrated.exec(fs.readFileSync(path.join(root,'migrations',file),'utf8'))
         // Virtual table creation recreates its own shadow tables in native D1.
         const definitions=migrated.prepare("SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN(SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'view' THEN 2 ELSE 3 END,rowid").all()
         console.log('Loading '+definitions.length+' real schema definitions into native D1')
         for(const {sql} of definitions) await db.prepare(sql).run()
       } finally { migrated.close() }
+      for(const name of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) {
+        for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8')))await db.prepare(sql).run()
+      }
       await db.prepare("INSERT INTO roles(id,name,code,permissions)VALUES(1,'Administrator','admin','{}') ON CONFLICT(id) DO UPDATE SET code='admin',permissions='{}'").run()
-    } else for (const sql of split(schema)) await db.prepare(sql).run()
+    } else {
+      for (const sql of split(schema)) await db.prepare(sql).run()
+      await db.prepare("INSERT INTO system_flags(key,value)VALUES('business_dataset_generation',?)").bind(JSON.stringify({generation:crypto.randomUUID()})).run()
+    }
     await db.prepare('CREATE TABLE effects(actor_id INTEGER NOT NULL,amount REAL NOT NULL)').run()
     const migration = fs.readFileSync(path.join(root, 'migrations/0190_dataset_operation_journal.sql'), 'utf8')
     assert.equal(migration.includes('\r'), false, 'trigger SQL must be LF-only')
     for (const sql of split(migration)) await db.prepare(sql).run()
+    const transitionMigration=path.join(root,'migrations/0191_dataset_operation_generation_transition.sql')
+    if(fs.existsSync(transitionMigration))for (const sql of split(fs.readFileSync(transitionMigration,'utf8')))await db.prepare(sql).run()
     const call = async payload => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify(payload) })
       return { status: response.status, ...await response.json() }
@@ -60,8 +71,8 @@ async function main() {
       const id = ++nextActor
       await db.prepare("INSERT INTO users(id,organization_id,created_at,username,role_id,permissions,is_active,deleted_at,password,name) VALUES(?,NULL,?,?,1,?,1,NULL,?,'Admin')").bind(id, '2026-09-21T00:00:00Z', 'admin'+id, '{}', 'password').run()
       await db.prepare('INSERT INTO system_flags(key,value)VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('maintenance', JSON.stringify({ mode: 'restore', token: 'owner'+id, backupKey:'backup.json',startedAt:'2026-09-21T00:00:00Z',startedBy:'admin',updatedAt:'2026-09-21T00:00:00Z',phase:'inserting' })).run()
-      await db.prepare('INSERT INTO system_flags(key,value)VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind('business_dataset_generation', JSON.stringify({ generation: 'dataset'+id })).run()
-      return { actorId:id,organizationId:null,requestId:'request-'+id,kind:'restore',source:{key:'backup.json',version:'v1',sha256:'a'.repeat(64)},request:{scope:'all'},maintenanceToken:'owner'+id,datasetGeneration:'dataset'+id,initialPhase:'rows' }
+      const generation=JSON.parse((await db.prepare("SELECT value FROM system_flags WHERE key='business_dataset_generation'").first()).value).generation
+      return { actorId:id,organizationId:null,requestId:'request-'+id,kind:'restore',source:{key:'backup.json',version:'v1',sha256:'a'.repeat(64)},request:{scope:'all'},maintenanceToken:'owner'+id,datasetGeneration:generation,initialPhase:'rows' }
     }
     async function begin(value) {
       const result = await call({ mode:'begin', value }); assert.equal(result.status,200,result.error); return result.result
@@ -92,11 +103,13 @@ async function main() {
         await db.prepare('INSERT INTO users('+Object.keys(row).join(',')+')VALUES('+Object.keys(row).map(()=>'?').join(',')+')').bind(...Object.values(row)).run()
       }
       const beforeBatch = invalidation==='owner'?{sql:'UPDATE system_flags SET value=? WHERE key=?',params:['{"mode":"restore","token":"replacement"}','maintenance']}
-        :invalidation==='generation'?{sql:'UPDATE system_flags SET value=? WHERE key=?',params:['{"generation":"replacement"}','business_dataset_generation']}
+        :invalidation==='generation'&&!fullSchema?{sql:'UPDATE system_flags SET value=? WHERE key=?',params:['{"generation":"replacement"}','business_dataset_generation']}
         :invalidation==='principal'?{sql:'UPDATE users SET is_active=0 WHERE id=?',params:[owner.actorId]}
         :invalidation==='role'?{sql:'UPDATE roles SET permissions=? WHERE id=1',params:['{"changed":'+owner.actorId+'}']}
         :invalidation==='replace'?{sql:'INSERT OR REPLACE INTO users SELECT * FROM users WHERE id=?',params:[owner.actorId]}:undefined
-      const result=await call({value:plan,beforeBatch});assert.equal(result.status,409,invalidation);assert.equal(await count(owner.actorId),0,invalidation)
+      const identity={actorId:owner.actorId,organizationId:null}
+      const rotateGeneration=invalidation==='generation'&&fullSchema?{actual:identity,expected:identity,datasetGeneration:owner.datasetGeneration,user:{id:owner.actorId,organization_id:null,role_code:'admin'},kind:'reset',nextGeneration:crypto.randomUUID(),maxStatements:12}:undefined
+      const result=await call({value:plan,beforeBatch,rotateGeneration});assert.equal(result.status,409,invalidation);assert.equal(await count(owner.actorId),0,invalidation)
       assert.equal((await db.prepare('SELECT revision FROM dataset_operations WHERE id=?').bind(op.id).first()).revision,0)
     }
     for(const failure of ['effect-error','row-budget','self-revoke','budget']) {
