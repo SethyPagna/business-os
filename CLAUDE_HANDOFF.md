@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL:**3c2e9b95 journal foundation integrated exactly fromb436b9bf, independentb50b3542 boundedPASS. Root14714 native postmigration-schema/typecheck terminal0; earlier81268 process crash retained. No remote0190 or route enablement. Plan64642270 next actual sales-reset slice needs atomic generation+retirement+journal transition, not separate rotation. Append-only0191 proposal assigned. Production85a3e752/0bdfffc5 unchanged; full goal open.
+
 > **LATEST LIVE:**85a3e7525ef2 / Paid Worker0bdfffc5-b4a9-48a6-9db3-3c0958979f1b, hashfe29238f46ffdbe2. Deployment95421 terminal0; frontend unchangeda1ed5ca3. Separate authenticated Returns load and normal warmreload passed in460569656. No migrations/business-data writes. Full journal/transfer/reset/restore/export lifecycle remains open. See September21 maintenance-admission release record and progress.md; older status below is historical.
 
 > **LATEST LOCAL:** 2c6a1e38 restore import admission fails closed; root dab734 passed 11 actual route cases, 11 maintenance checks and Worker types, independent 4d6ecef8 PASS. Not deployed. Journal 0190 is under isolated implementation with explicit principal-loss pause, not synthetic continuation authority. Transfer foundation 3e326b6c source-only PASS; remote migration and lifecycle integration remain held. Production remains ce945bb4 / 7fb32ac1. Read progress.md before older entries.

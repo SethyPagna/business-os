@@ -18,7 +18,7 @@ See `2026-09-21-maintenance-admission-release.md` for bounded evidence.
 | Online-only writes / original-account recovery / cost rules | Deployed checkpoint6a31689f; see online-only release | Dataset replacement identity epoch, broader device and historical checks |
 | Dashboard/Returns/Expenses/Reports time fixes and shift comparison | Deployed scoped fixes; see admin-range and shift release records | Remaining direct date hosts and universal UI coverage |
 | Transfer run/retirement foundation | Independent source-only PASS3e326b6c; isolated | Actual route integration, backup/reset evidence preservation, complete tier budgets |
-| Dataset journal0190 | Isolated implementation; reviewf43dcbbb held on malformed maintenance acceptance | Correct shared-validator/exact-state fencing and independent native negative controls |
+| Dataset journal0190 | Locally integrated3c2e9b95; corruption correction independently acceptedb50b3542; root14714 native schema/typecheck pass | Not remotely applied or wired; atomic generation transition and real lifecycle routes remain |
 | Complete Returns exports | Isolated bounded implementation | Generation/lifecycle dependencies and actual browser downloads |
 | Continuous debloat | Active AGENTS.md gate; unused loading component removed, FIFO read removed, restore discovery consolidated | Remaining candidate tracing and equivalent-behavior tests; no blanket deletion approval |
 | Free/Paid |52 configuration/queue/surface checks and both bundles pass | Real workload CPU/query/storage/daily quotas; no no-impact downgrade guarantee |
@@ -28,6 +28,12 @@ The checkpoint paragraphs below are **historical**, not competing current releas
 claims. Their open requirements remain active unless a newer scoped record closes
 them. In particular, earlier "not deployed" labels for maintenance CAS, online-only
 writes, costs, Dashboard/Returns and shift fixes are superseded by the releases above.
+
+Journal update: three integrated files exactly matchb436b9bf. Earlier root81268
+passed minimal fixture then crashed during schema run without diagnostic; isolated
+integrated14714 passed. Do not describe this as one uninterrupted green run.
+Plan64642270 requires a private atomic generation/retirement/journal transition
+before real sales-reset continuation; no separate rotation or synthetic actor.
 
 New journal verification caveat: a native replay attempt stopped at existing0098
 user_aliases compound-SELECT limits (writer84275 exit1). Post-migration schema tests

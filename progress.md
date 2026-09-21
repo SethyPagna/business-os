@@ -1,3 +1,21 @@
+## Journal foundation integrated locally; real lifecycle wiring next — September 21
+
+Root3c2e9b95 integrates pinnedb436b9bf exactly (three files). Independentb50b3542
+bounded PASS includes malformed-maintenance refusal, exact raw validation fences,
+lost acknowledgements, principal invalidation, rollback and permanent receipts.
+Root14714 terminal0: native post-migration schema matrix (477 definitions), Worker
+typecheck. Earlier81268 minimal passed then migrated-schema process exited
+-1073740791 without diagnostic; isolated integrated rerun passed, not an uninterrupted
+green run. Historical0098 native migration replay failure remains separately open.
+
+No remote0190 migration, route enablement or deployment. Production85a3e752 unchanged.
+Architect64642270 identifies next real slice: sales-reset route with bounded chunks,
+atomic generation/retirement/journal transition, continuation and actual route tests.
+Current primitive intentionally cannot rotate generation as ordinary effect SQL;
+a reviewed private extension is required, not a separate uncoordinated rotation.
+Writer assigned proposal for append-only0191; full factory/restore principal handover,
+R2/IMPORT_DB coordination, transfer/export integration and Free capacity stay open.
+
 ## Active ledger reconciled; journal review hold retained — September 21
 
 Active-request ledger now begins with one current-status matrix and explicitly
