@@ -80,6 +80,7 @@ const transport = loadTs('src/api/productWriteTransport.ts', {
     ensureClientRequestId: (body: Record<string, unknown>, prefix: string) => ({ ...body, client_request_id: body.client_request_id || `${prefix}-generated` }),
   },
   './expectedUpdatedAt.ts': {},
+  './actorReadScope.ts': { captureActorReadScope: () => ({}), assertActorReadScope: () => {} },
   '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ device_id: 'browser' }) },
   '../utils/selectedConflictMerge.ts': {},
   '../utils/selectedConflictActionReview.ts': {},

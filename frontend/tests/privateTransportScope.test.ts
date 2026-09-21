@@ -47,7 +47,10 @@ function load(name: string): any {
 }
 const products = load('productImageUploadTransport'), files = load('fileTransport'), imports = load('importJobsTransport'), form = load('importTransport')
 const stale = (e: any) => e?.code === 'stale_read_scope'
-const notDispatched = (e: any) => e?.code === 'actor_session_quarantined' && e?.outcome === 'not_dispatched'
+// Two fences refuse dispatch after an actor change: the captured read scope
+// (stale_read_scope, thrown first since 43f656d3) and the session quarantine
+// (actor_session_quarantined / not_dispatched). Both are asserted with sent === 0.
+const notDispatched = (e: any) => e?.code === 'stale_read_scope' || (e?.code === 'actor_session_quarantined' && e?.outcome === 'not_dispatched')
 for (const invoke of [
   () => products.uploadProductImage({ file }),
   () => products.uploadProductImage({ filePath: 'data:image/jpeg;base64,dGVzdA==' }),
@@ -59,8 +62,17 @@ for (const invoke of [
   const pending = invoke(); scopes.resetActorReadSession(); compression.resolve(file)
   await assert.rejects(pending, notDispatched); assert.equal(sent, 0, 'earlier actor cannot dispatch after compression')
 }
-// A dispatched mutation must keep its real response after a session change.
-for (const invoke of [() => products.uploadProductImage({ file }), () => files.uploadFileAsset({ file }), () => form.apiFormPost('/upload', new FormData())]) {
+// A dispatched generic upload keeps its real response after a session change.
+// The product image upload is the exception since 43f656d3: its result is
+// fenced to the actor that started the save, so a session change while the
+// response is in flight rejects after dispatch (productSaveActorFence.test.ts).
+compression = deferred(); fetchResponse = deferred(); sent = 0
+{
+  const pending = products.uploadProductImage({ file }); compression.resolve(file); await flush(); assert.equal(sent, 1)
+  scopes.resetActorReadSession(); fetchResponse.resolve(new Response('{"data":{"public_path":"/uploaded"}}', { status: 200 }))
+  await assert.rejects(pending, stale)
+}
+for (const invoke of [() => files.uploadFileAsset({ file }), () => form.apiFormPost('/upload', new FormData())]) {
   compression = deferred(); fetchResponse = deferred(); sent = 0
   const pending = invoke(); compression.resolve(file); await flush(); assert.equal(sent, 1)
   scopes.resetActorReadSession(); fetchResponse.resolve(new Response('{"data":{"public_path":"/uploaded"}}', { status: 200 }))
