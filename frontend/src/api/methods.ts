@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
 
 // Legacy domain API registry. This file is now a TypeScript module so callers,
 // tests, and bundling use the same extension path; the next slices should move
@@ -613,12 +614,18 @@ export const getAiResponses = async (limit = 80) => {
   return module.getAiResponses(limit)
 }
 export const createProduct = async (payload) => {
+  const scope = captureActorReadScope('products')
+  const check = () => assertActorReadScope(scope, false)
   const module = await loadProductWriteTransport()
-  return module.createProduct(payload)
+  check()
+  return module.createProduct(payload, check)
 }
 export const updateProduct = async (id, payload) => {
+  const scope = captureActorReadScope('products')
+  const check = () => assertActorReadScope(scope, false)
   const module = await loadProductWriteTransport()
-  return module.updateProduct(id, payload)
+  check()
+  return module.updateProduct(id, payload, check)
 }
 export const deleteProduct = async (id, reason) => {
   const module = await loadProductWriteTransport()

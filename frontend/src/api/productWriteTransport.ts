@@ -2,6 +2,7 @@ import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
 type ProductPayload = ExpectedUpdatedAtPayload
@@ -267,24 +268,35 @@ function encodeId(id: string | number): string {
   return encodeURIComponent(String(id))
 }
 
-export async function createProduct(payload: ProductPayload = {}): Promise<unknown> {
+export async function createProduct(payload: ProductPayload = {}, assertCurrent?: () => void): Promise<unknown> {
+  const scope = captureActorReadScope('products')
+  const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
+  check()
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'product')
-  return route(
+  const result = await route(
     'products:create',
-    () => apiFetch('POST', '/api/products', body),
+    () => { check(); return apiFetch('POST', '/api/products', body) },
     null,
     true,
   )
+  check()
+  return result
 }
 
-export async function updateProduct(id: string | number, payload: ProductPayload = {}): Promise<unknown> {
+export async function updateProduct(id: string | number, payload: ProductPayload = {}, assertCurrent?: () => void): Promise<unknown> {
+  const scope = captureActorReadScope('products')
+  const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
+  check()
   const body = await withExpectedUpdatedAt('products', id, { ...getDevicePayload(), ...(payload || {}) })
-  return route(
+  check()
+  const result = await route(
     'products:update',
-    () => apiFetch('PUT', `/api/products/${encodeId(id)}`, body),
+    () => { check(); return apiFetch('PUT', `/api/products/${encodeId(id)}`, body) },
     null,
     true,
   )
+  check()
+  return result
 }
 
 export async function deleteProduct(id: string | number, reason?: string): Promise<unknown> {
