@@ -253,10 +253,25 @@ both by default.
   trio to LF) did not change the result. Classified environmental, not a
   regression; chip `task_e8f6d763` holds the evidence. Latent weakness noted:
   the test's source-replace of the app-document guard silently no-ops on CRLF.
+  **Root cause found (22 September, test-only fix):** that latent weakness *was*
+  the failure. `frontend/public/sw.js` is checked in CRLF; the fixture's needle
+  `if (!isAppDocumentPath(url.pathname))\n            return;` never matched, so
+  the legacy worker kept the guard, returned early for the
+  `/business-os-build.json` navigation without `respondWith()`, and the request
+  fell through to the fixture server that deliberately holds that route: nothing
+  to commit, 30 s timeout. It passed in the 23:38 chain because the build had just
+  rewritten the public trio to LF; restoring CRLF with `git checkout --` made the
+  no-op return. Fix: normalise `source` to LF once and assert the needle matches
+  **before** replacing (a replace-then-`!includes` check is always true and was
+  removed as vacuous). Positive control: a needle mangled to `\r\n` fails in
+  0.45 s at the new assertion, no navigation timeout. Five consecutive green
+  runs at ~2.3 s. `builtStartupGate.test.ts` unaffected.
   Worker gate on `22554ff6`: `tsc --noEmit` exit 0; 492 of 497 `scripts/test-*.cjs` green; red: `test-dated-stock-count-apply-pure.cjs`, `test-dated-stock-count-decisions-pure.cjs`, `test-reset-products-pure.cjs` (the three disclosed baseline reds); `test-product-conflict-action-apply-native.cjs`, `test-product-conflict-action-remove-native.cjs` red in the sweep, green standalone (contention).
 - **Chips:** `task_e8f6d763` (swShellContent navigation timeout),
   `task_dc150fae` (ReceiptSettings hard-codes its language labels) — fixed in
-  `1d9c7004` (committed, not pushed, not deployed, per the owner's task brief):
+  `1d9c7004` (committed under the owner's task brief, then pushed and deployed at
+  the 17:50Z checkpoint below once the brief was widened to "keep going until all
+  are finish"):
   one shared `RECEIPT_LANGUAGE_OPTIONS` feeds the Settings cards, both preview
   pill rows and the printable receipt's switcher with keyed labels, English
   fallbacks and real Khmer; the receipt toolbar shows EN / KM / EN/KM below `sm`
@@ -290,6 +305,31 @@ migrations stay unapplied by design. Pushed first: `origin/main` and
   checks: a signed-in shift report on Telegram in the chosen language, and the
   Settings → "Report language" row.
 - Previous production: `80f379ff` / `ce056cc0-ceba-44b0-b42c-177c7aa41247`.
+
+### Deployment — DONE (Paid), 21 September 2026 17:50Z (receipt-language chooser)
+
+Deployed from the isolated worktree `C:/Users/mrkl6/Downloads/bos-deploy-20260922b`
+(detached at `c5b20a80`, tracked tree clean after restoring the public trio,
+Worker typecheck exit 0, frontend built from that tip, Paid and Free dry-runs
+exit 0 with a clean stamp) with `npm run deploy` (wrangler.toml, Paid) under the
+owner's "keep going until all are finish" direction and the standing checkpoint
+authorization. No `deploy:full`, `migrate:remote` or `secrets:sync`. Pushed
+first: `origin/main` and `origin/codex/supplier-settlement-20260918` both at
+`c5b20a80`.
+
+- Source: `c5b20a8066b89c977ac8a4af02fd5c3869e14776` (code tip `1d9c7004`; `c5b20a80`
+  is the docs record on top).
+- Worker version: `0093be5b-5ea6-4926-841e-fe6caa0f6e1a`; live `/api/runtime/version`:
+  revision `c5b20a8066b8`, hash `56fe20116c2869da`, built `2026-09-21T17:49:02.172Z`,
+  booted `17:50:03Z`, tier `paid`. Startup 18 ms; exit 0.
+- Frontend: `business-os-build.json` revision `c5b20a8066b8`, hash `f1187a522235752b`,
+  built `2026-09-21T17:48:25.133Z`. 211 assets uploaded (110 already present).
+- Live smoke (browser pane, signed out): admin shell renders the login screen with
+  only the expected 401 session probes; public storefront renders. No sign-in, no
+  transaction, no shift touched. Owner's remaining check: the receipt toolbar at
+  phone width shows EN / KM / EN/KM and the Settings receipt-language cards read
+  in Khmer when the app language is Khmer.
+- Previous production: `ee226065` / `d6851e03-5548-488a-8fc7-28720c2da15e`.
 
 ## Downloads cleanup — DONE
 

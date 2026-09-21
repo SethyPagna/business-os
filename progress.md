@@ -47,7 +47,12 @@ Deployed (Paid) 17:11Z from ee226065: Worker d6851e03-5548-488a-8fc7-28720c2da15
 revision ee226065610b, frontend hash 9cde5f6b800bd51b; no remote migration; smoke green.
 Receipt-language chooser keyed on every surface (1d9c7004, committed only: Settings
 cards, preview pills, printable receipt switcher share RECEIPT_LANGUAGE_OPTIONS;
-EN/KM codes below sm on the receipt toolbar). Not pushed, not deployed.
+EN/KM codes below sm on the receipt toolbar). Pushed (both branches at c5b20a80) and
+deployed (Paid) 17:50Z: Worker 0093be5b-5ea6-4926-841e-fe6caa0f6e1a, live revision
+c5b20a8066b8, frontend hash f1187a522235752b; no remote migration; smoke green.
+swShellContent red root-caused (test-only): CRLF sw.js made the fixture's guard-removal
+needle a silent no-op; source normalised to LF and the needle asserted present before
+replacing; green five of five, control fails fast.
 Open: yesterday-open-shift POS gate trap (readCurrent is today-only).
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 
