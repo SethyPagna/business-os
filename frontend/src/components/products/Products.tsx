@@ -65,7 +65,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
-import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
 import {
@@ -398,7 +398,7 @@ type ProductImageUploadModule = typeof import('../../api/productImageUploadTrans
 
 type ProductApi = {
   adjustStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
-  createProduct: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  createProduct: (payload: Record<string, unknown>, assertCurrent?: () => void) => Promise<ProductApiResponse | undefined>
   deleteProduct: (id: EntityId, reason?: string) => Promise<ProductApiResponse | undefined>
   startBulkDeleteJob: (ids: EntityId[], reason: string) => Promise<{ jobId: string; totalCount: number }>
   getBulkDeleteJobStatus: (jobId: string) => Promise<BulkDeleteJobStatus>
@@ -418,8 +418,8 @@ type ProductApi = {
   invalidateProductReadCacheForReconciliation: () => Promise<void>
   searchProducts: (query: Record<string, unknown>) => Promise<ProductSearchResponse | ProductRecord[] | undefined>
   transferStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
-  updateProduct: (id: EntityId, payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
-  uploadProductImage: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
+  updateProduct: (id: EntityId, payload: Record<string, unknown>, assertCurrent?: () => void) => Promise<ProductApiResponse | undefined>
+  uploadProductImage: (payload: Record<string, unknown>, assertCurrent?: () => void) => Promise<ProductApiResponse | undefined>
 }
 
 type ProductsAppContext = {
@@ -511,9 +511,19 @@ function loadProductImageUploadModule(): Promise<ProductImageUploadModule> {
   return productImageUploadModulePromise
 }
 
+function captureProductWriteGuard(assertCurrent?: () => void): () => void {
+  const scope = captureActorReadScope('products')
+  return () => { assertActorReadScope(scope, false); assertCurrent?.() }
+}
+
 const productApi: ProductApi = {
   adjustStock: async (payload) => toProductApiResponse(await (await loadInventoryWriteModule()).adjustStock(payload)),
-  createProduct: async (payload) => toProductApiResponse(await (await loadProductWriteModule()).createProduct(payload)),
+  createProduct: async (payload, assertCurrent) => {
+    const check = captureProductWriteGuard(assertCurrent)
+    const module = await loadProductWriteModule()
+    check()
+    return toProductApiResponse(await module.createProduct(payload, check))
+  },
   deleteProduct: async (id, reason) => toProductApiResponse(await (await loadProductWriteModule()).deleteProduct(id, reason)),
   startBulkDeleteJob: async (ids, reason) => (await loadProductWriteModule()).startBulkDeleteJob(ids as Array<string | number>, reason),
   getBulkDeleteJobStatus: async (jobId) => (await loadProductWriteModule()).getBulkDeleteJobStatus(jobId),
@@ -552,8 +562,18 @@ const productApi: ProductApi = {
     return (await module.searchProducts(query as Parameters<ProductReadModule['searchProducts']>[0])) as ProductSearchResponse | ProductRecord[]
   },
   transferStock: async (payload) => toProductApiResponse(await (await loadBranchModule()).transferStock(payload)),
-  updateProduct: async (id, payload) => toProductApiResponse(await (await loadProductWriteModule()).updateProduct(id, payload)),
-  uploadProductImage: async (payload) => toProductApiResponse(await (await loadProductImageUploadModule()).uploadProductImage(payload)),
+  updateProduct: async (id, payload, assertCurrent) => {
+    const check = captureProductWriteGuard(assertCurrent)
+    const module = await loadProductWriteModule()
+    check()
+    return toProductApiResponse(await module.updateProduct(id, payload, check))
+  },
+  uploadProductImage: async (payload, assertCurrent) => {
+    const check = captureProductWriteGuard(assertCurrent)
+    const module = await loadProductImageUploadModule()
+    check()
+    return toProductApiResponse(await module.uploadProductImage(payload, check))
+  },
 }
 
 function getProductApi(): ProductApi {
@@ -1694,6 +1714,16 @@ function ProductsFullEditor() {
   const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const productSaveInFlightRef = useRef(false)
+  // Preserve the initiating form authority across uploads, lazy imports and
+  // refreshes. The revision detects change-away-and-back, without coupling a
+  // legitimate save to ordinary product-cache invalidation.
+  const productSaveAuthority = JSON.stringify([user, isActive, selected?.id ?? null,
+    can('products', selected ? 'edit' : 'add'), can('products', 'image'), canEditCosts])
+  const productSaveAuthorityRef = useRef({ key: productSaveAuthority, revision: 0 })
+  if (productSaveAuthorityRef.current.key !== productSaveAuthority) {
+    productSaveAuthorityRef.current = { key: productSaveAuthority, revision: productSaveAuthorityRef.current.revision + 1 }
+  }
+  useEffect(() => () => { productSaveAuthorityRef.current.revision++ }, [])
   // A product a person just saved via the edit modal stays visible in the
   // current results even if a background/automatic refresh (a sync
   // broadcast from another tab, or the post-save reload the save flow
@@ -2208,13 +2238,14 @@ function ProductsFullEditor() {
   // already be in flight by the time an earlier one fails.
   const GALLERY_UPLOAD_CONCURRENCY = 3
 
-  const uploadGalleryImages = async (productId: EntityId | null | undefined, gallery: unknown[] = []): Promise<string[]> => {
+  const uploadGalleryImages = async (productId: EntityId | null | undefined, gallery: unknown[] = [], assertCurrent?: () => void): Promise<string[]> => {
     const entries = normalizeProductGallery(gallery)
     const results: string[] = new Array(entries.length)
     let firstError: Error | null = null
     let cursor = 0
     const runWorker = async () => {
       while (cursor < entries.length) {
+        assertCurrent?.()
         const index = cursor
         cursor += 1
         const entry = entries[index]
@@ -2232,10 +2263,11 @@ function ProductsFullEditor() {
         const fileName = `product_${productId || 'new'}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
         try {
           const uploaded = await runProductWriteMutation(
-            () => productApi.uploadProductImage({ productId, filePath: entry, fileName }),
+            () => productApi.uploadProductImage({ productId, filePath: entry, fileName }, assertCurrent),
             'Upload product image',
             PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS,
           )
+          assertCurrent?.()
           if (!uploaded?.path) throw new Error(uploaded?.error || 'Image upload failed')
           results[index] = uploaded.path
         } catch (e) {
@@ -2286,13 +2318,21 @@ function ProductsFullEditor() {
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
+    const revision = productSaveAuthorityRef.current.revision
+    const assertCurrent = captureProductWriteGuard(() => {
+      if (productSaveAuthorityRef.current.revision !== revision || !isActive || !can('products', selected ? 'edit' : 'add')) {
+        throw Object.assign(new Error('Product save belongs to an earlier account, permission or form. Reopen it before saving.'), { name: 'AbortError', code: 'stale_write_scope' })
+      }
+    })
+    assertCurrent()
     form = omitUnauthorizedCatalogCosts(form, user)
     if (!form.name?.trim()) throw new Error(t('name') + ' required')
     if (!beginSingleAction(productSaveInFlightRef)) throw new Error(t('saving_label') || 'Saving…')
     try {
       const previousSnapshot = selected ? cloneHistorySnapshot(selected) : null
       const galleryInput = normalizeProductGallery(form.image_gallery, form.image_path || null)
-      const uploadedGallery = await uploadGalleryImages(selected?.id || null, galleryInput)
+      const uploadedGallery = await uploadGalleryImages(selected?.id || null, galleryInput, assertCurrent)
+      assertCurrent()
       const createClientRequestId = !selected
         ? `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         : ''
@@ -2317,14 +2357,16 @@ function ProductsFullEditor() {
       // an existing row instead of a new one.
       let foldedIntoName: string | null = null
       if (!selected) {
-        const res = await runProductWriteMutation(() => productApi.createProduct(payload), 'Create product')
+        const res = await runProductWriteMutation(() => productApi.createProduct(payload, assertCurrent), 'Create product')
+        assertCurrent()
         if (!res?.success) throw new Error(res?.error || 'Failed to create product')
         createdProductId = extractHistoryResultId(res)
         if ((res as { folded_into?: unknown })?.folded_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
         }
       } else {
-        const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload), 'Update product')
+        const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload, assertCurrent), 'Update product')
+        assertCurrent()
         if (res?.success === false) throw new Error(res.error || 'Failed to update product')
         if ((res as { merged_into?: unknown })?.merged_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
@@ -2354,6 +2396,7 @@ function ProductsFullEditor() {
       void (async () => {
         try {
           const latestProducts = await fetchProductsByIds([targetProductId])
+          assertCurrent()
           const latestProductsById = buildProductIdMap(latestProducts || [])
           const latestProductSnapshot = selected
             ? cloneHistorySnapshot(

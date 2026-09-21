@@ -1,7 +1,7 @@
 import { getSyncServerUrl, requireLiveServerWrite } from './http.ts'
 import { compressImageFile } from '../utils/imageCompression.ts'
 import { canonicalizePersistedMediaPath } from '../utils/mediaUpload.ts'
-import { assertActorSessionDispatchAllowed, captureActorReadScope } from './actorReadScope.ts'
+import { assertActorSessionDispatchAllowed, assertActorReadScope, captureActorReadScope } from './actorReadScope.ts'
 
 type ImageUploadPayload = {
   file?: File
@@ -46,8 +46,10 @@ export async function uploadProductImage({
   fileName,
   filePath,
   productName,
-}: ImageUploadPayload): Promise<unknown> {
+}: ImageUploadPayload, assertCurrent?: () => void): Promise<unknown> {
   const scope = captureActorReadScope('products')
+  const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
+  check()
   requireLiveServerWrite('products:uploadImage', {
     offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
     notConfiguredMessage: 'Server is not connected. Product image uploads are invalid until a live server is configured.',
@@ -78,6 +80,7 @@ export async function uploadProductImage({
   }
 
   const base = getSyncServerUrl().replace(/\/$/, '')
+  check()
   assertActorSessionDispatchAllowed(scope)
   const res = await fetch(`${base}/api/products/upload-image`, {
     method: 'POST',
@@ -86,6 +89,7 @@ export async function uploadProductImage({
     body: form,
   })
   const text = await res.text()
+  check()
   let data: unknown = {}
   try {
     data = text ? JSON.parse(text) : {}
