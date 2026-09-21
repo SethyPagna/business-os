@@ -401,6 +401,13 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
  * OLDEST first, not most recent: intervalError refuses to close a later
  * segment while an earlier one is still open, so with two stale days the only
  * order the POS can drain is oldest to newest.
+ *
+ * Read for EVERY caller, exempt administrators included: the exemption decides
+ * whether an account is PROMPTED to register its own day, never what it may
+ * close, and under shop_wide an administrator is the only account that may end
+ * a stale row another cashier left open. /current reports the row together
+ * with the close bound the Worker itself will enforce (see the handler), so
+ * the client never has to guess a closing time that comes back 409.
  */
 async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
@@ -594,12 +601,27 @@ app.get('/current', async (c) => {
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
   // The carry-over is a BANNER, not a report: no reconciliation and no figures
   // on it, for the same reason /current carries none (see figuresFor).
-  const carryOver = exempt ? undefined : await readPreviousOpen(db, policy, user.id, requestedBranchId)
+  //
+  // Read for the exempt administrator too (see readPreviousOpen): `shift`,
+  // needs_registration and everything else currentResponse answers are
+  // unchanged for them -- none of that reads the carry-over -- but the one
+  // account that may close a foreign shop-wide stale row can now see it.
+  const carryOver = await readPreviousOpen(db, policy, user.id, requestedBranchId)
+  // The CLOSE BOUND for that row, from the very query the close is validated
+  // against: intervalError refuses a closing time later than the opening of
+  // the next segment, and readAdjacentShift(..., 'next') is how it finds that
+  // segment. The client used to guess the bound from today's opening, which is
+  // wrong whenever another stale day sits in between -- the guess came back
+  // 409. Null means nothing opened after this row, so any time up to now is
+  // accepted. Reusing the one helper is what keeps the two from disagreeing.
+  const closeBefore = carryOver ? await readAdjacentShift(db, carryOver, carryOver.opened_at, 'next') : null
   const body = currentResponse(user, shift, policy, exempt)
   // Admin comparison may include an open shift. Staff retain only registered
   // counts; no report calculation is needed to enter or close their drawer.
   const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
-  return c.json({ ...body, shift: presented, previous_open_shift: carryOver ? responseShift(user, carryOver) : null })
+  return c.json({ ...body, shift: presented,
+    previous_open_shift: carryOver ? responseShift(user, carryOver) : null,
+    previous_open_close_before: closeBefore?.opened_at ?? null })
 })
 
 app.get('/', async (c) => {
