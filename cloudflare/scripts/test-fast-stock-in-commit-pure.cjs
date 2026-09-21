@@ -88,10 +88,12 @@ function loadReal(relPath, overrides = {}) {
 
 // ---------------------------------------------------------------------------
 // A flat db.prepare().get()/.all()/.run() + db.batch() adapter, matching the
-// interface lib/db.ts's real D1Compat class produces (.run()/.batch() return
-// {changes, lastInsertRowid} at the top level, not nested under .meta; .get()
-// returns the row itself or undefined) -- built on top of the raw D1-shaped
-// harness (scripts/harness/d1compat.cjs), which mimics Cloudflare's actual
+// interface lib/db.ts's real D1Compat class produces (.run() returns
+// {changes, lastInsertRowid} at the top level, not nested under .meta;
+// .batch() returns the raw D1Result[] verbatim -- callers read
+// results[i].meta.last_row_id off it; .get() returns the row itself or
+// undefined) -- built on top of the raw D1-shaped harness
+// (scripts/harness/d1compat.cjs), which mimics Cloudflare's actual
 // D1 binding (.prepare().bind().first()/.all()/.run()). '../lib/db' /
 // './db' are overridden with `{ getDb: () => currentDb }` below instead of
 // loading the real lib/db.ts module, so this test never needs the raw
@@ -111,9 +113,11 @@ function wrapFlat(rawDb) {
         },
       }
     },
+    // Pass results through unmapped, like the real D1Compat.batch() --
+    // flattening to {changes,lastInsertRowid} dropped .meta and made a
+    // batched insert's row id read back as 0. Found 2026-09-22.
     async batch(items) {
-      const results = await rawDb.batch(items)
-      return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
+      return rawDb.batch(items)
     },
     async transaction(fn) { return fn(this) },
   }

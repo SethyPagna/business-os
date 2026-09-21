@@ -102,10 +102,12 @@ function countingDb(rawDb) {
           },
         }
       },
+      // Pass results through unmapped, like the real D1Compat.batch()
+      // (db.ts) -- flattening to {changes,lastInsertRowid} dropped .meta
+      // and made a batched insert's row id read back as 0. Found 2026-09-22.
       async batch(items) {
         statements += 1
-        const results = await rawDb.batch(items)
-        return results.map((r) => ({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }))
+        return rawDb.batch(items)
       },
     },
   }

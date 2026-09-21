@@ -61,11 +61,10 @@ const db = {
     if (beforeDbBatchHook) await beforeDbBatchHook(items)
     // Exercise D1's actual atomic batch contract. A later assertion/trigger
     // failure must roll back every earlier statement in the same receipt.
-    const rawResults = await rawDb.batch(items)
-    const results = rawResults.map((r) => ({
-      changes: r.meta?.changes ?? 0,
-      lastInsertRowid: Number(r.meta?.last_row_id ?? 0),
-    }))
+    // Pass results through unmapped, like the real D1Compat.batch() (db.ts)
+    // -- flattening to {changes,lastInsertRowid} dropped .meta and made a
+    // batched insert's row id read back as 0. Found 2026-09-22.
+    const results = await rawDb.batch(items)
     if (afterDbBatchHook) await afterDbBatchHook(items)
     return results
   },
