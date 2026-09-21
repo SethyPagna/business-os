@@ -110,6 +110,11 @@ async function main() {
       const identity={actorId:owner.actorId,organizationId:null}
       const rotateGeneration=invalidation==='generation'&&fullSchema?{actual:identity,expected:identity,datasetGeneration:owner.datasetGeneration,user:{id:owner.actorId,organization_id:null,role_code:'admin'},kind:'reset',nextGeneration:crypto.randomUUID(),maxStatements:12}:undefined
       const result=await call({value:plan,beforeBatch,rotateGeneration});assert.equal(result.status,409,invalidation);assert.equal(await count(owner.actorId),0,invalidation)
+      if(rotateGeneration){
+        const actual=JSON.parse((await db.prepare("SELECT value FROM system_flags WHERE key='business_dataset_generation'").first()).value).generation
+        assert.equal(actual,rotateGeneration.nextGeneration,'real lifecycle rotation must complete before stale journal refusal')
+        assert.notEqual(actual,owner.datasetGeneration)
+      }
       assert.equal((await db.prepare('SELECT revision FROM dataset_operations WHERE id=?').bind(op.id).first()).revision,0)
     }
     for(const failure of ['effect-error','row-budget','self-revoke','budget']) {
