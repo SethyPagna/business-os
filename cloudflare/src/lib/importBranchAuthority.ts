@@ -91,6 +91,10 @@ export function withCanonicalImportBranchWriteGuard(db: D1Compat, branchIds: num
     const results = await db.batch([guard, ...statements])
     return results.slice(1)
   }) as D1Compat['batch']
+  guarded.batchOnce = (async (statements: Array<{ sql: string; params?: Record<string, unknown> }>) => {
+    const results = await db.batchOnce([guard, ...statements])
+    return results.slice(1)
+  }) as D1Compat['batchOnce']
   guarded.prepare = ((sql: string) => {
     const prepared = db.prepare(sql)
     return {
@@ -98,9 +102,12 @@ export function withCanonicalImportBranchWriteGuard(db: D1Compat, branchIds: num
       all: prepared.all.bind(prepared),
       run: async (params?: BindParams) => {
         const results = await db.batch([guard, { sql, params }])
-        return results[1]
+        return {
+          changes: results[1].meta?.changes ?? 0,
+          lastInsertRowid: Number(results[1].meta?.last_row_id ?? 0),
+        }
       },
     }
-  }) as unknown as D1Compat['prepare']
+  }) as D1Compat['prepare']
   return guarded
 }

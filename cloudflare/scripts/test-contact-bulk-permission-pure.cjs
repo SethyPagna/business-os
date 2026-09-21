@@ -90,6 +90,10 @@ let actor = narrowed
 const contactsApp = load('routes/contacts.ts', {
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() } },
   '../lib/db': { getDb: () => fakeDb },
+  '../lib/importMaintenanceFence': {
+    getImportFencedDb: async () => fakeDb,
+    isImportMaintenanceFenceError: () => false,
+  },
   '../lib/permissions': { ...require(path.join(temp, 'permissions.js')) },
   '../lib/bulkDeleteEngine': {
     getBulkDeleteJob: async (_env, id) => jobs.get(id) ?? null,

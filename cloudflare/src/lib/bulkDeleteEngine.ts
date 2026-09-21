@@ -29,7 +29,7 @@
 // calls createBulkDeleteJob with a different entityType.
 
 import type { Env } from '../index'
-import { getDb, type D1Compat } from './db'
+import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
 import { getPlanLimits } from './planTier'
 import { dispatchImportWork } from './queueDispatch'
 import { chunkForBinding, selectInChunks } from './sqlBinding'
@@ -253,7 +253,7 @@ export async function createBulkDeleteJob(
   const uniqueIds = Array.from(new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!uniqueIds.length) throw new Error('No valid ids to delete')
   const jobId = crypto.randomUUID()
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   await db.prepare(`
     INSERT INTO bulk_delete_jobs (id, entity_type, status, reason, ids_json, total_count, created_by_id, created_by_name)
     VALUES (@id, @entityType, 'pending', @reason, @idsJson, @totalCount, @userId, @userName)
@@ -276,12 +276,13 @@ async function markFailed(db: D1Compat, jobId: string, message: string): Promise
   await db.prepare(`
     UPDATE bulk_delete_jobs SET status = 'failed', last_error = @error, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = @id
   `).run({ id: jobId, error }).catch((writeError) => {
+    if (isImportMaintenanceFenceError(writeError)) throw writeError
     console.error('[bulk-delete] could not record job failure', jobId, writeError)
   })
 }
 
 export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   // Ids per chunk, tier-aware -- see lib/planTier.ts. Free gets 125 instead
   // of 500 for the same reason the import chunk shrinks: one chunk has to
   // fit one invocation's CPU budget. runD1BatchInChunks' adaptive
@@ -364,6 +365,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
         SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, updated_at = CURRENT_TIMESTAMP
         WHERE id = @id`).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds) })
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       // A whole chunk failing (after runD1BatchInChunks' own per-statement
       // adaptive retry already gave up) is treated as those specific ids
       // failing, not the whole job -- record them and move on to the next
@@ -393,7 +395,7 @@ const STALLED_BULK_DELETE_REAP_MINUTES = 20
 // called from the job-status route rather than the cron scheduler, so it
 // only does work when someone is actually looking (polling a job).
 export async function reapStalledBulkDeleteJobs(env: Env): Promise<void> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   await db.prepare(`
     UPDATE bulk_delete_jobs
     SET status = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,

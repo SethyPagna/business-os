@@ -178,6 +178,7 @@ function loadImportRoute(state) {
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/db': { getDb: () => db },
+    '../lib/importMaintenanceFence': { getImportFencedDb: async () => db, isImportMaintenanceFenceError: () => false },
     '../lib/permissions': permissions,
     '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/media': media,

@@ -15,7 +15,7 @@ import {
   storeSystemJob,
   validateCloudflareBackup,
 } from '../lib/backup'
-import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance } from '../lib/maintenance'
+import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, MaintenanceAdmissionConflictError } from '../lib/maintenance'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -189,10 +189,18 @@ app.post('/', async (c) => {
           error: `${activeImports.n} import job(s) are still active. Wait for them to finish (or cancel them) before restoring -- their queued writes would interleave with the restore.`,
         }, 409)
       }
-      const maintenance = await beginMaintenance(c.env, {
-        backupKey: sourceDir,
-        startedBy: user.username || String(user.id || 'unknown'),
-      })
+      let maintenance: Awaited<ReturnType<typeof beginMaintenance>>
+      try {
+        maintenance = await beginMaintenance(c.env, {
+          backupKey: sourceDir,
+          startedBy: user.username || String(user.id || 'unknown'),
+        })
+      } catch (error) {
+        if (error instanceof MaintenanceAdmissionConflictError) {
+          return c.json({ code: 'maintenance_admission_conflict', error: error.message }, 409)
+        }
+        throw error
+      }
       let restore: Awaited<ReturnType<typeof restoreCloudflareBackup>>
       try {
         restore = await restoreCloudflareBackup(c.env, sourceDir, async (progress) => {

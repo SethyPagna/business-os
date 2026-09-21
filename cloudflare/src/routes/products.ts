@@ -3,6 +3,7 @@ import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite 
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
+import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback, bumpVersion, bumpVersions } from '../lib/cache'
@@ -2362,6 +2363,7 @@ app.post('/bulk-delete-jobs', async (c) => {
     const { jobId, totalCount } = await createBulkDeleteJob(c.env, 'products', rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
     return c.json({ success: true, jobId, totalCount }, 202)
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
     return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
   }
 })
@@ -2398,7 +2400,12 @@ app.get('/bulk-delete-jobs/:id', async (c) => {
 app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   const user = c.get('user')
   if (getPermissionTier(user, 'products') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
-  await getDb(c.env).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
+  try {
+    await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
+  } catch (error) {
+    if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
+    throw error
+  }
   return c.json({ success: true })
 })
 

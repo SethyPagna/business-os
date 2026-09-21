@@ -59,7 +59,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE
 // existing logic -- see buildSalesGroups() below.
 
 import type { Env } from '../index'
-import { getDb, type D1Compat } from './db'
+import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
 import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
@@ -4409,7 +4409,7 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 // either way -- the continuation is a separate, fresh message, not a retry
 // of this one.
 export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<void> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   // Per-request shadow of the module-level ceilings. The exported constants
   // keep their Paid values, so every existing reader and test is unaffected;
   // THIS is what the running code uses, so a Free deployment actually gets
@@ -4636,6 +4636,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     `).run({ id: jobId, total, errored: byAction.error, warned, summary: JSON.stringify(summary) })
     console.log('[import-timing] analyze done', jobId, summary.timings.analyze)
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     await markJobFailed(db, jobId, (error as Error).message || 'Analyze failed')
     throw error
   } finally {
@@ -4644,7 +4645,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // rather than waiting out a 60s lease held by an invocation that is
     // already gone. Token-guarded inside, so an invocation whose lease had
     // already expired and been taken cannot clear the new holder's.
-    await releaseImportLease(db, jobId, leaseToken)
+    await releaseImportLease(db, jobId, leaseToken).catch((error) => {
+      if (!isImportMaintenanceFenceError(error)) throw error
+    })
   }
 }
 
@@ -4743,6 +4746,7 @@ export async function markJobFailed(db: D1Compat, jobId: string, message: string
       await db.prepare(`UPDATE import_jobs SET status = 'failed', phase = 'failed', last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId, error })
       return
     } catch (writeError) {
+      if (isImportMaintenanceFenceError(writeError)) throw writeError
       if (attempt === 2) {
         // Out of retries -- log it so it's at least visible in Worker logs
         // even though the job row itself couldn't be updated. The frontend
@@ -5288,6 +5292,7 @@ async function applyStockActionsSinglePass(
     try {
       await dispatchStockActionSingle(db, jobId, r, resolveSupplierId)
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       fail(r, error instanceof Error ? error.message : 'Stock action failed')
     }
   }
@@ -5302,6 +5307,7 @@ async function applyStockActionsSinglePass(
       const outcome = await dispatchStockActionSaleGroup(db, jobId, saleGroupKey, groupRows, actor)
       if (outcome === 'skipped') for (const r of groupRows) r.action = 'skip'
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       const message = error instanceof Error ? error.message : 'Sale group failed'
       for (const r of groupRows) fail(r, message)
     }
@@ -5501,6 +5507,7 @@ async function applyStockActionsContinuation(
       // caller's guard doesn't see through the call, hence the cast.
       if ((r.action as RowAction) === 'skip' || r.existingId != null) touched.push(r)
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       r.action = 'error'
       r.message = error instanceof Error ? error.message : 'Stock action failed'
       touched.push(r)
@@ -5558,6 +5565,7 @@ async function applyStockActionsContinuation(
           const outcome = await dispatchStockActionSaleGroup(db, jobId, plan.saleGroupKey, groupResults, actor)
           if (outcome === 'skipped') markGroup((row) => { row.action = 'skip' })
         } catch (error) {
+          if (isImportMaintenanceFenceError(error)) throw error
           const message = error instanceof Error ? error.message : 'Sale group failed'
           markGroup((row) => { row.action = 'error'; row.message = message })
         }
@@ -5737,7 +5745,7 @@ export async function runD1BatchGroupsInChunks(
 // has to cover duplicates within one ~150-row window, same as it always
 // covered duplicates within one batch).
 export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: number, attempt?: number): Promise<{ applied: number; failed: number }> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   // Same per-request shadow as runImportAnalyze -- see its comment -- and
   // the same redelivery back-off.
   const limits = getPlanLimits(env)
@@ -6813,6 +6821,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     await markJobFailed(db, jobId, (error as Error).message || 'Apply failed')
     throw error
   } finally {
@@ -6821,7 +6830,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // rather than waiting out a 60s lease held by an invocation that is
     // already gone. Token-guarded inside, so an invocation whose lease had
     // already expired and been taken cannot clear the new holder's.
-    await releaseImportLease(db, jobId, leaseToken)
+    await releaseImportLease(db, jobId, leaseToken).catch((error) => {
+      if (!isImportMaintenanceFenceError(error)) throw error
+    })
   }
 }
 

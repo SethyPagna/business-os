@@ -73,7 +73,7 @@ const asyncNoop = async () => {}
 const STUBS = {
   './cache': new Proxy({}, { get: () => asyncNoop }),
   '../durable-objects/broadcastHub': new Proxy({}, { get: () => asyncNoop }),
-  './db': { getDb: (env) => env.DB },
+  './db': { getDb: (env) => env.DB, getImportFencedDb: async (env) => env.DB, isImportMaintenanceFenceError: () => false },
   './importCsv': {},
   '../index': {},
   './stockActionSeal': new Proxy({}, { get: () => async () => 0 }),

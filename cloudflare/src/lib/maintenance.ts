@@ -22,6 +22,13 @@ import type { Env } from '../index'
 
 export const MAINTENANCE_FLAG_KEY = 'maintenance'
 
+export class MaintenanceAdmissionConflictError extends Error {
+  constructor() {
+    super('A restore is already in progress, or an import or bulk delete is active. Inspect jobs and maintenance before retrying.')
+    this.name = 'MaintenanceAdmissionConflictError'
+  }
+}
+
 export interface MaintenanceState {
   mode: 'restore'
   token: string
@@ -100,10 +107,23 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
     phase: 'deleting',
     updatedAt: new Date().toISOString(),
   }
+  // Admission is decided by this one main-D1 write transaction, not by the
+  // route's earlier advisory COUNT. A queued import/bulk job or an unexpired
+  // import lease must win over restore even when its status is stale/failed.
+  // Conversely, once this INSERT wins, every fenced business batch refuses.
   const result = await env.DB.prepare(`INSERT INTO system_flags (key, value, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO NOTHING`)
+    SELECT ?, ?, CURRENT_TIMESTAMP
+    WHERE NOT EXISTS (
+      SELECT 1 FROM import_jobs
+      WHERE status IN ('pending','queued','running','analyzing','approved','applying','cancelling')
+         OR julianday(lease_expires_at) > julianday('now')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM bulk_delete_jobs WHERE status IN ('pending','processing')
+    )
+    ON CONFLICT(key) DO NOTHING`)
     .bind(MAINTENANCE_FLAG_KEY, JSON.stringify(state)).run()
-  if (result.meta.changes !== 1) throw new Error('A restore is already in progress or requires recovery. Inspect maintenance before clearing it.')
+  if (result.meta.changes !== 1) throw new MaintenanceAdmissionConflictError()
   return state
 }
 

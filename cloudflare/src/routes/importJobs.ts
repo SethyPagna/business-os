@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts, canEditAcquisitionCosts, isAcquisitionCostImport } from '../lib/acquisitionCostAccess'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
+import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -22,6 +23,13 @@ import { dispatchImportWork } from '../lib/queueDispatch'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+app.onError((error, c) => {
+  if (isImportMaintenanceFenceError(error)) {
+    return c.json({ success: false, code: error.code, error: error.message }, 503)
+  }
+  console.error(error)
+  return c.text('Internal Server Error', 500)
+})
 app.use('*', acquisitionCostResponses)
 
 const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'sales', 'stock_actions'])
@@ -186,7 +194,7 @@ app.get('/queue/status', async (c) => {
 const STALLED_IMPORT_JOB_REAP_MINUTES = 20
 
 export async function reapStalledImportJobs(env: Env): Promise<void> {
-  const db = getDb(env)
+  const db = await getImportFencedDb(env)
   const candidates = await db.prepare(`
     SELECT
       EXISTS(
@@ -287,7 +295,7 @@ app.post('/', async (c) => {
   }
 
   const id = crypto.randomUUID()
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   await db.prepare(`
     INSERT INTO import_jobs (id, type, status, phase, queue_driver, policy_json, created_by_id, created_by_name)
     VALUES (@id, @type, 'pending', 'created', 'cloudflare-queues', @policy_json, @created_by_id, @created_by_name)
@@ -525,7 +533,7 @@ app.patch('/:id/decisions', async (c) => {
     }
     incoming = validated
   }
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   const current = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object' ? policy.decisionsByRowNumber : {}
   policy.decisionsByRowNumber = { ...current, ...incoming }
@@ -554,7 +562,7 @@ app.patch('/:id/images/assign', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const fileId = Number(body?.file_id)
   if (!fileId) return c.json({ success: false, error: 'file_id is required' }, 400)
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const fileRow = await db.prepare(`SELECT id FROM import_job_files WHERE id = @fileId AND job_id = @id AND kind = 'image'`).get<{ id: number }>({ fileId, id })
   if (!fileRow) return c.json({ success: false, error: 'Image not found on this import job' }, 404)
 
@@ -596,7 +604,7 @@ app.patch('/:id/images/assign-existing', async (c) => {
   if (!fileId) return c.json({ success: false, error: 'file_id is required' }, 400)
   if (!productId) return c.json({ success: false, error: 'product_id is required' }, 400)
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const fileRow = await db.prepare(`
     SELECT id, original_name, stored_path, file_asset_id FROM import_job_files
     WHERE id = @fileId AND job_id = @id AND kind = 'image' AND status != 'rejected' AND status != 'linked_existing'
@@ -648,7 +656,7 @@ app.patch('/:id/images/resolve-limit', async (c) => {
   if (rowNumber == null) return c.json({ success: false, error: 'row_number is required' }, 400)
   if (keepFileIds.length > MAX_IMAGES_PER_REQUEST) return c.json({ success: false, error: 'Too many images selected' }, 400)
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
   const decisions = policy.imageLimitDecisions && typeof policy.imageLimitDecisions === 'object' ? policy.imageLimitDecisions : {}
   if (keepFileIds.length) decisions[String(rowNumber)] = keepFileIds
@@ -765,6 +773,7 @@ app.post('/:id/preflight', async (c) => {
       planTier: resolvePlanTier(c.env),
     })
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message || 'Failed to preflight import job' }, 400)
   }
 })
@@ -806,6 +815,7 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
     try {
       validateUploadedBuffer(bytes, mimeType, originalName)
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       throw new Error((error as Error).message)
     }
   }
@@ -818,7 +828,7 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
   // image-extension gate filters CSVs and other non-images.
   if (addToLibrary) await enqueueImageNormalization(c.env, key)
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   let fileAssetId: number | null = null
   if (addToLibrary) {
     const mediaType = getMediaType(mimeType, originalName)
@@ -915,11 +925,12 @@ app.post('/:id/csv', async (c) => {
     // FIRST file's already-parsed rows. Cheap no-op if nothing was
     // materialized yet (a job's first-ever CSV upload). See migration
     // 0012_import_job_source_rows.sql.
-    await resetMaterializeState(getDb(c.env), id)
+    await resetMaterializeState(await getImportFencedDb(c.env), id)
     const after = await getJob(c.env, id)
     await auditImportEvent(c, 'import_job_upload', id, job, after || null, { source: 'api', fileKind: 'csv', fileName: file.name })
     return c.json({ success: true, file: stored, job: serializeJob(after || job) })
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message || 'Failed to upload CSV' }, 400)
   }
 })
@@ -953,6 +964,7 @@ app.post('/:id/zip', async (c) => {
     try {
       entries = readCentralDirectory(zipBytes)
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       // A ZIP that stores fine but fails to parse (corrupt/unsupported)
       // still keeps its stored-file row above -- report the parse failure
       // as a note rather than a hard 400, since the operator's upload did
@@ -972,6 +984,7 @@ app.post('/:id/zip', async (c) => {
         const imageFile = new File([bytes], baseName, { type: mimeType })
         extractedImages.push(await storeUpload(c, id, 'image', imageFile, entry.fileName))
       } catch (error) {
+        if (isImportMaintenanceFenceError(error)) throw error
         failedImages.push({ file_name: entry.fileName, error_message: (error as Error).message || 'Failed to extract' })
       }
     }
@@ -998,6 +1011,7 @@ app.post('/:id/zip', async (c) => {
       note,
     })
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message || 'Failed to upload ZIP' }, 400)
   }
 })
@@ -1025,6 +1039,7 @@ app.post('/:id/images', async (c) => {
     try {
       saved.push(await storeUpload(c, id, 'image', file, relativePaths[index] || file.name))
     } catch (error) {
+      if (isImportMaintenanceFenceError(error)) throw error
       saved.push({ original_name: file.name, status: 'rejected', error_message: (error as Error).message })
     }
   }
@@ -1089,7 +1104,7 @@ app.post('/:id/images/wire', async (c) => {
     return c.json({ success: false, error: 'Wait for the current pass to finish before wiring images.' }, 409)
   }
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const policy = safeJsonParse<Record<string, unknown>>(job.policy_json as string, {})
   policy.wire_images = true
   await db.prepare(`UPDATE import_jobs SET policy_json = @policy, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
@@ -1109,7 +1124,7 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const row = await db.prepare(`
     SELECT id, kind, stored_path, byte_size, file_asset_id
     FROM import_job_files WHERE id = @fileId AND job_id = @jobId AND kind = 'image'
@@ -1126,6 +1141,7 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
   try {
     validateUploadedBuffer(bytes, mimeType, file.name || 'image')
   } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
 
@@ -1164,7 +1180,7 @@ app.post('/:id/start', async (c) => {
     await auditImportEvent(c, 'import_job_start_blocked', id, job, job, { source: 'api', mode: 'analyze' })
     return c.json({ success: false, error: 'Import was cancelled. Use Retry before starting it again.' }, 409)
   }
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv'`).get<{ n: number }>({ id })
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
@@ -1245,7 +1261,7 @@ app.post('/:id/approve', async (c) => {
     }, 409)
   }
 
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   policy.apply_authorized_by_id = c.get('user')?.id ?? null
   policy.apply_authorized_at = new Date().toISOString()
   if (job.type === 'stock_actions') {
@@ -1278,7 +1294,7 @@ app.post('/:id/dismiss', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   await db.prepare(`
     UPDATE import_jobs SET dismissed_at = CURRENT_TIMESTAMP, dismissed_status = @status, updated_at = CURRENT_TIMESTAMP WHERE id = @id
   `).run({ id, status: String(job.status || '') })
@@ -1293,7 +1309,7 @@ app.post('/:id/cancel', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const status = String(job.status || '').toLowerCase()
   // Best-effort cancel: a queue message already in flight for this job will
   // still run to completion (Cloudflare Queues has no message-recall API),
@@ -1309,7 +1325,7 @@ app.post('/:id/cancel', async (c) => {
 })
 
 async function deleteJobData(c: any, id: string) {
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const files = await db.prepare(`SELECT stored_path, file_asset_id FROM import_job_files WHERE job_id = @id`).all<{ stored_path: string; file_asset_id: number | null }>({ id })
   for (const file of files) {
     // A file with a file_asset_id is the person's Library copy (see
@@ -1361,7 +1377,7 @@ app.post('/:id/retry', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
-  const db = getDb(c.env)
+  const db = await getImportFencedDb(c.env)
   const status = String(job.status || '').toLowerCase()
   // K4 retention: once the scheduled sweep has pruned a terminal job's
   // staged detail (source rows + unlinked raw file, kept 24h by policy),
