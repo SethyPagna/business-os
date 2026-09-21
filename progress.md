@@ -80,6 +80,8 @@ signed-in session); popup closeDirty chip task_4683ad2f.
 D12 pushed (both branches at fee0a315) and deployed (Paid) 23:10Z: Worker
 4d263940-1996-43d6-aeac-19514c8080b0, live revision fee0a315baf3, frontend hash
 1bef2af49779c663; no remote migration; smoke green (admin login shell, storefront).
+Settlement workspace removed 22 Sep (evidence in BusinessOS-Recovery/2026-09-22/, branch
+kept on origin at the main tip); only business-os-v1 remains under Downloads.
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

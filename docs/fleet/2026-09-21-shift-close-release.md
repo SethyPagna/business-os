@@ -539,7 +539,26 @@ branch `codex/shift-modal-bound-20260922` deleted locally (its two commits are
   day → Close: the closing time is prefilled a minute before the next shift's opening
   and that bound is shown above the form.
 - Previous production: `f98754b3` / `c77d84db-2d7a-4308-8b97-674b60bdb439`.
-- Deploy worktree removed after the smoke.
+- Deploy worktree removed after the smoke (long-path residue deleted with PowerShell,
+  registration pruned).
+
+### Program workspace removed — DONE, 22 September 2026
+
+With both branches at `e864268c` and nothing uncommitted, the settlement workspace
+`bos-supplier-settlement-20260918` was removed under the owner's "delete the many
+folders" direction: its ignored evidence (`outputs/`, `frontend/e2e-report`,
+`frontend/test-results`; 1 669 files) copied to
+`BusinessOS-Recovery/2026-09-22/bos-supplier-settlement-20260918/`, its
+`cloudflare/node_modules` junction into the shared checkout deleted as a link only
+(target entry count unchanged), then `git worktree remove` and prune. Under
+Downloads only `business-os-v1` remains. `codex/supplier-settlement-20260918` stays
+on origin at the same tip as `main`.
+
+**Still open after this program:** shift 20 (21.09.2026) closing-count amendment
+(needs the owner signed in; Claude does not enter passwords); popup `closeDirty`
+prefill (chip `task_4683ad2f`); shop-wide close permission (chip `task_4c313434`,
+owner decision); D13 `opened_at` index (low, only if `shift_sessions` grows); 0188
+reset blocker; adjust candidate `a22d3b1e` stays REJECT.
 
 ## Downloads cleanup — DONE
 
