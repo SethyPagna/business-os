@@ -17,7 +17,7 @@ See `2026-09-21-maintenance-admission-release.md` for bounded evidence.
 | Browser shell / legacy upgrade | Deployed; focused native-browser regressions and latest live Returns warm reload pass | All-device/engine upgrade cycles and runtime readback not universally proved |
 | Online-only writes / original-account recovery / cost rules | Deployed checkpoint6a31689f; see online-only release | Dataset replacement identity epoch, broader device and historical checks |
 | Dashboard/Returns/Expenses/Reports time fixes and shift comparison | Deployed scoped fixes; see admin-range and shift release records | Remaining direct date hosts and universal UI coverage |
-| Transfer run/retirement foundation | Independent source-only PASS3e326b6c; isolated | Actual route integration, backup/reset evidence preservation, complete tier budgets |
+| Transfer run/retirement foundation | Locally integrated through73fb3da1; root10091 five scripts/types and combined42939 pass | Actual route integration, backup/reset evidence preservation, complete tier budgets; no remote migration |
 | Dataset journal0190 | Locally integrated3c2e9b95; corruption correction independently acceptedb50b3542; root14714 native schema/typecheck pass | Not remotely applied or wired; atomic generation transition and real lifecycle routes remain |
 | Complete Returns exports | Isolated bounded implementation | Generation/lifecycle dependencies and actual browser downloads |
 | Continuous debloat | Active AGENTS.md gate; unused loading component removed, FIFO read removed, restore discovery consolidated | Remaining candidate tracing and equivalent-behavior tests; no blanket deletion approval |
@@ -34,6 +34,12 @@ passed minimal fixture then crashed during schema run without diagnostic; isolat
 integrated14714 passed. Do not describe this as one uninterrupted green run.
 Plan64642270 requires a private atomic generation/retirement/journal transition
 before real sales-reset continuation; no separate rotation or synthetic actor.
+
+Combined fixture correctione7140dfc/fa119496 respects protected0186 bootstrap and
+asserts actual lifecycle generation change before stale-request rejection. Root42939
+migrated/minimal/types and independent15981 pinned-runtime pass. Initial42034
+fixture failure retained;0191acbebdb6 remains isolated under review. Import fencing
+865261f5 is still a plan, and product dead-handler cleanupa0fa0b55 is in progress.
 
 New journal verification caveat: a native replay attempt stopped at existing0098
 user_aliases compound-SELECT limits (writer84275 exit1). Post-migration schema tests

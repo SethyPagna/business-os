@@ -1,3 +1,20 @@
+## Combined transfer/journal gate passed; transition review next — September 21
+
+Integrated fixturee7140dfc/fa119496 respects0186 generation bootstrap and proves
+the real lifecycle rotation occurred before stale-journal denial. Root42939 terminal0:
+native migrated-schema and minimal journal suites plus Worker types. Independent
+review15981 terminal0 pins old runtime, excludes unreviewed0191, and accepts fixture.
+Earlier42034 failure and initial false-positive proof gap remain recorded below.
+Transfer five-suite10091 remains valid; source checkpoint now ready for GitHub push.
+No remote migration/route enablement/deployment; production85a3e752 unchanged.
+
+Transition candidateacbebdb6 remains isolated awaiting independent review. Import
+transaction-fence audit865261f5 traced normal/queue/stock/sales/bulk/reaper paths;
+shared atomic main-D1 guard and atomic admission are required, separate staging
+cannot be cross-D1 atomic. Proven-dead product handleSave audit a0fa0b55 assigned
+isolated cleanup and tests of the actually wired handler; separate post-upload
+account/permission recheck concern remains open, not concealed by cleanup.
+
 ## Transfer dependencies integrated locally; combined fixture gate held — September 21
 
 Local792683cd through73fb3da1 integrate reviewed233d604d..b5abeb3a exactly; no0189.
