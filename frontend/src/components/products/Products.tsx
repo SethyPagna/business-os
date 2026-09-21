@@ -2225,33 +2225,6 @@ function ProductsFullEditor() {
     pendingLoadRef.current = null
   }, [])
 
-  const handleSave = async (form: ProductRecord) => {
-    if (!form.name?.trim()) return notify(t('name') + ' required', 'error')
-    if (!beginSingleAction(productSaveInFlightRef)) return
-    try {
-      const data = { ...form, userId: user?.id, userName: user?.name }
-
-      if (!selected) {
-        const res = await runProductWriteMutation(() => productApi.createProduct(data), 'Create product')
-        if (!res?.success) return notify(res?.error || 'Failed to create product', 'error')
-      } else {
-        const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, data), 'Update product')
-        if (res?.success === false) return notify(res.error || 'Failed to update product', 'error')
-      }
-
-      if (selected?.id) {
-        pinnedEditedProductsRef.current.set(Number(selected.id), { ...selected, ...data } as ProductRecord)
-      }
-      notify(selected ? t('product_updated') || 'Product updated' : t('product_created') || 'Product created')
-      setModal(null); setSelected(null); setDetailProduct(null); load()
-    } catch(e) {
-      console.error('[handleSave] error:', e)
-      notify(getErrorMessage(e, 'Failed to save product'), 'error')
-    } finally {
-      finishSingleAction(productSaveInFlightRef)
-    }
-  }
-
   // P4-4b item 5: images used to upload one-at-a-time (a `for...of` + `await`
   // loop), so a 5-image gallery paid for 5 sequential round trips even though
   // each upload is independent. A small worker pool now runs up to
