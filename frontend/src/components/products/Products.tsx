@@ -1717,13 +1717,19 @@ function ProductsFullEditor() {
   // Preserve the initiating form authority across uploads, lazy imports and
   // refreshes. The revision detects change-away-and-back, without coupling a
   // legitimate save to ordinary product-cache invalidation.
-  const productSaveAuthority = JSON.stringify([user, isActive, selected?.id ?? null,
-    can('products', selected ? 'edit' : 'add'), can('products', 'image'), canEditCosts])
+  const productSaveAuthority = JSON.stringify([user, isActive,
+    can('products', 'edit'), can('products', 'add'), can('products', 'image'), canEditCosts])
   const productSaveAuthorityRef = useRef({ key: productSaveAuthority, revision: 0 })
   if (productSaveAuthorityRef.current.key !== productSaveAuthority) {
     productSaveAuthorityRef.current = { key: productSaveAuthority, revision: productSaveAuthorityRef.current.revision + 1 }
   }
   useEffect(() => () => { productSaveAuthorityRef.current.revision++ }, [])
+  // Closing the successfully saved form must not invalidate its pending undo
+  // snapshot. Form identity fences the write; account/permissions fence both.
+  const productSaveFormRef = useRef({ id: selected?.id ?? null, revision: 0 })
+  if (productSaveFormRef.current.id !== (selected?.id ?? null)) {
+    productSaveFormRef.current = { id: selected?.id ?? null, revision: productSaveFormRef.current.revision + 1 }
+  }
   // A product a person just saved via the edit modal stays visible in the
   // current results even if a background/automatic refresh (a sync
   // broadcast from another tab, or the post-save reload the save flow
@@ -2319,11 +2325,18 @@ function ProductsFullEditor() {
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
     const revision = productSaveAuthorityRef.current.revision
-    const assertCurrent = captureProductWriteGuard(() => {
+    const formRevision = productSaveFormRef.current.revision
+    const assertAuthority = captureProductWriteGuard(() => {
       if (productSaveAuthorityRef.current.revision !== revision || !isActive || !can('products', selected ? 'edit' : 'add')) {
         throw Object.assign(new Error('Product save belongs to an earlier account, permission or form. Reopen it before saving.'), { name: 'AbortError', code: 'stale_write_scope' })
       }
     })
+    const assertCurrent = () => {
+      assertAuthority()
+      if (productSaveFormRef.current.revision !== formRevision) {
+        throw Object.assign(new Error('Product form changed before saving completed.'), { name: 'AbortError', code: 'stale_write_scope' })
+      }
+    }
     assertCurrent()
     form = omitUnauthorizedCatalogCosts(form, user)
     if (!form.name?.trim()) throw new Error(t('name') + ' required')
@@ -2396,7 +2409,7 @@ function ProductsFullEditor() {
       void (async () => {
         try {
           const latestProducts = await fetchProductsByIds([targetProductId])
-          assertCurrent()
+          assertAuthority()
           const latestProductsById = buildProductIdMap(latestProducts || [])
           const latestProductSnapshot = selected
             ? cloneHistorySnapshot(
