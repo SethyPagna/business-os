@@ -1,5 +1,7 @@
 # Business OS — Claude takeover checkpoint
 
+> **LATEST LOCAL:**0dee5a64 integrates reviewed0191 transition exactly fromacbebdb6. Root transition25692 PASS; corrected73539 minimal journal/types and15904 migrated-schema journal terminal0. Initial command-path mistakes recorded in progress.md. No remote migration/deployment or real lifecycle route enablement. Downloads cleanup removed four dormant dist-only trees recoverably;1,200 build files retained privately,88 files categorized. Full cleanup and application ledger remain open.
+
 > **LATEST LOCAL GATE PASS:**fixturee7140dfc/fa119496 corrects protected bootstrap and proves actual generation rotation. Root42939 native migrated/minimal+types terminal0; independent15981 pinned-runtime PASS. Transfer10091 five-script gate remains. Ready to push this checkpoint, not deploy migrations. Isolated0191acbebdb6 under review; import transaction fence865261f5 and bounded dead-handle cleanupa0fa0b55 tracked. Production85a3e752 unchanged.
 
 > **LATEST LOCAL, PUSH HELD:** Transfer foundations792683cd..73fb3da1 integrated; root10091 five scripts+types PASS. Combined journal schema42034 RED because fixture overwrites0186-protected generation. Writer adapting fixture through legitimate lifecycle, not weakening triggers, alongside approved0191 atomic transition. Council1017defe conditional design only. No remote migration/deployment; production85a3e752 unchanged. Read progress.md for exact remaining gates.

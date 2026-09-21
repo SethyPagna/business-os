@@ -1,3 +1,27 @@
+## Reviewed atomic transition integrated and locally verified — September 21
+
+0dee5a64 integrates exactly acbebdb6 (0191 migration, journal transition module,
+native test); independent a5e86457 accepted the bounded candidate. Root25692
+transition PASS, then command-name error stopped the sequence. Corrected73539
+minimal journal and Worker types terminal0;15904 migrated-schema journal terminal0.
+Earlier wrong-directory invocation6d0981 never ran tests. No failures hidden.
+No remote migration, route enablement or deployment. Actual sales-reset continuation,
+import effect fencing, backup/restore orchestration and measured Free budgets remain
+open. Next: implement real lifecycle consumers, not another isolated completion claim.
+
+## Downloads organization and recoverable checkout cleanup — September 21
+
+User-requested cleanup: 88 loose files moved to categories and hash-verified;
+one identical PDF and one empty version directory recycled. Four isolated source
+versions pushed and remotely verified under codex/archive/*-20260921. Four further
+dormant dist-only checkouts removed with ordinary Git removal after live remote
+reachability, clean/local-data, dependency, process and claim checks. All 1,200
+build files preserved and hash-verified in private BusinessOS-Recovery storage.
+Execution93900 terminal0. Private recovery manifests and exact paths are in
+Downloads/Organization Records/cleanup-20260921.md; personal inventory is not
+published to GitHub. Other dirty/data-bearing worktrees remain, so cleanup is
+not complete. No production deployment/migration/data changes from this cleanup.
+
 ## Combined transfer/journal gate passed; transition review next — September 21
 
 Integrated fixturee7140dfc/fa119496 respects0186 generation bootstrap and proves

@@ -5,6 +5,12 @@ Recorded means tracked; implemented does not mean verified or deployed.
 
 ## Current authoritative checkpoint
 
+Local update September21: reviewed atomic transition0191 integrated0dee5a64;
+root transition25692, corrected minimal/types73539 and migrated-schema15904 pass.
+Real reset/restore route wiring and import transaction fences remain open; no remote
+migration or deployment. Four dormant checkouts removed with GitHub/recovery proof;
+88 loose Downloads files categorized. Remaining local-data-bearing folders not cleared.
+
 As of September 21, the current deployed source is **85a3e7525ef2**, Paid Worker
 **0bdfffc5-b4a9-48a6-9db3-3c0958979f1b**. Deployment95421 exited0; frontend
 remainsa1ed5ca3/23cc431e6e86d05e. Separate authenticated Returns load and normal
