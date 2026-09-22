@@ -79,6 +79,25 @@ test('the phone gets it too: the product pane renders it in both responsive slot
   assert.match(pane, /const fieldHistoryButton = canReadFieldHistory && Number\(p\.id\) > 0 \? \(/)
 })
 
+test('all THREE contact tabs carry it, each under its own audit entity', () => {
+  const tabs: Array<[string, string]> = [
+    ['../src/components/contacts/CustomersTab.tsx', 'customer'],
+    ['../src/components/contacts/SuppliersTab.tsx', 'supplier'],
+    ['../src/components/contacts/DeliveryTab.tsx', 'delivery_contact'],
+  ]
+  for (const [path, entity] of tabs) {
+    const tab = read(path)
+    assert.match(tab, new RegExp(`entity="${entity}"`), `${path} does not read the ${entity} trail`)
+    assert.match(tab, /'field_history', 'Field history'/, `${path} has no Field history button`)
+    assert.match(tab, /getPermissionTier\('audit_log'\) === 'full'/, `${path} does not gate on the tier that sees the whole trail`)
+    // Closing the float returns to the detail it was opened from, rather than
+    // dropping the reader back to the list.
+    assert.match(tab, /onClose=\{\(\) => setModal\('detail'\)\}/, `${path} closes the float to the wrong place`)
+    // Loaded on open, like every other modal in these tabs.
+    assert.match(tab, /const EntityRecordsFloat = lazyRetry\(/, `${path} pulls the float into the tab's own chunk`)
+  }
+})
+
 test('Field history is named in BOTH packs', () => {
   const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
   const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
