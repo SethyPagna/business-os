@@ -2038,6 +2038,10 @@ app.put('/:id', async (c) => {
   }
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
+  // Set by the two places that actually INSERT a 'rename'/'product_group' audit
+  // row, so the field diff below can drop `name` exactly when it would be a
+  // duplicate -- never merely because a name changed.
+  let wroteProductRenameAudit = false
   if (body.name !== undefined || body.barcode !== undefined) {
     const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id')
       .get<{ name: string; barcode: string | null }>({ id })
@@ -2161,6 +2165,7 @@ app.put('/:id', async (c) => {
       if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
         const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())
         await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id, { from: fromName, to: nextName, rows: carried.products })
+        wroteProductRenameAudit = true
       }
     }
     delete body.__rename_scope
@@ -2215,8 +2220,11 @@ app.put('/:id', async (c) => {
     throw error
   }
   const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
-  if (appliedGroupRename) await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
-    { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
+  if (appliedGroupRename) {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
+      { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
+    wroteProductRenameAudit = true
+  }
   // Real, latent gap this session found while wiring the image-only role's
   // gallery writes through this same handler: `image_gallery` is a virtual
   // key (see syncProductImageGallery's own comment) that updateRow's
@@ -2235,13 +2243,15 @@ app.put('/:id', async (c) => {
   // is not an error.
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
-  // A group rename already has its own 'rename'/'product_group' row (above and
-  // in the applyRenameCarry branch) carrying from/to, so the name is left out
-  // of this row rather than recorded twice. An edit that changed nothing
-  // audited (an image-gallery-only reorder, a resave of identical values)
-  // yields no diff and therefore no row at all.
+  // `name` is held back only when a rename row was ACTUALLY written, tracked
+  // with the writes themselves. The first version keyed this off
+  // renamedProductName, which is set for ANY name change while the rename row
+  // fires only under __rename_scope === 'group' -- so a default-scope rename
+  // (the common case: rename this row only) was recorded nowhere at all.
+  // An edit that changed nothing audited (an image-gallery-only reorder, a
+  // resave of identical values) yields no diff and therefore no row.
   const productFieldChange = changedFields(productBefore, item as Record<string, unknown>, {
-    keys: appliedGroupRename || renamedProductName
+    keys: wroteProductRenameAudit
       ? PRODUCT_FIELD_AUDIT_COLUMNS.filter((column) => column !== 'name')
       : PRODUCT_FIELD_AUDIT_COLUMNS,
   })
