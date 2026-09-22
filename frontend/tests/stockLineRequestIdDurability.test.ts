@@ -176,4 +176,40 @@ if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
 }
+runTest('the guard codes are translated, not shown in the server English', () => {
+  const outcome = source('utils/stockAdjustOutcome.ts')
+  for (const code of ["stock_request_in_flight", "stock_request_partially_applied", "idempotency_conflict", "invalid_client_request_id"]) {
+    assert.ok(outcome.includes(code), `${code} must map to a pack key`)
+  }
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  for (const key of ['stock_request_in_flight', 'stock_request_partially_applied', 'stock_request_id_conflict', 'stock_request_id_invalid']) {
+    assert.ok(en[key], `${key} missing from en.json`)
+    assert.ok(km[key], `${key} missing from km.json`)
+    assert.notEqual(en[key], km[key], `${key} must actually be translated`)
+  }
+  // The removal signpost is the only way out of the terminal refusals, so it
+  // has to be in the words as well as in the button.
+  assert.match(en.stock_request_partially_applied, /remove this line/i)
+  assert.match(en.stock_request_id_conflict, /[Rr]emove this line/)
+})
+
+runTest('every stock surface routes its failure text through the shared helper', () => {
+  assert.match(fastStockIn, /stockFailureText\(error, tr, tr\('error', 'Error'\)\)/, 'sequential commit')
+  assert.match(fastStockIn, /stockFailureText\(result, tr, tr\('error', 'Error'\)\)/, 'batched commit')
+  assert.match(source('components/inventory/ReceiveBatchModal.tsx'), /stockFailureText\(e, tr,/, 'ReceiveBatchModal')
+  assert.match(source('components/products/forms/StockAdjustModal.tsx'), /stockFailureText\(error, tr, classified\.message\)/, 'StockAdjustModal')
+  const bulk = source('components/products/forms/BulkAddStockModal.tsx')
+  assert.match(bulk, /stockFailureText\(error, \(key, fallback\) => t\(key\) || fallback, failure\.message\)/, 'BulkAddStockModal')
+})
+
+runTest('the batched commit envelope carries the guard code back to the client', () => {
+  const commit = readFileSync(new URL('../../cloudflare/src/routes/stockInCommit.ts', import.meta.url), 'utf8')
+  const failures = commit.match(/return \{ ok: false, key: line\.key, error: String\(json\.error[^}]*\}/g) || []
+  assert.equal(failures.length, 2, 'both wires build a failure result')
+  for (const failure of failures) {
+    assert.match(failure, /code: json\.code \?\? null/, 'a failure without its code is untranslatable on the client')
+  }
+})
+
 console.log('\nAll stock line request id durability assertions passed')

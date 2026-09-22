@@ -23,6 +23,7 @@ import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
+import { stockFailureText } from '../../utils/stockAdjustOutcome.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
@@ -803,8 +804,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
         failed += 1
-        const message = error instanceof Error ? error.message : tr('error', 'Error')
-        lines = applyLineOutcome(lines, line.key, { status: 'error', detail: message })
+        // Migration 0192: a guard refusal gets its translated sentence;
+        // everything else keeps the server's own words, which the operator
+        // acts on ("only 2 available").
+        lines = applyLineOutcome(lines, line.key, {
+          status: 'error',
+          detail: stockFailureText(error, tr, tr('error', 'Error')),
+        })
       }
       // The committed outcome is durable BEFORE the render that shows it.
       persistSessionDraft(lines)
@@ -832,7 +838,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       const message = error instanceof Error ? error.message : tr('error', 'Error')
       failed = pending.length
       const lines = received.map((item) => (pending.some((line) => line.key === item.key)
-        ? { ...item, status: 'error' as const, detail: message }
+        ? { ...item, status: 'error' as const, detail: stockFailureText(error, tr, message) }
         : item))
       persistSessionDraft(lines)
       setReceived(lines)
@@ -849,8 +855,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
         } else {
           failed += 1
-          const message = result?.error || tr('error', 'Error')
-          lines = applyLineOutcome(lines, line.key, { status: 'error', detail: message })
+          lines = applyLineOutcome(lines, line.key, {
+            detail: stockFailureText(result, tr, tr('error', 'Error')),
+            status: 'error',
+          })
         }
       })
       // Durable before the render. A crash here used to leave every line

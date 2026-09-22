@@ -172,7 +172,12 @@ runTest('the bulk surface follows the same rule, row by row', () => {
 runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
   // The reference implementation this rule generalises: per-line status,
   // inline detail, saved lines skipped on the next Complete.
-  assert.match(fastStockIn, /status: 'error', detail: message/)
+  // Migration 0192: the detail now goes through stockFailureText (a guard
+  // refusal gets a translated sentence, everything else keeps the server's own
+  // words). The behaviour this pins -- per-line status with an inline reason --
+  // is unchanged.
+  assert.match(fastStockIn, /status: 'error',\s*\n?\s*detail: stockFailureText\(error, tr/)
+  assert.match(fastStockIn, /detail: stockFailureText\(result, tr/)
   assert.match(fastStockIn, /received\.filter\(\(line\) => line\.status !== 'saved'\)/)
 })
 
