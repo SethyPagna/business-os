@@ -202,6 +202,17 @@ export function stockFailureText(
   return message.trim() || fallbackMessage
 }
 
+/**
+ * True when the line can never succeed under its current id -- the operator's
+ * way out is Remove, not Retry. Every stock surface that offers a retry must
+ * ask this first, or it invites the exact double-send the guard just stopped.
+ */
+export function stockLineNeedsRemoval(error: unknown): boolean {
+  const source = (error && typeof error === 'object' ? error : {}) as Record<string, unknown>
+  const code = String(source.code || '')
+  return code === 'stock_request_partially_applied' || code === 'idempotency_conflict' || code === 'invalid_client_request_id'
+}
+
 export type StockAdjustOutcome =
   | { status: 'saving' }
   | { status: 'done' }

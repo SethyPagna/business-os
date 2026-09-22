@@ -197,6 +197,13 @@ runTest('the guard codes are translated, not shown in the server English', () =>
 runTest('every stock surface routes its failure text through the shared helper', () => {
   assert.match(fastStockIn, /stockFailureText\(error, tr, tr\('error', 'Error'\)\)/, 'sequential commit')
   assert.match(fastStockIn, /stockFailureText\(result, tr, tr\('error', 'Error'\)\)/, 'batched commit')
+  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(error\)/, 'sequential commit marks the signpost')
+  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(result\)/, 'batched commit marks the signpost')
+  assert.match(
+    fastStockIn,
+    /line\.status !== .saved. && !line\.needsRemoval \? <button[^>]*onClick=\{\(\) => editLine\(line\)\}/,
+    'a line that can only be removed must not offer Edit -- editing keeps the id and earns another 409',
+  )
   assert.match(source('components/inventory/ReceiveBatchModal.tsx'), /stockFailureText\(e, tr,/, 'ReceiveBatchModal')
   assert.match(source('components/products/forms/StockAdjustModal.tsx'), /stockFailureText\(error, tr, classified\.message\)/, 'StockAdjustModal')
   const bulk = source('components/products/forms/BulkAddStockModal.tsx')

@@ -178,6 +178,7 @@ runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
   // is unchanged.
   assert.match(fastStockIn, /status: 'error',\s*\n?\s*detail: stockFailureText\(error, tr/)
   assert.match(fastStockIn, /detail: stockFailureText\(result, tr/)
+  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(/)
   assert.match(fastStockIn, /received\.filter\(\(line\) => line\.status !== 'saved'\)/)
 })
 
