@@ -661,6 +661,17 @@ async function productsRoute() {
     assert.deepEqual(JSON.parse(updates[2].old_value), { purchase_price_usd: 0.9 })
     assert.deepEqual(JSON.parse(updates[2].new_value), { purchase_price_usd: 1.1 })
   })
+
+  // Bulk price adjust: the scope never materializes ids, so the honest
+  // before/after is the catalog total per adjusted field plus the row count.
+  raw.prepare("INSERT INTO products(id, name, unit, is_active, selling_price_usd) VALUES (2, 'Pepsi 330ml', 'pcs', 1, 2.0)").run()
+  response = await request('POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.5, fields: ['selling_price_usd'] })
+  assert.equal(response.status, 200, JSON.stringify(response.body))
+  check('bulk price adjust reports the rows it actually changed', () => {
+    // D1 reports a batch statement's row count in meta.changes; reading it at
+    // the top level answered undefined -> 0 for every adjustment ever made.
+    assert.equal(response.body.changed, 2)
+  })
 }
 
 // ---------------------------------------------------------------------------
