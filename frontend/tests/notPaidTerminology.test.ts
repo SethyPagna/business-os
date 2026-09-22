@@ -173,6 +173,41 @@ assert.match(notificationsRoute, /summaryKey: 'notification_sales_summary'/, 'th
 assert.match(notificationsRoute, /metaKey: 'notification_sales_awaiting_payment'/, 'the Not Paid rows name their localized meta copy')
 assert.match(notificationsRoute, /metaKey: 'notification_sales_awaiting_delivery'/, 'the awaiting-delivery rows name theirs too')
 assert.doesNotMatch(notificationsRoute, /កំពុងរង់ចាំបង់ប្រាក់|កំពុងរង់ចាំការទូទាត់|រង់ចាំបង់ប្រាក់/, 'the route must not carry Khmer status copy of its own')
+
+// THE ENGLISH SIDE, which this guard could not check until Sep 23 2026: it
+// only looked for Khmer here, because the English "Awaiting payment" in this
+// file is DELIBERATE -- it is what a client running an older cached bundle
+// renders when it does not recognise the localized key beside it. Deleting it
+// would break that client; leaving the guard silent lets the wording spread.
+//
+// So: count the occurrences and pin each one to its key. Two lines carry the
+// retired wording, and each sits in a block that also names a metaKey or a
+// summaryKey. A third one, or one of these two losing its key, is drift.
+const routeCodeLines = code(notificationsRoute).split('\n')
+const retiredInRoute = routeCodeLines
+  .map((line, index) => ({ line: line.trim(), index }))
+  .filter(({ line }) => RETIRED_STATUS_WORDING.test(line))
+assert.equal(retiredInRoute.length, 2,
+  `notifications.ts may carry the retired wording ONLY on its two stale-client fallbacks, found ${retiredInRoute.length}:\n  ${retiredInRoute.map(({ line, index }) => `${index + 1}: ${line}`).join('\n  ')}`)
+for (const { line, index } of retiredInRoute) {
+  assert.match(routeCodeLines.slice(index, index + 6).join('\n'), /(metaKey|summaryKey): '/,
+    `the retired wording on this line is not a fallback beside a localized key, so it is what the shop reads: ${line}`)
+}
+// It must be exactly the two the panel localizes -- the item meta and the
+// section summary -- and not, say, two copies of the same one.
+assert.match(retiredInRoute[0].line, /^meta: /, retiredInRoute[0].line)
+assert.match(retiredInRoute[1].line, /^awaitingPayment\.length \?/, retiredInRoute[1].line)
+// DISCRIMINATING CONTROL: the same predicate, run over the same source with
+// one extra drifted line spliced in far from any key, must reject it -- a
+// count that cannot fail is not a guard.
+{
+  const drifted = routeCodeLines.slice()
+  drifted.splice(5, 0, "  const heading = 'Awaiting payment'")
+  const found = drifted.filter((line) => RETIRED_STATUS_WORDING.test(line))
+  assert.equal(found.length, 3, 'the control line was not seen by the pattern at all')
+  assert.match(drifted.slice(5, 11).join('\n'), /^(?!.*(metaKey|summaryKey): ')[\s\S]*$/,
+    'the control line must NOT be near a key, or it would pass for the wrong reason')
+}
 const dashboardStatus = read('../src/components/dashboard/dashboardSaleStatus.ts')
 assert.match(dashboardStatus, /awaiting_payment: \{ key: 'status_awaiting_payment', fallback: 'Not Paid' \}/)
 const pos = read('../src/components/pos/POS.tsx')
