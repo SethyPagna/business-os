@@ -60,6 +60,10 @@ const rows = [
   { user_id: 2, user_name: 'Sok', action: 'delete', entity: 'fee', entity_id: '7', details: null, table_name: 'fee', record_id: '7', new_value: null, device_name: 'Office', created_at: '2026-08-15T09:00:00.000Z' },
   { user_id: 2, user_name: 'Sok', action: 'restore', entity: null, entity_id: null, details: 'backup restore', table_name: 'backup', record_id: 'b-1', new_value: null, device_name: 'Office', created_at: '2026-08-20T09:00:00.000Z' },
   { user_id: 3, user_name: 'សុភា', action: 'CREATE', entity: 'sale', entity_id: '55', details: 'receipt 001', table_name: 'sale', record_id: '55', new_value: null, device_name: 'POS 2', created_at: '2026-08-28T09:00:00.000Z' },
+  // A writer that keys its row by a RECEIPT id and names the record only in
+  // record_id -- the return create row's real shape. A per-record float that
+  // matched entity_id alone would lose every creation.
+  { user_id: 2, user_name: 'Sok', action: 'create', entity: 'return_create', entity_id: 'rct-20260829-01', details: null, table_name: 'returns', record_id: '10', new_value: null, device_name: 'Office', created_at: '2026-08-29T09:00:00.000Z' },
 ]
 for (const row of rows) insert.run(row)
 
@@ -80,16 +84,16 @@ function run(input, page = 1, pageSize = 50) {
 // ---- behavior -------------------------------------------------------------
 {
   const { items, total } = run({})
-  ok(items.length === 5 && total === 5, 'no filters -> everything, count agrees')
+  ok(items.length === 6 && total === 6, 'no filters -> everything, count agrees')
 }
 {
   const { items, total } = run({ action: 'create' })
-  ok(total === 2 && items.every((r) => r.action.toLowerCase() === 'create'),
+  ok(total === 3 && items.every((r) => r.action.toLowerCase() === 'create'),
     "action filter is case-insensitive ('create' matches the uppercase legacy row too)")
 }
 {
   const { total } = run({ action: 'create,delete' })
-  ok(total === 3, 'comma-joined multi action (toggleMultiValue shape) ORs the values')
+  ok(total === 4, 'comma-joined multi action (toggleMultiValue shape) ORs the values')
 }
 {
   const { items, total } = run({ entity: 'backup' })
@@ -106,7 +110,7 @@ function run(input, page = 1, pageSize = 50) {
 }
 {
   const { total } = run({ userId: 'abc,-4' })
-  ok(total === 5, 'garbage userIds are dropped, not turned into an impossible filter')
+  ok(total === 6, 'garbage userIds are dropped, not turned into an impossible filter')
 }
 {
   const { total } = run({ startDate: '2026-08-10', endDate: '2026-08-20' })
@@ -145,9 +149,32 @@ function run(input, page = 1, pageSize = 50) {
   ok(total === 1, 'filters combine with AND')
 }
 {
-  const { items, total } = run({ action: 'create' }, 2, 1)
-  ok(total === 2 && items.length === 1 && items[0].created_at === '2026-08-01T09:00:00.000Z',
+  const { items, total } = run({ action: 'create' }, 3, 1)
+  ok(total === 3 && items.length === 1 && items[0].created_at === '2026-08-01T09:00:00.000Z',
     'pagination pages within the FILTERED set (count stays the filtered total)')
+}
+
+// ---- entityId: ONE record's trail (the per-record Records floats) ----------
+{
+  const { items, total } = run({ entity: 'product', entityId: '10' })
+  ok(total === 2 && items.every((r) => r.entity === 'product'),
+    'entityId narrows to one record, and combines with entity')
+}
+{
+  const { total } = run({ entityId: '10' })
+  ok(total === 3, 'a row that names its record only in record_id is still part of that record history')
+}
+{
+  const { total } = run({ entityId: '55' })
+  ok(total === 1, 'CONTROL: a different record id returns a different, smaller set -- not everything')
+}
+{
+  const { total } = run({ entityId: '' })
+  ok(total === 6, 'CONTROL: a blank entityId is no filter at all, never a match on empty ids')
+}
+{
+  const { total } = run({ entityId: "10' OR '1'='1" })
+  ok(total === 0, 'entityId is bound, not interpolated')
 }
 
 // ---- wiring pins ----------------------------------------------------------
@@ -158,6 +185,8 @@ ok(!/date\(created_at\) >= @startDate/.test(auditSrc),
   'auditLogQuery.ts no longer buckets the date filter in UTC')
 const compatSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'compat.ts'), 'utf8')
 ok(compatSrc.includes('buildAuditLogFilters({'), 'compat.ts builds the clause from the request')
+ok(/entityId: c\.req\.query\('entityId'\)/.test(compatSrc),
+  'compat.ts passes entityId through -- the per-record floats read this same endpoint rather than a second audit reader with its own permission story')
 ok(/SELECT COUNT\(\*\) AS count FROM audit_logs \$\{where\}/.test(compatSrc),
   'the COUNT shares the WHERE -- pagination cannot disagree with the rows')
 ok(/DISTINCT LOWER\(action\)/.test(compatSrc) && /DISTINCT LOWER\(COALESCE\(entity, table_name\)\)/.test(compatSrc),

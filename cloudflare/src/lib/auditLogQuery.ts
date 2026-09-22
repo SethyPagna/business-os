@@ -25,6 +25,19 @@ export type AuditLogFilterInput = {
   search?: string
   action?: string
   entity?: string
+  /**
+   * ONE record's trail. Added for the per-record "Records" / "Field history"
+   * floats (products, contacts): they ask this same endpoint for
+   * entity=product&entityId=42 rather than introducing a second audit reader
+   * with its own permission story. A SINGLE value, not the comma list the
+   * other filters take -- a float is always about one record, and matching a
+   * list here would let a caller widen its own scope.
+   *
+   * entity_id is a TEXT column written by both text and integer writers, and
+   * record_id carries the id for rows whose entity_id holds a receipt id
+   * instead (a return's create row is the live example), so both are matched.
+   */
+  entityId?: string
   userId?: string
   startDate?: string
   endDate?: string
@@ -68,6 +81,12 @@ export function buildAuditLogFilters(input: AuditLogFilterInput): AuditLogFilter
     })
     const list = names.join(', ')
     clauses.push(`(LOWER(COALESCE(entity, '')) IN (${list}) OR LOWER(COALESCE(table_name, '')) IN (${list}))`)
+  }
+
+  const entityId = String(input.entityId ?? '').trim()
+  if (entityId) {
+    params.entityId = entityId
+    clauses.push('(CAST(entity_id AS TEXT) = @entityId OR CAST(record_id AS TEXT) = @entityId)')
   }
 
   const userIds = splitMulti(input.userId)
