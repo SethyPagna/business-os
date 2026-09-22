@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { fmtTime } from '../../utils/formatters'
 import {
   beginTrackedRequest,
@@ -60,11 +61,12 @@ interface SaleReturnItem extends SaleItemRow {
   stock_action: ReturnStockAction
 }
 
-// 11.12 Replace: a line handed to the customer from SAME-NAME stock,
-// chosen the POS way (row of the group + branch + optional exact lot).
+// A replacement is a normal sale line linked to this return. It may be any
+// catalog product and is selected with the same name/barcode search as POS.
 interface ReplacementCandidate {
   id: number | string
   name?: string | null
+  sku?: string | null
   barcode?: string | null
   selling_price_usd?: number | string | null
   selling_price_khr?: number | string | null
@@ -78,6 +80,9 @@ interface ReplacementLine {
   batch_id: number | null
   batches: ProductBatch[]
   candidates: ReplacementCandidate[]
+  search_query: string
+  searching: boolean
+  searched: boolean
   quantity: number
   price_usd: number
   price_khr: number
@@ -237,7 +242,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   // explicit preview" -- the checkbox below IS the explicit preview, and
   // it only unlocks for Full Access to Returns.
   const canSettleDifference = getPermissionTier?.('returns') === 'full'
-  const normName = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+  const normCode = (value: unknown) => String(value ?? '').trim().toLowerCase()
 
   const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
     if (!branchId) return
@@ -249,7 +254,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     } catch { /* the lot picker is a nicety -- "any stock" still works */ }
   }
 
-  const addReplacementFor = async (item: SaleReturnItem) => {
+  const addReplacementFor = (item: SaleReturnItem) => {
     if (!item.product_id) return
     const name = String(item.product_name || item.name || '').trim()
     const branchId = item.branch_id || foundSale?.branch_id || null
@@ -262,19 +267,16 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
       batch_id: null,
       batches: [],
       candidates: [],
+      search_query: '',
+      searching: false,
+      searched: false,
       quantity: item.returnQty || 1,
-      // seeding with the SAME row at the price the customer paid keeps the
-      // default an even exchange; picking a different row of the group
-      // switches to that row's own price (a real gap worth surfacing)
+      // Seed with the returned row at the paid price for a quick even swap.
+      // A catalog search can then replace it with any other product/price.
       price_usd: toNumber(item.applied_price_usd),
       price_khr: toNumber(item.applied_price_khr),
     }])
     void loadReplacementBatches(key, item.product_id, branchId)
-    try {
-      const payload = await searchProducts({ query: name, pageSize: 20 }) as { items?: ReplacementCandidate[] }
-      const rows = (Array.isArray(payload?.items) ? payload.items : []).filter((row) => normName(row.name) === normName(name))
-      setReplacements((prev) => prev.map((line) => line.key === key ? { ...line, candidates: rows } : line))
-    } catch { /* same-row replacement still works without the sibling list */ }
   }
 
   const pickReplacementRow = (lineKey: string, candidate: ReplacementCandidate) => {
@@ -297,6 +299,23 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
 
   const updateReplacement = (lineKey: string, patch: Partial<ReplacementLine>) => {
     setReplacements((prev) => prev.map((line) => line.key === lineKey ? { ...line, ...patch } : line))
+  }
+
+  const searchReplacementCatalog = async (lineKey: string, scannedQuery?: string) => {
+    const line = replacements.find((entry) => entry.key === lineKey)
+    const query = scannedQuery?.trim() || line?.search_query.trim() || ''
+    if (!line || !query || line.searching) return
+    updateReplacement(lineKey, { search_query: query, searching: true })
+    try {
+      const payload = await searchProducts({ query, page: 1, pageSize: 30 }) as { items?: ReplacementCandidate[] }
+      const rows = Array.isArray(payload?.items) ? payload.items : []
+      updateReplacement(lineKey, { candidates: rows, searching: false, searched: true })
+      const exactBarcode = rows.find((row) => normCode(row.barcode) === normCode(query) || normCode(row.sku) === normCode(query))
+      if (exactBarcode) pickReplacementRow(lineKey, exactBarcode)
+    } catch (error) {
+      updateReplacement(lineKey, { searching: false, searched: true })
+      notify(`${T('search_error', 'Search error')}: ${getLoaderErrorMessage(error, T('error', 'Error'))}`, 'error')
+    }
   }
   const removeReplacement = (lineKey: string) => setReplacements((prev) => prev.filter((line) => line.key !== lineKey))
 
@@ -459,7 +478,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         'Create return',
         RETURN_CREATE_TIMEOUT_MS,
       )
-      notify(T('sale_complete','Return processed successfully'))
+      const response = (result || {}) as { replacementReceiptNumber?: string | null }
+      notify(response.replacementReceiptNumber
+        ? `${T('return_processed_with_receipt', 'Return processed. Replacement sale receipt')}: ${response.replacementReceiptNumber}`
+        : T('sale_complete','Return processed successfully'))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
@@ -679,9 +701,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                                 </div>
                               )}
                               {item.product_id ? (
-                                <button type="button" onClick={() => void addReplacementFor(item)}
+                                <button type="button" onClick={() => addReplacementFor(item)}
                                   className="text-[11px] text-emerald-600 hover:underline dark:text-emerald-400">
-                                  🔁 {T('add_replacement', 'Hand out a replacement for this item')}
+                                  🔁 {T('add_replacement_sale_item', 'Add an item to the replacement sale')}
                                 </button>
                               ) : null}
                             </div>
@@ -709,13 +731,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 </div>
               )}
 
-              {/* 11.12 Replace: same-name stock handed out with the return,
-                  chosen the POS way (row of the group + exact lot), with the
-                  settlement preview the backend will enforce. */}
+              {/* Replacement sale: any catalog item can be found by name,
+                  SKU or barcode, then drawn from an optional exact lot. */}
               {replacements.length > 0 && (
                 <div>
                   <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
-                    🔁 {T('replacement_items_label','Replacement items (same-name stock)')}
+                    🔁 {T('replacement_sale_items_label','Replacement sale items')}
                   </label>
                   <div className="space-y-2">
                     {replacements.map((line) => (
@@ -724,17 +745,43 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                           <div className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{line.product_name}</div>
                           <button type="button" onClick={() => removeReplacement(line.key)} className="flex-shrink-0 text-xs text-red-500 hover:underline">{T('remove','Remove')}</button>
                         </div>
-                        {line.candidates.length > 1 && (
+                        <div className="flex gap-2">
+                          <input
+                            className="input h-9 min-w-0 flex-1 py-1 text-xs"
+                            value={line.search_query}
+                            onChange={(event) => updateReplacement(line.key, { search_query: event.target.value, searched: false })}
+                            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchReplacementCatalog(line.key) } }}
+                            placeholder={T('replacement_product_search', 'Search another product by name, SKU or barcode')}
+                            aria-label={T('replacement_product_search', 'Search another product by name, SKU or barcode')}
+                          />
+                          <button
+                            type="button"
+                            className="btn-secondary h-9 flex-shrink-0 px-3 py-1 text-xs"
+                            disabled={line.searching || !line.search_query.trim()}
+                            onClick={() => void searchReplacementCatalog(line.key)}
+                          >
+                            {line.searching ? '…' : T('btn_search', 'Search')}
+                          </button>
+                          <ScanSearchButton
+                            onDetected={(value) => { void searchReplacementCatalog(line.key, value) }}
+                            t={(key: string) => T(key, key)}
+                            className="h-9 w-9"
+                          />
+                        </div>
+                        {line.candidates.length > 0 && (
                           <AppSelect
                             value={String(line.product_id)}
                             onChange={(next) => { const candidate = line.candidates.find((row) => String(row.id) === next); if (candidate) pickReplacementRow(line.key, candidate) }}
-                            ariaLabel={T('replacement_row','Which row of the group')}
+                            ariaLabel={T('replacement_product', 'Replacement product')}
                             className="w-full"
                             buttonClassName="h-9 w-full text-xs"
                             optionClassName="text-xs"
-                            options={line.candidates.map((row) => ({ value: String(row.id), label: `${row.name}${row.barcode ? ` · ${row.barcode}` : ''} · ${fmtUSD(toNumber(row.selling_price_usd))}` }))}
+                            options={line.candidates.map((row) => ({ value: String(row.id), label: `${row.name}${row.sku ? ` · ${row.sku}` : ''}${row.barcode ? ` · ${row.barcode}` : ''} · ${fmtUSD(toNumber(row.selling_price_usd))}` }))}
                           />
                         )}
+                        {line.searched && !line.searching && line.candidates.length === 0 ? (
+                          <div className="text-xs text-amber-600 dark:text-amber-400">{T('no_products_found', 'No products found. Try another name, SKU or barcode.')}</div>
+                        ) : null}
                         <div className="flex items-center gap-2">
                           <AppSelect
                             value={line.batch_id != null ? String(line.batch_id) : ''}
@@ -841,7 +888,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                     <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
                   )}
                   {replacements.length > 0 && (
-                    <div>🔁 {replacements.length} {T('replacement_items_short','replacement item(s) handed out')} — {settlementPreview.isEven ? T('even_exchange','even exchange') : T('price_difference','price difference')}</div>
+                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {settlementPreview.isEven ? T('even_exchange','even exchange') : T('price_difference','price difference')}</div>
                   )}
                 </div>
               </div>

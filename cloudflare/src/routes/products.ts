@@ -18,7 +18,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups, findPossiblySameProductClusters, normalizeProductClusterKey } from '../lib/productIdentity'
-import { normalizeProductGroupName } from '../lib/productDetailRule'
+import { normalizeProductGroupName, resolveMergedPricing } from '../lib/productDetailRule'
 import { registerMergeFold, recordMergeUndoSnapshot, recordBulkMergeUndoSnapshot, recordSupplierBackfillSnapshot, type MergeReversal } from '../lib/undoAppliers'
 import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
@@ -316,7 +316,11 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // structural filters only, same stable behavior Products.tsx's own
   // filter-meta cache already relies on, so it can never again go stale
   // relative to a search box the caller doesn't track in its refresh key.
-  const { query: _searchTerm, q: _searchTermAlt, ...structuralQuery } = query
+  // `search` is listed alongside query/q because buildSearchFilters now
+  // honors it as a third alias (see its own comment there) -- if it were
+  // left in, this facet-metadata call would silently start narrowing by a
+  // free-text term again, the exact staleness this strip exists to prevent.
+  const { query: _searchTerm, q: _searchTermAlt, search: _searchTermAlias, ...structuralQuery } = query
   const variants = buildFilterVariants(structuralQuery)
   const sql = (f: ReturnType<typeof buildSearchFilters>) => `WHERE ${f.where.join(' AND ')}`
   const joinSql = (f: ReturnType<typeof buildSearchFilters>) => f.joins.join('\n')
@@ -694,7 +698,56 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
   }
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
 
-  const searchTermGroups = splitSearchTermGroups(query.query || query.q || '')
+  // `ids` is the by-id lookup the client transport has always sent
+  // (frontend/src/api/productReadTransport.ts -> getProductsByIds), and this
+  // endpoint never read it. The silent-drop consequence is not "an unfiltered
+  // list", it is the WRONG RECORD: the caller asks for one id, takes items[0],
+  // and gets the first row of the catalog by the default name order instead.
+  // Reported live 2026-09-03 -- opening Adjust Stock on "Dior Backstage
+  // Highlighter New 002" (id 7231) loaded, and would have written against,
+  // "Abercrombie Authantic 10ml" (id 1). Verified against a production
+  // snapshot: `?ids=7231&pageSize=1` answered total 10212, items[0] = id 1.
+  // A present-but-unusable `ids` resolves to "no rows", never "everything":
+  // returning the whole catalog to a by-id lookup is the failure being fixed.
+  // Not every unread param is a bug: `include` is also never parsed here, and
+  // that is deliberate -- attachBranchStock/attachImageGallery/attachBatchCounts
+  // run unconditionally and the Products page, POS and the branch stock column
+  // all depend on that data arriving whether or not they asked for it. Do NOT
+  // "tidy" `include` into a gate; it would strip fields those surfaces render.
+  const rawIdFilter = query.ids ?? query.id
+  if (rawIdFilter != null && String(rawIdFilter).trim() !== '') {
+    const requestedIds = [...new Set(
+      String(rawIdFilter)
+        .split(',')
+        .map((raw) => String(raw).trim())
+        // Whole-token digits only. Number.parseInt is lenient and stops at
+        // the first non-digit, so a malformed '1.5.2' would parse to 1 --
+        // resolving a bad id to a DIFFERENT VALID PRODUCT, which is the
+        // wrong-record failure this filter exists to prevent. A token that
+        // is not an id must fall through to the 1 = 0 branch below.
+        .filter((raw) => /^\d+$/.test(raw))
+        .map((raw) => Number.parseInt(raw, 10))
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
+    )].slice(0, 100)
+    if (!requestedIds.length) where.push('1 = 0')
+    else {
+      const placeholders = requestedIds.map((id, index) => {
+        params[`byId${index}`] = id
+        return `@byId${index}`
+      })
+      where.push(`p.id IN (${placeholders.join(', ')})`)
+    }
+  }
+
+  // `search` accepted as a third alias alongside query/q. A caller that
+  // spells the term with a synonym used to get the WHOLE unfiltered catalog
+  // back with a 200 -- a silent drop, not an error -- which is precisely how
+  // the Change-stock picker shipped a search box that ignored what was typed
+  // or scanned into it (StockAdjustModal sent `search=`; verified live against
+  // a production snapshot: `?search=3348901770569` returned total 10212,
+  // `?query=3348901770569` returned total 3).
+  // NOTE: /filters strips all three aliases -- see its own comment.
+  const searchTermGroups = splitSearchTermGroups(query.query || query.q || query.search || '')
   // Relevance rank for ordering (not filtering) results once there's an
   // actual search term -- FTS5's own bm25() relevance function
   // (PRODUCTS_FTS_BM25_SQL, lib/searchMatch.ts) weighted so a
@@ -2479,8 +2532,14 @@ export async function foldDuplicateProductInto(
   // Keeper's image_path BEFORE the fold: the fold adopts the dup's image only
   // when the keeper had none, so undo restores this captured value verbatim.
   const canonicalBefore = await db
-    .prepare('SELECT image_path FROM products WHERE id = @id')
-    .get<{ image_path: string | null }>({ id: canonicalId })
+    .prepare(`SELECT image_path, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+              FROM products WHERE id = @id`)
+    .get<{ image_path: string | null; selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: canonicalId })
+  const dupPricing = await db
+    .prepare(`SELECT selling_price_usd, selling_price_khr, special_price_usd, special_price_khr
+              FROM products WHERE id = @id`)
+    .get<{ selling_price_usd: number | null; selling_price_khr: number | null; special_price_usd: number | null; special_price_khr: number | null }>({ id: dup.id })
+  const mergedPricing = resolveMergedPricing([canonicalBefore || {}, dupPricing || {}])
   const dupBatchRows = await db
     .prepare('SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id')
     .all<{ id: number; batch_key: string; batch_number: number | null }>({ id: dup.id })
@@ -2556,6 +2615,22 @@ export async function foldDuplicateProductInto(
   })
 
   statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
+  statements.push({
+    sql: `UPDATE products
+          SET selling_price_usd = @sellingUsd,
+              selling_price_khr = @sellingKhr,
+              special_price_usd = @specialUsd,
+              special_price_khr = @specialKhr,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = @canonicalId`,
+    params: {
+      canonicalId,
+      sellingUsd: mergedPricing.selling_price_usd ?? canonicalBefore?.selling_price_usd ?? 0,
+      sellingKhr: mergedPricing.selling_price_khr ?? canonicalBefore?.selling_price_khr ?? 0,
+      specialUsd: mergedPricing.special_price_usd ?? canonicalBefore?.special_price_usd ?? 0,
+      specialKhr: mergedPricing.special_price_khr ?? canonicalBefore?.special_price_khr ?? 0,
+    },
+  })
 
   // batch_key has a UNIQUE(variant_product_id, batch_key) index, so a
   // batch can't just be re-pointed at the canonical product if the
@@ -2686,6 +2761,12 @@ export async function foldDuplicateProductInto(
       dupId: dup.id,
       dupName: dup.name ?? null,
       keeperImagePathBefore: canonicalBefore?.image_path ?? null,
+      keeperPricingBefore: {
+        selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
+        selling_price_khr: Number(canonicalBefore?.selling_price_khr) || 0,
+        special_price_usd: Number(canonicalBefore?.special_price_usd) || 0,
+        special_price_khr: Number(canonicalBefore?.special_price_khr) || 0,
+      },
       keeperStockBefore: canonicalStockBefore.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0 })),
       dupStockBefore: stockRows.map((r) => ({ branch_id: r.branch_id, quantity: Number(r.quantity) || 0, rfid_confirmed_qty: Number(r.rfid_confirmed_qty) || 0 })),
       dupImagesBefore: dupImageRows.map((r) => ({ image_path: String(r.image_path), sort_order: r.sort_order == null ? null : Number(r.sort_order) })),

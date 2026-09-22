@@ -67,6 +67,7 @@ await runTest('deriveScannerPresentation keeps dismissed prompts distinct from h
 
 await runTest('scanner starts only from an explicit button and always releases the camera', () => {
   const source = fs.readFileSync(new URL('../src/components/products/scanning/BarcodeScannerModal.tsx', import.meta.url), 'utf8')
+  const modalSource = fs.readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
   assert.match(source, /const video = await waitForVideoElement\(startToken\)/, 'camera startup must wait for React to commit the video element')
   assert.match(source, /decodeFromConstraints\([\s\S]*?video,[\s\S]*?\(result\)/, 'the iOS compatibility decoder must receive the mounted video element')
   const prepareBlock = source.slice(source.indexOf('const prepareScanner'), source.indexOf('const closeScanner'))
@@ -78,17 +79,55 @@ await runTest('scanner starts only from an explicit button and always releases t
   assert.match(source, /onClick=\{\(\) => startCamera\(\{ preserveManualValue: true \}\)\}/, 'the visible camera action remains the sole start trigger')
   assert.match(source, /const closeScanner[\s\S]*?cleanup\(\)[\s\S]*?onClose\(\)/, 'closing the scanner must stop tracks before dismissing the modal')
   assert.match(source, /cleanup\(\)[\s\S]*?setPermissionState\(documentBlocked/, 'failed starts must stop partially-open camera tracks')
+  assert.match(source, /<Modal[^>]*layer="nested"/, 'the camera dialog must sit above the workflow modal that opened it')
+  assert.match(modalSource, /layer === 'nested' \? 'z-\[1070\]' : 'z-\[1050\]'/, 'nested tools must use a higher dialog layer')
 })
 
 await runTest('branch transfer exposes the shared icon scanner in single and multi-product searches', () => {
   const source = fs.readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
   const mainCss = fs.readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
   assert.match(source, /import ScanSearchButton from ['"]\.\.\/shared\/ScanSearchButton\.tsx['"]/)
-  const scannerUses = source.match(/<ScanSearchButton onDetected=\{setSearch\} t=\{t\} \/>/g) || []
+  assert.match(
+    source,
+    /const handleTransferProductScan = useCallback\([\s\S]*?setShowSelectedOnly\(false\)[\s\S]*?setShowAllProducts\(false\)[\s\S]*?setSearch\(barcode\)/,
+    'a scan must become the transfer picker query and reset filters that could hide it',
+  )
+  const scannerUses = source.match(/<ScanSearchButton\b[\s\S]*?onDetected=\{handleTransferProductScan\}[\s\S]*?\/>/g) || []
   assert.equal(scannerUses.length, 2, 'single and multi transfer searches must both keep scanner access')
+  const focusedProductSearches = source.match(/placeholder=\{t\('search_products_placeholder'\)[\s\S]*?autoFocus[\s\S]*?autoComplete="off"/g) || []
+  assert.equal(focusedProductSearches.length, 2, 'both transfer product searches must take scanner-keyboard focus')
+  assert.doesNotMatch(source, /<ScanSearchButton\s+onDetected=\{setSearch\}/, 'transfer scans must not use an unscoped generic search setter')
   assert.match(source, /items-end justify-center[^\"]*sm:items-center/, 'small screens should use a bottom sheet while larger screens center the dialog')
   assert.match(source, /modal-viewport-safe/, 'transfer dialog should use the shared safe-area viewport layer')
   assert.match(mainCss, /\.modal-viewport-safe[\s\S]*safe-area-inset-bottom/, 'the shared transfer layer should stay above the mobile safe area')
+})
+
+await runTest('stock workflow scanners stay inside their active product picker', () => {
+  const adjustmentSource = fs.readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
+  const stockInSource = fs.readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
+  const ledgerSource = fs.readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+
+  assert.match(
+    adjustmentSource,
+    /const handleProductScan = useCallback\([\s\S]*?setResults\(\[\]\)[\s\S]*?setSearch\(barcode\)/,
+    'Add, Remove, and Set Quantity must route scans to their modal query',
+  )
+  assert.match(adjustmentSource, /<ScanSearchButton\b[\s\S]*?onDetected=\{handleProductScan\}/)
+  assert.match(
+    stockInSource,
+    /<ScanSearchButton onDetected=\{\(value\) => \{[\s\S]*?setQuery\(barcode\)[\s\S]*?setScannedBarcode\(barcode\)/,
+    'Add Stock must keep barcode lookup in its own query and exact-scan state',
+  )
+
+  assert.match(ledgerSource, /const stockWorkflowOpen = adjustType !== null \|\| fastStockInOpen/)
+  assert.match(ledgerSource, /const blurLedgerSearch = useCallback\([\s\S]*?activeElement\.blur\(\)/)
+  assert.match(ledgerSource, /openAdjust: openStockAdjustment/)
+  assert.match(ledgerSource, /<SearchInput id="stock-ledger-search"[^>]*disabled=\{stockWorkflowOpen\}/)
+  assert.match(
+    ledgerSource,
+    /\{!stockWorkflowOpen \? <ScanSearchButton onDetected=\{setSearch\}/,
+    'Stock Change History scanner must be unavailable while a stock workflow owns scanning',
+  )
 })
 
 await runTest('remaining product search surfaces expose controlled icon-only scanners', () => {

@@ -154,6 +154,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   const [results, setResults] = useState<PickedProduct[]>([])
   const [searching, setSearching] = useState(false)
 
+  // Camera results belong to this picker only. A named handler (rather than
+  // passing a generic setSearch reference) makes that boundary explicit and
+  // clears stale rows while the exact barcode query is loading.
+  const handleProductScan = useCallback((value: string) => {
+    const barcode = String(value || '').trim()
+    if (!barcode) return
+    setResults([])
+    setSearch(barcode)
+  }, [])
+
   useEffect(() => {
     if (selectedProduct) return
     let cancelled = false
@@ -161,7 +171,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // include branch_stock so per-branch quantity + remove-availability
     // checks below are accurate; the search endpoint supports `include`
     // (same param getProductsByIds passes).
-    searchProducts({ search: debouncedSearch, pageSize: 20, include: 'branch_stock' })
+    searchProducts({ query: debouncedSearch, pageSize: 20, include: 'branch_stock' })
       .then((raw) => {
         if (cancelled) return
         const rows = Array.isArray(raw)
@@ -322,7 +332,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
           : Array.isArray((raw as { items?: unknown })?.items)
             ? (raw as { items: PickedProduct[] }).items
             : []
-        selectProduct((rows[0] as PickedProduct | undefined) || initial as PickedProduct)
+        // Key the refreshed row by the id that was asked for. Taking
+        // items[0] meant that any response that was not exactly this
+        // product -- and until the fix in this lane the endpoint ignored
+        // `ids` and answered with the head of the whole catalog -- silently
+        // rebound the form to a different product: reported live on an
+        // iPhone, picking a Dior highlighter (id 7231) and getting the
+        // catalog's first row by name in the adjustment below. The picked
+        // product's identity now comes from its id, and an unmatched
+        // response falls back to the row the operator actually clicked
+        // rather than to a stranger.
+        const refreshed = (rows as PickedProduct[]).find((row) => Number(row?.id) === Number(id))
+        selectProduct(refreshed || initial as PickedProduct)
       })
       .catch(() => { if (!cancelled) selectProduct(initial as PickedProduct) })
     return () => { cancelled = true }
@@ -439,7 +460,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
                 autoFocus
               />
             </div>
-            <ScanSearchButton onDetected={setSearch} t={t} />
+            <ScanSearchButton
+              onDetected={handleProductScan}
+              t={t}
+              title={tr('scan_product_for_adjustment', 'Scan product for this stock adjustment')}
+            />
           </div>
           {searching && !results.length ? (
             <div className="py-6 text-center text-sm text-gray-400">{t('loading')}</div>

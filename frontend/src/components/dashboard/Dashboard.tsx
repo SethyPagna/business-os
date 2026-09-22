@@ -9,7 +9,7 @@ import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import { fmtTime } from '../../utils/formatters'
-import { todayStr } from '../../utils/dateHelpers'
+import { offsetDate, todayStr } from '../../utils/dateHelpers'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import DateTimeRangePicker, { type DateTimeRange } from '../shared/DateTimeRangePicker'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -248,7 +248,7 @@ interface ImportFileSummary {
 }
 
 interface DashboardApi {
-  getDashboard: () => Promise<unknown>
+  getDashboard: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
   getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
 }
@@ -677,11 +677,11 @@ export default function Dashboard() {
   const [silentRefresh, setSilentRefresh] = useState(false)
   const [summaryError, setSummaryError] = useState('')
   const [analyticsError, setAnalyticsError] = useState('')
-  // Preset chips are gone. A legacy saved preset deliberately migrates to the
-  // new app-wide default (today); a range the user explicitly edited remains.
+  // Preset chips are gone. A user-edited custom range remains; everyone else
+  // starts with the requested rolling seven business days (today inclusive).
   const [rangeId, setRangeId]     = useState<DashboardRangeId>('custom')
-  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customStart || '') : '')
-  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' ? (initialFilterPrefs.customEnd || '') : '')
+  const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customStart ? initialFilterPrefs.customStart : offsetDate(-6))
+  const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.rangeId === 'custom' && initialFilterPrefs.customEnd ? initialFilterPrefs.customEnd : todayStr())
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -796,7 +796,12 @@ export default function Dashboard() {
     const requestId = beginTrackedRequest(summaryRequestRef)
     if (markLoading) setLoading(true)
     try {
-      const data = await withLoaderTimeout(() => getDashboardApi().getDashboard(), label, DASHBOARD_SUMMARY_TIMEOUT_MS)
+      const { start, end, granularity } = getCurrentDashboardRange()
+      const data = await withLoaderTimeout(
+        () => getDashboardApi().getDashboard({ startDate: start, endDate: end, granularity }),
+        label,
+        DASHBOARD_SUMMARY_TIMEOUT_MS,
+      )
       if (!isTrackedRequestCurrent(summaryRequestRef, requestId)) return null
       if (!isDashboardSummaryPayload(data)) {
         throw new Error('Dashboard summary returned incomplete data.')
@@ -820,7 +825,7 @@ export default function Dashboard() {
         setLoading(false)
       }
     }
-  }, [])
+  }, [getCurrentDashboardRange])
 
   const loadAnalytics = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const requestId = beginTrackedRequest(analyticsRequestRef)
@@ -863,8 +868,8 @@ export default function Dashboard() {
     filterStorageKeyRef.current = dashboardFilterStorageKey
     const nextPrefs = readDashboardFilterPrefs([dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY])
     setRangeId('custom')
-    setCustomStart(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customStart || '') : '')
-    setCustomEnd(nextPrefs?.rangeId === 'custom' ? (nextPrefs.customEnd || '') : '')
+    setCustomStart(nextPrefs?.rangeId === 'custom' && nextPrefs.customStart ? nextPrefs.customStart : offsetDate(-6))
+    setCustomEnd(nextPrefs?.rangeId === 'custom' && nextPrefs.customEnd ? nextPrefs.customEnd : todayStr())
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
