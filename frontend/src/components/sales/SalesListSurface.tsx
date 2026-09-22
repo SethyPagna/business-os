@@ -343,7 +343,7 @@ export default function SalesListSurface({
                                 ) : null}
                               </td>
                               <td className="max-w-[11rem] px-3 py-1.5">
-                                <button type="button" className="block max-w-full truncate font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400" title={sale.receipt_number} onClick={(event) => { event.stopPropagation(); setDetailSale(sale) }}>{sale.receipt_number}</button>
+                                <button type="button" className="block max-w-full detail-scroll-text font-mono font-semibold text-blue-600 hover:underline dark:text-blue-400" title={sale.receipt_number} onClick={(event) => { event.stopPropagation(); setDetailSale(sale) }}>{sale.receipt_number}</button>
                               </td>
                               <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500">{fmtTime(sale.created_at)}</td>
                               <td className="px-3 py-1.5">
@@ -351,8 +351,8 @@ export default function SalesListSurface({
                                     row click opens the full detail (membership,
                                     address, line items). */}
                                 <div className="min-w-0 max-w-[12rem]">
-                                  <div className="truncate font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</div>
-                                  {sale.customer_phone?.trim() ? <div className="truncate text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
+                                  <div className="detail-scroll-text font-medium text-gray-800 dark:text-gray-200">{Number(sale.customer_is_anonymous || 0) === 1 ? (t('walk_in') || 'General') : sale.customer_name?.trim() ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}</div>
+                                  {sale.customer_phone?.trim() ? <div className="detail-scroll-text text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
                               <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>

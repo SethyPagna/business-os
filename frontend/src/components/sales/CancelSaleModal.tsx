@@ -93,7 +93,7 @@ export default function CancelSaleModal({ label, bulk = false, saving = false, o
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('cancel_sale_title', 'Cancel sale')}</h2>
-            <div className="mt-0.5 truncate text-xs text-gray-400">{label}</div>
+            <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{label}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={saving}>

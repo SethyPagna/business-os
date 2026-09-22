@@ -508,7 +508,7 @@ export default function ReturnsListSurface({
                               copyLabel={tr('copy_return_id', 'Copy return ID')}
                               copiedLabel={tr('copied', 'Copied')}
                               className="max-w-[42%] shrink"
-                              valueClassName="truncate font-mono text-sm font-semibold text-gray-900 dark:text-white"
+                              valueClassName="font-mono text-sm font-semibold text-gray-900 dark:text-white"
                             />
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
@@ -535,14 +535,14 @@ export default function ReturnsListSurface({
                             />
                           </div>
                         ) : null}
-                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-                          <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
+                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] leading-4 text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                          <span className="shrink-0" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
-                          <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>
+                          <span className="shrink-0" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
-                          <span className="min-w-0 truncate" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}`}>{retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}</span>
+                          <span className="shrink-0" aria-label={`${retScope === SUPPLIER_SCOPE ? tr('supplier', 'Supplier') : tr('customer', 'Customer')}: ${retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}`}>{retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
-                          <span className="min-w-0 flex-1 truncate" aria-label={`${tr('reason', 'Reason')}: ${ret.reason || '-'}`}>{ret.reason || '-'}</span>
+                          <span className="shrink-0" aria-label={`${tr('reason', 'Reason')}: ${ret.reason || '-'}`}>{ret.reason || '-'}</span>
                         </div>
                       </div>
                     )

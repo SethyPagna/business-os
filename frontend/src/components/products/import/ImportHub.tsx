@@ -205,7 +205,7 @@ export default function ImportHub({
                   truncating. */}
               <div className="flex items-center gap-2 flex-wrap">
                 <FileSpreadsheet className="w-4 h-4 text-gray-400 shrink-0" />
-                <span className="min-w-0 flex-1 text-sm font-medium truncate">{entry.name}</span>
+                <span className="min-w-0 flex-1 text-sm font-medium detail-scroll-text">{entry.name}</span>
                 <span className="shrink-0 whitespace-nowrap text-xs text-gray-400">{entry.rowCount} {T('import_hub_rows', 'rows')}</span>
                 <span className={`ml-auto shrink-0 text-xs font-semibold ${
                   entry.status === 'queued' ? 'text-emerald-600'

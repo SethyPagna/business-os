@@ -937,8 +937,8 @@ export default function LoyaltyPointsPage() {
                 ) : topPointCustomers.length ? topPointCustomers.map((customer) => (
                   <div key={customer.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{customer.name || customer.membership_number}</div>
-                      <div className="truncate text-xs font-mono text-gray-500 dark:text-gray-400">{customer.membership_number}</div>
+                      <div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{customer.name || customer.membership_number}</div>
+                      <div className="detail-scroll-text text-xs font-mono text-gray-500 dark:text-gray-400">{customer.membership_number}</div>
                     </div>
                     <div className="text-right text-sm font-semibold text-blue-600 dark:text-blue-300">
                       {formatLookupValue(customer.points_balance)}

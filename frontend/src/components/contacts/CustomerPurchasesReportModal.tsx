@@ -207,7 +207,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
                   {sales.map((sale) => (
                     <div key={sale.id} className="rounded-xl border border-gray-200 px-3 py-2 dark:border-gray-700">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white" />
+                        <CopyableId value={sale.receipt_number || '--'} copyLabel={tr(t, 'copy', 'Copy')} copiedLabel={tr(t, 'copied', 'Copied')} valueClassName="min-w-0 flex-1 text-sm leading-6 text-gray-900 dark:text-white" />
                         <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(sale.total_usd)}</span>
                       </div>
                       <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

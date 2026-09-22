@@ -118,10 +118,10 @@ export default function CatalogAccountSection({
                 <UserIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                <div className="detail-scroll-text text-sm font-semibold text-slate-900 dark:text-white">
                   {copy('signedInAs', 'Signed in as')} {account.name}
                 </div>
-                <div className="truncate text-xs text-slate-500 dark:text-neutral-400">
+                <div className="detail-scroll-text text-xs text-slate-500 dark:text-neutral-400">
                   {copy('membershipId', 'Membership ID')}: {account.membershipId}
                 </div>
               </div>

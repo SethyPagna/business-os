@@ -991,7 +991,7 @@ export default function ProductDetailSheet({
                             onClick={() => setBatchChoicesOpen((open) => !open)}
                             aria-expanded={batchChoicesOpen}
                           >
-                            <span className="min-w-0 truncate">
+                            <span className="min-w-0 detail-scroll-text">
                               {selectedBatch
                                 ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
                                 : t('choose_received_date') || 'Choose a received date'}
@@ -1099,7 +1099,7 @@ export default function ProductDetailSheet({
                       onClick={() => setBatchChoicesOpen((open) => !open)}
                       aria-expanded={batchChoicesOpen}
                     >
-                      <span className="min-w-0 truncate">
+                      <span className="min-w-0 detail-scroll-text">
                         {selectedBatch
                           ? `${formatBatchLabel(selectedBatch, batchWord)} · ${Number(selectedBatch.quantity || 0)}`
                           : t('choose_received_date') || 'Choose a received date'}

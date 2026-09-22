@@ -781,8 +781,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
                     className="flex w-full items-center justify-between gap-2 rounded-xl border border-gray-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 dark:border-gray-700 dark:hover:border-blue-600 dark:hover:bg-blue-900/20"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-gray-900 dark:text-white">{group.name || String(lead?.id)}</span>
-                      <span className="block truncate text-xs text-gray-400">
+                      <span className="block detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{group.name || String(lead?.id)}</span>
+                      <span className="block detail-scroll-text text-xs text-gray-400">
                         {rows.length > 1
                           ? `${rows.length} ${tr('options', 'options')} · ${group.stockTotal}`
                           : `${lead?.barcode ? `${lead.barcode} · ` : ''}${stockQtyOf(lead)} ${lead?.unit || ''}`}

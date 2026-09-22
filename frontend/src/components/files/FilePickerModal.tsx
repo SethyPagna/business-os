@@ -319,7 +319,7 @@ export default function FilePickerModal({
                 <div key={asset.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                   <AssetPreview asset={asset} />
                   <div className="mt-3 min-w-0">
-                    <div className="truncate text-sm font-semibold text-slate-900" title={asset.original_name}>{asset.original_name}</div>
+                    <div className="detail-scroll-text text-sm font-semibold text-slate-900" title={asset.original_name}>{asset.original_name}</div>
                     <div className="mt-1 text-xs text-slate-500">{asset.media_type || 'file'}{asset.byte_size ? ` · ${(asset.byte_size / 1024).toFixed(0)} KB` : ''}</div>
                     {asset.usageCount ? <div className="mt-1 text-[11px] text-amber-600">{asset.usageCount} use(s)</div> : <div className="mt-1 text-[11px] text-emerald-600">Unused</div>}
                   </div>

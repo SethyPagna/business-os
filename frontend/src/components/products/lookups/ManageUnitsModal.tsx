@@ -600,13 +600,13 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: unit.color || DEFAULT_UNIT_COLOR }} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-gray-700 dark:text-gray-300">{unit.name}</div>
+                    <div className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">{unit.name}</div>
                     <div className="text-xs text-gray-400">
                       {Number(unit.usage_count || 0)} product(s)
                       {unit.unresolved_count ? ` - ${unit.unresolved_count} need cleanup` : ''}
                     </div>
                     {Array.isArray(unit.sample_products) && unit.sample_products.length ? (
-                      <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                      <div className="detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
                         {unit.sample_products.map((product) => product?.name).filter(Boolean).join(', ')}
                       </div>
                     ) : null}

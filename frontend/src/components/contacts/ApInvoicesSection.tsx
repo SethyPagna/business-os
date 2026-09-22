@@ -353,7 +353,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <time dateTime={row.invoice_date} className="whitespace-nowrap text-xs leading-5 tabular-nums text-gray-500">{fmtDate(row.invoice_date)}</time>
-                    <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{supplierDisplay(row.supplier_name, tr)}</span>
+                    <span className="min-w-0 flex-1 detail-scroll-text text-sm leading-6 text-gray-900 dark:text-white">{supplierDisplay(row.supplier_name, tr)}</span>
                     {canViewCosts ? <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{money(row.total_amount_usd)}</span> : null}
                   </div>
                   <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

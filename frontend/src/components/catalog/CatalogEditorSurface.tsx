@@ -578,7 +578,7 @@ function CatalogEditorSurfaceContent() {
                         onClick={() => toggleRecommendedProduct(product.id)}
                         title={`${copy('remove', 'Remove')} ${product.name}`}
                       >
-                        <span className="truncate">{product.name}</span>
+                        <span className="detail-scroll-text">{product.name}</span>
                         <span aria-hidden="true">x</span>
                       </button>
                     ))}
@@ -624,8 +624,8 @@ function CatalogEditorSurfaceContent() {
                               {product.image ? <ProductImg src={product.image} alt={product.name || ''} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-slate-400"><ShoppingBag className="h-4 w-4" /></div>}
                             </div>
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
-                              <div className="truncate text-xs text-slate-500 dark:text-slate-400">{product.subtitle || `#${product.id}`}</div>
+                              <div className="detail-scroll-text text-sm font-medium text-slate-800 dark:text-slate-100">{product.name}</div>
+                              <div className="detail-scroll-text text-xs text-slate-500 dark:text-slate-400">{product.subtitle || `#${product.id}`}</div>
                             </div>
                           </label>
                         )

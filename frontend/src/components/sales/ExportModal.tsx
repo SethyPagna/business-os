@@ -345,7 +345,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
                 <div className="space-y-1">
                   {preview.by_product.slice(0, 8).map((row, index) => (
                     <div key={`${row.product_id || row.product_name}-${index}`} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
-                      <span className="mr-2 min-w-0 flex-1 truncate text-gray-700 dark:text-gray-300">{row.product_name}</span>
+                      <span className="mr-2 min-w-0 flex-1 detail-scroll-text text-gray-700 dark:text-gray-300">{row.product_name}</span>
                       <span className="shrink-0 text-gray-500">{row.qty_sold} sold · {fmtUSD(row.revenue_usd || 0)}</span>
                     </div>
                   ))}

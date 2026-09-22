@@ -127,7 +127,7 @@ export default function SaleCustomerActionModal({
                 >
                   <span className="min-w-0">
                     <span className="block font-mono text-sm font-medium">{customer.phone || translate('sale_customer_no_phone', 'No phone')}</span>
-                    <span className="block truncate text-xs text-gray-500">{customer.name}</span>
+                    <span className="block detail-scroll-text text-xs text-gray-500">{customer.name}</span>
                   </span>
                   <span className="shrink-0 text-right text-xs text-gray-500">
                     {customer.membershipNumber || translate('sale_customer_no_membership', 'No membership')}

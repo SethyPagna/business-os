@@ -134,7 +134,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
         <div className="max-h-72 space-y-1 overflow-y-auto">
           {loading ? <div className="py-6 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : presets[scope].length ? presets[scope].map((reason) => (
             <div key={reason.toLocaleLowerCase()} className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 dark:border-slate-700">
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700 dark:text-slate-200">{reason}</span>
+              <span className="min-w-0 flex-1 detail-scroll-text text-sm text-slate-700 dark:text-slate-200">{reason}</span>
               <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-300" onClick={() => void rename(reason)} disabled={saving} aria-label={`${tr('rename', 'Rename')} ${reason}`} title={tr('preview_and_replace', 'Preview and replace')}><Pencil className="h-3.5 w-3.5" /></button>
               <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-red-500 hover:bg-red-50 dark:text-red-300" onClick={() => void remove(reason)} disabled={saving} aria-label={`${tr('remove', 'Remove')} ${reason}`} title={tr('remove_saved_reason_choice', 'Remove saved choice')}><Trash2 className="h-3.5 w-3.5" /></button>
             </div>

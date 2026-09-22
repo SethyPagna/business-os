@@ -1032,6 +1032,13 @@ body.lang-km .compact-analytics-legend {
    block below restates this floor for. */
 body.lang-km .scroll-x-clean,
 .scroll-x-clean.khmer-text { line-height: var(--km-line-height, 1.6); }
+/* The same floor for the app-wide detail scroller. `.detail-scroll-text` is
+   `overflow-y: hidden` too, so a Khmer coeng subscript inside a scrolling
+   detail value is sheared without it. S4-22's `overflow-clip-margin` trick
+   cannot stand in: it only applies to `overflow: clip`, and this box has to
+   stay `auto` on the inline axis to scroll at all. */
+body.lang-km .detail-scroll-text,
+.detail-scroll-text.khmer-text { line-height: var(--km-line-height, 1.6); }
 
 /* .price-strip -- selling | wholesale | cost | qty+unit on ONE line.
    Arithmetic for the reported wrap, at 375px on the Products mobile card:

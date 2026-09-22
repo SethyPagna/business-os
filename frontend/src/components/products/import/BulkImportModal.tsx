@@ -786,7 +786,7 @@ function InlineImportDetailGrid({
               onChange={(event) => onChange?.(field, event.target.value)}
             />
             {differs ? (
-              <span className="mt-1 block truncate text-[10px] text-amber-700 dark:text-amber-200">Existing: {compactImportValue(compareTo?.[field])}</span>
+              <span className="mt-1 block detail-scroll-text text-[10px] text-amber-700 dark:text-amber-200">Existing: {compactImportValue(compareTo?.[field])}</span>
             ) : null}
           </label>
         )
@@ -991,7 +991,7 @@ function ImageMatchReviewPanel({
               <div key={image.id} className="flex items-center gap-3 rounded-lg border border-amber-200/70 bg-white p-2 dark:border-amber-900/40 dark:bg-slate-900">
                 <img src={image.publicPath} alt={image.originalName} className="h-10 w-10 flex-none rounded object-cover" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-slate-700 dark:text-slate-200">{image.originalName}</div>
+                  <div className="detail-scroll-text font-medium text-slate-700 dark:text-slate-200">{image.originalName}</div>
                   <div className="mb-1 flex gap-1 text-[10px]">
                     <button
                       type="button"
@@ -1067,7 +1067,7 @@ function ImageLimitPicker({
             >
               <input type="checkbox" className="sr-only" checked={isSelected} onChange={() => toggle(image.id)} />
               <img src={image.publicPath} alt={image.originalName} className="h-14 w-14 rounded object-cover" />
-              <span className="max-w-[4.5rem] truncate text-[10px]">{image.originalName}</span>
+              <span className="max-w-[4.5rem] detail-scroll-text text-[10px]">{image.originalName}</span>
             </label>
           )
         })}
@@ -2293,7 +2293,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} className="mt-1" />
           <div className="min-w-[14rem] flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="truncate font-medium text-gray-900 dark:text-white">{editedRow.name || 'Needs a product name'}</span>
+              <span className="detail-scroll-text font-medium text-gray-900 dark:text-white">{editedRow.name || 'Needs a product name'}</span>
               {liveBarcodeIssue ? (
                 <span title={getProductImportIssueHint(liveBarcodeIssue)} className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${liveBarcodeBlocking ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'}`}>
                   {getProductImportIssueLabel(liveBarcodeIssue)}
@@ -2321,7 +2321,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               <span>Qty: <span className="text-slate-700 dark:text-slate-200">{compactImportValue((editedRow as ImportRecord)['stock_quantity'])}</span></span>
               <span>Price: <span className="text-slate-700 dark:text-slate-200">{compactImportPrice(editedRow)}</span></span>
             </div>
-            <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500" title={targetSummary}>{targetSummary}</div>
+            <div className="mt-0.5 detail-scroll-text text-[11px] text-slate-400 dark:text-slate-500" title={targetSummary}>{targetSummary}</div>
           </div>
           <AppSelect
             value={decisionValue}
@@ -2660,7 +2660,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             <div className="order-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{T('import_review_before', 'Review before importing')}</span>
-                <span className="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400">{csvData.name || T('selected_file', 'Selected file')} · {totalCount.toLocaleString()} {T('rows', 'rows')}</span>
+                <span className="min-w-0 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">{csvData.name || T('selected_file', 'Selected file')} · {totalCount.toLocaleString()} {T('rows', 'rows')}</span>
               </div>
               {csvPreview.rows.length ? (
                 <div className="max-h-56 overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
@@ -2705,7 +2705,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               {T('images_screen_one_hint', 'Choose the image folder or ZIP here on Screen 1. Screen 2 only reviews the CSV, image matches, and final actions.')}
             </p>
             <div className="flex flex-wrap gap-2">
-              <div className="input min-w-0 flex-1 truncate text-xs text-gray-500">{imageDir || zipFile?.name || T('no_folder', 'No images selected')}</div>
+              <div className="input min-w-0 flex-1 detail-scroll-text text-xs text-gray-500">{imageDir || zipFile?.name || T('no_folder', 'No images selected')}</div>
               <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>{T('browse', 'Browse')}</button>
               <button type="button" className="btn-secondary text-sm" onClick={pickImageZip}>{T('zip_images', 'ZIP')}</button>
               <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
@@ -2960,7 +2960,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
               {isImageDragActive ? T('zip_drop_file', 'Drop the .zip here') : T('select_image_folder_label', 'Select image folder')}
             </p>
             <div className="flex flex-wrap gap-2">
-              <div className="input min-w-0 flex-1 truncate text-sm text-gray-500">{imageDir || T('no_folder_selected', 'No folder selected')}</div>
+              <div className="input min-w-0 flex-1 detail-scroll-text text-sm text-gray-500">{imageDir || T('no_folder_selected', 'No folder selected')}</div>
               <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>
                 {T('browse', 'Browse')}
               </button>

@@ -366,7 +366,7 @@ export default function ReceiveBatchModal({
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('receive_batch', 'Receive Stock')}</h2>
-            <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
+            <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{product.name}</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {preserveAndMinimize ? (

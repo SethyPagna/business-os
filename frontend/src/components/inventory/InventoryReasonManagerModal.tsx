@@ -109,7 +109,7 @@ export default function InventoryReasonManagerModal({
           <div className="space-y-2">
             {(reasonsByType[reasonManager.type] ?? []).length ? (reasonsByType[reasonManager.type] ?? []).map((entry) => (
               <div key={entry.id} className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900/40">
-                <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-gray-200">{entry.label}</span>
+                <span className="min-w-0 flex-1 detail-scroll-text text-gray-800 dark:text-gray-200">{entry.label}</span>
                 <div className="flex items-center gap-1">
                   <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-900/30" onClick={() => renameSavedReason(entry)}>{t('edit') || 'Edit'}</button>
                   <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/30" onClick={() => deleteSavedReason(entry)}>{t('delete') || 'Delete'}</button>

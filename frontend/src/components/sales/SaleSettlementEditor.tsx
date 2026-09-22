@@ -72,7 +72,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
               disabled={saving || rows.length >= MAX_SETTLEMENT_ROWS}
               onClick={() => addMethod(method)}
             >
-              <span className="inline-flex min-w-0 items-center gap-1"><Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{method}</span></span>
+              <span className="inline-flex min-w-0 items-center gap-1"><Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="detail-scroll-text">{method}</span></span>
             </button>
           )
         })}
@@ -82,7 +82,7 @@ export default function SaleSettlementEditor({ rows, configuredMethods, exchange
         {rows.map((row, index) => (
           <div key={row.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800/80">
             <div className="mb-2 flex min-h-11 items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
+              <span className="min-w-0 detail-scroll-text text-sm font-semibold text-gray-800 dark:text-gray-100">
                 {row.method || translate('payment_method', 'Payment method', 'វិធីទូទាត់')}
                 {row.id.startsWith('recorded-') ? <span className="ml-2 text-xs font-normal text-gray-400">{translate('recorded', 'Recorded', 'បានកត់ត្រា')}</span> : null}
               </span>

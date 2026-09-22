@@ -1004,15 +1004,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
               </button>
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-                  <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{profile.name}</div>
-                  <span className="max-w-24 shrink-0 truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-zinc-700 dark:text-slate-300" title={profile.role_name || tr('no_role', 'No role')}>
+                  <div className="min-w-0 flex-1 detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{profile.name}</div>
+                  <span className="max-w-24 shrink-0 detail-scroll-text rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-zinc-700 dark:text-slate-300" title={profile.role_name || tr('no_role', 'No role')}>
                     {profile.role_name || tr('no_role', 'No role')}
                   </span>
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${otpEnabled ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-200 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}>
                     2FA {otpEnabled ? tr('on', 'on') : tr('off', 'off')}
                   </span>
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">
+                <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
                   @{profile.username}
                 </div>
               </div>

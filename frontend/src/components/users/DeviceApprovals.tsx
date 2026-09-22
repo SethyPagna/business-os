@@ -161,14 +161,14 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
 
   const renderDeviceMeta = (device: TrustedDeviceRecord) => (
     <div className="min-w-0">
-      <div className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+      <div className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">
         {device.device_name || tr(t, 'unknown_device', 'Unknown device')}
       </div>
-      <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+      <div className="mt-0.5 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
         {tr(t, 'account', 'Account')}: {device.user_name || device.username}
         {device.last_ip || device.first_ip ? ` \u00b7 ${device.last_ip || device.first_ip}` : ''}
       </div>
-      <div className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">
+      <div className="mt-0.5 detail-scroll-text text-xs text-gray-400 dark:text-gray-500">
         {device.user_agent || tr(t, 'unknown_browser', 'Unknown browser')}
       </div>
       <div className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
@@ -313,13 +313,13 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                         className="flex flex-col gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/40 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <div className="truncate text-sm text-gray-900 dark:text-white">
+                          <div className="detail-scroll-text text-sm text-gray-900 dark:text-white">
                             {session.device_name || tr(t, 'unknown_device', 'Unknown device')}
                             <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
                               {tr(t, 'live_session', 'Live session')}
                             </span>
                           </div>
-                          <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                          <div className="mt-0.5 detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
                             {session.user_agent || tr(t, 'unknown_browser', 'Unknown browser')}
                             {session.last_ip ? ` · ${session.last_ip}` : ''}
                           </div>

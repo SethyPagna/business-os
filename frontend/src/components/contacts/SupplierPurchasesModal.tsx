@@ -226,7 +226,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                     onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDetailBatch(batch) } }}
                   >
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="min-w-0 flex-1 truncate text-sm leading-6 text-gray-900 dark:text-white">{batch.product_name || '--'}</span>
+                      <span className="min-w-0 flex-1 detail-scroll-text text-sm leading-6 text-gray-900 dark:text-white">{batch.product_name || '--'}</span>
                       {canViewCosts ? <span className="text-sm font-semibold leading-6 tabular-nums text-gray-900 dark:text-white">{batch.unit_cost_usd == null ? '--' : money(batch.unit_cost_usd)}</span> : null}
                     </div>
                     <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

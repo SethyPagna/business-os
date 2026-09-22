@@ -106,8 +106,8 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
           {loading ? <div className="py-8 text-center text-sm text-slate-400">{tr('loading', 'Loading…')}</div> : labels.length ? labels.map((entry) => (
             <div key={entry.label.toLocaleLowerCase()} className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(7rem,8.5rem)_1.75rem] items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1.5 dark:border-slate-700">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">{entry.label}</div>
-                <div className="truncate text-[11px] text-slate-400">{entry.uses} {tr('records', 'records')}{entry.type_counts && entry.type_counts.length > 1 ? ` · ${tr('mixed_categories', 'mixed categories')}` : ''}</div>
+                <div className="detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">{entry.label}</div>
+                <div className="detail-scroll-text text-[11px] text-slate-400">{entry.uses} {tr('records', 'records')}{entry.type_counts && entry.type_counts.length > 1 ? ` · ${tr('mixed_categories', 'mixed categories')}` : ''}</div>
               </div>
               <AppSelect
                 value={entry.fee_type}

@@ -837,17 +837,17 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         {fee.sale_receipt_number || fee.sale_id ? (
                           <span className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                             <Receipt className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{expenseSaleLabel(fee.sale_receipt_number, fee.sale_id, tr('sale', 'Sale'))}</span>
+                            <span className="detail-scroll-text">{expenseSaleLabel(fee.sale_receipt_number, fee.sale_id, tr('sale', 'Sale'))}</span>
                           </span>
                         ) : null}
                         {fee.created_by_name ? (
-                          <span className="truncate text-[11px] text-slate-400">{fee.created_by_name}</span>
+                          <span className="detail-scroll-text text-[11px] text-slate-400">{fee.created_by_name}</span>
                         ) : null}
                         {fee.branch_name ? (
-                          <span className="truncate text-[11px] text-slate-400">{fee.branch_name}</span>
+                          <span className="detail-scroll-text text-[11px] text-slate-400">{fee.branch_name}</span>
                         ) : null}
                         {fee.delivery_contact_name ? (
-                          <span className="truncate text-[11px] text-slate-400">{fee.delivery_contact_name}</span>
+                          <span className="detail-scroll-text text-[11px] text-slate-400">{fee.delivery_contact_name}</span>
                         ) : null}
                       </div>
                     </td>
@@ -874,15 +874,15 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs font-semibold ${feeTypeToneClass(fee.fee_type)}`}>
                     {feeTypeLabel(fee.fee_type)}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
+                  <span className="min-w-0 flex-1 detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">{fee.label || ''}</span>
                   <span className="ml-auto shrink-0 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                     {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                   </span>
                 </div>
-                <div data-expense-line="secondary" className="mt-1 flex min-w-0 items-center gap-1.5 text-sm font-normal text-slate-700 dark:text-slate-200">
-                  {fee.created_by_name ? <span className="min-w-0 truncate" aria-label={`${tr('cashier', 'Cashier')}: ${fee.created_by_name}`}>{fee.created_by_name}</span> : null}
+                <div data-expense-line="secondary" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-sm font-normal text-slate-700 dark:text-slate-200 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {fee.created_by_name ? <span className="shrink-0" aria-label={`${tr('cashier', 'Cashier')}: ${fee.created_by_name}`}>{fee.created_by_name}</span> : null}
                   {fee.created_by_name && fee.branch_name ? <span aria-hidden="true" className="shrink-0">·</span> : null}
-                  {fee.branch_name ? <span className="min-w-0 truncate" aria-label={`${tr('branch', 'Branch')}: ${fee.branch_name}`}>{fee.branch_name}</span> : null}
+                  {fee.branch_name ? <span className="shrink-0" aria-label={`${tr('branch', 'Branch')}: ${fee.branch_name}`}>{fee.branch_name}</span> : null}
                 </div>
               </button>
                 ))}

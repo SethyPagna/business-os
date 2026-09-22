@@ -567,10 +567,10 @@ export default function PromotionsPage() {
                         const schedule = [rule?.starts_at ? fmtDate(rule.starts_at) : '', rule?.ends_at ? fmtDate(rule.ends_at) : ''].filter(Boolean).join(' – ')
                         return (
                           <tr key={`desktop-${row.id}`} className={`${canManagePromotions ? 'cursor-pointer' : ''} hover:bg-slate-50 dark:hover:bg-slate-800/50`} onClick={() => { if (canManagePromotions) openEditRule(row) }}>
-                            <td className="max-w-[7rem] truncate px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PR-${row.id}`}>PR-{row.id}</td>
-                            <td className="max-w-[15rem] px-3 py-1.5"><div className="truncate font-semibold text-slate-800 dark:text-slate-100" title={rule?.title || `#${row.id}`}>{rule?.title || `#${row.id}`}</div><div className="truncate text-[11px] text-slate-400">{ruleSummary(row)}</div></td>
+                            <td className="max-w-[7rem] px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PR-${row.id}`}><span className="detail-scroll-text">PR-{row.id}</span></td>
+                            <td className="max-w-[15rem] px-3 py-1.5"><div className="detail-scroll-text font-semibold text-slate-800 dark:text-slate-100" title={rule?.title || `#${row.id}`}>{rule?.title || `#${row.id}`}</div><div className="detail-scroll-text text-[11px] text-slate-400">{ruleSummary(row)}</div></td>
                             <td className="whitespace-nowrap px-3 py-1.5 text-slate-600 dark:text-slate-300">{String(rule?.rule_type || '').replaceAll('_', ' ')}</td>
-                            <td className="max-w-[12rem] truncate px-3 py-1.5 text-slate-600 dark:text-slate-300" title={ruleScopeSummary(row, t)}>{ruleScopeSummary(row, t)}</td>
+                            <td className="max-w-[12rem] px-3 py-1.5 text-slate-600 dark:text-slate-300" title={ruleScopeSummary(row, t)}><span className="detail-scroll-text">{ruleScopeSummary(row, t)}</span></td>
                             <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-slate-500">{schedule || '—'}</td>
                             <td className="px-3 py-1.5"><StatusPill status={status} /></td>
                             <td className="px-2 py-1.5" onClick={(event) => event.stopPropagation()}><div className="flex flex-nowrap justify-end gap-0.5">{canManagePromotions ? <><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" onClick={() => openEditRule(row)} aria-label={t('edit') || 'Edit'} title={t('edit') || 'Edit'}><Eye className="h-3.5 w-3.5" /></button><button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" onClick={() => removeRule(row)} aria-label={t('delete') || 'Delete'} title={t('delete') || 'Delete'}><Trash2 className="h-3.5 w-3.5" /></button></> : <span className="text-slate-300">—</span>}</div></td>
@@ -599,13 +599,13 @@ export default function PromotionsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{rule?.title || `#${row.id}`}</span>
+                          <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{rule?.title || `#${row.id}`}</span>
                           <StatusPill status={status} />
                           {rule && !rule.show_title ? (
                             <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500 dark:bg-gray-800">{t('promo_title_hidden') || 'title hidden'}</span>
                           ) : null}
                         </div>
-                        <p className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-300">{ruleSummary(row)}</p>
+                        <p className="mt-0.5 detail-scroll-text text-xs text-gray-600 dark:text-gray-300">{ruleSummary(row)}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
                           <span className="inline-flex items-center gap-1"><Layers className="h-3 w-3" />{ruleScopeSummary(row, t)}</span>
                           {window ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" />{window}</span> : null}
@@ -691,8 +691,8 @@ export default function PromotionsPage() {
                       {discountViews.map(({ product, promo, live }) => {
                         const status: PromoStatusKey = computePromoStatus(Boolean(product.discount_enabled), live, product.discount_starts_at, product.discount_ends_at)
                         return <tr key={`desktop-${String(product.id)}`} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => openDiscountEditor(product)}>
-                          <td className="max-w-[7rem] truncate px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PD-${product.id}`}>PD-{String(product.id)}</td>
-                          <td className="max-w-[16rem] truncate px-3 py-1.5 font-semibold text-slate-800 dark:text-slate-100" title={String(product.name || `#${product.id}`)}>{String(product.name || `#${product.id}`)}</td>
+                          <td className="max-w-[7rem] px-3 py-1.5 font-mono font-semibold text-blue-600 dark:text-blue-400" title={`PD-${product.id}`}><span className="detail-scroll-text">PD-{String(product.id)}</span></td>
+                          <td className="max-w-[16rem] px-3 py-1.5 font-semibold text-slate-800 dark:text-slate-100" title={String(product.name || `#${product.id}`)}><span className="detail-scroll-text">{String(product.name || `#${product.id}`)}</span></td>
                           <td className="whitespace-nowrap px-3 py-1.5"><span className="text-slate-400 line-through">{fmtUSD(Number(product.selling_price_usd) || 0)}</span>{promo.active ? <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">{fmtUSD(promo.applied_price_usd)}</span> : null}</td>
                           <td className="whitespace-nowrap px-3 py-1.5 text-[11px] text-slate-500">{product.discount_ends_at ? fmtDate(String(product.discount_ends_at)) : '—'}</td>
                           <td className="px-3 py-1.5"><StatusPill status={status} /></td>
@@ -716,7 +716,7 @@ export default function PromotionsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{String(product.name || `#${product.id}`)}</span>
+                          <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{String(product.name || `#${product.id}`)}</span>
                           <StatusPill status={status} />
                           {String(product.discount_label || '') ? (
                             <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: color }}>

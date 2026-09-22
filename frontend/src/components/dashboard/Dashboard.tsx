@@ -569,7 +569,7 @@ function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, 
                 <button key={`${payment.payment_method || payment.method || 'payment'}-${index}`} type="button" onClick={() => onOpen(payment)} className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-xs transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
-                    <span className="truncate text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
+                    <span className="detail-scroll-text text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
                   </div>
                   <div className="flex shrink-0 items-baseline gap-1 whitespace-nowrap text-right tabular-nums">
                     <span className="font-semibold text-gray-900 dark:text-white">{fmtUSD(payment.revenue_usd || 0)}</span>
@@ -603,7 +603,7 @@ function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus
       <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>
         {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.map((sale) => (
           <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
-            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
+            <div className="min-w-0"><p className="detail-scroll-text text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="detail-scroll-text text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name || t('walk_in') || 'General']).join(' | ')}</p></div>
             <div className="shrink-0 text-right"><div className="flex items-baseline justify-end gap-1 whitespace-nowrap"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <span className="text-[10px] text-gray-400">{fmtKHR(sale.total_khr || 0)}</span> : null}</div><div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getDashboardSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
           </button>
         ))}
@@ -634,7 +634,7 @@ function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailab
         <div className={`space-y-1 ${CARD_LIST_BODY}`}>
           {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : all.map((branch, index) => {
             const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
-            return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
+            return <button key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`} type="button" onClick={() => onOpen(branch)} className="block w-full rounded-xl px-2 py-1.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50"><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 detail-scroll-text text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></button>
           })}
         </div>
         <DashboardViewMoreFooter show={all.length > 5} translateOr={translateOr} onClick={onViewMore} />
@@ -2246,7 +2246,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                         <div className="flex justify-between text-xs mb-0.5">
                           <div className="flex items-center gap-1.5">
                             <span className="text-gray-400 w-4 text-right">{i+1}.</span>
-                            <span className="text-gray-700 dark:text-gray-300 truncate max-w-32 sm:max-w-48 lg:max-w-72 xl:max-w-96">{p.product_name}</span>
+                            <span className="text-gray-700 dark:text-gray-300 detail-scroll-text max-w-32 sm:max-w-48 lg:max-w-72 xl:max-w-96">{p.product_name}</span>
                           </div>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {topMode==='qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
@@ -2298,7 +2298,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                                   <div className="flex justify-between text-xs mb-0.5">
                                     <div className="flex items-center gap-1.5">
                                       <span className="text-gray-400 w-4 text-right">{i+1}.</span>
-                                      <span className="text-gray-700 dark:text-gray-300 truncate max-w-36">{c.customer_name || t('walk_in') || 'General'}</span>
+                                      <span className="text-gray-700 dark:text-gray-300 detail-scroll-text max-w-36">{c.customer_name || t('walk_in') || 'General'}</span>
                                     </div>
                                     <span className="font-medium text-green-700 dark:text-green-400">{fmtUSD(c.net_revenue_usd || 0)}</span>
                                   </div>
@@ -2356,8 +2356,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   onClick={() => setProductDetail({ ...p, insightType: 'low_stock' })}
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
-                    {p.category && <p className="truncate text-xs text-gray-400">{p.category}</p>}
+                    <p className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
+                    {p.category && <p className="detail-scroll-text text-xs text-gray-400">{p.category}</p>}
                   </div>
                   <span className="badge-yellow shrink-0">{p.stock_quantity} {p.unit}</span>
                 </button>
@@ -2401,8 +2401,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                   onClick={() => setProductDetail({ ...p, insightType: 'out_of_stock' })}
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
-                    {p.category && <p className="truncate text-xs text-gray-400">{p.category}</p>}
+                    <p className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">{p.name}</p>
+                    {p.category && <p className="detail-scroll-text text-xs text-gray-400">{p.category}</p>}
                   </div>
                   <span className="badge-red shrink-0">{p.stock_quantity} {p.unit}</span>
                 </button>
@@ -2468,10 +2468,10 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
                     onClick={() => setImportReportJobId(job.id)}
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm text-gray-700 dark:text-gray-300">
+                      <p className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">
                         {job.fileName || `${job.type || 'products'} import`}
                       </p>
-                      <p className="truncate text-xs text-gray-400 capitalize">
+                      <p className="detail-scroll-text text-xs text-gray-400 capitalize">
                         {[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' \u00b7 ')}
                       </p>
                     </div>
@@ -2666,8 +2666,8 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             onClick={() => { setRecentImportsListOpen(false); setImportReportJobId(job.id) }}
           >
             <div className="min-w-0">
-              <p className="truncate text-sm text-gray-700 dark:text-gray-300">{job.fileName || `${job.type || 'products'} import`}</p>
-              <p className="truncate text-xs text-gray-400 capitalize">{[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' · ')}</p>
+              <p className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">{job.fileName || `${job.type || 'products'} import`}</p>
+              <p className="detail-scroll-text text-xs text-gray-400 capitalize">{[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' · ')}</p>
             </div>
             {(job.warning_count || 0) > 0 && (
               <span className="badge-yellow flex-shrink-0 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{job.warning_count} {translateOr('warnings_short', 'warnings')}</span>

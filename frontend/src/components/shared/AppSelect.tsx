@@ -181,7 +181,7 @@ export default function AppSelect({
         }}
         onKeyDown={handleKeyDown}
       >
-        <span className="min-w-0 flex-1 truncate" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
+        <span className="min-w-0 flex-1 detail-scroll-text" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
         {showChevron ? <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" /> : null}
       </button>
 
@@ -216,7 +216,7 @@ export default function AppSelect({
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => chooseOption(option)}
               >
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                <span className="min-w-0 flex-1 detail-scroll-text">{option.label}</span>
               </button>
             )
           })}

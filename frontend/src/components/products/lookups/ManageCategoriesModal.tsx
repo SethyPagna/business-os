@@ -608,13 +608,13 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-gray-700 dark:text-gray-300">{category.name}</div>
+                    <div className="detail-scroll-text text-sm text-gray-700 dark:text-gray-300">{category.name}</div>
                     <div className="text-xs text-gray-400">
                       {Number(category.usage_count || 0)} product(s)
                       {category.unresolved_count ? ` - ${category.unresolved_count} need cleanup` : ''}
                     </div>
                     {Array.isArray(category.sample_products) && category.sample_products.length ? (
-                      <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                      <div className="detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
                         {category.sample_products.map((product) => product?.name).filter(Boolean).join(', ')}
                       </div>
                     ) : null}

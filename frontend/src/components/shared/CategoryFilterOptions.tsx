@@ -57,7 +57,7 @@ export function buildHierarchicalCategoryFilterOptions({
       onClick: () => onToggle(values, !groupActive),
       label: (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate font-bold">{group.mainLabel}</span>
+          <span className="min-w-0 detail-scroll-text font-bold">{group.mainLabel}</span>
           <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-px text-[9px] font-bold leading-4 text-slate-500 dark:bg-slate-700 dark:text-slate-300">
             {values.length}
           </span>
@@ -75,7 +75,7 @@ export function buildHierarchicalCategoryFilterOptions({
         label: (
           <span className="flex min-w-0 items-center gap-1 pl-3.5 text-slate-500 dark:text-slate-400">
             <span aria-hidden="true" className="shrink-0 text-slate-300 dark:text-slate-600">&#8627;</span>
-            <span className="min-w-0 truncate">{child.label}</span>
+            <span className="min-w-0 detail-scroll-text">{child.label}</span>
           </span>
         ),
       })

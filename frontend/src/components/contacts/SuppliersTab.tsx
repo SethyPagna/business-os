@@ -1371,9 +1371,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               </>
               ) : null}
             </td>
-            <td className="max-w-[13rem] cursor-pointer truncate px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(supplier)}>{supplier.name}</td>
+            <td className="max-w-[13rem] cursor-pointer px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(supplier)}><span className="detail-scroll-text">{supplier.name}</span></td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.phone || supplier.phone || '--'}</td>
-            <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.email || supplier.email || '--'}</td>
+            <td className="max-w-[12rem] cursor-pointer px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}><span className="detail-scroll-text">{primaryOption.email || supplier.email || '--'}</span></td>
             <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{primaryOption.name || supplier.contact_person || '--'}</td>
             <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(supplier)}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(supplier)}>{fmtDateTime24(supplier.created_at)}</td>
@@ -1471,14 +1471,14 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</span>
+                <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{supplier.name}</span>
                 {contactCount > 0 ? (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600 dark:bg-orange-900/40 dark:text-orange-300" title={`${contactCount} ${tr('contact_options', 'contact options')}`}>
                     <Phone className="h-2.5 w-2.5" />{contactCount}
                   </span>
                 ) : null}
               </div>
-              {cardMetaPrimary ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMetaPrimary}</div> : null}
+              {cardMetaPrimary ? <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-500">{cardMetaPrimary}</div> : null}
             </div>
           </div>
           )

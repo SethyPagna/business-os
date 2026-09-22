@@ -107,7 +107,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                     <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass(movement)}`}>
                       {translateMovementType(movement.movement_type, t)}
                     </span>
-                    <span className="truncate text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
+                    <span className="detail-scroll-text text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>
                   {/* Through TruncatedText, like the ledger's own receipt
                       line: this line now carries a receipt id, and a `title`

@@ -1128,7 +1128,7 @@ export default function AuditLog() {
                             <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
                           </td>
                           <td className="max-w-[160px] px-3 py-2">
-                            <div className="truncate text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log)}>
+                            <div className="detail-scroll-text text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log)}>
                               {formatEntityName(log)}
                             </div>
                           </td>
@@ -1139,16 +1139,16 @@ export default function AuditLog() {
                             </span>
                           </td>
                           <td className="px-3 py-2">
-                            <div className="max-w-[170px] truncate text-xs text-gray-700 dark:text-gray-300" title={auditDeviceLabel(log)}>
+                            <div className="max-w-[170px] detail-scroll-text text-xs text-gray-700 dark:text-gray-300" title={auditDeviceLabel(log)}>
                               {auditDeviceLabel(log)}
                             </div>
                             <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{auditTimezoneLabel(log)}</div>
                           </td>
                           <td
-                            className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate"
+                            className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400"
                             title={readableSummary(log) || undefined}
                           >
-                            {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
+                            <span className="detail-scroll-text">{readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}</span>
                           </td>
                           <td className="px-3 py-2 text-xs leading-snug text-gray-400" title={formatLogTime(log)}>
                             <span className="block max-w-[7.5rem] break-words font-medium text-gray-500 dark:text-gray-400">{formatLogTableTime(log)}</span>
@@ -1286,16 +1286,16 @@ export default function AuditLog() {
                             onClick={(event) => event.stopPropagation()}
                             aria-label={`Select ${sessionEntryLabel(log)}`}
                           />
-                          <span className="truncate font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
+                          <span className="detail-scroll-text font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
-                          <span className="truncate text-xs text-gray-500">{formatEntityName(log)}</span>
+                          <span className="detail-scroll-text text-xs text-gray-500">{formatEntityName(log)}</span>
                           <span className="shrink-0 text-xs text-gray-400">{sessionEntryLabel(log)}</span>
                         </div>
                         {readableSummary(log) ? (
                           <div
-                            className="mt-1 truncate text-xs text-gray-400"
+                            className="mt-1 detail-scroll-text text-xs text-gray-400"
                             title={readableSummary(log) ?? undefined}
                           >
                             {readableSummary(log)}
@@ -1340,7 +1340,7 @@ export default function AuditLog() {
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(detailLog.action)}`}>
                     {actionLabel(detailLog.action)}
                   </span>
-                  <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog)}</span>
+                  <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog)}</span>
                 </div>
                 <div className="mt-1 text-xs font-semibold text-gray-400">{sessionEntryLabel(detailLog)}</div>
               </div>

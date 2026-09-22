@@ -1278,9 +1278,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               </>
               ) : null}
             </td>
-            <td className="max-w-[13rem] cursor-pointer truncate px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(contact)}>{contact.name}</td>
+            <td className="max-w-[13rem] cursor-pointer px-3 py-1.5 font-medium text-gray-900 dark:text-white" onClick={() => handleContactCellClick(contact)}><span className="detail-scroll-text">{contact.name}</span></td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{primaryOption.phone || contact.phone || '-'}</td>
-            <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{primaryOption.area || contact.area || '-'}</td>
+            <td className="max-w-[12rem] cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}><span className="detail-scroll-text">{primaryOption.area || contact.area || '-'}</span></td>
             <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(contact)}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(contact)}>{fmtDateTime24(contact.created_at)}</td>
             <td className="px-2 py-1.5 text-right" onClick={e => e.stopPropagation()}>
@@ -1363,14 +1363,14 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{contact.name}</span>
+                <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{contact.name}</span>
                 {contactCount > 0 ? (
                   <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-600 dark:bg-green-900/40 dark:text-green-300" title={`${contactCount} ${tr('contact_options', 'contact options')}`}>
                     <Phone className="h-2.5 w-2.5" />{contactCount}
                   </span>
                 ) : null}
               </div>
-              {cardMeta ? <div className="mt-0.5 truncate text-[11px] text-gray-500">{cardMeta}</div> : null}
+              {cardMeta ? <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-500">{cardMeta}</div> : null}
             </div>
           </div>
           )

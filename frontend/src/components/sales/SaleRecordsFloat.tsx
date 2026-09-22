@@ -305,7 +305,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="text-[13px] font-medium text-gray-800 dark:text-gray-100">{kindLabel(String(record.kind || ''))}</span>
-                        {record.subject ? <span className="truncate text-xs text-gray-500">{record.subject}</span> : null}
+                        {record.subject ? <span className="detail-scroll-text text-xs text-gray-500">{record.subject}</span> : null}
                       </span>
                       {/* The history convention: acting USERNAME, then the
                           dd/mm/yyyy HH:mm stamp. */}

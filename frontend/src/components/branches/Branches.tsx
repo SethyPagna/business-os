@@ -273,8 +273,8 @@ function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:tex
         {detailText ? <InfoHint className="shrink-0" label={String(label || '')} text={detailText} /> : null}
       </div>
       <button type="button" className="block w-full min-w-0 text-left focus:outline-none" onClick={onClick}>
-        <div className={`truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
-        {sub ? <div className="mt-0.5 min-w-0 truncate text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">{sub}</div> : null}
+        <div className={`detail-scroll-text text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
+        {sub ? <div className="mt-0.5 min-w-0 detail-scroll-text text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">{sub}</div> : null}
       </button>
     </div>
   )
@@ -1323,7 +1323,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                             {branch.phone ? <span>{branch.phone}</span> : null}
                             {branch.manager ? <span>{branch.manager}</span> : null}
                           </div>
-                          {branch.notes ? <p className="mt-0.5 truncate pl-5 text-xs text-gray-400">{branch.notes}</p> : null}
+                          {branch.notes ? <p className="mt-0.5 detail-scroll-text pl-5 text-xs text-gray-400">{branch.notes}</p> : null}
                         </button>
                         <div className="flex max-w-full flex-shrink-0 items-center gap-1 overflow-x-auto pb-1">
                           <button
@@ -1510,7 +1510,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                       <span className="flex-shrink-0 rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                                         {group.rows.length}
                                       </span>
-                                      <span className="flex-shrink-0 truncate text-[10px] text-slate-500 dark:text-slate-400">
+                                      <span className="flex-shrink-0 detail-scroll-text text-[10px] text-slate-500 dark:text-slate-400">
                                         {qtyTotal} {groupUnit}
                                       </span>
                                     </button>,
@@ -1551,7 +1551,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <button type="button" key={transfer.id} onClick={() => setTransferDetail(transfer)} className="card w-full p-2.5 text-left transition hover:border-violet-300 hover:bg-violet-50/30 dark:hover:border-violet-800 dark:hover:bg-violet-950/10">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="mb-0.5 truncate font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
+                    <div className="mb-0.5 detail-scroll-text font-mono text-[10px] font-semibold text-violet-600 dark:text-violet-300" title={`Transfer #${transfer.id}`}>
                       {formatTransferReference(transfer.id)}
                     </div>
                     <div className="whitespace-normal break-words text-sm font-semibold text-gray-900 dark:text-white">{transfer.product_name}</div>
@@ -1563,13 +1563,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                   </div>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center gap-1 text-[11px]">
-                  <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{historyField(transfer.from_name)}</span>
+                  <span className="min-w-0 detail-scroll-text rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{historyField(transfer.from_name)}</span>
                   <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                  <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{historyField(transfer.to_name)}</span>
+                  <span className="min-w-0 detail-scroll-text rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{historyField(transfer.to_name)}</span>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                  <div className="min-w-0 truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div>
-                  <div className="shrink-0 truncate">{historyActor(transfer.user_name)}</div>
+                  <div className="min-w-0 detail-scroll-text" title={transfer.note || undefined}>{historyField(transfer.note)}</div>
+                  <div className="shrink-0 detail-scroll-text">{historyActor(transfer.user_name)}</div>
                 </div>
               </button>
             ))}
@@ -1605,14 +1605,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                     <td className="max-w-[16rem] whitespace-normal break-words px-2.5 py-1.5 font-medium text-gray-800 dark:text-gray-200">{transfer.product_name}</td>
                     <td className="px-2.5 py-1.5">
                       <div className="flex min-w-0 items-center gap-1">
-                        <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{historyField(transfer.from_name)}</span>
+                        <span className="max-w-[8rem] detail-scroll-text rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{historyField(transfer.from_name)}</span>
                         <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
-                        <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{historyField(transfer.to_name)}</span>
+                        <span className="max-w-[8rem] detail-scroll-text rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{historyField(transfer.to_name)}</span>
                       </div>
                     </td>
                     <td className="bg-blue-50/30 px-2.5 py-1.5 text-right font-bold text-blue-700 dark:bg-blue-950/10 dark:text-blue-300">{transfer.quantity}</td>
-                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.note || undefined}>{historyField(transfer.note)}</div></td>
-                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="truncate" title={transfer.user_name || undefined}>{historyActor(transfer.user_name)}</div></td>
+                    <td className="max-w-[14rem] px-2.5 py-1.5 text-gray-500"><div className="detail-scroll-text" title={transfer.note || undefined}>{historyField(transfer.note)}</div></td>
+                    <td className="max-w-[10rem] px-2.5 py-1.5 text-gray-500"><div className="detail-scroll-text" title={transfer.user_name || undefined}>{historyActor(transfer.user_name)}</div></td>
                   </tr>
                 ))}
               </tbody>

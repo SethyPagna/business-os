@@ -126,7 +126,7 @@ function TaggedStockMobileCardComponent({ row, tr, canWrite, onAction }: {
       data-tagged-stock-row={row.condition_tag}
     >
       <TagPill row={row} />
-      <span className="min-w-0 flex-1 truncate text-[11px] text-gray-500 dark:text-gray-400">
+      <span className="min-w-0 flex-1 detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
         {[row.branch_name, tr('stock_tagged_not_sellable', 'Not sellable', 'លក់មិនបាន')].filter(Boolean).join(' · ')}
       </span>
       <span className="tabular-nums text-sm font-semibold text-orange-700 dark:text-orange-300">{row.quantity}</span>

@@ -241,7 +241,7 @@ export default function ContactPicker({
               onClick={() => choose(contact)}
               className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${index === cursor ? 'bg-blue-50 text-slate-900 dark:bg-blue-900/30 dark:text-slate-100' : 'text-slate-700 hover:bg-blue-50 dark:text-slate-100 dark:hover:bg-blue-900/20'}`}
             >
-              <span className="min-w-0 flex-1 truncate font-medium">{contact.name || `#${contact.id}`}</span>
+              <span className="min-w-0 flex-1 detail-scroll-text font-medium">{contact.name || `#${contact.id}`}</span>
               {contact.phone ? <span className="shrink-0 text-xs text-gray-400">{contact.phone}</span> : null}
             </button>
           ))}

@@ -1247,7 +1247,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
               ) : null}
               {brandName ? (
                 <span
-                  className={`inline-block max-w-[4.5rem] truncate rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
+                  className={`inline-block max-w-[4.5rem] detail-scroll-text rounded-full px-1 py-0.5 text-[10px] font-medium sm:max-w-[6rem] ${getBrandColor(brandName) ? '' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}
                   style={getBrandColor(brandName) ? {
                     background: getBrandColor(brandName),
                     color: getContrastingTextColor(getBrandColor(brandName)),
@@ -3395,7 +3395,7 @@ function ProductsFullEditor() {
       ? 'shrink-0 whitespace-nowrap'
       : fullDetailKeys.has(item.key)
         ? 'max-w-full whitespace-normal break-words'
-        : 'max-w-[5rem] truncate'
+        : 'max-w-[5rem] detail-scroll-text'
     if (item.color) {
       return (
         <span
@@ -4879,7 +4879,7 @@ function ProductsFullEditor() {
             <div className="flex flex-wrap items-center gap-1.5">
                 {hasSelected ? (
                   <span className="inline-flex min-w-0 items-center overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
-                    <span className="truncate whitespace-nowrap">{productSelectedLabel}</span>
+                    <span className="detail-scroll-text whitespace-nowrap">{productSelectedLabel}</span>
                   </span>
                 ) : null}
                 {hasSelected ? (

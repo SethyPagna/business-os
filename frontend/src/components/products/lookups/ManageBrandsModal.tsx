@@ -725,7 +725,7 @@ export default function ManageBrandsModal({
                           style={{ backgroundColor: entry.color }}
                           aria-hidden="true"
                         />
-                        <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{entry.name}</div>
+                        <div className="detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{entry.name}</div>
                         {entry.reviewRule ? (
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -747,7 +747,7 @@ export default function ManageBrandsModal({
                           </div>
                         ) : null}
                         {entry.sampleProducts.length ? (
-                          <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+                          <div className="detail-scroll-text text-[11px] text-gray-500 dark:text-gray-400">
                             {entry.sampleProducts.map((product) => product?.name).filter(Boolean).join(', ')}
                           </div>
                         ) : null}
@@ -811,7 +811,7 @@ export default function ManageBrandsModal({
                           style={{ backgroundColor: brandColorMap[normalizeLookup(name)] || DEFAULT_BRAND_COLOR }}
                           aria-hidden="true"
                         />
-                        <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+                        <span className="min-w-0 flex-1 detail-scroll-text font-medium">{name}</span>
                         <button
                           type="button"
                           className="text-blue-600 hover:underline dark:text-blue-300"

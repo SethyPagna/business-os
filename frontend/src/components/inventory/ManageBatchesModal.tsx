@@ -266,7 +266,7 @@ export default function ManageBatchesModal({
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0">
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('manage_batches', 'Manage Received Dates')}</h2>
-            <div className="mt-0.5 truncate text-xs text-gray-400">{product.name}</div>
+            <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{product.name}</div>
           </div>
           <button type="button" onClick={closeIfIdle} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-gray-400 hover:text-gray-600" disabled={!!savingId}>
             <X className="h-4 w-4" />
@@ -457,7 +457,7 @@ export default function ManageBatchesModal({
                             </button>
                           ) : null,
                           <span>{tr('expiry', 'Expiry')} {batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')}</span>,
-                          <span className={`max-w-[9rem] truncate ${hasSupplier(batch.supplier_name) ? '' : 'text-gray-400'}`} title={supplierDisplay(batch.supplier_name, tr)}>{supplierDisplay(batch.supplier_name, tr)}</span>,
+                          <span className={`max-w-[9rem] detail-scroll-text ${hasSupplier(batch.supplier_name) ? '' : 'text-gray-400'}`} title={supplierDisplay(batch.supplier_name, tr)}>{supplierDisplay(batch.supplier_name, tr)}</span>,
                           !batch.is_active ? <span className="font-medium text-gray-400">{tr('deactivated', 'Deactivated')}</span> : null,
                         ].filter(Boolean).map((node, i) => (
                           <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
@@ -466,7 +466,7 @@ export default function ManageBatchesModal({
                           </span>
                         ))}
                       </div>
-                      {batch.notes ? <div className="mt-0.5 truncate text-[11px] text-gray-400" title={batch.notes}>{batch.notes}</div> : null}
+                      {batch.notes ? <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-400" title={batch.notes}>{batch.notes}</div> : null}
                     </div>
                     <div className="flex flex-shrink-0 flex-col items-end gap-1">
                       <div className="whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{batch.quantity} {product.unit}</div>

@@ -265,7 +265,7 @@ export default function ReviewQueue() {
                         {tr(row.status, row.status)}
                       </span>
                     </div>
-                    <p className="mt-1 truncate text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <p className="mt-1 detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">
                       {row.summary || `#${row.entity_id ?? '--'}`}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-400">

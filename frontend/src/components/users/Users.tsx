@@ -1234,8 +1234,8 @@ export default function Users() {
                   {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-gray-900 dark:text-white">{user.name}</div>
-                  <div className="truncate text-xs text-gray-500 dark:text-gray-400">{user.email || user.phone || `@${user.username}`}</div>
+                  <div className="detail-scroll-text font-semibold text-gray-900 dark:text-white">{user.name}</div>
+                  <div className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">{user.email || user.phone || `@${user.username}`}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     {user.role_name ? <span className="badge-blue text-xs">{user.role_name}</span> : <span className="text-xs text-gray-400">{t('no_role') || 'No role'}</span>}
                     <span className={user.is_active ? 'badge-green text-xs' : 'badge-red text-xs'}>{user.is_active ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span>

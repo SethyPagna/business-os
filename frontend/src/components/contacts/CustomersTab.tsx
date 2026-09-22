@@ -1268,12 +1268,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                   ) : null}
                 </span>
               </td>
-              <td className="max-w-[10rem] cursor-pointer truncate px-3 py-1.5 font-mono text-[11px] text-blue-600 dark:text-blue-400" title={customerRow.membership_number || undefined} onClick={() => handleContactCellClick(customerRow)}>{customerRow.membership_number || '--'}</td>
+              <td className="max-w-[10rem] cursor-pointer px-3 py-1.5 font-mono text-[11px] text-blue-600 dark:text-blue-400" title={customerRow.membership_number || undefined} onClick={() => handleContactCellClick(customerRow)}><span className="detail-scroll-text">{customerRow.membership_number || '--'}</span></td>
               <td className="cursor-pointer px-3 py-1.5 font-semibold text-blue-600 dark:text-blue-300" onClick={() => handleContactCellClick(customerRow)}>
                 {formatPoints(customerRow.points_balance)}
               </td>
               <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.phone || customerRow.phone || '-'}</td>
-              <td className="max-w-[12rem] cursor-pointer truncate px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{primaryOption.email || customerRow.email || '-'}</td>
+              <td className="max-w-[12rem] cursor-pointer px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}><span className="detail-scroll-text">{primaryOption.email || customerRow.email || '-'}</span></td>
               <td className="cursor-pointer px-3 py-1.5 text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{customerRow.gender ? tr(t, customerRow.gender, customerRow.gender) : tr(t, 'unspecified', 'Unspecified')}</td>
               <td className="cursor-pointer whitespace-nowrap px-3 py-1.5 text-[11px] text-gray-500" onClick={() => handleContactCellClick(customerRow)}>{fmtDateTime24(customerRow.created_at)}</td>
               <td className="cursor-pointer px-3 py-1.5" onClick={() => handleContactCellClick(customerRow)}>
@@ -1282,7 +1282,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 ) : (
                   <div className="flex flex-wrap items-center gap-1">
                     {options.slice(0, 2).map((option, index) => (
-                      <span key={index} className="badge-blue max-w-[90px] truncate text-xs">{option.label || `Opt ${index + 1}`}</span>
+                      <span key={index} className="badge-blue max-w-[90px] detail-scroll-text text-xs">{option.label || `Opt ${index + 1}`}</span>
                     ))}
                     {options.length > 2 ? <span className="text-xs text-gray-400">+{options.length - 2}</span> : null}
                   </div>
@@ -1371,7 +1371,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40">{customerRow.name?.[0]?.toUpperCase()}</div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">{customerRow.name}</span>
+                  <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{customerRow.name}</span>
                   {contactCount > 0 ? (
                     <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300" title={`${contactCount} ${tr(t, 'contact_options', 'contact options')}`}>
                       <Phone className="h-2.5 w-2.5" />{contactCount}
@@ -1383,12 +1383,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                     </span>
                   ) : null}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-gray-500">
+                <div className="mt-0.5 detail-scroll-text text-[11px] text-gray-500">
                   {customerRow.membership_number ? <span className="font-mono text-blue-500">{customerRow.membership_number}</span> : null}
                   {customerRow.membership_number ? <span className="mx-1 text-gray-300 dark:text-gray-600">·</span> : null}
                   <span className="font-semibold text-blue-600 dark:text-blue-300">{formatPoints(customerRow.points_balance)} {tr(t, 'points_short', 'pts')}</span>
                 </div>
-                {cardPhone ? <div className="truncate text-[11px] text-gray-500">{cardPhone}</div> : null}
+                {cardPhone ? <div className="detail-scroll-text text-[11px] text-gray-500">{cardPhone}</div> : null}
               </div>
             </div>
           )

@@ -445,7 +445,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <div className="text-xs font-medium text-slate-600 dark:text-slate-300">Product cover ({usage.covers.length})</div>
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {usage.covers.map((row) => (
-                      <li key={`cover-${row.id}`} className="truncate">{row.name || `product #${row.id}`}{row.barcode ? ` · ${row.barcode}` : ''}</li>
+                      <li key={`cover-${row.id}`} className="detail-scroll-text">{row.name || `product #${row.id}`}{row.barcode ? ` · ${row.barcode}` : ''}</li>
                     ))}
                   </ul>
                 </div>
@@ -455,7 +455,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <div className="text-xs font-medium text-slate-600 dark:text-slate-300">Product gallery ({usage.gallery.length})</div>
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {usage.gallery.map((row, index) => (
-                      <li key={`gallery-${row.product_id}-${index}`} className="truncate">{row.name || `product #${row.product_id}`}{row.sort_order != null ? ` · image ${Number(row.sort_order) + 1}` : ''}</li>
+                      <li key={`gallery-${row.product_id}-${index}`} className="detail-scroll-text">{row.name || `product #${row.product_id}`}{row.sort_order != null ? ` · image ${Number(row.sort_order) + 1}` : ''}</li>
                     ))}
                   </ul>
                 </div>
@@ -465,7 +465,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <div className="text-xs font-medium text-slate-600 dark:text-slate-300">User avatar ({usage.avatars.length})</div>
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {usage.avatars.map((row) => (
-                      <li key={`avatar-${row.id}`} className="truncate">{row.name || row.username || `user #${row.id}`}</li>
+                      <li key={`avatar-${row.id}`} className="detail-scroll-text">{row.name || row.username || `user #${row.id}`}</li>
                     ))}
                   </ul>
                 </div>
@@ -475,7 +475,7 @@ function AssetPreviewModal({ asset, onClose, canManage, notify, filesApi, onRewi
                   <div className="text-xs font-medium text-slate-600 dark:text-slate-300">{tr('promotions', 'Promotions', 'ប្រូម៉ូសិន')} ({promotionReferences.length})</div>
                   <ul className="mt-0.5 space-y-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {promotionReferences.map((row) => (
-                      <li key={`promotion-${row.id}`} className="truncate">
+                      <li key={`promotion-${row.id}`} className="detail-scroll-text">
                         {row.title || `${tr('promotion', 'promotion', 'ប្រូម៉ូសិន')} #${row.id}`}
                         {' · '}{Number(row.is_active) === 0 ? tr('inactive', 'Inactive', 'អសកម្ម') : tr('active', 'Active', 'សកម្ម')}
                       </li>
@@ -1712,23 +1712,23 @@ export default function FilesPage() {
                       ) : !asset.referenceProduct && canManageLibrary ? (
                         <button
                           type="button"
-                          className="block w-full truncate rounded px-0.5 text-left text-sm font-semibold leading-5 text-slate-900 hover:bg-slate-100 dark:text-white dark:hover:bg-slate-800"
+                          className="block w-full detail-scroll-text rounded px-0.5 text-left text-sm font-semibold leading-5 text-slate-900 hover:bg-slate-100 dark:text-white dark:hover:bg-slate-800"
                           title={tr('rename_file_hint', 'Click to rename')}
                           onClick={() => startRenameAsset(asset)}
                         >
                           {logicalAssetDisplayName(asset)}
                         </button>
                       ) : (
-                        <div className="block w-full truncate px-0.5 text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={logicalAssetDisplayName(asset)}>
+                        <div className="block w-full detail-scroll-text px-0.5 text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={logicalAssetDisplayName(asset)}>
                           {logicalAssetDisplayName(asset)}
                         </div>
                       )}
                       {asset.referenceProduct ? (
-                        <div className="mt-1 truncate px-0.5 text-[10px] text-slate-500" title={asset.physical_original_name || asset.original_name || ''}>
+                        <div className="mt-1 detail-scroll-text px-0.5 text-[10px] text-slate-500" title={asset.physical_original_name || asset.original_name || ''}>
                           {tr('one_stored_file', 'One stored file')}: {asset.physical_original_name || asset.original_name || '-'}
                         </div>
                       ) : null}
-                      <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={assetUrl}>{assetUrl}</div>
+                      <div className="mt-1 detail-scroll-text rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={assetUrl}>{assetUrl}</div>
                       <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
                         <span className="text-right">{formatFileSize(asset.byte_size)}</span>
@@ -1844,7 +1844,7 @@ export default function FilesPage() {
       {deleteConfirmAsset ? (
         <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm" unsavedChanges="read-only">
           <div className="flex flex-col gap-4">
-            <p className="truncate text-sm font-medium text-slate-900 dark:text-white" title={deleteConfirmAsset.original_name || ''}>
+            <p className="detail-scroll-text text-sm font-medium text-slate-900 dark:text-white" title={deleteConfirmAsset.original_name || ''}>
               {deleteConfirmAsset.original_name || '-'}
             </p>
             {!deleteConfirmAsset.canDelete ? (

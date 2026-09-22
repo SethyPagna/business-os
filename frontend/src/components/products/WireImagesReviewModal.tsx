@@ -160,7 +160,7 @@ export default function WireImagesReviewModal({
 
   const counts = preview?.counts
   const fileList = (files: string[]) => files.map((file) => (
-    <li key={file} className="truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">{file}</li>
+    <li key={file} className="detail-scroll-text font-mono text-[11px] text-gray-500 dark:text-gray-400">{file}</li>
   ))
 
   return (
@@ -257,7 +257,7 @@ export default function WireImagesReviewModal({
                         />
                       ))}
                     </span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-gray-400">
+                    <span className="mt-0.5 block detail-scroll-text font-mono text-[11px] text-gray-400">
                       {change.imageNames.join(' · ')}
                     </span>
                   </span>

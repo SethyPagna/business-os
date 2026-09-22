@@ -575,7 +575,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                     {isExpanded ? (
                       <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-gray-50 p-2 text-xs dark:bg-zinc-800/60">
                         {detailEntries.map(([key, value]) => (
-                          <div key={key} className="truncate">
+                          <div key={key} className="detail-scroll-text">
                             <span className="text-gray-400 dark:text-gray-500">{key}: </span>
                             <span className="text-gray-700 dark:text-gray-200">{String(value ?? '')}</span>
                           </div>

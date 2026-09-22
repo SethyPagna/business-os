@@ -564,7 +564,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         {selectedSale ? (
           <div className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-700 dark:bg-emerald-950/30">
             <div className="min-w-0">
-              <div className="truncate font-semibold text-emerald-900 dark:text-emerald-100">{formatSaleOptionLabel(selectedSale)}</div>
+              <div className="detail-scroll-text font-semibold text-emerald-900 dark:text-emerald-100">{formatSaleOptionLabel(selectedSale)}</div>
               <div className="text-xs text-emerald-700 dark:text-emerald-300">Sale ID #{selectedSale.id}{selectedSale.branch_name ? ` · ${selectedSale.branch_name}` : ''}</div>
             </div>
             <button

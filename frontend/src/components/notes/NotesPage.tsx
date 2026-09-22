@@ -189,7 +189,7 @@ export default function NotesPage() {
                     <button type="button" onClick={() => openNoteHere(note)} className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-1.5">
                         {note.pinned ? <Pin className="h-3 w-3 shrink-0 text-blue-500" /> : null}
-                        <span className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                        <span className="detail-scroll-text text-sm font-medium text-slate-800 dark:text-slate-100">
                           {noteDisplayTitle(note, t)}
                         </span>
                       </div>

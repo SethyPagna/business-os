@@ -274,7 +274,7 @@ export default function InventoryMovementsSurface({
           {group.reasonPrimary ? (
             <span className="flex min-w-0 max-w-full items-baseline gap-1" title={group.reasonSummary}>
               <span className="shrink-0">{t('reason') || 'Reason'}:</span>
-              <span className="min-w-0 truncate leading-normal text-gray-700 dark:text-gray-200">{group.reasonPrimary}</span>
+              <span className="min-w-0 detail-scroll-text leading-normal text-gray-700 dark:text-gray-200">{group.reasonPrimary}</span>
               {group.reasonExtraCount ? <span className="shrink-0 text-gray-700 dark:text-gray-200">+{group.reasonExtraCount}</span> : null}
             </span>
           ) : null}
@@ -508,7 +508,7 @@ export default function InventoryMovementsSurface({
                                       {translateMovementType(group.movement_type, t)}
                                     </span>
                                   </div>
-                                  <div className="mt-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{movementGroupTitle(group, tr)}</div>
+                                  <div className="mt-1 detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{movementGroupTitle(group, tr)}</div>
                                   <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-gray-400">
                                     <span>{getMovementRecordCount(group)} {tr('records', 'records')}</span>
                                     {group.branchSummary ? <span>{group.branchSummary}</span> : null}
@@ -656,7 +656,7 @@ export default function InventoryMovementsSurface({
                                       className="inline-flex min-w-0 items-center gap-1.5 text-left hover:text-blue-600 dark:hover:text-blue-300"
                                       onClick={() => toggleMovementGroup(group.id)}
                                     >
-                                      <span className="truncate">{movementGroupTitle(group, tr)}</span>
+                                      <span className="detail-scroll-text">{movementGroupTitle(group, tr)}</span>
                                       <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                     </button>
                                   </td>

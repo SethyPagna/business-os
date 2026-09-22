@@ -2028,7 +2028,7 @@ export default function ProductForm({
                   const quantity = Number(row?.quantity || 0)
                   return (
                     <div key={String(branch.id)} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
-                      <span className="min-w-0 truncate text-gray-700 dark:text-gray-300">{branch.name}</span>
+                      <span className="min-w-0 detail-scroll-text text-gray-700 dark:text-gray-300">{branch.name}</span>
                       <span className="ml-3 tabular-nums font-semibold text-gray-900 dark:text-gray-100">{quantity}</span>
                     </div>
                   )

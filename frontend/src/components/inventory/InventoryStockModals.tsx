@@ -598,7 +598,7 @@ export default function InventoryStockModals({
                     aria-expanded={receivedDateOptionsOpen}
                   >
                     <span className="shrink-0">{tr('options', 'Options', 'ជម្រើស')}</span>
-                    <span className="min-w-0 flex-1 truncate text-right text-xs font-normal tabular-nums text-gray-500 dark:text-gray-400">{receivedDateOptionSummary}</span>
+                    <span className="min-w-0 flex-1 detail-scroll-text text-right text-xs font-normal tabular-nums text-gray-500 dark:text-gray-400">{receivedDateOptionSummary}</span>
                     <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${receivedDateOptionsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                   </button>
                   {receivedDateOptionsOpen ? (
@@ -822,7 +822,7 @@ export default function InventoryStockModals({
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
-                <div className="mt-0.5 truncate text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
+                <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {onMinimizeTransfer ? <MinimizeButton onMinimize={onMinimizeTransfer} tr={tr} disabled={transferSaving} /> : null}

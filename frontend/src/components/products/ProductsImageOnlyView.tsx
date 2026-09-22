@@ -498,7 +498,7 @@ export default function ProductsImageOnlyView() {
                     // Named, not a bare figure. A number on its own next to a
                     // product could as easily be cost or a promotional price;
                     // this role has no other pricing on screen to infer from.
-                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                    <p className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
                       <span className="text-gray-400 dark:text-gray-500">{t('selling_price') || 'Selling price'}: </span>
                       {fmtUSD(product.selling_price_usd)}
                       {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
@@ -515,7 +515,7 @@ export default function ProductsImageOnlyView() {
                   ) : null}
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                     {(showCategory || showBrand) && metaParts.length > 0 ? (
-                      <span className="truncate text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</span>
+                      <span className="detail-scroll-text text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</span>
                     ) : null}
                     {showStock ? (
                       <span className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${stockTone}`}>
@@ -705,7 +705,7 @@ export default function ProductsImageOnlyView() {
                   <div className="divide-y divide-gray-100 dark:divide-slate-700">
                     {detailBatches.map((batch) => (
                       <div key={`${batch.branchName}-${batch.id}`} className="flex items-center justify-between gap-2 py-1.5 text-xs">
-                        <span className="min-w-0 truncate text-gray-700 dark:text-gray-200">
+                        <span className="min-w-0 detail-scroll-text text-gray-700 dark:text-gray-200">
                           {/* Z1a: a lot reads as its received DATE. Rendering
                               `batch.lotCode` verbatim printed the raw MMDDYYYY
                               code ("08242026") next to real dd/mm/yyyy dates --

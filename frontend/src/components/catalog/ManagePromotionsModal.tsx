@@ -533,7 +533,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{promo.title}</span>
+                    <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-gray-100">{promo.title}</span>
                     {promo.badge_text ? (
                       <span
                         className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
@@ -543,7 +543,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                       </span>
                     ) : null}
                   </div>
-                  <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+                  <div className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
                     {promo.subtitle || (
                       promo.link_type === 'product'
                         ? `Links to: ${productNameById.get(promo.link_product_id || 0) || 'a product'}`

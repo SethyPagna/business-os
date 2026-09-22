@@ -218,12 +218,12 @@ export default function CartItem({
               actually shown here before, so a batch-tracked sale looked
               no different from a plain one until the receipt printed. */}
           {item.batch_label ? (
-            <div {...getKhmerTextProps(item.batch_label, 'mt-0.5 truncate text-[10px] font-medium text-sky-600 dark:text-sky-400')} title={item.batch_label}>
+            <div {...getKhmerTextProps(item.batch_label, 'mt-0.5 detail-scroll-text text-[10px] font-medium text-sky-600 dark:text-sky-400')} title={item.batch_label}>
               {item.batch_label}
             </div>
           ) : null}
           {item.damaged_lot_label ? (
-            <div className="mt-0.5 truncate text-[10px] font-medium text-orange-500 dark:text-orange-400" title={item.damaged_lot_label}>
+            <div className="mt-0.5 detail-scroll-text text-[10px] font-medium text-orange-500 dark:text-orange-400" title={item.damaged_lot_label}>
               🟠 {item.damaged_lot_label}
             </div>
           ) : null}

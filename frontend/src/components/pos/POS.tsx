@@ -3883,7 +3883,7 @@ export default function POS() {
                 <button className="flex-1 text-left flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400" onClick={() => setShowCustomer(v => !v)}>
                   <span>{t('pos_customer')||t('customer')||'Customer'}</span>
                   {active.customer.name
-                    ? <span className="text-blue-600 truncate max-w-[120px]">{active.customer.name}</span>
+                    ? <span className="text-blue-600 detail-scroll-text max-w-[120px]">{active.customer.name}</span>
                     : <span className="text-gray-400">({t('optional')||'optional'})</span>}
                   <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? t('hide') : t('show')}</span>
                 </button>
@@ -4070,7 +4070,7 @@ export default function POS() {
               <div className="flex items-center justify-between px-3 py-2">
                 <button className="flex-1 text-left flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400" onClick={() => setShowDelivery(v => !v)}>
                   <span>{t('pos_delivery')||t('delivery_fees')||'Delivery'}</span>
-                  {active.isDelivery && active.selectedDelivery?.name && <span className="text-orange-500 truncate max-w-[80px]">{active.selectedDelivery.name}</span>}
+                  {active.isDelivery && active.selectedDelivery?.name && <span className="text-orange-500 detail-scroll-text max-w-[80px]">{active.selectedDelivery.name}</span>}
                   {active.isDelivery && feeUsd > 0 && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{fmtUSD(feeUsd)}</span>}
                   <span className="ml-auto text-[10px] text-gray-400">{showDelivery ? t('hide') : t('show')}</span>
                 </button>

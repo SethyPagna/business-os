@@ -226,7 +226,7 @@ function ProductCardComponent({
           product's "qty unit" uses, judged against the group's
           total. A flat product keeps its coloured "qty unit". */}
       <div className="mt-0.5 flex min-w-0 items-center gap-1">
-      <p {...getKhmerTextProps(groupProduct ? choiceLabel : unit, `min-w-0 flex-1 ${posPresentation ? 'truncate text-[11px]' : 'text-xs'} font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)} title={groupProduct ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${copy('Total', 'សរុប')}: ${groupMeta.stockTotal}` : ''}` : `${stock} ${unit}`}>
+      <p {...getKhmerTextProps(groupProduct ? choiceLabel : unit, `min-w-0 flex-1 ${posPresentation ? 'detail-scroll-text text-[11px]' : 'text-xs'} font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= effectiveLowStockThreshold(lowStockConfig, product.low_stock_threshold) ? 'text-yellow-500' : 'text-emerald-500'}`)} title={groupProduct ? `${choiceLabel}: ${variants.length}${groupMeta?.stockTotal != null ? ` | ${copy('Total', 'សរុប')}: ${groupMeta.stockTotal}` : ''}` : `${stock} ${unit}`}>
         {groupProduct ? (
           <>
             {choiceLabel}: <span className="font-semibold text-primary-600 dark:text-primary-400">{variants.length}</span>

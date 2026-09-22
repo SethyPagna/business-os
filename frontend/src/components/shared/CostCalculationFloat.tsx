@@ -71,7 +71,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
   return (
     <Modal title={tr('cost_breakdown_title', 'Calculated cost price')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="space-y-3 text-sm">
-        {productName ? <div className="min-w-0 truncate text-xs font-medium text-gray-500 dark:text-gray-400">{productName}</div> : null}
+        {productName ? <div className="min-w-0 detail-scroll-text text-xs font-medium text-gray-500 dark:text-gray-400">{productName}</div> : null}
 
         {loading ? (
           <div className="space-y-2" aria-busy="true">

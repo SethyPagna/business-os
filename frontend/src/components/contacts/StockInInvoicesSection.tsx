@@ -269,7 +269,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
                         {group.received_day ? <time dateTime={group.received_day}>{fmtDateOnly(group.received_day)}</time> : tr('no_date_recorded', 'No date recorded')}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{supplierLabel(group)}</span>
+                      <span className="min-w-0 flex-1 detail-scroll-text text-sm text-gray-700 dark:text-gray-200">{supplierLabel(group)}</span>
                       {branchNames ? <span className="text-[11px] text-gray-400">{branchNames}</span> : null}
                       {group.credit_lines > 0 ? (
                         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('on_credit', 'Not Yet Paid')}: {group.credit_lines}</span>
