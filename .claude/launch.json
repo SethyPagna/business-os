@@ -82,6 +82,48 @@
       ],
       "port": 8899,
       "autoPort": false
+    },
+    {
+      "name": "a2-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:/Users/mrkl6/Downloads/bos-a2/frontend",
+        "--",
+        "--config",
+        "vite.lane.config.ts",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180,
+      "autoPort": false
+    },
+    {
+      "name": "a2-worker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mrkl6/Downloads/bos-a2/cloudflare/node_modules/wrangler/bin/wrangler.js",
+        "dev",
+        "--local",
+        "-c",
+        "C:/Users/mrkl6/Downloads/bos-a2/cloudflare/wrangler.toml",
+        "--port",
+        "8790"
+      ],
+      "port": 8790,
+      "autoPort": false
+    },
+    {
+      "name": "a2-worker-supervised",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mrkl6/AppData/Local/Temp/claude/C--Users-mrkl6-Downloads-business-os-v1/5d63d8ce-9752-4d30-870a-4cd1a8a85208/scratchpad/a2-worker-supervisor.cjs"
+      ],
+      "port": 8790,
+      "autoPort": false
     }
   ]
 }

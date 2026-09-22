@@ -1,10 +1,11 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
-export function getDashboard(): Promise<unknown> {
+export function getDashboard(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
   return route(
-    'dashboard:get',
-    () => apiFetch('GET', '/api/dashboard'),
+    `dashboard:get:${query}`,
+    () => apiFetch('GET', appendQuery('/api/dashboard', query)),
   )
 }
 

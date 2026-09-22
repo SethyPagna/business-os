@@ -127,13 +127,15 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
     !/date\(s?\.?created_at\) (BETWEEN|= date\(@today\))/.test(src) && !/created_at >= date\(@(startDate|today)\)/.test(src))
   check('compat.ts buckets the range breakdowns via the local-day helper',
     /localDateRangeClause\(`\$\{alias\}\.created_at`\)/.test(src) && /localDateRangeClause\('r\.created_at'\)/.test(src))
-  check('compat.ts buckets the two "today" tiles via the local-today helper', /localTodayRangeClause\('created_at'\)/.test(src))
+  check('compat.ts scopes dashboard summary sales and returns through the selected local-date range',
+    (src.match(/localDateRangeClause\('created_at'\)/g) || []).length >= 4)
   check('compat.ts buckets hour-of-day in local time', /localHourExpr\('s\.created_at'\)/.test(src))
   check('compat.ts returns the field names consumed by the dashboard',
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))
   check('compat.ts breakdowns share the canonical recognized net-sale formula',
     /recognizedExpr\(`\$\{alias\}\.`\)/.test(src) && /netSaleExpr\('s\.'\)/.test(src) && /CUSTOMER_REFUND_JOIN/.test(src))
-  check('compat.ts default range uses the business-timezone today', /const today = businessToday\(\)/.test(src))
+  check('compat.ts default range uses seven business days ending today',
+    /const today = businessToday\(\)/.test(src) && /defaultStart\.setUTCDate\(defaultStart\.getUTCDate\(\) - 6\)/.test(src))
   // The intentionally-skipped sites must stay (expiry_date has a per-row bound;
   // the audit_logs retention delete has no created_at index -- ±7h immaterial).
   check('expiry_date and audit_logs date() sites are deliberately untouched',

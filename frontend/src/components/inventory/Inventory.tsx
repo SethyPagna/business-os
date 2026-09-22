@@ -1275,7 +1275,14 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           'Inventory product detail',
           INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,
         )
-        const product = Array.isArray(result?.items) ? result.items[0] : null
+        // By id, not by position: a response that is not this movement's
+        // product must fall through to the movement-derived detail below
+        // rather than open a different product's card. (/api/products/search
+        // ignored `ids` until this lane fixed it and answered with the
+        // catalog's first row by name.)
+        const product = Array.isArray(result?.items)
+          ? result.items.find((row: { id?: unknown }) => Number(row?.id) === productId) || null
+          : null
         if (product) {
           setDetailProduct(product)
           return

@@ -102,8 +102,11 @@ runTest('K2: NewReturnModal wires the chooser, Replace, and the settlement gate'
   assert.match(newReturnSource, /STOCK_ACTION_OPTIONS\.map\(\(option\)/)
   assert.match(newReturnSource, /const updateItemAction = \(idx: number, action: ReturnStockAction\)/)
   assert.match(newReturnSource, /stock_action: action, return_to_stock: action === 'restock'/)
-  // Replace: same-name candidates only, POS-way lot picker, payload keys
-  assert.match(newReturnSource, /normName\(row\.name\) === normName\(name\)/)
+  // Replace: full catalog name/SKU/barcode search, scan auto-pick, POS-way lot picker, payload keys
+  assert.match(newReturnSource, /searchProducts\(\{ query, page: 1, pageSize: 30 \}\)/)
+  assert.match(newReturnSource, /normCode\(row\.barcode\).*normCode\(row\.sku\)/)
+  assert.doesNotMatch(newReturnSource, /normName\(row\.name\) === normName\(name\)/)
+  assert.match(newReturnSource, /<ScanSearchButton/)
   assert.match(newReturnSource, /getProductBatches\(productId, branchId, true\)/)
   assert.match(newReturnSource, /replacement_items: replacements\.map/)
   assert.match(newReturnSource, /settlement_mode: settlementPreview\.isEven \? 'even_exchange' : 'price_difference'/)

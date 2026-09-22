@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { consumeLongPressClick, createLongPressHandlers, createLongPressState, type LongPressState } from '../../utils/longPress.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
+import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -1210,10 +1211,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             }}
             t={t}
             className="min-w-0"
-            actions={<><ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense />{branchExportButton}</>}
           />
         ) : null}
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b border-gray-200 pt-0.5 dark:border-gray-700">
+          {showDateRange ? <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} className="w-auto shrink-0" showLabel dense /> : null}
+          {showDateRange ? branchExportButton : null}
           {showSectionNavigation ? <div className="flex gap-1 overflow-x-auto">
             {[
               { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
@@ -1234,7 +1236,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           </div> : null}
           {canTransferStock ? (
             <button
-              className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
               onClick={() => setModal('transfer')}
               title={tr('transfer', 'Transfer')}
               aria-label={tr('transfer', 'Transfer')}
@@ -1244,13 +1246,13 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             </button>
           ) : null}
           {tab === 'branches' ? <button
-            className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-lg border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
+            className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-700 bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:border-blue-800 hover:bg-blue-700"
             onClick={() => { setSelected(null); setModal('form') }}
             title={tr('add_branch', 'Add Branch')}
             aria-label={tr('add_branch', 'Add Branch')}
           >
             <Plus className="h-4 w-4 shrink-0" />
-            <span>{tr('branches', 'Branch')}</span>
+            <span>{tr('add_branch', 'Add Branch')}</span>
           </button> : null}
           <div className="mb-1 ml-auto shrink-0">
             <FilterMenu
@@ -1655,7 +1657,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                 </div>
                 <div className="mt-2 flex min-w-0 items-center gap-1 text-[11px]">
                   <span className="min-w-0 truncate rounded bg-rose-50 px-1.5 py-0.5 font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{transfer.from_name || 'N/A'}</span>
-                  <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                  <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
                   <span className="min-w-0 truncate rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{transfer.to_name || 'N/A'}</span>
                 </div>
                 <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
@@ -1698,7 +1700,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                     <td className="px-2.5 py-1.5">
                       <div className="flex min-w-0 items-center gap-1">
                         <span className="max-w-[8rem] truncate rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" title={transfer.from_name || undefined}>{transfer.from_name || 'N/A'}</span>
-                        <ArrowRightLeft className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
+                        <ArrowRight className="h-3 w-3 shrink-0 text-gray-400" aria-hidden="true" />
                         <span className="max-w-[8rem] truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300" title={transfer.to_name || undefined}>{transfer.to_name || 'N/A'}</span>
                       </div>
                     </td>

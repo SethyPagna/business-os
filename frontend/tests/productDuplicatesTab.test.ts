@@ -3,9 +3,10 @@
 // panel (cross-surface rule): per-cluster checkboxes, Select all over the
 // FILTERED view, a bulk bar with Merge/Dismiss selected, sequential calls
 // with visible progress, and — the safety-critical part — bulk merge only
-// ever automated for exactly-2-product clusters with "keep the older
-// record" (lower id) as the keeper; 3+ clusters are skipped for a human,
-// never guessed.
+// ever automated for exact same-name + same-cost barcode pairs. Similar-name
+// and same-barcode/different-name conflicts stay manual; keeper selection is
+// stock-aware, while an extra-zero pair keeps the clean barcode so stock can
+// be folded onto it.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -29,11 +30,15 @@ test('Select all selects the FILTERED view, not hidden clusters', () => {
   assert.match(src, /setSelectedKeys\(new Set\(visibleClusters\.map\(\(cluster\) => clusterKey\(cluster\)\)\)\)/)
 })
 
-test('bulk merge automates only 2-product clusters and keeps the older record', () => {
-  assert.match(src, /cluster\.products\.length === 2/, 'a 3+ cluster needs a human-picked keeper')
-  assert.match(src, /\[\.\.\.cluster\.products\]\.sort\(\(a, b\) => a\.id - b\.id\)/, 'keeper = lower id (created first)')
+test('bulk merge excludes manual-only conflicts and keeps stock/clean barcode', () => {
+  assert.match(src, /cluster\.products\.length !== 2/, 'a 3+ cluster needs a human-picked keeper')
+  assert.match(src, /normalizeProductGroupName\(a\.name\).*normalizeProductGroupName\(b\.name\)/s, 'names must match exactly after normal grouping')
+  assert.match(src, /cost_price_usd/, 'cost must match before an automatic merge')
+  assert.match(src, /isLeadingZeroPair && aExtraZero !== bExtraZero/, 'an extra-zero pair must preserve the clean barcode')
+  assert.match(src, /aExtraZero \? 1 : -1/, 'the clean barcode must beat the extra-zero copy')
+  assert.match(src, /const stockDiff =/, 'ordinary exact-barcode duplicates must prefer the stocked row')
   assert.match(src, /mergePossiblySameProducts\(keeper\.id, other\.id\)/)
-  assert.match(src, /bulk_merge_skipped_multiway/, 'skipped 3+ groups are reported, not silent')
+  assert.match(src, /bulk_merge_skipped_multiway/, 'manual-only groups are reported as skipped, not silent')
 })
 
 test('bulk actions run sequentially with live progress and continue past failures', () => {

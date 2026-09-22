@@ -1,5 +1,30 @@
 # progress.md — business-os
 
+> **Active Codex continuation — September 5:** Production-usability work is in
+> sibling `business-os-v1-integration`, tracked in
+> `docs/fleet/2026-09-05-production-usability.md`. Bounded Sol lanes own product
+> draft reliability, shift lifecycle/ownership and floating UI, compact navigation,
+> date presets and sale-picker layering. Main coordinates/verifies; do not deploy
+> dirty main. This new round is not deployed. September 4 shift 1 remains open;
+> exact historical closing time is unresolved. Existing expenses already total
+> 150000 KHR; do not duplicate them or reapply historical sales settlement.
+
+> **Codex release checkpoint — September 5, 2026:** Production is verified at
+> `0ffc4bfcc4fd`, Worker `be276770-359d-4002-9d26-560fa5656d33`, 100% traffic,
+> from the deployed-lineage integration, not this dirty main checkout. Membership
+> defaults/authenticated lookup/eight-character new IDs, grouped bulk history/undo,
+> and bounded security/restore fixes are deployed. Migrations 0120–0122 applied.
+> Historical settlement: 89 sales fully paid/Completed, 100 receivables settled,
+> two source lines restored; zero unexplained settlement stock residual. The
+> earlier nine-unit stock incident remains unchanged, per the no-stock instruction.
+> All 200 frontend files, full chain, 209 backend suites and builds/typechecks pass.
+> Control-plane release is confirmed; Cloudflare browser challenges blocked final
+> live API/build probes. Authenticated flows and Telegram receipt remain uncertified.
+> Full provenance/recovery and Part 607 are in sibling `business-os-v1-integration`:
+> `docs/fleet/2026-09-05-membership-bulk-release.md` and
+> `docs/fleet/2026-09-05-settlement-result.md`.
+> This checkpoint was added without staging or rewriting existing shared changes.
+
 The control document for this project. **Read this file top-to-bottom at the start of
 every session**; it is deliberately kept short enough that this is realistic.
 
@@ -3319,6 +3344,272 @@ if it's abandoned, revert it so the tree reflects reality.
 One line per open item; the full text lives in the master-plan phases below (same
 IDs) or the section linked. Statuses: **[~]** = in progress / partly done,
 **[ ]** = not started.
+
+### Sep-6 task wave — shift cash, compact inputs, and historical stock correction
+
+These items were registered on 2026-09-06 from the owner's latest notes. They
+are deliberately separate from the older S4 queues and from already-shipped or
+candidate-only work. The director owns reconciliation: each implementation lane
+must return a durable evidence envelope (base/head/dirty state, files, focused
+tests, risks, and not-done scope), then an independent verifier must challenge
+it before it can move to DONE.
+
+**[~] N43 · Shift open/close cash semantics and layout.** Audit the current
+shift kernel, route, summary, close flow, reports, expenses, offline behavior,
+permissions, and both currency paths. The UI contract to validate is:
+`Available Amount for shift open: <KHR> Riel + <USD> USD` with the numeric inputs
+immediately before their currency labels; at close show `Final Amount (Closed):
+<KHR> Riel + <USD> USD` and `Additional used: <KHR> Riel + <USD> USD`. A counted
+close of zero must be valid; opening-register insufficiency must not silently
+disable closing or invent a sale/expense. Determine and document the exact
+sign/meaning of “Additional used” before editing: it must reconcile the
+operator's cash explanation without changing the report-only rule for register
+breakdown. Preserve registered opening USD/KHR and final USD/KHR in shift
+reports. Keep actual business calculations based on sales, COGS, profit,
+expenses, delivery, and credit rules; do not make a visual registration
+breakdown a second accounting ledger. Add focused backend parity tests and UI
+tests, including blank/zero, KHR-only, USD-only, insufficient opening cash,
+additional-used, duplicate-submit, permissions, and report serialization.
+
+**[~] N44 · Smart, field-specific compact input sizing.** Inventory every
+shared input/control and the product, stock-in, POS, sales, returns, branches,
+contacts, reports, and shift surfaces. Define one field policy from observed
+data: barcodes must remain fully readable with leading zeroes and many digits;
+names, brands, categories, suppliers, and notes must not truncate or wrap
+destructively; phone inputs should fit the normal roughly-ten-digit value; USD
+prices should fit values like `nnn.nn`; USD cash should fit the normal `nnnn`
+range; KHR amounts must fit the larger observed range such as
+`nnnnnnnn.nn`. Separate CSS width/scroll behavior from validation maxLength so
+visual compactness never discards data. Verify keyboard, paste, scanner,
+Khmer/i18n, 375px/768px/desktop, iOS PWA and Android PWA behavior. Add a
+focused contract test for widths, input modes, and preservation of long values.
+
+**[~] N45 · Sep-3–Sep-6 historical warehouse-sale audit and correction.**
+Read-only first: identify the exact business-date window using the canonical
+business timezone, sales and sale lines, statuses/returns/cancellations,
+inventory movements, branch/warehouse identifiers, and current Shop/Warehouse
+quantities. Determine whether any sale consumed Warehouse stock when the rule
+requires Shop stock. For each affected line, design an idempotent correction
+that restores Warehouse where it was wrongly decremented, transfers only the
+needed quantity to Shop before the sale is treated as Shop stock, avoids double
+counting existing movements, and records every stock movement in the Stock
+Change surface with actor/reason/reference. Do not rewrite history or run
+remote D1 writes until the exact target set, pre/post invariants, rollback or
+compensation path, and production authorization are explicitly reviewed. The
+future guard must enforce Shop-only selling and the transfer-first prompt.
+Existing expenses/settlements must not be duplicated.
+
+**[ ] N46 · Reconcile the 2026-09-06 expense note before any data mutation.**
+The listed expenses are 55,000 + 28,300 + 6,000 + 5,000 + 5,000 = **99,300
+KHR**, while the note says `993000៛`; and `64,700 + 34,600 = 99,300`. Preserve
+both the literal note and this arithmetic finding. Status is **needs owner
+confirmation** for whether `993000` is a typo for `99300`; no expense or shift
+record may be created or changed from this note alone.
+
+**[~] N47 · Coordination and certification ledger.** Track all active,
+inactive, uncommitted, committed, candidate-only, deployed, blocked, and
+owner-gated lanes from the current repository ledger and the Claude/Fable
+handoff notes. Do not claim recovery of conversations that are not present in
+the repository. Reuse agents only when ownership is disjoint and relevant;
+never overlap write paths. Every completed lane gets a second-pass adversarial
+review, then the main agent performs the final reconciliation and full affected
+gates. Production deployment, remote migration, and historical D1 correction
+remain explicitly gated actions.
+
+**[~] N48 · Canonical accounting convergence across every consumer.** The
+second independent accounting review confirmed that current `main` still has
+dashboard/compatibility, Telegram, payment-method, customer, product,
+inventory, and export surfaces using `total_usd` or line totals while the
+analytics kernel uses a different recognized/net formula. Build one explicit
+status/discount/refund/delivery authority and make every consumer use it. First
+lock the Credit rule: the owner's ruling says Credit is positive in revenue and
+profit and is labeled `Credit`, while current main/tests still exclude
+`awaiting_payment`. Reconcile item-level discounts in dashboard/export fields,
+linked versus unlinked courier cost, sale-date versus return-date reporting,
+Telegram, receipts, imports, offline replay, and public redaction. Add seeded
+mixed-status parity fixtures; do not accept source-shape tests alone.
+
+**[~] N49 · Real browser/PWA certification and accessibility foundation.** The
+independent UX lanes confirmed no Playwright configuration/dependency and no
+reachable local smoke server, so source-contract tests are not browser proof.
+Provide a safe local authenticated fixture or explicitly document the approved
+manual/browser harness, then test 320/360/375/390/768/1024/1280px, iOS/Android
+PWA metadata, offline/update flows, Khmer rendering, listbox keyboard semantics,
+44px touch targets, long-name/barcode visibility, phone/price input modes, and
+loading/error/success states. Remove or track the `user-scalable=no` decision;
+do not weaken data preservation to achieve compactness.
+
+**[~] N50 · Product identity merge contract — exact name plus barcode identity.**
+Refine and replace conflicting S4-17/S4-17b/S4-29 wording with one executable
+contract. A merge is allowed only when the product name is exactly the same
+(no fuzzy, case-folded, or trimmed-name expansion unless explicitly proven as
+the existing identity rule) and either the barcode is exactly the same or the
+only barcode difference is leading zeroes. Normalize the surviving barcode by
+removing only those leading zeroes, with an explicit all-zero/empty-barcode
+rule. If the normalized barcodes are genuinely different, keep separate child
+rows under the exact-name group; do not merge them merely because the names
+match. Merge all per-branch quantities additively while preserving batch/lot
+ownership and all historical links. Resolve USD and KHR independently: zero is
+missing when another value exists; selling and wholesale use the highest
+recorded nonzero value; cost uses the mean of distinct recorded nonzero costs,
+or the sole nonzero value when zero is the only alternative, and remains zero
+when every value is zero. Pin precision/rounding and duplicate-cost behavior
+with tests before implementation. No product, sale, return, movement,
+supplier, received-date, category, brand, unit, barcode, batch, or alias link
+may be dropped.
+
+**[~] N51 · Existing product-group survey and correction manifest.** Survey
+all exact-name groups for exact and leading-zero-normalized barcode matches,
+including parent/child rows, inactive rows, duplicate costs, zero prices,
+branch/batch stock, sales, returns, transfers, supplier and received-date
+links. Produce a dry-run manifest with survivor, normalized barcode, merged
+quantity, price/cost decisions, linked-record counts, and quarantine reasons.
+Production writes are gated: do not merge or delete rows until the exact
+manifest is reviewed and approved. Every applied group needs a unique case key,
+append-only reversal snapshot, pre/post stock/link invariants, and visible
+Stock Change/audit history.
+
+**[~] N52 · Product-merge link propagation and child-row parity.** Verify the
+merge path and every consumer after identity consolidation: POS/search/scanner,
+stock-in and imports, branches/products, transfers, returns/replacements,
+sales/sale-items, inventory movements, batches, supplier/received dates,
+category/brand/unit, reports/exports, offline replay, audit, and undo. Same
+name plus normalized barcode must resolve to one product identity; same name
+plus genuinely different barcode must remain independently selectable as child
+rows. Conflicts must prompt with a reversible “keep/link/merge” decision rather
+than silently overwriting fields. Add backend enforcement and focused parity
+tests for all link classes.
+
+**[ ] N53 · Product merge numeric-resolution and precision contract.** Pin the
+executable USD/KHR resolver before implementation: zero/missing versus an
+explicit zero, malformed and whitespace-only values, negative values, duplicate
+costs, distinct-cost averaging, sub-cent precision, and deterministic rounding.
+Selling and wholesale must independently select the highest valid recorded value;
+cost must exclude zero when a nonzero value exists, average distinct nonzero costs
+exactly as specified, and remain zero only when every usable value is zero. Add
+adversarial pure tests for one-zero/one-nonzero, duplicate costs, 4/5, 4/4/4/5,
+high-precision decimals, malformed input, negative-only input, both currencies,
+and all-zero input. No numeric coercion may silently turn malformed data into a
+valid business value.
+
+**[ ] N54 · Product merge safety kernel, complete links, and concurrency.** Make
+every server-side merge path enforce the same exact-name plus exact/leading-zero
+barcode rule; an arbitrary pair of active product IDs must not be mergeable just
+because the IDs exist. Reparent or explicitly quarantine every product-linked
+table and batch allocation (including returns, transfers, damaged/replacement,
+stock-row moves, RFID, promotions, and sale/return batch allocations), carry
+wholesale and all resolved fields, and make the operation atomic, idempotent, and
+compare-and-set safe under concurrent merge/undo. Preserve an append-only
+reversal snapshot and Stock Change/audit record; prove rollback on injected
+failure and prove no double stock movement or partial bulk merge. Add backend
+parity tests and a read-only link inventory before any production correction.
+
+#### Sep-7 identity swarm — independent lanes (reconciled)
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Euler | feature planner | Owner-rule reconciliation and acceptance contract | **[x] complete; contract confirmed, boundary decisions remain** |
+| Zeno | business OS architect | Backend merge/link architecture | **[x] partial; unsafe arbitrary merge and missing links confirmed** |
+| Peirce | verifier | Price/cost/zero/rounding mathematics | **[x] complete; candidate math passes, edge cases remain** |
+| Ramanujan | verifier | UI grouping and child-row behavior | **[x] partial; candidate not integrated, import parity gap** |
+| Popper | security reviewer | Merge integrity, permissions, idempotency, undo | **[x] complete; P1 integrity blockers confirmed** |
+| Franklin | business OS architect | Import/offline/export/backup parity | **[x] partial; identity is not system-wide** |
+| Hilbert | reconciler | Commit, branch, and deployed-provenance reconciliation | **[x] partial; candidate/deploy lineage discrepancy** |
+| McClintock | security reviewer | Production dry-run survey and invariant plan | **[x] complete; manifest and mutation gates defined** |
+
+All are read-only and may not operate on production data. The main agent will
+reconcile their pairwise findings before allocating any writer. Their evidence
+was reconciled on 2026-09-07: the identity rule is not certified on current
+`main`, no candidate is approved for integration, and N53/N54 are required
+before an implementation lane can be considered safe.
+
+#### Sep-7 identity swarm — evidence reconciliation
+
+| Agreement | Refuted assumption / unresolved point | Disposition |
+|---|---|---|
+| All eight lanes agree the owner intent is exact name, exact or leading-zero-equivalent barcode, additive stock, highest selling/wholesale, and distinct nonzero cost averaging. | Current `main` still includes cost in the product-detail identity and S4-17/S4-29 plus A2 hardening are on separate refs or candidate lineages. | N50 remains implementation-pending; candidate ancestry must be proven before integration. |
+| Backend and security lanes independently found the possible-duplicates merge accepts arbitrary active non-group IDs. | Existence, active state, and permissions are not identity compatibility. | N54 P1: enforce identity/cluster validation server-side and test unauthorized pairings. |
+| Backend and security lanes independently found the merge fold updates only part of the product graph. | Returns, transfers, damaged/replacement, stock-row moves, RFID, promotions, and batch allocations can remain attached to the inactive row; wholesale is not fully carried/undone. | N54 P1: inventory the schema and reparent or fail closed; add rollback/link invariants. |
+| Math lanes agree on zero exclusion, maximum selling/wholesale, and cost averaging as the intended direction. | Precision order, negative-only values, malformed/whitespace values, all-zero barcodes, and leading-zero survivor threshold are not pinned; one candidate rounds values before averaging. | N53: pin fixtures and reject silent coercion before code integration. |
+| UI/parity lanes found the candidate covers many surfaces. | Candidate import planning still uses raw barcode detail keys; frontend merged rows can retain a non-canonical displayed barcode; backup/restore and offline replay do not enforce identity. | N52 remains open; add importer/export/restore/offline and displayed-barcode parity tests. |
+| Provenance lane reconciled refs and worktrees. | Current dirty `main` is not the same as the documented deployed/candidate lines; no production state was read. | No deployment or production correction claim; preserve dirty main and use isolated integration worktrees. |
+
+No source files, tests, migrations, production data, deployment, or remote state
+were changed by this swarm. The only changes in this checkpoint are the durable
+task/status records in this file and the session log.
+
+#### Sep-7 identity swarm — adversarial second pass (completed with evidence gap)
+
+The same eight agents were re-tasked to falsify their first conclusions rather
+than repeat them. Euler is rechecking the literal contract and boundary choices;
+Zeno and Popper are red-teaming the complete FK graph, authorization, atomicity,
+idempotency, CAS, and undo; Peirce is recomputing hostile numeric vectors;
+Ramanujan is tracing displayed-barcode and UI/import parity; Franklin is tracing
+backup/offline/export/report consumers; Hilbert is rechecking ancestry and
+deployment provenance; and McClintock is red-teaming the production manifest and
+invariants. This pass was read-only. One additional math envelope was visible and
+reconfirmed the candidate-only precision, negative-value, and current-main
+lineage exceptions. The other seven task turns completed without a surfaced final
+envelope, so their second-pass assertions are deliberately not counted as new
+evidence; their first-pass envelopes remain the recorded basis. A silent task
+completion is not a verification pass.
+
+| Lane | Second-pass disposition |
+|---|---|
+| Euler | Completed, final envelope not surfaced; no new claim admitted |
+| Zeno | Completed, final envelope not surfaced; no new claim admitted |
+| Peirce | Completed, visible envelope reconfirms candidate-only math with precision/negative exceptions |
+| Ramanujan | Completed, final envelope not surfaced; no new claim admitted |
+| Popper | Completed, final envelope not surfaced; no new claim admitted |
+| Franklin | Completed, final envelope not surfaced; no new claim admitted |
+| Hilbert | Completed, final envelope not surfaced; no new claim admitted |
+| McClintock | Completed, final envelope not surfaced; no new claim admitted |
+
+#### N43–N47 evidence checkpoint 1 (2026-09-06)
+
+| Agent | Lane | Status | Evidence disposition |
+|---|---|---|---|
+| Dalton | Shift cash architecture | **[x] Investigation complete** | Read-only audit; found two semantic blockers (Available Amount ceiling vs snapshot; Additional used derived outflow vs manual other-cash event); no edits or production action. |
+| Feynman | Input sizing and responsive UX | **[x] Investigation complete** | Read-only inventory; confirmed responsive and input-mode defects; no edits, browser run, deployment, or remote write. |
+| Dirac | Historical warehouse-sale correction | **[x] Investigation complete** | Read-only security audit; no production counts or mutation; exact target set and invariant-gated correction still required. |
+| Herschel | Requirements refutation and provenance | **[x] Investigation complete** | Confirmed A2 shift/credit changes are not ancestors of current `main`; registered cash is report-only; no edits or production action. |
+| Codex/main | Reconciliation | **[~] Active** | Registered task wave, recomputed note arithmetic, published durable handoffs; implementation and final gates remain open. |
+
+The completed investigation lanes are not implementation approvals. The next
+write lanes must use disjoint ownership, work in isolated worktrees, preserve
+the dirty main checkout, and return base/head/dirty evidence plus focused tests.
+
+#### Swarm wave 2 — independent refutation lanes (2026-09-06)
+
+Eight read-only agents are active. Duplicate subject coverage is intentional:
+each pair has an independent brief and must report disagreements rather than
+converging by assumption. No agent may edit, stage, deploy, migrate, or touch
+production data in this wave.
+
+| Agent | Role | Scope | Status |
+|---|---|---|---|
+| Dewey | business OS architect | Shift-A architecture and lineage | **[x] partial; blockers recorded** |
+| Carver | verifier | Shift-B adversarial counterexamples | **[x] partial; candidate-only, no cash-addition coverage** |
+| Laplace | business OS architect | Accounting-A cross-surface formula authority | **[x] partial; Credit/discount/fee conflicts recorded** |
+| Boyle | verifier | Accounting-B revenue/profit/delivery refutation | **[x] partial; multiple sibling formula inconsistencies confirmed** |
+| Locke | security reviewer | Stock-A correction safety and invariants | **[x] complete; production evidence still absent** |
+| Leibniz | reconciler | Stock-B correction design and provenance | **[x] partial; movement-first design, no live candidates** |
+| Singer | product designer | UX-A field sizing, i18n, PWA | **[x] partial; source defects confirmed, browser not run** |
+| Russell | Playwright tester | UX-B browser/PWA verification feasibility | **[x] partial; no harness/local smoke unavailable** |
+
+Completion requires a valid evidence envelope, not a green assertion. After
+the wave returns, Codex/main will reconcile each pair, assign only non-overlapping
+write paths, require an implementation verifier, and rerun the affected package
+gates. A lane that times out or lacks evidence stays open/blocked.
+
+#### Swarm wave 2 reconciliation result
+
+| Pair | Agreement | Refutation / unresolved point | Disposition |
+|---|---|---|---|
+| Shift | Current `main` lacks the shift implementation; A2 supports per-currency, zero-valid, mismatch-nonblocking close. | Blank is nullable at the Worker but can become zero in UI; cash additions and Additional used have no canonical model; needs-review figures can still display. | N43 remains implementation-pending and owner-semantics-gated. |
+| Accounting | Multiple consumers diverge from the kernel; A2 Credit behavior is positive while main excludes `awaiting_payment`. | A2 comments/tests contradict executable behavior; item discounts and linked/unlinked courier authority are not fully converged. | N48 opened; no merge or accounting claim made. |
+| Stock | Date window and item-level movement-first classification agree; bare branch rewrites are unsafe. | Existing transfers lack correction-grade idempotency/reference and live IDs/balances are unavailable. | N45 remains blocked on read-only production manifest and correction design. |
+| UX/PWA | Preserve full values, avoid arbitrary maxLength, use explicit keyboard modes, and make long values readable. | Source contracts are not device proof; no Playwright/local smoke harness; listbox/touch/PWA issues remain. | N49 opened; browser certification not done. |
 
 ### DEPLOY BLOCKER — main is ten migrations behind production (measured Sep 4 2026, business-os-v1-c3)
 

@@ -165,9 +165,11 @@ export default function ProductsListSurface({
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
   const showDesktopLoadingOverlay = !initialDesktopRevealReady
 
-  // A fixed responsive grid prevents long product metadata from widening
-  // the table beyond an ordinary laptop viewport. Details/Margin still
-  // hide at their existing breakpoints, while Stock remains inside the card.
+  // A responsive fixed-layout grid keeps the final Stock/Qty column visible
+  // on an ordinary desktop. Name and Details share the available width as
+  // percentages; the numeric columns stay compact and predictable. At widths
+  // below xl we use the card surface, because a sidebar leaves too little
+  // usable space for an eight-column table even when the viewport is `lg`.
   // 11.1 + 11.2: the checkbox column only takes space in SELECT mode.
   // Out of select mode the column collapses to 0 width and its cells drop
   // their padding, so nothing is reserved and the whole grid sits a touch
@@ -178,25 +180,18 @@ export default function ProductsListSurface({
   // was removed.
   const selectColWidth = selectionModeActive ? SELECT_COL_WIDTH : '0px'
   const selectCellPad = selectionModeActive ? 'px-2' : 'px-0'
-
   const desktopColGroup = (
     <colgroup>
       <col style={{ width: selectColWidth }} />
       <col style={{ width: IMAGE_COL_WIDTH }} />
-      {/* These six MUST sum to 100%. They summed to 90%, and `table-fixed`
-          spreads whatever is unclaimed across EVERY column proportionally
-          -- including the two fixed ones above, which is why the checkbox
-          and image columns rendered at 51px and 89px on a 1400px table
-          having asked for 32px and 56px, and why the indent grew with the
-          window. Measured in a browser against the built stylesheet: at
-          100% they render at exactly 32px and 56px, and the left rail
-          stops moving with the viewport (98px at 1400px and at 820px). */}
-      <col className="w-[34%]" />
-      <col className="w-[22%]" />
-      <col className="w-[11%]" />
-      <col className="w-[12%]" />
-      <col className="w-[9%]" />
-      <col className="w-[12%]" />
+      {/* Name is the one auto column: it receives exactly the remaining
+          width after the compact, bounded Details and numeric columns. */}
+      <col />
+      <col style={{ width: '10.5rem' }} />
+      <col style={{ width: '5.5rem' }} />
+      <col style={{ width: '6.5rem' }} />
+      <col style={{ width: '5rem' }} />
+      <col style={{ width: '5.5rem' }} />
     </colgroup>
   )
 
@@ -220,7 +215,7 @@ export default function ProductsListSurface({
         </th>
         <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
         <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
-        <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
+        <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('details') || 'Details'}</th>
         {/* Was t('cost_in_purchase') ("Cost In (Purchase)") -- too long for
             this column at normal widths, overflowing/truncating to
             "Costin...". Just "Cost" (same short key ProductForm's other
@@ -229,7 +224,7 @@ export default function ProductsListSurface({
             it. */}
         <th className="col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400">{t('cost')}</th>
         <th className="col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400">{t('selling_price_label')}</th>
-        <th className="hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400 lg:table-cell">{t('margin')}</th>
+        <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400">{t('margin')}</th>
         <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('stock')}</th>
       </tr>
     </thead>
@@ -291,9 +286,9 @@ export default function ProductsListSurface({
           works here -- it just sticks to `.page-scroll` (the nearest scrolling
           ancestor now) instead of to this card, which is the same "header
           stays visible while scrolling" behavior, just anchored one level up. */}
-      <div className="card hidden overflow-hidden sm:flex sm:flex-col">
-        <div className="relative overflow-hidden">
-          <table className="w-full table-fixed text-sm table-bordered">
+      <div className="card hidden min-w-0 max-w-full overflow-hidden xl:flex xl:flex-col">
+        <div className="relative overflow-x-auto">
+          <table className="w-full min-w-[58rem] table-fixed text-sm table-bordered">
             {desktopColGroup}
             {renderDesktopTableHead()}
             <tbody className={showDesktopLoadingOverlay ? 'invisible' : ''}>
@@ -455,7 +450,7 @@ export default function ProductsListSurface({
       {/* Mobile card list: same fix as the desktop table above -- dropped
           `min-h-[32rem] flex-1 overflow-auto` (its own independent scroll
           region) so this flows with `.page-scroll` instead. */}
-      <div className="space-y-2 sm:hidden">
+      <div className="min-w-0 max-w-full space-y-2 xl:hidden">
         {loading ? (
           <div className="space-y-2">
             {skeletonRows.slice(0, 6).map((row) => (
@@ -478,10 +473,10 @@ export default function ProductsListSurface({
         ) : productSections.map((section) => {
           const isCollapsed = collapsedProductSections.has(section.id)
           return (
-            <div key={section.id} className="space-y-2">
+            <div key={section.id} className="min-w-0 max-w-full space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     {selectionModeActive ? (
                       <input
                         type="checkbox"
@@ -494,12 +489,12 @@ export default function ProductsListSurface({
                         aria-label={`Select ${section.label}`}
                       />
                     ) : null}
-                    <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                    <span className="min-w-0 truncate">{section.label}</span>
+                    <span className="shrink-0 normal-case tracking-normal text-slate-400">{section.items.length}</span>
                   </label>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                    className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
                     onClick={() => toggleProductSection(section.id)}
                   >
                     {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -528,7 +523,7 @@ export default function ProductsListSurface({
                 return (
                   <div
                     key={group.key}
-                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
+                    className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/70"
                     data-product-jump-id={group.anchorId}
                     {...(bindGroupHold ? bindGroupHold(group) : {})}
                   >
