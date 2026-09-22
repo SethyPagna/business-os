@@ -228,6 +228,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/saleBulkStatus': saleBulkStatusKernel,
   '../lib/saleRecordEvents': saleRecordEventsKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // The records reader (GET /:id/records); this file exercises the write paths.
+  '../lib/returnRecords': { loadReturnRecords: async () => null },
   '../lib/customerReturnEntitlement': customerReturnEntitlementKernel,
   '../lib/productMergeLineage': productMergeLineageKernel,
   '../lib/saleMoneyPrecision': saleMoneyPrecisionKernel,

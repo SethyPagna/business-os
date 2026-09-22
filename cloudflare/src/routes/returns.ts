@@ -25,6 +25,7 @@ import { computeSaleTotals } from '../lib/saleTotals'
 import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
+import { loadReturnRecords } from '../lib/returnRecords'
 // A replacement line is an ordinary sale line, so the warehouse may not
 // carry one -- the same rule, and the same message, POST /sales enforces.
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
@@ -1220,6 +1221,27 @@ app.get('/:id', async (c) => {
   const items = await db.prepare('SELECT * FROM return_items WHERE return_id = ?').all([id])
   const replacementItems = await db.prepare('SELECT * FROM return_replacement_items WHERE return_id = ?').all([id])
   return c.json({ ...row, items, replacement_items: replacementItems })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/returns/:id/records -- every change anybody ever made to this
+// return, as ONE list. The returns half of the owner's Sep 22 2026 ask
+// ("having records in sales, returns ... like sales do before and after, by
+// who etc..."), modelled on GET /api/sales/:id/records.
+//
+// The reads AND the meaning live in lib/returnRecords.ts: this file cannot be
+// loaded into a pure test (transpiling 3,000 lines overflows the compiler's
+// stack), so SQL written here would be SQL nothing can exercise.
+//
+// Read-gated by the router's own 'returns' view tier above (the same gate
+// GET /:id passes): whoever may open the return may see how it got that way.
+// ---------------------------------------------------------------------------
+app.get('/:id/records', async (c) => {
+  const returnId = Number(c.req.param('id'))
+  if (!Number.isFinite(returnId) || returnId <= 0) return c.json({ error: 'Return not found' }, 404)
+  const payload = await loadReturnRecords(getDb(c.env), returnId)
+  if (!payload) return c.json({ error: 'Return not found' }, 404)
+  return c.json(payload)
 })
 
 // POST /api/returns -- create a customer return, restocking branch_stock
