@@ -176,6 +176,168 @@ if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
 }
+// ---------------------------------------------------------------------------
+// EXECUTED, not source-shape. Everything above reads the component text; the
+// rest of this file RUNS the real draft store (src/utils/workDrafts.ts) and the
+// real id generator against a fake localStorage, and simulates the exact crash
+// this lane exists to survive: the response arrived, the draft was written, and
+// the render that would have shown it never happened.
+// ---------------------------------------------------------------------------
+
+const store = new Map<string, string>()
+const fakeStorage = {
+  getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+  setItem: (key: string, value: string) => { store.set(key, String(value)) },
+  removeItem: (key: string) => { store.delete(key) },
+}
+let currentUser: Record<string, unknown> = { id: 7, username: "kanha", organization_public_id: "org1" }
+;(globalThis as unknown as Record<string, unknown>).localStorage = fakeStorage
+;(globalThis as unknown as Record<string, unknown>).sessionStorage = {
+  getItem: () => JSON.stringify(currentUser),
+  setItem: () => {},
+  removeItem: () => {},
+}
+;(globalThis as unknown as Record<string, unknown>).window = {
+  setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+  clearTimeout: (id: number) => clearTimeout(id),
+  addEventListener: () => {},
+}
+
+const { writeWorkDraft, readWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey } = await import('../src/utils/workDrafts.ts')
+const { createClientRequestId } = await import('../src/api/requestIds.ts')
+
+type DraftLine = { key: string; requestId?: string; status: string; detail?: string; mode?: string }
+type Draft = { lines: DraftLine[]; batchChoice: string; sessionId?: number | null }
+
+// The component ships applyLineOutcome and the restore-and-mint block as plain
+// code precisely so they can be lifted out and RUN here. Lifted by regex from
+// the real file, so the test dies if either is rewritten into something a test
+// can no longer exercise.
+function liftApplyLineOutcome(): (lines: DraftLine[], key: string, outcome: Record<string, unknown>) => DraftLine[] {
+  const match = /function applyLineOutcome\([\s\S]*?\n\}/.exec(fastStockIn)
+  assert.ok(match, 'applyLineOutcome must stay a plain, extractable function')
+  const body = match![0].replace(/: ReceivedLine\['status'\]/g, '').replace(/: ReceivedLine\[\]/g, '')
+    .replace(/lines: ReceivedLine\[\],/, 'lines,').replace(/key: string,/, 'key,')
+    .replace(/outcome: \{[^}]*\},/, 'outcome,').replace(/\): ReceivedLine\[\] \{/, ') {')
+  return new Function(`${body}; return applyLineOutcome`)() as never
+}
+
+function liftRestoreBlock(): (
+  restoredLinesRef: { current: unknown },
+  draft: Draft,
+  fastStockInDraftKey: string,
+  write: typeof writeWorkDraft,
+  mintId: typeof createClientRequestId,
+) => void {
+  const start = fastStockIn.indexOf("if (restoredLinesRef.current === null) {")
+  assert.ok(start > 0, 'the restore-and-mint block must stay extractable')
+  const end = fastStockIn.indexOf("\n  }", start)
+  const block = fastStockIn.slice(start, end + 4)
+  assert.match(block, /writeWorkDraft<FastStockInDraft>\(fastStockInDraftKey/, 'the block must persist the minted ids itself')
+  const plain = block.replace(/<FastStockInDraft>/g, '').replace(/: ReceivedLine\[\] \| null/g, '')
+  return new Function(
+    'restoredLinesRef', 'draft', 'fastStockInDraftKey', 'writeWorkDraft', 'createClientRequestId',
+    plain,
+  ) as never
+}
+
+const applyLineOutcome = liftApplyLineOutcome()
+const runRestoreBlock = liftRestoreBlock()
+
+runTest('EXECUTED: a committed line survives a crash between the response and the render', () => {
+  const key = scopedWorkDraftKey('fast_stock_in')
+  const draft: Draft = {
+    batchChoice: "new",
+    lines: [
+      { key: "l1", requestId: "stockline_1111-aaaa-bbbb", status: "queued" },
+      { key: "l2", requestId: "stockline_2222-cccc-dddd", status: "queued" },
+    ],
+  }
+  writeWorkDraft(key, draft)
+
+  // The autosave effect is mid-flight with the STALE (queued) snapshot -- this
+  // is the 800ms window the defect lived in.
+  scheduleWorkDraftWrite(key, draft, 20)
+
+  // The server answered for line 1. persistSessionDraft writes the fact
+  // BEFORE setReceived would have rendered it.
+  const committed = applyLineOutcome(draft.lines, "l1", { status: "saved", detail: "Lot 09232026" })
+  writeWorkDraft(key, { ...draft, lines: committed })
+
+  // ...and then the render crashes. No effect runs, no flush, nothing else.
+  const reloaded = readWorkDraft<Draft>(key)
+  assert.ok(reloaded, 'the draft survived')
+  const line = reloaded!.data.lines.find((entry) => entry.key === "l1")!
+  assert.equal(line.status, 'saved', 'THE FIX: the reloaded draft knows line 1 was already applied')
+  assert.equal(line.requestId, 'stockline_1111-aaaa-bbbb', 'and it kept the id the server deduped on')
+  assert.equal(
+    reloaded!.data.lines.find((entry) => entry.key === "l2")!.status,
+    'queued',
+    'the untouched line is still queued -- the retry set is exactly one line',
+  )
+})
+
+// Awaited OUTSIDE runTest: a rejected promise handed to a synchronous runner is
+// a test that cannot fail, which is worse than no test at all.
+await new Promise((resolve) => setTimeout(resolve, 80))
+runTest('EXECUTED: the in-flight autosave cannot resurrect the pre-commit snapshot', () => {
+  const key = scopedWorkDraftKey('fast_stock_in')
+  const settled = readWorkDraft<Draft>(key)
+  assert.equal(
+    settled!.data.lines.find((entry) => entry.key === "l1")!.status,
+    'saved',
+    'a synchronous write must CANCEL the pending debounce, or the stale queued snapshot wins 800ms later',
+  )
+})
+
+runTest('EXECUTED: a legacy draft with no ids has them persisted in the same tick', () => {
+  const key = scopedWorkDraftKey('fast_stock_in_legacy')
+  // Written by a build that predates the dedup id.
+  writeWorkDraft(key, { batchChoice: "new", lines: [{ key: "old1", status: "queued" }, { key: "old2", status: "queued" }] })
+  const draft = readWorkDraft<Draft>(key)!.data
+
+  const ref: { current: unknown } = { current: null }
+  runRestoreBlock(ref, draft, key, writeWorkDraft, createClientRequestId)
+
+  // No timer has fired and no effect has run: the ids must ALREADY be on disk,
+  // or a crash inside the 800ms window reloads the same id-less draft and the
+  // retry commits unprotected all over again.
+  const persisted = readWorkDraft<Draft>(key)!.data
+  for (const line of persisted.lines) {
+    assert.match(String(line.requestId || ''), /^stockline_.{8,}$/, `${line.key} must have a usable id persisted immediately`)
+  }
+  assert.equal(
+    persisted.lines[0].requestId,
+    (ref.current as DraftLine[])[0].requestId,
+    'and the persisted id must be the SAME one React was handed, not a second mint',
+  )
+  assert.notEqual(persisted.lines[0].requestId, persisted.lines[1].requestId, "each line gets its own id")
+})
+
+runTest('EXECUTED: the draft key is actor-scoped, which is what stops a cross-actor replay', () => {
+  // The Worker keys its receipt on (actor_id, request_id). If two accounts on
+  // one device could read each other’s draft, account B would re-send account
+  // A's line ids under B's actor -- a different receipt row, and the delta
+  // applies twice. The actor in the draft key is what makes that impossible.
+  currentUser = { id: 7, username: "kanha", organization_public_id: "org1" }
+  const forSeven = scopedWorkDraftKey('fast_stock_in')
+  currentUser = { id: 8, username: "dara", organization_public_id: "org1" }
+  const forEight = scopedWorkDraftKey('fast_stock_in')
+  assert.notEqual(forSeven, forEight, 'two accounts on one device must not share a stock-in draft')
+  assert.match(forSeven, /_7_/, 'the acting user id is part of the key')
+  assert.match(forEight, /_8_/, 'the acting user id is part of the key')
+  currentUser = { id: 7, username: "kanha", organization_public_id: "org2" }
+  assert.notEqual(scopedWorkDraftKey('fast_stock_in'), forSeven, 'and so is the organization')
+
+  const drafts = source('utils/workDrafts.ts')
+  assert.match(
+    drafts,
+    /userId = String\(user\.id \|\| user\.username \|\| .anonymous.\)/,
+    'user.id must stay in the key builder -- dropping it re-opens cross-actor replay',
+  )
+})
+
+
 runTest('the guard codes are translated, not shown in the server English', () => {
   const outcome = source('utils/stockAdjustOutcome.ts')
   for (const code of ["stock_request_in_flight", "stock_request_partially_applied", "idempotency_conflict", "invalid_client_request_id"]) {

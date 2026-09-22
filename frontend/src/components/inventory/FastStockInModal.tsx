@@ -305,8 +305,22 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [createUnits, setCreateUnits] = useState<LookupOption[]>([])
   const [saving, setSaving] = useState(false)
   // A draft saved before the mode switch existed holds add lines that never
-  // recorded a mode; they stay adds rather than reading as 'changes'.
-  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct), requestId: line.requestId || createClientRequestId('stockline') })))
+  // recorded a mode; they stay adds rather than reading as 'changes'. A draft
+  // saved before the per-line dedup id existed holds lines with no requestId,
+  // and those ids are minted HERE -- so they are also WRITTEN BACK here, in the
+  // same tick, rather than riding the 800ms autosave. A crash inside that
+  // window would otherwise reload the very same id-less draft, and the commit
+  // that followed would be unprotected all over again. Lazily, through a ref,
+  // so the ids are minted exactly once per mount.
+  const restoredLinesRef = useRef<ReceivedLine[] | null>(null)
+  if (restoredLinesRef.current === null) {
+    const restored = (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct), requestId: line.requestId || createClientRequestId('stockline') }))
+    restoredLinesRef.current = restored
+    if (draft?.lines?.some((line) => !line.requestId)) {
+      writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, { ...draft, lines: restored })
+    }
+  }
+  const [received, setReceived] = useState<ReceivedLine[]>(restoredLinesRef.current)
   const [editingKey, setEditingKey] = useState('')
   const duplicateRows = useMemo(() => received.map((line) => ({
     ...line,
