@@ -196,7 +196,9 @@ function seed(name = 'Existing') {
   const expectedId = seed('Expected revision')
   raw.prepare("UPDATE products SET updated_at='editor revision' WHERE id=?").run(expectedId)
   afterRead = sql => {
-    if (!/^SELECT updated_at FROM products/.test(sql)) return
+    // The PUT pre-read (routes/products.ts) -- since 22 Sep 2026 it also
+    // returns id/name/barcode so the 409 can name the product.
+    if (!/^SELECT id, name, barcode, updated_at FROM products/.test(sql)) return
     afterRead = null
     raw.prepare("UPDATE products SET cost_price_usd=99, updated_at='newer revision' WHERE id=?").run(expectedId)
   }
