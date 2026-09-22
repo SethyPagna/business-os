@@ -169,9 +169,16 @@ export function auditRowsToRecords(rows: AuditRecordRow[] | null | undefined): R
   const list = Array.isArray(rows) ? rows : []
   return list
     .map((row) => {
+      const action = String(row.action || '').toLowerCase()
       const changes: RecordChange[] = buildAuditFieldDiff(row.old_value, row.new_value).map((diff) => ({
         field: diff.key,
-        before: diff.before === null ? { state: 'known_none' as const } : { state: 'known_value' as const, value: diff.before },
+        // A context row carries no old side. On a create that genuinely means
+        // "there was nothing before"; on any other action it means the row
+        // never recorded one -- two different answers, and saying "None" to
+        // both claims evidence the second one does not have.
+        before: diff.changeType === 'context' && action !== 'create'
+          ? { state: 'unknown' as const }
+          : diff.before === null ? { state: 'known_none' as const } : { state: 'known_value' as const, value: diff.before },
         after: diff.after === null ? { state: 'known_none' as const } : { state: 'known_value' as const, value: diff.after },
       }))
       // The reason the operator typed lives in `details`, never in the field
@@ -182,7 +189,6 @@ export function auditRowsToRecords(rows: AuditRecordRow[] | null | undefined): R
       if (typeof reason === 'string' && reason.trim() && !changes.some((change) => change.field === 'reason')) {
         changes.push({ field: 'reason', before: { state: 'unknown' }, after: { state: 'known_value', value: reason.trim() } })
       }
-      const action = String(row.action || '').toLowerCase()
       return {
         id: `audit:${row.id ?? ''}`,
         at: row.created_at || null,

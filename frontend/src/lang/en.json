@@ -6224,6 +6224,8 @@
   "stock_deducted_now": "Stock deducted now",
   "stock_released_allocation_only": "Released allocation; no stock deduction",
   "record_kind_undone": "Action undone",
+  "no_field_changed": "No field changed",
+  "recorded_context": "Recorded context",
   "record_kind_other": "Other change",
   "record_history": "Records",
   "records_open_record": "Show who changed this record",

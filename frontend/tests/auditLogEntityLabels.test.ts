@@ -211,9 +211,12 @@ test('the Audit Log page names actions and record types from the shared vocabula
   // The Title-Case-the-raw-column renderer is gone from both places it lived.
   assert.doesNotMatch(page, /const labelFor = \(key: string\) => key\.replace/)
   assert.doesNotMatch(page, /if \(!raw\) return 'System'/)
-  // And the detail float still renders the pair as field, before, after.
-  assert.match(page, /fieldDiffRows\.map\(\(row\) => \([\s\S]{0,400}\{row\.label\}/)
-  assert.match(page, /\{row\.before\}[\s\S]{0,200}\{row\.after\}/)
+  // And the detail float still renders the pair as field, before, after --
+  // through the one line component both of its blocks share.
+  assert.match(page, /fieldDiffRows\.map\(\(row\) => <AuditFieldDiffLine/)
+  const line = read('../src/components/utils-settings/AuditFieldDiffLine.tsx')
+  assert.match(line, /\{row\.label\}/)
+  assert.match(line, /\{row\.before\}[\s\S]{0,200}\{row\.after\}/)
 })
 
 if (failed) { console.error(`${failed} audit entity label case(s) failed`); process.exit(1) }
