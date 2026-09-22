@@ -502,6 +502,7 @@ check('the cost-override row is not duplicated, and the diff is derived not hand
     'name drops out only when a rename row was ACTUALLY written')
 })
 
+// ---------------------------------------------------------------------------
 // 6. Real routes/products.ts, end to end, on the migrated schema.
 //
 // Two defects this pins, both found by an adversarial read of the first
@@ -662,6 +663,7 @@ async function productsRoute() {
   })
 }
 
+// ---------------------------------------------------------------------------
 // 7. Real routes/users.ts self-service profile: an avatar change alone used
 //    to write a row that said nothing changed (E7).
 // ---------------------------------------------------------------------------
@@ -706,12 +708,67 @@ async function usersProfileRoute() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// 8. Real routes/settings.ts payment-method rename: its before/after used to
+//    live only inside `details`, where the renderer never looks.
+// ---------------------------------------------------------------------------
+async function settingsPaymentMethodRoute() {
+  const db = openDb(MIGRATION_SQLS)
+  db.exec('DELETE FROM audit_logs;')
+  db.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, '2026-09-05T08:00:00.000Z') ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run({ value: JSON.stringify(['Cash', 'ABA', 'Wing']) })
+  const auditLib = loadReal(workerSrc('lib/audit.ts'), { './db': { getDb: () => db } })
+  const moduleCacheLocal = new Map()
+  const overrides = {
+    '../lib/db': { getDb: (env) => env.DB },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 91, username: 'payments', name: 'Payment Admin', permissions: JSON.stringify({ settings: true, sales_policy: true }) }); return next() } },
+    '../lib/audit': auditLib,
+    '../lib/permissions': { hasPermission: () => true },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {} },
+  }
+  function load(rel) {
+    if (moduleCacheLocal.has(rel)) return moduleCacheLocal.get(rel).exports
+    const sourcePath = path.join(cloudflareRoot, 'src', rel)
+    const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath,
+    }).outputText
+    const mod = { exports: {} }
+    moduleCacheLocal.set(rel, mod)
+    const localRequire = (request) => {
+      if (Object.prototype.hasOwnProperty.call(overrides, request)) return overrides[request]
+      if (!request.startsWith('.')) return require(request)
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
+      return load(resolved.endsWith('.ts') ? resolved : resolved + '.ts')
+    }
+    new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+    return mod.exports
+  }
+  const app = load('routes/settings.ts').default
+  const ctx = { waitUntil(promise) { if (promise && promise.catch) promise.catch(() => {}) }, passThroughOnException() {} }
+  const response = await app.request('/payment-methods/replace', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: 'Wing', to: 'Wing Bank', scope: 'settings_only' }),
+  }, { DB: db }, ctx)
+  assert.equal(response.status, 200, await response.text())
+  const rows = db.prepare("SELECT action, details, old_value, new_value FROM audit_logs WHERE entity = 'payment_method' ORDER BY id").all({})
+  check('the payment-method rename writes its before/after where the renderer reads it', () => {
+    assert.equal(rows.length, 1)
+    assert.deepEqual(JSON.parse(rows[0].old_value), { payment_method: 'Wing', configured_methods: ['Cash', 'ABA', 'Wing'] })
+    assert.deepEqual(JSON.parse(rows[0].new_value), { payment_method: 'Wing Bank', configured_methods: ['Cash', 'ABA', 'Wing Bank'] })
+    assert.ok(JSON.parse(rows[0].details).operationId, 'details keeps its existing shape for existing consumers')
+    assert.deepEqual(renderer.buildAuditFieldDiff(rows[0].old_value, rows[0].new_value).map((r) => r.label),
+      ['Configured Methods', 'Payment Method'])
+  })
+}
+
 async function main() {
   await auditWriteScenario()
   await feesRoute()
   await promotionsRoute()
   await productsRoute()
   await usersProfileRoute()
+  await settingsPaymentMethodRoute()
   console.log('\nOK ' + passed + ' checks')
 }
 

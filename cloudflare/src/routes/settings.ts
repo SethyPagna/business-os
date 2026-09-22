@@ -573,10 +573,12 @@ app.post('/payment-methods/backfill', async (c) => {
     `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
   ).run({ value: JSON.stringify(merged.methods) })
+  // Sibling of the rename below: the configured list before and after the
+  // backfill, in the columns the Audit Log's diff actually reads.
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', 'pos_payment_methods', {
     action: 'payment_methods_backfill',
     added: merged.added,
-  })
+  }, changedFields({ configured_methods: configured }, { configured_methods: merged.methods }))
   c.executionCtx.waitUntil(Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')]))
   return c.json({ methods: merged.methods, added: merged.added })
 })
