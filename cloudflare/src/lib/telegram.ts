@@ -531,7 +531,15 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
     for (const sale of sales) {
       lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
       const saleItems = bySale.get(sale.id) || []
-      for (const item of saleItems.slice(0, 4)) lines.push(`   ${Number(item.quantity)} × ${cleanLine(item.product_name || 'Item', 100)} — ${money(item.applied_price_usd, item.applied_price_khr)}`)
+      // The same `1. name qty × price = total` equation the sale alert
+      // prints (formatSaleTelegramLines), indented under its receipt. It
+      // used to read `   2 × name — $1.00`: a different order, a different
+      // separator, and no line total, so the one number the reader wanted
+      // was the one they had to multiply out themselves.
+      saleItems.slice(0, 4).forEach((item, index) => {
+        const quantity = Number(item.quantity) || 0
+        lines.push(`   ${index + 1}. ${cleanLine(item.product_name || 'Item', 100)} ${quantity} × ${money(item.applied_price_usd, item.applied_price_khr)} = ${money(round2(quantity * (Number(item.applied_price_usd) || 0)), Math.round(quantity * (Number(item.applied_price_khr) || 0)))}`)
+      })
       if (saleItems.length > 4) lines.push(`   + ${saleItems.length - 4} more ${localizeTelegramValue('item(s)')}`)
     }
     return lines.join('\n')

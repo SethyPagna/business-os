@@ -249,6 +249,17 @@ const salesMsg = await telegram.telegramCommandReply({}, '/sales 10/08/2026')
 check('the /sales total is the kernel total too', salesMsg.includes('$115.00') && !salesMsg.includes('$643.00'))
 check('the receipt LIST does not show the voided receipt under a total it is not part of',
   salesMsg.includes('20260810-090000') && salesMsg.includes('20260810-110000') && !salesMsg.includes('20260810-100000'))
+// Sep 23 2026: the items under each receipt used to read `   1 × Lamp — $100.00`
+// -- quantity first, an em dash where every other message puts an equals sign,
+// and NO line total, so the one figure the reader wanted was the one they had
+// to multiply out. They now print the sale alert's own numbered equation.
+const saleItemLines = salesMsg.split('\n').filter((line) => /^ {3}\d+\. /.test(line))
+check(`each receipt lists its items as a numbered equation (${saleItemLines.length} item lines)`,
+  saleItemLines.length === 2
+  && saleItemLines[0] === '   1. Lamp 1 × $100.00 · 400,000៛ = $100.00 · 400,000៛'
+  && saleItemLines[1] === '   1. Mug 1 × $40.00 · 160,000៛ = $40.00 · 160,000៛')
+check('and the retired quantity-first em-dash form is gone from the item lines',
+  !/\d+ × [A-Za-z]/.test(salesMsg) && !saleItemLines.some((line) => line.includes('—')))
 
 // ---- /stock and /inventory: numbered sections, over a REAL LIMIT (Sep 22 2026) ---
 // The Sep 21 2026 sectioned-layout redesign converted five replies and left
