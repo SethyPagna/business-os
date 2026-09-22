@@ -68,6 +68,30 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
   )
 }
 
+/**
+ * ONE record's own audit trail -- the rows for this product, this customer,
+ * this supplier -- for the per-record Records / Field history floats.
+ *
+ * The same endpoint the Audit Log page reads, with the entityId filter added
+ * in lib/auditLogQuery.ts, rather than a second route per entity: one clause
+ * builder, one permission gate, one place a filter can go wrong.
+ *
+ * Deliberately NOT falling back to the local mirror. getAuditLogs's fallback
+ * answers with the newest rows the device happens to hold, which for an
+ * entity-scoped read would be some OTHER record's history rendered under this
+ * record's name -- far worse than saying the read failed. Same rule as the
+ * sale's and the return's records.
+ */
+export function getEntityAuditRecords(entity: string, entityId: string | number, pageSize = 100): Promise<unknown> {
+  const query = buildQueryString({ entity, entityId: String(entityId), page: 1, pageSize })
+  return route(
+    `audit_log:entity:${entity}:${entityId}`,
+    () => apiFetch('GET', appendQuery('/api/system/audit-logs', query)),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
 // The legacy deleted-sale audit ledger (the old system's deleted/abandoned
 // cart lines, preserved as evidence). Read-only and server-gated by
 // audit_log like the audit trail above; no local mirror -- the ledger is
