@@ -91,4 +91,67 @@ const saleDetail = read('../src/components/sales/SaleDetailModal.tsx')
 assert.match(saleDetail, /translateOr\('credit_awaiting_payment', 'Not Paid', 'ប្រាក់ជំពាក់'\)/)
 assert.match(saleDetail, /awaiting_payment/, 'the internal status remains unchanged')
 
+
+// Sep 22 2026, owner: "status the khmer and english Not Paid / ប្រាក់ជំពាក់ ...
+// i see in telegram stil uses the old awaiting payment etc...". The Worker
+// keeps its own bilingual table (it has no React language pack at runtime), so
+// the only thing that stops the two drifting apart again is this pin: each
+// status phrase the Worker rewrites must equal the pack value, emoji aside.
+// Only the decorative prefix differs between a pack value and the Worker's --
+// the same prefix StatusBadge.tsx drops for its compact badge. The words
+// themselves must match exactly, Khmer combining marks and all.
+const packStatus = (value: string): string => value.replace(/^[⏳🚚↩️\s]+/u, '').trim()
+const workerStatusPhrases: Array<[phrase: string, key: string]> = [
+  ['awaiting payment', 'status_awaiting_payment'],
+  ['awaiting delivery', 'status_awaiting_delivery'],
+  ['partial return', 'status_partial_return'],
+  ['completed', 'status_completed'],
+  ['cancelled', 'status_cancelled'],
+  ['returned', 'status_returned'],
+]
+for (const [phrase, key] of workerStatusPhrases) {
+  const quoted = /^[a-z]+$/.test(phrase) ? phrase : `'${phrase}'`
+  const entry = new RegExp(`\\n\\s*${quoted}: \\{ en: '([^']+)', km: '([^']+)' \\}`).exec(telegramLang)
+  assert.ok(entry, `telegramLang has no bilingual value phrase for "${phrase}"`)
+  assert.equal(entry![1], packStatus(en[key]), `the Worker's English for "${phrase}" must be en.${key}`)
+  assert.equal(entry![2], packStatus(km[key]), `the Worker's Khmer for "${phrase}" must be km.${key}`)
+}
+// The retired wording must not come back through the Worker table either.
+assert.doesNotMatch(telegramLang, /'Awaiting Payment'/, 'the Worker must not reintroduce Awaiting Payment')
+assert.doesNotMatch(telegramLang, /កំពុងរង់ចាំបង់ប្រាក់/, 'the Worker must not reintroduce the long retired Khmer status')
+
+// The receipt-status notification is composed by a named builder in telegram.ts,
+// not inline in the route, so the status words above reach it through one path.
+assert.match(telegram, /export function formatSaleStatusTelegramLines/, 'the status-change message has a testable builder')
+const salesRoute = read('../../cloudflare/src/routes/sales.ts')
+assert.match(salesRoute, /formatSaleStatusTelegramLines\(/, 'the sales route calls the builder')
+assert.doesNotMatch(salesRoute, /Status: \$\{oldStatus/, 'the route must not compose the status line itself again')
+
+// The in-app surfaces that name the same status. Each of these carried a second
+// copy of the words; a hard-coded fallback is how the retired name survives a
+// rename, because it only shows when a pack lookup misses.
+// Comments are allowed to name the retired wording -- that is how the rename is
+// explained to the next reader; only shipping code is checked.
+const code = (source: string): string => source.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n')
+// Positive controls, so neither filter can pass this file by deleting the
+// evidence instead of by the wording being right.
+assert.equal(packStatus(en.status_awaiting_payment), 'Not Paid')
+assert.match(code('// awaiting payment\nconst live = 1'), /const live = 1/)
+assert.doesNotMatch(code('// awaiting payment\nconst live = 1'), /awaiting/)
+const notificationCenter = read('../src/components/shared/NotificationCenter.tsx')
+assert.doesNotMatch(code(notificationCenter), /awaiting payment|កំពុងរង់ចាំបង់ប្រាក់/, 'the bell summary must not hard-code the retired status wording')
+assert.match(notificationCenter, /getStatusBadgeLabel\('awaiting_payment', t\)/, 'the bell summary reads the status name from the language packs')
+const dashboardStatus = read('../src/components/dashboard/dashboardSaleStatus.ts')
+assert.match(dashboardStatus, /awaiting_payment: \{ key: 'status_awaiting_payment', fallback: 'Not Paid' \}/)
+const pos = read('../src/components/pos/POS.tsx')
+assert.match(pos, /awaiting_payment: 'Not Paid'/, 'the POS status fallback uses the current name')
+for (const [file, source] of [
+  ['dashboardSaleStatus.ts', dashboardStatus],
+  ['POS.tsx', pos],
+  ['SaleIncidentRecovery.tsx', read('../src/components/utils-settings/SaleIncidentRecovery.tsx')],
+  ['SaleNotPaidStockRecovery.tsx', read('../src/components/utils-settings/SaleNotPaidStockRecovery.tsx')],
+] as const) {
+  assert.doesNotMatch(source, /'Awaiting [Pp]ayment'/, `${file} still ships a retired Awaiting Payment fallback`)
+}
+
 console.log('PASS Not Paid terminology preserves sale accounting and distinct credit concepts')

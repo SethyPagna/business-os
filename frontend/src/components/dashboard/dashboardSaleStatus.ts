@@ -10,7 +10,10 @@ type TranslateFn = (key: string) => string
 
 const STATUS_LABELS: Record<DashboardSaleStatus, { key: string; fallback: string }> = {
   completed: { key: 'status_completed', fallback: 'Completed' },
-  awaiting_payment: { key: 'status_awaiting_payment', fallback: 'Awaiting Payment' },
+  // Sep 22 2026: the owner renamed this status to Not Paid / ប្រាក់ជំពាក់. The pack
+  // keys carry it; this fallback still said "Awaiting Payment" and would have
+  // reintroduced the retired wording the moment a pack lookup missed.
+  awaiting_payment: { key: 'status_awaiting_payment', fallback: 'Not Paid' },
   awaiting_delivery: { key: 'status_awaiting_delivery', fallback: 'Awaiting Delivery' },
   cancelled: { key: 'status_cancelled', fallback: 'Cancelled' },
   partial_return: { key: 'status_partial_return', fallback: 'Partial Return' },

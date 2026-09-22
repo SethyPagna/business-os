@@ -149,7 +149,7 @@ type PosSaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery'
 
 const POS_STATUS_LABELS: Record<PosSaleStatus, string> = {
   completed: 'Completed',
-  awaiting_payment: 'Awaiting Payment',
+  awaiting_payment: 'Not Paid', // Sep 22 2026 rename; the pack keys already say Not Paid / ប្រាក់ជំពាក់
   awaiting_delivery: 'Awaiting Delivery',
 }
 

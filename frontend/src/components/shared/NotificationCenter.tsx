@@ -23,15 +23,20 @@ import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTra
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
+import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
 type VisibilityMode = 'always' | 'desktop' | 'mobile'
 type LabelTuple = [key: string, fallbackEn: string, fallbackKm: string]
 type CopyParams = Record<string, unknown>
+type TranslateFn = (key: string) => string
+// Most renderers are pure text; the ones that name a domain value (a sale
+// status) take the translator so they read the language packs instead of
+// keeping a second copy of the words.
 type LocalizedCopy = {
-  en: (params: CopyParams) => string
-  km: (params: CopyParams) => string
+  en: (params: CopyParams, t?: TranslateFn) => string
+  km: (params: CopyParams, t?: TranslateFn) => string
 }
 
 type NotificationItem = {
@@ -203,14 +208,25 @@ const TONE_LABEL_KEYS: Record<Tone, LabelTuple> = {
   info: ['status_info', 'Info', 'ព័ត៌មាន'],
 }
 
+const salesSummaryCopy = ({ awaitingPaymentCount, awaitingDeliveryCount }: CopyParams, t?: TranslateFn): string => [
+  awaitingPaymentCount ? `${awaitingPaymentCount} ${getStatusBadgeLabel('awaiting_payment', t)}` : null,
+  awaitingDeliveryCount ? `${awaitingDeliveryCount} ${getStatusBadgeLabel('awaiting_delivery', t)}` : null,
+].filter(Boolean).join(' • ')
+
 const SECTION_SUMMARY_COPY: Record<string, LocalizedCopy> = {
   notification_inventory_summary: {
     en: ({ outCount, lowCount }) => [outCount ? `${outCount} out of stock` : null, lowCount ? `${lowCount} low stock` : null].filter(Boolean).join(' • '),
     km: ({ outCount, lowCount }) => [outCount ? `${outCount} អស់ស្តុក` : null, lowCount ? `${lowCount} ស្តុកទាប` : null].filter(Boolean).join(' • '),
   },
+  // Sep 22 2026: this summary carried its own second copy of the sale status
+  // names and had drifted to the retired "awaiting payment" /
+  // "កំពុងរង់ចាំបង់ប្រាក់" wording after the rest of the app moved to
+  // Not Paid / ប្រាក់ជំពាក់. Both renderers now read the same pack keys the
+  // status badges read, through the badge helper that drops the decorative
+  // prefix, so these two words have one source of truth.
   notification_sales_summary: {
-    en: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} awaiting payment` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} awaiting delivery` : null].filter(Boolean).join(' • '),
-    km: ({ awaitingPaymentCount, awaitingDeliveryCount }) => [awaitingPaymentCount ? `${awaitingPaymentCount} កំពុងរង់ចាំបង់ប្រាក់` : null, awaitingDeliveryCount ? `${awaitingDeliveryCount} កំពុងរង់ចាំដឹកជញ្ជូន` : null].filter(Boolean).join(' • '),
+    en: salesSummaryCopy,
+    km: salesSummaryCopy,
   },
   notification_loyalty_summary: {
     en: ({ count, threshold }) => `${count} customer${count === 1 ? '' : 's'} reached ${threshold}+ points`,
@@ -613,8 +629,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     const entry = SECTION_SUMMARY_COPY[key] || ITEM_META_COPY[key]
     if (!entry) return fallback || ''
     const renderer = isKhmer ? entry.km : entry.en
-    return typeof renderer === 'function' ? renderer(params || {}) : (fallback || '')
-  }, [isKhmer])
+    return typeof renderer === 'function' ? renderer(params || {}, t) : (fallback || '')
+  }, [isKhmer, t])
 
   const normalizedNotificationSearch = notificationSearch.trim().toLowerCase()
 
