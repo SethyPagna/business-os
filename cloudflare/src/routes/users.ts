@@ -544,7 +544,7 @@ app.put('/users/:id/profile', async (c) => {
 
   const db = getDb(c.env)
   const user = await db.prepare(
-    'SELECT id, username, name, password, phone, email, deleted_at, is_active, updated_at FROM users WHERE id = @id AND deleted_at IS NULL',
+    'SELECT id, username, name, password, phone, email, avatar_path, phone_verified, email_verified, deleted_at, is_active, updated_at FROM users WHERE id = @id AND deleted_at IS NULL',
   ).get<Record<string, unknown>>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
   try {
@@ -589,11 +589,30 @@ app.put('/users/:id/profile', async (c) => {
       updateProfileStatement,
       ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(targetId), username) : []),
     ])
-    // Same before/after record on the self-service path; this handler only
-    // writes the identity fields, so those are the only ones diffed.
+    // Every column this UPDATE writes is diffed, not just the four identity
+    // fields: an avatar change alone used to produce a row that said nothing
+    // changed. phone_lookup is left out as a derived restatement of phone;
+    // the two *_verified flags are in because the statement resets them.
+    const nextAvatarPath = updateProfileStatement.params.avatar
     await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'profile' }, changedFields(
-      { username: user.username, name: user.name, phone: user.phone, email: user.email },
-      { username, name, phone, email },
+      {
+        username: user.username,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        avatar_path: user.avatar_path,
+        phone_verified: Number(user.phone_verified || 0),
+        email_verified: Number(user.email_verified || 0),
+      },
+      {
+        username,
+        name,
+        phone,
+        email,
+        avatar_path: nextAvatarPath,
+        phone_verified: 0,
+        email_verified: email === null ? 0 : Number(user.email_verified || 0),
+      },
     ))
     if (usernameChanged && renameScope === 'carry') {
       await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])

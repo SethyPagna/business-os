@@ -59,6 +59,7 @@ function transpileFile(sourcePath) {
 // the same way (cached), so a helper's own helpers resolve without every
 // scenario having to enumerate the whole tree.
 const moduleCache = new Map()
+const loadingModules = new Map()
 function loadReal(sourcePath, requireOverrides = {}) {
   const outputText = transpileFile(sourcePath)
   const originalLoad = Module._load
@@ -67,6 +68,10 @@ function loadReal(sourcePath, requireOverrides = {}) {
     if (request.startsWith('.')) {
       const resolved = path.resolve(path.dirname(sourcePath), request) + '.ts'
       if (fs.existsSync(resolved)) {
+        // A cycle (lib/a -> lib/b -> lib/a) must see the partially-filled
+        // module, exactly as CommonJS itself does; without this the loader
+        // recursed until the transpiler blew the stack.
+        if (loadingModules.has(resolved)) return loadingModules.get(resolved)
         if (!moduleCache.has(resolved)) {
           Module._load = originalLoad
           try { moduleCache.set(resolved, loadReal(resolved, requireOverrides)) } finally { Module._load = patchedLoad }
@@ -77,12 +82,14 @@ function loadReal(sourcePath, requireOverrides = {}) {
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
+  loadingModules.set(sourcePath, moduleObj.exports)
   try {
     new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
       moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
     )
   } finally {
     Module._load = originalLoad
+    loadingModules.delete(sourcePath)
   }
   return moduleObj.exports
 }
@@ -639,11 +646,56 @@ async function productsRoute() {
   })
 }
 
+// 7. Real routes/users.ts self-service profile: an avatar change alone used
+//    to write a row that said nothing changed (E7).
+// ---------------------------------------------------------------------------
+async function usersProfileRoute() {
+  const db = openDb(MIGRATION_SQLS)
+  db.exec('DELETE FROM audit_logs;')
+  db.exec("INSERT INTO users (id, username, name, password, phone, email, avatar_path, is_active) VALUES (31, 'za', 'Za Sethy', 'x', '012345678', 'za@example.com', '/avatars/old.png', 1);")
+  const auditLib = loadReal(workerSrc('lib/audit.ts'), { './db': { getDb: () => db } })
+  const route = loadReal(workerSrc('routes/users.ts'), {
+    hono: require('hono'),
+    bcryptjs: { compareSync: () => true, hashSync: (value) => 'hashed:' + value },
+    '../lib/db': { getDb: () => db },
+    './db': { getDb: () => db },
+    '../lib/auth': {
+      requireAuth: async (c, next) => { c.set('user', { id: 31, username: 'za', name: 'Za Sethy' }); return next() },
+      revokeUserSessions: async () => {},
+    },
+    '../lib/audit': auditLib,
+    './audit': auditLib,
+    '../lib/permissions': { isAdminControlUser: () => true },
+    '../lib/cache': { bumpVersion: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    '../index': {},
+  }).default
+  const ctx = { waitUntil: (p) => (p && p.catch ? p.catch(() => {}) : p), passThroughOnException() {} }
+  const response = await route.request('/users/31/profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: 'za', name: 'Za Sethy', phone: '012345678', email: 'za@example.com',
+      avatar_path: '/avatars/new.png', adminOverride: true,
+    }),
+  }, {}, ctx)
+  assert.equal(response.status, 200, await response.text())
+  const rows = db.prepare("SELECT old_value, new_value FROM audit_logs WHERE entity = 'user' ORDER BY id").all({})
+  check('E7: an avatar-only profile save records the avatar, not an empty diff', () => {
+    assert.equal(rows.length, 1)
+    assert.deepEqual(JSON.parse(rows[0].old_value), { avatar_path: '/avatars/old.png' })
+    assert.deepEqual(JSON.parse(rows[0].new_value), { avatar_path: '/avatars/new.png' })
+    assert.deepEqual(renderer.buildAuditFieldDiff(rows[0].old_value, rows[0].new_value).map((r) => r.label), ['Avatar Path'])
+    const rawRow = JSON.stringify(rows[0])
+    assert.ok(!rawRow.includes('password') && !rawRow.includes('hashed:'), 'no password material in the row')
+  })
+}
+
 async function main() {
   await auditWriteScenario()
   await feesRoute()
   await promotionsRoute()
   await productsRoute()
+  await usersProfileRoute()
   console.log('\nOK ' + passed + ' checks')
 }
 
