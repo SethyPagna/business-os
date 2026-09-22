@@ -209,6 +209,12 @@ function receiptCount(db) {
   return Number(row?.n ?? 0)
 }
 
+// The real 0192 text, so the re-probe case re-applies exactly what the owner would.
+function migration0192Sql() {
+  const file = path.join(root, 'migrations', '0192_stock_mutation_receipts.sql')
+  return fs.readFileSync(file, 'utf8')
+}
+
 const addBody = (requestId, quantity = 5) => ({
   client_request_id: requestId,
   productId: 1, type: 'add', quantity, branchId: 1, reason: 'stock in',
@@ -376,6 +382,29 @@ async function run() {
     assert.equal(first.status, 200, 'a stock write is never refused for a missing receipt table')
     assert.equal(branchStock(db), 5, 'and applies normally')
     console.log('PASS a database without migration 0192 keeps writing stock')
+  }
+
+  // E3 -- THE PROBE MUST NOT LATCH OFF. An isolate that probed while 0192 was
+  //    not yet applied used to run unprotected for its whole life, with no
+  //    signal anywhere. Only the POSITIVE result is memoised now, so the guard
+  //    starts working the moment the table exists.
+  {
+    const db = freshDb()
+    db.raw.exec('DROP TABLE stock_mutation_receipts;')
+    receiptMod.resetStockMutationReceiptSchemaProbe()
+    await runAdjustAction(makeContext(db), addBody('stockline_cccc0000-probe'))
+    assert.equal(branchStock(db), 5, 'the unprotected write still lands')
+
+    // The owner applies 0192. No deploy, no isolate restart.
+    db.raw.exec(migration0192Sql())
+    const after = await runAdjustAction(makeContext(db), addBody('stockline_dddd0000-probe'))
+    assert.equal(after.status, 200, 'the next line still writes')
+    assert.equal(branchStock(db), 10, 'and applies')
+    assert.equal(receiptCount(db), 1, 'THE FIX: protection resumed without recycling the isolate')
+    const repeat = await runAdjustAction(makeContext(db), addBody('stockline_dddd0000-probe'))
+    assert.equal((await jsonOf(repeat)).replayed, true, 'and the very next repeat is deduped')
+    assert.equal(branchStock(db), 10, 'THE FIX: stock stays at 10 -- before this it went to 15')
+    console.log('PASS the schema probe re-checks after a miss')
   }
 
   console.log('\nAll stock mutation receipt assertions passed')

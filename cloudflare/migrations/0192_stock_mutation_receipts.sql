@@ -17,10 +17,18 @@
 --              inventory_movements must be identical before and after.
 -- Post-assert: SELECT COUNT(*) FROM stock_mutation_receipts = 0; the five
 --              stock tables above unchanged.
+-- Deploy order: EITHER order is safe -- lib/stockMutationReceipt.ts probes for
+--              the table on each request until it finds it (the probe memoises
+--              only the positive result), and a Worker without the table takes
+--              the exact pre-0192 path. But PROTECTION only starts once BOTH
+--              are live. Migration first, then the Worker, gives a window with
+--              no protection and no clients sending ids -- the smaller of the
+--              two. Worker first leaves clients sending ids that nothing yet
+--              dedups until the migration lands, which is no worse than today
+--              but lasts as long as the gap does.
 -- Recovery:    roll the Worker back; the table is inert when no request
---              carries a client_request_id, and lib/stockMutationReceipt.ts
---              falls back to the pre-0192 behaviour when the table is absent,
---              so code and schema can land in either order.
+--              carries a client_request_id, and the lib falls back to the
+--              pre-0192 behaviour when the table is absent.
 -- Retention:   receipts are kept forever -- there is NO pruner. One row per
 --              identified stock line is the same order of magnitude as
 --              inventory_movements, which is also never pruned, so this adds
