@@ -44,6 +44,11 @@ const NAMED_COMPANIONS = {
   188: 'test-transfer-receipt-retirement-native.cjs',
   190: 'test-dataset-operation-native.cjs',
   191: 'test-dataset-operation-transition-native.cjs',
+  // 0192 creates stock_mutation_receipts, the per-line idempotency table for
+  // the two single-line stock kernels. Its companion applies the real
+  // migration chain and drives runAdjustAction / runReceiveBatchAction
+  // through a repeat, a control and the no-table fallback.
+  192: 'test-stock-mutation-receipt-pure.cjs',
 }
 
 function listMigrationNumbers() {

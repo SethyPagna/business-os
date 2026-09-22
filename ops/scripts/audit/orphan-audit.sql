@@ -217,6 +217,7 @@ SELECT 'shift_sessions.closed_by_user_id->users' AS relation, COUNT(*) AS orphan
 SELECT 'shift_sessions.parent_shift_id->shift_sessions' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN shift_sessions p ON p.id = c.parent_shift_id WHERE c.parent_shift_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_sessions.reopened_by_user_id->users' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN users p ON p.id = c.reopened_by_user_id WHERE c.reopened_by_user_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_sessions.user_id->users' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN users p ON p.id = c.user_id WHERE c.user_id IS NOT NULL AND p.id IS NULL;
+SELECT 'stock_mutation_receipts.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM stock_mutation_receipts c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_row_moves.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM stock_row_moves c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_row_moves.destination_product_id->products' AS relation, COUNT(*) AS orphan_count FROM stock_row_moves c LEFT JOIN products p ON p.id = c.destination_product_id WHERE c.destination_product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_row_moves.source_product_id->products' AS relation, COUNT(*) AS orphan_count FROM stock_row_moves c LEFT JOIN products p ON p.id = c.source_product_id WHERE c.source_product_id IS NOT NULL AND p.id IS NULL;

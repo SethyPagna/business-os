@@ -94,6 +94,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
@@ -211,6 +212,11 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // Migration 0192: runAdjustAction wraps its kernel in the per-line receipt
+  // guard, so the real module joins the stub map like every other real
+  // dependency. These bodies carry no client_request_id, so the guard hands
+  // straight through to the kernel and touches no table.
+  '../lib/stockMutationReceipt': stockMutationReceipt,
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
@@ -298,6 +304,11 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // Migration 0192: runAdjustAction wraps its kernel in the per-line receipt
+  // guard, so the real module joins the stub map like every other real
+  // dependency. These bodies carry no client_request_id, so the guard hands
+  // straight through to the kernel and touches no table.
+  '../lib/stockMutationReceipt': stockMutationReceipt,
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),

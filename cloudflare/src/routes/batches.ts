@@ -12,6 +12,7 @@ import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
+import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
@@ -196,13 +197,31 @@ export type ReceiveBody = {
   payment_status?: string | null
   credit_due_date?: string | null
   session_id?: number | null
+  /** Migration 0192 per-line idempotency id; absent means the pre-0192 path. */
+  client_request_id?: string | null
 }
 
 // Pulled out from behind `app.post('/', ...)` (P4-B, batched fast stock-in)
 // so lib/stockInCommit.ts's batched-commit route can run the exact same
 // validation/write kernel per line instead of re-implementing it -- the body
 // only, no logic changed.
+// Per-line idempotency (migration 0192), the same wrapper POST
+// /api/inventory/adjust uses. The kernel body below is unchanged; this only
+// claims the caller-supplied client_request_id so a receipt whose response
+// was lost is replayed from its stored result instead of topping the lot up
+// a second time.
 export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody): Promise<Response> {
+  return withStockMutationReceipt(
+    () => getDb(c.env),
+    c.get('user')?.id ?? null,
+    'receive',
+    body as unknown as Record<string, unknown>,
+    (value, status) => c.json(value as never, status as never),
+    () => runReceiveBatchActionKernel(c, body),
+  )
+}
+
+async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
   const db = getDb(c.env)

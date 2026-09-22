@@ -13,6 +13,7 @@ import { useApp } from '../../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { getProductsByIds, searchProducts } from '../../../api/productReadTransport.ts'
 import { adjustStock } from '../../../api/inventoryWriteTransport.ts'
+import { createClientRequestId } from '../../../api/requestIds.ts'
 import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
@@ -557,6 +558,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       return
     }
     const adjustmentRequest = {
+      // Migration 0192: minted with the PARKED request. commitAdjust keeps
+      // pendingAdjust on failure, so re-confirming after a lost response
+      // replays the original receipt instead of adjusting stock twice.
+      client_request_id: createClientRequestId('stockadjust'),
       productId: product.id,
       productName: product.name,
       type: adjustForm.type,
