@@ -438,12 +438,29 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     lines.push(...sectionTitle(index, key), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
 
+  // Expenses is computed first because the Sales section needs one figure out
+  // of it: the courier money. See the section-3 comment below.
+  const showExpenses = categories?.fees !== false
+  const expenses = expenseTotals({
+    otherUsd: showExpenses ? stats.fees?.usd : 0,
+    otherKhr: showExpenses ? stats.fees?.khr : 0,
+    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
+    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
+  })
+
   // 1. Sales -- Revenue and Profit print even at $0.00: a day that took
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
     const sales = [labeled('revenue', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd))]
     if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
+    // The courier money is a SALES figure -- it comes out of the day's
+    // deliveries, not out of the fees table -- and it is normally reported
+    // under Expenses with the shop's own fees. With Expenses switched off
+    // there is no section to report it in, so it stays here, beside the fee
+    // the customer was charged, rather than disappearing with a switch that
+    // was only ever about the fees table.
+    if (!showExpenses && expenses.courierUsd > 0) sales.push(labeled('deliveryCost', usd(expenses.courierUsd)))
     if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
     // Directly below Not Paid, the owner's "also add one row below unpaid in
     // reports as well". One number, no sentence. Like Not Paid it is a
@@ -460,13 +477,6 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
 
   // 3. Expenses -- the SAME sum the shift report prints, through the same
   // function: the fees of the day plus the courier money actually paid out.
-  // The `fees` switch still governs whether the section exists at all.
-  const expenses = expenseTotals({
-    otherUsd: categories?.fees === false ? 0 : stats.fees?.usd,
-    otherKhr: categories?.fees === false ? 0 : stats.fees?.khr,
-    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
-    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
-  })
   const expenseRows: string[] = []
   // The two component lines print only when the total really has two parts.
   // With one part the total IS that part, and printing it twice under two
@@ -475,9 +485,13 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
   }
   if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  // On when either of its two sources is on: the shop's own expenses
-  // (`fees`) or the courier money that comes out of the sales figures.
-  section('expenses', expenseRows, categories?.fees !== false || showSales)
+  // OFF means gone -- no heading, no number and no `N/A` placeholder. It used
+  // to stay alive whenever Sales was on, so a shop that switched Expenses off
+  // was still sent `3. Expenses / ចំណាយ` with `· N/A` under it on every quiet
+  // day: a section they had asked not to see, saying nothing. `N/A` is for a
+  // section that is ON and had nothing today; that distinction is the whole
+  // point of the `enabled` argument.
+  section('expenses', expenseRows, showExpenses)
 
   // 4. Stock
   const stock: string[] = []

@@ -578,6 +578,45 @@ check('numbering closes up when a switched-off category removes a section',
 check('a switched-off category leaves no N/A placeholder behind either',
   !salesOff.includes('Sales / ការលក់') && !salesOff.includes('Stock / ស្តុក'), salesOff)
 
+// Sep 23 2026: `{ fees: false }` ALONE. The Expenses section used to survive
+// this switch whenever Sales was on -- the gate read `fees !== false ||
+// showSales` -- so a shop that had switched Expenses off was still sent
+// `3. Expenses / ចំណាយ`, carrying either the courier money alone or, on a day
+// with no deliveries, nothing but `· N/A`. Off must mean gone.
+const feesOff = render('both', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }], { fees: false }))
+check('fees:false removes the Expenses section outright -- no heading, no N/A',
+  !feesOff.includes('Expenses / ចំណាយ') && !feesOff.includes('ចំណាយ'), feesOff)
+check('and the numbering closes up behind it, with no gap',
+  feesOff.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ')
+  === '1. Sales / ការលក់ | 2. Invoices / វិក្កយបត្រ | 3. Stock / ស្តុក | 4. Cashiers / អ្នកគិតប្រាក់', feesOff)
+// The courier money is not a fee -- it comes out of the day's deliveries --
+// so switching the fees table off must not take it off the report. It moves
+// to the Sales section it came from, beside the fee the customer paid.
+check('the recorded delivery COST stays, under Sales, when Expenses is gone',
+  sectionBlock(feesOff, 'Sales / ការលក់').join('\n') === [
+    '· Revenue / ចំណូល: $486.25',
+    '· Profit / ចំណេញ: $142.60',
+    '· Delivery fee / ថ្លៃដឹក: $12.00',
+    '· Actual delivery cost / ថ្លៃដឹកដើម: $7.50',
+    '· Not Paid / ប្រាក់ជំពាក់: $38.00',
+    '· Refunds / ការសងប្រាក់: $15.00',
+  ].join('\n'), sectionBlock(feesOff, 'Sales / ការលក់').join('\n'))
+check('and the fees table\'s own money is gone with the section',
+  !feesOff.includes('$9.50') && !feesOff.includes('20,000៛') && !feesOff.includes('$17.00'), feesOff)
+// POSITIVE CONTROL: the same switch left ON prints the section with both its
+// parts, so the check above is about the SWITCH and not about the fixture.
+const feesOn = render('both', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }], { fees: true }))
+check('POSITIVE CONTROL: fees:true still prints Expenses, and Sales has no cost row',
+  feesOn.includes('3. Expenses / ចំណាយ') && feesOn.includes('· Total / សរុប: $17.00 · 20,000៛')
+  && !sectionBlock(feesOn, 'Sales / ការលក់').some((line) => line.includes('ថ្លៃដឹកដើម')), feesOn)
+// A day with no deliveries either: the section is still gone, and nothing is
+// added to Sales in its place.
+const feesOffQuiet = render('both', () => telegram.formatDaySummary(
+  { ...dayStats, sales: { ...dayStats.sales, deliveryCostUsd: 0, deliveryCostRecorded: 0 } }, [], { fees: false }))
+check('with no courier cost either, Expenses is simply absent and Sales gains nothing',
+  !feesOffQuiet.includes('ចំណាយ') && !feesOffQuiet.includes('ថ្លៃដឹកដើម')
+  && feesOffQuiet.split('\n').filter((line) => /^\d\. /.test(line)).length === 4, feesOffQuiet)
+
 // ---- 5. the absences -------------------------------------------------------
 // Each string below is a line the PRE-REDESIGN report printed for this very
 // fixture. They are the measurement of "so long".
