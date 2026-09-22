@@ -310,7 +310,14 @@ check('list views carry no per-row bold, and no size above the document scale', 
   // bold, so a customer's statement read differently from the Overview chip
   // that summarises it. A row detail is a statement, not one card in a list,
   // so every one of them carries the statement weight (Sep 23 ruling).
-  for (const [label, source, count] of [['GroupedReport', grouped, 3], ['PeriodReport', period, 2], ['SalesListReport', salesList, 2], ['ReturnsReport', returns, 1], ['ExpensesReport', expenses, 1]] as const) {
+  //
+  // The counts dropped by one each on the first three when the flag was taken
+  // off the blocks that could not spend it: `summary` is behavioural, not
+  // documentation -- the two reads above are a block TITLE and a
+  // `kind: 'total'` line, and GroupedReport's 'meta', PeriodReport's 'meta'
+  // and SalesListReport's 'who' have neither, so the flag rendered nothing.
+  // Every block still listed here does have one or the other.
+  for (const [label, source, count] of [['GroupedReport', grouped, 2], ['PeriodReport', period, 1], ['SalesListReport', salesList, 1], ['ReturnsReport', returns, 1], ['ExpensesReport', expenses, 1]] as const) {
     assert.equal((stripComments(source).match(/\bsummary: true,/g) || []).length, count, `${label}'s row-detail statement blocks all carry the statement weight`)
   }
   assert.doesNotMatch(surfaceCss, /@media screen\s*\{/, 'the screen-only +2px size bump is gone (owner: "the size is too big")')

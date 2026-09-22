@@ -248,9 +248,13 @@ export default function SalesListReport(p: ReportViewProps) {
           {openRow ? (
             <ReceiptSheet
               blocks={[
-                // A row detail is a STATEMENT, not one card in a list: both
-                // blocks keep the weights they had before the Sep 22 pass.
-                { key: 'who', summary: true, lines: detailLines(openRow) },
+                // A row detail is a STATEMENT, not one card in a list, so the
+                // breakdown keeps the weight it had before the Sep 22 pass. The
+                // 'who' block does not carry the flag: ReceiptSheet reads it in
+                // exactly two places (ReceiptSheet.tsx:150-152), the block TITLE
+                // and a `kind: 'total'` line, and 'who' has neither -- every
+                // `detailLines` entry is `kind: 'info'` and there is no title.
+                { key: 'who', lines: detailLines(openRow) },
                 { key: 'money', summary: true, title: tr('rpt_breakdown', 'Breakdown'), lines: moneyLines(openRow) },
               ]}
             />

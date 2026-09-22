@@ -204,8 +204,11 @@ export default function PeriodReport(p: ReportViewProps) {
               blocks={[
                 {
                   key: 'meta',
-                  // A row detail is a STATEMENT, not one card in a list.
-                  summary: true,
+                  // No `summary: true` on this one although it is part of the
+                  // same statement: ReceiptSheet reads that flag in exactly two
+                  // places (ReceiptSheet.tsx:150-152), the block TITLE and a
+                  // `kind: 'total'` line, and this block has neither. The
+                  // statement groups below carry it, where it is read.
                   lines: [
                     { label: tr('sales', 'Sales'), value: fmtInt(openRow.tx_count), kind: 'info' },
                     { label: tr('avg_order', 'Avg order'), value: fmtMoney(openRow.avg_order_usd), kind: 'info' },

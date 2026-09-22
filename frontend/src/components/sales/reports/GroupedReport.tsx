@@ -461,7 +461,12 @@ export default function GroupedReport(p: ReportViewProps) {
           {open ? (
             <ReceiptSheet
               blocks={[
-                { key: 'meta', summary: true, lines: [{ label: tr('sales', 'Sales'), value: fmtInt(open.tx_count), kind: 'info' }, { label: tr('avg_order', 'Avg order'), value: fmtMoney(open.avg_order_usd), kind: 'info' }, { label: tr('rpt_share', 'Share'), value: fmtPct(pct(basisValue(open, options.basis), totalBasis)), kind: 'info' }] },
+                // No `summary: true` on this one although it is part of the
+                // same statement: ReceiptSheet reads that flag in exactly two
+                // places (ReceiptSheet.tsx:150-152), the block TITLE and a
+                // `kind: 'total'` line, and this block has neither. The
+                // statement groups below carry it, where it is read.
+                { key: 'meta', lines: [{ label: tr('sales', 'Sales'), value: fmtInt(open.tx_count), kind: 'info' }, { label: tr('avg_order', 'Avg order'), value: fmtMoney(open.avg_order_usd), kind: 'info' }, { label: tr('rpt_share', 'Share'), value: fmtPct(pct(basisValue(open, options.basis), totalBasis)), kind: 'info' }] },
                 ...STATEMENT_GROUPS
                   .filter((grp) => statement.some((l) => l.group === grp))
                   .map((grp) => ({
