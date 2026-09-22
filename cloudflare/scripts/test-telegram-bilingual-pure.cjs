@@ -101,13 +101,44 @@ assert.equal(inMode('km', () => lang.bi('still open', 'នៅបើកនៅឡ�
 assert.equal(inMode('en', () => lang.localizeTelegramValue('unpaid')), 'unpaid')
 assert.equal(inMode('km', () => lang.localizeTelegramValue('unpaid')), 'មិនទាន់បង់')
 assert.equal(inMode('both', () => lang.localizeTelegramValue('unpaid')), `unpaid${SEP}មិនទាន់បង់`)
-assert.equal(inMode('km', () => lang.localizeTelegramLine('Cashier: Za')), 'អ្នកគិតប្រាក់: Za', 'the VALUE is never translated')
-assert.equal(inMode('en', () => lang.localizeTelegramLine('Cashier: Za')), 'Cashier: Za')
+// A `{ en, km }` phrase rewrites the ENGLISH too -- the whole point of that
+// shape. The `en` mode is where the old early-return hid the defect: an
+// English-only shop was the one reader still being sent the retired phrase.
+assert.equal(inMode('en', () => lang.localizeTelegramValue('awaiting payment')), 'Not Paid')
+assert.equal(inMode('km', () => lang.localizeTelegramValue('awaiting payment')), 'ប្រាក់ជំពាក់')
+assert.equal(inMode('both', () => lang.localizeTelegramValue('awaiting payment')), `Not Paid${SEP}ប្រាក់ជំពាក់`)
+// Every sale status, in every mode, carries the app's own wording and never
+// the raw enum. km.json/en.json status_* are the source; the emoji is the
+// heading's job, not a value's.
+const SALE_STATUS_WORDING = [
+  ['awaiting payment', 'Not Paid', 'ប្រាក់ជំពាក់'],
+  ['awaiting delivery', 'Awaiting Delivery', 'រង់ចាំការដឹកជញ្ជូន'],
+  ['partial return', 'Partial Return', 'ប្រគល់ខ្លះ'],
+  ['completed', 'Completed', 'បានបញ្ចប់'],
+  ['cancelled', 'Cancelled', 'បានបោះបង់'],
+  ['returned', 'Returned', 'បានប្រគល់'],
+]
+for (const [wire, english, khmer] of SALE_STATUS_WORDING) {
+  assert.equal(inMode('both', () => lang.localizeTelegramLine(`Status: ${wire}`)), `· Status${SEP}ស្ថានភាព: ${english}${SEP}${khmer}`)
+  assert.equal(inMode('en', () => lang.localizeTelegramLine(`Status: ${wire}`)), `· Status: ${english}`)
+  assert.equal(inMode('km', () => lang.localizeTelegramLine(`Status: ${wire}`)), `· ស្ថានភាព: ${khmer}`)
+}
+// Negative control: the retired pair must not be reachable in ANY mode.
+for (const mode of ['both', 'en', 'km']) {
+  const rendered = inMode(mode, () => SALE_STATUS_WORDING.map(([wire]) => lang.localizeTelegramLine(`Status: ${wire}`)).join('\n'))
+  assert.ok(!/awaiting.payment/i.test(rendered), `${mode}: the retired English phrase survives\n${rendered}`)
+  assert.ok(!rendered.includes('កំពុងរង់ចាំការទូទាត់'), `${mode}: the retired Khmer phrase survives\n${rendered}`)
+}
+// A plain string phrase keeps the caller's English, unchanged, in en mode --
+// dropping the early return must not have altered it.
+assert.equal(inMode('en', () => lang.localizeTelegramValue('restock')), 'restock')
+assert.equal(inMode('km', () => lang.localizeTelegramLine('Cashier: Za')), '· អ្នកគិតប្រាក់: Za', 'the VALUE is never translated')
+assert.equal(inMode('en', () => lang.localizeTelegramLine('Cashier: Za')), '· Cashier: Za')
 // The reason a mode is applied at composition and never by splitting finished
 // text: a value can contain the separator itself.
 assert.equal(
   inMode('km', () => lang.localizeTelegramLine('Note: deliver 9 / 10 boxes')),
-  'កំណត់ចំណាំ: deliver 9 / 10 boxes',
+  '· កំណត់ចំណាំ: deliver 9 / 10 boxes',
   'a value containing " / " must survive a single-language rendering intact',
 )
 // The heading keeps its emoji in every mode; only the words change.
@@ -166,8 +197,37 @@ const checkAgainstPack = (english, khmer, where) => {
     divergent.push(`${where} "${english}": worker says ${khmer}, km.json says ${[...allowed].join(' | ')}`)
   }
 }
+// The six SALE STATUSES name the pack key they were copied from, in the
+// source, so they are held to THAT key rather than to whichever pack entry
+// happens to share the English word. Two entries do share one: `partial_return`
+// (a row tag) and `returned_quantity_tag` (a quantity tag) are older, longer
+// Khmer for a DIFFERENT sense -- a quantity that came back, not the state a
+// sale is in -- and the owner shortened the status wording itself on Sep 22
+// 2026. Checking against the named key is the stricter test, not the looser
+// one: it fails if the pack is edited and the Worker is not.
+const STATUS_PACK_KEYS = {
+  'awaiting payment': 'status_awaiting_payment',
+  'awaiting delivery': 'status_awaiting_delivery',
+  'partial return': 'status_partial_return',
+  completed: 'status_completed',
+  cancelled: 'status_cancelled',
+  returned: 'status_returned',
+}
+// The packs put a status emoji in front; a Telegram bubble already carries
+// the one emoji it needs on the heading, so only the words are copied.
+const packWords = (text) => String(text ?? '').replace(/^[^\p{L}\p{N}$]+/u, '').trim()
+for (const [phrase, key] of Object.entries(STATUS_PACK_KEYS)) {
+  const entry = lang.TELEGRAM_VALUE_PHRASES[phrase]
+  assert.equal(typeof entry, 'object', `the sale status "${phrase}" must rewrite BOTH languages, not only append Khmer`)
+  assert.ok(enPack[key] && kmPack[key], `${key} must exist in both packs`)
+  assert.equal(entry.en, packWords(enPack[key]), `value phrase "${phrase}" must say what en.json ${key} says`)
+  assert.equal(entry.km, packWords(kmPack[key]), `value phrase "${phrase}" must say what km.json ${key} says`)
+}
 for (const [key, entry] of Object.entries(lang.TELEGRAM_LABELS)) checkAgainstPack(entry.en, entry.km, `label ${key}`)
-for (const [english, khmer] of Object.entries(lang.TELEGRAM_VALUE_PHRASES)) checkAgainstPack(english, khmer, 'value phrase')
+for (const [english, khmer] of Object.entries(lang.TELEGRAM_VALUE_PHRASES)) {
+  if (STATUS_PACK_KEYS[english]) continue
+  checkAgainstPack(english, khmer, 'value phrase')
+}
 
 assert.deepEqual(
   divergent,
@@ -200,7 +260,7 @@ const RIVAL_SPELLINGS = [
 const everyWorkerKhmer = [
   ...Object.entries(lang.TELEGRAM_LABELS).map(([key, entry]) => [`label ${key}`, entry.km]),
   ...Object.entries(lang.TELEGRAM_HEADINGS).map(([heading, km]) => [`heading ${heading}`, km]),
-  ...Object.entries(lang.TELEGRAM_VALUE_PHRASES).map(([english, km]) => [`phrase ${english}`, km]),
+  ...Object.entries(lang.TELEGRAM_VALUE_PHRASES).map(([english, phrase]) => [`phrase ${english}`, typeof phrase === 'string' ? phrase : phrase.km]),
   ...lang.TELEGRAM_COMMANDS.map((doc) => [`reference ${doc.command}`, doc.km]),
 ]
 const forked = []
@@ -277,8 +337,15 @@ const bilingualOk = (line) => {
   const split = line.indexOf(': ')
   if (split <= 0) return true              // an item bullet: product name + arithmetic only
   const labelPart = line.slice(0, split)
-  return !known.has(labelPart.split(SEP)[0]) ? true : KHMER.test(labelPart)
+  // Strip the row bullet before the lookup: leaving it on would make every
+  // label unrecognised and this whole check vacuously true.
+  const english = labelPart.replace(lang.ROW_BULLET, '').split(SEP)[0]
+  return !known.has(english) ? true : KHMER.test(labelPart)
 }
+// Positive control for the line above: a KNOWN label with its Khmer removed
+// must be reported, or the check proves nothing.
+assert.equal(bilingualOk(`${lang.ROW_BULLET}Cashier: Za`), false, 'a known label with no Khmer must fail bilingualOk')
+assert.equal(bilingualOk(`${lang.ROW_BULLET}Cashier${SEP}អ្នកគិតប្រាក់: Za`), true)
 const assertAllBilingual = (lines, what) => {
   const localized = lines.filter(Boolean).map(lang.localizeTelegramLine)
   const english = localized.filter((line) => !bilingualOk(line))
@@ -295,13 +362,17 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   driver: { name: 'Dara', phone: '099 111 222' },
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
-assert.ok(saleLines.includes('Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់'), 'sale status value is translated too')
+// RENAMED Sep 22 2026. This line used to read
+// `Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់` -- a phrase the
+// app had already replaced everywhere the owner could see it except here.
+assert.ok(saleLines.includes('· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់'), `sale status value carries the app's own wording:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.join('\n').includes('awaiting payment'), 'the retired English phrase is gone')
 // REDESIGNED Sep 6 2026. The unsettled sale used to end on
 // `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
 // saying "not paid", and the amount owed nowhere on the line. It now names
 // the owner's word and the positive figure, in both languages.
-assert.ok(saleLines.includes('Not Paid / ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
-assert.ok(!saleLines.some((line) => line.startsWith('Paid')), 'no Paid line survives on a wholly unpaid sale')
+assert.ok(saleLines.includes('· Not Paid / ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.some((line) => line.startsWith('· Paid')), 'no Paid line survives on a wholly unpaid sale')
 assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
 // P10: numbered like the printed receipt ("1. name ...") instead of a bullet.
 assert.ok(saleLines.some((line) => line.startsWith('1. Coca Cola 330ml')), 'the product name is left exactly as entered')
@@ -314,9 +385,9 @@ const stockLines = assertAllBilingual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'add', quantity: 12, branch: 'Shop', reason: 'Delivery', lot: '09032026',
   branchOnHand: 40, totalOnHand: 95, by: 'Sethy',
 }), 'stock change')
-assert.ok(stockLines.includes('Stock change / ការផ្លាស់ប្ដូរស្តុក: +12'), 'stock delta has its own label')
+assert.ok(stockLines.includes('· Stock change / ការផ្លាស់ប្ដូរស្តុក: +12'), 'stock delta has its own label')
 assert.ok(stockLines.some((line) => line.includes('all branches / គ្រប់សាខា 95')), 'the on-hand total is bilingual')
-assert.ok(!stockLines.some((line) => line.startsWith('Change / ')), '"Change" must stay the money-handed-back label')
+assert.ok(!stockLines.some((line) => line.startsWith('· Change / ')), '"Change" must stay the money-handed-back label')
 
 assertAllBilingual(telegram.formatTransferTelegramLines({
   createdAt: '2026-09-03T03:04:05.000Z', fromBranch: 'Shop', toBranch: 'Warehouse', note: 'restock run', by: 'Sethy',
@@ -329,35 +400,36 @@ const returnLines = assertAllBilingual(telegram.formatReturnTelegramLines({
   items: [{ product: 'Rice 5kg', quantity: 1, refundUsd: 7.25, stockAction: 'restock', branchOnHand: 39, totalOnHand: 94 }],
   refundUsd: 7.25, refundKhr: 0, by: 'Sethy',
 }), 'customer return')
-assert.ok(returnLines.includes('Settlement / វិធីដោះស្រាយ: refund / សងប្រាក់'), 'the settlement enum is translated')
+assert.ok(returnLines.includes('· Settlement / វិធីដោះស្រាយ: refund / សងប្រាក់'), 'the settlement enum is translated')
 
 assertAllBilingual(telegram.formatReturnTelegramLines({
   kind: 'supplier', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'SRET-1', party: 'Acme',
   branch: 'Shop', items: [{ product: 'Rice 5kg', quantity: 2 }], compensationUsd: 10, lossUsd: 2, by: 'Sethy',
 }), 'supplier return')
 
-// The two routes that still compose their lines inline -- covered without
-// touching files other lanes own.
-assertAllBilingual([
-  'Receipt: 20260903-100405',
-  'Status: awaiting payment → completed',
-  'Customer: Sok Dara',
-  'Reason: Customer cancelled',
-  'Lost fee: $2.00',
-], 'routes/sales.ts inline status lines')
+// The status change is a BUILDER now (Sep 22 2026), not a route's inline
+// array -- so it is driven the way every other message is.
+const statusLines = assertAllBilingual(telegram.formatSaleStatusTelegramLines({
+  receipt: '20260903-100405', fromStatus: 'awaiting_payment', toStatus: 'completed',
+  customer: 'Sok Dara', reason: 'Customer cancelled', lostFeeUsd: 2, by: 'Sethy',
+}), 'sale status change')
+assert.ok(statusLines.includes('· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់'), statusLines.join('\n'))
+// routes/fees.ts is the one route still composing lines inline.
 const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
 ], 'routes/fees.ts inline fee lines')
 // routes/fees.ts emits a bare ISO fee_date; the feed must show ONE date shape.
-assert.ok(feeLines.includes('Date / កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the pinned dd/mm/yyyy')
-assert.equal(lang.localizeTelegramLine('Date: 03/09/2026 10:04'), 'Date / កាលបរិច្ឆេទ: 03/09/2026 10:04', 'an already-formatted date is untouched')
-assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), 'Note / កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
-console.log('PASS payloads: sale, stock, transfer, both return kinds and both inline route messages are bilingual')
+assert.ok(feeLines.includes('· Date / កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the pinned dd/mm/yyyy')
+assert.equal(lang.localizeTelegramLine('Date: 03/09/2026 10:04'), '· Date / កាលបរិច្ឆេទ: 03/09/2026 10:04', 'an already-formatted date is untouched')
+assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), '· Note / កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
+console.log('PASS payloads: sale, status change, stock, transfer, both return kinds and the inline fee message are bilingual')
 
 // A free-text value must never be rewritten, however unlucky the wording.
-assert.equal(lang.localizeTelegramLine('Product: None'), 'Product / ផលិតផល: None', 'a product named "None" is left alone')
-assert.equal(lang.localizeTelegramLine('Note: item(s) damaged in transit'), 'Note / កំណត់ចំណាំ: item(s) damaged in transit', 'a free-text note is left alone')
+assert.equal(lang.localizeTelegramLine('Product: None'), '· Product / ផលិតផល: None', 'a product named "None" is left alone')
+assert.equal(lang.localizeTelegramLine('Note: item(s) damaged in transit'), '· Note / កំណត់ចំណាំ: item(s) damaged in transit', 'a free-text note is left alone')
 assert.equal(lang.localizeTelegramLine('• Rice 5kg 2 × $1.00 = $2.00'), '• Rice 5kg 2 × $1.00 = $2.00', 'item bullets pass through')
+assert.equal(lang.localizeTelegramLine('1. Rice 5kg 2 × $1.00 = $2.00'), '1. Rice 5kg 2 × $1.00 = $2.00', 'numbered item lines pass through, unbulleted')
+assert.equal(lang.localizeTelegramLine(lang.GROUP_RULE), lang.GROUP_RULE, 'a divider is not a label row and gains no bullet')
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
 
@@ -589,18 +661,18 @@ const lastSent = () => sent[sent.length - 1].body.text
     '🏷️ Inventory / ស្តុក',
     RULE,
     '1. Products / ផលិតផល',
-    'Active products / ផលិតផលសកម្ម: 1,240',
-    'Units on hand / ឯកតាក្នុងស្តុក: 8,630',
+    '· Active products / ផលិតផលសកម្ម: 1,240',
+    '· Units on hand / ឯកតាក្នុងស្តុក: 8,630',
     RULE,
     '2. Stock / ស្តុក',
-    'Low stock / ស្តុកទាប: 12',
-    'Out of stock / អស់ស្តុក: 3',
+    '· Low stock / ស្តុកទាប: 12',
+    '· Out of stock / អស់ស្តុក: 3',
   ], `/inventory does not have the shared numbered-section shape:\n${inventoryReply}`)
   assert.deepEqual(stockReply.split('\n'), [
     '📦 Low stock / ស្តុកទាប',
     RULE,
     '1. Stock / ស្តុក',
-    'Products / ផលិតផល: 2',
+    '· Products / ផលិតផល: 2',
     '• OUT / អស់ស្តុក — Coca-Cola 330ml — 0 (⚠ 5)',
     '• LOW / ស្តុកទាប — Rice 5kg — 3 (⚠ 5)',
   ], `/stock does not have the shared numbered-section shape:\n${stockReply}`)
@@ -694,8 +766,8 @@ const lastSent = () => sent[sent.length - 1].body.text
     '🏷️ Inventory / ស្តុក',
     RULE,
     '1. Products / ផលិតផល',
-    'Active products / ផលិតផលសកម្ម: 0',
-    'Units on hand / ឯកតាក្នុងស្តុក: 0',
+    '· Active products / ផលិតផលសកម្ម: 0',
+    '· Units on hand / ឯកតាក្នុងស្តុក: 0',
   ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)
   console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
 

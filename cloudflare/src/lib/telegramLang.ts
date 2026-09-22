@@ -111,7 +111,11 @@ const LABELS = {
   // --- receipt summary (formatSaleTelegramLines) ---
   status: { en: 'Status', km: 'ស្ថានភាព', localizeValue: true },
   date: { en: 'Date', km: 'កាលបរិច្ឆេទ' },
-  inv: { en: 'INV', km: 'លេខវិក្កយបត្រ' },
+  // SHORTENED Sep 22 2026 (owner: "i changed some khmer that is too long and
+  // no need so long"). វិក្កយបត្រ IS the invoice; លេខ- ("number of") added a
+  // word the reader does not need next to a value that is obviously a number.
+  // Same Khmer as `receipt` below on purpose: one noun, one spelling.
+  inv: { en: 'INV', km: 'វិក្កយបត្រ' },
   receipt: { en: 'Receipt', km: 'វិក្កយបត្រ' },
   cashier: { en: 'Cashier', km: 'អ្នកគិតប្រាក់', localizeValue: true },
   customer: { en: 'Customer', km: 'អតិថិជន' },
@@ -280,7 +284,9 @@ export const TELEGRAM_LABELS: Record<string, LabelEntry> = LABELS
 /** Message headings. Emoji stays in front of BOTH languages. */
 const HEADINGS = {
   '🛍️ Sale recorded': 'បានកត់ត្រាការលក់',
-  '🧾 Receipt status updated': 'ស្ថានភាពបង្កាន់ដៃបានផ្លាស់ប្ដូរ',
+  // SHORTENED Sep 22 2026 to the owner's own wording. បង្កាន់ដៃ (receipt) is
+  // already named by the `Receipt / វិក្កយបត្រ` line directly underneath.
+  '🧾 Receipt status updated': 'ស្ថានភាពបានផ្លាស់ប្ដូរ',
   '💸 Fee recorded': 'បានកត់ត្រាចំណាយ',
   '📥 Stock in': 'ស្តុកចូល',
   '📤 Stock out': 'ស្តុកចេញ',
@@ -294,7 +300,19 @@ export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
 // Enumerated words that appear INSIDE a value. Applied in one pass (longest
 // first) only to labels flagged `localizeValue`, so free-text values -- product
 // names, customer names, notes -- are never touched.
-const VALUE_PHRASES: Record<string, string> = {
+//
+// A plain string entry translates the word: the ENGLISH the caller wrote is
+// kept and the Khmer is appended. A `{ en, km }` entry REPLACES the English
+// too, and exists for one reason: the wire value and the word the shop reads
+// are not the same word. `sale_status = 'awaiting_payment'` is a database
+// enum; the app renamed what it shows for it to "Not Paid / ប្រាក់ជំពាក់"
+// (en.json/km.json status_awaiting_payment) and the bot was left printing the
+// retired phrase in BOTH languages -- the owner found it on Sep 22 2026: "i
+// see in telegram stil uses the old awaiting payment etc...". Rewriting the
+// pair here fixes every message that carries a status without any route
+// learning the status vocabulary.
+type ValuePhrase = string | { en: string; km: string }
+const VALUE_PHRASES: Record<string, ValuePhrase> = {
   'all branches': 'គ្រប់សាខា',
   'receipt(s)': 'វិក្កយបត្រ',
   'record(s)': 'កំណត់ត្រា',
@@ -307,14 +325,18 @@ const VALUE_PHRASES: Record<string, string> = {
   Unknown: 'មិនស្គាល់',
   unpaid: 'មិនទាន់បង់',
   none: 'គ្មាន',
-  // sale statuses (lib/salesStatus.ts VALID_SALE_STATUSES, underscores already
-  // replaced with spaces by the callers)
-  'awaiting payment': 'កំពុងរង់ចាំការទូទាត់',
-  'awaiting delivery': 'រង់ចាំការដឹកជញ្ជូន',
-  'partial return': 'ត្រឡប់ដោយផ្នែក',
-  completed: 'បានបញ្ចប់',
-  cancelled: 'បានបោះបង់',
-  returned: 'បានប្រគល់មកវិញ',
+  // Sale statuses (lib/salesStatus.ts VALID_SALE_STATUSES, underscores already
+  // replaced with spaces by the callers). Every pair is COPIED from
+  // frontend/src/lang/{en,km}.json's status_* keys with the pack's leading
+  // emoji dropped -- the message heading already carries the one emoji a
+  // Telegram bubble needs -- so the phone message and the Sales screen name a
+  // status with the same two words.
+  'awaiting payment': { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },              // status_awaiting_payment
+  'awaiting delivery': { en: 'Awaiting Delivery', km: 'រង់ចាំការដឹកជញ្ជូន' }, // status_awaiting_delivery
+  'partial return': { en: 'Partial Return', km: 'ប្រគល់ខ្លះ' },            // status_partial_return
+  completed: { en: 'Completed', km: 'បានបញ្ចប់' },                          // status_completed
+  cancelled: { en: 'Cancelled', km: 'បានបោះបង់' },                          // status_cancelled
+  returned: { en: 'Returned', km: 'បានប្រគល់' },                            // status_returned
   // return stock actions (lib/returnsStock.ts ReturnStockAction)
   restock: 'បញ្ចូលស្តុកវិញ',
   damaged: 'ខូចខាត',
@@ -347,9 +369,28 @@ export function label(key: TelegramLabelKey): string {
   return pair(entry.en, entry.km)
 }
 
-/** `'Cashier / អ្នកគិតប្រាក់: Za'` -- a whole bilingual line. */
+/**
+ * The bullet every LABEL row opens with (owner, Sep 22 2026: "we can do bullet
+ * points ... so it is easier to read"). One glyph, defined once, so a reader
+ * scanning a long shift report can find where a row starts at phone width
+ * without a parse mode -- postTelegram sends plain text, so indentation is the
+ * only structure available and `*bold*` would print as asterisks.
+ *
+ * `·` is for a LABEL row; `•` stays the marker for the LIST rows (payment
+ * methods, deliveries, expenses, cashiers) and a numbered `1.` opens an item.
+ * Three shapes, three meanings, and none of them is a second way of writing
+ * another.
+ */
+export const ROW_BULLET = '· '
+
+/** `'· Cashier / អ្នកគិតប្រាក់: Za'` -- the one row shape every message uses. */
+export function row(labelText: string, value: unknown): string {
+  return `${ROW_BULLET}${labelText}: ${String(value ?? '')}`
+}
+
+/** `row()` for a table key -- the form nearly every call site wants. */
 export function labeled(key: TelegramLabelKey, value: unknown): string {
-  return `${label(key)}: ${String(value ?? '')}`
+  return row(label(key), value)
 }
 
 /** Ad-hoc pair for copy that is not a field label (help text, notices). */
@@ -357,10 +398,20 @@ export function bi(en: string, km: string): string {
   return pair(en, km)
 }
 
-/** Translate the enumerated words inside one value. */
+/**
+ * Translate the enumerated words inside one value.
+ *
+ * The `en` mode runs the pass too, and must: a `{ en, km }` entry exists
+ * precisely because the English the caller wrote is the retired word, so an
+ * English-only shop is exactly the reader who would otherwise still be sent
+ * "awaiting payment". A plain string entry is unchanged in `en` mode --
+ * `pair(match, km)` hands `match` straight back.
+ */
 export function localizeTelegramValue(value: string): string {
-  if (currentLanguage === 'en') return value
-  return value.replace(VALUE_PHRASE_RE, (match) => pair(match, VALUE_PHRASES[match]))
+  return value.replace(VALUE_PHRASE_RE, (match) => {
+    const phrase = VALUE_PHRASES[match]
+    return typeof phrase === 'string' ? pair(match, phrase) : pair(phrase.en, phrase.km)
+  })
 }
 
 /**
@@ -383,7 +434,10 @@ export function localizeTelegramLine(line: string): string {
   // gives the whole feed ONE date convention without editing that route.
   if (entry.en === 'Date') value = value.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$3/$2/$1')
   if (entry.localizeValue) value = localizeTelegramValue(value)
-  return `${pair(entry.en, entry.km)}: ${value}`
+  // Recognising the label is also what earns the bullet: a line this table
+  // has no word for is not a label row and keeps its own shape (an item
+  // equation, a divider, a list bullet).
+  return row(pair(entry.en, entry.km), value)
 }
 
 /** Make a message heading bilingual, keeping its emoji in front. */
@@ -413,6 +467,20 @@ export function localizeTelegramHeading(heading: string): string {
 // block and a blank line reads as an accident rather than a divider. Exported
 // so lib/telegram.ts draws the SAME rule -- two copies drift by one glyph.
 export const RULE = '━'.repeat(18)
+
+/**
+ * The divider for an EVENT message -- the sale alert and the status change.
+ *
+ * Those two are not sectioned reports: they have no numbered headings, only
+ * groups of rows (who/when, who rang it up, who bought it, what was bought,
+ * what it came to), and the owner's Sep 22 2026 reference layout separates
+ * those groups with a plain dashed row. A lighter weight than `RULE` says
+ * "next group" rather than "next numbered section", and the SAME width keeps
+ * every Business OS message the same shape in the chat. One constant per
+ * family, never a literal at a call site -- two hand-typed rules drift by a
+ * glyph or by a length and the feed starts looking accidental.
+ */
+export const GROUP_RULE = '─'.repeat(18)
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 

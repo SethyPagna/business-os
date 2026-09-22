@@ -198,9 +198,9 @@ check(`the day summary is a title line and ${sectionTitles.length} numbered sect
 // REDESIGNED Sep 6 2026: one figure per line. The counts of the SAME thing
 // share one compact row (Sep 21 2026), under the Invoices section.
 check('and the kernel receipt count, not the count that included the void',
-  /^Total \/ [^\n]*: 2 · /m.test(report) && !/: 3 · /m.test(report) && !/: 3$/m.test(report))
+  /^· Total \/ [^\n]*: 2 · /m.test(report) && !/: 3 · /m.test(report) && !/: 3$/m.test(report))
 check('the refund that produced the difference is printed, so the number explains itself',
-  /^Refunds \/ [^\n]*: \$15\.00$/m.test(report))
+  /^· Refunds \/ [^\n]*: \$15\.00$/m.test(report))
 check('the voided receipt is REPORTED as voided rather than silently counted or silently dropped',
   /Cancelled \/ [^\n]*: 1/.test(report))
 // The whole point of the redesign, stated as a measurement rather than a
@@ -209,7 +209,7 @@ check('the voided receipt is REPORTED as voided rather than silently counted or 
 check(`the day summary fits one phone screen (${report.split('\n').length} lines)`,
   report.split('\n').length <= 26)
 check('and its Sales section leads with revenue and profit, the two that always print',
-  /^Revenue \/ [^\n]*: \$115\.00$/m.test(report) && /^Profit \/ /m.test(report))
+  /^· Revenue \/ [^\n]*: \$115\.00$/m.test(report) && /^· Profit \/ /m.test(report))
 check('the tax and the delivery fee are not inside the sales figure',
   !report.includes('$103.00') && !report.includes('$128.00'))
 
@@ -229,7 +229,7 @@ const reportEn = await telegram.telegramCommandReply({}, '/report 10/08/2026', D
 const reportKm = await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'km')
 check("'en' drops the Khmer half of every label and keeps every figure",
   !khmerText(reportEn) && reportEn.includes('$115.00')
-  && reportEn.split('\n').includes('Revenue: $115.00')
+  && reportEn.split('\n').includes('· Revenue: $115.00')
   && reportEn.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === sectionTitles.map((line) => line.split(SEP)[0]).join(' | '))
 check("'km' drops the English half and still carries the same figures",
   reportKm.includes('$115.00') && reportKm.startsWith('📊 ')
@@ -260,7 +260,7 @@ const inventoryMsg = await telegram.telegramCommandReply({}, '/inventory')
 
 check('the LIMIT 12 the query has always carried still caps the bullet list (14 qualifying rows, 12 shown)',
   stockMsg.split('\n').filter((line) => line.startsWith('•')).length === 12
-  && /^Products \/ [^\n]*: 12$/m.test(stockMsg))
+  && /^· Products \/ [^\n]*: 12$/m.test(stockMsg))
 check('is_active = 0 still excludes a product from /stock entirely', !stockMsg.includes('Inactive item'))
 check('a product above both thresholds is not listed', !stockMsg.includes('Healthy item'))
 check('/inventory counts only the active catalogue (14 qualifying + 1 healthy = 15), never the inactive row',

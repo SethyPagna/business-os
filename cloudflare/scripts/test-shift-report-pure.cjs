@@ -144,7 +144,9 @@ const KHMER = /[ក-៿]/
 const SEP = lang.BILINGUAL_SEPARATOR
 // A section with no rows still prints, marked rather than missing (the
 // owner's Sep 21 2026 reference shows every section, empty ones included).
-const EMPTY_SECTION_MARKER = '—'
+// `N/A` since Sep 22 2026 (owner: "show n/a"): the bare em dash it replaced
+// read as a value that had failed to render, not as "nothing to report".
+const EMPTY_SECTION_MARKER = `${lang.ROW_BULLET}N/A`
 
 // A closed shift: opened 08:15 local (01:15Z), counted 17:02 local (10:02Z).
 const CLOSED = {
@@ -190,7 +192,7 @@ const NOW = Date.parse('2026-09-04T12:00:00.000Z')
 const report = telegram.formatShiftReport('Sok Meng Shop', CLOSED, FIGURES, NOW)
 const lines = report.split('\n')
 const lineWith = (english) => {
-  const prefix = `${english}${SEP}`
+  const prefix = `${lang.ROW_BULLET}${english}${SEP}`
   const found = lines.find((line) => line.startsWith(prefix))
   assert.ok(found, `the report has no "${english}" line:\n${report}`)
   return found
@@ -248,7 +250,7 @@ const ORDER = [
 ]
 let cursor = -1
 for (const english of ORDER) {
-  const at = lines.findIndex((line, index) => index > cursor && line.startsWith(`${english}${SEP}`))
+  const at = lines.findIndex((line, index) => index > cursor && line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
   assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the Sep 21 2026 layout fixed this sequence:\n${report}`)
   cursor = at
 }
@@ -265,13 +267,13 @@ console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines
 // not order.
 {
   const swapped = [...lines]
-  const shopAt = swapped.findIndex((line) => line.startsWith(`Shop${SEP}`))
-  const idAt = swapped.findIndex((line) => line.startsWith(`ID${SEP}`));
+  const shopAt = swapped.findIndex((line) => line.startsWith(`${lang.ROW_BULLET}Shop${SEP}`))
+  const idAt = swapped.findIndex((line) => line.startsWith(`${lang.ROW_BULLET}ID${SEP}`));
   [swapped[shopAt], swapped[idAt]] = [swapped[idAt], swapped[shopAt]]
   let brokenCursor = -1
   let rejected = false
   for (const english of ORDER) {
-    const at = swapped.findIndex((line, index) => index > brokenCursor && line.startsWith(`${english}${SEP}`))
+    const at = swapped.findIndex((line, index) => index > brokenCursor && line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
     if (!(at > brokenCursor)) { rejected = true; break }
     brokenCursor = at
   }
@@ -303,7 +305,8 @@ assert.equal(bulletValue('Other expenses'), '$4.00')
 // The Invoices section is ONE row: the total, and the two counts that
 // qualify it, joined by ' · ' rather than printed on their own lines.
 const invoicesRow = sectionBlock(report, 'invoices')[0]
-assert.equal(invoicesRow, `${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
+// ONE bullet opens the row; the pairs inside it are joined, not re-bulleted.
+assert.equal(invoicesRow, `${lang.ROW_BULLET}${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
 
 // THE EXPENSE TOTAL is the sum of the two bullets that explain it, and only
 // of those two -- a section total that does not equal its own breakdown is
@@ -360,7 +363,7 @@ const noCost = telegram.formatShiftReport('Shop', CLOSED, {
 }, NOW)
 assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
-assert.ok(noCostLines.some((line) => line.startsWith(`Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
+assert.ok(noCostLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
 assert.deepEqual(sectionBlock(noCost, 'expenses'), [`• ${lang.label('expensesOther')} — $4.00`, lang.labeled('total', '$4.00')],
   'an unrecorded courier cost must not be folded into the expense total as a zero, nor as its own bullet')
 console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
@@ -368,7 +371,7 @@ console.log('PASS honesty: an unrecorded courier cost prints no line and enters 
 // --- 4. the difference is the shared formula's number, once ------------------
 
 // Exactly one difference line, and it is signed.
-assert.equal(lines.filter((line) => line.startsWith(`Difference${SEP}`)).length, 1)
+assert.equal(lines.filter((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`)).length, 1)
 // opening 50 + cash 210 - refunds 12 - expenses 4 - courier 3.50 = 240.50,
 // counted 256 -> +15.50. Riel: 100,000 in, 100,000 counted -> 0.
 assert.equal(valueOf('Additional change used'), '$10.00 · 5,000៛')
@@ -381,10 +384,10 @@ assert.notEqual(valueOf('Difference'), '+$23.50 · −5,000៛', 'credit was sub
 
 // A short drawer shows the sign in front of the currency symbol.
 const short = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 235 }, FIGURES, NOW)
-const shortDiff = short.split('\n').find((line) => line.startsWith(`Difference${SEP}`))
+const shortDiff = short.split('\n').find((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`))
 assert.ok(shortDiff.endsWith(': −$15.50 · −5,000៛'), `a short drawer must read as a negative amount, got: ${shortDiff}`)
 const level = telegram.formatShiftReport('Shop', { ...CLOSED, closing_counted_usd: 240.5 }, FIGURES, NOW)
-assert.ok(level.split('\n').find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'),
+assert.ok(level.split('\n').find((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'),
   'a drawer below expected cash is signed')
 console.log('PASS difference: one line, signed in front of the currency symbol, credit not double-counted')
 
@@ -401,10 +404,10 @@ const rielReport = telegram.formatShiftReport('Shop', {
   otherExpenseUsd: 0, otherExpenseKhr: 150000,
 }, NOW)
 const rielLines = rielReport.split('\n')
-assert.ok(rielLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $0.00 · 283,700៛'))
-assert.ok(rielLines.find((line) => line.startsWith(`Closing cash${SEP}`)).endsWith(': $0.00 · 133,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Opening cash${SEP}`)).endsWith(': $0.00 · 283,700៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Closing cash${SEP}`)).endsWith(': $0.00 · 133,700៛'))
 assert.equal(sectionBlock(rielReport, 'expenses').at(-1), lang.labeled('total', '150,000៛'))
-assert.ok(rielLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
+assert.ok(rielLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`)).endsWith(': $0.00 · 0៛'))
 // The per-expense list is gone: the section total and its single fallback
 // bullet are the breakdown the owner asked for, and six bullets under them is
 // the length he asked us to cut.
@@ -478,7 +481,7 @@ const RECONCILED = {
 const full = telegram.formatShiftReport('Shop', CLOSED, { ...FIGURES, reconciliation: RECONCILED }, NOW)
 const fullLines = full.split('\n')
 const fullValue = (english) => {
-  const line = fullLines.find((row) => row.startsWith(`${english}${SEP}`))
+  const line = fullLines.find((row) => row.startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
   assert.ok(line, `no "${english}" line:\n${full}`)
   return line.slice(line.indexOf(': ') + 2)
 }
@@ -528,9 +531,18 @@ for (const length of [0,1,3899,3900,3901,7800]) {
 const OPEN = { ...CLOSED, closed_at: null, closing_counted_usd: null, closing_counted_khr: null }
 const openReport = telegram.formatShiftReport('Sok Meng Shop', OPEN, FIGURES, NOW)
 const openLines = openReport.split('\n')
-const openTo = openLines.find((line) => line.startsWith(`To${SEP}`))
-// Reported up to NOW (12:00Z = 19:00 local).
-assert.ok(openTo.includes('04/09/2026 19:00'), `an open shift reports up to now, got: ${openTo}`)
+const openTo = openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}To${SEP}`))
+// UPDATED Sep 22 2026. This line used to render `formatBusinessDateTime(now)`
+// -- "reported up to now" -- and the owner's paste showed what that means on
+// a shift opened minutes ago: a To identical to the From, a window that reads
+// as zero minutes long. An open shift has NO end, so the line now carries the
+// state pair instead of a timestamp, and cannot be read as one.
+assert.equal(openTo, lang.labeled('to', lang.bi('Open', 'កំពុងបើក')), `an open shift must state its state on the To line, got: ${openTo}`)
+assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(openTo), 'no timestamp may appear on an open shift\'s To line')
+assert.notEqual(openTo, openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}From${SEP}`)), 'From and To must never render identically')
+// The closed report still prints a real closing timestamp -- the change is
+// scoped to the open case.
+assert.ok(/\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(lineWith('To')), `a closed shift still ends on a timestamp: ${lineWith('To')}`)
 // UPDATED Sep 21 2026: "still open" used to be a tag appended to this very To
 // line; the sectioned layout states the shift's state ONCE, in the title, so
 // repeating it here would be the redundant fact the redesign removed. The
@@ -542,17 +554,17 @@ assert.ok(openLines[0].includes('Open'), 'an open shift must say so in the title
 assert.ok(KHMER.test(openLines[0]), 'the title is not bilingual')
 // No closing count exists yet, so neither line may appear -- a "Difference" of
 // -$256.00 on every open till would read as an alarm.
-assert.ok(!openLines.some((line) => line.startsWith(`Closing cash${SEP}`)), 'an open shift must not print a closing count that has not been taken')
+assert.ok(!openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Closing cash${SEP}`)), 'an open shift must not print a closing count that has not been taken')
 assert.ok(!openReport.includes('Difference'), 'an open shift must not print a difference against a count that does not exist')
-assert.ok(openLines.some((line) => line.startsWith(`Expected cash${SEP}`)), 'an open shift still reports expected cash')
+assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Expected cash${SEP}`)), 'an open shift still reports expected cash')
 // The registered-cash block still carries its open half: that is the whole
 // point of showing open vs end.
-assert.ok(openLines.some((line) => line.startsWith(`Opening cash${SEP}`)), 'an open shift still reports its registered opening cash')
+assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Opening cash${SEP}`)), 'an open shift still reports its registered opening cash')
 // Everything else still renders: this is a real report, not a placeholder.
 // (De-duplicated: ORDER lists "Total" twice, once per section it labels.)
 const stillExpected = [...new Set(ORDER)].filter((entry) => entry !== 'Closing cash' && entry !== 'Difference')
 for (const english of stillExpected) {
-  assert.ok(openLines.some((line) => line.startsWith(`${english}${SEP}`)), `open shift dropped the "${english}" line`)
+  assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`)), `open shift dropped the "${english}" line`)
 }
 assert.deepEqual(sectionTitleLines(openReport), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`),
   'an open shift still renders all six sections, in order')
@@ -574,10 +586,10 @@ const emptyLines = empty.split('\n')
 assert.ok(!/NaN|undefined|null/.test(empty), `an empty shift produced a broken value:\n${empty}`)
 // Revenue and Profit print even at zero -- a day that took nothing is a fact
 // -- while every optional line is gone.
-assert.ok(emptyLines.find((line) => line.startsWith(`Revenue${SEP}`)).endsWith(': $0.00'))
-assert.ok(emptyLines.find((line) => line.startsWith(`Profit${SEP}`)).endsWith(': $0.00'))
+assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Revenue${SEP}`)).endsWith(': $0.00'))
+assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Profit${SEP}`)).endsWith(': $0.00'))
 for (const dropped of ['Delivery fee', 'Not Paid', 'Refunds']) {
-  assert.ok(!emptyLines.some((line) => line.startsWith(`${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
+  assert.ok(!emptyLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${dropped}${SEP}`)), `a quiet shift still printed a zero "${dropped}" line`)
 }
 // The Invoices row drops its zero-valued Cancelled/Edited qualifiers but
 // still states the total -- a day with nothing is a fact, not a blank.
@@ -587,10 +599,17 @@ assert.equal(sectionBlock(empty, 'invoices')[0], lang.labeled('total', 0))
 assert.deepEqual(sectionTitleLines(empty), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`))
 assert.deepEqual(sectionBlock(empty, 'expenses'), [EMPTY_SECTION_MARKER],
   'a quiet shift must mark the Expenses section empty rather than print a $0.00 bullet or total')
+// The retired em-dash marker (Sep 22 2026) must not survive on ANY of the
+// three sections that can be empty -- a bare `—` read as a value that had
+// failed to render rather than as "nothing to report".
+assert.ok(!empty.split('\n').includes('—'), `the retired em-dash empty marker is still shipping:\n${empty}`)
+for (const key of ['paymentMethods', 'delivery', 'expenses']) {
+  assert.deepEqual(sectionBlock(empty, key), [EMPTY_SECTION_MARKER], `${key} must mark itself N/A`)
+}
 // The float is still in the drawer and nothing was taken out of it.
-assert.ok(emptyLines.find((line) => line.startsWith(`Opening cash${SEP}`)).endsWith(': $50.00 · 100,000៛'))
-assert.ok(emptyLines.find((line) => line.startsWith(`Expected cash${SEP}`)).endsWith(': $60.00 · 105,000៛'))
-assert.ok(emptyLines.find((line) => line.startsWith(`Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Opening cash${SEP}`)).endsWith(': $50.00 · 100,000៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Expected cash${SEP}`)).endsWith(': $60.00 · 105,000៛'))
+assert.ok(emptyLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Difference${SEP}`)).endsWith(': −$10.00 · −5,000៛'))
 assert.ok(emptyLines.length < lines.length, 'a quiet shift must be shorter than a busy one')
 console.log(`PASS empty shift: ${emptyLines.length} lines, zero-valued lines dropped, the float is still the drawer`)
 
@@ -800,7 +819,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.ok(mappingTotalsCalls >= 1, 'the mapped figure oracle must be consumed through getSalesTotals')
   const mapped = reply.split('\n')
   const mappedValue = (english) => {
-    const found = mapped.find((line) => line.trimStart().startsWith(`${english}${SEP}`))
+    const found = mapped.find((line) => line.trimStart().startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
     assert.ok(found, `the report has no "${english}" line:\n${reply}`)
     return found.slice(found.indexOf(': ') + 2)
   }
@@ -832,7 +851,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   assert.equal(mappedBulletValue(lang.label('deliveryCost')), '$3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two bullets above it.
   assert.equal(mappedSection('expenses').at(-1), lang.labeled('total', '$7.50'), 'the section total is its own two bullets')
-  assert.equal(mappedSection('invoices')[0], `${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
+  assert.equal(mappedSection('invoices')[0], `${lang.ROW_BULLET}${lang.label('total')}: 12 · ${lang.label('cancelled')}: 1 · ${lang.label('edited')}: 2`)
   assert.equal(mappedValue('Opening cash'), '$50.00 · 100,000៛', 'the registered opening cash is the shift row, both currencies')
   assert.equal(mappedValue('Closing cash'), '$256.00 · 100,000៛', 'and the closing cash is the shift row too')
   // opening 50 + cash 0 - refunds 12 - expenses 4 - courier 3.50 = 30.50,

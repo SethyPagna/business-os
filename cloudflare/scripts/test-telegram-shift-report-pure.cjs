@@ -163,34 +163,34 @@ assert.deepEqual(lines, [
   // The TITLE carries the state, the way the owner's reference does
   // ("Shift Report - Open or Closed"), then the business day.
   '🧑‍💼 Shift report / របាយការណ៍វេន — Closed / បានបិទ · 06/09/2026',
-  'Shop / ហាង: Sunrise Mart',
-  'ID / លេខសម្គាល់: S-0906-01',
-  'Cashier / អ្នកគិតប្រាក់: Za',
-  'From / ពី: 06/09/2026 08:15',
-  'To / ទៅ: 06/09/2026 20:02',
+  '· Shop / ហាង: Sunrise Mart',
+  '· ID / លេខសម្គាល់: S-0906-01',
+  '· Cashier / អ្នកគិតប្រាក់: Za',
+  '· From / ពី: 06/09/2026 08:15',
+  '· To / ទៅ: 06/09/2026 20:02',
   RULE,
   '1. Invoices / វិក្កយបត្រ',
-  'Total / សរុប: 24 · Cancelled / បានបោះបង់: 1 · Edited / បានកែប្រែ: 2',
+  '· Total / សរុប: 24 · Cancelled / បានបោះបង់: 1 · Edited / បានកែប្រែ: 2',
   RULE,
   '2. Sales / ការលក់',
-  'Revenue / ចំណូល: $486.25',
-  'Discount on items / ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
-  'Discount on invoices / ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
-  'Gross sales / ការលក់សរុប: $503.65',
-  'Profit / ចំណេញ: $142.60',
-  'Delivery fee / ថ្លៃដឹក: $12.00',
+  '· Revenue / ចំណូល: $486.25',
+  '· Discount on items / ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
+  '· Discount on invoices / ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
+  '· Gross sales / ការលក់សរុប: $503.65',
+  '· Profit / ចំណេញ: $142.60',
+  '· Delivery fee / ថ្លៃដឹក: $12.00',
   // POSITIVE, and the owner's own word. Never $-38.00, and never taken off
   // the Revenue or Profit lines above it.
-  'Not Paid / ប្រាក់ជំពាក់: $38.00',
-  'Refunds / ការសងប្រាក់: $15.00',
+  '· Not Paid / ប្រាក់ជំពាក់: $38.00',
+  '· Refunds / ការសងប្រាក់: $15.00',
   RULE,
   // The gap the owner named: registered opening and closing cash, both
   // currencies, then the expected drawer and ONE difference line.
   '3. Cash count / ការរាប់សាច់ប្រាក់',
-  'Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
-  'Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
-  'Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
-  'Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
+  '· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
+  '· Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
+  '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
+  '· Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
   RULE,
   '4. Payment methods / វិធីទូទាត់',
   '• Cash — 18 · $300.00',
@@ -204,7 +204,7 @@ assert.deepEqual(lines, [
   '6. Expenses / ចំណាយ',
   '• Actual delivery cost / ថ្លៃដឹកដើម — $7.50',
   '• Rent — $9.50 · 20,000៛',
-  'Total / សរុប: $17.00 · 20,000៛',
+  '· Total / សរុប: $17.00 · 20,000៛',
 ], report)
 check('the exact owner sequence renders: title, identity, six numbered sections', true)
 
@@ -212,40 +212,40 @@ check('the exact owner sequence renders: title, identity, six numbered sections'
 check('the Expenses total is exactly its two bullet rows',
   Math.round((figures.otherExpenseUsd + figures.deliveryCostUsd) * 100) / 100 === 17)
 // One difference line, and it is a fact, not a verdict.
-const difference = lines.filter((line) => line.startsWith('Difference'))
+const difference = lines.filter((line) => line.startsWith('· Difference'))
 check('there is exactly one difference line and it never calls the till short',
   difference.length === 1 && !/shortage|short|must match|expected to match/i.test(report), report)
 // Reinstated Sep 21 2026 -- but still ONE line, not a per-return breakdown.
 check('refunds are stated once, in the Sales section',
-  lines.filter((line) => line.startsWith('Refunds')).length === 1, report)
+  lines.filter((line) => line.startsWith('· Refunds')).length === 1, report)
 
 // --- 'en': the English report, with no Khmer word anywhere ------------------
 assert.deepEqual(englishReport.split('\n'), [
   '🧑‍💼 Shift report — Closed · 06/09/2026',
-  'Shop: Sunrise Mart',
-  'ID: S-0906-01',
-  'Cashier: Za',
-  'From: 06/09/2026 08:15',
-  'To: 06/09/2026 20:02',
+  '· Shop: Sunrise Mart',
+  '· ID: S-0906-01',
+  '· Cashier: Za',
+  '· From: 06/09/2026 08:15',
+  '· To: 06/09/2026 20:02',
   RULE,
   '1. Invoices',
-  'Total: 24 · Cancelled: 1 · Edited: 2',
+  '· Total: 24 · Cancelled: 1 · Edited: 2',
   RULE,
   '2. Sales',
-  'Revenue: $486.25',
-  'Discount on items: $12.40',
-  'Discount on invoices: $5.00',
-  'Gross sales: $503.65',
-  'Profit: $142.60',
-  'Delivery fee: $12.00',
-  'Not Paid: $38.00',
-  'Refunds: $15.00',
+  '· Revenue: $486.25',
+  '· Discount on items: $12.40',
+  '· Discount on invoices: $5.00',
+  '· Gross sales: $503.65',
+  '· Profit: $142.60',
+  '· Delivery fee: $12.00',
+  '· Not Paid: $38.00',
+  '· Refunds: $15.00',
   RULE,
   '3. Cash count',
-  'Opening cash: $50.00 · 100,000៛',
-  'Closing cash: $182.50 · 240,000៛',
-  'Expected cash: $178.00 · 240,000៛',
-  'Difference: +$4.50 · 0៛',
+  '· Opening cash: $50.00 · 100,000៛',
+  '· Closing cash: $182.50 · 240,000៛',
+  '· Expected cash: $178.00 · 240,000៛',
+  '· Difference: +$4.50 · 0៛',
   RULE,
   '4. Payment methods',
   '• Cash — 18 · $300.00',
@@ -257,7 +257,7 @@ assert.deepEqual(englishReport.split('\n'), [
   '6. Expenses',
   '• Actual delivery cost — $7.50',
   '• Rent — $9.50 · 20,000៛',
-  'Total: $17.00 · 20,000៛',
+  '· Total: $17.00 · 20,000៛',
 ], englishReport)
 check('the \'en\' mode report carries no Khmer word at all (the riel sign is a symbol, not a word)',
   !khmerText(englishReport), englishReport)
@@ -268,30 +268,30 @@ check('the \'en\' mode report carries no Khmer word at all (the riel sign is a s
 const khmerReport = render('km', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW))
 assert.deepEqual(khmerReport.split('\n'), [
   '🧑‍💼 របាយការណ៍វេន — បានបិទ · 06/09/2026',
-  'ហាង: Sunrise Mart',
-  'លេខសម្គាល់: S-0906-01',
-  'អ្នកគិតប្រាក់: Za',
-  'ពី: 06/09/2026 08:15',
-  'ទៅ: 06/09/2026 20:02',
+  '· ហាង: Sunrise Mart',
+  '· លេខសម្គាល់: S-0906-01',
+  '· អ្នកគិតប្រាក់: Za',
+  '· ពី: 06/09/2026 08:15',
+  '· ទៅ: 06/09/2026 20:02',
   RULE,
   '1. វិក្កយបត្រ',
-  'សរុប: 24 · បានបោះបង់: 1 · បានកែប្រែ: 2',
+  '· សរុប: 24 · បានបោះបង់: 1 · បានកែប្រែ: 2',
   RULE,
   '2. ការលក់',
-  'ចំណូល: $486.25',
-  'ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
-  'ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
-  'ការលក់សរុប: $503.65',
-  'ចំណេញ: $142.60',
-  'ថ្លៃដឹក: $12.00',
-  'ប្រាក់ជំពាក់: $38.00',
-  'ការសងប្រាក់: $15.00',
+  '· ចំណូល: $486.25',
+  '· ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
+  '· ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
+  '· ការលក់សរុប: $503.65',
+  '· ចំណេញ: $142.60',
+  '· ថ្លៃដឹក: $12.00',
+  '· ប្រាក់ជំពាក់: $38.00',
+  '· ការសងប្រាក់: $15.00',
   RULE,
   '3. ការរាប់សាច់ប្រាក់',
-  'សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
-  'សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
-  'សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
-  'ភាពខុសគ្នា: +$4.50 · 0៛',
+  '· សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
+  '· សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
+  '· សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
+  '· ភាពខុសគ្នា: +$4.50 · 0៛',
   RULE,
   '4. វិធីទូទាត់',
   '• Cash — 18 · $300.00',
@@ -303,7 +303,7 @@ assert.deepEqual(khmerReport.split('\n'), [
   '6. ចំណាយ',
   '• ថ្លៃដឹកដើម — $7.50',
   '• Rent — $9.50 · 20,000៛',
-  'សរុប: $17.00 · 20,000៛',
+  '· សរុប: $17.00 · 20,000៛',
 ], khmerReport)
 // A label position is everything before the first ': ' on a non-bullet line.
 // Product names, payment methods and couriers live on bullets and after the
@@ -351,11 +351,28 @@ const openReport = render('both', () => telegram.formatShiftReport('Sunrise Mart
 assert.deepEqual(sectionTitles(openReport), SIX_SECTIONS, openReport)
 check('an open shift shows the opening count and no difference against a count nobody took',
   openReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Open / កំពុងបើក · 06/09/2026')
-  && openReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
+  && openReport.includes('· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
   && !openReport.includes('Closing cash')
   && !openReport.includes('Difference'), openReport)
-check('and its To line reports up to now rather than inventing a closing time',
-  openReport.includes('To / ទៅ: 06/09/2026 21:00'), openReport)
+// FIXED Sep 22 2026. The To line used to print `formatBusinessDateTime(now)`,
+// which on a shift opened minutes ago rendered IDENTICAL to the From line --
+// a window that reads as zero minutes long, which is what the owner pasted --
+// and on a long one rendered a closing time that never happened. It now
+// carries the same state pair the title does, so it cannot be misread as a
+// timestamp at all.
+check('an open shift states "open" on its To line instead of a closing time that never happened',
+  openReport.includes('· To / ទៅ: Open / កំពុងបើក')
+  && !openReport.includes('· To / ទៅ: 06/09/2026'), openReport)
+// The defect in its own right: a shift opened one minute ago must not print
+// the same value on both bound lines.
+const justOpened = render('both', () => telegram.formatShiftReport('Sunrise Mart', { ...openShift, opened_at: '2026-09-06T13:59:00.000Z' }, figures, NOW))
+const boundLines = justOpened.split('\n').filter((line) => /^· (From|To) \//.test(line))
+check('the From and To lines of a just-opened shift are never the same string',
+  boundLines.length === 2 && boundLines[0] !== boundLines[1], justOpened)
+// A CLOSED shift still prints its real closing timestamp -- the fix is scoped
+// to the open case and nothing else.
+check('a closed shift still prints its real closing time',
+  report.includes('· To / ទៅ: 06/09/2026 20:02'), report)
 
 const partiallyRegistered = render('both', () => telegram.formatShiftReport('Sunrise Mart', {
   ...openShift, opening_float_usd: null, opening_float_khr: 0,
@@ -388,35 +405,46 @@ const quiet = render('both', () => telegram.formatShiftReport('Sunrise Mart', { 
 }, NOW))
 assert.deepEqual(quiet.split('\n'), [
   '🧑‍💼 Shift report / របាយការណ៍វេន — Open / កំពុងបើក · 06/09/2026',
-  'Shop / ហាង: Sunrise Mart',
-  'ID / លេខសម្គាល់: S-0906-01',
-  'Cashier / អ្នកគិតប្រាក់: Za',
-  'From / ពី: 06/09/2026 08:15',
-  'To / ទៅ: 06/09/2026 21:00',
+  '· Shop / ហាង: Sunrise Mart',
+  '· ID / លេខសម្គាល់: S-0906-01',
+  '· Cashier / អ្នកគិតប្រាក់: Za',
+  '· From / ពី: 06/09/2026 08:15',
+  '· To / ទៅ: Open / កំពុងបើក',
   RULE,
   '1. Invoices / វិក្កយបត្រ',
-  'Total / សរុប: 0',
+  '· Total / សរុប: 0',
   RULE,
   '2. Sales / ការលក់',
-  'Revenue / ចំណូល: $0.00',
-  'Profit / ចំណេញ: $0.00',
+  // A shift that took nothing prints $0.00 and NOTHING in riel. The owner's
+  // Sep 22 2026 paste showed `Revenue: $0.00 · 000៛` -- a riel figure with no
+  // value, and a zero-padding no formatter in lib/telegram.ts produces. These
+  // two rows are USD-only by construction; pinned here so an edit that adds a
+  // riel equivalent has to face the zero case first.
+  '· Revenue / ចំណូល: $0.00',
+  '· Profit / ចំណេញ: $0.00',
   RULE,
   '3. Cash count / ការរាប់សាច់ប្រាក់',
-  'Opening cash / សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
-  'Expected cash / សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
+  '· Opening cash / សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
+  '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
   RULE,
   '4. Payment methods / វិធីទូទាត់',
-  '—',
+  // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced
+  // read as a value that failed to render rather than as "nothing here".
+  '· N/A',
   RULE,
   '5. Delivery / ការដឹកជញ្ជូន',
-  '—',
+  '· N/A',
   RULE,
   '6. Expenses / ចំណាយ',
-  '—',
+  '· N/A',
 ], quiet)
 check(`a shift that took nothing keeps all six sections and marks the empty ones (${quiet.split('\n').length} lines)`,
   !quiet.includes('Not Paid') && !quiet.includes('Delivery fee') && !quiet.includes('Refunds')
   && !quiet.includes('Cancelled') && !quiet.includes('Edited'), quiet)
+check('the retired em-dash empty marker is gone from every section',
+  !quiet.split('\n').includes('—') && quiet.split('\n').filter((line) => line === '· N/A').length === 3, quiet)
+check('a zero row carries no empty riel figure',
+  !/^· (Revenue|Profit)[^\n]*៛/m.test(quiet), quiet)
 
 // An unrecorded courier cost is NULL, never $0.00 (deliveryActualCostExpr), so
 // a courier with no payout recorded shows the fee alone rather than claiming
@@ -437,14 +465,14 @@ const lossFigures = { ...figures, removalLossUsd: 12.5, removalLossUnvaluedRows:
 const lossEn = render('en', () => telegram.formatShiftReport('Sunrise Mart', shift, lossFigures, NOW))
 const lossKm = render('km', () => telegram.formatShiftReport('Sunrise Mart', shift, lossFigures, NOW))
 check('the shift report Loss line carries the unvalued-count suffix in English',
-  lossEn.split('\n').includes('Loss: $12.50 (1?)'), lossEn)
+  lossEn.split('\n').includes('· Loss: $12.50 (1?)'), lossEn)
 check('...and the SAME suffix survives in the Khmer rendering of the same line',
-  lossKm.split('\n').includes('ខាតបង់: $12.50 (1?)'), lossKm)
+  lossKm.split('\n').includes('· ខាតបង់: $12.50 (1?)'), lossKm)
 // Loss sits directly below Not Paid, the owner's "also add one row below
 // unpaid in reports as well".
 const lossBoth = render('both', () => telegram.formatShiftReport('Sunrise Mart', shift, lossFigures, NOW)).split('\n')
 check('and Loss sits directly below Not Paid',
-  lossBoth.findIndex((line) => line.startsWith('Loss')) === lossBoth.findIndex((line) => line.startsWith('Not Paid')) + 1, lossBoth.join('\n'))
+  lossBoth.findIndex((line) => line.startsWith('· Loss')) === lossBoth.findIndex((line) => line.startsWith('· Not Paid')) + 1, lossBoth.join('\n'))
 
 // The 8-row cap with an "Other" fold is applied in shiftFigures (it needs the
 // kernel rows), so the formatter is pinned on the rows it is handed.
@@ -483,23 +511,23 @@ assert.deepEqual(daySections, [
   '📊 Business summary / សង្ខេបអាជីវកម្ម — 06/09/2026',
   RULE,
   '1. Sales / ការលក់',
-  'Revenue / ចំណូល: $486.25',
-  'Profit / ចំណេញ: $142.60',
-  'Delivery fee / ថ្លៃដឹក: $12.00',
-  'Not Paid / ប្រាក់ជំពាក់: $38.00',
-  'Refunds / ការសងប្រាក់: $15.00',
+  '· Revenue / ចំណូល: $486.25',
+  '· Profit / ចំណេញ: $142.60',
+  '· Delivery fee / ថ្លៃដឹក: $12.00',
+  '· Not Paid / ប្រាក់ជំពាក់: $38.00',
+  '· Refunds / ការសងប្រាក់: $15.00',
   RULE,
   '2. Invoices / វិក្កយបត្រ',
-  'Total / សរុប: 24 · Cancelled / បានបោះបង់: 1',
+  '· Total / សរុប: 24 · Cancelled / បានបោះបង់: 1',
   RULE,
   '3. Expenses / ចំណាយ',
-  'Actual delivery cost / ថ្លៃដឹកដើម: $7.50',
-  'Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
-  'Total / សរុប: $17.00 · 20,000៛',
+  '· Actual delivery cost / ថ្លៃដឹកដើម: $7.50',
+  '· Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
+  '· Total / សរុប: $17.00 · 20,000៛',
   RULE,
   '4. Stock / ស្តុក',
-  'Stock in / ស្តុកចូល: 3 movement(s) / ចលនាស្តុក · 120 unit(s) / ឯកតា',
-  'Stock out / ស្តុកចេញ: 1 movement(s) / ចលនាស្តុក · 4 unit(s) / ឯកតា',
+  '· Stock in / ស្តុកចូល: 3 movement(s) / ចលនាស្តុក · 120 unit(s) / ឯកតា',
+  '· Stock out / ស្តុកចេញ: 1 movement(s) / ចលនាស្តុក · 4 unit(s) / ឯកតា',
   RULE,
   '5. Cashiers / អ្នកគិតប្រាក់',
   '• za01 — 18 · $300.00',

@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, normalizeTelegramLanguage, RULE,
+  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, normalizeTelegramLanguage, ROW_BULLET, row, RULE,
   parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -363,16 +363,26 @@ const sectionTitle = (index: number, key: TelegramLabelKey): string[] => [RULE, 
 
 /** A section the shop has no rows for still prints, so the numbering and the
  *  shape of the message never move (the owner's reference shows every
- *  section, empty ones included). */
-const EMPTY_SECTION = '—'
+ *  section, empty ones included).
+ *
+ *  `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced read
+ *  as a rendering accident -- a row whose value failed to print -- rather than
+ *  as the fact that there is nothing to report. `N/A` is left untranslated on
+ *  purpose: it is the same two letters in the Khmer half of every form in this
+ *  app, and a Khmer paraphrase of "no data" would be longer than the rows it
+ *  stands in for. */
+const EMPTY_SECTION = `${ROW_BULLET}N/A`
 
 /**
- * `Total: 24 · Cancelled: 1 · Edited: 2` -- one compact row for counts of the
- * SAME thing. The first entry always prints (a shift that rang nothing up
+ * `· Total: 24 · Cancelled: 1 · Edited: 2` -- one compact row for counts of
+ * the SAME thing. The first entry always prints (a shift that rang nothing up
  * still states it); the rest only when they are non-zero.
+ *
+ * Composed from `label()` rather than `labeled()`: this is ONE row carrying
+ * several pairs, so it opens with ONE bullet.
  */
 const countRow = (entries: Array<[TelegramLabelKey, number]>): string =>
-  entries.filter(([, value], index) => index === 0 || value > 0).map(([key, value]) => labeled(key, value)).join(' · ')
+  ROW_BULLET + entries.filter(([, value], index) => index === 0 || value > 0).map(([key, value]) => `${label(key)}: ${value}`).join(' · ')
 
 /**
  * At most `limit` rows; everything past it folds into ONE "Other" row, so a
@@ -758,16 +768,21 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     labeled('shift', cleanLine(shift.shift_code, 40)),
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
     labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
-    // An open shift reports up to NOW rather than printing a closing time that
-    // has not happened; the title already says the shift is still open. A
-    // shift left running overnight is the honest record -- migration 0116
-    // refuses to close one on a timer -- so the report has to render one.
-    labeled('to', formatBusinessDateTime(open ? new Date(nowMs).toISOString() : endedAt, nowMs)),
+    // An OPEN shift has no end. It used to print `formatBusinessDateTime(now)`
+    // here, which on a shift opened minutes ago rendered `To:` identical to
+    // `From:` -- the owner's Sep 22 2026 paste shows exactly that, a window
+    // that reads as zero minutes long -- and on a long shift rendered a
+    // precise closing time that never happened. The honest value is the
+    // state itself, and it is the SAME pair the title already carries, so no
+    // new label and no new Khmer: `To / ទៅ: Open / កំពុងបើក`. A shift left
+    // running overnight is still the honest record (migration 0116 refuses to
+    // close one on a timer) and still renders.
+    labeled('to', open ? state : formatBusinessDateTime(endedAt, nowMs)),
   ]
   if (cancelled) {
-    if (shift.closed_at) lines.push(`${bi('Cancelled at', 'បោះបង់នៅ')}: ${formatBusinessDateTime(shift.cancelled_at, nowMs)}`)
-    lines.push(`${bi('Cancelled by', 'បោះបង់ដោយ')}: ${cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)}`)
-    lines.push(`${bi('Reason', 'មូលហេតុ')}: ${cleanLine(shift.cancel_reason || 'Not recorded', 500)}`)
+    if (shift.closed_at) lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
+    lines.push(row(bi('Cancelled by', 'បោះបង់ដោយ'), cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)))
+    lines.push(row(bi('Reason', 'មូលហេតុ'), cleanLine(shift.cancel_reason || 'Not recorded', 500)))
   }
 
   // 1. Invoices -- total, and the two counts that qualify it.
@@ -1206,6 +1221,28 @@ export type TelegramStockChange = {
 }
 const TELEGRAM_MAX_ITEM_LINES = 20
 
+/**
+ * Join an event message's row GROUPS with the one event divider.
+ *
+ * Owner, Sep 22 2026, over a sale alert: "for sales we can do like this. so it
+ * is easier to read." Their reference layout separates when/what-it-is, who
+ * rang it up, who it was for, the items, and the money with a rule between
+ * each -- five blocks a reader can jump between instead of one column of
+ * fifteen rows.
+ *
+ * A group whose rows are ALL empty (no customer at all, a sale with no
+ * delivery) takes its divider with it, so an anonymous walk-in never ships a
+ * rule with nothing under it and never two rules in a row. Blanks are dropped
+ * HERE rather than by sendTelegramEvent's `.filter(Boolean)` because only
+ * this function can tell an empty group from an empty row.
+ */
+function eventGroups(groups: string[][]): string[] {
+  return groups
+    .map((group) => group.filter(Boolean))
+    .filter((group) => group.length)
+    .flatMap((group, index) => (index ? [GROUP_RULE, ...group] : group))
+}
+
 // dd/mm/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
 // convention (day-first since Sep 4 2026). D1's CURRENT_TIMESTAMP is
 // 'YYYY-MM-DD HH:MM:SS' UTC without a zone marker; client-sent created_at is
@@ -1277,7 +1314,11 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   const shopAbsorbedDelivery = Boolean(sale.isDelivery) && deliveryFee > 0 && customerDelivery === 0
   const paid = (Number(sale.paidUsd) || 0) + (Number(sale.paidKhr) || 0)
   const change = (Number(sale.changeUsd) || 0) + (Number(sale.changeKhr) || 0)
-  const status = String(sale.status || '').replace(/_/g, ' ')
+  // Defaulted, because the Status row is unconditional since Sep 22 2026 and a
+  // caller that omits the status must not produce `Status:` with nothing after
+  // it. `completed` is the same reading the app's own normalizer gives a
+  // missing sale_status, and the heading already says a sale was recorded.
+  const status = String(sale.status || 'completed').replace(/_/g, ' ')
   // lib/salesStatus.ts's one unsettled status, with the underscore already
   // taken out above. This is the ONLY thing that makes a sale credit.
   const unsettled = status === 'awaiting payment'
@@ -1287,49 +1328,125 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // stop doing -- so on the ordinary sale it does not print at all.
   const grossTotalUsd = round2((Number(sale.subtotalUsd) || 0) + customerDelivery)
   const totalRepeatsNet = grossTotalUsd === round2(Number(sale.totalUsd) || 0)
-  return [
-    // A completed sale is the norm this heading already announces ("Sale
-    // recorded"), so only an out-of-the-ordinary status is worth a line.
-    status && status !== 'completed' ? `Status: ${status}` : '',
-    `Date: ${formatBusinessDateTime(sale.createdAt)}`,
-    `INV: ${sale.receiptNumber}`,
-    `Cashier: ${sale.cashier || 'Unknown'}`,
-    sale.customer ? `Customer: ${sale.customer}` : '',
-    sale.phone ? `Tel: ${sale.phone}` : '',
-    sale.branch ? `Branch: ${sale.branch}` : '',
-    ...items,
-    sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
-    sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
-    totalRepeatsNet ? '' : `Total: ${usd(grossTotalUsd)}`,
-    sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
-    sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
-    // totalKhr is the converted equivalent of totalUsd, while paidUsd and
-    // paidKhr are native tender amounts. Change from saleTotals is likewise
-    // an equivalent pair unless a caller can explicitly establish that both
-    // currencies were physically returned.
-    //
-    // A sale the customer has NOT settled states the amount ONCE, under the
-    // word CREDIT -- the owner's ruling for this figure everywhere ("just use
-    // credit ... instead of $-n ... just $n"). It used to print the same
-    // dollars as a Net Total and then "Paid: unpaid" underneath: two lines,
-    // one number, and the word the reader was looking for on neither of them.
-    //
-    // The trigger is the sale's own STATUS, never "no tender was passed to
-    // this builder": a replacement hand-out and a completed sale whose
-    // payment the caller did not supply are not credit, and calling them
-    // credit would put a debt on a customer who owes nothing.
-    ...(unsettled && paid <= 0
-      ? [`Not Paid: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
-      : [
-        `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
-        // No recorded tender means no Paid line. The status carries the
-        // "not paid" fact already, so a line saying it again is one more
-        // line for nothing.
-        paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
-      ]),
-    change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
-    sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
-  ]
+  return eventGroups([
+    // WHAT HAPPENED. Status leads, and it prints on EVERY sale now (owner's
+    // Sep 22 2026 reference layout opens on it). It used to be dropped on a
+    // completed sale as "the norm the heading already announces" -- but the
+    // reader scanning a phone at the till wants the same row in the same
+    // place on every message far more than they want one line saved, and a
+    // status that appears only when something is unusual is a row whose
+    // ABSENCE has to be interpreted. The value's wording comes from
+    // telegramLang's status table, so it says "Not Paid / ប្រាក់ជំពាក់".
+    [
+      `Status: ${status}`,
+      `Date: ${formatBusinessDateTime(sale.createdAt)}`,
+      `INV: ${sale.receiptNumber}`,
+    ],
+    // WHO RANG IT UP.
+    [
+      `Cashier: ${sale.cashier || 'Unknown'}`,
+      sale.branch ? `Branch: ${sale.branch}` : '',
+    ],
+    // WHO IT WAS FOR. The driver belongs with the customer, not alone at the
+    // foot of the message: on a delivery the three of them are one fact --
+    // who bought it, how to reach them, who is taking it to them.
+    [
+      sale.customer ? `Customer: ${sale.customer}` : '',
+      sale.phone ? `Tel: ${sale.phone}` : '',
+      sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
+    ],
+    // WHAT WAS BOUGHT.
+    [
+      ...items,
+      sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
+    ],
+    // WHAT IT CAME TO.
+    [
+      sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
+      totalRepeatsNet ? '' : `Total: ${usd(grossTotalUsd)}`,
+      sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
+      sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
+      // totalKhr is the converted equivalent of totalUsd, while paidUsd and
+      // paidKhr are native tender amounts. Change from saleTotals is likewise
+      // an equivalent pair unless a caller can explicitly establish that both
+      // currencies were physically returned.
+      //
+      // A sale the customer has NOT settled states the amount ONCE, under the
+      // word CREDIT -- the owner's ruling for this figure everywhere ("just use
+      // credit ... instead of $-n ... just $n"). It used to print the same
+      // dollars as a Net Total and then "Paid: unpaid" underneath: two lines,
+      // one number, and the word the reader was looking for on neither of them.
+      //
+      // The trigger is the sale's own STATUS, never "no tender was passed to
+      // this builder": a replacement hand-out and a completed sale whose
+      // payment the caller did not supply are not credit, and calling them
+      // credit would put a debt on a customer who owes nothing.
+      ...(unsettled && paid <= 0
+        ? [`Not Paid: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
+        : [
+          `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
+          // No recorded tender means no Paid line. The status carries the
+          // "not paid" fact already, so a line saying it again is one more
+          // line for nothing.
+          paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
+        ]),
+      change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
+    ],
+  ])
+}
+
+/**
+ * The receipt-status change -- `PATCH /api/sales/:id/status`'s alert.
+ *
+ * It lived INLINE in routes/sales.ts until Sep 22 2026, and that is exactly
+ * why the owner found `Status: awaiting payment → completed` on their phone
+ * months after the app stopped using those words anywhere else: a route
+ * composing message text is a place the message rules do not reach. It is a
+ * builder like every other event message now, beside the sale summary whose
+ * Status line it has to agree with, and it emits the SAME raw status strings
+ * that summary does so both are translated by the one status table in
+ * telegramLang.ts.
+ *
+ * `reason` arrives already resolved to display text (routes/sales.ts owns the
+ * cancellation-reason vocabulary), and `by` is last, the idiom every other
+ * builder that names an actor already follows.
+ */
+export type TelegramStatusChange = {
+  // `receipt` and `customer` are read straight off the D1 row, which the
+  // status handler holds as a `Record<string, unknown>`, so they arrive
+  // untyped and are cleaned here rather than cast at the call site.
+  receipt: unknown
+  fromStatus: string
+  toStatus: string
+  customer?: unknown
+  reason?: string | null
+  /** > 0 when the transition deliberately moved no stock (S4-2). */
+  skippedUnits?: number
+  lostFeeUsd?: number
+  lostFeeKhr?: number
+  by?: string | null
+}
+export function formatSaleStatusTelegramLines(change: TelegramStatusChange): string[] {
+  const readable = (value: unknown) => String(value ?? '').replace(/_/g, ' ')
+  const skipped = Math.round(Number(change.skippedUnits) || 0)
+  const lostFeeUsd = Number(change.lostFeeUsd) || 0
+  const lostFeeKhr = Number(change.lostFeeKhr) || 0
+  const customer = cleanLine(change.customer, 120)
+  return eventGroups([
+    [
+      `Receipt: ${cleanLine(change.receipt, 40)}`,
+      `Status: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`,
+    ],
+    [
+      customer ? `Customer: ${customer}` : '',
+      change.reason ? `Reason: ${change.reason}` : '',
+      // S4-2: say it out loud on the shop's channel too -- a status change
+      // that moved no stock must not look like a normal one.
+      skipped > 0 ? `Stock: not changed (${skipped} unit${skipped === 1 ? '' : 's'} deliberately skipped)` : '',
+      lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
+      change.by ? `By: ${change.by}` : '',
+    ],
+  ])
 }
 
 // Stock alerts carry the RESULTING on-hand figures (this branch, all
