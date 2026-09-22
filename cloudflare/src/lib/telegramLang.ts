@@ -423,7 +423,10 @@ export function localizeTelegramValue(value: string): string {
 export function localizeTelegramLine(line: string): string {
   const text = String(line ?? '')
   if (!text) return text
-  if (text.startsWith('+ ')) return localizeTelegramValue(text)
+  // The `+ N more item(s)` continuation closes the numbered item list, so
+  // it takes the row bullet too -- without it, it was the one row in the
+  // message hanging off the left margin.
+  if (text.startsWith('+ ')) return ROW_BULLET + localizeTelegramValue(text)
   const split = text.indexOf(': ')
   if (split <= 0) return text
   const entry = BY_ENGLISH.get(text.slice(0, split))
