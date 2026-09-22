@@ -142,7 +142,7 @@ import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/na
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
-import { formatSaleTelegramLines, sendTelegramEvent, telegramMoney } from '../lib/telegram'
+import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
@@ -2597,19 +2597,24 @@ app.patch('/:id/status', async (c) => {
   // formatStockChangeTelegramLines/formatTransferTelegramLines/
   // formatReturnTelegramLines, rather than printing "By: undefined".
   const actorName = actorSnapshot(user)
+  // The LINES are composed by lib/telegram.ts (formatSaleStatusTelegramLines),
+  // like every other event message. This handler used to build them here, and
+  // that is how it kept sending the retired words "awaiting payment" long
+  // after the app had renamed the status to "Not Paid": message wording is not
+  // a route's job. This route's job is the facts.
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'status',
-    lines: [
-      `Receipt: ${sale.receipt_number || id}`,
-      `Status: ${oldStatus.replace(/_/g, ' ')} → ${saleStatus.replace(/_/g, ' ')}`,
-      sale.customer_name ? `Customer: ${sale.customer_name}` : '',
-      cancelReason ? `Reason: ${cancelReasonLabel(cancelReason)}` : '',
-      // S4-2: say it out loud on the shop's channel too -- a status change
-      // that moved no stock must not look like a normal one.
-      skipStock ? `Stock: not changed (${totalSkippedUnits} unit${totalSkippedUnits === 1 ? '' : 's'} deliberately skipped)` : '',
-      cancelFeeUsd || cancelFeeKhr ? `Lost fee: ${telegramMoney(cancelFeeUsd, cancelFeeKhr)}` : '',
-      actorName ? `By: ${actorName}` : '',
-    ],
+    lines: formatSaleStatusTelegramLines({
+      receipt: sale.receipt_number || id,
+      fromStatus: oldStatus,
+      toStatus: saleStatus,
+      customer: sale.customer_name,
+      reason: cancelReason ? cancelReasonLabel(cancelReason) : null,
+      skippedUnits: skipStock ? totalSkippedUnits : 0,
+      lostFeeUsd: cancelFeeUsd,
+      lostFeeKhr: cancelFeeKhr,
+      by: actorName,
+    }),
   }).catch((error) => console.error('[telegram] sale status notification failed', error)))
   // S4-2: echo the skip back so the client can badge the sale immediately
   // (and so a scripted caller can assert the flag actually took effect).
