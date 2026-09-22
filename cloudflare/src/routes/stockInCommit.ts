@@ -75,12 +75,15 @@ async function runLine(c: InventoryContext, line: StockInCommitLine): Promise<St
       const res = await runReceiveBatchAction(c, line.body)
       const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
       if (res.status >= 200 && res.status < 300) return { ok: true, key: line.key, ...json }
-      return { ok: false, key: line.key, error: String(json.error || 'Failed to receive stock') }
+      // Migration 0192: the guard's code has to survive the per-line
+      // envelope, or FastStockInModal cannot tell a replay refusal (remove
+      // this line) from an ordinary validation failure (fix and retry).
+      return { ok: false, key: line.key, error: String(json.error || 'Failed to receive stock'), code: json.code ?? null }
     }
     const res = await runAdjustAction(c, line.body)
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>
     if (res.status >= 200 && res.status < 300) return { ok: true, key: line.key, ...json }
-    return { ok: false, key: line.key, error: String(json.error || 'Failed to adjust stock') }
+    return { ok: false, key: line.key, error: String(json.error || 'Failed to adjust stock'), code: json.code ?? null }
   } catch (error) {
     return { ok: false, key: line.key, error: error instanceof Error ? error.message : 'Failed' }
   }

@@ -23,6 +23,7 @@ import {
   applyRowOutcome,
   browserStockStorage,
   classifyStockAdjustFailure,
+  stockFailureText,
   createRow,
   dropFailedStockAttempt,
   emitFailedAttemptsChanged,
@@ -701,7 +702,12 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       // The row keeps the exact request the operator built, the server's own
       // reason is pinned to it for inline display, and the attempt is
       // persisted so the Stock Change section lists it as unsaved.
-      const failure = classifyStockAdjustFailure(error)
+      const classified = classifyStockAdjustFailure(error)
+      // The 0192 guard's refusals (in-flight, partially applied, id conflict,
+      // unusable id) are the guard's own sentences, so they are translated here;
+      // every other failure keeps the server's verbatim text, which the operator
+      // acts on.
+      const failure = { ...classified, message: stockFailureText(error, tr, classified.message) }
       setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'failed', failure }))
       persistFailedAttempt(adjustmentRequest, target.rowId, failure)
       notify(failure.message, 'error')

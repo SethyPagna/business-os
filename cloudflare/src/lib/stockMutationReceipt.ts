@@ -262,18 +262,21 @@ async function releaseStockMutation(db: D1Compat, actorId: number, requestId: st
   ).run({ actor: actorId, request: requestId })
 }
 
+// Machine-readable codes. The frontend maps all four to a translated sentence
+// (utils/stockAdjustOutcome.ts's stockRequestFailureEntry + the en/km packs);
+// the English text here is the fallback for a direct API caller.
 const STOCK_MUTATION_INVALID_ID = {
   error: 'client_request_id must be 8-120 characters of letters, digits, "-" or "_".',
   code: 'invalid_client_request_id',
 }
 
 const STOCK_MUTATION_CONFLICT = {
-  error: 'client_request_id was already used for different stock data.',
+  error: 'This line was already recorded with different details. Remove this line and add it again if needed.',
   code: 'idempotency_conflict',
 }
 
 const STOCK_MUTATION_IN_FLIGHT = {
-  error: 'This stock line is already being recorded. Check the Stock Change ledger before sending it again.',
+  error: 'This line is still being recorded on the server. Wait a moment and try again.',
   code: 'stock_request_in_flight',
 }
 

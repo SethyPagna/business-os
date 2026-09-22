@@ -31,6 +31,12 @@ export type StockAdjustFailureKind =
 
 export type StockAdjustFailure = {
   kind: StockAdjustFailureKind
+  /**
+   * The server's machine-readable code, '' when it gave none. Carried so a
+   * surface can translate the sentence instead of showing the English one --
+   * see stockRequestFailureEntry below.
+   */
+  code: string
   /** The server's own message, verbatim where it gave one. */
   message: string
   /** Parsed out of the insufficient-stock messages so the row can show it. */
@@ -103,7 +109,7 @@ export function classifyStockAdjustFailure(error: unknown): StockAdjustFailure {
     || reason === 'server_not_configured'
     || /failed to fetch|networkerror|load failed|server is offline|server is not connected/i.test(message)
   if (offline) {
-    return { kind: 'offline', message, available: null, requested: null, status, retryable: true, offline: true }
+    return { kind: 'offline', code, message, available: null, requested: null, status, retryable: true, offline: true }
   }
 
   // "Cannot remove 5 - only 2 available in shop" / "Only 2 available in this
@@ -113,6 +119,7 @@ export function classifyStockAdjustFailure(error: unknown): StockAdjustFailure {
   if (availableMatch || /no stock|insufficient/i.test(message)) {
     return {
       kind: 'insufficient_stock',
+      code,
       message,
       available: availableMatch ? Number(availableMatch[1]) : null,
       requested: requestedMatch ? Number(requestedMatch[1]) : null,
@@ -123,18 +130,76 @@ export function classifyStockAdjustFailure(error: unknown): StockAdjustFailure {
   }
 
   if (status === 403 || status === 401 || /full access|not allowed|permission/i.test(message)) {
-    return { kind: 'permission', message, available: null, requested: null, status, retryable: false, offline: false }
+    return { kind: 'permission', code, message, available: null, requested: null, status, retryable: false, offline: false }
   }
   if (status === 409 || code === 'write_conflict' || /changed on another device/i.test(message)) {
-    return { kind: 'conflict', message, available: null, requested: null, status, retryable: true, offline: false }
+    return { kind: 'conflict', code, message, available: null, requested: null, status, retryable: true, offline: false }
   }
   if (status != null && status >= 500) {
-    return { kind: 'server', message, available: null, requested: null, status, retryable: true, offline: false }
+    return { kind: 'server', code, message, available: null, requested: null, status, retryable: true, offline: false }
   }
   if (status === 400 || status === 404 || status === 422) {
-    return { kind: 'validation', message, available: null, requested: null, status, retryable: true, offline: false }
+    return { kind: 'validation', code, message, available: null, requested: null, status, retryable: true, offline: false }
   }
-  return { kind: 'unknown', message, available: null, requested: null, status, retryable: true, offline: false }
+  return { kind: 'unknown', code, message, available: null, requested: null, status, retryable: true, offline: false }
+}
+
+// ---------------------------------------------------------------------------
+// The per-line stock request guard (migration 0192, Worker
+// lib/stockMutationReceipt.ts). Its four refusals are the only stock errors
+// whose English sentence is written by the guard rather than by the business
+// rule the operator broke, so they are the four that must be translated here
+// instead of passed through verbatim.
+//
+// Three of them are terminal for the line: it can never succeed under its own
+// id again, so the sentence has to send the operator to the Remove control
+// rather than to the Retry button. stock_request_in_flight is the exception --
+// the first attempt is still running, so waiting and retrying is exactly
+// right. Keep that instruction in each text: it is the only signpost the row
+// has.
+// ---------------------------------------------------------------------------
+
+type StockRequestFailureEntry = { key: string; fallback: string }
+
+const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = {
+  stock_request_in_flight: {
+    key: 'stock_request_in_flight',
+    fallback: 'This line is still being recorded on the server. Wait a moment and try again.',
+  },
+  stock_request_partially_applied: {
+    key: 'stock_request_partially_applied',
+    fallback: 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.',
+  },
+  idempotency_conflict: {
+    key: 'stock_request_id_conflict',
+    fallback: 'This line was already recorded with different details. Remove this line and add it again if needed.',
+  },
+  invalid_client_request_id: {
+    key: 'stock_request_id_invalid',
+    fallback: 'This line lost its request id. Remove it and add it again.',
+  },
+}
+
+/** The pack key + English fallback for a guard code, or null for anything else. */
+function stockRequestFailureEntry(code: unknown): StockRequestFailureEntry | null {
+  return STOCK_REQUEST_FAILURE_ENTRIES[String(code || '')] || null
+}
+
+/**
+ * The sentence a stock surface shows for a failed line: the guard's translated
+ * text when the server named one of its codes, the server's own message
+ * otherwise (which the operator has to be able to act on -- "only 2 available").
+ */
+export function stockFailureText(
+  error: unknown,
+  tr: (key: string, fallback: string) => string,
+  fallbackMessage: string,
+): string {
+  const source = (error && typeof error === 'object' ? error : {}) as Record<string, unknown>
+  const entry = stockRequestFailureEntry(source.code)
+  if (entry) return tr(entry.key, entry.fallback)
+  const message = typeof error === 'string' ? error : String((source.message ?? source.error ?? '') || '')
+  return message.trim() || fallbackMessage
 }
 
 export type StockAdjustOutcome =

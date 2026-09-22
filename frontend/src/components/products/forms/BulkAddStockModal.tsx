@@ -32,6 +32,7 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 import {
   applyRowOutcome,
   classifyStockAdjustFailure,
+  stockFailureText,
   countRows,
   createRow,
   hasUnsavedFailures,
@@ -377,9 +378,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           // Never swallow the reason -- the operator needs to know WHICH
           // product refused and why (insufficient stock, and how much is
           // actually available) to fix it.
+          const failure = classifyStockAdjustFailure(error)
           working = applyRowOutcome(working, row.rowId, {
             status: 'failed',
-            failure: classifyStockAdjustFailure(error),
+            // The 0192 guard's four refusals are written by the guard, not by
+            // a business rule, so they are translated rather than shown in the
+            // server's English.
+            failure: { ...failure, message: stockFailureText(error, (key, fallback) => t(key) || fallback, failure.message) },
           })
         }
         setRows(working)

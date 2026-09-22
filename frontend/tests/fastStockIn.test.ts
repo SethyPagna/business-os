@@ -67,7 +67,11 @@ runTest('F2: Add queues editable lines; completion writes through the one D4 ker
   // same ternary chain, one place instead of a copy at each call site.
   assert.match(modalSource, /const describeLineResult = \(line: ReceivedLine, result[^)]*\): string => \(\s*line\.mode === 'remove'[^]*?: line\.mode === 'set'[^]*?: result\?\.lotCode/)
   assert.equal((modalSource.match(/detail: describeLineResult\(line, result/g) || []).length, 2, 'both the batched-result branch and the sequential fallback report through the same function')
-  assert.match(modalSource, /status: 'error', detail: message/)
+  // Migration 0192: the failure detail now goes through stockFailureText, so a
+  // guard refusal ('this line was already recorded') is a translated sentence
+  // and everything else keeps the server's own words. One failure branch per
+  // wire path, exactly as before.
+  assert.equal((modalSource.match(/detail: stockFailureText\(/g) || []).length, 3, 'sequential, batched and whole-request failures all report through one helper')
   // Add clears the line and refocuses for the next product
   assert.match(modalSource, /const resetLine = \(\) => \{/)
   assert.match(modalSource, /searchInputRef\.current\?\.focus\(\)/)
