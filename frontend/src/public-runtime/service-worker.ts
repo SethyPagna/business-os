@@ -807,6 +807,18 @@ function isCacheableStaticPath(pathname) {
     || pathname === '/theme-bootstrap.js'
 }
 
+// Every recovery reload the app issues carries __bos_reload: the nested lazy
+// chunk guard (utils/lazyImport.ts), the page chunk guard (App.tsx) and the
+// runtime build-mismatch reload (AppContext.tsx) all set it before navigating.
+// It is the page telling this worker "the document you gave me cannot run".
+function isRecoveryNavigation(request) {
+  try {
+    return new URL(request.url, self.location.origin).searchParams.has('__bos_reload')
+  } catch (_) {
+    return false
+  }
+}
+
 // P4-4b: navigation used to be network-first with no timeout, so a
 // slow-but-alive connection (the reported iOS lag) made every navigation
 // wait for the full round trip before the shell could even start parsing.
@@ -828,6 +840,32 @@ async function appShellFallback(request, event) {
     await cache.delete('/index.html').catch(() => {})
     await cache.delete('/').catch(() => {})
     return fetchAndCacheShell(new Request(new URL('/index.html', self.location.origin)), cache)
+  }
+  // A recovery navigation says, in its own URL, that the build this worker is
+  // serving is already proven broken. Answering it from APP_SHELL_CACHE hands
+  // back the very document whose chunks the deploy deleted -- which is how the
+  // guard spent its one allowed reload and still landed on the dead build
+  // (Sep 23 incident). recoverStaleShell below tries to refresh the shell
+  // first, but that refresh is a worker-context read of /index.html: an edge
+  // POP still serving the previous document, a bot challenge, or any non-200
+  // leaves the cache untouched, so recovery must not depend on it. Go to the
+  // network for this one navigation and let the answer heal the cache; the
+  // cached shell stays the fallback for a failed fetch (offline), never the
+  // answer. App.tsx strips these keys on mount, so this covers one navigation.
+  //
+  // fetch(request) and NOT fetchAndCacheShell: any init object downgrades a
+  // navigate-mode Request to 'same-origin' (Request constructor), and a
+  // same-origin subresource read of the document is exactly the shape this
+  // host answers with a bot challenge instead of the page. The recovery
+  // navigation has to reach the origin as the navigation it is. /index.html
+  // and / are served must-revalidate (frontend/public/_headers), and this URL
+  // carries __bos_reload, so there is no stale HTTP-cache hit to guard.
+  if (isRecoveryNavigation(request)) {
+    const fresh = await fetch(request).catch(() => null)
+    if (isValidDocumentResponse(fresh)) {
+      await cache.put('/index.html', fresh.clone()).catch(() => {})
+      return fresh
+    }
   }
   if (cached) {
     const revalidate = fetch('/index.html', { cache: 'no-store' })
@@ -909,9 +947,16 @@ async function fetchAndCacheStatic(request, event, cache) {
 // A hashed /assets/ chunk the server no longer has means the shell that
 // referenced it came from an earlier build (appShellFallback serves the
 // cached shell first and only revalidates in the background). Refresh the
-// cached shell BEFORE the 404 reaches the page, so the app's one-shot chunk
-// recovery reload (utils/chunkReloadGuard.ts) lands on the current build
-// instead of the same stale shell, and ask the browser for the new worker.
+// cached shell before the 404 reaches the page and ask the browser for the
+// new worker.
+//
+// This refresh is best effort, NOT the guarantee it was once described as:
+// it is a worker-context read of /index.html, so an edge POP still serving
+// the previous document, a bot challenge, or any non-200 leaves the cache
+// exactly as stale as it was, silently. What actually makes the app's
+// one-shot recovery reload (utils/chunkReloadGuard.ts) land on the current
+// build is isRecoveryNavigation in appShellFallback above, which takes that
+// navigation to the network instead of answering it from this cache.
 function isStaleBuildAsset(request, response) {
   if (!response) return false
   const pathname = new URL(request.url, self.location.origin).pathname
