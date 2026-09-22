@@ -535,6 +535,15 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     if (!canViewFinancialHistory) setModal((current) => current === 'report' ? 'detail' : current)
   }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<DeliveryContact | null>(null)
+  // The open form keeps the operator's edits (its state seeds once), but the
+  // version it sends follows the list: a reload -- the 409 handler's, or a
+  // broadcast's -- re-seeds `selected`, so the next save press carries the
+  // version that won instead of the one this screen opened with.
+  useEffect(() => {
+    if (!selected) return
+    const fresh = contacts.find((row) => Number(row.id) === Number(selected.id))
+    if (fresh && fresh.updated_at !== selected.updated_at) setSelected(fresh)
+  }, [contacts]) // eslint-disable-line react-hooks/exhaustive-deps -- list reloads only
   const [loading,  setLoading]  = useState(true)
   // Y1: true while ANY load is in flight (incl. silent search refetches)
   // so an empty list can say Searching... instead of a false empty state.
@@ -842,7 +851,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload: DeliveryPayload = { ...form, userId: user?.id, userName: user?.name }
+      const payload: DeliveryPayload = { ...form, ...(selected ? { updated_at: selected.updated_at } : {}), userId: user?.id, userName: user?.name }
       const oldName = selected ? String(selected.name || '').trim() : ''
       const newName = String(form.name || '').trim()
       if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {

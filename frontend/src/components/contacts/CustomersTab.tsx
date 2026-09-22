@@ -342,6 +342,15 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     setModal((current) => current === 'purchases' ? 'detail' : current)
   }, [canViewFinancialHistory])
   const [selected, setSelected] = useState<CustomerRow | null>(null)
+  // The open form keeps the operator's edits (its state seeds once), but the
+  // version it sends follows the list: a reload -- the 409 handler's, or a
+  // broadcast's -- re-seeds `selected`, so the next save press carries the
+  // version that won instead of the one this screen opened with.
+  useEffect(() => {
+    if (!selected) return
+    const fresh = customers.find((row) => Number(row.id) === Number(selected.id))
+    if (fresh && fresh.updated_at !== selected.updated_at) setSelected(fresh)
+  }, [customers]) // eslint-disable-line react-hooks/exhaustive-deps -- list reloads only
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
   const renameResolveRef = useRef<((choice: RenameCascadeChoice) => void) | null>(null)
   const askRenameChoice = (request: RenameCascadeRequest) => new Promise<RenameCascadeChoice>((resolve) => {
@@ -745,7 +754,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload: CustomerPayload = { ...form, userId: user?.id, userName: user?.name } as CustomerPayload
+      const payload: CustomerPayload = { ...form, ...(selected ? { updated_at: selected.updated_at } : {}), userId: user?.id, userName: user?.name } as CustomerPayload
       const oldName = selected ? String(selected.name || '').trim() : ''
       const newName = String(form.name || '').trim()
       if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {

@@ -31,8 +31,9 @@
 //   3. the callers that had no version now pass the screen's: branch save,
 //      promotion discount save, role delete, contact deletes (single + bulk),
 //      product undo/redo restore and delete-redo;
-//   4. a refused product save re-reads the row into `selected` and the list,
-//      and a refused contact save reloads its list.
+//   4. a refused product save re-reads the row into `selected` and the list;
+//      a refused contact save reloads its list, and the open contact form's
+//      version follows the list (so the next press carries the version that won).
 //
 // Run: node tests/writeVersionFromScreen.test.ts
 import assert from 'node:assert/strict'
@@ -151,8 +152,14 @@ for (const [file, label] of [
   ['src/components/contacts/DeliveryTab.tsx', 'Delivery contacts'],
 ] as const) {
   pin(file, new RegExp(`if \\(isWriteConflictError\\(error\\)\\) void load\\(\\{ silent: true, label: '${label} conflict reload' \\}\\)`),
-    `${path.basename(file)}: a refused save reloads the list so the reopened form carries the version that won`,
+    `${path.basename(file)}: a refused save reloads the list`,
     (s) => s.replace(/\r?\n\s*if \(isWriteConflictError\(error\)\) void load\([^\n]*/, ''))
+  pin(file, /useEffect\(\(\) => \{\s*\n\s*if \(!selected\) return\s*\n\s*const fresh = \w+\.find\(\(row\) => Number\(row\.id\) === Number\(selected\.id\)\)\s*\n\s*if \(fresh && fresh\.updated_at !== selected\.updated_at\) setSelected\(fresh\)/,
+    `${path.basename(file)}: the open form's version follows the reloaded list`,
+    (s) => s.replace(/\r?\n\s*if \(fresh && fresh\.updated_at !== selected\.updated_at\) setSelected\(fresh\)/, ''))
+  pin(file, /const payload[^\n]*= \{ \.\.\.form, \.\.\.\(selected \? \{ updated_at: selected\.updated_at \} : \{\}\), userId: user\?\.id, userName: user\?\.name \}/,
+    `${path.basename(file)}: the edit payload carries the listed row's version, not the one the form opened with`,
+    (s) => s.replace('...(selected ? { updated_at: selected.updated_at } : {}), ', ''))
 }
 // Contact edit forms initialise from the row, so their PUT body carries the
 // row's `updated_at` and the Worker reads that as the token.

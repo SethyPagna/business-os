@@ -536,6 +536,15 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
   const [modal, setModal] = useState<ContactModal>(null)
   const [section, setSection] = useState<SupplierSection>('directory')
   const [selected, setSelected] = useState<SupplierRow | null>(null)
+  // The open form keeps the operator's edits (its state seeds once), but the
+  // version it sends follows the list: a reload -- the 409 handler's, or a
+  // broadcast's -- re-seeds `selected`, so the next save press carries the
+  // version that won instead of the one this screen opened with.
+  useEffect(() => {
+    if (!selected) return
+    const fresh = suppliers.find((row) => Number(row.id) === Number(selected.id))
+    if (fresh && fresh.updated_at !== selected.updated_at) setSelected(fresh)
+  }, [suppliers]) // eslint-disable-line react-hooks/exhaustive-deps -- list reloads only
   const [loading, setLoading] = useState(true)
   // Y1: true while ANY load is in flight (incl. silent search refetches)
   // so an empty list can say Searching... instead of a false empty state.
@@ -849,7 +858,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     }
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload: Record<string, unknown> = { ...form, userId: user?.id, userName: user?.name }
+      const payload: Record<string, unknown> = { ...form, ...(selected ? { updated_at: selected.updated_at } : {}), userId: user?.id, userName: user?.name }
       // D6: renaming a supplier previews the products/batches carrying the
       // old free-text name and asks -- carry them to the new name, keep a
       // copy (a fresh supplier, the old keeps its rows), or cancel.
