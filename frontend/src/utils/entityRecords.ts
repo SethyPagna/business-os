@@ -201,6 +201,19 @@ export function auditRowsToRecords(rows: AuditRecordRow[] | null | undefined): R
 }
 
 /**
+ * An /api/system/audit-logs page as records, in the shape the float reads.
+ *
+ * The endpoint answers `{ items, total, ... }` and, on some paths, a bare
+ * array; both are accepted here so the shape lives in one place instead of at
+ * every call site.
+ */
+export function auditPayloadToRecords(payload: unknown): { records: RecordItem[] } {
+  const body = payload as { items?: unknown } | null
+  const rows = Array.isArray(payload) ? payload : Array.isArray(body?.items) ? body.items : []
+  return { records: auditRowsToRecords(rows as AuditRecordRow[]) }
+}
+
+/**
  * The adapter for audit-sourced records.
  *
  * Labels come from the SHARED audit vocabulary, so a product's Field history
@@ -245,6 +258,16 @@ const ENTITY_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
   branch_id: ['branch', 'Branch'],
   supplier_name: ['supplier', 'Supplier'],
   customer_name: ['customer', 'Customer'],
+  // Columns the Worker's own audited-column lists write (fees.ts's
+  // FEE_AUDIT_COLUMNS, promotions.ts's rule input, settings.ts's key list).
+  // Without a pack word these read as Title-Cased English -- "Amount Usd" --
+  // in the Khmer pack too, on a table whose whole job is saying what moved.
+  amount_usd: ['amount_usd', 'Amount (USD)'],
+  amount_khr: ['amount_khr', 'Amount (KHR)'],
+  fee_type: ['fee_type', 'Type'],
+  title: ['title', 'Title'],
+  return_type: ['return_type', 'Return type'],
+  exchange_rate: ['exchange_rate', 'Exchange Rate'],
 }
 
 /**
