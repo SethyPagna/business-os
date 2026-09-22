@@ -169,7 +169,16 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     tree = render()
     const found = nodes(tree)
     const boundRow = found.find((node) => node.type === 'p' && text(node).includes('shift_previous_open_close_before'))
+    const dirtyOf = (list: RenderNode[]) => list.find((node) => node.props?.unsavedChanges)?.props.unsavedChanges.dirty as boolean
     return {
+      dirty: dirtyOf(found),
+      // Change one field through its own handler, re-render, and report dirty.
+      dirtyAfter: (field: 'time' | 'usd' | 'note') => {
+        if (field === 'time') found.find((node) => node.type === DateMarker)!.props.onChange('2026-09-20T09:00')
+        else if (field === 'usd') found.find((node) => node.type === PairMarker)!.props.onUsd('5')
+        else found.find((node) => node.type === 'input' && node.props.value === '')!.props.onChange({ target: { value: 'left 500' } })
+        return dirtyOf(nodes(render()))
+      },
       closedAt: found.find((node) => node.type === DateMarker)?.props.value as string,
       boundText: boundRow ? text(boundRow) : null,
       submitLabel: found.find((node) => node.type === SubmitMarker)?.props.label as string,
@@ -236,6 +245,28 @@ try {
   eq(fromDetail.closedAt, expected, 'the prefill follows the record read, which is the row the close is addressed to')
   ok(fromDetail.boundText, 'and the bound it shows comes from there too')
   console.log('  ok - executed: the bound survives the hop from list row to record read')
+  // ---- 5. opening the form is not an unsaved change; editing it is --------
+  //
+  // closedAt is always prefilled, so a dirty test of "any field non-empty"
+  // armed the unsaved-changes guard and disabled the other actions the moment
+  // the Close form opened (chip task_4683ad2f). Dirty is a change from the
+  // seed the form opened with.
+  eq(form.dirty, false, 'opening the Close form on an open row is not an unsaved change')
+  eq(form.dirtyAfter('time'), true,
+    'changing the closing time IS an unsaved change')
+  const countPair = await openCloseForm(modalSource)
+  eq(countPair.dirtyAfter('usd'), true,
+    'entering a counted amount IS an unsaved change')
+  const noteForm = await openCloseForm(modalSource)
+  eq(noteForm.dirtyAfter('note'), true,
+    'typing the closing note IS an unsaved change')
+  const anyFilled = modalSource.replace(
+    'const closeDirty = JSON.stringify(close) !== JSON.stringify(closeBase)',
+    "const closeDirty = Object.values(close).some((value) => value.trim() !== '')")
+  assert.notEqual(anyFilled, modalSource, 'the dirty negative control could not find its target')
+  eq((await openCloseForm(anyFilled)).dirty, true,
+    'negative control: the old "any field non-empty" rule is dirty on open, so the check above discriminates')
+  console.log('  ok - executed: the prefilled close time alone is not an unsaved change; every edit is')
 } finally {
   globalThis.window = oldWindow
 }
