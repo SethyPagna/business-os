@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
+import { loadRecordsFloatModule } from './recordsFloatModule.ts'
 import type { SaleRecord, SaleRecordValue } from '../src/utils/saleRecords.ts'
 
 const require = createRequire(import.meta.url)
@@ -12,6 +13,8 @@ const mod = { exports: {} as Record<string, unknown> }
 const compiled = transformSync(source, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
 new Function('require', 'module', 'exports', compiled)((id: string) => {
   if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+  // The REAL shared float: the change table under test lives there now.
+  if (id.includes('shared/RecordsFloat')) return loadRecordsFloatModule()
   if (id.includes('utils/saleRecords')) return require('../src/utils/saleRecords.ts')
   if (id.includes('saleRecordValue')) return require('../src/components/sales/saleRecordValue.ts')
   if (id.includes('StatusBadge')) return { getStatusLabel: String }
