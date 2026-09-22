@@ -87,7 +87,8 @@ writing on 12 Sep (expectedUpdatedAt.ts) is deleted; every screen passes its rec
 updated_at explicitly, a refused product save re-reads the row into the form AND the list, a
 refused contact save reloads its tab, the dialog names the product, DELETE /roles/:id reads
 the body token (its guard never ran), dead contact/branch/sale-attach transports removed.
-bos-verify: fix certified sound; first root-cause story refuted and corrected in 4c163015. New blast-radius skill + AGENTS.md
+bos-verify: fix certified sound; first root-cause story refuted and corrected in 4c163015.
+DEPLOYED 22 Sep 09:00Z from `9895c5ec` (origin/main = codex/supplier-settlement-20260918): Worker version `582c0642-b4a4-4de4-bab6-080d65584b07`, revision `9895c5ec725a`, frontend hash `9b87775267b62e7e`, tier paid, Free dry-run bundle green, no remote migration. Smoke: admin login shell and storefront render on the new chunks; the browser pane's first storefront load ran the previous build's cached shell (stale-asset 404 until reload — the normal service-worker transition, not this lane). The owner's exact flow (edit a product changed elsewhere, save with an image) needs a signed-in session and is verified by the executed tests, not live. New blast-radius skill + AGENTS.md
 rule (verify the affected surroundings of every change). Gates on 4c163015: frontend
 517 passed, 0 red of 517 executed files (0 skipped; 453870 ms), i18n/build 0; Worker tsc 0, 494/501 green (test-backup-schema-discovery-native.cjs, test-catalog-live-stock-native.cjs, test-import-maintenance-fence-native.cjs, test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs, test-sale-return-money-precision-native.cjs contention, green standalone; test-product-money-write-policy-native.cjs hook repaired at 4c163015, green).
 Settlement workspace removed 22 Sep (evidence in BusinessOS-Recovery/2026-09-22/, branch

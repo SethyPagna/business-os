@@ -661,6 +661,8 @@ cannot fire after close (revision fence); DELETE bodies are really sent
 helper; the conflict dialog was already English-only (pre-existing, not new).
 Not driven at runtime: the two newly effective guards against live concurrency.
 
+**Deployment.** DEPLOYED 22 Sep 09:00Z from `9895c5ec` (origin/main = codex/supplier-settlement-20260918): Worker version `582c0642-b4a4-4de4-bab6-080d65584b07`, revision `9895c5ec725a`, frontend hash `9b87775267b62e7e`, tier paid, Free dry-run bundle green, no remote migration. Smoke: admin login shell and storefront render on the new chunks; the browser pane's first storefront load ran the previous build's cached shell (stale-asset 404 until reload — the normal service-worker transition, not this lane). The owner's exact flow (edit a product changed elsewhere, save with an image) needs a signed-in session and is verified by the executed tests, not live.
+
 ## Downloads cleanup — DONE
 
 314 `business-os` checkouts under `C:/Users/mrkl6/Downloads` were classified: 300
