@@ -16,9 +16,15 @@ import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
-import EntityRecordsFloat from '../shared/EntityRecordsFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+
+// Loaded when the float is opened. The field history is a rare read behind a
+// permission tier; imported statically it joins this page's startup closure
+// (tests/performanceBudgets.test.ts measures exactly that closure), so every
+// operator would pay to download a float most of them never open.
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'inventory-records-float')
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -433,15 +439,17 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
       />
     ) : null}
     {fieldHistoryOpen ? (
-      <EntityRecordsFloat
-        entity="product"
-        entityId={Number((p as { id?: unknown }).id) || 0}
-        subject={String(p.name || '')}
-        onClose={() => setFieldHistoryOpen(false)}
-        t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
-        fmtUSD={(value) => fmtUSD(Number(value))}
-        fmtKHR={(value) => fmtKHR(Number(value))}
-      />
+      <Suspense fallback={null}>
+        <EntityRecordsFloat
+          entity="product"
+          entityId={Number((p as { id?: unknown }).id) || 0}
+          subject={String(p.name || '')}
+          onClose={() => setFieldHistoryOpen(false)}
+          t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
+          fmtUSD={(value) => fmtUSD(Number(value))}
+          fmtKHR={(value) => fmtKHR(Number(value))}
+        />
+      </Suspense>
     ) : null}
     </>,
     document.body,

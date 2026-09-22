@@ -22,9 +22,13 @@ import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
-import EntityRecordsFloat from '../../shared/EntityRecordsFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
+// Loaded when the float is opened. The field history is a rare read behind a
+// permission tier; imported statically it joins this page's startup closure
+// (tests/performanceBudgets.test.ts measures exactly that closure), so every
+// operator would pay to download a float most of them never open.
+const EntityRecordsFloat = lazyRetry(() => import('../../shared/EntityRecordsFloat.tsx'), 'products-records-float')
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
 // movements with running balance, sales breakdown, suppliers) -- its own
@@ -570,15 +574,17 @@ export default function ProductDetailModal({
         </Suspense>
       ) : null}
       {fieldHistoryOpen ? (
-        <EntityRecordsFloat
-          entity="product"
-          entityId={Number(p.id) || 0}
-          subject={productName}
-          onClose={() => setFieldHistoryOpen(false)}
-          t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
-          fmtUSD={(value) => fmtUSD(Number(value))}
-          fmtKHR={(value) => fmtKHR(Number(value))}
-        />
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity="product"
+            entityId={Number(p.id) || 0}
+            subject={productName}
+            onClose={() => setFieldHistoryOpen(false)}
+            t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
+            fmtUSD={(value) => fmtUSD(Number(value))}
+            fmtKHR={(value) => fmtKHR(Number(value))}
+          />
+        </Suspense>
       ) : null}
       {canViewCosts && costFloatOpen ? (
         <CostCalculationFloat

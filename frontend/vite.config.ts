@@ -915,6 +915,23 @@ function manualChunks(id: string): string | undefined {
     // loop with.
     if (normalized.includes('/src/components/shared/ImportReportModal.tsx')) return 'import-report-modal'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
+    // The Records float (sale records, return records, the per-record field
+    // history) has consumers in many route chunks -- Sales, Returns, both
+    // product detail panes, the three contact tabs -- and every one of them
+    // loads it lazily, on open. Left to the generic '/src/components/shared/'
+    // catch-all below it lands in 'app-shared', which IS statically in those
+    // pages' closures, so the lazy imports would buy nothing and, worse,
+    // EntityRecordsFloat's static import of auditLogTransport.ts ('audit-log-api')
+    // would drag the audit transport into every page that touches app-shared
+    // (measured: +1 chunk on the catalog-products closure, past the budget in
+    // tests/performanceBudgets.test.ts). Its own chunk keeps it off the
+    // startup path of every surface that merely offers the button.
+    if (
+      normalized.includes('/src/components/shared/RecordsFloat.tsx')
+      || normalized.includes('/src/components/shared/EntityRecordsFloat.tsx')
+    ) {
+      return 'records-float'
+    }
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'

@@ -79,6 +79,40 @@ test('the phone gets it too: the product pane renders it in both responsive slot
   assert.match(pane, /const fieldHistoryButton = canReadFieldHistory && Number\(p\.id\) > 0 \? \(/)
 })
 
+// The float is opened by a minority of readers (it needs the audit_log 'full'
+// tier) from six different pages, so it must not be on any page's startup
+// path. Two halves have to hold at once, and one without the other is a silent
+// no-op: the consumer imports it lazily, AND vite gives it a chunk of its own.
+// Left to the '/src/components/shared/' catch-all it lands in 'app-shared',
+// which every one of these pages already loads statically -- the lazy import
+// then buys nothing and EntityRecordsFloat's audit transport rides along into
+// every page (measured on a real build: catalog-products 31 -> 32 chunks, past
+// the tests/performanceBudgets.test.ts budget).
+test('the float is never on a page\'s startup path: lazy at the consumer AND its own chunk', () => {
+  const consumers = [
+    '../src/components/inventory/ProductDetailModal.tsx',
+    '../src/components/products/surfaces/ProductDetailModal.tsx',
+    '../src/components/contacts/CustomersTab.tsx',
+    '../src/components/contacts/SuppliersTab.tsx',
+    '../src/components/contacts/DeliveryTab.tsx',
+  ]
+  for (const path of consumers) {
+    const source = read(path)
+    assert.match(source, /const EntityRecordsFloat = lazyRetry\(\(\) => import\('[^']*EntityRecordsFloat\.tsx'\)/, `${path} does not load the float on open`)
+    assert.doesNotMatch(source, /^import EntityRecordsFloat from/m, `${path} still imports the float statically`)
+    assert.match(source, /<Suspense fallback=\{null\}>\s*\n\s*<EntityRecordsFloat/, `${path} renders a lazy component with no boundary`)
+  }
+  const config = read('../vite.config.ts')
+  const ownChunk = config.indexOf("normalized.includes('/src/components/shared/RecordsFloat.tsx')")
+  const catchAll = config.indexOf("if (normalized.includes('/src/components/shared/')) return 'app-shared'")
+  assert.ok(ownChunk > 0, 'RecordsFloat has no chunk rule, so it falls into app-shared')
+  assert.match(config.slice(ownChunk, ownChunk + 400), /EntityRecordsFloat\.tsx'\)\s*\n\s*\) \{\s*\n\s*return 'records-float'/)
+  // POSITIVE CONTROL: rule order is the whole point -- the same rule written
+  // below the catch-all is dead code, and this comparison is what catches it.
+  assert.ok(catchAll > 0, 'the app-shared catch-all moved; this ordering check is measuring nothing')
+  assert.ok(ownChunk < catchAll, 'the records-float rule sits after the app-shared catch-all and never runs')
+})
+
 test('all THREE contact tabs carry it, each under its own audit entity', () => {
   const tabs: Array<[string, string]> = [
     ['../src/components/contacts/CustomersTab.tsx', 'customer'],
