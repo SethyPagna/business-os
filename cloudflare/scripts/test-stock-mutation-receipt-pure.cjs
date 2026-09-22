@@ -230,6 +230,27 @@ function faultyDb(db, match) {
   }
 }
 
+// A database whose claim RELEASE silently does nothing -- the only way to
+// produce, through the real code path, the row a hard crash leaves behind:
+// claimed, written = 0, never completed.
+function noReleaseDb(db) {
+  return {
+    prepare(sql) {
+      if (sql.startsWith('DELETE FROM stock_mutation_receipts')) {
+        return { get: () => undefined, all: () => [], run: () => ({ changes: 0 }) }
+      }
+      return db.prepare(sql)
+    },
+    batch: (items) => db.batch(items),
+    transaction: (fn) => db.transaction(fn),
+    raw: db.raw,
+  }
+}
+
+function backdateClaim(db, seconds = 300) {
+  db.raw.exec(`UPDATE stock_mutation_receipts SET created_at = datetime('now', '-${seconds} seconds')`)
+}
+
 // The real 0192 text, so the re-probe case re-applies exactly what the owner would.
 function migration0192Sql() {
   const file = path.join(root, 'migrations', '0192_stock_mutation_receipts.sql')
@@ -482,6 +503,85 @@ async function run() {
     assert.equal(retry.status, 200, 'CONTROL: the same id retries cleanly')
     assert.equal(branchStock(db), 5, 'CONTROL: and applies exactly once')
     console.log('PASS a failure before the write still releases the claim (control)')
+  }
+
+  // E2 -- A STALE CLAIM IS NOT A LIFE SENTENCE. A crash between the claim
+  //    and the completion used to strand the id in 409 forever, with nothing
+  //    to prune it. A claim that wrote nothing and is older than the window
+  //    is taken over by the retry.
+  {
+    const db = freshDb()
+    // A crash mid-kernel, BEFORE any write, whose release never ran: exactly
+    // the row a killed isolate leaves behind. Same body as the retry below,
+    // so this is a stale claim and not a conflict.
+    const crashedCtx = makeContext(noReleaseDb(faultyDb(db, 'SELECT id, name FROM branches')))
+    let crashed = false
+    try { await runAdjustAction(crashedCtx, addBody('stockline_88888888-stale')) } catch { crashed = true }
+    assert.equal(crashed, true, 'the first attempt died mid-kernel')
+    assert.equal(receiptCount(db), 1, 'and its claim was stranded (release suppressed)')
+    assert.equal(Number(receiptRow(db).written), 0, 'having written nothing')
+
+    const tooSoon = await runAdjustAction(makeContext(db), addBody('stockline_88888888-stale'))
+    assert.equal(tooSoon.status, 409, 'a FRESH claim is still protected from takeover')
+    assert.equal((await jsonOf(tooSoon)).code, 'stock_request_in_flight', 'with the honest wait-and-retry code')
+    assert.equal(branchStock(db), 0, 'and moves nothing')
+
+    backdateClaim(db)
+    const reclaimed = await runAdjustAction(makeContext(db), addBody('stockline_88888888-stale'))
+    assert.equal(reclaimed.status, 200, 'THE FIX: a stale write-nothing claim is taken over')
+    assert.equal(branchStock(db), 5, 'and the line finally applies -- exactly once')
+    assert.equal(movementCount(db), 1, 'one movement, not two')
+    assert.equal(receiptCount(db), 1, 'still one receipt, now completed')
+    console.log('PASS a stale unwritten claim is re-claimed and runs once')
+  }
+
+  // CONTROL. A stale claim that DID write is never taken over -- that is the
+  //    whole point of the written flag.
+  {
+    const db = freshDb()
+    const c = makeContext(faultyDb(db, 'INSERT INTO inventory_movements'))
+    try { await runAdjustAction(c, addBody('stockline_88888888-wrote')) } catch { /* expected */ }
+    assert.equal(branchStock(db), 5, 'stock moved before the crash')
+    // A crash so hard the completion never ran, then left to go stale.
+    db.raw.exec('UPDATE stock_mutation_receipts SET completed_at=NULL, response_status=NULL, response_json=NULL')
+    backdateClaim(db)
+    const retry = await runAdjustAction(makeContext(db), addBody('stockline_88888888-wrote'))
+    assert.equal(retry.status, 409, 'CONTROL: a stale claim that wrote is NOT re-claimed')
+    assert.equal((await jsonOf(retry)).code, 'stock_request_partially_applied', 'it is reported as partially applied')
+    assert.equal(branchStock(db), 5, 'CONTROL: stock unchanged')
+    assert.equal(movementCount(db), 0, 'CONTROL: and no movement was ever written')
+    console.log('PASS a stale claim that already wrote stock is never re-claimed (control)')
+  }
+
+  // E2 -- two calls racing on ONE id. Whatever the interleaving, the shelf
+  //    moves once; the loser either replays the winner or is told to wait.
+  {
+    const db = freshDb()
+    const c = makeContext(db)
+    const [a, b] = await Promise.all([
+      runAdjustAction(c, addBody('stockline_aaaa0000-race')),
+      runAdjustAction(c, addBody('stockline_aaaa0000-race')),
+    ])
+    assert.equal(branchStock(db), 5, 'THE FIX: a concurrent double-submit moves stock once')
+    assert.equal(movementCount(db), 1, 'and writes one movement')
+    assert.equal(receiptCount(db), 1, 'under one receipt')
+    const statuses = [a.status, b.status].sort()
+    assert.equal(statuses[0], 200, 'one of the two wrote')
+    assert.ok(statuses[1] === 200 || statuses[1] === 409, 'the other replayed or was told to wait')
+    console.log('PASS two calls racing on one id still move stock once')
+  }
+
+  // E2 -- the losing racer whose winner has already vanished. The claim
+  //    INSERT fails, the re-read finds nothing, and the honest answer is a
+  //    409, never the 500 this branch used to throw.
+  {
+    const db = freshDb()
+    const c = makeContext(faultyDb(db, 'INSERT INTO stock_mutation_receipts'))
+    const answer = await runAdjustAction(c, addBody('stockline_bbbb0000-race'))
+    assert.equal(answer.status, 409, 'THE FIX: a vanished race answers 409, not 500')
+    assert.equal((await jsonOf(answer)).code, 'stock_request_in_flight', 'with a code the UI can translate')
+    assert.equal(branchStock(db), 0, 'and moves no stock')
+    console.log('PASS a lost claim race answers a clean 409')
   }
 
   console.log('\nAll stock mutation receipt assertions passed')

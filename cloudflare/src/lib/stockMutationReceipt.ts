@@ -47,19 +47,33 @@ import type { D1Compat } from './db'
 //                                  at the ledger, because some stock moved and
 //                                  only a human can say how much
 //
-//   claim -> 'claimed'   : nobody holds this id; run the kernel
+//   claim -> 'claimed'   : nobody holds this id (or a stale claim was taken
+//                          over); run the kernel
 //         -> 'replay'    : completed before; return the original response
 //         -> 'conflict'  : same id, different request body -> 409
-//         -> 'in_flight' : claimed but never completed -> 409, do NOT guess
+//         -> 'in_flight' : claimed under 120s ago and still running -> 409
 //         -> 'partial'   : wrote stock and did not finish -> 409
 //         -> 'invalid'   : an id was sent but is not a usable one -> 400
 //         -> 'disabled'  : migration 0192 not applied here -> pre-0192 path
+//
+// STALE CLAIMS. A crash between the claim and the completion used to strand
+// the id in 'in_flight' FOREVER, and the operator had no way back: the line
+// could never be re-sent under that id and nothing pruned it. A claimed row
+// with written = 0 moved no stock by construction, so after 120 seconds -- far
+// longer than any Worker invocation -- it is a crashed request, and the retry
+// takes it over with a conditional UPDATE (whoever's UPDATE reports one
+// changed row owns it, so two racing retries still produce one write).
+// written = 1 is never taken over.
 //
 // Free/paid: no plan-sensitive capability. Two to three small D1 statements
 // per identified line, on the same binding the kernel already holds; no KV, no
 // Queues, no Durable Object, no cron, no custom CPU limit.
 
+/** Long enough that a truncated or hand-typed value cannot collide by accident. */
 const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
+
+/** A claim younger than this is treated as a request that is still running. */
+const STOCK_MUTATION_STALE_SECONDS = 120
 
 type StockMutationKind = 'adjust' | 'receive'
 
@@ -156,7 +170,27 @@ async function readReceipt(db: D1Compat, actorId: number, requestId: string): Pr
   ).get<ReceiptRow>({ actor: actorId, request: requestId })
 }
 
-function decideFromStoredReceipt(row: ReceiptRow, canonical: string): StockMutationClaim {
+/**
+ * Take over a claim that crashed before it wrote anything. Conditional on the
+ * exact state that makes takeover safe, so two racing retries cannot both win:
+ * whoever's UPDATE reports a changed row owns the write.
+ */
+async function reclaimStaleStockMutation(db: D1Compat, actorId: number, requestId: string): Promise<boolean> {
+  const result = await db.prepare(
+    `UPDATE stock_mutation_receipts SET created_at=CURRENT_TIMESTAMP
+       WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL AND written=0
+         AND created_at < datetime('now', @window)`,
+  ).run({ actor: actorId, request: requestId, window: `-${STOCK_MUTATION_STALE_SECONDS} seconds` })
+  return Number(result?.changes ?? 0) === 1
+}
+
+async function decideFromStoredReceipt(
+  db: D1Compat,
+  actorId: number,
+  requestId: string,
+  row: ReceiptRow,
+  canonical: string,
+): Promise<StockMutationClaim> {
   if (row.request_json !== canonical) return { state: 'conflict' }
   const wrote = Number(row.written ?? 0) === 1
   if (row.completed_at && row.response_status != null) {
@@ -169,6 +203,7 @@ function decideFromStoredReceipt(row: ReceiptRow, canonical: string): StockMutat
     return { state: 'replay', status: row.response_status, body }
   }
   if (wrote) return { state: 'partial' }
+  if (await reclaimStaleStockMutation(db, actorId, requestId)) return { state: 'claimed' }
   return { state: 'in_flight' }
 }
 
@@ -181,7 +216,7 @@ async function claimStockMutation(
 ): Promise<StockMutationClaim> {
   if (!await receiptsAvailable(db)) return { state: 'disabled' }
   const existing = await readReceipt(db, actorId, requestId)
-  if (existing) return decideFromStoredReceipt(existing, canonical)
+  if (existing) return decideFromStoredReceipt(db, actorId, requestId, existing, canonical)
   try {
     await db.prepare(
       'INSERT INTO stock_mutation_receipts(actor_id,request_id,kind,request_json) VALUES(@actor,@request,@kind,@canonical)',
@@ -190,8 +225,12 @@ async function claimStockMutation(
     // Lost the race to a concurrent double-submit of the same id: whoever won
     // owns the write, so read their row and answer from it.
     const raced = await readReceipt(db, actorId, requestId)
-    if (!raced) throw new Error('Stock request receipt could not be recorded')
-    return decideFromStoredReceipt(raced, canonical)
+    // The winner finished and released its claim between our INSERT and this
+    // read -- so it refused, and nothing was written. Answering 409 is the
+    // honest, non-guessing reply; a 500 here used to turn a benign race into
+    // an alarming server error.
+    if (!raced) return { state: 'in_flight' }
+    return decideFromStoredReceipt(db, actorId, requestId, raced, canonical)
   }
   return { state: 'claimed' }
 }
