@@ -256,13 +256,17 @@ const ITEM_META_COPY: Record<string, LocalizedCopy> = {
     en: ({ quantity }) => `Low stock (${quantity})`,
     km: ({ quantity }) => `ស្តុកទាប (${quantity})`,
   },
+  // Sep 23 2026: a third hand-written copy of the sale-status words lived
+  // here and had drifted too ("Awaiting payment" / "រង់ចាំបង់ប្រាក់"). Both
+  // renderers read the packs now, through the same helper the status badges
+  // use, so the bell row and the Sales row cannot disagree.
   notification_sales_awaiting_payment: {
-    en: ({ totalUsd }) => `Awaiting payment • $${totalUsd}`,
-    km: ({ totalUsd }) => `រង់ចាំបង់ប្រាក់ • $${totalUsd}`,
+    en: ({ totalUsd }, t) => `${getStatusBadgeLabel('awaiting_payment', t)} • $${totalUsd}`,
+    km: ({ totalUsd }, t) => `${getStatusBadgeLabel('awaiting_payment', t)} • $${totalUsd}`,
   },
   notification_sales_awaiting_delivery: {
-    en: ({ totalUsd }) => `Awaiting delivery • $${totalUsd}`,
-    km: ({ totalUsd }) => `រង់ចាំដឹកជញ្ជូន • $${totalUsd}`,
+    en: ({ totalUsd }, t) => `${getStatusBadgeLabel('awaiting_delivery', t)} • $${totalUsd}`,
+    km: ({ totalUsd }, t) => `${getStatusBadgeLabel('awaiting_delivery', t)} • $${totalUsd}`,
   },
   notification_loyalty_points_balance: {
     en: ({ balance }) => `${balance} points`,

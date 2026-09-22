@@ -89,6 +89,13 @@ type NotificationItem = {
   tone: 'danger' | 'warning' | 'info' | 'success'
   label: string
   meta: string
+  // The panel renders `meta` from the language packs when `metaKey` names an
+  // entry in NotificationCenter.tsx's ITEM_META_COPY, and falls back to the
+  // English `meta` above when it does not (an older cached bundle, or a row
+  // this route has no copy entry for). Keeping both is what lets the wording
+  // change without breaking a client that has not reloaded.
+  metaKey?: string
+  metaParams?: Record<string, unknown>
   kind: string
   pageId: string
   // Optional sub-page target within pageId, e.g. 'devices' for the Users
@@ -103,6 +110,9 @@ type NotificationSection = {
   pageId: string
   count: number
   summary: string
+  /** As `metaKey`/`metaParams` above, against SECTION_SUMMARY_COPY. */
+  summaryKey?: string
+  summaryParams?: Record<string, unknown>
   items: NotificationItem[]
   // Settings key this section's on/off switch reads and writes (see
   // Settings.tsx's Notifications block and NotificationCenter.tsx's
@@ -331,6 +341,8 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
       tone: 'warning' as const,
       label: sale.receipt_number || `Sale #${sale.id}`,
       meta: `Awaiting payment${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      metaKey: 'notification_sales_awaiting_payment',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
       kind: 'sales_awaiting_payment',
       pageId: 'sales',
     })),
@@ -339,6 +351,8 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
       tone: 'info' as const,
       label: sale.receipt_number || `Sale #${sale.id}`,
       meta: `Awaiting delivery${SUMMARY_SEPARATOR}$${Number(sale.total_usd || 0).toFixed(2)}`,
+      metaKey: 'notification_sales_awaiting_delivery',
+      metaParams: { totalUsd: Number(sale.total_usd || 0).toFixed(2) },
       kind: 'sales_awaiting_delivery',
       pageId: 'sales',
     })),
@@ -349,10 +363,19 @@ async function buildSalesSection(env: Env): Promise<NotificationSection | null> 
     label: 'Sales',
     pageId: 'sales',
     count: awaitingPayment.length + awaitingDelivery.length,
+    // Sep 23 2026. This line, and the item lines above, are what the shop
+    // actually reads in the bell -- and they were still calling the status
+    // "awaiting payment" months after the app renamed it to Not Paid /
+    // ប្រាក់ជំពាក់, in English only, because the panel's language hook was
+    // never connected to this route. The English strings stay as the
+    // fallback for a client that has not reloaded; the keys below are what
+    // a current panel renders, from the language packs.
     summary: joinSummary([
       awaitingPayment.length ? `${awaitingPayment.length} awaiting payment` : null,
       awaitingDelivery.length ? `${awaitingDelivery.length} awaiting delivery` : null,
     ]),
+    summaryKey: 'notification_sales_summary',
+    summaryParams: { awaitingPaymentCount: awaitingPayment.length, awaitingDeliveryCount: awaitingDelivery.length },
     items,
     enabledKey: 'notifications_sales_enabled',
   }
