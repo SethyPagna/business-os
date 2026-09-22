@@ -20,6 +20,9 @@
 4. Invoke `/fleet-coordination` ([.claude/skills/fleet-coordination/](.claude/skills/fleet-coordination/SKILL.md))
    whenever more than one session is active and for any coordinate / verify / reconcile / deploy /
    compaction / docs task. It is the operating playbook; this file only points at it.
+5. Invoke `/blast-radius` ([.claude/skills/blast-radius/](.claude/skills/blast-radius/SKILL.md))
+   before every edit and every lane merge: map the callers, siblings, other-package counterpart
+   and pinned tests of what you touch, and verify them afterwards on the surface the owner uses.
 
 ## The two rules whose violation hurts peers within minutes
 

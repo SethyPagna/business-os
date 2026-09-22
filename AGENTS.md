@@ -33,6 +33,7 @@ Use `node agent-team/scripts/team-state.mjs` for cross-tool claims, heartbeats, 
 
 - Preserve the dirty shared worktree. Never reset, discard, stage, or rewrite changes you do not own. Do not use `git add .` or `git add -A`.
 - Trace sibling UI, API, import, bulk, offline, permissions, i18n, audit, and undo surfaces before declaring a feature complete.
+- Verify the blast radius of every change (`.claude/skills/blast-radius/SKILL.md`): before editing, enumerate with `git grep` every caller, reader, sibling surface, Worker/frontend counterpart and pinned test of what you touch; treat one reported symptom as one instance of a class; after editing, run those pinned tests individually, then the package gates, then the surface the owner uses, and record the matrix with a verdict per item in the release note. A merged peer lane gets the same treatment as your own diff.
 - Frontend validation must have backend enforcement and a focused parity test.
 - Treat deployments, remote migrations, secret sync, and remote D1 commands as production actions requiring explicit user authorization. Planning and review agents must not run them.
 - Never infer that `main` is deployed. Production claims require recorded commit/deployment provenance.
