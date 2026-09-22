@@ -1465,8 +1465,14 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
       customer ? `Customer: ${customer}` : '',
       change.reason ? `Reason: ${change.reason}` : '',
       // S4-2: say it out loud on the shop's channel too -- a status change
-      // that moved no stock must not look like a normal one.
-      skipped > 0 ? `Stock: not changed (${skipped} unit${skipped === 1 ? '' : 's'} deliberately skipped)` : '',
+      // that moved no stock must not look like a normal one. Composed with
+      // bi() because the `stock` label does not localize its value (it also
+      // carries free text on the stock alerts), and this note was therefore
+      // shipping in English to a Khmer-only shop. "មិនប៉ះពាល់ស្តុក" is the
+      // packs' own wording for it (en/km.json sale_stock_skipped).
+      skipped > 0
+        ? `Stock: ${bi('not changed', 'មិនប៉ះពាល់ស្តុក')} (${skipped} ${skipped === 1 ? bi('unit', 'ឯកតា') : bi('units', 'ឯកតា')} ${bi('deliberately skipped', 'បានរំលងដោយចេតនា')})`
+        : '',
       lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
       change.by ? `By: ${change.by}` : '',
     ],

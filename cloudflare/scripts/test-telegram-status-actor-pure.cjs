@@ -205,12 +205,17 @@ function composeMessage(lines) {
     telegramLang.GROUP_RULE,
     'Customer: Sok Dara',
     'Reason: Customer cancelled',
-    'Stock: not changed (3 units deliberately skipped)',
+    'Stock: not changed / មិនប៉ះពាល់ស្តុក (3 units / ឯកតា deliberately skipped / បានរំលងដោយចេតនា)',
     'Lost fee: $2.00',
     'By: admin',
   ], full.join('\n'))
   const one = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', skippedUnits: 1 })
-  assert.ok(one.includes('Stock: not changed (1 unit deliberately skipped)'), one.join('\n'))
+  assert.ok(one.includes('Stock: not changed / មិនប៉ះពាល់ស្តុក (1 unit / ឯកតា deliberately skipped / បានរំលងដោយចេតនា)'), one.join('\n'))
+  // UPDATED Sep 23 2026: the note used to ship in English whatever language the
+  // shop had set. The count agreement it also pins is unchanged -- the English
+  // half still says "unit" or "units"; Khmer marks no plural, so ឯកតា is right
+  // in both.
+  assert.ok(/\(3 units \//.test(full.join('\n')) && /\(1 unit \//.test(one.join('\n')), 'singular and plural must still differ in English')
   // A bare change -- no customer, no reason, no fee, no actor -- keeps its
   // first group and drops the second, divider and all.
   const bare = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled' })
