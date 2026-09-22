@@ -119,6 +119,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,
+  // The records reader (GET /:id/records); this file exercises the write paths.
+  '../lib/returnRecords': { loadReturnRecords: async () => null },
   // N21: the display-address kernel routes/returns.ts snapshots through, REAL
   // (it has no imports of its own; a stub would leave it undefined).
   '../lib/contactOptions': loadReal('lib/contactOptions.ts'),
