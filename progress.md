@@ -76,7 +76,8 @@ shiftTransport, the Shifts popup's Close form prefilled a minute before it and s
 it. Gates on e2c744bf: frontend 515 passed, 0 red of 515 executed files (0 skipped; 508104 ms), i18n/build 0; Worker
 tsc 0, 497/499 green (test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs contention, green standalone). Shared checkout: dangling @playwright/test link
 replaced (typecheck there green again). Open: shift 20 closing-count amendment (needs a
-signed-in session); popup closeDirty chip task_4683ad2f.
+signed-in session). Popup closeDirty FIXED at bbbf8be8 (the prefilled close time alone is
+not an unsaved change; every edit still is; shiftModalCloseBound 17 checks).
 D12 pushed (both branches at fee0a315) and deployed (Paid) 23:10Z: Worker
 4d263940-1996-43d6-aeac-19514c8080b0, live revision fee0a315baf3, frontend hash
 1bef2af49779c663; no remote migration; smoke green (admin login shell, storefront).
@@ -93,6 +94,10 @@ rule (verify the affected surroundings of every change). Gates on 4c163015: fron
 517 passed, 0 red of 517 executed files (0 skipped; 453870 ms), i18n/build 0; Worker tsc 0, 494/501 green (test-backup-schema-discovery-native.cjs, test-catalog-live-stock-native.cjs, test-import-maintenance-fence-native.cjs, test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs, test-sale-return-money-precision-native.cjs contention, green standalone; test-product-money-write-policy-native.cjs hook repaired at 4c163015, green).
 Settlement workspace removed 22 Sep (evidence in BusinessOS-Recovery/2026-09-22/, branch
 kept on origin at the main tip); only business-os-v1 remains under Downloads.
+Contact-edit residual CLOSED (c58a847a): the open customer/supplier/delivery form's version
+follows its list (409 reload or broadcast), so the retry saves in place; pinned with negative
+controls (writeVersionFromScreen 93 checks). Gates on c58a847a: frontend 517 passed, 0 red of 517 executed files (0 skipped; 378108 ms), i18n/build 0.
+Worktree cleanup 22 Sep (owner: "keep one business-os version only"): 23 registered worktrees under Temp, ~/.codex/worktrees and business-os-v1/.claude/worktrees archived then removed (unmerged heads and real uncommitted edits pushed as origin/archive/{aa7e-business-os-v1, aa98-business-os-v1, bos-efficiency-20260908-business-os-v1, private-read-caches, stock-transfer-existing-lots-20260912, bos-f51-c0ef-branch-review, bos-f51-e97-branch-review, bos-f65-phase1-browser-e2f5489b-4012fe0c, mergedry, lane-p9-assistant-chat, lane-p9-portal-reset, lane-p9-public-home}; untracked files in BusinessOS-Recovery/2026-09-22/<name>/; node_modules junctions deleted as links only; `git worktree prune`). Only business-os-v1 exists now; local branches were left in place.
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
 Full record: docs/fleet/2026-09-21-shift-close-release.md.
 

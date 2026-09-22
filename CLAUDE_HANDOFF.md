@@ -1,11 +1,12 @@
 # Business OS — Claude checkpoint
 
-## Current state, 21 September 2026 (Claude lead session)
+## Current state, 22 September 2026 (Claude lead session)
 
-Codex's pause handoff of 21 September was taken over and completed through push.
-Authoritative workspace `C:/Users/mrkl6/Downloads/bos-supplier-settlement-20260918`,
-branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
-`origin/codex/supplier-settlement-20260918`.
+Codex's pause handoff of 21 September was taken over and completed through push and
+deploy. The only checkout is the shared `C:/Users/mrkl6/Downloads/business-os-v1`
+(dirty peer work preserved; never reset); lanes work in detached worktrees under the
+session scratchpad and remove them when done. `main` = `codex/supplier-settlement-20260918`
+on origin; the latest code commit and deploy record are in progress.md.
 
 ### What landed
 
@@ -25,7 +26,8 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   migration (0185–0191 still unapplied by design). Signed-in POS End Shift smoke is the
   owner's remaining check.
 - Adjust candidate `a22d3b1e` REJECTED with reproduced defects (release record).
-  Its worktree and stash are kept.
+  Its worktree was archived (`origin/archive/bos-business-maintenance-guards-20260921`,
+  `284536b7`) and removed; its stash entry stays in the shared repository's stash list.
 - Three baseline red Worker tests (dated-stock-count ×2, reset-products) disclosed.
 - Frontend: four baseline reds left by Codex's `43f656d3`/`6324e286` (stale
   assertions against the product-save actor fence) repaired as test-only changes;
@@ -54,22 +56,25 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   `pendingShiftMutation` replay; admin-exempt users receive the row too.
   `readCurrent` and the daily prompt are unchanged. Deployed (Paid) as Worker
   `c77d84db`, live revision `f98754b364ba`, frontend hash `858e11877a4da3a1`.
+  Popup `closeDirty` prefill FIXED (`bbbf8be8`, lane commit `88d5cbd1`): the
+  prefilled close time alone is not an unsaved change; every edit still is.
 - D12 Shifts popup parity (`f69e81f1` Worker, `e2c744bf` POS): every presented
   shift row carries `close_before` (`closeBoundFor` via `readAdjacentShift`,
   null for closed/cancelled rows), `carryOverCloseSeedMs` lives once in
   `shiftTransport.ts`, and the popup's Close form seeds a minute before the
   bound and shows it. Gates green on `e2c744bf`. Open: shift 20 (21.09.2026)
   closing count amendment (500៛ counted, additional 0, note) once the owner
-  signs in; popup `closeDirty` prefill chip `task_4683ad2f`. Deployed (Paid) as
+  signs in (Claude does not enter passwords). Deployed (Paid) as
   Worker `4d263940`, live revision `fee0a315baf3`, frontend hash `1bef2af49779c663`.
   The settlement workspace is removed (evidence in `BusinessOS-Recovery/2026-09-22/`);
-  work continues from `business-os-v1` or a fresh scratchpad worktree off `origin/main`.
+  work continues from `business-os-v1` in scratchpad worktrees removed at session end.
 - "Changed on another device" class fix (`4c163015`): `frontend/src/api/expectedUpdatedAt.ts`
   is gone (it filled MISSING versions from Dexie mirrors the live app has not written
   since 12 Sep; the stale token itself was the `updated_at` the screen loaded with);
   transports send the caller's payload and every form/row passes its own `updated_at`
   explicitly; a refused product save re-reads the row into the form and the list, a
-  refused contact save reloads its tab; `DELETE /roles/:id` reads the body token. Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
+  refused contact save reloads its tab and the open contact form's version follows
+  the list (`c58a847a`, so the retry saves in place); `DELETE /roles/:id` reads the body token. Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
   `test-roles-delete-conflict-body-pure.cjs`, `test-products-update-conflict-current-pure.cjs`.
   New rule: `.claude/skills/blast-radius/SKILL.md` (map and verify the surroundings of
   every change; one symptom = one class). Gates green on `4c163015`.
@@ -78,9 +83,11 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   route before applying 0185–0191.
 - Reset lifecycle blockers unchanged; destructive reset stays disabled.
 - Downloads cleanup done: 300 worktrees archived then removed, plain folders and
-  loose files moved to `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/`; only
-  `business-os-v1`, this workspace and the candidate worktree remain. Journal in
-  that folder (`cleanup-journal.jsonl`).
+  loose files moved to `C:/Users/mrkl6/BusinessOS-Recovery/2026-09-21/` (journal
+  `cleanup-journal.jsonl` there). 22 Sep: the settlement workspace, the candidate
+  worktree and every remaining worktree elsewhere (Temp scratchpads, `~/.codex/worktrees`,
+  `.claude/worktrees`) archived then removed the same way (journal in
+  `BusinessOS-Recovery/2026-09-22/`); only `business-os-v1` exists.
 
 The historical checkpoint notes below remain evidence, not competing current status.
 

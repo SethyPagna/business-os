@@ -555,8 +555,7 @@ Downloads only `business-os-v1` remains. `codex/supplier-settlement-20260918` st
 on origin at the same tip as `main`.
 
 **Still open after this program:** the 22 Sep "changed on another device" class (fixed below); shift 20 (21.09.2026) closing-count amendment
-(needs the owner signed in; Claude does not enter passwords); popup `closeDirty`
-prefill (chip `task_4683ad2f`); shop-wide close permission (chip `task_4c313434`,
+(needs the owner signed in; Claude does not enter passwords); shop-wide close permission (chip `task_4c313434`,
 owner decision); D13 `opened_at` index (low, only if `shift_sessions` grows); 0188
 reset blocker; adjust candidate `a22d3b1e` stays REJECT.
 
@@ -650,7 +649,8 @@ false version was removed from four source comments and the test header;
 (2) the class was not closed for contact edits — now a refused contact save
 reloads its tab; the open modal itself still holds the `updated_at` it opened
 with, so "close, reopen, save" is the path there (recorded as the residual; the
-product form gets the stronger in-place re-read). Certified: no remaining
+product form gets the stronger in-place re-read) — closed in `c58a847a`, see the
+follow-up below. Certified: no remaining
 importer of the removed modules; the guarded-write matrix (every
 `assertUpdatedAtMatch` route and its frontend caller — no route lost a token,
 branch PUT and role DELETE go from "guard never ran" to "guard runs"); settings
@@ -662,6 +662,28 @@ helper; the conflict dialog was already English-only (pre-existing, not new).
 Not driven at runtime: the two newly effective guards against live concurrency.
 
 **Deployment.** DEPLOYED 22 Sep 09:00Z from `9895c5ec` (origin/main = codex/supplier-settlement-20260918): Worker version `582c0642-b4a4-4de4-bab6-080d65584b07`, revision `9895c5ec725a`, frontend hash `9b87775267b62e7e`, tier paid, Free dry-run bundle green, no remote migration. Smoke: admin login shell and storefront render on the new chunks; the browser pane's first storefront load ran the previous build's cached shell (stale-asset 404 until reload — the normal service-worker transition, not this lane). The owner's exact flow (edit a product changed elsewhere, save with an image) needs a signed-in session and is verified by the executed tests, not live.
+
+## Follow-up, 22 September (lane C)
+
+- `bbbf8be8` (lane commit `88d5cbd1`, chip `task_4683ad2f`): opening the Shifts popup's
+  Close form is not an unsaved change — `closeDirty` compares against the prefilled
+  seed, so the X closes silently until the operator edits a field; every edit still
+  guards. Pinned in `shiftModalCloseBound.test.ts` (17 checks).
+- `c58a847a`: the contact residual above is closed. While a customer, supplier or
+  delivery-contact form is open, `selected` follows the list row's `updated_at` (an
+  effect keyed on the list), and the edit payload spreads `selected.updated_at` over
+  the form's copy; the form state itself seeds once, so the operator's edits are
+  untouched. After the 409 handler's reload the next save press carries the version
+  that won. Pinned with negative controls (`writeVersionFromScreen.test.ts`, 93 checks).
+- Simulated council (five perspectives, labelled simulated): product owner — retry in
+  place matches the product form; UX — no visible change until a conflict, no new
+  dialog; architecture — one effect per tab, no shared helper (three call sites of
+  three lines; a helper would be the fourth file); security — no route change, the
+  Worker guard is unchanged; QA — the pins have controls that remove exactly the new
+  lines. Dead code: none added, none left (`useEffect` was already imported). Debloat:
+  no new state, no re-render beyond the reload that already happens.
+- Gates on `c58a847a`: frontend 517 passed, 0 red of 517 executed files (0 skipped; 378108 ms), i18n/build 0. Worker unchanged since `4c163015`.
+- Worktree cleanup 22 Sep (owner: "keep one business-os version only"): 23 registered worktrees under Temp, ~/.codex/worktrees and business-os-v1/.claude/worktrees archived then removed (unmerged heads and real uncommitted edits pushed as origin/archive/{aa7e-business-os-v1, aa98-business-os-v1, bos-efficiency-20260908-business-os-v1, private-read-caches, stock-transfer-existing-lots-20260912, bos-f51-c0ef-branch-review, bos-f51-e97-branch-review, bos-f65-phase1-browser-e2f5489b-4012fe0c, mergedry, lane-p9-assistant-chat, lane-p9-portal-reset, lane-p9-public-home}; untracked files in BusinessOS-Recovery/2026-09-22/<name>/; node_modules junctions deleted as links only; `git worktree prune`). Only business-os-v1 exists now; local branches were left in place.
 
 ## Downloads cleanup — DONE
 
