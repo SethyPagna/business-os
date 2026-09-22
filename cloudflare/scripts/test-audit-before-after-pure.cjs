@@ -257,20 +257,31 @@ async function auditWriteScenario() {
   // 3. The renderer the Audit Log page actually runs.
   check('the REAL Audit Log renderer turns those bytes into Field | Before | After rows', () => {
     const rows = renderer.buildAuditFieldDiff(withChange.old_value, withChange.new_value)
+    // Sep 23 2026 (records lane phase 2): a nested OBJECT now expands into one
+    // row per child that actually moved instead of one flattened
+    // "Sales: full -> Sales: view" line, so a permissions edit names the
+    // permission. The bytes this lane writes are unchanged -- only the
+    // renderer reads them differently.
     assert.deepEqual(rows.map((row) => [row.key, row.before, row.after, row.changeType]), [
       ['is_active', '1', '0', 'changed'],
-      ['permissions', 'Sales: full', 'Sales: view', 'changed'],
+      ['permissions.sales', 'full', 'view', 'changed'],
       ['role_id', '2', '3', 'changed'],
     ])
-    assert.deepEqual(rows.map((row) => row.label), ['Is Active', 'Permissions', 'Role Id'])
+    assert.deepEqual(rows.map((row) => row.label), ['Is Active', 'Permissions - Sales', 'Role Id'])
   })
-  check('CONTROL: a details-only row can only claim every field was ADDED', () => {
+  check('CONTROL: a details-only row still cannot say what changed', () => {
     // This is the defect this lane removes, pinned so it cannot come back
     // unnoticed: with old_value NULL the renderer has no before image, so an
-    // ordinary edit reads as if the branch had just been given a name.
+    // ordinary edit cannot be told apart from the branch being created.
+    //
+    // Phase 2 changed only the WORD: such a row used to be reported as
+    // 'added' -- an outright false claim on a legacy rename, which printed
+    // From/To/Rows as three additions that never happened -- and reads as
+    // 'context' now. What it still does NOT have is a before image, which is
+    // the whole point of this control and of writing the pair above.
     assert.deepEqual(renderer.buildAuditFieldDiff(legacy.old_value, legacy.new_value)
       .map((row) => [row.key, row.before, row.after, row.changeType]), [
-      ['name', null, 'Shop', 'added'],
+      ['name', null, 'Shop', 'context'],
     ])
   })
 
