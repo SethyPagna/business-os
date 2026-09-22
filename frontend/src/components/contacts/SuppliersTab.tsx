@@ -59,11 +59,14 @@ const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'
 // Invoices section is opened.
 const SupplierInvoicesSection = lazyRetry(() => import('./SupplierInvoicesSection'), 'suppliers-invoices-section')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'suppliers-export-options')
+// Loaded on open like every other modal here: the field history is a rare
+// read, and its float pulls the shared change table with it.
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'suppliers-records-float')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | null
+type ContactModal = 'form' | 'import' | 'detail' | 'purchases' | 'records' | null
 type SortDirection = 'asc' | 'desc'
 type SupplierGroupMode = 'time' | 'alphabet'
 // Top-level section of the Suppliers tab: the supplier directory (rows) OR
@@ -81,6 +84,12 @@ interface AppContextValue {
   // admin permission editor renders, so a control's visibility here always
   // matches what an admin was shown when granting the tier.
   can: (permissionKey: string, actionKey: string) => boolean
+  // Page-granularity tier, for the one control whose correctness depends on
+  // it: the field-history float reads an endpoint whose 'view' tier answers
+  // own-entries-only.
+  getPermissionTier: (key: string) => string
+  fmtUSD: (value: unknown) => string
+  fmtKHR: (value: unknown) => string
   user?: AppUser | null
 }
 
@@ -475,7 +484,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
 }
 
 function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabProps) {
-  const { can, user } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR } = useApp()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -1523,10 +1532,34 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
           wrapValuesAnywhere
-          extraButtons={[{ label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') }]}
+          extraButtons={[
+            { label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') },
+            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+          ]}
         />
       ) : null}
 
+      {/* The contact's field history: who changed this name, phone, address
+          or note, when, and what it was before -- including the pre-image a
+          merge keeps. Same float and same change table as the sale's and the
+          return's. Its rows are audit rows, read through the audit_log
+          permission, whose 'view' tier answers with the CALLER'S OWN entries
+          only; a list scoped to one reader presented as this contact's history
+          would be a wrong answer, so the button appears only at the tier that
+          sees all of it. */}
+      {modal === 'records' && selected ? (
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity="supplier"
+            entityId={selected.id as number}
+            subject={String(selected.name || '')}
+            onClose={() => setModal('detail')}
+            t={(key) => t(key) || key}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
       {exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog

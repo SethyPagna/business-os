@@ -54,11 +54,14 @@ import type { ContactOption } from './contactOptionUtils'
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
 const DeliveryContactReportModal = lazyRetry(() => import('./DeliveryContactReportModal'), 'delivery-contact-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'delivery-export-options')
+// Loaded on open like every other modal here: the field history is a rare
+// read, and its float pulls the shared change table with it.
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'delivery-records-float')
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type DeliveryModal = 'form' | 'import' | 'detail' | 'report' | null
+type DeliveryModal = 'form' | 'import' | 'detail' | 'report' | 'records' | null
 type SortDirection = 'asc' | 'desc'
 type DeliveryGroupMode = 'time' | 'alphabet'
 
@@ -72,6 +75,12 @@ interface AppContextValue {
   // admin permission editor renders, so a control's visibility here always
   // matches what an admin was shown when granting the tier.
   can: (permissionKey: string, actionKey: string) => boolean
+  // Page-granularity tier, for the one control whose correctness depends on
+  // it: the field-history float reads an endpoint whose 'view' tier answers
+  // own-entries-only.
+  getPermissionTier: (key: string) => string
+  fmtUSD: (value: unknown) => string
+  fmtKHR: (value: unknown) => string
   user?: AppUser | null
 }
 
@@ -473,7 +482,7 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
 
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabProps) {
-  const { can, user } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR } = useApp()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -1401,8 +1410,32 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             ]
           })()}
           onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
-          extraButtons={canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []} />
+          extraButtons={[
+            ...(canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []),
+            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+          ]} />
       )}
+      {/* The contact's field history: who changed this name, phone, address
+          or note, when, and what it was before -- including the pre-image a
+          merge keeps. Same float and same change table as the sale's and the
+          return's. Its rows are audit rows, read through the audit_log
+          permission, whose 'view' tier answers with the CALLER'S OWN entries
+          only; a list scoped to one reader presented as this contact's history
+          would be a wrong answer, so the button appears only at the tier that
+          sees all of it. */}
+      {modal === 'records' && selected ? (
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity="delivery_contact"
+            entityId={selected.id as number}
+            subject={String(selected.name || '')}
+            onClose={() => setModal('detail')}
+            t={(key) => t(key) || key}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
       {exportDialog ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog

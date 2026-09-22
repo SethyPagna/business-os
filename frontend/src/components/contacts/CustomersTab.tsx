@@ -46,7 +46,7 @@ import { effectivePermissions, type PermissionUser } from '../../utils/permissio
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactModal = 'form' | 'import' | 'gender-restoration' | 'detail' | 'purchases' | null
+type ContactModal = 'form' | 'import' | 'gender-restoration' | 'detail' | 'purchases' | 'records' | null
 type SortDirection = 'asc' | 'desc'
 type CustomerGroupMode = 'time' | 'alphabet'
 type CustomerPayload = Partial<CustomerRow> & {
@@ -88,6 +88,12 @@ interface AppContextValue {
   // admin permission editor renders, so a control's visibility here always
   // matches what an admin was shown when granting the tier.
   can: (permissionKey: string, actionKey: string) => boolean
+  // Page-granularity tier, for the one control whose correctness depends on
+  // it: the field-history float reads an endpoint whose 'view' tier answers
+  // own-entries-only.
+  getPermissionTier: (key: string) => string
+  fmtUSD: (value: unknown) => string
+  fmtKHR: (value: unknown) => string
   user?: AppUser | null
 }
 
@@ -272,6 +278,9 @@ const CustomerGenderRestorationModal = lazyRetry(() => import('./CustomerGenderR
 const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CustomerPurchasesReportModal = lazyRetry(() => import('./CustomerPurchasesReportModal'), 'customers-purchases-report')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'customers-export-options')
+// Loaded on open like every other modal here: the field history is a rare
+// read, and its float pulls the shared change table with it.
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'customers-records-float')
 // The customer accounts-receivable ledger (migration 0094) -- the customer-side
 // mirror of the supplier AP ledger, and the customer half of
 // docs/DATA-VISIBILITY-AND-CREDIT-AUDIT.md's "who owes the shop" view. It was
@@ -287,7 +296,7 @@ const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
-  const { can, user } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR } = useApp()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -307,6 +316,8 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   // the Suppliers/Delivery tabs and the Products precedent.
   const canExportContacts = can('contacts', 'export')
   const canViewFinancialHistory = can('contacts', 'financial_history')
+  // See the note on the records float at the bottom of this file.
+  const canReadFieldHistory = getPermissionTier('audit_log') === 'full'
   // This evidence-backed repair is intentionally narrower than Import:
   // administrator identity AND the Full contacts tier are both required.
   // Review-tier edit can change names only, so can('contacts','edit') alone
@@ -1449,8 +1460,32 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
-          extraButtons={canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []}
+          extraButtons={[
+            ...(canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []),
+            ...(canReadFieldHistory ? [{ label: tr(t, 'field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+          ]}
         />
+      ) : null}
+      {/* The contact's field history: who changed this name, phone, address
+          or note, when, and what it was before -- including the pre-image a
+          merge keeps. Same float and same change table as the sale's and the
+          return's. Its rows are audit rows, read through the audit_log
+          permission, whose 'view' tier answers with the CALLER'S OWN entries
+          only; a list scoped to one reader presented as this contact's history
+          would be a wrong answer, so the button appears only at the tier that
+          sees all of it. */}
+      {modal === 'records' && selected ? (
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity="customer"
+            entityId={selected.id as number}
+            subject={String(selected.name || '')}
+            onClose={() => setModal('detail')}
+            t={(key) => t(key) || key}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
       ) : null}
       {exportDialog ? (
         <Suspense fallback={null}>
