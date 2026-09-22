@@ -1611,6 +1611,15 @@ app.post('/bulk-price-adjust', async (c) => {
           WHERE is_active = 1 AND (${fieldCondition(field)})`,
     params: { delta },
   }))
+  // This scope deliberately never materializes ids, so there is no per-row
+  // before/after to record and no undo. The honest before/after at this scope
+  // is the catalog total per adjusted field: one aggregate read on each side
+  // (an indexed-free scan of a single column, run once for a rare, explicitly
+  // confirmed admin action) turns "changed 4,120 products" into a figure an
+  // operator can actually check. rows_touched rides along as a field so it
+  // renders in the same table.
+  const totalsSql = `SELECT ${fields.map((field) => `ROUND(SUM(COALESCE(${field}, 0)), 2) AS "${field}"`).join(', ')} FROM products WHERE is_active = 1`
+  const totalsBefore = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
   const results = await db.batch(statements)
   // D1 reports a batch statement's row count in meta.changes, never at the
   // top level, so the old read was always undefined -> 0: the response said
@@ -1619,9 +1628,14 @@ app.post('/bulk-price-adjust', async (c) => {
   const changed = Math.max(0, ...results.map((r) => Number(
     (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
   ) || 0))
+  const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
     scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
-  })
+  }, changedFields(
+    { ...totalsBefore, rows_touched: 0 },
+    { ...totalsAfter, rows_touched: changed },
+    { keys: [...fields, 'rows_touched'] },
+  ))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   await broadcast(c.env, 'products', { action: 'bulk-price-adjust' }).catch(() => {})
   return c.json({ success: true, changed })
