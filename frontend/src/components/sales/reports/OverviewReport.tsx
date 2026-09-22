@@ -196,6 +196,14 @@ export default function OverviewReport(p: ReportViewProps) {
         key: g,
         title: g === 'pending' ? undefined : groupLabel(g),
         highlight: isTheoreticalGroup(g),
+        // Every block here is a statement GROUP -- a summary of several
+        // lines, not one record -- so each keeps the 600 weight on its
+        // caption and its '=' total that it had before the Sep 22 weight
+        // pass. That pass took the weight off per-ROW totals because a list
+        // of record cards repeated it once per row; the Overview has six
+        // blocks and the owner named it as the surface that was already
+        // fine, so it must not be flattened along with them.
+        emphasis: true,
         lines: lines
           .filter((l) => l.group === g)
           .map((l) => {

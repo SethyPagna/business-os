@@ -56,7 +56,11 @@ export default function ReportFrame({ title, titleControl, menuAction, secondary
       ) : null}
       {error ? (
         <div className="flex items-center gap-2 rounded-[var(--ui-radius)] border border-[var(--ui-line)] bg-[var(--ui-surface-2)] px-3 py-2 text-[length:var(--ui-size-meta)] text-[var(--ui-danger)]">
-          <span className="min-w-0 flex-1 truncate">{error}</span>
+          {/* An error message is prose, not a name: it WRAPS (grow down, the
+              app's rule for space) instead of losing its tail to an ellipsis.
+              A truncated failure reason is the one string a user has to read
+              in full before pressing Retry. */}
+          <span className="min-w-0 flex-1 whitespace-normal break-words">{error}</span>
           {onRetry ? <Button size="sm" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={onRetry}>{retryLabel}</Button> : null}
         </div>
       ) : null}

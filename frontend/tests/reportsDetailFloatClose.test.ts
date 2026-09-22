@@ -24,9 +24,25 @@
 //   3. a click outside DOES close it
 //   4. the header X DOES close it
 //
+//   5. scrolling the list MOVES the float with its row but never carries it
+//      off the screen (the clamp in Fold's `placeAnchored`)
+//
 // Plus the readability half: the sheet inside that 448px float lays its
 // blocks out as ONE column, not the three ~90px columns the viewport-keyed
 // `md:`/`xl:` grid produced on a desktop window.
+//
+// WHY THE FIXTURE IMPORTS TWO STYLESHEETS, and what went wrong without them.
+// The first version of this file mounted GroupedReport alone. `main.css` is
+// imported by the app entry and `reports-surface.css` by ReportsHub.tsx --
+// neither of which this fixture loads -- so the page ran with NO project CSS
+// at all, and every readability assertion passed on a browser DEFAULT rather
+// than on the rule it names: `text-overflow` is `clip` by default, an element
+// with no `display: grid` reports `grid-template-columns: none` by default,
+// and with no `.detail-scroll-text` rule nothing could ever compute to
+// `ellipsis`. Four green checks, zero evidence. Both stylesheets are loaded
+// now, and each readability probe is run a SECOND time with the pre-fix rule
+// set injected over it, where it must go red -- the control that proves the
+// instrument can still see a defect.
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -50,6 +66,13 @@ assert.ok(browserPath, 'A local Chromium or Edge executable is required')
 const fixtureSource = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
+  // The REAL stylesheets, both of them: main.css carries .detail-scroll-text,
+  // the Khmer line boxes and --app-vh (which is what gives the report table
+  // its own scroll container); reports-surface.css carries the --ui-* tokens,
+  // .report-segment and the receipt sheet's container queries. Without them
+  // this fixture measures browser defaults -- see the header comment.
+  import '/src/styles/main.css'
+  import '/src/components/sales/reports/reports-surface.css'
   import GroupedReport from '/src/components/sales/reports/GroupedReport.tsx'
   import { getReportView } from '/src/components/sales/reports/reportModel.ts'
 
@@ -77,10 +100,13 @@ const fixtureSource = String.raw`
 
 // Long labels on purpose: the float's header and the statement's label
 // column are exactly where an ellipsis used to appear.
+// 60 rows, not 12: the table takes its own scroll container from main.css
+// (`--app-vh` -> max-height: calc(70 * 1vh)), and the scroll assertion needs
+// a list that actually scrolls far enough to carry a row off the top.
 const transportSource = String.raw`
   export function getReportGrouped() {
     const rows = []
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 60; i++) {
       rows.push({ key: String(i), label: 'Customer ' + i + ' with a deliberately very long display name for the scroll check', entity_id: i, tx_count: (i % 6) + 1, gross_sales_usd: 20 + i, item_discount_usd: 0, total_discount_usd: 0, revenue_usd: 18 + i, refund_usd: 0, collected_total_usd: 18 + i, avg_order_usd: 9, pending_revenue_usd: 0 })
     }
     return Promise.resolve({ rows })
@@ -230,37 +256,130 @@ try {
     assert.equal(await evaluate<boolean>(floatOpen), true, 'no pointer gesture short of a press may close the float')
   })
 
+  // ONE probe, run twice: once against the shipped stylesheets and once with
+  // the pre-fix rule set injected over them. A probe that cannot be made to
+  // report the defect is not measuring anything.
+  const readabilityProbe = `(() => {
+    const panel = document.querySelector('[role="dialog"]')
+    const sheet = panel.querySelector('.report-receipt-body')
+    const blocks = [...sheet.children]
+    const cells = [...panel.querySelectorAll('.detail-scroll-text')]
+    return {
+      width: Math.round(panel.getBoundingClientRect().width),
+      columns: getComputedStyle(sheet).gridTemplateColumns,
+      blocks: blocks.length,
+      minBlock: Math.round(Math.min(...blocks.map((b) => b.getBoundingClientRect().width))),
+      heading: getComputedStyle(panel.querySelector('h3')).textOverflow,
+      scrollers: cells.length,
+      ellipsis: cells.filter((c) => getComputedStyle(c).textOverflow === 'ellipsis').length,
+      sheetRule: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => r.cssText.includes('report-receipt-sheet')) } catch { return false } }),
+      scrollerRule: [...document.styleSheets].some((s) => { try { return [...s.cssRules].some((r) => r.cssText.includes('detail-scroll-text')) } catch { return false } }),
+    }
+  })()`
+  type Readability = { width: number; columns: string; blocks: number; minBlock: number; heading: string; scrollers: number; ellipsis: number; sheetRule: boolean; scrollerRule: boolean }
+
+  // The pre-fix rule set, restated as CSS: the kit's `truncate` on the fold
+  // heading and on every name cell, and the viewport-keyed `xl:grid-cols-3`
+  // that made a 448px float draw three ~90px columns on a 1280px window.
+  const legacyDefectCss = `
+    [role="dialog"] h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-scroll-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    [data-receipt-layout='cards'] > .report-receipt-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    [data-receipt-layout='cards'] > .report-receipt-body > * { max-width: none; }
+  `
+  const withLegacyDefect = `(() => {
+    const style = document.createElement('style')
+    style.id = 'legacy-defect'
+    style.textContent = ${JSON.stringify(legacyDefectCss)}
+    document.head.appendChild(style)
+    return true
+  })()`
+  const withoutLegacyDefect = `(() => { document.getElementById('legacy-defect')?.remove(); return true })()`
+
+  await check('the real stylesheets are loaded (the probe can see project CSS at all)', async () => {
+    const state = await evaluate<Readability>(readabilityProbe)
+    assert.equal(state.sheetRule, true, 'reports-surface.css is in the document')
+    assert.equal(state.scrollerRule, true, 'main.css is in the document')
+  })
+
   await check('the detail sheet inside the float is ONE column, not a squeezed grid', async () => {
-    const layout = await evaluate<{ width: number; columns: string; blocks: number; minBlock: number }>(`(() => {
-      const panel = document.querySelector('[role="dialog"]')
-      const sheet = panel.querySelector('.report-receipt-body')
-      const blocks = [...sheet.children]
-      return {
-        width: Math.round(panel.getBoundingClientRect().width),
-        columns: getComputedStyle(sheet).gridTemplateColumns,
-        blocks: blocks.length,
-        minBlock: Math.round(Math.min(...blocks.map((b) => b.getBoundingClientRect().width))),
-      }
-    })()`)
+    const layout = await evaluate<Readability>(readabilityProbe)
     assert.ok(layout.blocks >= 2, `the statement renders its groups (${layout.blocks} blocks)`)
     assert.equal(layout.columns, 'none', `a float-hosted sheet stays a single tape (grid-template-columns: ${layout.columns})`)
     assert.ok(layout.minBlock > layout.width * 0.6, `every block fills the float's width (narrowest ${layout.minBlock}px in a ${layout.width}px panel)`)
   })
 
   await check('names inside the float scroll instead of ending in an ellipsis', async () => {
-    const names = await evaluate<{ heading: string; scrollers: number; ellipsis: number }>(`(() => {
-      const panel = document.querySelector('[role="dialog"]')
-      const heading = getComputedStyle(panel.querySelector('h3')).textOverflow
-      const cells = [...panel.querySelectorAll('.detail-scroll-text')]
-      return {
-        heading,
-        scrollers: cells.length,
-        ellipsis: cells.filter((c) => getComputedStyle(c).textOverflow === 'ellipsis').length,
-      }
-    })()`)
+    const names = await evaluate<Readability>(readabilityProbe)
     assert.equal(names.heading, 'clip', 'the float header scrolls its long name instead of clipping it with an ellipsis')
     assert.ok(names.scrollers > 0, 'the float body uses the shared horizontal scroller')
     assert.equal(names.ellipsis, 0, 'no scroller falls back to an ellipsis')
+  })
+
+  await check('NEGATIVE CONTROL: the same probe reports RED against the pre-fix rule set', async () => {
+    await evaluate(withLegacyDefect)
+    await evaluate(settle)
+    const defective = await evaluate<Readability>(readabilityProbe)
+    try {
+      assert.notEqual(defective.columns, 'none', 'with the viewport-keyed grid restored the sheet must report a grid')
+      assert.ok(defective.minBlock <= defective.width * 0.6, `with three columns in a ${defective.width}px float a block must be narrow again (measured ${defective.minBlock}px)`)
+      assert.equal(defective.heading, 'ellipsis', 'with the kit truncate restored the heading must report an ellipsis')
+      assert.ok(defective.ellipsis > 0, 'with truncate restored the name cells must report an ellipsis')
+    } finally {
+      await evaluate(withoutLegacyDefect)
+      await evaluate(settle)
+    }
+    const repaired = await evaluate<Readability>(readabilityProbe)
+    assert.equal(repaired.columns, 'none', 'removing the control returns the sheet to one tape')
+    assert.equal(repaired.heading, 'clip', 'removing the control returns the heading to the scroller')
+  })
+
+  await check('scrolling the list moves the float but never off the screen', async () => {
+    // THE second half of "if i move it, it disappears": the panel follows its
+    // anchor on every scroll, so before the clamp a list scrolled to the end
+    // put the panel at top -1596px in this fixture (-872px on a real report,
+    // measured by the lane verifier) -- off-screen, X unreachable,
+    // and a fixed element cannot be scrolled back into view.
+    const scrolled = await evaluate<{ scrolledBy: number; open: boolean; top: number; bottom: number; unclampedTop: number; close: { top: number; bottom: number; left: number; right: number } | null; viewport: number }>(`(async () => {
+      const table = document.querySelector('table')
+      let node = table.parentElement
+      let scroller = null
+      while (node && !scroller) {
+        const style = getComputedStyle(node)
+        if (node.scrollHeight - node.clientHeight > 50 && /auto|scroll/.test(style.overflowY)) scroller = node
+        node = node.parentElement
+      }
+      if (!scroller) { scroller = document.scrollingElement; }
+      const before = scroller.scrollTop
+      scroller.scrollTop = scroller.scrollHeight
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 200))))
+      const panel = document.querySelector('[role="dialog"]')
+      const anchor = document.querySelectorAll('table tbody tr')[2]
+      const anchorRect = anchor.getBoundingClientRect()
+      const panelRect = panel ? panel.getBoundingClientRect() : null
+      const closeButton = panel ? panel.querySelector('button[aria-label="Close"]') : null
+      const closeRect = closeButton ? closeButton.getBoundingClientRect() : null
+      return {
+        scrolledBy: Math.round(scroller.scrollTop - before),
+        open: !!panel,
+        top: panelRect ? Math.round(panelRect.top) : NaN,
+        bottom: panelRect ? Math.round(panelRect.bottom) : NaN,
+        // What the UNCLAMPED placement would have produced from the same rect.
+        unclampedTop: Math.round(anchorRect.bottom + 8),
+        close: closeRect ? { top: Math.round(closeRect.top), bottom: Math.round(closeRect.bottom), left: Math.round(closeRect.left), right: Math.round(closeRect.right) } : null,
+        viewport: window.innerHeight,
+      }
+    })()`)
+    // CONTROL, inside the same measurement: the anchor really did leave the
+    // viewport, so the clamp assertion below is not passing because nothing
+    // moved. Without the clamp this run would have placed the panel at
+    // `unclampedTop`, which is above the top margin.
+    assert.ok(scrolled.scrolledBy > 100, `the list actually scrolled (${scrolled.scrolledBy}px)`)
+    assert.ok(scrolled.unclampedTop < 8, `the unclamped placement would have been off-screen (top ${scrolled.unclampedTop}px), so the clamp is what is being measured`)
+    assert.equal(scrolled.open, true, 'scrolling the list never closes the float')
+    assert.ok(scrolled.top >= 8, `the panel stays inside the viewport (top ${scrolled.top}px)`)
+    assert.ok(scrolled.bottom <= scrolled.viewport, `and inside its bottom edge (bottom ${scrolled.bottom}px in a ${scrolled.viewport}px viewport)`)
+    assert.ok(scrolled.close && scrolled.close.top >= 0 && scrolled.close.bottom <= scrolled.viewport, `the close button is reachable (${JSON.stringify(scrolled.close)})`)
   })
 
   await check('a click outside closes the float', async () => {

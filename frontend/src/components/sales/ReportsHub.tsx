@@ -431,7 +431,13 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
           onClick={() => setControlsFolded(false)}
         >
           <ChevronDown className="h-4 w-4 shrink-0 text-[var(--ui-ink-3)]" />
-          <span className="min-w-0 truncate text-[length:var(--ui-size-meta)] text-[var(--ui-ink-2)]">{rangeSubtitle(filters, trh)}</span>
+          {/* The folded handle's only text is the active range ("dd/mm/yyyy –
+              dd/mm/yyyy 08:00–17:00"), so an ellipsis here hides exactly the
+              thing the handle exists to report. It scrolls sideways instead
+              (`detail-scroll-text`, the app-wide scroller), which also keeps
+              the date and its time on ONE row -- the date-range rule -- on a
+              narrow phone. */}
+          <span className="detail-scroll-text min-w-0 text-[length:var(--ui-size-meta)] text-[var(--ui-ink-2)]">{rangeSubtitle(filters, trh)}</span>
         </button>
       </div>
     </section>

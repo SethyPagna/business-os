@@ -39,6 +39,9 @@ const table = read('src/components/sales/reports/ReportTable.tsx')
 const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
 const grouped = read('src/components/sales/reports/GroupedReport.tsx')
 const period = read('src/components/sales/reports/PeriodReport.tsx')
+const overview = read('src/components/sales/reports/OverviewReport.tsx')
+const frame = read('src/components/sales/reports/ReportFrame.tsx')
+const hub = read('src/components/sales/ReportsHub.tsx')
 const fold = read('src/components/shared/kit/Fold.tsx')
 const surfaceCss = read('src/components/sales/reports/reports-surface.css')
 const mainCss = read('src/styles/main.css')
@@ -59,21 +62,41 @@ function check(name: string, run: () => void): void {
 // 1. Names scroll, never ellipsise.
 // ---------------------------------------------------------------------------
 
-/** Does this source still cut text with an ellipsis box in its markup? */
+/** Does this source still cut text with an ellipsis box in its markup?
+ *
+ *  A class CONSTANT counts as markup: the kit's fold header keeps its class
+ *  string in `FOLD_TITLE_CLASS`, so a predicate anchored to `className=`
+ *  would have read the ellipsis that shipped there as absent. */
 export function hasEllipsisedCells(source: string): boolean {
   const code = stripComments(source)
-  return /className=[^\n]*\btruncate\b/.test(code) || /\btext-ellipsis\b/.test(code) || /\bline-clamp-\d/.test(code)
+  return /\btruncate\b/.test(code) || /\btext-ellipsis\b/.test(code) || /\bline-clamp-\d/.test(code)
 }
 
-check('report rows and row details never ellipsise a name', () => {
-  for (const [label, source] of [['ReportTable', table], ['ReceiptSheet', sheet], ['GroupedReport', grouped]] as const) {
+check('report rows, row details, the hub and the kit fold never ellipsise a name', () => {
+  // Fold is in this list because the ROOT CAUSE lived there: the kit put
+  // `truncate` on the panel heading and only `.reports-fold-panel > div > h3`
+  // in reports-surface.css undid it, so every other Fold caller (the kit
+  // gallery, anything adopted later) kept the ellipsis and any change to the
+  // header's DOM shape silently re-broke the reports one.
+  for (const [label, source] of [['ReportTable', table], ['ReceiptSheet', sheet], ['GroupedReport', grouped], ['ReportFrame', frame], ['ReportsHub', hub], ['kit Fold', fold]] as const) {
     assert.equal(hasEllipsisedCells(source), false, `${label} still has an ellipsis box on a text cell`)
   }
   // ...and the replacement is the shared scroller, used the same way the
   // product detail surfaces already use it (one implementation, not two).
   assert.match(table, /<span className="detail-scroll-text">\{formatCell\(c, row, fmtMoney\)\}<\/span>/, 'text cells scroll their full value')
-  assert.match(sheet, /className="detail-scroll-text font-medium">\{block\.title\}/, 'a card title (the record name) scrolls')
+  assert.match(sheet, /'detail-scroll-text font-medium'/, 'a card title (the record name) scrolls')
   assert.match(sheet, /\['detail-scroll-text', cellClass\]/, 'a ledger label scrolls')
+  // The fold header takes the same scroller the shared Modal's header takes
+  // (`Modal.tsx`: `detail-scroll-text min-w-0 flex-1`) -- level-1 and level-2
+  // dialogs reveal a long title the same way.
+  assert.match(fold, /const FOLD_TITLE_CLASS = 'detail-scroll-text min-w-0 flex-1/, 'the kit fold header scrolls its title at the kit, not through a per-surface override')
+  assert.equal((fold.match(/<h3 className=\{FOLD_TITLE_CLASS\}>/g) || []).length, 2, 'both fold branches (mobile sheet, desktop panel) share that one heading class')
+  assert.doesNotMatch(stripComments(surfaceCss), /\.reports-fold-panel > div > h3/, 'the per-surface heading override is gone with the cause')
+  // The date-range handle is the one place the hub still had an ellipsis:
+  // its only text IS the range it exists to report.
+  assert.match(hub, /className="detail-scroll-text min-w-0 text-\[length:var\(--ui-size-meta\)\]/, 'the folded filters handle scrolls the active range')
+  // An error message is prose: it wraps rather than scrolls or ellipsises.
+  assert.match(frame, /className="min-w-0 flex-1 whitespace-normal break-words">\{error\}/, 'a report error is readable in full')
   assert.match(mainCss, /\.detail-scroll-text\s*\{[^}]*overflow-x:\s*auto[^}]*white-space:\s*nowrap/, 'the shared scroller is a real horizontal scroller')
   // The `title` tooltip that used to be the only reveal is gone with the
   // ellipsis: a native tooltip vanishes the moment the pointer moves, which
@@ -84,6 +107,9 @@ check('report rows and row details never ellipsise a name', () => {
 check('NEGATIVE CONTROL: the ellipsis checker still fails a truncating cell', () => {
   const defective = '<td className={["max-w-[200px] truncate", extra].join(" ")} title={String(value)}>{cell}</td>'
   assert.equal(hasEllipsisedCells(defective), true, 'the checker must reject a truncating cell')
+  // ...including one hidden behind a class constant, which is exactly how the
+  // kit fold carried it.
+  assert.equal(hasEllipsisedCells("const TITLE = 'min-w-0 flex-1 truncate font-semibold'"), true, 'the checker must reject an ellipsis hidden in a class constant')
   assert.equal(hasEllipsisedCells('// truncate is deliberately not used here\n<td className="max-w-[200px]">{cell}</td>'), false, 'prose about truncation is not a truncating cell')
 })
 
@@ -128,7 +154,41 @@ check('no Fold effect is keyed on the caller\'s inline onClose', () => {
   assert.match(fold, /const onCloseRef = useRef\(onClose\)/, 'the latest handler is reached through a ref instead')
   assert.match(fold, /onCloseRef\.current\(\)/, 'the close paths call through that ref')
   // Scrolling MOVES the anchored panel with its row; it never closes it.
-  assert.match(fold, /document\.addEventListener\('scroll', track, true\)/, 'the anchored panel follows its row on scroll')
+  assert.match(fold, /document\.addEventListener\('scroll', scheduleTrack, true\)/, 'the anchored panel follows its row on scroll')
+})
+
+/** Does the anchored placement keep the panel inside the viewport vertically,
+ *  the way it already did horizontally? */
+export function clampsToViewport(source: string): { top: boolean; bottom: boolean; height: boolean } {
+  const code = stripComments(source)
+  return {
+    top: /const top = Math\.min\(Math\.max\(margin, rect\.bottom \+ gap\)/.test(code),
+    bottom: /const bottom = Math\.min\(Math\.max\(margin, viewportHeight - rect\.top \+ gap\)/.test(code),
+    height: /Math\.max\(margin, viewportHeight - margin - maxHeight\)/.test(code),
+  }
+}
+
+check('a scrolled-away row cannot carry the float off the screen', () => {
+  // The float follows its anchor, so without a vertical clamp scrolling the
+  // list to the end put the panel at a measured top of -872px: fully off the
+  // top, its X unreachable, and a fixed element cannot be scrolled back. The
+  // owner's "if i move it it disappears" survived the auto-close fix on
+  // desktop because of exactly this.
+  assert.deepEqual(clampsToViewport(fold), { top: true, bottom: true, height: true }, 'both placements clamp to the viewport margins, and the height clamps with them')
+  // One measurement per frame, not one per scroll event.
+  assert.match(fold, /frame = window\.requestAnimationFrame\(/, 'scroll/resize tracking is coalesced into one rAF')
+  assert.match(fold, /if \(frame\) window\.cancelAnimationFrame\(frame\)/, 'the pending frame is cancelled with the listeners')
+  assert.match(fold, /if \(last && last\.top === rect\.top/, 'an unchanged anchor rect never re-renders the panel')
+})
+
+check('NEGATIVE CONTROL: the clamp checker still fails the unclamped placement', () => {
+  const defective = `
+    function placeAnchored(rect, panelWidth) {
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - 8))
+      return { position: 'fixed', left, top: rect.bottom + 8, maxHeight: Math.max(120, spaceBelow) }
+    }
+  `
+  assert.deepEqual(clampsToViewport(defective), { top: false, bottom: false, height: false }, 'the checker must reject a placement that only clamps left')
 })
 
 check('NEGATIVE CONTROL: both float checkers still fail the pre-fix Fold', () => {
@@ -151,6 +211,15 @@ check('NEGATIVE CONTROL: both float checkers still fail the pre-fix Fold', () =>
 check('the row detail reads as one tape inside a float and as cards in the report', () => {
   assert.match(surfaceCss, /\.report-receipt-sheet\s*\{[^}]*container-type:\s*inline-size/, 'the sheet is its own query container')
   assert.match(surfaceCss, /@container \(min-width: 40rem\)/, 'cards appear from a SHEET width, not a window width')
+  // MONOTONIC in window width. The hub is capped at 74rem and its gutter grows
+  // with the window, so the sheet is widest around 1280-1440 and narrower
+  // again at 1920 (measured, real hub + real CSS in headless Chrome: 660 /
+  // 752 / 936 / 1066 / 1053 / 1014px at 700 / 800 / 1024 / 1280 / 1440 /
+  // 1920). A 64rem (1024px) third tier therefore gave 3 columns at 1440 and
+  // dropped back to 2 at 1920 -- a wider monitor showing less. 60rem sits
+  // below the whole plateau, and every tier is the same 20rem per card.
+  assert.match(surfaceCss, /@container \(min-width: 60rem\)/, 'the three-column tier is reachable across the whole desktop plateau')
+  assert.doesNotMatch(stripComments(surfaceCss), /@container \(min-width: 64rem\)/, 'the non-monotonic 64rem tier is gone')
   assert.ok(!/md:grid|xl:grid-cols/.test(stripComments(sheet)), 'no viewport variant decides the card grid')
   assert.match(sheet, /data-receipt-layout=\{centered \? 'statement' : 'cards'\}/, 'the centered statement opts out of the card grid explicitly')
   // The two folds whose body is a full income statement take the kit's wide
@@ -171,6 +240,15 @@ check('list views carry no per-row bold, and no size above the document scale', 
   // One bold row survives per table -- the totals line -- which is exactly
   // what the Overview statement does.
   assert.match(table, /<tr className="h-\[var\(--ui-row-h\)\] bg-\[var\(--ui-surface-2\)\] font-semibold">/, 'the single totals row keeps its weight')
+  // ...and the RECEIPT style has to agree with the excel style about where
+  // that one bold sits, or the receipt sheet ends up with no emphasis at all.
+  assert.match(table, /key: '__totals',\s*\n\s*emphasis: true,/, "the receipt style's totals block is the sheet's tfoot")
+  assert.match(sheet, /block\.emphasis \? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'/, 'only a summary block takes the bold title')
+  assert.match(sheet, /kind === 'total' && block\.emphasis \? 'pt-1 font-semibold' : LINE_CLASS\[kind \|\| 'add'\]/, 'only a summary block takes the bold total line')
+  // The Overview is the surface the owner called fine; its statement groups
+  // are summaries, not record cards, so they keep the weight they had before
+  // this lane instead of being flattened with the list views.
+  assert.match(overview, /highlight: isTheoreticalGroup\(g\),[\s\S]{0,700}?emphasis: true,/, "the Overview statement's groups keep their weight")
   assert.doesNotMatch(surfaceCss, /@media screen\s*\{/, 'the screen-only +2px size bump is gone (owner: "the size is too big")')
   assert.match(surfaceCss, /--ui-size-body:\s*12px/, 'the compact document scale is the base')
   assert.doesNotMatch(surfaceCss, /calc\(16px \* var\(--ui-km-boost/, 'no 16px Latin body anywhere in the surface')

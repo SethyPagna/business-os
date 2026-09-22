@@ -280,7 +280,19 @@
   }
 }
 
-@container (min-width: 64rem) {
+/* Every tier is a multiple of the SAME per-card width (20rem), which is what
+   makes the ladder monotonic in window width. 64rem here was not: the hub is
+   capped at 74rem and its gutter grows with the window, so the sheet is
+   *widest* around 1280-1440 and gets NARROWER again at 1920, where the >=1536
+   gutter tier eats into the same 74rem column. Sheet width measured in the
+   real hub with both stylesheets, headless Chrome: 660 / 752 / 936 / 1066 /
+   1053 / 1014px at windows of 700 / 800 / 1024 / 1280 / 1440 / 1920. A 64rem
+   (1024px) threshold therefore gave three columns at 1280 and 1440 and two
+   again at 1920 -- a wider monitor showing less. 60rem (960px) sits
+   below the whole plateau, so the column count only ever goes up as the
+   window grows, and each card still gets the same >=20rem it gets in the
+   two-column tier. */
+@container (min-width: 60rem) {
   [data-receipt-layout='cards'] > .report-receipt-body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -300,18 +312,14 @@
   max-width: 100%;
 }
 
-/* The fold's own header carries the record's NAME (a product, a period, a
-   receipt). The kit gives that heading `truncate`; on this surface it
-   scrolls instead. */
-.reports-fold-panel > div > h3 {
-  overflow-x: auto;
-  overflow-y: hidden;
-  text-overflow: clip;
-  scrollbar-width: none;
-  touch-action: pan-x;
-}
-
-.reports-fold-panel > div > h3::-webkit-scrollbar { display: none; }
+/* (The fold header's own scroller used to be patched here, as
+   `.reports-fold-panel > div > h3`. That was the symptom, not the cause: the
+   kit put `truncate` on the heading, so every OTHER Fold caller kept the
+   ellipsis and a structural change in Fold's header would have slipped past
+   the child selector. The scroller now lives on the heading itself
+   (shared/kit/Fold.tsx, `FOLD_TITLE_CLASS`) and this override is gone with
+   it -- the Khmer padding rule at the bottom of this file already covers
+   `.reports-fold-panel .detail-scroll-text`.) */
 
 /* A segment's two STATE tints have to be declared HERE, not as Tailwind
    background utilities on the element.

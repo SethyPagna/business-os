@@ -31,6 +31,21 @@ export type FoldProps = {
 const MOBILE_BREAKPOINT = 768
 const FOLD_HISTORY_MARKER = '__businessOsFold'
 
+// The header carries the record's NAME (a product, a customer, a receipt
+// number, a period). Names are never cut with an ellipsis on this project
+// (owner, Sep 22: "product names are using elipses when too long, remember we
+// don't do that. we do scroll left and right") -- a long one scrolls sideways
+// inside its own box.
+//
+// `.detail-scroll-text` (styles/main.css) is that scroller, app-wide and
+// already used by the product detail surfaces: one implementation, not a
+// second. It lives HERE rather than in a per-surface override, because an
+// override in reports-surface.css only ever fixed the panels that happen to
+// carry `.reports-fold-panel` -- the kit gallery's fold, and any future
+// caller, kept the ellipsis. Both branches (mobile sheet, desktop panel)
+// share the string so they cannot drift apart.
+const FOLD_TITLE_CLASS = 'detail-scroll-text min-w-0 flex-1 font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]'
+
 function getFocusable(root: HTMLElement | null): HTMLElement[] {
   if (!root) return []
   return Array.from(
@@ -68,17 +83,41 @@ function getFocusable(root: HTMLElement | null): HTMLElement[] {
 // cut off (a fixed element cannot be scrolled into view). Whichever side is
 // used, max height is bounded by the space on that side so the body scrolls
 // instead of overflowing the viewport.
+//
+// AND the result is clamped to the viewport on BOTH axes, not only on `left`.
+// The panel follows its anchor on every scroll (see `track` below), so a list
+// scrolled far enough carried the anchor -- and with it the panel -- clean off
+// the top of the screen: `top: -872px` measured on a real report list by the
+// lane's verifier, and `top: -1596px` reproduced in
+// tests/reportsDetailFloatClose.test.ts (which fails on that assertion if this
+// clamp is removed). The header X was unreachable, so the owner's "if i move
+// it it disappears" was still true on desktop after the auto-close fix. A
+// fixed panel cannot be scrolled back into view, so the clamp is the only
+// repair. `maxHeight` is clamped with it: a panel pinned to the top margin may
+// not be taller than the room left under it, or the clamp just moves the
+// overflow to the bottom edge.
 const FOLD_MIN_SPACE = 240
+const FOLD_VIEWPORT_MARGIN = 8
 function placeAnchored(rect: DOMRect, panelWidth: number): CSSProperties {
   const gap = 8
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - panelWidth - gap))
-  const spaceBelow = window.innerHeight - rect.bottom - gap * 2
+  const margin = FOLD_VIEWPORT_MARGIN
+  const viewportHeight = window.innerHeight
+  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - panelWidth - gap))
+  const spaceBelow = viewportHeight - rect.bottom - gap * 2
   const spaceAbove = rect.top - gap * 2
   const base: CSSProperties = { position: 'fixed', left, zIndex: 'var(--z-fold)' }
+  // The tallest a panel may be and still sit inside both margins.
+  const limit = Math.max(120, viewportHeight - margin * 2)
   if (spaceBelow >= FOLD_MIN_SPACE || spaceBelow >= spaceAbove) {
-    return { ...base, top: rect.bottom + gap, maxHeight: Math.max(120, spaceBelow) }
+    const maxHeight = Math.min(Math.max(120, spaceBelow), limit)
+    // Never above the top margin, never so low that the panel's own height
+    // would push its bottom past the bottom margin.
+    const top = Math.min(Math.max(margin, rect.bottom + gap), Math.max(margin, viewportHeight - margin - maxHeight))
+    return { ...base, top, maxHeight }
   }
-  return { ...base, bottom: window.innerHeight - rect.top + gap, maxHeight: Math.max(120, spaceAbove) }
+  const maxHeight = Math.min(Math.max(120, spaceAbove), limit)
+  const bottom = Math.min(Math.max(margin, viewportHeight - rect.top + gap), Math.max(margin, viewportHeight - margin - maxHeight))
+  return { ...base, bottom, maxHeight }
 }
 
 export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', className = '' }: FoldProps) {
@@ -121,9 +160,29 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
   // Anchor position (desktop only) + outside-click / Escape handling.
   useEffect(() => {
     if (!open) return undefined
+    // One measurement per FRAME, not one per scroll event. A capture-phase
+    // scroll listener on `document` fires for every nested scroller and every
+    // wheel/touch step; measuring + setState on each one meant a forced layout
+    // and a React render per event on a surface (the report list) whose whole
+    // complaint was that it felt heavy. The rAF coalesces a burst into the one
+    // measurement the next paint will actually use, and an unchanged rect is
+    // dropped before it can re-render anything.
+    let frame = 0
+    let last: { top: number; left: number; bottom: number; right: number } | null = null
     const track = () => {
       const anchor = anchorRef?.current
-      if (anchor) setAnchorRect(anchor.getBoundingClientRect())
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      if (last && last.top === rect.top && last.left === rect.left && last.bottom === rect.bottom && last.right === rect.right) return
+      last = { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right }
+      setAnchorRect(rect)
+    }
+    const scheduleTrack = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        track()
+      })
     }
     if (!isMobile) track()
     const closeIfOutside = (event: MouseEvent | TouchEvent) => {
@@ -139,20 +198,23 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
     document.addEventListener('mousedown', closeIfOutside)
     document.addEventListener('touchstart', closeIfOutside)
     document.addEventListener('keydown', closeIfEscape)
-    // A scroll MOVES the anchored panel with its row; it never closes it.
+    // A scroll MOVES the anchored panel with its row; it never closes it, and
+    // `placeAnchored` keeps the moved panel inside the viewport so the row can
+    // scroll away without taking the close button with it.
     // Capture, because the scrolling node is the nested `.page-scroll`
     // container and scroll events do not bubble (same technique AppSelect/
     // PortalMenu use).
     if (!isMobile) {
-      document.addEventListener('scroll', track, true)
-      window.addEventListener('resize', track)
+      document.addEventListener('scroll', scheduleTrack, true)
+      window.addEventListener('resize', scheduleTrack)
     }
     return () => {
       document.removeEventListener('mousedown', closeIfOutside)
       document.removeEventListener('touchstart', closeIfOutside)
       document.removeEventListener('keydown', closeIfEscape)
-      document.removeEventListener('scroll', track, true)
-      window.removeEventListener('resize', track)
+      document.removeEventListener('scroll', scheduleTrack, true)
+      window.removeEventListener('resize', scheduleTrack)
+      if (frame) window.cancelAnimationFrame(frame)
     }
   }, [open, isMobile, anchorRef])
 
@@ -232,7 +294,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
           <span className="h-1 w-9 rounded-full bg-[var(--ui-line-2)]" aria-hidden="true" />
         </div>
         <div className="flex min-w-0 items-center gap-2 border-b border-[var(--ui-line)] px-4 py-2.5">
-          <h3 className="min-w-0 flex-1 truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]">{title}</h3>
+          <h3 className={FOLD_TITLE_CLASS}>{title}</h3>
           {actions}
           <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
             <X className="h-4 w-4" aria-hidden="true" />
@@ -252,7 +314,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
       className={[size === 'lg' ? 'w-[28rem]' : 'w-80', 'max-h-[70vh] flex flex-col rounded-[var(--ui-radius-lg)] border border-[var(--ui-line)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow-3)]', className].join(' ').trim()}
     >
       <div className="flex min-w-0 items-center gap-2 border-b border-[var(--ui-line)] px-3 py-2">
-        <h3 className="min-w-0 flex-1 truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h3)] font-semibold text-[var(--ui-ink)]">{title}</h3>
+        <h3 className={FOLD_TITLE_CLASS}>{title}</h3>
         {actions}
         <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--ui-radius)] text-[var(--ui-ink-2)] hover:bg-[var(--ui-surface-2)]">
           <X className="h-3.5 w-3.5" aria-hidden="true" />

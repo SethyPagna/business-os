@@ -39,6 +39,19 @@ export interface ReceiptBlock {
    * in revenue and profit, so its highlighted row is informational.
    */
   highlight?: boolean
+  /**
+   * This block SUMMARISES the sheet instead of carrying one record: the
+   * totals footer ReportTable appends, or a statement group in the Overview.
+   * It -- and only it -- takes the 600 weight, the same weight the excel
+   * style's `<tfoot>` row carries, so the two styles agree on where the
+   * emphasis sits.
+   *
+   * Record cards deliberately do NOT get it: a list of fifty cards each
+   * closing on a bold line is the "text heavy... the boldness, weight made it
+   * worse" the owner reported on Sep 22. One bold block per sheet is the
+   * Overview's own rhythm, which the same owner called fine.
+   */
+  emphasis?: boolean
 }
 
 export interface ReceiptSheetProps {
@@ -54,10 +67,12 @@ const LINE_CLASS: Record<ReceiptLineKind, string> = {
   // The rule-over-totals border/margin moved to a spanning divider cell (see
   // the grid below) so it can cross both grid columns; this keeps only the
   // text treatment that belongs on each cell.
-  // 'medium', not 'semibold': a total line closes EVERY card in a list view
-  // as well as the statement's groups, so semibold here is bold repeated once
-  // per row (owner, Sep 22: 'the boldness, weight made it worse'). The rule
-  // above the line and the mono figure carry the hierarchy.
+  // 'medium', not 'semibold': a total line closes EVERY card in a list view,
+  // so semibold as the DEFAULT is bold repeated once per row (owner, Sep 22:
+  // 'the boldness, weight made it worse'). The rule above the line and the
+  // mono figure carry the hierarchy there. A block that is a summary rather
+  // than a record (`ReceiptBlock.emphasis` -- the totals footer, an Overview
+  // statement group) takes the 600 weight back; see the map below.
   total: 'pt-1 font-medium',
   info: 'text-[var(--ui-ink-2)]',
   muted: 'text-[var(--ui-ink-3)]',
@@ -122,6 +137,13 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
     >
       {blocks.map((block, index) => {
         const clickable = typeof block.onClick === 'function'
+        // The one bold cue, and where it lands. In a summary block the weight
+        // goes on the title (in the totals footer the title IS the word
+        // "Total") and on its arithmetic total lines; everywhere else the
+        // LINE_CLASS medium above stands.
+        const titleClass = block.emphasis ? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'
+        const lineClass = (kind: ReceiptLineKind | undefined) =>
+          kind === 'total' && block.emphasis ? 'pt-1 font-semibold' : LINE_CLASS[kind || 'add']
         const body = (
           <>
             {block.title != null || block.meta != null ? (
@@ -132,8 +154,10 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                     sideways inside its own box (`detail-scroll-text`). Weight
                     is `medium`, not `semibold`: in a list every card carries
                     one, and a page of bold titles is the "boldness, weight
-                    made it worse" the owner reported. */}
-                {block.title != null ? <div className="detail-scroll-text font-medium">{block.title}</div> : <span />}
+                    made it worse" the owner reported. A summary block (the
+                    totals footer, a statement group) is the exception -- see
+                    `titleClass` above. */}
+                {block.title != null ? <div className={titleClass}>{block.title}</div> : <span />}
                 {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
@@ -165,7 +189,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
               <div className="grid grid-cols-[minmax(0,1fr)_max-content] items-baseline gap-x-[var(--ui-receipt-gap,0.75rem)]">
                 {block.lines.map((line, i) => {
                   const kind = line.kind
-                  const cellClass = LINE_CLASS[kind || 'add']
+                  const cellClass = lineClass(kind)
                   return (
                     <Fragment key={line.key || i}>
                       {kind === 'total' ? <div className="col-span-2 mt-1 border-t border-[var(--ui-ink-3)]" /> : null}
