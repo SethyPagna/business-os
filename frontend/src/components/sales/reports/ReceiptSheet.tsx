@@ -40,18 +40,24 @@ export interface ReceiptBlock {
    */
   highlight?: boolean
   /**
-   * This block SUMMARISES the sheet instead of carrying one record: the
-   * totals footer ReportTable appends, or a statement group in the Overview.
-   * It -- and only it -- takes the 600 weight, the same weight the excel
-   * style's `<tfoot>` row carries, so the two styles agree on where the
-   * emphasis sits.
+   * This block SUMMARISES rather than carrying one record in a list: the
+   * totals footer ReportTable appends, a statement group (the Overview and
+   * every row-detail fold), the breakdown block of a single receipt. It
+   * takes the 600 weight on its caption and its `=` totals -- the same
+   * weight the excel style's `<tfoot>` row carries, so the two styles agree
+   * about where the emphasis sits, and the same weight every statement
+   * carried before the Sep 22 pass.
    *
-   * Record cards deliberately do NOT get it: a list of fifty cards each
+   * Record cards in a LIST deliberately do not get it: fifty cards each
    * closing on a bold line is the "text heavy... the boldness, weight made it
-   * worse" the owner reported on Sep 22. One bold block per sheet is the
-   * Overview's own rhythm, which the same owner called fine.
+   * worse" the owner reported on Sep 22.
+   *
+   * NOT to be confused with `ReportColumn.emphasis` in ReportTable.tsx, which
+   * names the primary money column and renders MEDIUM. Two flags with
+   * opposite weights in one folder is how that confusion starts, hence the
+   * different name.
    */
-  emphasis?: boolean
+  summary?: boolean
 }
 
 export interface ReceiptSheetProps {
@@ -71,7 +77,7 @@ const LINE_CLASS: Record<ReceiptLineKind, string> = {
   // so semibold as the DEFAULT is bold repeated once per row (owner, Sep 22:
   // 'the boldness, weight made it worse'). The rule above the line and the
   // mono figure carry the hierarchy there. A block that is a summary rather
-  // than a record (`ReceiptBlock.emphasis` -- the totals footer, an Overview
+  // than a record (`ReceiptBlock.summary` -- the totals footer, an Overview
   // statement group) takes the 600 weight back; see the map below.
   total: 'pt-1 font-medium',
   info: 'text-[var(--ui-ink-2)]',
@@ -141,9 +147,9 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
         // goes on the title (in the totals footer the title IS the word
         // "Total") and on its arithmetic total lines; everywhere else the
         // LINE_CLASS medium above stands.
-        const titleClass = block.emphasis ? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'
+        const titleClass = block.summary ? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'
         const lineClass = (kind: ReceiptLineKind | undefined) =>
-          kind === 'total' && block.emphasis ? 'pt-1 font-semibold' : LINE_CLASS[kind || 'add']
+          kind === 'total' && block.summary ? 'pt-1 font-semibold' : LINE_CLASS[kind || 'add']
         const body = (
           <>
             {block.title != null || block.meta != null ? (

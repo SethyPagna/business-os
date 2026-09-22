@@ -19,7 +19,8 @@ export type SectionHeaderProps = {
 
 // SectionHeader -- the one section-title row: title + optional count +
 // optional InfoHint on the left, actions on the right, always a single row
-// (title truncates rather than wrapping). Never nests a second title row --
+// (a long title scrolls sideways rather than wrapping or ellipsising --
+// see the h2 below). Never nests a second title row --
 // a page with sub-sections uses this once per SectionCard-equivalent, not
 // once per mini-section (mini-sections stay visually quieter, per the
 // existing SectionCard `nested` convention this component does not
@@ -28,8 +29,19 @@ export default function SectionHeader({ title, count, infoHint, titleControl, ac
   return (
     <div className={['flex min-w-0 items-center gap-2', className].join(' ').trim()}>
       <div className="flex min-w-0 items-center gap-1.5">
+        {/* The section title is a NAME (the active report, a page section),
+            and names are never cut with an ellipsis on this project (owner,
+            Sep 22: "we don't do that. we do scroll left and right"). It takes
+            the app-wide `.detail-scroll-text` scroller, the same one
+            shared/Modal.tsx's title and the kit's own Fold header use.
+
+            The `title` attribute stays for the string case as a courtesy, but
+            it is no longer load-bearing -- and it never covered the element
+            case at all: ReportFrame passes a `titleControl` ELEMENT as the
+            title, so the report's own heading was an ellipsis with no reveal
+            behind it. */}
         <h2
-          className="truncate font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h2)] font-semibold leading-[var(--ui-lh-heading)] text-[var(--ui-ink)]"
+          className="detail-scroll-text font-[family-name:var(--ui-font-display)] text-[length:var(--ui-size-h2)] font-semibold leading-[var(--ui-lh-heading)] text-[var(--ui-ink)]"
           title={typeof title === 'string' ? title : undefined}
         >
           {title}

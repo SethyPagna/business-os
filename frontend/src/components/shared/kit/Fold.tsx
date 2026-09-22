@@ -22,6 +22,19 @@ export type FoldProps = {
    *  implement "anchored to the triggering row" -- documented here rather
    *  than left unresolved. */
   anchorRef?: RefObject<HTMLElement | null>
+  /** Identity of the row `anchorRef.current` currently points at (a row id,
+   *  a key -- anything that changes when the anchor changes).
+   *
+   *  A ref mutation is invisible to React: callers set `anchorRef.current =
+   *  el` and then change which row is open, so when the fold is RE-TARGETED
+   *  while already open (press row A, then row B; or a programmatic drill
+   *  from one row to another) nothing re-ran the placement effect and the
+   *  panel stayed at the previous row's coordinates (measured: panel top
+ *  275px while the newly-opened row sat at 542px, reportsDetailFloatClose).
+   *  The placement effect is keyed on this, so passing the open row's id is
+   *  what makes a re-target move the panel. Optional: a fold anchored to one
+   *  fixed control (the options fold's button) has nothing to re-target. */
+  anchorKey?: string | number
   /** Desktop panel width: 'md' (20rem, default) for a single receipt/detail,
    *  'lg' (28rem) when the body is a multi-column table. Ignored on the mobile sheet. */
   size?: 'md' | 'lg'
@@ -120,7 +133,7 @@ function placeAnchored(rect: DOMRect, panelWidth: number): CSSProperties {
   return { ...base, bottom, maxHeight }
 }
 
-export default function Fold({ open, onClose, title, actions, children, anchorRef, size = 'md', className = '' }: FoldProps) {
+export default function Fold({ open, onClose, title, actions, children, anchorRef, anchorKey, size = 'md', className = '' }: FoldProps) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -216,7 +229,12 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
       window.removeEventListener('resize', scheduleTrack)
       if (frame) window.cancelAnimationFrame(frame)
     }
-  }, [open, isMobile, anchorRef])
+  // `anchorKey` is in here so a RE-TARGET re-measures: the caller mutates
+  // `anchorRef.current` to the new row, which React cannot see, and without
+  // this dep the panel kept the previous row's position. Re-running is
+  // cheap (it re-arms three listeners and takes one measurement) and it is
+  // NOT the history effect, which must stay keyed on `open` alone.
+  }, [open, isMobile, anchorRef, anchorKey])
 
   // Focus trap + return focus.
   useEffect(() => {

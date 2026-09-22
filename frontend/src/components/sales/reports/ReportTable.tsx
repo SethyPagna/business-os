@@ -209,11 +209,11 @@ export default function ReportTable<Row>({
       // (font-semibold on the `<tr>` below); without this flag the receipt
       // style had NO bold left anywhere once the per-row semibold came off,
       // so the sheet's one summary block read exactly like the fifty record
-      // cards above it. `emphasis` is the block-level opt-in -- one bold
+      // cards above it. `summary` is the block-level opt-in -- one bold
       // block per sheet, the same place the excel style puts it.
       blocks.push({
         key: '__totals',
-        emphasis: true,
+        summary: true,
         title: labels.total,
         lines: lineColumns.filter((c) => isNumericKind(c.kind)).map((c) => ({ key: c.key, label: c.label, value: formatCell(c, totalsRow, fmtMoney), kind: receiptLineKind(c) })),
         body: cardBody ? cardBody(totalsRow) : undefined,

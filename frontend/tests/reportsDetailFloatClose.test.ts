@@ -26,6 +26,15 @@
 //
 //   5. scrolling the list MOVES the float with its row but never carries it
 //      off the screen (the clamp in Fold's `placeAnchored`)
+
+//   6. pressing a DIFFERENT row while it is open RE-TARGETS it -- the panel
+//      moves to the new row instead of keeping the old row's coordinates
+//      (`anchorKey`; a ref mutation is invisible to React)
+//   7. and the two weight/layout claims the source-shape sweep can only make
+//      as regexes are MEASURED here: the totals block is the only thing
+//      painting at 600 in the sheet, and the column ladder turns over where
+//      the 60rem container query says it does. Each has its own in-run
+//      control that must flip it red.
 //
 // Plus the readability half: the sheet inside that 448px float lays its
 // blocks out as ONE column, not the three ~90px columns the viewport-keyed
@@ -86,9 +95,14 @@ const fixtureSource = String.raw`
 
   function Harness() {
     const [tick, setTick] = React.useState(0)
+    const [style, setStyle] = React.useState('excel')
     window.__bump = () => setTick((v) => v + 1)
+    // The report body in the RECEIPT style: the same ReceiptSheet the float
+    // renders, but with 60 record cards and the totals block, which is what
+    // the weight and column-ladder measurements need.
+    window.__setStyle = (next) => setStyle(next)
     return React.createElement(GroupedReport, {
-      view, filters, search: '', options, style: 'excel', fmtMoney, khrToUsd, tr, t,
+      view, filters, search: '', options, style, fmtMoney, khrToUsd, tr, t,
       perms: { sales: true, returns: true, fees: true, shift: true },
       canExport: () => true, compact: false, onDrill: () => {}, onOptionsChange: () => {},
       titleControl: React.createElement('span', null, 'tick ' + tick),
@@ -243,6 +257,31 @@ try {
     assert.equal(await evaluate<boolean>(floatOpen), true, 'repeated re-renders must not close it either')
   })
 
+  await check('re-targeting the open float at another row moves it to that row', async () => {
+    // A caller mutates `anchorRef.current` and changes which row is open.
+    // React cannot see a ref mutation, so before `anchorKey` joined the
+    // placement effect's deps the effect never re-ran and the panel kept the
+    // FIRST row's coordinates while showing the SECOND row's data.
+    const before = await evaluate<{ panelTop: number; rowBottom: number }>(`(() => {
+      const panel = document.querySelector('[role="dialog"]').getBoundingClientRect()
+      const row = document.querySelectorAll('table tbody tr')[2].getBoundingClientRect()
+      return { panelTop: Math.round(panel.top), rowBottom: Math.round(row.bottom) }
+    })()`)
+    await evaluate(`(() => { document.querySelectorAll('table tbody tr')[9].click(); return true })()`)
+    await evaluate(settle)
+    const after = await evaluate<{ open: boolean; panelTop: number; rowBottom: number }>(`(() => {
+      const panel = document.querySelector('[role="dialog"]')
+      const row = document.querySelectorAll('table tbody tr')[9].getBoundingClientRect()
+      return { open: !!panel, panelTop: panel ? Math.round(panel.getBoundingClientRect().top) : NaN, rowBottom: Math.round(row.bottom) }
+    })()`)
+    // CONTROL: the two rows are far enough apart that "followed the anchor"
+    // and "kept the old position" cannot both be true.
+    assert.ok(Math.abs(after.rowBottom - before.rowBottom) > 50, `the two rows are far apart (${before.rowBottom} -> ${after.rowBottom})`)
+    assert.equal(after.open, true, 'pressing a DIFFERENT row re-targets the float instead of closing it')
+    assert.ok(Math.abs(after.panelTop - (after.rowBottom + 8)) <= 2, `the panel sits under the new row (top ${after.panelTop}, row bottom ${after.rowBottom})`)
+    assert.ok(Math.abs(after.panelTop - before.panelTop) > 50, `and actually moved (was ${before.panelTop}, now ${after.panelTop})`)
+  })
+
   await check('pointer movement over the page leaves the float open', async () => {
     await evaluate(`(() => {
       const row = document.querySelectorAll('table tbody tr')[7]
@@ -354,7 +393,8 @@ try {
       scroller.scrollTop = scroller.scrollHeight
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 200))))
       const panel = document.querySelector('[role="dialog"]')
-      const anchor = document.querySelectorAll('table tbody tr')[2]
+      // Row 9: the re-target check above moved the anchor there.
+      const anchor = document.querySelectorAll('table tbody tr')[9]
       const anchorRect = anchor.getBoundingClientRect()
       const panelRect = panel ? panel.getBoundingClientRect() : null
       const closeButton = panel ? panel.querySelector('button[aria-label="Close"]') : null
@@ -396,6 +436,117 @@ try {
     await evaluate(`(() => { document.querySelector('[role="dialog"] button[aria-label="Close"]').click(); return true })()`)
     await evaluate(settle)
     assert.equal(await evaluate<boolean>(floatOpen), false, 'the one close affordance in the header closes the float')
+  })
+
+  // -------------------------------------------------------------------------
+  // The two claims reportsReadableRows can only make as regexes, measured.
+  // -------------------------------------------------------------------------
+  await check('the report body renders in the receipt style for the measured checks', async () => {
+    await evaluate(`(() => { window.__setStyle('receipt'); return true })()`)
+    await evaluate(settle)
+    const blocks = await evaluate<number>(`document.querySelectorAll('.report-receipt-body > *').length`)
+    assert.ok(blocks >= 60, `the receipt-style report body renders its record cards plus the totals block (${blocks})`)
+  })
+
+  /** Every element in the report body sheet that actually PAINTS at >=600,
+   *  and whether it sits in the last block (the totals footer) or above it. */
+  const weightProbe = `(() => {
+    const body = document.querySelector('.report-receipt-body')
+    const blocks = [...body.children]
+    const last = blocks[blocks.length - 1]
+    const bold = [...body.querySelectorAll('*')].filter((el) => {
+      if (!el.textContent.trim()) return false
+      return parseInt(getComputedStyle(el).fontWeight, 10) >= 600
+    })
+    return {
+      blocks: blocks.length,
+      boldTotal: bold.length,
+      boldInLast: bold.filter((el) => last.contains(el)).length,
+      boldOutsideLast: bold.filter((el) => !last.contains(el)).length,
+      lastTitle: last.textContent.trim().slice(0, 16),
+    }
+  })()`
+  type Weights = { blocks: number; boldTotal: number; boldInLast: number; boldOutsideLast: number; lastTitle: string }
+
+  await check('the totals block is the ONLY thing painting at 600 in the sheet', async () => {
+    // The owner's complaint was the weight, not the absence of it: "the
+    // boldness, weight made it worse". One bold block per sheet, in the same
+    // place the excel style bolds its <tfoot> row -- and the source regex in
+    // reportsReadableRows cannot tell whether that is what PAINTS.
+    const weights = await evaluate<Weights>(weightProbe)
+    assert.ok(weights.boldInLast > 0, `the totals block carries the sheet's one bold cue (${weights.boldInLast} elements, block text "${weights.lastTitle}")`)
+    assert.equal(weights.boldOutsideLast, 0, `nothing above the totals block paints at 600 (${weights.boldOutsideLast} of ${weights.boldTotal} in ${weights.blocks} blocks)`)
+  })
+
+  await check('CONTROL: the weight probe reports RED when the record cards are bold again', async () => {
+    // If every `font-medium` in the sheet is pushed to 700, the probe has to
+    // see it. A probe that returns 0 either way is measuring nothing.
+    await evaluate(`(() => {
+      const style = document.createElement('style')
+      style.id = 'bold-cards-control'
+      style.textContent = '.report-receipt-body .font-medium { font-weight: 700 }'
+      document.head.appendChild(style)
+      return true
+    })()`)
+    await evaluate(settle)
+    let defective: Weights
+    try {
+      defective = await evaluate<Weights>(weightProbe)
+    } finally {
+      await evaluate(`(() => { document.getElementById('bold-cards-control')?.remove(); return true })()`)
+      await evaluate(settle)
+    }
+    assert.ok(defective.boldOutsideLast > 10, `with the record cards bold again the probe must see them (${defective.boldOutsideLast})`)
+    const repaired = await evaluate<Weights>(weightProbe)
+    assert.equal(repaired.boldOutsideLast, 0, 'removing the control returns the sheet to one bold block')
+  })
+
+  /** Column tracks the sheet actually lays out at a GIVEN sheet width. The
+   *  tier is a container query, so forcing the sheet's own inline size is
+   *  what the rule answers -- no window resize needed. */
+  const columnsAt = (width: number) => `(async () => {
+    const sheet = document.querySelector('.report-receipt-sheet')
+    sheet.style.width = '${width}px'
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const body = sheet.querySelector('.report-receipt-body')
+    const tracks = getComputedStyle(body).gridTemplateColumns
+    return { measured: Math.round(sheet.getBoundingClientRect().width), tracks, columns: tracks === 'none' ? 1 : tracks.split(' ').length }
+  })()`
+  type Columns = { measured: number; tracks: string; columns: number }
+
+  await check('the column ladder straddles 60rem where the stylesheet says it does', async () => {
+    // 1008px is 63rem: above the 60rem tier that shipped, BELOW the 64rem one
+    // it replaced. That is the whole repair -- at a 1053px sheet (a 1440px
+    // window) the 64rem tier dropped back to two columns while a 1280px window
+    // showed three.
+    const wide = await evaluate<Columns>(columnsAt(1008))
+    assert.equal(wide.measured, 1008, `the sheet really is 1008px wide (${wide.measured})`)
+    assert.equal(wide.columns, 3, `a 1008px sheet lays out three cards (${wide.tracks})`)
+    const mid = await evaluate<Columns>(columnsAt(900))
+    assert.equal(mid.columns, 2, `a 900px sheet lays out two (${mid.tracks})`)
+    const narrow = await evaluate<Columns>(columnsAt(500))
+    assert.equal(narrow.columns, 1, `and a 500px sheet stays one tape (${narrow.tracks})`)
+  })
+
+  await check('CONTROL: the column probe reports the OLD ladder when 64rem is restored', async () => {
+    // The pre-fix tier, restated: three columns only from 64rem. If the probe
+    // still says 3 at 1008px with this injected, it is reading a constant.
+    await evaluate(`(() => {
+      const style = document.createElement('style')
+      style.id = 'old-tier-control'
+      style.textContent = "@container (min-width: 60rem) and (max-width: 63.999rem) { [data-receipt-layout='cards'] > .report-receipt-body { grid-template-columns: repeat(2, minmax(0, 1fr)) } }"
+      document.head.appendChild(style)
+      return true
+    })()`)
+    await evaluate(settle)
+    let defective: Columns
+    try {
+      defective = await evaluate<Columns>(columnsAt(1008))
+    } finally {
+      await evaluate(`(() => { document.getElementById('old-tier-control')?.remove(); document.querySelector('.report-receipt-sheet').style.width = ''; return true })()`)
+      await evaluate(settle)
+    }
+    assert.equal(defective.columns, 2, `with the 64rem tier restored a 1008px sheet falls back to two columns (${defective.tracks})`)
   })
 } finally {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))

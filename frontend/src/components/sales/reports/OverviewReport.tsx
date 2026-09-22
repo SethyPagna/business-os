@@ -203,7 +203,7 @@ export default function OverviewReport(p: ReportViewProps) {
         // of record cards repeated it once per row; the Overview has six
         // blocks and the owner named it as the surface that was already
         // fine, so it must not be flattened along with them.
-        emphasis: true,
+        summary: true,
         lines: lines
           .filter((l) => l.group === g)
           .map((l) => {
@@ -335,7 +335,7 @@ export default function OverviewReport(p: ReportViewProps) {
         <div className="reports-overview-statement">{statementBody}</div>
         {!state.loading && !state.error && !sales && !returns && !expenses ? <p className="text-[length:var(--ui-size-meta)] text-[var(--ui-ink-3)]">{labels.empty}</p> : null}
       </ReportFrame>
-      <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
+      <Fold className="reports-fold-panel" open={open != null} onClose={() => setOpen(null)} anchorRef={anchorRef} anchorKey={open ?? undefined} size="lg" title={chips.find((c) => c.id === open)?.label || ''}>
         <div className="p-2">
           {open === 'payments' ? <ReportTable surfaceKey="reports-overview-payments" columns={paymentColumns} rows={payments} rowKey={(r) => r.key} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}
           {open === 'couriers' ? <ReportTable surfaceKey="reports-overview-couriers" columns={courierColumns} rows={couriers} rowKey={(r) => String(r.delivery_contact_id ?? r.delivery_contact_name)} style={style} fmtMoney={fmtMoney} labels={labels} /> : null}

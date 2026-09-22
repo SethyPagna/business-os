@@ -212,12 +212,14 @@ export default function ReturnsReport(p: ReportViewProps) {
           {...common}
         />
       ) : null}
-      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('rpt_return_no', 'Return #')} ${openRow.return_number}` : ''}>
+      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} anchorKey={openRow ? `${openRow.id}:${openRow.return_number}` : undefined} title={openRow ? `${tr('rpt_return_no', 'Return #')} ${openRow.return_number}` : ''}>
         <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[{
                 key: 'r',
+                // A row detail is a STATEMENT, not one card in a list.
+                summary: true,
                 lines: [
                   { label: tr('date', 'Date'), value: fmtDateTime24(openRow.date), kind: 'info' },
                   { label: tr('receipt', 'Receipt'), value: openRow.sale_receipt_number || '—', kind: 'info' },

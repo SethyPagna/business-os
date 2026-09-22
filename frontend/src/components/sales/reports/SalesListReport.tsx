@@ -243,13 +243,15 @@ export default function SalesListReport(p: ReportViewProps) {
           ) : null
         }
       />
-      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
+      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} anchorKey={openRow?.id ?? undefined} title={openRow ? `${tr('receipt', 'Receipt')} ${openRow.receipt_number}` : ''}>
         <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[
-                { key: 'who', lines: detailLines(openRow) },
-                { key: 'money', title: tr('rpt_breakdown', 'Breakdown'), lines: moneyLines(openRow) },
+                // A row detail is a STATEMENT, not one card in a list: both
+                // blocks keep the weights they had before the Sep 22 pass.
+                { key: 'who', summary: true, lines: detailLines(openRow) },
+                { key: 'money', summary: true, title: tr('rpt_breakdown', 'Breakdown'), lines: moneyLines(openRow) },
               ]}
             />
           ) : null}

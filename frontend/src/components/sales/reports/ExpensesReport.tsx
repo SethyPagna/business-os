@@ -208,12 +208,14 @@ export default function ExpensesReport(p: ReportViewProps) {
           {...common}
         />
       ) : null}
-      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} title={openRow ? openRow.label || feeTypeLabel(openRow.type, tr) : ''}>
+      <Fold className="reports-fold-panel" open={!!openRow} onClose={() => setOpenRow(null)} anchorRef={anchorRef} anchorKey={openRow?.id ?? undefined} title={openRow ? openRow.label || feeTypeLabel(openRow.type, tr) : ''}>
         <div className="p-2">
           {openRow ? (
             <ReceiptSheet
               blocks={[{
                 key: 'e',
+                // A row detail is a STATEMENT, not one card in a list.
+                summary: true,
                 lines: [
                   { label: tr('date', 'Date'), value: fmtDateOnly(openRow.date), kind: 'info' },
                   { label: tr('type', 'Type'), value: feeTypeLabel(openRow.type, tr), kind: 'info' },

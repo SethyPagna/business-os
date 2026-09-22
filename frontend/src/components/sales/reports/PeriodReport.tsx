@@ -186,6 +186,7 @@ export default function PeriodReport(p: ReportViewProps) {
         open={!!openRow}
         onClose={() => setOpenRow(null)}
         anchorRef={anchorRef}
+        anchorKey={openRow?.period ?? undefined}
         // Same statement body as the grouped views -- same wide panel.
         size="lg"
         title={openRow ? periodLabel(openRow, g, fmtDate) : ''}
@@ -203,6 +204,8 @@ export default function PeriodReport(p: ReportViewProps) {
               blocks={[
                 {
                   key: 'meta',
+                  // A row detail is a STATEMENT, not one card in a list.
+                  summary: true,
                   lines: [
                     { label: tr('sales', 'Sales'), value: fmtInt(openRow.tx_count), kind: 'info' },
                     { label: tr('avg_order', 'Avg order'), value: fmtMoney(openRow.avg_order_usd), kind: 'info' },
@@ -214,6 +217,9 @@ export default function PeriodReport(p: ReportViewProps) {
                     key: grp,
                     title: grp === 'pending' ? undefined : statementGroupLabel(grp, tr),
                     highlight: isTheoreticalGroup(grp),
+                    // Same statement, same weights as the Overview's (Sep 23
+                    // ruling: one statement renders one way everywhere).
+                    summary: true,
                     lines: openStatement.filter((l) => l.group === grp).map((l) => ({
                       key: l.key,
                       label: tr(l.labelKey, l.fallback),

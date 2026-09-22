@@ -303,12 +303,15 @@ export default function GroupedReport(p: ReportViewProps) {
           }}
           maxHeight="calc(70 * var(--app-vh))"
         />
-        <Fold className="reports-fold-panel" open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} title={open?.product_name || ''}>
+        <Fold className="reports-fold-panel" open={!!open} onClose={() => setOpenKey(null)} anchorRef={anchorRef} anchorKey={openKey ?? undefined} title={open?.product_name || ''}>
           <div className="p-2">
             {open ? (
               <ReceiptSheet
                 blocks={[{
                   key: 'p',
+                  // A row detail is a STATEMENT, not one card in a list: it keeps
+                  // the weights every statement had before the Sep 22 pass.
+                  summary: true,
                   lines: [
                     { label: tr('sales', 'Sales'), value: fmtInt(open.sale_count), kind: 'info' },
                     { label: tr('quantity', 'Quantity'), value: fmtQty(open.qty), kind: 'info' },
@@ -437,6 +440,9 @@ export default function GroupedReport(p: ReportViewProps) {
         open={!!open}
         onClose={() => setOpenKey(null)}
         anchorRef={anchorRef}
+        // The open row's id: a ref mutation is invisible to React, so this
+        // is what re-measures when one row's detail is re-targeted at another.
+        anchorKey={openKey ?? undefined}
         // A full income statement, not a two-line summary: 'lg' is the width
         // the kit reserves for a multi-column body, and the 320px default put
         // this statement's label/value pairs into a column the labels could
@@ -455,13 +461,16 @@ export default function GroupedReport(p: ReportViewProps) {
           {open ? (
             <ReceiptSheet
               blocks={[
-                { key: 'meta', lines: [{ label: tr('sales', 'Sales'), value: fmtInt(open.tx_count), kind: 'info' }, { label: tr('avg_order', 'Avg order'), value: fmtMoney(open.avg_order_usd), kind: 'info' }, { label: tr('rpt_share', 'Share'), value: fmtPct(pct(basisValue(open, options.basis), totalBasis)), kind: 'info' }] },
+                { key: 'meta', summary: true, lines: [{ label: tr('sales', 'Sales'), value: fmtInt(open.tx_count), kind: 'info' }, { label: tr('avg_order', 'Avg order'), value: fmtMoney(open.avg_order_usd), kind: 'info' }, { label: tr('rpt_share', 'Share'), value: fmtPct(pct(basisValue(open, options.basis), totalBasis)), kind: 'info' }] },
                 ...STATEMENT_GROUPS
                   .filter((grp) => statement.some((l) => l.group === grp))
                   .map((grp) => ({
                     key: grp,
                     title: grp === 'pending' ? undefined : statementGroupLabel(grp, tr),
                     highlight: isTheoreticalGroup(grp),
+                    // Same statement, same weights as the Overview's (Sep 23
+                    // ruling: one statement renders one way everywhere).
+                    summary: true,
                     lines: statement.filter((l) => l.group === grp).map((l) => ({
                       key: l.key,
                       label: tr(l.labelKey, l.fallback),

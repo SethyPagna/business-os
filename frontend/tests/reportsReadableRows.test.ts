@@ -42,7 +42,11 @@ const period = read('src/components/sales/reports/PeriodReport.tsx')
 const overview = read('src/components/sales/reports/OverviewReport.tsx')
 const frame = read('src/components/sales/reports/ReportFrame.tsx')
 const hub = read('src/components/sales/ReportsHub.tsx')
+const salesList = read('src/components/sales/reports/SalesListReport.tsx')
+const returns = read('src/components/sales/reports/ReturnsReport.tsx')
+const expenses = read('src/components/sales/reports/ExpensesReport.tsx')
 const fold = read('src/components/shared/kit/Fold.tsx')
+const sectionHeader = read('src/components/shared/kit/SectionHeader.tsx')
 const surfaceCss = read('src/components/sales/reports/reports-surface.css')
 const mainCss = read('src/styles/main.css')
 
@@ -78,7 +82,12 @@ check('report rows, row details, the hub and the kit fold never ellipsise a name
   // in reports-surface.css undid it, so every other Fold caller (the kit
   // gallery, anything adopted later) kept the ellipsis and any change to the
   // header's DOM shape silently re-broke the reports one.
-  for (const [label, source] of [['ReportTable', table], ['ReceiptSheet', sheet], ['GroupedReport', grouped], ['ReportFrame', frame], ['ReportsHub', hub], ['kit Fold', fold]] as const) {
+  // SectionHeader is here for the same reason Fold is: it is the kit's own
+  // heading row, and a report's <h2> IS a SectionHeader title. Worse than
+  // Fold's case, its `title` tooltip only ever covered the string form --
+  // ReportFrame passes a titleControl ELEMENT as the title, so the active
+  // report's own name was an ellipsis with no reveal at all behind it.
+  for (const [label, source] of [['ReportTable', table], ['ReceiptSheet', sheet], ['GroupedReport', grouped], ['ReportFrame', frame], ['ReportsHub', hub], ['kit Fold', fold], ['kit SectionHeader', sectionHeader]] as const) {
     assert.equal(hasEllipsisedCells(source), false, `${label} still has an ellipsis box on a text cell`)
   }
   // ...and the replacement is the shared scroller, used the same way the
@@ -91,6 +100,7 @@ check('report rows, row details, the hub and the kit fold never ellipsise a name
   // dialogs reveal a long title the same way.
   assert.match(fold, /const FOLD_TITLE_CLASS = 'detail-scroll-text min-w-0 flex-1/, 'the kit fold header scrolls its title at the kit, not through a per-surface override')
   assert.equal((fold.match(/<h3 className=\{FOLD_TITLE_CLASS\}>/g) || []).length, 2, 'both fold branches (mobile sheet, desktop panel) share that one heading class')
+  assert.match(sectionHeader, /<h2\s*\n\s*className="detail-scroll-text /, 'the kit section heading scrolls a long title too')
   assert.doesNotMatch(stripComments(surfaceCss), /\.reports-fold-panel > div > h3/, 'the per-surface heading override is gone with the cause')
   // The date-range handle is the one place the hub still had an ellipsis:
   // its only text IS the range it exists to report.
@@ -181,6 +191,23 @@ check('a scrolled-away row cannot carry the float off the screen', () => {
   assert.match(fold, /if \(last && last\.top === rect\.top/, 'an unchanged anchor rect never re-renders the panel')
 })
 
+check('the anchored panel re-measures when the open row changes', () => {
+  // `anchorRef.current` is a MUTATION: React never re-runs an effect for it.
+  // Pressing a second row while the float is open swapped the ref to the new
+  // row but left the panel measured against the old one, so the detail hung
+  // beside the wrong row (measured in reportsDetailFloatClose: panel top
+  // 275px while the newly-opened row sat at 542px). The row's identity is
+  // passed in as `anchorKey` and keyed into the placement effect.
+  assert.match(fold, /anchorKey\?: string \| number/, 'the kit takes the anchor identity as a prop')
+  assert.match(fold, /\}, \[open, isMobile, anchorRef, anchorKey\]\)/, 'the placement effect re-measures when the open row changes')
+  // The history effect deliberately stays keyed on `open` alone: re-arming it
+  // on every row change would push a second entry per row (Part 143767f4).
+  assert.doesNotMatch(fold, /\}, \[open, anchorKey\]\)/, 'the history entry is not re-armed per row')
+  for (const [label, source] of [['GroupedReport', grouped], ['PeriodReport', period], ['SalesListReport', salesList], ['ReturnsReport', returns], ['ExpensesReport', expenses], ['OverviewReport', overview]] as const) {
+    assert.match(source, /anchorKey=\{/, `${label} passes the open row's identity to its fold`)
+  }
+})
+
 check('NEGATIVE CONTROL: the clamp checker still fails the unclamped placement', () => {
   const defective = `
     function placeAnchored(rect, panelWidth) {
@@ -242,13 +269,25 @@ check('list views carry no per-row bold, and no size above the document scale', 
   assert.match(table, /<tr className="h-\[var\(--ui-row-h\)\] bg-\[var\(--ui-surface-2\)\] font-semibold">/, 'the single totals row keeps its weight')
   // ...and the RECEIPT style has to agree with the excel style about where
   // that one bold sits, or the receipt sheet ends up with no emphasis at all.
-  assert.match(table, /key: '__totals',\s*\n\s*emphasis: true,/, "the receipt style's totals block is the sheet's tfoot")
-  assert.match(sheet, /block\.emphasis \? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'/, 'only a summary block takes the bold title')
-  assert.match(sheet, /kind === 'total' && block\.emphasis \? 'pt-1 font-semibold' : LINE_CLASS\[kind \|\| 'add'\]/, 'only a summary block takes the bold total line')
+  assert.match(table, /key: '__totals',\s*\n\s*summary: true,/, "the receipt style's totals block is the sheet's tfoot")
+  assert.match(sheet, /block\.summary \? 'detail-scroll-text font-semibold' : 'detail-scroll-text font-medium'/, 'only a summary block takes the bold title')
+  assert.match(sheet, /kind === 'total' && block\.summary \? 'pt-1 font-semibold' : LINE_CLASS\[kind \|\| 'add'\]/, 'only a summary block takes the bold total line')
+  // The block flag is named summary, not emphasis: ReportColumn.emphasis in
+  // the same folder means font-MEDIUM on a data column, and two flags one
+  // word apart with opposite weights is how a later edit picks the wrong one.
+  assert.doesNotMatch(stripComments(sheet), /\bemphasis\b/, 'the receipt block flag is not a second emphasis')
   // The Overview is the surface the owner called fine; its statement groups
   // are summaries, not record cards, so they keep the weight they had before
   // this lane instead of being flattened with the list views.
-  assert.match(overview, /highlight: isTheoreticalGroup\(g\),[\s\S]{0,700}?emphasis: true,/, "the Overview statement's groups keep their weight")
+  assert.match(overview, /highlight: isTheoreticalGroup\(g\),[\s\S]{0,700}?summary: true,/, "the Overview statement's groups keep their weight")
+  // ...and the SAME statement renders the same way wherever it appears. The
+  // Sep 22 pass flattened the six row-detail folds while leaving the Overview
+  // bold, so a customer's statement read differently from the Overview chip
+  // that summarises it. A row detail is a statement, not one card in a list,
+  // so every one of them carries the statement weight (Sep 23 ruling).
+  for (const [label, source, count] of [['GroupedReport', grouped, 3], ['PeriodReport', period, 2], ['SalesListReport', salesList, 2], ['ReturnsReport', returns, 1], ['ExpensesReport', expenses, 1]] as const) {
+    assert.equal((stripComments(source).match(/\bsummary: true,/g) || []).length, count, `${label}'s row-detail statement blocks all carry the statement weight`)
+  }
   assert.doesNotMatch(surfaceCss, /@media screen\s*\{/, 'the screen-only +2px size bump is gone (owner: "the size is too big")')
   assert.match(surfaceCss, /--ui-size-body:\s*12px/, 'the compact document scale is the base')
   assert.doesNotMatch(surfaceCss, /calc\(16px \* var\(--ui-km-boost/, 'no 16px Latin body anywhere in the surface')
