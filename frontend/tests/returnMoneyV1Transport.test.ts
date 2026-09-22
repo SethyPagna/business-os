@@ -20,7 +20,7 @@ let network: (method: string, url: string, body: any) => Promise<any>
 const dependencies: Record<string, unknown> = {
   './actorReadScope.ts': scopes, './httpState.ts': httpState, '../utils/moneyPrecision.ts': money,
   './requestIds.ts': { ensureClientRequestId }, '../utils/deviceInfo.ts': { getClientDeviceInfo: () => ({ clientTime: 'fixed', deviceTz: 'UTC' }) },
-  '../utils/timestampId.ts': { businessDateTimeId: () => '20260913-120000' }, './conflicts.ts': {}, './expectedUpdatedAt.ts': {},
+  '../utils/timestampId.ts': { businessDateTimeId: () => '20260913-120000' }, './conflicts.ts': {},
   './lazyLocalDb.ts': { getLocalDb: () => { throw Error('unexpected local mirror') } }, './returnsReadTransport.ts': {},
   './http.ts': { apiFetch: async (method: string, url: string, body: unknown) => { calls.push({ method, url, body: JSON.parse(JSON.stringify(body ?? null)) }); return network(method, url, body) }, route: () => { throw Error('v1 must not enter write route/offline queue') } },
 }

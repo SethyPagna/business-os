@@ -1,9 +1,8 @@
 import { appendActorQuery } from './actorQuery.ts'
 import { apiFetch, route } from './http.ts'
 import { getUsers as getUsersRequest } from './userReadTransport.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
-type AccessPayload = ExpectedUpdatedAtPayload
+type AccessPayload = Record<string, unknown>
 
 function encodeId(id: string | number): string {
   return encodeURIComponent(String(id))
@@ -51,21 +50,19 @@ export function createUser(payload: AccessPayload = {}): Promise<unknown> {
   )
 }
 
-export async function updateUser(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('users', id, payload)
+export function updateUser(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:update',
-    () => apiFetch('PUT', `/api/users/${encodeId(id)}`, body),
+    () => apiFetch('PUT', `/api/users/${encodeId(id)}`, payload),
     null,
     true,
   )
 }
 
-export async function updateUserProfile(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('users', id, payload)
+export function updateUserProfile(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:updateProfile',
-    () => apiFetch('PUT', `/api/users/${encodeId(id)}/profile`, body),
+    () => apiFetch('PUT', `/api/users/${encodeId(id)}/profile`, payload),
     null,
     true,
   )
@@ -107,21 +104,19 @@ export function createRole(payload: AccessPayload = {}): Promise<unknown> {
   )
 }
 
-export async function updateRole(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('roles', id, payload)
+export function updateRole(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'roles:update',
-    () => apiFetch('PUT', `/api/roles/${encodeId(id)}`, body),
+    () => apiFetch('PUT', `/api/roles/${encodeId(id)}`, payload),
     null,
     true,
   )
 }
 
-export async function deleteRole(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('roles', id, payload)
+export function deleteRole(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'roles:delete',
-    () => apiFetch('DELETE', `/api/roles/${encodeId(id)}`, body),
+    () => apiFetch('DELETE', `/api/roles/${encodeId(id)}`, payload),
     null,
     true,
   )

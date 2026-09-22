@@ -106,11 +106,19 @@ function summarizeCurrentValue(entity: ConflictEntity | undefined, current: unkn
     ].filter(isConflictSummaryRow)
   }
 
+  if (entity === 'product') {
+    return [
+      currentRecord.name ? { label: 'Product', value: String(currentRecord.name) } : null,
+      currentRecord.barcode ? { label: 'Barcode', value: String(currentRecord.barcode) } : null,
+      currentRecord.updated_at ? { label: 'Updated', value: formatConflictTime(currentRecord.updated_at) } : null,
+    ].filter(isConflictSummaryRow)
+  }
+
   return Object.entries(currentRecord)
     .slice(0, 4)
     .map(([key, value]) => ({
       label: key.replace(/_/g, ' '),
-      value: valueToString(value),
+      value: key.endsWith('_at') ? formatConflictTime(value) : valueToString(value),
     }))
 }
 

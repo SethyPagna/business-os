@@ -160,20 +160,6 @@ export async function localSaveSettings(updates: Record<string, unknown>): Promi
   })
 }
 
-export async function localGetSettingsMeta(): Promise<LocalRow | null> {
-  return (await dexieDb.settings_meta.get('settings')) || null
-}
-
-export async function localSaveSettingsMeta(updatedAt: unknown): Promise<unknown | null> {
-  if (!updatedAt) return null
-  await dexieDb.settings_meta.put({
-    key: 'settings',
-    updatedAt: String(updatedAt),
-    savedAt: new Date().toISOString(),
-  })
-  return updatedAt
-}
-
 export async function replaceTableContents(tableName: string, rows: unknown): Promise<LocalRow[]> {
   const table = dexieDb.table(tableName)
   const safeRows = Array.isArray(rows)

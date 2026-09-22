@@ -15,7 +15,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, {
   if (id === './requestIds.ts') return { ensureClientRequestId }
   if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({ device_name: 'test' }) }
   if (id === '../utils/syncProblemLifecycle.ts') return { dispatchResolvedSyncError: () => {} }
-  if (id === './query.ts' || id === './expectedUpdatedAt.ts') return {}
+  if (id === './query.ts') return {}
   throw new Error(`Unexpected import ${id}`)
 }, module)
 const { prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun, transferStock, transferStockBulk, getBranchSummary } = module.exports

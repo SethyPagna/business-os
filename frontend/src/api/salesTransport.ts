@@ -2,25 +2,15 @@ import { SYNC } from '../constants.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { saleMoneyResponseFields } from '../utils/saleMoneyV1.ts'
 import type { SaleMutationHeaderQuote } from '../utils/saleMutationHeaderQuote.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorReadResult, mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { ensureClientRequestId } from './requestIds.ts'
-import { contactDisplayAddress } from '../components/contacts/contactOptionUtils.ts'
 import { stampOfflineSaleOwner } from './offlineQueueOwnership.ts'
 
-type SalePayload = ExpectedUpdatedAtPayload
+type SalePayload = Record<string, unknown>
 type ResultRecord = Record<string, unknown>
-type CustomerRecord = {
-  id?: unknown
-  name?: unknown
-  membership_number?: unknown
-  phone?: unknown
-  address?: unknown
-}
-type SaleAttachCustomerResult = ResultRecord & { customer?: CustomerRecord }
 type AttemptedError = Error & { attempted?: unknown }
 export type SalesReadOptions = { signal?: AbortSignal; timeoutMs?: number }
 export const SALES_LIST_REQUEST_TIMEOUT_MS = 20_000
@@ -150,7 +140,7 @@ export function getSales(params: QueryParams = {}, options: SalesReadOptions = {
   )
 }
 
-export type PreparedSaleStatusRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
+export type PreparedSaleStatusRequest = Record<string, unknown> & { client_request_id: string }
 
 export type SaleStatusReceipt = { committed: boolean; response?: Record<string, unknown> }
 
@@ -178,12 +168,12 @@ export async function prepareSaleStatusRequest(
   // collect it (CancelSaleModal) before calling this.
   extra?: Record<string, unknown> | null,
 ): Promise<PreparedSaleStatusRequest> {
-  const payload = await withExpectedUpdatedAt('sales', id, ensureClientRequestId({
+  const payload = ensureClientRequestId({
     ...getDevicePayload(),
     sale_status: saleStatus,
     notes,
     ...(extra || {}),
-  }, 'sale-status'))
+  }, 'sale-status')
   return payload as PreparedSaleStatusRequest
 }
 
@@ -217,42 +207,6 @@ export async function updateSaleStatus(
   extra?: Record<string, unknown> | null,
 ): Promise<unknown> {
   return submitSaleStatusRequest(id, await prepareSaleStatusRequest(id, saleStatus, notes, extra))
-}
-
-export async function attachSaleCustomer(
-  id: number | string,
-  payload: SalePayload = {},
-): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('sales', id, { ...getDevicePayload(), ...(payload || {}) })
-  try {
-    const result = await route(
-      'sales:attachCustomer',
-      () => apiFetch('PATCH', `/api/sales/${encodeId(id)}/customer`, body),
-      null,
-      true,
-    ) as SaleAttachCustomerResult
-    const db = await getLocalDb()
-    await db.table('sales').update(id, {
-      customer_id: result?.customer?.id || null,
-      customer_name: result?.customer?.name || null,
-      customer_membership_number: result?.customer?.membership_number || null,
-      customer_phone: result?.customer?.phone || null,
-      // N21: the response carries the customer's RAW address column (the
-      // Contact Options JSON); the server stored the display address on the
-      // sale. Mirror what the server stored, or the sale detail shows the JSON
-      // again the moment this device reads its local copy offline.
-      customer_address: contactDisplayAddress(result?.customer?.address) || null,
-      updated_at: getResultTimestamp(result),
-    }).catch(() => {})
-    return result
-  } catch (error) {
-    attachAttempted(error, {
-      customer_id: payload?.customer_id || null,
-      customer_name: payload?.customer_name || '',
-      customer_phone: payload?.customer_phone || '',
-      customer_address: contactDisplayAddress(payload?.customer_address) || '',
-    })
-  }
 }
 
 export type SaleItemAddition = {
@@ -298,12 +252,12 @@ export async function addSaleItems(
   if (!String(review?.client_request_id || '').trim()) {
     throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
   }
-  const body = review.money_precision_version === 1 ? structuredClone({ items, notes, ...review }) : await withExpectedUpdatedAt('sales', id, {
+  const body = review.money_precision_version === 1 ? structuredClone({ items, notes, ...review }) : {
     ...getDevicePayload(),
     items,
     notes,
     ...review,
-  })
+  }
   try {
     const result = await route(
       'sales:addItems',
@@ -367,10 +321,10 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
   if (!String(request?.client_request_id || '').trim()) {
     throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
   }
-  const body = request.money_precision_version === 1 ? structuredClone(request) : await withExpectedUpdatedAt('sales', id, {
+  const body = request.money_precision_version === 1 ? structuredClone(request) : {
     ...getDevicePayload(),
     ...request,
-  })
+  }
   try {
     const result = await route(
       'sales:amend',

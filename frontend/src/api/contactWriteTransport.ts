@@ -8,7 +8,6 @@ import type {
 } from '../components/contacts/customerGenderRestorationFlow.ts'
 
 type ContactWritePayload = Record<string, unknown>
-type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
 
 function createContactClientRequestId(prefix = 'contact'): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -54,31 +53,34 @@ function createContact(
   )
 }
 
-async function updateContact(
+// The optimistic-concurrency token is the version the SCREEN holds: the
+// form's record (its `updated_at`) or, for a delete, the row the tab listed.
+// Never a local mirror row: the live app has not rewritten those mirrors
+// since 12 Sep 2026 (localMirrors.ts shouldPersistLocalMirror), so a mirror
+// token was days old and the write was refused as "changed on another
+// device" (owner report, 22 Sep). A write with no version is checked by
+// nothing server-side rather than refused on a stale one.
+function updateContact(
   routeKey: string,
   endpoint: string,
-  tableName: ContactTableName,
   id: number | string,
   payload: ContactWritePayload = {},
 ): Promise<unknown> {
-  const { withExpectedUpdatedAt } = await import('./expectedUpdatedAt.ts')
-  const body = await withExpectedUpdatedAt(tableName, id, payload)
   return route(
     `${routeKey}:update`,
-    () => apiFetch('PUT', `${endpoint}/${encodeURIComponent(String(id))}`, body),
+    () => apiFetch('PUT', `${endpoint}/${encodeURIComponent(String(id))}`, payload),
     null,
     true,
   )
 }
 
-async function deleteContact(
+function deleteContact(
   routeKey: string,
   endpoint: string,
-  tableName: ContactTableName,
   id: number | string,
+  expectedUpdatedAt?: string | null,
 ): Promise<unknown> {
-  const { withExpectedUpdatedAt } = await import('./expectedUpdatedAt.ts')
-  const body = await withExpectedUpdatedAt(tableName, id, {})
+  const body = expectedUpdatedAt ? { expectedUpdatedAt } : {}
   return route(
     `${routeKey}:delete`,
     () => apiFetch('DELETE', `${endpoint}/${encodeURIComponent(String(id))}`, body),
@@ -92,7 +94,7 @@ export function createCustomer(payload: ContactWritePayload = {}): Promise<unkno
 }
 
 export function updateCustomer(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
-  return updateContact('customers', '/api/customers', 'customers', id, payload)
+  return updateContact('customers', '/api/customers', id, payload)
 }
 
 export function getCustomerRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
@@ -100,8 +102,8 @@ export function getCustomerRenameImpact(id: number | string, to: string): Promis
   return apiFetch('GET', `/api/customers/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
 }
 
-export function deleteCustomer(id: number | string): Promise<unknown> {
-  return deleteContact('customers', '/api/customers', 'customers', id)
+export function deleteCustomer(id: number | string, expectedUpdatedAt?: string | null): Promise<unknown> {
+  return deleteContact('customers', '/api/customers', id, expectedUpdatedAt)
 }
 
 export function previewCustomerGenderRestoration(chunk: GenderRestorationChunk): Promise<GenderRestorationReceipt> {
@@ -131,7 +133,7 @@ export function createSupplier(payload: ContactWritePayload = {}): Promise<unkno
 }
 
 export function updateSupplier(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
-  return updateContact('suppliers', '/api/suppliers', 'suppliers', id, payload)
+  return updateContact('suppliers', '/api/suppliers', id, payload)
 }
 
 export function getSupplierRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
@@ -139,8 +141,8 @@ export function getSupplierRenameImpact(id: number | string, to: string): Promis
   return apiFetch('GET', `/api/suppliers/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
 }
 
-export function deleteSupplier(id: number | string): Promise<unknown> {
-  return deleteContact('suppliers', '/api/suppliers', 'suppliers', id)
+export function deleteSupplier(id: number | string, expectedUpdatedAt?: string | null): Promise<unknown> {
+  return deleteContact('suppliers', '/api/suppliers', id, expectedUpdatedAt)
 }
 
 export function createDeliveryContact(payload: ContactWritePayload = {}): Promise<unknown> {
@@ -148,7 +150,7 @@ export function createDeliveryContact(payload: ContactWritePayload = {}): Promis
 }
 
 export function updateDeliveryContact(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
-  return updateContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id, payload)
+  return updateContact('deliveryContacts', '/api/delivery-contacts', id, payload)
 }
 
 export function getDeliveryContactRenameImpact(id: number | string, to: string): Promise<RenameImpact> {
@@ -156,6 +158,6 @@ export function getDeliveryContactRenameImpact(id: number | string, to: string):
   return apiFetch('GET', `/api/delivery-contacts/${encodeURIComponent(String(id))}/rename-impact?${query.toString()}`)
 }
 
-export function deleteDeliveryContact(id: number | string): Promise<unknown> {
-  return deleteContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id)
+export function deleteDeliveryContact(id: number | string, expectedUpdatedAt?: string | null): Promise<unknown> {
+  return deleteContact('deliveryContacts', '/api/delivery-contacts', id, expectedUpdatedAt)
 }

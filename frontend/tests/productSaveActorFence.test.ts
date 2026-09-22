@@ -34,15 +34,13 @@ function authority() {
     },
   }
 }
-for (const kind of ['createProduct', 'updateProduct']) for (const boundary of ['lookup', 'dispatch', 'completion']) {
+for (const kind of ['createProduct', 'updateProduct']) for (const boundary of ['dispatch', 'completion']) {
   const a = authority(), wait = deferred(); let writes = 0
   const method = compile(functionSource('api/productWriteTransport.ts', kind), {
     ...a, getDevicePayload: () => ({}), ensureClientRequestId: (body: unknown) => body, encodeId: String,
-    withExpectedUpdatedAt: async (_table: unknown, _id: unknown, body: unknown) => { if (boundary === 'lookup') await wait.promise; return body },
     route: async (_name: unknown, dispatch: () => Promise<unknown>) => { if (boundary === 'dispatch') await wait.promise; return dispatch() },
     apiFetch: async () => { writes++; if (boundary === 'completion') await wait.promise; return { success: true } },
   }, kind)
-  if (kind === 'createProduct' && boundary === 'lookup') continue
   const pending = kind === 'createProduct' ? method({ name: 'A' }) : method(1, { name: 'A' })
   await tick(); a.switchActor(); wait.resolve()
   await assert.rejects(pending, /stale actor/)

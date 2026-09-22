@@ -113,6 +113,7 @@ interface CustomersTabProps {
 
 interface CustomerRow extends Record<string, unknown> {
   id: number | string
+  updated_at?: string | null
   name?: string | null
   membership_number?: string | null
   phone?: string | null
@@ -161,7 +162,7 @@ interface CustomerApi {
   createCustomer: (payload: CustomerPayload) => Promise<unknown>
   updateCustomer: (id: number | string, payload: CustomerPayload | CustomerRow) => Promise<unknown>
   getCustomerRenameImpact: (id: number | string, to: string) => Promise<import('../../api/renameCascadeTransport.ts').RenameImpact>
-  deleteCustomer: (id: number | string) => Promise<unknown>
+  deleteCustomer: (id: number | string, expectedUpdatedAt?: string | null) => Promise<unknown>
 }
 
 interface ApiListResponse {
@@ -200,7 +201,7 @@ function getCustomerApi(): CustomerApi {
     createCustomer: async (payload) => (await loadContactWriteTransportModule()).createCustomer(payload),
     updateCustomer: async (id, payload) => (await loadContactWriteTransportModule()).updateCustomer(id, payload),
     getCustomerRenameImpact: async (id, to) => (await loadContactWriteTransportModule()).getCustomerRenameImpact(id, to),
-    deleteCustomer: async (id) => (await loadContactWriteTransportModule()).deleteCustomer(id),
+    deleteCustomer: async (id, expectedUpdatedAt) => (await loadContactWriteTransportModule()).deleteCustomer(id, expectedUpdatedAt),
   }
 }
 
@@ -875,7 +876,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     }
     try {
       const snapshot = cloneHistorySnapshot(customer)
-      await runCustomerMutation(() => getCustomerApi().deleteCustomer(customer.id), 'Delete customer')
+      await runCustomerMutation(() => getCustomerApi().deleteCustomer(customer.id, customer.updated_at), 'Delete customer')
       let restoredCustomerId = 0
       actionHistory.pushAction({
         label: `Delete customer ${snapshot.name || ''}`.trim(),
@@ -914,11 +915,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
     }
     const ids = [...selectedIds]
     const snapshots = buildSelectedSnapshots(customers, ids)
+    const snapshotById = new Map(snapshots.map((row) => [Number(row.id), row]))
     const failedIds = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
-        await runCustomerMutation(() => getCustomerApi().deleteCustomer(id), 'Bulk delete customers')
+        await runCustomerMutation(() => getCustomerApi().deleteCustomer(id, snapshotById.get(Number(id))?.updated_at as string | null | undefined), 'Bulk delete customers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length

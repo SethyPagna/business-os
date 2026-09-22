@@ -64,7 +64,7 @@ import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { createLongPressHandlers, createLongPressState, consumeLongPressClick } from '../../utils/longPress.ts'
 import type { LongPressState } from '../../utils/longPress.ts'
-import { isApiVersionMismatchError } from '../../api/http.ts'
+import { isApiVersionMismatchError, isWriteConflictError } from '../../api/http.ts'
 import { captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { mergeDuplicateChunkCanContinueAutomatically, mergeDuplicateChunkRequiresManualResume } from './mergeDuplicatesRun.ts'
 import { getKhmerTextProps, withKhmerTextClass } from '../../utils/scriptTypography.ts'
@@ -399,7 +399,7 @@ type ProductImageUploadModule = typeof import('../../api/productImageUploadTrans
 type ProductApi = {
   adjustStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
   createProduct: (payload: Record<string, unknown>, assertCurrent?: () => void) => Promise<ProductApiResponse | undefined>
-  deleteProduct: (id: EntityId, reason?: string) => Promise<ProductApiResponse | undefined>
+  deleteProduct: (id: EntityId, reason?: string, expectedUpdatedAt?: string | null) => Promise<ProductApiResponse | undefined>
   startBulkDeleteJob: (ids: EntityId[], reason: string) => Promise<{ jobId: string; totalCount: number }>
   getBulkDeleteJobStatus: (jobId: string) => Promise<BulkDeleteJobStatus>
   cancelBulkDeleteJob: (jobId: string) => Promise<void>
@@ -524,7 +524,7 @@ const productApi: ProductApi = {
     check()
     return toProductApiResponse(await module.createProduct(payload, check))
   },
-  deleteProduct: async (id, reason) => toProductApiResponse(await (await loadProductWriteModule()).deleteProduct(id, reason)),
+  deleteProduct: async (id, reason, expectedUpdatedAt) => toProductApiResponse(await (await loadProductWriteModule()).deleteProduct(id, reason, expectedUpdatedAt)),
   startBulkDeleteJob: async (ids, reason) => (await loadProductWriteModule()).startBulkDeleteJob(ids as Array<string | number>, reason),
   getBulkDeleteJobStatus: async (jobId) => (await loadProductWriteModule()).getBulkDeleteJobStatus(jobId),
   cancelBulkDeleteJob: async (jobId) => { await (await loadProductWriteModule()).cancelBulkDeleteJob(jobId) },
@@ -2353,6 +2353,12 @@ function ProductsFullEditor() {
         ...form,
         image_gallery: uploadedGallery,
         image_path: uploadedGallery[0] || null,
+        // The optimistic-concurrency token is the version THIS screen opened
+        // (the row `selected` was set from), never a local mirror row: the
+        // Dexie products mirror is only rewritten by the offline snapshot, so
+        // on a phone it was days old and every edit of a product changed since
+        // was refused as "changed on another device" (owner report, 22 Sep).
+        expectedUpdatedAt: selected?.updated_at || undefined,
         client_request_id: createClientRequestId || form.client_request_id || undefined,
         userId: user?.id,
         userName: user?.name,
@@ -2449,6 +2455,19 @@ function ProductsFullEditor() {
       })()
     } catch (e) {
       console.error('[handleSaveWithGallery] error:', e)
+      // A refused version: re-read the row so `selected` (and with it the
+      // token the next press sends) is the version that won. The form keeps
+      // the operator's edits -- its state hydrates only when the product id
+      // changes (useStableHydratedState) -- so "review what won, then try
+      // again" is one more press, not the same 409 forever.
+      if (selected?.id && isWriteConflictError(e)) {
+        const conflictedId = selected.id
+        void fetchProductsByIds([conflictedId])
+          .then(([latest]) => {
+            if (latest && productSaveFormRef.current.revision === formRevision) setSelected(latest)
+          })
+          .catch(() => {})
+      }
       throw e instanceof Error ? e : new Error(getErrorMessage(e, 'Failed to save product'))
     } finally {
       finishSingleAction(productSaveInFlightRef)
@@ -2527,11 +2546,12 @@ function ProductsFullEditor() {
     if (ids.length > BULK_DELETE_JOB_THRESHOLD) return runBulkDeleteJobConfirmed(ids, reason)
     if (!beginSingleAction(bulkActionInFlightRef, { blocked: bulkActionBusy })) return
     const snapshots = snapshotProductsByIds(ids)
+    const snapshotById = buildProductIdMap(snapshots)
     setBulkActionBusy(true)
     setDeleteConfirmBusy(true)
     try {
       const deletionRun = await runConcurrentTasks<EntityId, ProductApiResponse>(ids, async (id: EntityId) => {
-        const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason), 'Delete product')
+        const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason, snapshotById.get(Number(id))?.updated_at), 'Delete product')
         if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
         return result || {}
       })
@@ -2562,8 +2582,9 @@ function ProductsFullEditor() {
             const idsToDelete = restoredEntries.length
               ? normalizePositiveProductIds(restoredEntries, (entry) => entry.restoredId)
               : normalizePositiveProductIds(deletedSnapshots, (snapshot) => snapshot.id)
+            const latestById = buildProductIdMap(await fetchProductsByIds(idsToDelete))
             const redoRun = await runConcurrentTasks<EntityId, void>(idsToDelete, async (id: EntityId) => {
-              const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason), 'Re-delete product')
+              const result = await runProductDeleteMutation(() => productApi.deleteProduct(id, reason, latestById.get(Number(id))?.updated_at), 'Re-delete product')
               if (result?.success === false) throw new Error(result.error || 'Failed to re-delete product')
             })
             if (redoRun.failures.length) throw new Error(getErrorMessage(redoRun.failures[0]?.error, 'Failed to re-delete product'))
@@ -2701,7 +2722,7 @@ function ProductsFullEditor() {
     setDeleteConfirmBusy(true)
     try {
       const snapshot = cloneHistorySnapshot(p)
-      const result = await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason), 'Delete product')
+      const result = await runProductDeleteMutation(() => productApi.deleteProduct(p.id || 0, reason, p.updated_at), 'Delete product')
       if (result?.success === false) throw new Error(result.error || 'Failed to delete product')
       if (result?.pending === true) {
         notify('Product removal submitted for review')
@@ -2723,7 +2744,8 @@ function ProductsFullEditor() {
         redo: async () => {
           const targetId = Number(restoredEntries[0]?.restoredId || snapshot.id || 0)
           if (!targetId) return
-          const result = await runProductDeleteMutation(() => productApi.deleteProduct(targetId, reason), 'Delete product again')
+          const [latest] = await fetchProductsByIds([targetId])
+          const result = await runProductDeleteMutation(() => productApi.deleteProduct(targetId, reason, latest?.updated_at), 'Delete product again')
           if (result?.success === false) throw new Error(result.error || 'Failed to delete product again')
           await load(true)
         },
@@ -3876,7 +3898,8 @@ function ProductsFullEditor() {
       const currentProduct = latestMap.get(productId)
       if (!currentProduct) return
       const payload = await buildProductWritePayload(snapshot)
-      await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
+      // Undo/redo writes over whatever is current: the version is the fresh read above.
+      await runProductWriteMutation(() => productApi.updateProduct(productId, { ...payload, expectedUpdatedAt: currentProduct.updated_at || undefined }), 'Restore product')
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))

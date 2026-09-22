@@ -90,6 +90,7 @@ interface DeliveryTabProps {
 }
 
 interface DeliveryContact extends Record<string, unknown> {
+  updated_at?: string | null
   id: number | string
   name?: string | null
   phone?: string | null
@@ -137,7 +138,7 @@ interface DeliveryApi {
   getDeliveryContacts: (query?: QueryParams) => Promise<unknown>
   createDeliveryContact: (payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   updateDeliveryContact: (id: number | string, payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
-  deleteDeliveryContact: (id: number | string) => Promise<DeliveryMutationResult | unknown>
+  deleteDeliveryContact: (id: number | string, expectedUpdatedAt?: string | null) => Promise<DeliveryMutationResult | unknown>
   getDeliveryContactRenameImpact: (id: number | string, to: string) => Promise<import('../../api/renameCascadeTransport.ts').RenameImpact>
 }
 
@@ -167,7 +168,7 @@ function getDeliveryApi(): DeliveryApi {
     getDeliveryContacts: async (query = {}) => (await loadContactReadTransportModule()).getDeliveryContacts(query),
     createDeliveryContact: async (payload) => (await loadContactWriteTransportModule()).createDeliveryContact(payload as Record<string, unknown>),
     updateDeliveryContact: async (id, payload) => (await loadContactWriteTransportModule()).updateDeliveryContact(id, payload as Record<string, unknown>),
-    deleteDeliveryContact: async (id) => (await loadContactWriteTransportModule()).deleteDeliveryContact(id),
+    deleteDeliveryContact: async (id, expectedUpdatedAt) => (await loadContactWriteTransportModule()).deleteDeliveryContact(id, expectedUpdatedAt),
     getDeliveryContactRenameImpact: async (id, to) => (await loadContactWriteTransportModule()).getDeliveryContactRenameImpact(id, to),
   }
 }
@@ -958,7 +959,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     try {
       const snapshot = cloneHistorySnapshot(c)
-      await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(c.id), 'Delete delivery contact')
+      await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(c.id, c.updated_at), 'Delete delivery contact')
       let restoredContactId = 0
       actionHistory.pushAction({
         label: `Delete delivery contact ${snapshot.name || ''}`.trim(),
@@ -995,11 +996,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     }
     const ids = [...selectedIds]
     const snapshots = buildSelectedSnapshots(contacts, ids)
+    const snapshotById = new Map(snapshots.map((row) => [Number(row.id), row]))
     const failedIds: number[] = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
-        await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id), 'Bulk delete delivery contacts')
+        await runDeliveryMutation(() => getDeliveryApi().deleteDeliveryContact(id, snapshotById.get(Number(id))?.updated_at as string | null | undefined), 'Bulk delete delivery contacts')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length

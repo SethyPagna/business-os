@@ -1,7 +1,6 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { businessDateTimeId } from '../utils/timestampId.ts'
 import { buildAttemptedReturnItems } from './conflicts.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
@@ -11,8 +10,8 @@ import { assertActorReadScope, captureActorReadScope, type ActorReadScope } from
 import { getSyncServerUrl } from './httpState.ts'
 import { roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from '../utils/moneyPrecision.ts'
 
-type ReturnPayload = ExpectedUpdatedAtPayload
-export type PreparedReturnUpdateRequest = ExpectedUpdatedAtPayload & { client_request_id: string }
+type ReturnPayload = Record<string, unknown>
+export type PreparedReturnUpdateRequest = Record<string, unknown> & { client_request_id: string }
 type ReturnUpdateAttempt = {
   reason: unknown
   return_type: unknown
@@ -321,7 +320,7 @@ export function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBul
 }
 
 export async function prepareReturnUpdateRequest(id: number | string, payload: ReturnPayload = {}): Promise<PreparedReturnUpdateRequest> {
-  const body = await withExpectedUpdatedAt('returns', id, ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return-edit'))
+  const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return-edit')
   return body as PreparedReturnUpdateRequest
 }
 

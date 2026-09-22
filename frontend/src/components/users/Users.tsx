@@ -1026,6 +1026,7 @@ export default function Users() {
     try {
       const snapshot = cloneHistorySnapshot(role)
       const result = await runRoleMutation(() => getUsersApi().deleteRole(role.id, {
+        expectedUpdatedAt: role.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
       }), 'Delete role')

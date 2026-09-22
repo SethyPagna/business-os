@@ -1,11 +1,10 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
 
-type BranchPayload = ExpectedUpdatedAtPayload
+type BranchPayload = Record<string, unknown>
 const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
 
 export type PendingTransferRun = {
@@ -136,25 +135,11 @@ export function createBranch(payload: BranchPayload = {}): Promise<unknown> {
   )
 }
 
-export async function updateBranch(id: string | number, payload: BranchPayload = {}): Promise<unknown> {
-  const body = await withExpectedUpdatedAt('branches', id, { ...getDevicePayload(), ...(payload || {}) })
+export function updateBranch(id: string | number, payload: BranchPayload = {}): Promise<unknown> {
+  const body = { ...getDevicePayload(), ...(payload || {}) }
   return route(
     'branches:update',
     () => apiFetch('PUT', `/api/branches/${encodeId(id)}`, body),
-    null,
-    true,
-  )
-}
-
-export async function deleteBranch(
-  id: string | number,
-  userId: string | number | null,
-  userName: string | null,
-): Promise<unknown> {
-  const payload = await withExpectedUpdatedAt('branches', id, { userId, userName })
-  return route(
-    'branches:delete',
-    () => apiFetch('DELETE', `/api/branches/${encodeId(id)}`, payload),
     null,
     true,
   )

@@ -100,6 +100,7 @@ interface SuppliersTabProps {
 
 interface SupplierRow extends Record<string, unknown> {
   id: number | string
+  updated_at?: string | null
   name?: string | null
   phone?: string | null
   email?: string | null
@@ -149,7 +150,7 @@ interface SupplierApi {
   getSuppliers: (query?: QueryParams) => Promise<unknown>
   createSupplier: (payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
   updateSupplier: (id: number | string, payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
-  deleteSupplier: (id: number | string) => Promise<SupplierMutationResult | unknown>
+  deleteSupplier: (id: number | string, expectedUpdatedAt?: string | null) => Promise<SupplierMutationResult | unknown>
 }
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
@@ -190,7 +191,7 @@ function getSupplierApi(): SupplierApi {
     getSuppliers: async (query = {}) => (await loadContactReadTransportModule()).getSuppliers(query),
     createSupplier: async (payload) => (await loadContactWriteTransportModule()).createSupplier(payload as Record<string, unknown>),
     updateSupplier: async (id, payload) => (await loadContactWriteTransportModule()).updateSupplier(id, payload as Record<string, unknown>),
-    deleteSupplier: async (id) => (await loadContactWriteTransportModule()).deleteSupplier(id),
+    deleteSupplier: async (id, expectedUpdatedAt) => (await loadContactWriteTransportModule()).deleteSupplier(id, expectedUpdatedAt),
   }
 }
 
@@ -985,7 +986,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     }
     try {
       const snapshot = cloneHistorySnapshot(supplier)
-      await runSupplierMutation(() => getSupplierApi().deleteSupplier(supplier.id), 'Delete supplier')
+      await runSupplierMutation(() => getSupplierApi().deleteSupplier(supplier.id, supplier.updated_at), 'Delete supplier')
       let restoredSupplierId = 0
       actionHistory.pushAction({
         label: `Delete supplier ${snapshot.name || ''}`.trim(),
@@ -1024,11 +1025,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     }
     const ids = [...selectedIds]
     const snapshots = buildSelectedSnapshots(suppliers, ids)
+    const snapshotById = new Map(snapshots.map((row) => [Number(row.id), row]))
     const failedIds: number[] = []
     setBulkActionBusy(true)
     try {
       const deleteRun = await runConcurrentTasks(ids, async (id: number) => {
-        await runSupplierMutation(() => getSupplierApi().deleteSupplier(id), 'Bulk delete suppliers')
+        await runSupplierMutation(() => getSupplierApi().deleteSupplier(id, snapshotById.get(Number(id))?.updated_at as string | null | undefined), 'Bulk delete suppliers')
         return Number(id)
       })
       const deletedCount = deleteRun.successes.length

@@ -1,6 +1,6 @@
 import { apiFetch, cacheInvalidate, getSyncServerUrl, isServerOnline } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
-import { localSaveSettings, localSaveSettingsMeta } from './localDb.ts'
+import { localSaveSettings } from './localDb.ts'
 import { hasStoredUserSession } from './syncRuntime.ts'
 import { getCategories, getUnits } from './lookupTransport.ts'
 import { getBranches } from './branchTransport.ts'
@@ -105,8 +105,7 @@ async function writeOfflineDeviceSnapshotMeta(meta: SnapshotMeta): Promise<strin
 async function getSettingsSnapshot(): Promise<unknown> {
   cacheInvalidate('settings')
   const settingsResponse = await apiFetch('GET', '/api/settings')
-  const { updatedAt: inlineUpdatedAt, ...settings } = (settingsResponse || {}) as Record<string, unknown>
-  if (inlineUpdatedAt) await localSaveSettingsMeta(inlineUpdatedAt).catch(() => {})
+  const { updatedAt: _serverUpdatedAt, ...settings } = (settingsResponse || {}) as Record<string, unknown>
   await localSaveSettings(settings).catch(() => {})
   return settings
 }

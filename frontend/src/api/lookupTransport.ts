@@ -1,7 +1,6 @@
 import { apiFetch, route } from './http.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
-type LookupPayload = ExpectedUpdatedAtPayload
+type LookupPayload = Record<string, unknown>
 type LookupKind = 'categories' | 'units'
 type LookupConfig = {
   kind: LookupKind
@@ -54,27 +53,19 @@ async function createLookupRow(config: LookupConfig, payload: LookupPayload = {}
   )
 }
 
-async function updateLookupRow(config: LookupConfig, id: string | number, payload: LookupPayload = {}): Promise<unknown> {
+function updateLookupRow(config: LookupConfig, id: string | number, payload: LookupPayload = {}): Promise<unknown> {
   return route(
     `${config.routeKey}:update`,
-    async () => apiFetch(
-      config.kind === 'units' ? 'PATCH' : 'PUT',
-      `${config.path}/${id}`,
-      await withExpectedUpdatedAt(config.kind, id, payload),
-    ),
+    () => apiFetch(config.kind === 'units' ? 'PATCH' : 'PUT', `${config.path}/${id}`, payload),
     null,
     true,
   )
 }
 
-async function deleteLookupRow(config: LookupConfig, id: string | number, payload: LookupPayload = {}): Promise<unknown> {
+function deleteLookupRow(config: LookupConfig, id: string | number, payload: LookupPayload = {}): Promise<unknown> {
   return route(
     `${config.routeKey}:delete`,
-    async () => apiFetch(
-      'DELETE',
-      `${config.path}/${id}`,
-      await withExpectedUpdatedAt(config.kind, id, payload),
-    ),
+    () => apiFetch('DELETE', `${config.path}/${id}`, payload),
     null,
     true,
   )

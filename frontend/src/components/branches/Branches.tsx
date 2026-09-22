@@ -924,6 +924,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         ...form,
         is_default: form.is_default ? 1 : 0,
         is_active: form.is_active ? 1 : 0,
+        // The version this form opened with (BranchForm keeps only its own
+        // fields), so the save is checked against the row it showed.
+        expectedUpdatedAt: selected.updated_at || undefined,
         userId: user?.id,
         userName: user?.name,
       }

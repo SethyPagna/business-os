@@ -20,7 +20,7 @@ const createBlock = transport.slice(createStart, updateStart)
 const updateBlock = transport.slice(updateStart, deleteStart)
 assert.match(createBlock, /const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}/, 'create keeps the supplied free-text supplier in the product payload')
 assert.match(createBlock, /apiFetch\('POST', '\/api\/products', body\)/, 'create performs exactly the product write')
-assert.match(updateBlock, /withExpectedUpdatedAt\('products', id, \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}\)/, 'update keeps the supplied free-text supplier in the guarded product payload')
+assert.match(updateBlock, /const body = \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}/, 'update keeps the supplied free-text supplier in the guarded product payload')
 assert.match(updateBlock, /apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/, 'update performs exactly the product write')
 
 assert.match(productForm, /supplier NAME[\s\S]{0,120}does not link a contact/i, 'ProductForm documents the free-text supplier contract')

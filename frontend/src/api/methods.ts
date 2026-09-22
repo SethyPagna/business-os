@@ -490,10 +490,6 @@ export const updateBranch = async (id, payload) => {
   const { updateBranch: updateBranchRequest } = await loadBranchTransport()
   return updateBranchRequest(id, payload)
 }
-export const deleteBranch = async (id, userId, userName) => {
-  const { deleteBranch: deleteBranchRequest } = await loadBranchTransport()
-  return deleteBranchRequest(id, userId, userName)
-}
 export const getBranchStock = async (id, params = {}) => {
   const { getBranchStock: getBranchStockRequest } = await loadBranchTransport()
   return getBranchStockRequest(id, params)
@@ -627,9 +623,9 @@ export const updateProduct = async (id, payload) => {
   check()
   return module.updateProduct(id, payload, check)
 }
-export const deleteProduct = async (id, reason) => {
+export const deleteProduct = async (id, reason, expectedUpdatedAt) => {
   const module = await loadProductWriteTransport()
-  return module.deleteProduct(id, reason)
+  return module.deleteProduct(id, reason, expectedUpdatedAt)
 }
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
@@ -940,18 +936,6 @@ export async function createCustomer(d) {
   const module = await loadContactsTransport()
   return module.createCustomer(d)
 }
-export const updateCustomer = async (id, d) => {
-  const module = await loadContactsTransport()
-  return module.updateCustomer(id, d)
-}
-export const deleteCustomer = async (id) => {
-  const module = await loadContactsTransport()
-  return module.deleteCustomer(id)
-}
-export const bulkImportCustomers = async d => {
-  const module = await loadContactsTransport()
-  return module.bulkImportCustomers(d)
-}
 export const downloadCustomerTemplate = async () => {
   const module = await loadContactsTransport()
   return module.downloadCustomerTemplate()
@@ -966,18 +950,6 @@ export async function createSupplier(d) {
   const module = await loadContactsTransport()
   return module.createSupplier(d)
 }
-export const updateSupplier = async (id, d) => {
-  const module = await loadContactsTransport()
-  return module.updateSupplier(id, d)
-}
-export const deleteSupplier = async (id) => {
-  const module = await loadContactsTransport()
-  return module.deleteSupplier(id)
-}
-export const bulkImportSuppliers = async d => {
-  const module = await loadContactsTransport()
-  return module.bulkImportSuppliers(d)
-}
 export const downloadSupplierTemplate = async () => {
   const module = await loadContactsTransport()
   return module.downloadSupplierTemplate()
@@ -991,18 +963,6 @@ export const getDeliveryContacts = async (params = {}) => {
 export async function createDeliveryContact(d) {
   const module = await loadContactsTransport()
   return module.createDeliveryContact(d)
-}
-export const updateDeliveryContact = async (id, d) => {
-  const module = await loadContactsTransport()
-  return module.updateDeliveryContact(id, d)
-}
-export const deleteDeliveryContact = async (id) => {
-  const module = await loadContactsTransport()
-  return module.deleteDeliveryContact(id)
-}
-export const bulkImportDeliveryContacts = async d => {
-  const module = await loadContactsTransport()
-  return module.bulkImportDeliveryContacts(d)
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -1456,11 +1416,6 @@ export const getSaleAmendments = async (id) => {
 }
 
 // ─── Sales export ─────────────────────────────────────────────────────────────
-export const attachSaleCustomer = async (id, payload) => {
-  const { attachSaleCustomer: attachSaleCustomerRequest } = await loadSalesTransport()
-  return attachSaleCustomerRequest(id, payload)
-}
-
 export const getSalesExport = async (params) => {
   const { getSalesExport: getSalesExportRequest } = await loadSalesTransport()
   return getSalesExportRequest(params)

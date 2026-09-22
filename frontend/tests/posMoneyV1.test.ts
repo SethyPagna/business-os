@@ -321,7 +321,7 @@ for (const name of ['addSaleItems', 'amendSale']) {
   let enrichments = 0
   const sent: unknown[] = []
   const env = {
-    structuredClone, withExpectedUpdatedAt: async (_table: unknown, _id: unknown, body: unknown) => { enrichments++; return body },
+    structuredClone,
     getDevicePayload: () => { enrichments++; return { device_id: 'today-device' } },
     route: (_key: unknown, dispatch: () => unknown) => dispatch(), encodeId: String,
     apiFetch: async (_method: unknown, _path: unknown, body: unknown) => { sent.push(body); return {} },

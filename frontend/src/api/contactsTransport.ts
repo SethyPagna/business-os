@@ -4,9 +4,8 @@ import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { readCachedQueryResult, writeCachedQueryResult } from './queryCache.ts'
 import { ensureClientRequestId } from './requestIds.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
-type ContactPayload = ExpectedUpdatedAtPayload
+type ContactPayload = Record<string, unknown>
 type CsvTemplateModule = typeof import('../utils/csvTemplate.ts')
 type ContactEntityConfig = {
   routeKey: string
@@ -104,39 +103,6 @@ function createContact(config: ContactEntityConfig, payload: ContactPayload = {}
   )
 }
 
-async function updateContact(
-  config: ContactEntityConfig,
-  id: string | number,
-  payload: ContactPayload = {},
-): Promise<unknown> {
-  const body = await withExpectedUpdatedAt(config.tableName, id, payload)
-  return route(
-    `${config.routeKey}:update`,
-    () => apiFetch('PUT', `${config.endpoint}/${encodeId(id)}`, body),
-    null,
-    true,
-  )
-}
-
-async function deleteContact(config: ContactEntityConfig, id: string | number): Promise<unknown> {
-  const body = await withExpectedUpdatedAt(config.tableName, id, {})
-  return route(
-    `${config.routeKey}:delete`,
-    () => apiFetch('DELETE', `${config.endpoint}/${encodeId(id)}`, body),
-    null,
-    true,
-  )
-}
-
-function bulkImportContact(config: ContactEntityConfig, payload: ContactPayload = {}): Promise<unknown> {
-  return route(
-    `${config.routeKey}:bulkImport`,
-    () => apiFetch('POST', `${config.endpoint}/bulk-import`, payload),
-    null,
-    true,
-  )
-}
-
 export function getCustomers(params: QueryParams = {}): Promise<unknown> {
   return readContactList(CONTACT_ENTITY.customers, params)
 }
@@ -154,17 +120,6 @@ export function createCustomer(payload: ContactPayload = {}): Promise<unknown> {
   return createContact(CONTACT_ENTITY.customers, payload)
 }
 
-export function updateCustomer(id: string | number, payload: ContactPayload = {}): Promise<unknown> {
-  return updateContact(CONTACT_ENTITY.customers, id, payload)
-}
-
-export function deleteCustomer(id: string | number): Promise<unknown> {
-  return deleteContact(CONTACT_ENTITY.customers, id)
-}
-
-export function bulkImportCustomers(payload: ContactPayload = {}): Promise<unknown> {
-  return bulkImportContact(CONTACT_ENTITY.customers, payload)
-}
 
 export function downloadCustomerTemplate(): Promise<void> {
   return buildContactCsvTemplate([
@@ -192,17 +147,6 @@ export function createSupplier(payload: ContactPayload = {}): Promise<unknown> {
   return createContact(CONTACT_ENTITY.suppliers, payload)
 }
 
-export function updateSupplier(id: string | number, payload: ContactPayload = {}): Promise<unknown> {
-  return updateContact(CONTACT_ENTITY.suppliers, id, payload)
-}
-
-export function deleteSupplier(id: string | number): Promise<unknown> {
-  return deleteContact(CONTACT_ENTITY.suppliers, id)
-}
-
-export function bulkImportSuppliers(payload: ContactPayload = {}): Promise<unknown> {
-  return bulkImportContact(CONTACT_ENTITY.suppliers, payload)
-}
 
 export function downloadSupplierTemplate(): Promise<void> {
   return buildContactCsvTemplate([
@@ -226,14 +170,3 @@ export function createDeliveryContact(payload: ContactPayload = {}): Promise<unk
   return createContact(CONTACT_ENTITY.deliveryContacts, payload)
 }
 
-export function updateDeliveryContact(id: string | number, payload: ContactPayload = {}): Promise<unknown> {
-  return updateContact(CONTACT_ENTITY.deliveryContacts, id, payload)
-}
-
-export function deleteDeliveryContact(id: string | number): Promise<unknown> {
-  return deleteContact(CONTACT_ENTITY.deliveryContacts, id)
-}
-
-export function bulkImportDeliveryContacts(payload: ContactPayload = {}): Promise<unknown> {
-  return bulkImportContact(CONTACT_ENTITY.deliveryContacts, payload)
-}

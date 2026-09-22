@@ -293,7 +293,6 @@ await test('sale status retries send the exact prepared body and client request 
   const sales = loadTransport('../src/api/salesTransport.ts', {
     'constants.ts': { SYNC: { REQUEST_TIMEOUT_MS: 20000 } },
     'deviceInfo.ts': { getClientDeviceInfo: () => ({ client_id: 'device-1' }) },
-    'expectedUpdatedAt.ts': { withExpectedUpdatedAt: async (_table: string, _id: unknown, body: Record<string, unknown>) => ({ expected_updated_at: body.expected_updated_at || 'sale-rev-1', ...body }) },
     'http.ts': { apiFetch: async (method: string, path: string, body: unknown) => { requests.push(freezeDirectMutationBody({ method, path, body })); return { id: 31, sale_status: 'cancelled', updated_at: 'sale-rev-2' } }, route: async (_channel: string, fn: () => unknown) => fn(), cacheInvalidate: () => {} },
     'lazyLocalDb.ts': { getLocalDb: async () => ({ table: () => ({ update: async () => 1, orderBy: () => ({ reverse: () => ({ limit: () => ({ toArray: async () => [] }) }) }) }) }) },
     'localMirrors.ts': { mirrorReadResult: (_mirror: unknown, value: unknown) => value, mirrorTable: () => null },
@@ -301,7 +300,8 @@ await test('sale status retries send the exact prepared body and client request 
     'requestIds.ts': { ensureClientRequestId: (body: Record<string, unknown>) => ({ ...body, client_request_id: body.client_request_id || 'sale-status-fixed' }) },
     'contactOptionUtils.ts': { contactDisplayAddress: () => '' },
   })
-  const body = await sales.prepareSaleStatusRequest(31, 'cancelled', 'note', { cancel_reason: 'mistake' })
+  // The caller passes the version its screen holds (Sales.tsx: previousSale.updated_at).
+  const body = await sales.prepareSaleStatusRequest(31, 'cancelled', 'note', { cancel_reason: 'mistake', expected_updated_at: 'sale-rev-1' })
   await sales.submitSaleStatusRequest(31, body)
   await sales.submitSaleStatusRequest(31, body)
   assert.equal(body.client_request_id, 'sale-status-fixed')
@@ -315,13 +315,12 @@ await test('return edit retries send the exact prepared body and client request 
     'deviceInfo.ts': { getClientDeviceInfo: () => ({ client_id: 'device-1' }) },
     'timestampId.ts': { businessDateTimeId: () => '20260908-150000' },
     'conflicts.ts': { buildAttemptedReturnItems: (items: unknown) => items },
-    'expectedUpdatedAt.ts': { withExpectedUpdatedAt: async (_table: string, _id: unknown, body: Record<string, unknown>) => ({ expected_updated_at: body.expected_updated_at || 'return-rev-1', ...body }) },
     'http.ts': { apiFetch: async (method: string, path: string, body: unknown) => { requests.push(freezeDirectMutationBody({ method, path, body })); return { id: 44, updated_at: 'return-rev-2' } }, route: async (_channel: string, fn: () => unknown) => fn() },
     'lazyLocalDb.ts': { getLocalDb: async () => ({ table: () => ({ update: async () => 1 }) }) },
     'requestIds.ts': { ensureClientRequestId: (body: Record<string, unknown>) => ({ ...body, client_request_id: body.client_request_id || 'return-edit-fixed' }) },
     'returnsReadTransport.ts': { getReturn: async () => null, getReturns: async () => [] },
   })
-  const body = await returns.prepareReturnUpdateRequest(44, { reason: 'Damaged', items: [{ product_id: 9, quantity: 1 }] })
+  const body = await returns.prepareReturnUpdateRequest(44, { reason: 'Damaged', items: [{ product_id: 9, quantity: 1 }], expected_updated_at: 'return-rev-1' })
   await returns.submitReturnUpdateRequest(44, body)
   await returns.submitReturnUpdateRequest(44, body)
   assert.equal(body.client_request_id, 'return-edit-fixed')
@@ -333,7 +332,6 @@ await test('prepared senders refuse a missing client request id before the API c
   let calls = 0
   const common = {
     'deviceInfo.ts': { getClientDeviceInfo: () => ({}) },
-    'expectedUpdatedAt.ts': { withExpectedUpdatedAt: async (_table: string, _id: unknown, body: unknown) => body },
     'http.ts': { apiFetch: async () => { calls += 1 }, route: async (_channel: string, fn: () => unknown) => fn(), cacheInvalidate: () => {} },
     'lazyLocalDb.ts': { getLocalDb: async () => ({ table: () => ({ update: async () => 1 }) }) },
     'requestIds.ts': { ensureClientRequestId: (body: unknown) => body },

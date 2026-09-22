@@ -1,11 +1,10 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
-import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
-type ProductPayload = ExpectedUpdatedAtPayload
+type ProductPayload = Record<string, unknown>
 
 export type MergeDuplicateProductsChunkResult = {
   success: boolean
@@ -287,8 +286,7 @@ export async function updateProduct(id: string | number, payload: ProductPayload
   const scope = captureActorReadScope('products')
   const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
   check()
-  const body = await withExpectedUpdatedAt('products', id, { ...getDevicePayload(), ...(payload || {}) })
-  check()
+  const body = { ...getDevicePayload(), ...(payload || {}) }
   const result = await route(
     'products:update',
     () => { check(); return apiFetch('PUT', `/api/products/${encodeId(id)}`, body) },
@@ -299,11 +297,8 @@ export async function updateProduct(id: string | number, payload: ProductPayload
   return result
 }
 
-export async function deleteProduct(id: string | number, reason?: string): Promise<unknown> {
-  const payload = ensureClientRequestId(
-    await withExpectedUpdatedAt('products', id, { reason: reason ?? '' }),
-    'product-remove',
-  )
+export async function deleteProduct(id: string | number, reason?: string, expectedUpdatedAt?: string | null): Promise<unknown> {
+  const payload = ensureClientRequestId({ reason: reason ?? '', ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}) }, 'product-remove')
   return route(
     'products:delete',
     () => apiFetch('DELETE', `/api/products/${encodeId(id)}`, payload),

@@ -9,7 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const products = readFileSync(join(here, '..', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
 const transport = readFileSync(join(here, '..', 'src', 'api', 'productWriteTransport.ts'), 'utf8')
 
-assert.match(transport, /deleteProduct[\s\S]*ensureClientRequestId\([\s\S]*withExpectedUpdatedAt\('products', id,[\s\S]*'product-remove'/,
+assert.match(transport, /deleteProduct[\s\S]*ensureClientRequestId\(\{ reason: reason \?\? '', \.\.\.\(expectedUpdatedAt \? \{ expectedUpdatedAt \} : \{\}\) \}, 'product-remove'\)/,
   'direct removal always sends a server idempotency key alongside the reviewed product version')
 
 const singleStart = products.indexOf('const runSingleDeleteConfirmed')

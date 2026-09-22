@@ -400,6 +400,9 @@ export default function PromotionsPage() {
       // else on the product is touched (same contract the bulk editor
       // relies on).
       await updateProduct(discountDraft.product.id, {
+        // The version this editor opened with, so the save is checked against
+        // the row it showed and never against a stale local mirror.
+        expectedUpdatedAt: typeof discountDraft.product.updated_at === 'string' ? discountDraft.product.updated_at : undefined,
         discount_enabled: discountDraft.discount_enabled ? 1 : 0,
         discount_type: discountDraft.discount_type,
         discount_percent: Number(discountDraft.discount_percent) || 0,

@@ -49,7 +49,6 @@ import {
   readDriveSyncStatusCooldown,
   readNotificationSummaryMissingUntil,
 } from '../src/api/cooldownFallbacks.ts'
-import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from '../src/api/expectedUpdatedAt.ts'
 import { createImportJob, startImportJob, uploadImportJobCsv } from '../src/api/importJobsTransport.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { mirrorReadResult } from '../src/api/localMirrors.ts'
@@ -860,21 +859,6 @@ await runTest('cooldown fallback helpers keep typed notification and Drive fallb
   assert.equal(readDriveSyncStatusCooldown(), 0)
 })
 
-await runTest('expected updated-at helpers preserve explicit and row timestamp metadata', async () => {
-  assert.deepEqual(
-    await withExpectedUpdatedAt('products', 1, { name: 'Serum', expected_updated_at: 'server-value' }),
-    { name: 'Serum', expected_updated_at: 'server-value' },
-  )
-  assert.deepEqual(
-    await withExpectedUpdatedAt('products', 1, { name: 'Serum', updated_at: 'row-value' }),
-    { name: 'Serum', updated_at: 'row-value', expectedUpdatedAt: 'row-value' },
-  )
-  assert.deepEqual(
-    await withSettingsExpectedUpdatedAt({ theme: 'dark', expectedUpdatedAt: 'existing' }),
-    { theme: 'dark', expectedUpdatedAt: 'existing' },
-  )
-})
-
 await runTest('local mirror helper returns server data while mirroring asynchronously', async () => {
   const result = { ok: true }
   let mirrored: unknown = null
@@ -927,7 +911,6 @@ await runTest('browser dialog image fallbacks stay null for browser-hosted media
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
-  const expectedUpdatedAtSource = fs.readFileSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url), 'utf8')
   const localMirrorsSource = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
   const portalHttpSource = fs.readFileSync(new URL('../src/api/portalHttp.ts', import.meta.url), 'utf8')
   const portalTransportSource = fs.readFileSync(new URL('../src/api/portalTransport.ts', import.meta.url), 'utf8')
@@ -1011,8 +994,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /function loadQueryCacheModule\(\) \{[\s\S]*import\('\.\/queryCache\.ts'\)/)
   assert.doesNotMatch(source, /from '\.\/expectedUpdatedAt\.ts'/)
   assert.doesNotMatch(source, /withSettingsExpectedUpdatedAt/)
-  assert.match(settingsTransportSource, /import \{ withSettingsExpectedUpdatedAt, type ExpectedUpdatedAtPayload \} from '\.\/expectedUpdatedAt\.ts'/)
-  assert.match(salesTransportSource, /import \{ withExpectedUpdatedAt, type ExpectedUpdatedAtPayload \} from '\.\/expectedUpdatedAt\.ts'/)
+  assert.doesNotMatch(settingsTransportSource, /expectedUpdatedAt\.ts|SettingsMeta/, 'settings saves carry the scoped server version or none, never the device-local meta')
+  assert.doesNotMatch(salesTransportSource, /expectedUpdatedAt\.ts/)
   assert.doesNotMatch(source, /from '\.\/localMirrors\.ts'/)
   assert.match(source, /function loadLocalMirrorsModule\(\) \{[\s\S]*import\('\.\/localMirrors\.ts'\)/)
   assert.match(returnsTransportSource, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'/)
@@ -1031,7 +1014,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /function loadNotificationSummaryTransport\(\) \{[\s\S]*import\('\.\/notificationSummary\.ts'\)/)
   assert.match(source, /function loadBrowserDialogsModule\(\)[\s\S]*import\('\.\/browserDialogs\.ts'\)/)
   assert.match(source, /export async function openCSVDialog\(\)[\s\S]*openBrowserCSVDialog\(\)/)
-  assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
+  assert.equal(fs.existsSync(new URL('../src/api/expectedUpdatedAt.ts', import.meta.url)), false, 'the local-mirror version fallback is gone; every write sends the version its screen holds')
   assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
   assert.match(localMirrorsSource, /MIRROR_WRITE_IDLE_DELAY_MS = 10_000/)
   assert.match(localMirrorsSource, /window\.setTimeout\(\(\) => \{[\s\S]*requestIdleCallback[\s\S]*idle\(\(\) => run\(\), \{ timeout: MIRROR_WRITE_IDLE_DELAY_MS \}\)[\s\S]*\}, MIRROR_WRITE_IDLE_DELAY_MS\)/)
@@ -1040,12 +1023,12 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(lookupTransportSource, /const LOOKUP_MIRROR_WRITE_DELAY_MS = 10_000/)
   assert.match(lookupTransportSource, /import\('\.\/localMirrors\.ts'\)[\s\S]*mirrorTable\(config\.kind\)\(result\)/)
   assert.match(lookupTransportSource, /route\([\s\S]*\{ raceLocalFallback: false \}/)
-  assert.match(lookupTransportSource, /withExpectedUpdatedAt\(config\.kind, id, payload\)/)
+  assert.match(lookupTransportSource, /\(\) => apiFetch\(config\.kind === 'units' \? 'PATCH' : 'PUT', `\$\{config\.path\}\/\$\{id\}`, payload\)/)
   assert.match(lookupTransportSource, /config\.kind === 'units' \? 'PATCH' : 'PUT'/)
   assert.doesNotMatch(lookupTransportSource, /refreshAppData/)
   assert.match(branchTransportSource, /export function getBranches/)
   assert.match(branchTransportSource, /mirrorTable\('branches'\)/)
-  assert.match(branchTransportSource, /withExpectedUpdatedAt\('branches', id/)
+  assert.match(branchTransportSource, /const body = \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}/)
   assert.match(branchTransportSource, /export function getBranchStockIntegrity/)
   assert.match(branchTransportSource, /encodeURIComponent\(String\(id\)\)/)
   assert.match(source, /export const getBranches = async \(\) => \{[\s\S]*loadBranchTransport\(\)[\s\S]*getBranchesRequest\(\)/, 'legacy branch reads should lazy-load branch transport')
@@ -1064,7 +1047,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   )
   assert.match(
     productWriteTransportSource,
-    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void\)[\s\S]*const body = await withExpectedUpdatedAt\('products', id, \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}\)[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
+    /export async function updateProduct\(id: string \| number, payload: ProductPayload = \{\}, assertCurrent\?: \(\) => void\)[\s\S]*const body = \{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}[\s\S]*apiFetch\('PUT', `\/api\/products\/\$\{encodeId\(id\)\}`, body\)/,
     'product update preserves the caller payload and concurrency metadata on the product route',
   )
   assert.doesNotMatch(productWriteTransportSource, /ensureSupplierExists|apiFetch\('POST', '\/api\/suppliers'/,
@@ -1135,7 +1118,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(contactsTransportSource, /hasPagedParams\(params\)/)
   assert.match(contactsTransportSource, /readCachedQueryResult\(cacheKey\)/)
   assert.match(contactsTransportSource, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, config\.requestIdPrefix\)/)
-  assert.match(contactsTransportSource, /withExpectedUpdatedAt\(config\.tableName, id, payload\)/)
+  assert.doesNotMatch(contactsTransportSource, /updateContact|deleteContact|bulkImportContact/, 'contact writes live only in contactWriteTransport.ts')
   assert.match(contactsTransportSource, /export function getCustomerPointSummaries/)
   assert.match(contactsTransportSource, /function getCsvTemplateModule\(\): Promise<CsvTemplateModule>[\s\S]*import\('\.\.\/utils\/csvTemplate\.ts'\)/)
   assert.match(contactsTransportSource, /export function downloadCustomerTemplate\(\): Promise<void>[\s\S]*buildContactCsvTemplate\(\[/)
@@ -1167,7 +1150,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(userAdminTransportSource, /export function resetPassword/)
   assert.match(userAdminTransportSource, /export function getRoles/)
   assert.match(userAdminTransportSource, /import\('\.\/lazyLocalDb\.ts'\)/)
-  assert.match(userAdminTransportSource, /withExpectedUpdatedAt\('roles', id, payload\)/)
+  assert.match(userAdminTransportSource, /apiFetch\('PUT', `\/api\/roles\/\$\{encodeId\(id\)\}`, payload\)/)
   assert.match(userAdminTransportSource, /encodeURIComponent\(String\(id\)\)/)
   assert.doesNotMatch(userAdminTransportSource, /from '\.\/localMirrors\.ts'|from '\.\/lazyLocalDb\.ts'/, 'user-admin transport should not statically load local mirror or Dexie helpers')
   assert.match(appBootstrapTransportSource, /export async function getAppBootstrap/)
@@ -1203,10 +1186,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(salesTransportSource, /appendQuery\('\/api\/sales', query\)/)
   assert.match(salesTransportSource, /const db = await getLocalDb\(\)[\s\S]*db\.table\('sales'\)\.orderBy\('created_at'\)\.reverse\(\)\.limit\(1000\)\.toArray\(\)/)
   assert.match(salesTransportSource, /export async function updateSaleStatus\(/)
-  assert.match(salesTransportSource, /withExpectedUpdatedAt\('sales', id/)
+  assert.match(salesTransportSource, /const payload = ensureClientRequestId\(\{[\s\S]*sale_status: saleStatus,[\s\S]*\}, 'sale-status'\)/)
   assert.match(salesTransportSource, /apiFetch\('PATCH', `\/api\/sales\/\$\{encodeId\(id\)\}\/status`, payload\)/)
-  assert.match(salesTransportSource, /export async function attachSaleCustomer\(/)
-  assert.match(salesTransportSource, /apiFetch\('PATCH', `\/api\/sales\/\$\{encodeId\(id\)\}\/customer`, body\)/)
   assert.match(salesTransportSource, /export function getSalesExport\(params: QueryParams = \{\}\)/)
   assert.match(salesTransportSource, /appendQuery\('\/api\/sales\/export', query\)/)
   assert.doesNotMatch(source, /sales:updateStatus|sales:attachCustomer|sales:export|\/api\/sales\/export/)
@@ -1215,7 +1196,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(returnsTransportSource, /export function createSupplierReturn\(payload: ReturnPayload = \{\}\)/)
   assert.match(returnsTransportSource, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsTransportSource, /export async function updateReturn\(id: number \| string, payload: ReturnPayload = \{\}\)/)
-  assert.match(returnsTransportSource, /withExpectedUpdatedAt\('returns', id/)
+  assert.match(returnsTransportSource, /const body = ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return-edit'\)/)
   assert.match(returnsTransportSource, /buildAttemptedReturnItems\(Array\.isArray\(payload\.items\) \? payload\.items : \[\]\)/)
   assert.match(pendingSyncTransportSource, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'/)
   assert.match(pendingSyncTransportSource, /export async function discardPendingSyncQueue/)

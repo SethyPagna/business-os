@@ -1,9 +1,8 @@
 import { refreshAppData } from '../utils/appRefresh.ts'
 import { getSettingsRefreshChannels } from '../utils/settingsRefresh.ts'
 import { buildAttemptedSettings } from './conflicts.ts'
-import { withSettingsExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, cacheInvalidate, isWriteConflictError, route } from './http.ts'
-import { localGetSettings, localSaveSettings, localSaveSettingsMeta } from './localDb.ts'
+import { localGetSettings, localSaveSettings } from './localDb.ts'
 import { routeMirrored } from './localMirrors.ts'
 
 type SettingsPayload = Record<string, unknown>
@@ -75,13 +74,9 @@ async function saveSettingsLocally(updates: SettingsPayload): Promise<void> {
   await localSaveSettings(updates).catch(() => {})
 }
 
-async function saveSettingsMeta(updatedAt: unknown): Promise<void> {
-  if (updatedAt) await localSaveSettingsMeta(updatedAt).catch(() => {})
-}
-
 // Real, confirmed bug (traced from a live report of "Portal settings
 // changed on another device" firing on nearly every portal-editor save):
-// the old `withSettingsExpectedUpdatedAt` (expectedUpdatedAt.ts) read a
+// the old device-local settings meta (since removed) read a
 // single cached GLOBAL updated_at (the newest of every row in the settings
 // table), while the backend's own conflict check scopes its comparison to
 // only the keys actually being written in this save. Any unrelated
@@ -94,9 +89,10 @@ async function saveSettingsMeta(updatedAt: unknown): Promise<void> {
 // the server what the real current version of THESE keys is, right before
 // sending them, via GET /api/settings/meta?keys=... (added alongside this
 // fix) -- matching the exact scoping POST / already uses server-side, so
-// the comparison is finally apples-to-apples. Falls back to the old
-// (unscoped, best-effort) behavior if this request fails for any reason
-// (e.g. offline) rather than blocking the save entirely.
+// the comparison is finally apples-to-apples. If this request fails (e.g.
+// offline) the save carries no version and the server skips the check; the
+// device-local settings_meta fallback that used to fill in here was removed
+// on 22 Sep 2026 because it, too, was stale against other devices.
 async function getScopedExpectedUpdatedAt(keys: string[]): Promise<unknown> {
   if (!keys.length) return null
   try {
@@ -110,8 +106,7 @@ async function getScopedExpectedUpdatedAt(keys: string[]): Promise<unknown> {
 
 async function getServerSettings(): Promise<SettingsPayload> {
   const settingsResponse = asSettingsPayload(await apiFetch('GET', '/api/settings'))
-  const { updatedAt: inlineUpdatedAt, ...settings } = settingsResponse
-  await saveSettingsMeta(inlineUpdatedAt)
+  const { updatedAt: _serverUpdatedAt, ...settings } = settingsResponse
   return settings
 }
 
@@ -166,16 +161,13 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
     reason: String(options.reason || 'settings-saved').trim() || 'settings-saved',
     source: String(options.source || 'settings:save').trim() || 'settings:save',
   }
-  let payload: ExpectedUpdatedAtPayload = options.skipExpectedUpdatedAt
-    ? { ...updates }
-    : await withSettingsExpectedUpdatedAt(updates)
+  let payload: Record<string, unknown> = { ...updates }
   if (!options.skipExpectedUpdatedAt) {
     const scopedUpdatedAt = await getScopedExpectedUpdatedAt(Object.keys(updates))
     if (scopedUpdatedAt) payload = { ...payload, expectedUpdatedAt: scopedUpdatedAt }
   }
   try {
     const result = asSettingsPayload(await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true))
-    await saveSettingsMeta(result.updatedAt)
     await saveSettingsLocally(updates)
     refreshAppData(refreshChannels, refreshDetail)
     return result
@@ -199,7 +191,6 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
         const retryPayload = { ...attemptedSettings, expectedUpdatedAt: nextExpectedUpdatedAt }
         try {
           const retryResult = asSettingsPayload(await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true))
-          await saveSettingsMeta(retryResult.updatedAt)
           await saveSettingsLocally(attemptedSettings)
           refreshAppData(refreshChannels, refreshDetail)
           return retryResult
@@ -215,7 +206,6 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
       }
     }
     error.attempted = error.attempted || attemptedSettings
-    await saveSettingsMeta(error.actualUpdatedAt)
     if (error.currentSettings) await saveSettingsLocally(error.currentSettings)
     throw error
   }
