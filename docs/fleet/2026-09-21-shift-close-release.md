@@ -554,11 +554,112 @@ folders" direction: its ignored evidence (`outputs/`, `frontend/e2e-report`,
 Downloads only `business-os-v1` remains. `codex/supplier-settlement-20260918` stays
 on origin at the same tip as `main`.
 
-**Still open after this program:** shift 20 (21.09.2026) closing-count amendment
+**Still open after this program:** the 22 Sep "changed on another device" class (fixed below); shift 20 (21.09.2026) closing-count amendment
 (needs the owner signed in; Claude does not enter passwords); popup `closeDirty`
 prefill (chip `task_4683ad2f`); shop-wide close permission (chip `task_4c313434`,
 owner decision); D13 `opened_at` index (low, only if `shift_sessions` grows); 0188
 reset blocker; adjust candidate `a22d3b1e` stays REJECT.
+
+### "Changed on another device" on every edit — FIXED class-wide (`4c163015`)
+
+Owner report, 22 September (phone screenshot): a product edit was refused with
+"Product changed on another device — your version expected 16/09/2026 19:10,
+latest 22/09/2026 13:33", the "Current saved details" showed a raw ISO
+timestamp, and "many things are still expecting old versions": images, product
+changes, other actions.
+
+**Root cause (one class, not one screen; corrected after the adversarial
+verifier refuted the first version by executing the old helper).** The version
+token a guarded write sent was whatever `updated_at` rode along in the form
+payload — the record the screen loaded with (a Products list on a phone kept
+open for days, or an autosaved draft restored into the form) — and nothing ever
+refreshed it: a refused save kept the same record, so "Reload latest" and every
+further press sent the same stale token. Where a payload carried no
+`updated_at` at all, `frontend/src/api/expectedUpdatedAt.ts` filled one from a
+Dexie mirror row the live app stopped rewriting on 12 Sep (`10b4d902`,
+`localMirrors.ts` `shouldPersistLocalMirror` false on any http(s) origin):
+stale where a row existed, absent otherwise. The settings variant read a
+device-local `settings_meta` row holding a wrong-scope global version. The
+image symptom is the same defect: the form's image upload does not bump the
+product row, but the save that follows it was refused on the stale token.
+
+**Fix (simulated council decision, five labelled perspectives, one model).**
+- The helper module is deleted. Transports send the payload they are given,
+  synchronously (`branch`, `contactWrite`, `lookup`, `productWrite`, `returns`,
+  `sales`, `userAdmin`, `settings`); no mirror read on the request path. The
+  Worker already accepts `expectedUpdatedAt` / `expected_updated_at` /
+  `updated_at` (`conflictControl.ts` `getExpectedUpdatedAt`) and skips the check
+  on an empty token, so a write with no version is checked by nothing rather than
+  refused on a stale one.
+- Every caller passes the version its screen holds, explicitly: Products edit
+  (`selected.updated_at`), single and bulk delete (row / snapshot), undo/redo
+  restore and delete-redo (re-read first), promotion discount save, branch save,
+  contact deletes (single + bulk from the pre-delete snapshots; contact edits
+  already carried the row's `updated_at`), role delete. Sales, returns, users,
+  lookups, batches, fees, notes and files already did.
+- A refused product save re-reads the row (`fetchProductsByIds`) into the open
+  form AND patches the list row, so the next press carries the version that won
+  and closing/reopening the form does not replay the stale one; a refused
+  contact save (customers, suppliers, delivery) reloads its tab so the reopened
+  form carries the version that won. The dialog names the product (name,
+  barcode) and formats every `*_at` as dd/mm/yyyy 24-hour; the Worker's PUT
+  pre-read returns `id, name, barcode, updated_at` as `current`.
+- `DELETE /roles/:id` read the token only from the query string, which the client
+  never used, so that guard never ran; it now reads the JSON body first (as the
+  lookups routes do) with the query string as fallback.
+- Dead after tracing callers: `contactsTransport` update/delete/bulkImport
+  (the live path is `contactWriteTransport`), `deleteBranch`,
+  `attachSaleCustomer` (+ its private types), the `methods.ts` re-exports of all
+  of them, `localGetSettingsMeta` / `localSaveSettingsMeta` (the Dexie
+  `settings_meta` store declaration stays: Dexie versions are append-only).
+- Tests: `productWriteConflictToken.test.ts` (13, executed dialog), new
+  `writeVersionFromScreen.test.ts` (81: helper absent, no transport reads a
+  mirror, contact and role transports EXECUTED with a fake `apiFetch` send
+  exactly the caller's body, every caller and the 409 re-read/reload pinned
+  with a negative control), Worker
+  `test-products-update-conflict-current-pure.cjs` (6) and new
+  `test-roles-delete-conflict-body-pure.cjs` (6: the route's body-first
+  extraction executed verbatim with a fake context; negative control). Twelve
+  pinned tests updated to the new seam (`apiHttp`, `directMutationRequest`,
+  `posMoneyV1`, `productSaveActorFence`, …).
+- **Gates on `4c163015`:** frontend **test:utils: 517 passed, 0 red of 517 executed files (0 skipped; 453870 ms)**, `verify:i18n` and `build` exit 0,
+  public trio restored; Worker `tsc --noEmit` exit 0, 494 of 501
+  `scripts/test-*.cjs` green; `test-backup-schema-discovery-native.cjs`, `test-catalog-live-stock-native.cjs`, `test-import-maintenance-fence-native.cjs`, `test-product-conflict-action-apply-native.cjs`, `test-product-conflict-action-remove-native.cjs`, `test-sale-return-money-precision-native.cjs` red in the sweep, green standalone (workerd contention); `test-product-money-write-policy-native.cjs` red for real (its race hook named the old pre-read SQL), repaired at `4c163015`, green standalone twice.
+- **New rule and skill (owner, 22 Sep: "make a skill and rule to not break
+  anything and verify the affected surroundings"):** `.claude/skills/blast-radius/SKILL.md`
+  plus a non-negotiable line in `AGENTS.md` and a start-here step in
+  `CLAUDE.md` — map callers, siblings, the other package and pinned tests with
+  `git grep` before editing; treat one symptom as one instance of a class; verify
+  the map afterwards on the surface the owner uses; record the matrix.
+
+**Council record (simulated).** Product: the owner's exact flow (edit a product
+that changed elsewhere, save with a new image) now succeeds or names the product.
+Security: no guard weakened — the token is still compared server-side whenever
+the client holds one, and one guard (roles delete) that never ran now does.
+Debloat: −53-line helper, −69 lines of dead contact transports, −40 of sale
+attach, no `await` on the write path. Dead-code: every removal traced to zero
+importers (`git grep`). Free/paid: no plan-sensitive change. Accepted; no
+unresolved objection.
+
+**Adversarial verifier (bos-verify agent, read-only, on the lane tip before the
+follow-up).** Verdict NOT CERTIFIED on two counts, both answered in the follow-up
+commit: (1) the stated root cause was refuted by executing the old helper (it
+short-circuited on `payload.updated_at`, so the mirror branch never ran for a
+form that spread its record) — the story above is the corrected one and the
+false version was removed from four source comments and the test header;
+(2) the class was not closed for contact edits — now a refused contact save
+reloads its tab; the open modal itself still holds the `updated_at` it opened
+with, so "close, reopen, save" is the path there (recorded as the residual; the
+product form gets the stronger in-place re-read). Certified: no remaining
+importer of the removed modules; the guarded-write matrix (every
+`assertUpdatedAtMatch` route and its frontend caller — no route lost a token,
+branch PUT and role DELETE go from "guard never ran" to "guard runs"); settings
+scoped-meta semantics intact; sales/returns unchanged; the products re-read
+cannot clobber the operator's edits (form hydrates on id change only) and
+cannot fire after close (revision fence); DELETE bodies are really sent
+(`http.ts` `methodAllowsRequestBody`); no offline-queue/PWA path imported the
+helper; the conflict dialog was already English-only (pre-existing, not new).
+Not driven at runtime: the two newly effective guards against live concurrency.
 
 ## Downloads cleanup — DONE
 

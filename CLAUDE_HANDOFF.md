@@ -64,6 +64,15 @@ branch `codex/supplier-settlement-20260918`, HEAD `80f379ff` = `origin/main` =
   Worker `4d263940`, live revision `fee0a315baf3`, frontend hash `1bef2af49779c663`.
   The settlement workspace is removed (evidence in `BusinessOS-Recovery/2026-09-22/`);
   work continues from `business-os-v1` or a fresh scratchpad worktree off `origin/main`.
+- "Changed on another device" class fix (`4c163015`): `frontend/src/api/expectedUpdatedAt.ts`
+  is gone (it filled MISSING versions from Dexie mirrors the live app has not written
+  since 12 Sep; the stale token itself was the `updated_at` the screen loaded with);
+  transports send the caller's payload and every form/row passes its own `updated_at`
+  explicitly; a refused product save re-reads the row into the form and the list, a
+  refused contact save reloads its tab; `DELETE /roles/:id` reads the body token. Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
+  `test-roles-delete-conflict-body-pure.cjs`, `test-products-update-conflict-current-pure.cjs`.
+  New rule: `.claude/skills/blast-radius/SKILL.md` (map and verify the surroundings of
+  every change; one symptom = one class). Gates green on `4c163015`.
 - Reset blocker: migration 0188's retirement trigger refuses the reset route's
   `transfer_operation_members` delete; wire the retirement kernel into the
   route before applying 0185–0191.

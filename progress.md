@@ -80,6 +80,16 @@ signed-in session); popup closeDirty chip task_4683ad2f.
 D12 pushed (both branches at fee0a315) and deployed (Paid) 23:10Z: Worker
 4d263940-1996-43d6-aeac-19514c8080b0, live revision fee0a315baf3, frontend hash
 1bef2af49779c663; no remote migration; smoke green (admin login shell, storefront).
+"Changed on another device" on every edit FIXED class-wide (4c163015): the token a write
+sent was the updated_at the screen loaded with (stale list or restored draft) and nothing
+refreshed it; the helper that filled MISSING tokens from a Dexie mirror the live app stopped
+writing on 12 Sep (expectedUpdatedAt.ts) is deleted; every screen passes its record's
+updated_at explicitly, a refused product save re-reads the row into the form AND the list, a
+refused contact save reloads its tab, the dialog names the product, DELETE /roles/:id reads
+the body token (its guard never ran), dead contact/branch/sale-attach transports removed.
+bos-verify: fix certified sound; first root-cause story refuted and corrected in 4c163015. New blast-radius skill + AGENTS.md
+rule (verify the affected surroundings of every change). Gates on 4c163015: frontend
+517 passed, 0 red of 517 executed files (0 skipped; 453870 ms), i18n/build 0; Worker tsc 0, 494/501 green (test-backup-schema-discovery-native.cjs, test-catalog-live-stock-native.cjs, test-import-maintenance-fence-native.cjs, test-product-conflict-action-apply-native.cjs, test-product-conflict-action-remove-native.cjs, test-sale-return-money-precision-native.cjs contention, green standalone; test-product-money-write-policy-native.cjs hook repaired at 4c163015, green).
 Settlement workspace removed 22 Sep (evidence in BusinessOS-Recovery/2026-09-22/, branch
 kept on origin at the main tip); only business-os-v1 remains under Downloads.
 Reset blocker: 0188's retirement trigger must be wired into the reset route before it ships.
