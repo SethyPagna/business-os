@@ -472,14 +472,144 @@ check('the cost-override and group-rename rows are not duplicated by the plain p
   assert.ok(allowlist, 'products.ts must declare its plain-field allowlist')
   assert.ok(!/cost_price_usd|cost_price_khr/.test(allowlist[1]),
     'cost belongs to the cost_override row (lib/productWrites.ts); listing it here would record the same change twice')
-  assert.match(products, /appliedGroupRename \|\| renamedProductName[\s\S]{0,160}?filter\(\(column\) => column !== 'name'\)/,
-    'a group rename already has its own product_group row; the name must drop out of the plain diff')
+  assert.match(products, /keys: wroteProductRenameAudit[\s\S]{0,120}?filter\(\(column\) => column !== 'name'\)/,
+    'name drops out only when a rename row was ACTUALLY written')
 })
+
+// 6. Real routes/products.ts, end to end, on the migrated schema.
+//
+// Two defects this pins, both found by an adversarial read of the first
+// version of this lane:
+//   E1 -- a DEFAULT-scope rename (rename this row only, the common case) was
+//         recorded nowhere: the 'rename'/'product_group' row only fires under
+//         __rename_scope === 'group', but `name` was dropped from the field
+//         diff for ANY name change.
+//   E2 -- the field diff used a hand-written 16-column allowlist while the
+//         product form submits ~20 more (discounts, thresholds, expiry,
+//         tag_label, custom_fields), so changing five of them wrote no row.
+// ---------------------------------------------------------------------------
+function productsFixture() {
+  const database = openDb(MIGRATION_SQLS)
+  const raw = database.db
+  raw.exec('DELETE FROM audit_logs;')
+  const DB = {
+    prepare(sql) {
+      let values = []
+      const statement = {
+        bind(...args) { values = args; return statement },
+        async all() { return { results: raw.prepare(sql).all(...values) } },
+        async first() { return raw.prepare(sql).get(...values) ?? null },
+        async run() {
+          const result = raw.prepare(sql).run(...values)
+          return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
+        },
+      }
+      return statement
+    },
+    async batch(statements) {
+      raw.exec('BEGIN IMMEDIATE')
+      try {
+        const results = []
+        for (const statement of statements) results.push(await statement.run())
+        raw.exec('COMMIT')
+        return results
+      } catch (error) { raw.exec('ROLLBACK'); throw error }
+    },
+  }
+
+  // Everything that touches the write path is the real module -- including
+  // lib/audit.ts itself, which is the whole point: a stubbed audit would
+  // prove nothing about what lands in old_value/new_value.
+  const real = new Set([
+    'acquisitionCostAccess', 'audit',
+    'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
+    'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
+    'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute',
+  ])
+  const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
+  class ProductImageAssetError extends Error {}
+  const services = {
+    auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
+    permissions: {
+      getPermissionTier: () => 'full', getActionTier: () => 'full',
+      hasPermission: () => true, isActionBlocked: () => false, isAdminControlUser: () => true,
+    },
+    cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
+    broadcastHub: { broadcast: async () => {} },
+    media: { sanitizeMediaList: () => [] },
+    importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
+    productImagePermission: {
+      ProductImageAssetError, productImageFieldsChanged: () => false,
+      productImageFieldsChangedResolved: async () => false,
+      resolveProductImageFields: async () => {}, omitUnchangedProductImageFields: () => {},
+    },
+  }
+  const localCache = new Map()
+  function load(relative) {
+    if (localCache.has(relative)) return localCache.get(relative)
+    const mod = { exports: {} }
+    localCache.set(relative, mod.exports)
+    const filename = path.join(cloudflareRoot, 'src', relative)
+    const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, fileName: filename,
+    }).outputText
+    const localRequire = (request) => {
+      if (request === 'hono') return require('hono')
+      const name = request.split('/').pop()
+      if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
+      if (services[name]) return services[name]
+      if (real.has(name)) return load('lib/' + name + '.ts')
+      if (request.startsWith('.')) return noop
+      return require(request)
+    }
+    new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+    localCache.set(relative, mod.exports)
+    return mod.exports
+  }
+  const route = load('routes/products.ts').default
+  const ctx = { waitUntil: () => {}, passThroughOnException: () => {} }
+  const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
+  const request = async (method, url, body) => {
+    const response = await route.request(url, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+    }, { DB: DB, TEST_USER: admin }, ctx)
+    const text = await response.text()
+    return { status: response.status, body: text && response.headers.get('content-type') && response.headers.get('content-type').includes('application/json') ? JSON.parse(text) : text }
+  }
+  return { raw: raw, request: request }
+}
+
+function productAuditRows(raw, action) {
+  return raw.prepare("SELECT action, entity, entity_id, details, old_value, new_value FROM audit_logs WHERE entity IN ('product','product_group') AND action = ? ORDER BY id").all(action)
+}
+
+async function productsRoute() {
+  const fixture = productsFixture()
+  const raw = fixture.raw
+  const request = fixture.request
+  raw.prepare("INSERT INTO products(id, name, barcode, unit, category, is_active, discount_enabled, discount_percent, low_stock_threshold, expiry_alert_days, tag_label, selling_price_usd, purchase_price_usd, cost_price_usd, updated_at) VALUES (1, 'Coke 330ml', '8851', 'pcs', 'Drinks', 1, 0, 0, 10, 30, NULL, 1.25, 0.9, 0.8, NULL)").run()
+
+  // E1 reproduction, verbatim from the verifier: a rename with NO
+  // __rename_scope, alongside two ordinary field edits.
+  let response = await request('PUT', '/1', { name: 'Coke 330 ml', barcode: '7777', unit: 'bottle' })
+  assert.equal(response.status, 200, JSON.stringify(response.body))
+  let updates = productAuditRows(raw, 'update')
+  check('E1: a default-scope product rename is recorded, not silently dropped', () => {
+    assert.equal(productAuditRows(raw, 'rename').length, 0, 'no product_group row fires at default scope -- that is the premise')
+    assert.equal(updates.length, 1, 'exactly one plain-field row')
+    assert.deepEqual(JSON.parse(updates[0].old_value), { name: 'Coke 330ml', barcode: '8851', unit: 'pcs' })
+    assert.deepEqual(JSON.parse(updates[0].new_value), { name: 'Coke 330 ml', barcode: '7777', unit: 'bottle' })
+    assert.deepEqual(renderer.buildAuditFieldDiff(updates[0].old_value, updates[0].new_value).map((r) => r.label),
+      ['Barcode', 'Name', 'Unit'])
+  })
+
+}
 
 async function main() {
   await auditWriteScenario()
   await feesRoute()
   await promotionsRoute()
+  await productsRoute()
   console.log('\nOK ' + passed + ' checks')
 }
 
