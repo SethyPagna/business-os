@@ -26,6 +26,9 @@ export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stoc
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
 
+/** The owner's per-category switches, as every report consumer sees them. */
+export type TelegramCategories = Partial<Record<TelegramEventType, boolean>>
+
 type TelegramConfig = {
   enabled: boolean; chatId: string; chatIds: string[]; token: string
   categories: Record<TelegramEventType, boolean>
@@ -415,7 +418,7 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
  * Exported for scripts/test-telegram-shift-report-pure.cjs, which renders it
  * with no database at all -- the same reason formatShiftReport is exported.
  */
-export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: Partial<Record<TelegramEventType, boolean>>): string {
+export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
   // Sections are numbered as they APPEAR: a category the owner switched off
@@ -515,9 +518,9 @@ export async function sendTelegramTodaySummary(env: Env): Promise<void> {
   await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)))
 }
 
-async function dayReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
+async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
   const [stats, cashiers] = await Promise.all([dayStats(env, date), cashierTotals(env, date)])
-  return withLanguage(language, () => formatDaySummary(stats, cashiers))
+  return withLanguage(language, () => formatDaySummary(stats, cashiers, categories))
 }
 
 async function salesReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
@@ -1164,7 +1167,15 @@ function unknownCommandReply(command: string): string {
   ].join('\n')
 }
 
-export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both'): Promise<string> {
+/**
+ * `categories` is the owner's per-category switch set, threaded in from the
+ * SAME `getTelegramConfig` read that supplies `language` just above it. It was
+ * missing until Sep 23 2026, and the effect was that the switches worked on
+ * the pushed evening summary (sendTelegramTodaySummary passes them) but did
+ * nothing at all when someone typed `/report`: the same report, the same
+ * builder, two different answers depending on how it was asked for.
+ */
+export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
   // Group chats deliver "/report@shop_bot"; strip the bot mention.
   const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
@@ -1183,7 +1194,7 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   // manager who types the plural should get the report rather than the
   // unknown-command help.
   if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs, language)
-  return dayReport(env, parsed.date, language)
+  return dayReport(env, parsed.date, language, categories)
 }
 
 
@@ -1212,7 +1223,7 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
     await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId)
     return
   }
-  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language), chatId)
+  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)

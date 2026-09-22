@@ -244,6 +244,33 @@ check('all three renderings have the same number of lines -- one report, three l
 check('cashier names survive every mode untouched',
   reportEn.includes('aza') && reportKm.includes('aza'))
 
+// ---- the owner's per-category switches reach the TYPED command --------------
+//
+// Sep 23 2026. They reached the pushed evening summary
+// (sendTelegramTodaySummary passes config.categories) and stopped at the
+// typed one: dayReport called formatDaySummary with no categories at all, so
+// the same report, from the same builder, answered differently depending on
+// whether the shop waited for it or asked for it. A shop that had switched
+// Expenses off saw it every time anybody typed /report.
+const reportFeesOff = await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'both', { fees: false })
+const titlesOf = (text) => text.split('\n').filter((line) => /^\d\. /.test(line)).map((line) => line.split(SEP)[0].trim())
+check(`/report honours fees:false -- the Expenses section is gone (${titlesOf(reportFeesOff).join(' | ')})`,
+  !titlesOf(reportFeesOff).includes('3. Expenses') && !reportFeesOff.includes('Expenses'), reportFeesOff)
+check('and the numbering behind it stays contiguous',
+  titlesOf(reportFeesOff).every((title, index) => title.startsWith(`${index + 1}. `)), reportFeesOff)
+check('a sales:false /report drops Sales and Invoices and renumbers from 1',
+  titlesOf(await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'both', { sales: false }))
+    .join(' | ') === '1. Expenses | 2. Stock | 3. Cashiers')
+// POSITIVE CONTROL: the same command with no switches still prints them, so
+// the two checks above are about the SWITCH and not about this fixture.
+check('POSITIVE CONTROL: /report with no categories still prints every section',
+  titlesOf(report).includes('3. Expenses') && titlesOf(report).includes('1. Sales'), report)
+// And the webhook has to HAND them over: the parameter existing proves
+// nothing if the one live caller still leaves it out.
+check('handleTelegramWebhook passes the shop\'s switches into the command reply',
+  /telegramCommandReply\(env, text, Date\.now\(\), config\.language, config\.categories\)/.test(
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
+
 // ---- /sales ------------------------------------------------------------------
 const salesMsg = await telegram.telegramCommandReply({}, '/sales 10/08/2026')
 check('the /sales total is the kernel total too', salesMsg.includes('$115.00') && !salesMsg.includes('$643.00'))
