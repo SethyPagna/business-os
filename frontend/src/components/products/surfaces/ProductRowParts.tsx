@@ -87,7 +87,7 @@ export function ProductDiscountBadge({
     ? (extra.title || `${label} ${extra.minQuantity || 0}+`)
     : `${shownLabel} ${fmtUSD(promo.applied_price_usd || 0)}`
   return (
-    <span className={className} title={text}>
+    <span className={className} title={text} data-reveal-text={text}>
       {text}
     </span>
   )
@@ -113,10 +113,10 @@ export function ProductBatchPreview({
         return (
           <span
             key={`${product?.id || 'product'}-batch-${batchId}`}
-            className="inline-flex max-w-[13rem] items-center truncate rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
+            className="inline-flex max-w-[13rem] items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-950/30 dark:text-amber-200 dark:ring-amber-900/50"
             title={`${lotCode} / ${expiryDate} / ${quantity}`}
           >
-            {lotCode} / {expiryDate} / {quantity}
+            <span className="detail-scroll-text">{lotCode} / {expiryDate} / {quantity}</span>
           </span>
         )
       })}

@@ -836,7 +836,7 @@ function ImageRowPicker({
             <button
               key={row._rowNumber}
               type="button"
-              className="block w-full truncate px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="block w-full detail-scroll-text px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
               onClick={() => onPick(Number(row._rowNumber))}
             >
               {T('row_label', 'Row {n}').replace('{n}', String(row._rowNumber))}: {row.name}
@@ -907,7 +907,7 @@ function ExistingProductSearchPicker({
             <button
               key={product.id}
               type="button"
-              className="block w-full truncate px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="block w-full detail-scroll-text px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
               onClick={() => onPick(product)}
             >
               {product.name}

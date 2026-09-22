@@ -1074,7 +1074,7 @@ export default function AuditLog() {
                             onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
                             aria-label={`Select ${section.label}`}
                           />
-                          <span className="truncate">{section.label}</span>
+                          <span className="detail-scroll-text">{section.label}</span>
                         </label>
                         <div className="flex items-center gap-2">
                           <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm dark:bg-slate-900/80 dark:text-slate-300">{section.ids.length}</span>
@@ -1238,7 +1238,7 @@ export default function AuditLog() {
                     onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
                     aria-label={`Select ${section.label}`}
                   />
-                  <span className="min-w-0 flex-1 truncate">{section.label}</span>
+                  <span className="min-w-0 flex-1 detail-scroll-text">{section.label}</span>
                   <span className="shrink-0 normal-case tracking-normal text-slate-400">{section.ids.length}</span>
                 </label>
                 <div className="flex items-center gap-1">
@@ -1263,7 +1263,7 @@ export default function AuditLog() {
                         onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
                         aria-label={`Select ${group.label}`}
                       />
-                      <span className="min-w-0 truncate">{group.label}</span>
+                      <span className="min-w-0 detail-scroll-text">{group.label}</span>
                       <span className="shrink-0 text-slate-400">{group.items.length}</span>
                     </label>
                   </div>

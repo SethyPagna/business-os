@@ -1036,7 +1036,23 @@ body.lang-km .scroll-x-clean,
    `overflow-y: hidden` too, so a Khmer coeng subscript inside a scrolling
    detail value is sheared without it. S4-22's `overflow-clip-margin` trick
    cannot stand in: it only applies to `overflow: clip`, and this box has to
-   stay `auto` on the inline axis to scroll at all. */
+   stay `auto` on the inline axis to scroll at all.
+
+   What this costs, decided deliberately rather than discovered later. Like the
+   .scroll-x-clean floor above it, this rule is UNLAYERED, so it outranks
+   Tailwind's `leading-*` utilities -- which is the point, because a row that
+   sets `leading-3` or `leading-tight` is exactly the row whose line box is cut
+   to Latin ink and shears a coeng. In lang-km it therefore grows every
+   scrolling value that had a tighter leading, including the 22 elements that
+   used this class before the no-ellipsis sweep. Measured on the two shapes
+   that set their own leading: the Branches stat sub-value (`text-[9.5px]
+   leading-3`) 12px -> 15.19px, and the barcode line of the product detail
+   report (`font-mono text-[10px] leading-tight`) 14.39px -> 18.42px. Nothing
+   changes in English. Accepted: a Khmer row that is ~3px taller is the price
+   of a Khmer row whose subscripts are not cut in half, and the alternative --
+   padding-block with a cancelling negative margin -- loses to any Tailwind
+   `mt-*`/`mb-*` on the same element and would shift those rows instead.
+   Pinned in frontend/tests/noEllipsisOnNames.test.ts. */
 body.lang-km .detail-scroll-text,
 .detail-scroll-text.khmer-text { line-height: var(--km-line-height, 1.6); }
 
@@ -1248,7 +1264,11 @@ body.lang-km .dense-data-table td { line-height: var(--km-line-height, 1.6); }
    1.6 floor leaves on a clamped Khmer paragraph.
    The one behavioural difference is that `clip` does not establish a block formatting
    context and `hidden` does, so a truncating box wrapping a block child could reflow.
-   Checked: of the 363 `truncate` elements in src/, none has a block-level child. */
+   Checked, and re-checked by frontend/tests/noEllipsisOnNames.test.ts on every run
+   so the number cannot go stale: of the 145 elements in src/components whose class
+   list carries a `truncate` token (bare, breakpoint-prefixed, or the dense-table
+   `dense-cell-truncate`), none has a block-level child -- in particular none wraps
+   the block-level `.detail-scroll-text`. */
 @supports (overflow-clip-margin: 0.3em) {
   body.lang-km .truncate,
   body.lang-km .dense-cell-truncate,

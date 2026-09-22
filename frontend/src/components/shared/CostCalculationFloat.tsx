@@ -113,8 +113,8 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                       />
                     </span>
                     <span className={`${isManual ? 'min-w-0 max-w-[65%]' : 'shrink-0'} text-right tabular-nums`}>
-                      <span className={`block font-medium ${isManual ? 'truncate' : ''}`} title={isManual ? costText : undefined}>{costText}</span>
-                      {excludedLabel ? <span className={`block text-[11px] text-gray-400 ${isManual ? 'truncate' : ''}`}>{excludedLabel}</span> : null}
+                      <span className={`block font-medium ${isManual ? 'detail-scroll-text' : ''}`} title={isManual ? costText : undefined}>{costText}</span>
+                      {excludedLabel ? <span className={`block text-[11px] text-gray-400 ${isManual ? 'detail-scroll-text' : ''}`}>{excludedLabel}</span> : null}
                     </span>
                   </li>
                 )

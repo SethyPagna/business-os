@@ -871,7 +871,7 @@ export default function PromotionsPage() {
                     ]}
                   />
                 </div>
-                <div className="truncate pb-1 text-xs text-gray-500">
+                <div className="detail-scroll-text pb-1 text-xs text-gray-500">
                   {(t('promo_label_preview') || 'Shown as:')}{' '}
                   <span className="font-semibold text-gray-700 dark:text-gray-200">
                     {draft.title.trim() || (() => {
@@ -1000,7 +1000,7 @@ export default function PromotionsPage() {
         {discountDraft && canManageDiscounts ? (
           <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-start justify-center overflow-y-auto bg-black/40" onClick={requestCloseDiscount}>
             <div className="modal-panel-safe my-auto w-full max-w-lg space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
-              <h2 className="truncate text-base font-semibold">
+              <h2 className="detail-scroll-text text-base font-semibold">
                 {(t('promo_discount_for') || 'Discount for')} {String(discountDraft.product.name || `#${discountDraft.product.id}`)}
               </h2>
 

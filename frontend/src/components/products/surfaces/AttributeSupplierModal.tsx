@@ -145,7 +145,7 @@ export default function AttributeSupplierModal({
               return (
                 <label key={lot.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] hover:bg-gray-100 dark:hover:bg-gray-700/50">
                   <input type="checkbox" checked={on} onChange={() => toggleLot(lot.id)} className="h-3.5 w-3.5 shrink-0 accent-purple-600" />
-                  <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-gray-300">
+                  <span className="min-w-0 flex-1 detail-scroll-text text-gray-600 dark:text-gray-300">
                     {batchDisplayLabel({ id: lot.id, lot_code: lot.lot_code, received_at: lot.received_at })}
                     <span className="ml-1 text-gray-400">· {supplierDisplay(lot.supplier_name, tr)}</span>
                   </span>

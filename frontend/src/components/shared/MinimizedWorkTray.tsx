@@ -95,10 +95,10 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
           <button
             type="button"
             onClick={() => restore(entry)}
-            className="min-w-0 truncate hover:underline"
+            className="min-w-0 hover:underline"
             title={`${tr('restore', 'Restore', 'ស្ដារ')} — ${entry.label}`}
           >
-            {entry.label}
+            <span className="detail-scroll-text">{entry.label}</span>
           </button>
           <button
             type="button"

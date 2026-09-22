@@ -322,7 +322,7 @@ export default function ActionHistoryBar({
                 disabled={!!history.busy}
                 onClick={() => { closeMenu(); history.undo(item.id) }}
               >
-                <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
+                <span className="min-w-0 detail-scroll-text text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{T('undo', 'Undo')}</span>
               </button>
             ))}
@@ -334,7 +334,7 @@ export default function ActionHistoryBar({
                 disabled={!!history.busy}
                 onClick={() => { closeMenu(); history.redo(item.id) }}
               >
-                <span className="min-w-0 truncate text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
+                <span className="min-w-0 detail-scroll-text text-slate-700 dark:text-slate-200" title={item.label}>{item.label}</span>
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">{T('redo', 'Redo')}</span>
               </button>
             ))}
@@ -401,7 +401,7 @@ export default function ActionHistoryBar({
         <div className={`pointer-events-none absolute ${menuPosition} top-full z-40 mt-2 w-[min(16rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-600 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300`}>
           {previewLabels.length ? (
             previewLabels.map((label, index) => (
-              <div key={`${label}-${index}`} className="truncate px-1 py-0.5" title={label}>{label}</div>
+              <div key={`${label}-${index}`} className="break-words px-1 py-0.5" title={label}>{label}</div>
             ))
           ) : (
             <div className="px-1 py-0.5 text-slate-400">{T('no_recent_actions', 'No recent actions')}</div>

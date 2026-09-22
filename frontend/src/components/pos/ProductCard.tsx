@@ -115,7 +115,7 @@ function ProductDiscountBadge({
     ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
     : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
   return (
-    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text}>
+    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text} data-reveal-text={text}>
       {text}
     </span>
   )
@@ -239,7 +239,7 @@ function ProductCardComponent({
         ) : `${stock} ${unit}`}
       </p>
       {posPresentation && promoBadge.active ? (
-        <span className="max-w-[45%] shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: promoBadge.badge_color || '#e11d48' }} title={compactPromotionTitle} aria-label={compactPromotionTitle}>
+        <span className="max-w-[45%] shrink-0 truncate rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: promoBadge.badge_color || '#e11d48' }} title={compactPromotionTitle} aria-label={compactPromotionTitle} data-reveal-text={compactPromotionTitle}>
           {copy('Deal', 'ប្រូម៉ូសិន')}
         </span>
       ) : null}

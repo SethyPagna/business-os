@@ -528,10 +528,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className={`truncate text-sm font-medium ${textClass || 'text-gray-900 dark:text-white'}`} style={textStyle}>
+              <div className={`detail-scroll-text text-sm font-medium ${textClass || 'text-gray-900 dark:text-white'}`} style={textStyle}>
                 {user?.name}
               </div>
-              <div className={`truncate text-xs ${subTextClass || 'text-gray-400'}`} style={subduedTextStyle}>
+              <div className={`detail-scroll-text text-xs ${subTextClass || 'text-gray-400'}`} style={subduedTextStyle}>
                 {user?.role_name || t('no_role') || 'No role'}
               </div>
             </div>
@@ -625,8 +625,8 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
-                      <div className="truncate text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
+                      <div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
+                      <div className="detail-scroll-text text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
                     </div>
                   </div>
                   {inline ? (
