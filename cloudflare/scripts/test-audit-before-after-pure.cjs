@@ -466,12 +466,15 @@ check('every route in scope still threads a before/after into its audit write', 
   }
 })
 
-check('the cost-override and group-rename rows are not duplicated by the plain product diff', () => {
+check('the cost-override row is not duplicated, and the diff is derived not hand-listed', () => {
   const products = fs.readFileSync(workerSrc('routes/products.ts'), 'utf8')
-  const allowlist = products.match(/const PRODUCT_FIELD_AUDIT_COLUMNS = \[([\s\S]*?)\] as const/)
-  assert.ok(allowlist, 'products.ts must declare its plain-field allowlist')
-  assert.ok(!/cost_price_usd|cost_price_khr/.test(allowlist[1]),
-    'cost belongs to the cost_override row (lib/productWrites.ts); listing it here would record the same change twice')
+  const excluded = products.match(/const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set\(\[([\s\S]*?)\]\)/)
+  assert.ok(excluded, 'products.ts must declare which columns the plain-field diff holds back')
+  assert.match(excluded[1], /cost_price_usd/, 'cost belongs to the cost_override row (lib/productWrites.ts)')
+  assert.ok(!/purchase_price/.test(excluded[1]),
+    'purchase_price has no other writer; holding it back would reopen the gap this lane closes')
+  assert.match(products, /Object\.keys\(cleanPayload\(body, await tableColumns\(c\.env, 'products'\)\)\)/,
+    'the diff must be derived from the columns the PUT writes, not a hand-written allowlist that drifts')
   assert.match(products, /keys: wroteProductRenameAudit[\s\S]{0,120}?filter\(\(column\) => column !== 'name'\)/,
     'name drops out only when a rename row was ACTUALLY written')
 })
@@ -603,6 +606,37 @@ async function productsRoute() {
       ['Barcode', 'Name', 'Unit'])
   })
 
+  // E2 reproduction: five columns the old 16-name allowlist did not contain.
+  response = await request('PUT', '/1', {
+    discount_enabled: 1, discount_percent: 15, low_stock_threshold: 4, expiry_alert_days: 7, tag_label: 'damaged',
+  })
+  assert.equal(response.status, 200, JSON.stringify(response.body))
+  updates = productAuditRows(raw, 'update')
+  check('E2: columns outside the old allowlist are recorded too', () => {
+    assert.equal(updates.length, 2)
+    assert.deepEqual(JSON.parse(updates[1].old_value),
+      { discount_enabled: 0, discount_percent: 0, low_stock_threshold: 10, expiry_alert_days: 30, tag_label: null })
+    assert.deepEqual(JSON.parse(updates[1].new_value),
+      { discount_enabled: 1, discount_percent: 15, low_stock_threshold: 4, expiry_alert_days: 7, tag_label: 'damaged' })
+  })
+
+  // Control: a resave of identical values still writes nothing at all.
+  response = await request('PUT', '/1', { discount_percent: 15, tag_label: 'damaged' })
+  assert.equal(response.status, 200, JSON.stringify(response.body))
+  check('E2 CONTROL: an unchanged product resave still writes no row at all', () => {
+    assert.equal(productAuditRows(raw, 'update').length, 2)
+  })
+
+  // purchase_price_* is NOT held back: the cost_override row covers
+  // cost_price_* only, so excluding it would leave the same gap.
+  response = await request('PUT', '/1', { purchase_price_usd: 1.1 })
+  assert.equal(response.status, 200, JSON.stringify(response.body))
+  updates = productAuditRows(raw, 'update')
+  check('purchase_price is recorded here because nothing else records it', () => {
+    assert.equal(updates.length, 3)
+    assert.deepEqual(JSON.parse(updates[2].old_value), { purchase_price_usd: 0.9 })
+    assert.deepEqual(JSON.parse(updates[2].new_value), { purchase_price_usd: 1.1 })
+  })
 }
 
 async function main() {
