@@ -2,13 +2,13 @@
 -- (routes/inventory.ts runAdjustAction and routes/batches.ts
 -- runReceiveBatchAction). Those two kernels are the only writers behind the
 -- fast stock-in commit (routes/stockInCommit.ts), the ReceiveBatchModal
--- receipt and the StockAdjustModal add/remove/set, and none of them had a
--- dedup identity: a line whose response was lost (crashed render, killed
--- tab, dropped connection) is re-sent by the retry and moved stock twice.
--- The transfer route has had this since 0151 via transfer_operation_receipts;
--- this is the same contract for the per-line kernels, in their own table
--- because transfer receipts carry provenance triggers a stock line has no
--- answer for.
+-- receipt and the StockAdjustModal / BulkAddStockModal add/remove/set, and
+-- none of them had a dedup identity: a line whose response was lost (crashed
+-- render, killed tab, dropped connection) is re-sent by the retry and moved
+-- stock twice. The transfer route has had this since 0151 via
+-- transfer_operation_receipts; this is the same contract for the per-line
+-- kernels, in their own table because transfer receipts carry provenance
+-- triggers a stock line has no answer for.
 --
 -- `written` is what makes the guard honest for a kernel that writes stock and
 -- THEN fails (a "not found after commit" 400, a catalog-cost recompute that

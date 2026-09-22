@@ -8,7 +8,7 @@ import type { D1Compat } from './db'
 //   - the fast stock-in batched commit (routes/stockInCommit.ts) calls both,
 //   - its 404 fallback posts the same two routes one line at a time,
 //   - ReceiveBatchModal posts POST /api/batches,
-//   - StockAdjustModal (add / remove / set) posts POST /api/inventory/adjust.
+//   - StockAdjustModal and BulkAddStockModal post POST /api/inventory/adjust.
 //
 // None of them had a dedup identity. A line whose "saved" outcome never
 // reached the client -- a crashed render, a killed tab, a dropped response --

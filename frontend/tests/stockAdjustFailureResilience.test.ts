@@ -185,7 +185,12 @@ runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
 runTest('the outcome kernel is pure and documents the commit semantics', () => {
   assert.doesNotMatch(outcomeUtil, /from 'react'/, 'the reducer must stay testable without React')
   assert.doesNotMatch(outcomeUtil, /\bdocument\./, 'the reducer must not touch the DOM')
-  assert.match(outcomeUtil, /single-row, non-idempotent write/)
+  assert.match(outcomeUtil, /is a single-row write/)
+  assert.match(
+    outcomeUtil,
+    /migration 0192 it is ALSO server-side idempotent/,
+    "the kernel must not keep claiming the route has no dedup -- it has had one since 0192",
+  )
   // The server truth this depends on: /adjust commits exactly one product per
   // call, so "all-or-nothing across rows" does not apply -- each row is its
   // own transaction and its own outcome.
