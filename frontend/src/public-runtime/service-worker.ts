@@ -16,6 +16,11 @@ const DB_NAME = 'BusinessOS'
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const RETRY_DELAY_MS = 30_000
 const SYNC_LEASE_MS = 60_000
+// How long the stale-asset recovery will wait for a newly requested build to
+// finish installing before it gives up on handing control over (see
+// releaseNewBuildForRecovery). Bounded so a worker stuck in its own install
+// handler cannot hold a fetch event's lifetime open indefinitely.
+const RECOVERY_TAKEOVER_TIMEOUT_MS = 30_000
 const OFFLINE_OWNER_REVIEW_MESSAGE = 'Keep this pending sale. Sign in to its original account and server to sync it. Older unowned sales need review in the current app; do not recreate or discard them.'
 
 // Standalone public runtime: parity-tested against offlineQueueOwnership.ts.
@@ -978,14 +983,47 @@ function isStaleBuildAsset(request, response) {
 // this one path: the shell this worker is serving cannot boot, so there is no
 // app left to show an Update prompt in, and nothing would ever release the
 // new build. Only here, only when the running build is already proven broken.
+//
+// This used to post to registration.waiting immediately after awaiting
+// registration.update(), and that message almost always went nowhere: the
+// spec resolves update()'s job promise once the new worker has been created
+// and its install event fired, NOT after install finishes, so at that instant
+// the new worker is `installing` and `waiting` is still null. That is why the
+// Sep 23 incident needed a later manual navigation before the new build took
+// over. Wait for the worker to actually reach 'installed'.
 async function releaseNewBuildForRecovery() {
-  await self.registration.update().catch(() => {})
-  try {
-    self.registration.waiting?.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-  } catch (_) {
-    // no waiting worker, or messaging unavailable -- the shell refresh is
-    // still the recovery.
+  const release = (worker) => {
+    try {
+      worker.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
+    } catch (_) {
+      // messaging unavailable -- the shell refresh is still the recovery
+    }
   }
+  await self.registration.update().catch(() => {})
+  if (self.registration.waiting) return release(self.registration.waiting)
+  const installing = self.registration.installing
+  if (!installing) return
+  if (installing.state === 'installed') return release(installing)
+  if (installing.state !== 'installing') return
+  await new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(deadline)
+      installing.removeEventListener('statechange', onStateChange)
+      resolve()
+    }
+    const onStateChange = () => {
+      if (installing.state === 'installed') release(installing)
+      // installed / activating / activated / redundant: every exit from
+      // 'installing' ends this wait, so the listener never outlives the
+      // recovery it was created for.
+      if (installing.state !== 'installing') finish()
+    }
+    // A worker that hangs in its own install handler, or a precache that
+    // never finishes on a bad connection, must not hold this fetch event's
+    // lifetime open for as long as the browser is willing to allow.
+    const deadline = setTimeout(finish, RECOVERY_TAKEOVER_TIMEOUT_MS)
+    installing.addEventListener('statechange', onStateChange)
+  })
 }
 
 async function recoverStaleShell(event) {

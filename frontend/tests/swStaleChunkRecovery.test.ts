@@ -23,19 +23,35 @@
 // that answers non-navigation reads with the challenge page once the new
 // generation is live.
 //
-// Three cases, so a green run means something:
+// Two more defects of the same recovery path are pinned here, because a
+// stale chunk exercises all three at once:
+//   - the 404 the page is blocked on used to wait for registration.update()
+//     to re-fetch /sw.js, spending seconds against lazyImport.ts's timeout;
+//   - the SKIP_WAITING message went to registration.waiting straight after
+//     update() resolved, which is while the new worker is still INSTALLING,
+//     so it went nowhere and the dead build kept control until someone
+//     navigated by hand.
+//
+// Every case has its opposite, so a green run means something:
 //   - fixed worker + deploy    -> the guard's FIRST reload gets the new shell
-//                                 and the catalog mounts (the fix)
-//   - ef0489c1 worker + deploy -> stays on the dead shell (negative control:
-//                                 the exact worker that was live at 21:23Z)
+//                                 and the catalog mounts; the 404 does not
+//                                 wait for /sw.js; the new build takes over
+//                                 with no navigation at all
+//   - ef0489c1 worker + deploy -> stays on the dead shell, waits the full
+//                                 /sw.js round trip, never hands over
+//                                 (negative controls: the exact worker that
+//                                 was live at 21:23Z)
 //   - fixed worker + no deploy -> no recovery reload at all, healthy build
-//                                 untouched (positive control)
+//                                 untouched (positive control). The
+//                                 consent-based update path for a normal
+//                                 deploy is covered by swLateUpgrade's
+//                                 "future update waits" case.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import fs from 'node:fs'
 import http from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { chromium } from '@playwright/test'
+import { chromium, type Page } from '@playwright/test'
 import { buildSync } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 
@@ -239,7 +255,27 @@ type StaleAssetProbe = {
   statusText: string
   /** How long the PAGE waited for the honest 404. */
   elapsedMs: number
+  /** Which build is controlling the tab afterwards, with NO navigation at all. */
+  controllerBuild: string | null
 }
+
+/** Ask the CONTROLLING worker which build it is, the way index.tsx does. */
+const controllerBuildHash = (page: Page) => page.evaluate(() => new Promise<string | null>((resolve) => {
+  const channel = new MessageChannel()
+  const done = (value: string | null) => {
+    clearTimeout(timer)
+    channel.port1.close()
+    channel.port2.close()
+    resolve(value)
+  }
+  const timer = setTimeout(() => done(null), 800)
+  channel.port1.onmessage = (event) => done(
+    String(event.data?.version || '').replace('business-os-app-shell-', '') || null,
+  )
+  const controller = navigator.serviceWorker.controller
+  if (!controller) done(null)
+  else controller.postMessage({ type: 'BUSINESS_OS_APP_VERSION_REQUEST' }, [channel.port2])
+}))
 
 /**
  * No navigation, no guard, no reload: just ask the worker for a chunk the
@@ -274,11 +310,20 @@ async function probeStaleAsset(workerSource: string): Promise<StaleAssetProbe> {
       }
     })
     fixture.deploy()
-    return await page.evaluate(async () => {
+    const failure = await page.evaluate(async () => {
       const started = performance.now()
       const response = await fetch('/assets/catalog-secondary-tabs-old.js')
       return { status: response.status, statusText: response.statusText, elapsedMs: performance.now() - started }
     })
+    // Deliberately NO navigation from here on: the question is whether the
+    // new build takes control on its own once the running one is proven
+    // broken, which is what the owner had to do by hand in production.
+    let controllerBuild: string | null = null
+    for (let attempt = 0; attempt < 24 && controllerBuild !== BUILD.new; attempt += 1) {
+      await page.waitForTimeout(400)
+      controllerBuild = await controllerBuildHash(page)
+    }
+    return { ...failure, controllerBuild }
   } finally {
     await context.close()
     await browser.close()
@@ -297,12 +342,28 @@ test('the stale-chunk 404 reaches the page without waiting for the /sw.js round 
   )
 })
 
-test('negative control: ef0489c1 made the page wait for /sw.js before the 404', { timeout: 180_000 }, async () => {
+test('the new build takes control after recovery, with no navigation at all', { timeout: 180_000 }, async () => {
+  const probe = await probeStaleAsset(fixedWorker)
+  assert.equal(
+    probe.controllerBuild,
+    BUILD.new,
+    'the running build is proven broken, so the freshly installed one must take over by itself -- '
+    + 'in production the owner had to navigate by hand before it did',
+  )
+})
+
+test('negative control: ef0489c1 waited for /sw.js and then never handed over', { timeout: 180_000 }, async () => {
   const probe = await probeStaleAsset(brokenWorker)
   assert.equal(probe.status, 404, 'the old worker answered with the same honest failure')
   assert.ok(
     probe.elapsedMs >= SW_JS_DELAY_MS,
     'if this ever stops holding, the delay fixture stopped measuring what it claims to measure',
+  )
+  assert.equal(
+    probe.controllerBuild,
+    BUILD.old,
+    'the incident: update() resolves while the new worker is still installing, so the SKIP_WAITING '
+    + 'message went to a null registration.waiting and the dead build kept control',
   )
 })
 
