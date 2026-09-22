@@ -1960,8 +1960,8 @@ app.put('/:id', async (c) => {
   const expectedProductUpdatedAt = getExpectedUpdatedAt(body)
   if (expectedProductUpdatedAt) {
     const currentForConflict = await getDb(c.env)
-      .prepare('SELECT updated_at FROM products WHERE id = @id')
-      .get<{ updated_at: string | null }>({ id })
+      .prepare('SELECT id, name, barcode, updated_at FROM products WHERE id = @id')
+      .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null }>({ id })
     try {
       assertUpdatedAtMatch('product', currentForConflict, expectedProductUpdatedAt)
     } catch (error) {

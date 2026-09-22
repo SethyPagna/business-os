@@ -741,8 +741,13 @@ app.delete('/roles/:id', async (c) => {
     id: number; code: string | null; is_system: number; updated_at: string | null
   }>({ id })
   if (!existingRole) return c.json({ success: false, error: 'Role not found' }, 404)
+  // The client sends the version it holds in the JSON body (apiFetch sends a
+  // body on DELETE too); the query string is the fallback, as in lookups.ts.
+  // Until 22 Sep 2026 only the query string was read, so the check never ran.
+  const query = Object.fromEntries(new URL(c.req.url).searchParams)
+  const bodyForConflict = await c.req.json<Record<string, unknown>>().catch(() => query)
   try {
-    assertUpdatedAtMatch('role', existingRole, getExpectedUpdatedAt(Object.fromEntries(new URL(c.req.url).searchParams)))
+    assertUpdatedAtMatch('role', existingRole, getExpectedUpdatedAt(bodyForConflict))
   } catch (error) {
     const result = conflictResult(error)
     if (result) return c.json(result.body, result.status)
