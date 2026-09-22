@@ -1465,14 +1465,18 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
       customer ? `Customer: ${customer}` : '',
       change.reason ? `Reason: ${change.reason}` : '',
       // S4-2: say it out loud on the shop's channel too -- a status change
-      // that moved no stock must not look like a normal one. Composed with
-      // bi() because the `stock` label does not localize its value (it also
-      // carries free text on the stock alerts), and this note was therefore
-      // shipping in English to a Khmer-only shop. "មិនប៉ះពាល់ស្តុក" is the
-      // packs' own wording for it (en/km.json sale_stock_skipped).
-      skipped > 0
-        ? `Stock: ${bi('not changed', 'មិនប៉ះពាល់ស្តុក')} (${skipped} ${skipped === 1 ? bi('unit', 'ឯកតា') : bi('units', 'ឯកតា')} ${bi('deliberately skipped', 'បានរំលងដោយចេតនា')})`
-        : '',
+      // that moved no stock must not look like a normal one.
+      //
+      // A PLAIN ENGLISH LINE, like every other row here. It was briefly
+      // composed with bi() instead, and that is a bug this builder cannot
+      // survive: the route calls it BEFORE sendTelegramEvent sets the shop's
+      // language, so bi() read whatever mode was left in the module -- always
+      // the `both` default -- and the note shipped bilingual to an en-only and
+      // a km-only shop alike. Emitted as `Stock skipped: 3 unit(s)`, it goes
+      // through localizeTelegramLine with the rest of the message: the label
+      // pair comes from the table (en/km.json sale_stock_skipped) and the
+      // counter from the same `unit(s)` phrase the stock reports use.
+      skipped > 0 ? `Stock skipped: ${skipped} unit(s)` : '',
       lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
       change.by ? `By: ${change.by}` : '',
     ],

@@ -205,22 +205,93 @@ function composeMessage(lines) {
     telegramLang.GROUP_RULE,
     'Customer: Sok Dara',
     'Reason: Customer cancelled',
-    'Stock: not changed / មិនប៉ះពាល់ស្តុក (3 units / ឯកតា deliberately skipped / បានរំលងដោយចេតនា)',
+    // UPDATED Sep 23 2026. The note is a PLAIN `Label: value` row like every
+    // other line the builder emits -- it briefly composed its own bilingual
+    // sentence here, which is the one thing a builder must not do (see the
+    // three-mode check at the end of this file). `unit(s)` is the counter
+    // every other Telegram message writes (lib/telegram.ts's `counted`), so
+    // the English plural is carried the same way here as in /report.
+    'Stock skipped: 3 unit(s)',
     'Lost fee: $2.00',
     'By: admin',
   ], full.join('\n'))
   const one = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', skippedUnits: 1 })
-  assert.ok(one.includes('Stock: not changed / មិនប៉ះពាល់ស្តុក (1 unit / ឯកតា deliberately skipped / បានរំលងដោយចេតនា)'), one.join('\n'))
-  // UPDATED Sep 23 2026: the note used to ship in English whatever language the
-  // shop had set. The count agreement it also pins is unchanged -- the English
-  // half still says "unit" or "units"; Khmer marks no plural, so ឯកតា is right
-  // in both.
-  assert.ok(/\(3 units \//.test(full.join('\n')) && /\(1 unit \//.test(one.join('\n')), 'singular and plural must still differ in English')
+  assert.ok(one.includes('Stock skipped: 1 unit(s)'), one.join('\n'))
+  assert.ok(!full.join('\n').includes('ឯកតា') && !full.join('\n').includes('មិនប៉ះពាល់ស្តុក'),
+    'the BUILDER emits English only -- the Khmer is added by the localizer, in the shop\'s mode')
   // A bare change -- no customer, no reason, no fee, no actor -- keeps its
   // first group and drops the second, divider and all.
   const bare = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled' })
   assert.deepEqual(bare, ['Receipt: R-9', 'Status: completed → cancelled'], bare.join('\n'))
-  console.log('PASS 8: every optional row is its own line, singular/plural is right, and an empty group takes its divider with it')
+  console.log('PASS 8: every optional row is its own line in plain English, and an empty group takes its divider with it')
 }
 
-console.log('All Telegram status-actor tests passed')
+// ---- 9. the three language modes, through the REAL send path --------------
+//
+// Every check above runs the lines through localizeTelegramLine directly,
+// which is the localisation HALF of sendTelegramEvent -- and that is exactly
+// the blind spot that let a builder-composed bilingual sentence ship: the
+// mode is set by sendTelegramEvent around its own pass, long after the route
+// asked the builder for its lines, so a `bi()` call inside the builder always
+// read the module's `both` default and printed both languages to an en-only
+// and a km-only shop alike. The only way to see that is to send.
+//
+// So this block drives the real exported sendTelegramEvent with the shop's
+// `telegram_language` setting answered from a stub settings table and the
+// Telegram API call captured instead of made. NOTHING IS SENT: fetch is
+// replaced for the duration and restored after.
+;(async () => {
+  const posted = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    assert.match(String(url), /^https:\/\/api\.telegram\.org\/bot/, 'the send path must be the Telegram API and nothing else')
+    posted.push(JSON.parse(init.body))
+    return { ok: true, status: 200, text: async () => '' }
+  }
+  let shopLanguage = 'both'
+  const settingsDb = {
+    getDb: () => ({
+      prepare: () => ({
+        all: async () => [
+          { key: 'telegram_automation_enabled', value: '1' },
+          { key: 'telegram_chat_id', value: '-100999' },
+          { key: 'telegram_language', value: shopLanguage },
+        ],
+      }),
+    }),
+  }
+  const wired = loadReal('lib/telegram.ts', {
+    './lowStockSettings': { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG },
+    './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang,
+    './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
+    './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', { './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
+  })
+  const sendIn = async (mode) => {
+    shopLanguage = mode
+    posted.length = 0
+    const sent = await wired.sendTelegramEvent({ TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one' }, {
+      type: 'status',
+      lines: wired.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', skippedUnits: 3, by: 'admin' }),
+    })
+    assert.equal(sent, true, `sendTelegramEvent did not compose anything in ${mode} mode`)
+    assert.equal(posted.length, 1, `expected exactly one captured message in ${mode} mode`)
+    return posted[0].text.split('\n').find((line) => line.includes('skipped') || line.includes('មិនប៉ះពាល់ស្តុក'))
+  }
+  try {
+    const both = await sendIn('both')
+    const en = await sendIn('en')
+    const km = await sendIn('km')
+    assert.equal(both, '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា', both)
+    assert.equal(en, '· Stock skipped: 3 unit(s)', en)
+    assert.equal(km, '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា', km)
+    // THE REGRESSION, stated as its own assertion: an en-only shop must get no
+    // Khmer on this line and a km-only shop no English. Both were false while
+    // the builder paired the words itself.
+    assert.ok(!/[ក-៿]/.test(en), 'an English-only shop must not be sent Khmer on the skipped-stock note')
+    assert.ok(!/[A-Za-z]/.test(km.replace(/[·\s]/g, '')), 'a Khmer-only shop must not be sent English words on it')
+    console.log('PASS 9: the skipped-stock note renders en-only, km-only and bilingual through the real sendTelegramEvent path')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  console.log('All Telegram status-actor tests passed')
+})().catch((error) => { console.error(error); process.exit(1) })

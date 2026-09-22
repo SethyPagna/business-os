@@ -139,6 +139,14 @@ const LABELS = {
   // line-level localizer cannot tell them apart -- so the stock delta gets its
   // own label instead of an ambiguous shared one.
   stockChange: { en: 'Stock change', km: 'ការផ្លាស់ប្ដូរស្តុក' },
+  // A status change that deliberately moved no stock (S4-2). The words are
+  // en.json/km.json `sale_stock_skipped`, so the channel says it exactly the
+  // way the Sales screen does. It is its OWN label rather than a sentence
+  // built with bi() inside the builder: formatSaleStatusTelegramLines runs in
+  // the ROUTE, before sendTelegramEvent sets the shop's language, so anything
+  // it pairs itself comes out bilingual in all three modes. `localizeValue`
+  // translates the `N unit(s)` counter beside it like every other counter.
+  stockSkipped: { en: 'Stock skipped', km: 'មិនប៉ះពាល់ស្តុក', localizeValue: true },
   quantity: { en: 'Quantity', km: 'បរិមាណ' },
   reason: { en: 'Reason', km: 'មូលហេតុ' },
   // `lot`/`batch` are storage and import identifiers. The operator-facing
