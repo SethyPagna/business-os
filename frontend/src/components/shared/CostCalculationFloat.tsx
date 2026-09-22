@@ -3,7 +3,6 @@ import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 import Modal from './Modal'
-import TruncatedText from './TruncatedText.tsx'
 import { getProductCostBreakdown } from '../../api/productReadTransport.ts'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
@@ -107,10 +106,15 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                     className={`flex items-center justify-between gap-2 px-2.5 py-1.5 ${input.excluded ? 'opacity-50' : ''}`}
                   >
                     <span className="min-w-0 flex-1">
-                      <TruncatedText
-                        text={`${primaryText}${meta ? ` · ${meta}` : ''}`}
-                        className={`block truncate text-sm ${isManual ? 'font-medium text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-200'}`}
-                      />
+                      {/* This line is per-record data, not a caption: the meta
+                          strip carries the BRANCH name on a lot row and the
+                          USER name on a manual one (costBreakdownFormat.ts,
+                          `costRowMeta`). Names are not cut on this project --
+                          they scroll sideways inside their own box -- so the
+                          row uses the same `.detail-scroll-text` the cost
+                          column beside it already uses, and no longer hands
+                          the text to the truncating component. */}
+                      <span className={`detail-scroll-text text-sm ${isManual ? 'font-medium text-indigo-600 dark:text-indigo-400' : 'text-gray-800 dark:text-gray-200'}`}>{`${primaryText}${meta ? ` · ${meta}` : ''}`}</span>
                     </span>
                     <span className={`${isManual ? 'min-w-0 max-w-[65%]' : 'shrink-0'} text-right tabular-nums`}>
                       <span className={`block font-medium ${isManual ? 'detail-scroll-text' : ''}`} title={isManual ? costText : undefined}>{costText}</span>

@@ -231,11 +231,39 @@ function childExpressions(source: string, from: number): string[] {
 
 export interface ClippedValue { value: string; classText: string; attrs: string }
 
-/** A lone string literal is static text, not a record's value. */
+/** A lone string literal is static text, not a record's value.
+ *
+ *  A TEMPLATE literal is static only while it interpolates NOTHING. Reading
+ *  every backtick string as a literal is how a composed per-record value --
+ *  the cost float's `${primaryText} · ${meta}` line, which carries a branch
+ *  name or a username -- stayed invisible to this sweep even once its
+ *  clipping element was being scanned. */
 function isStaticText(expression: string): boolean {
   if (!expression) return true
-  if (/^(['"`])[\s\S]*\1$/.test(expression)) return true
+  if (/^`[\s\S]*`$/.test(expression)) return !/\$\{/.test(expression)
+  if (/^(['"])[\s\S]*\1$/.test(expression)) return true
   return /^[\s·|/,-]*$/.test(expression)
+}
+
+/** A COMPONENT prints its text through a PROP, not as a child:
+ *  `<TruncatedText text={item.name} className="block truncate" />` has no
+ *  children at all, so the child scan below walked straight past it and the
+ *  sweep reported green on a file (CostCalculationFloat) whose `truncate`
+ *  was sitting in plain sight. Only capitalised tags qualify: on a native
+ *  element `value` and `name` are form attributes, not printed content, and
+ *  reading them would invent findings. A string-valued prop is static text. */
+const PRINTED_PROPS = ['text', 'label', 'value']
+function printedProps(tag: Tag): string[] {
+  if (!/^[A-Z]/.test(tag.name)) return []
+  const out: string[] = []
+  for (const prop of PRINTED_PROPS) {
+    const match = new RegExp(`(^|\\s)${prop}\\s*=\\s*`).exec(tag.attrs)
+    if (!match) continue
+    const valueAt = match.index + match[0].length
+    if (tag.attrs[valueAt] !== '{') continue
+    out.push(tag.attrs.slice(valueAt + 1, skipBraces(tag.attrs, valueAt) - 1).trim())
+  }
+  return out
 }
 
 /** Every element that clips unconditionally, with every value it prints. */
@@ -252,6 +280,7 @@ export function findClipped(source: string): ClippedValue[] {
     const { classText, helperValue } = classInfo(tag.attrs)
     if (!hasBareTruncate(classText)) continue
     const values = helperValue ? [helperValue] : []
+    values.push(...printedProps(tag))
     if (!tag.selfClosing) values.push(...childExpressions(flat, tag.end))
     for (const value of values) {
       if (isStaticText(value)) continue
@@ -329,6 +358,36 @@ runTest('control: the Khmer-props helper is scanned like a className', () => {
   const live = read('components/pos/CartItem.tsx')
   assert.match(live, /getKhmerTextProps\(item\.batch_label, 'mt-0\.5 detail-scroll-text/,
     'positive control: the live call this fixture models still uses the scroller')
+})
+
+runTest('control: a clipping component prints through a prop, and the scan reads it', () => {
+  const fixture = [
+    // The exact markup CostCalculationFloat carried: the class is on the
+    // component, the value is a prop, and there are no children to read.
+    '<TruncatedText text={`${primaryText} · ${meta}`} className={`block truncate text-sm ${tone}`} />',
+    // Same component, no ellipsis -- not a finding.
+    '<TruncatedText text={item.name} className="text-sm font-medium" />',
+    // A NATIVE element: `value` and `name` are form attributes, not content.
+    '<input className="truncate" value={form.name} name={fieldName} />',
+    // A label prop counts as printed content on a component.
+    '<StatCard label={stat.label} className="truncate" />',
+    // A string-valued prop is static text, like a string child.
+    '<TruncatedText text="Category" className="truncate" />',
+  ].join('\n')
+  assert.deepEqual(findClippedValues(fixture), ['`${primaryText} · ${meta}`', 'stat.label'],
+    'a prop-printed value clips like a child, and a form attribute is not printed content')
+
+  // Positive control on the real file: green now, red if the prop shape and
+  // its ellipsis come back.
+  const live = read('components/shared/CostCalculationFloat.tsx')
+  assert.deepEqual(findClippedValues(live), [], 'the live float clips nothing')
+  const reverted = live.replace(
+    /<span className={`detail-scroll-text text-sm[\s\S]*?<\/span>/,
+    '<TruncatedText text={`${primaryText}`} className={`block truncate text-sm`} />',
+  )
+  assert.notEqual(reverted, live, 'the cost row no longer has the shape this control reverts -- retarget it')
+  assert.deepEqual(findClippedValues(reverted), ['`${primaryText}`'],
+    'putting the truncating component back must turn this file red')
 })
 
 // ---------------------------------------------------------------------------

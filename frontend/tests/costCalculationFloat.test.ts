@@ -192,7 +192,6 @@ function renderBreakdown(payload: unknown, canViewCosts = true): string {
     if (id.includes('costBreakdownFormat')) return { formatCostFormula, costExclusionLabelKey, costRowPrimaryText, costRowMeta, normalizeCostBreakdown }
     if (id.includes('formatters')) return { fmtDate: (value: string) => value }
     if (id.includes('productReadTransport')) return { getProductCostBreakdown: () => { throw new Error('render must not fetch') } }
-    if (id.includes('TruncatedText')) return { default: ({ text }: { text: string }) => React.createElement('span', null, text) }
     if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
     throw new Error(`Unexpected dependency: ${id}`)
   }
