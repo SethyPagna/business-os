@@ -19,6 +19,9 @@
 --   written = 1 + failure  -> the failure is stored as a completed receipt and
 --                             a retry answers 409 stock_request_partially_applied
 --                             instead of applying the delta a second time.
+-- It is also how a stale claim is told from a live one: a claimed row with
+-- written = 0 and created_at older than 120 s is a crashed request that moved
+-- nothing, and the retry re-claims it; written = 1 is never re-claimed.
 --
 -- Schema-only. No product, stock, batch, movement, audit or history backfill.
 -- Pre-assert:  SELECT COUNT(*) FROM sqlite_master WHERE name='stock_mutation_receipts'
