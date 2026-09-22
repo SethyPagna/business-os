@@ -78,7 +78,9 @@ on origin; the latest code commit and deploy record are in progress.md.
   Deployed (Paid) 22 Sep from `a7c03ee7`: Worker `581d3612`, live revision `a7c03ee74f2d`,
   frontend hash `1198099512be7c8c`; no remote migration.
   POS hotfix deployed (Paid) 22 Sep 14:11Z from `2fd4adf7`: Worker `5d3f6aa6`, live revision `2fd4adf73a77`,
-  frontend hash `2529a3df70a96b92`; Chrome-Translate removeChild crash + non-durable committed close (see progress.md). Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
+  frontend hash `2529a3df70a96b92`; Chrome-Translate removeChild crash + non-durable committed close (see progress.md).
+  Checkpoint 2 deployed (Paid) 22 Sep 21:23Z from `ef0489c1`: Worker `61a1afaa`, live revision `ef0489c12856`,
+  frontend hash `722582f2f6b38731`; Reports readability + no-ellipsis class, frontend only (see progress.md). Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
   `test-roles-delete-conflict-body-pure.cjs`, `test-products-update-conflict-current-pure.cjs`.
   New rule: `.claude/skills/blast-radius/SKILL.md` (map and verify the surroundings of
   every change; one symptom = one class). Gates green on `4c163015`.
