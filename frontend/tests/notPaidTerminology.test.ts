@@ -138,9 +138,36 @@ const code = (source: string): string => source.split('\n').filter((line) => !li
 assert.equal(packStatus(en.status_awaiting_payment), 'Not Paid')
 assert.match(code('// awaiting payment\nconst live = 1'), /const live = 1/)
 assert.doesNotMatch(code('// awaiting payment\nconst live = 1'), /awaiting/)
+// The retired wording, in every spelling it was found in and in either case.
+// `/awaiting payment/` alone missed "Awaiting payment" -- the capitalised
+// form is what the Worker and three components actually shipped -- and the
+// Khmer had drifted into THREE different phrasings, none of them the packs'.
+const RETIRED_STATUS_WORDING = /awaiting payment|កំពុងរង់ចាំបង់ប្រាក់|កំពុងរង់ចាំការទូទាត់|រង់ចាំបង់ប្រាក់/i
+// Discriminating control: the pattern must catch BOTH cases and a Khmer
+// spelling, and must not fire on the wording that replaced them.
+// The snake_case wire value `awaiting_payment` is a database enum, not copy,
+// so only the spaced prose counts as the retired wording.
+assert.doesNotMatch('sale_status = awaiting_payment', RETIRED_STATUS_WORDING)
+assert.match('2 awaiting payment', RETIRED_STATUS_WORDING)
+assert.match('Awaiting payment - $12.00', RETIRED_STATUS_WORDING)
+assert.match('រង់ចាំបង់ប្រាក់ • $12.00', RETIRED_STATUS_WORDING)
+assert.doesNotMatch('Not Paid / ប្រាក់ជំពាក់', RETIRED_STATUS_WORDING)
+
 const notificationCenter = read('../src/components/shared/NotificationCenter.tsx')
-assert.doesNotMatch(code(notificationCenter), /awaiting payment|កំពុងរង់ចាំបង់ប្រាក់/, 'the bell summary must not hard-code the retired status wording')
+assert.doesNotMatch(code(notificationCenter), RETIRED_STATUS_WORDING, 'the bell must not hard-code the retired status wording')
 assert.match(notificationCenter, /getStatusBadgeLabel\('awaiting_payment', t\)/, 'the bell summary reads the status name from the language packs')
+
+// The bell text the shop actually sees is composed by the WORKER, not by the
+// component's copy tables -- those tables were unreachable until this route
+// started naming them, which is why a fix inside NotificationCenter.tsx alone
+// changed nothing on screen. The English strings beside the keys stay as the
+// fallback for a client running an older cached bundle, so they are not a
+// violation; what is required is that the keys ship next to them.
+const notificationsRoute = read('../../cloudflare/src/routes/notifications.ts')
+assert.match(notificationsRoute, /summaryKey: 'notification_sales_summary'/, 'the sales section names its localized summary copy')
+assert.match(notificationsRoute, /metaKey: 'notification_sales_awaiting_payment'/, 'the Not Paid rows name their localized meta copy')
+assert.match(notificationsRoute, /metaKey: 'notification_sales_awaiting_delivery'/, 'the awaiting-delivery rows name theirs too')
+assert.doesNotMatch(notificationsRoute, /កំពុងរង់ចាំបង់ប្រាក់|កំពុងរង់ចាំការទូទាត់|រង់ចាំបង់ប្រាក់/, 'the route must not carry Khmer status copy of its own')
 const dashboardStatus = read('../src/components/dashboard/dashboardSaleStatus.ts')
 assert.match(dashboardStatus, /awaiting_payment: \{ key: 'status_awaiting_payment', fallback: 'Not Paid' \}/)
 const pos = read('../src/components/pos/POS.tsx')
