@@ -23,7 +23,7 @@ import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
-import { stockFailureText } from '../../utils/stockAdjustOutcome.ts'
+import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
@@ -92,6 +92,13 @@ interface ReceivedLine {
   // that really did commit answers 409 idempotency_conflict instead of
   // silently posting the delta twice.
   requestId: string
+  // Set when the server answered with a 0192 guard refusal that this line can
+  // never come back from under its own id -- it was already recorded (the
+  // response was simply lost), or it wrote stock and died. Editing and
+  // re-sending would only earn another 409, and minting a fresh id would be
+  // the double-apply this whole guard exists to stop. The only honest way out
+  // is Remove, so the row hides Edit and says so.
+  needsRemoval?: boolean
   product: ProductCandidate
   productName: string
   quantity: number
@@ -132,7 +139,7 @@ interface ReceivedLine {
 function applyLineOutcome(
   lines: ReceivedLine[],
   key: string,
-  outcome: { status: ReceivedLine['status']; detail?: string },
+  outcome: { status: ReceivedLine['status']; detail?: string; needsRemoval?: boolean },
 ): ReceivedLine[] {
   return lines.map((line) => (line.key === key ? { ...line, ...outcome } : line))
 }
@@ -804,12 +811,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
         failed += 1
-        // Migration 0192: a guard refusal gets its translated sentence;
-        // everything else keeps the server's own words, which the operator
-        // acts on ("only 2 available").
+        // Migration 0192: a guard refusal gets its translated sentence and
+        // marks the line for removal; everything else keeps the server's own
+        // words, which the operator acts on ("only 2 available").
         lines = applyLineOutcome(lines, line.key, {
           status: 'error',
           detail: stockFailureText(error, tr, tr('error', 'Error')),
+          needsRemoval: stockLineNeedsRemoval(error),
         })
       }
       // The committed outcome is durable BEFORE the render that shows it.
@@ -858,6 +866,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           lines = applyLineOutcome(lines, line.key, {
             detail: stockFailureText(result, tr, tr('error', 'Error')),
             status: 'error',
+            needsRemoval: stockLineNeedsRemoval(result),
           })
         }
       })
@@ -1221,8 +1230,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                           out -- never a dead-end ellipsis on the only
                           explanation a failed line gets. */}
                       <span className={`break-words text-[10px] ${line.status === 'error' ? 'text-red-500' : 'text-gray-400'}`}>{line.detail}</span>
-                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => editLine(line)} className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-700" aria-label={tr('edit', 'Edit')}><Pencil className="h-3.5 w-3.5" /></button> : null}
-                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => removeLine(line.key)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" aria-label={tr('remove', 'Remove')}><Trash2 className="h-3.5 w-3.5" /></button> : null}
+                      {line.status !== 'saved' && !line.needsRemoval ? <button type="button" disabled={saving} onClick={() => editLine(line)} className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-700" aria-label={tr('edit', 'Edit')}><Pencil className="h-3.5 w-3.5" /></button> : null}
+                      {/* Migration 0192: a line the server has already recorded can only be removed -- Edit is hidden above and Remove is emphasised here, because that is the signpost the message tells the operator to look for. */}
+                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => removeLine(line.key)} className={`rounded p-1 ${line.needsRemoval ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'text-gray-400'} hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20`} aria-label={tr('remove', 'Remove')}><Trash2 className="h-3.5 w-3.5" /></button> : null}
                     </span>
                   </div>
                 ))}
