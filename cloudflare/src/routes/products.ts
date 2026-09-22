@@ -1612,7 +1612,13 @@ app.post('/bulk-price-adjust', async (c) => {
     params: { delta },
   }))
   const results = await db.batch(statements)
-  const changed = Math.max(0, ...results.map((r) => Number((r as { changes?: number }).changes) || 0))
+  // D1 reports a batch statement's row count in meta.changes, never at the
+  // top level, so the old read was always undefined -> 0: the response said
+  // "changed: 0" for every adjustment and the toast quietly fell back to the
+  // preview count. Same shape every other reader in this Worker uses.
+  const changed = Math.max(0, ...results.map((r) => Number(
+    (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
+  ) || 0))
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
     scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
   })
