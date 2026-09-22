@@ -21,7 +21,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
-import { audit, changedFields } from '../lib/audit'
+import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
@@ -1927,22 +1927,28 @@ app.post('/rename-brand', async (c) => {
   return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
 })
 
-// Plain product fields whose edit history the Audit Log now records as a
-// before/after row. Deliberately NOT here:
+// The plain product field diff covers whatever columns the PUT actually
+// writes -- derived from cleanPayload(), the same function updateRow uses, so
+// it cannot drift when a new column is added to the editor (the first version
+// of this was a hand-written 16-name allowlist and the form already submitted
+// ~20 more: discounts, thresholds, expiry, special prices, tag_label,
+// custom_fields; changing five of them wrote no audit row at all).
+//
+// Only these are held back:
 //   - cost_price_usd / cost_price_khr: a manual cost override already writes
-//     its own 'cost_override' audit row with old_value/new_value inside the
-//     same guarded batch (lib/productWrites.ts) -- listing them again would
-//     put the same change on two rows;
-//   - derived/search columns (name_key, name_normalized, brand_compact,
-//     categories, brands) which restate a field already in the list;
-//   - stock_quantity, which belongs to the stock ledger, not a field edit.
-const PRODUCT_FIELD_AUDIT_COLUMNS = [
-  'name', 'barcode', 'sku', 'category', 'brand', 'unit', 'description', 'supplier',
-  'image_path', 'is_active',
-  'selling_price_usd', 'selling_price_khr',
-  'wholesale_price_usd', 'wholesale_price_khr',
-  'purchase_price_usd', 'purchase_price_khr',
-] as const
+//     its own 'cost_override' row with old_value/new_value inside the same
+//     guarded batch (lib/productWrites.ts) -- listing them again would put one
+//     change on two rows. purchase_price_* is NOT held back: nothing else
+//     records it, so excluding it would leave the same gap this lane closes.
+//   - derived restatements of a column already in the diff (the search/compact
+//     columns, the multi-value mirrors of category/brand, the cached group
+//     flag). cleanPayload already drops id/updated_at/client_request_id.
+// Secret-shaped column names are dropped by changedFields itself.
+const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
+  'cost_price_usd', 'cost_price_khr',
+  'name_key', 'name_normalized', 'unit_normalized', 'brand_compact',
+  'categories', 'brands', 'is_grouped_cached',
+])
 
 app.put('/:id', async (c) => {
   const user = c.get('user')
@@ -2212,9 +2218,13 @@ app.put('/:id', async (c) => {
   // active flag) wrote NOTHING to audit_logs before this -- the Audit Log had
   // no record that a selling price had ever been changed, by whom, or from
   // what. One row per edit, carrying only the columns that actually moved.
-  const productBefore = await getDb(c.env)
-    .prepare(`SELECT ${PRODUCT_FIELD_AUDIT_COLUMNS.join(', ')} FROM products WHERE id = @id`)
-    .get<Record<string, unknown>>({ id })
+  const productAuditColumns = Object.keys(cleanPayload(body, await tableColumns(c.env, 'products')))
+    .filter((column) => !PRODUCT_AUDIT_EXCLUDED_COLUMNS.has(column) && !isSecretShapedAuditKey(column))
+  const productBefore = productAuditColumns.length
+    ? await getDb(c.env)
+      .prepare(`SELECT ${productAuditColumns.map((column) => `"${column}"`).join(', ')} FROM products WHERE id = @id`)
+      .get<Record<string, unknown>>({ id })
+    : null
   try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
@@ -2252,8 +2262,8 @@ app.put('/:id', async (c) => {
   // resave of identical values) yields no diff and therefore no row.
   const productFieldChange = changedFields(productBefore, item as Record<string, unknown>, {
     keys: wroteProductRenameAudit
-      ? PRODUCT_FIELD_AUDIT_COLUMNS.filter((column) => column !== 'name')
-      : PRODUCT_FIELD_AUDIT_COLUMNS,
+      ? productAuditColumns.filter((column) => column !== 'name')
+      : productAuditColumns,
   })
   if (productFieldChange) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
