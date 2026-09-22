@@ -672,6 +672,18 @@ async function productsRoute() {
     // the top level answered undefined -> 0 for every adjustment ever made.
     assert.equal(response.body.changed, 2)
   })
+  check('bulk price adjust records the catalog totals it moved, not just a count in details', () => {
+    const bulk = productAuditRows(raw, 'update').filter((row) => row.entity_id === 'bulk-price-adjust')
+    assert.equal(bulk.length, 1)
+    // Discriminating: 1.25 + 2.00 = 3.25 before, 1.75 + 2.50 = 4.25 after.
+    // A row that only carried rowsTouched (the pre-fix shape) fails on both
+    // the NULL columns and these figures.
+    assert.deepEqual(JSON.parse(bulk[0].old_value), { selling_price_usd: 3.25, rows_touched: 0 })
+    assert.deepEqual(JSON.parse(bulk[0].new_value), { selling_price_usd: 4.25, rows_touched: 2 })
+    assert.deepEqual(renderer.buildAuditFieldDiff(bulk[0].old_value, bulk[0].new_value).map((r) => r.label),
+      ['Rows Touched', 'Selling Price Usd'])
+    assert.equal(JSON.parse(bulk[0].details).rowsTouched, 2, 'details keeps its existing shape for existing consumers')
+  })
 }
 
 // ---------------------------------------------------------------------------
