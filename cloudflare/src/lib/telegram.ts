@@ -421,10 +421,21 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // Sections are numbered as they APPEAR: a category the owner switched off
   // takes its section out entirely rather than leaving a gap in the numbering.
   let index = 0
-  const section = (key: TelegramLabelKey, rows: string[]): void => {
-    if (!rows.length) return
+  // A section with no rows still prints its numbered heading and says N/A,
+  // the rule every other report already follows (the shift report and
+  // /fees). It used to return here, so a quiet day's /report stopped after
+  // section 2 and the reader had to work out whether the shop had no
+  // expenses or whether the message had been cut short. A category the
+  // owner switched OFF is still removed entirely -- that gate is the
+  // `if (showSales)`-style check at each call site, not this emptiness.
+  const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
+    // Switched OFF is not the same fact as empty, and only the call site
+    // knows which one it has: a category the owner turned off leaves no
+    // heading and no number, while a category that is on and simply had
+    // nothing today says N/A under its heading.
+    if (!enabled) return
     index += 1
-    lines.push(...sectionTitle(index, key), ...rows)
+    lines.push(...sectionTitle(index, key), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
 
   // 1. Sales -- Revenue and Profit print even at $0.00: a day that took
@@ -464,13 +475,15 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
   }
   if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  section('expenses', expenseRows)
+  // On when either of its two sources is on: the shop's own expenses
+  // (`fees`) or the courier money that comes out of the sales figures.
+  section('expenses', expenseRows, categories?.fees !== false || showSales)
 
   // 4. Stock
   const stock: string[] = []
   if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
   if (categories?.stock_out !== false && (stats.stockOut?.count || stats.stockOut?.quantity)) stock.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
-  section('stock', stock)
+  section('stock', stock, categories?.stock_in !== false || categories?.stock_out !== false)
 
   // 5. Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
   // is dropped here and only here: the section is a list of cashiers, so the
@@ -603,7 +616,10 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
     const health: string[] = []
     if (lowStock) health.push(labeled('lowStock', lowStock))
     if (outOfStock) health.push(labeled('outOfStock', outOfStock))
-    if (health.length) lines.push(...sectionTitle(2, 'stock'), ...health)
+    // Prints even when the shop has neither: "no low or out-of-stock
+    // products" is the answer to the question /inventory was asked, and a
+    // missing section 2 reads as a truncated message instead.
+    lines.push(...sectionTitle(2, 'stock'), ...(health.length ? health : [EMPTY_SECTION]))
     return lines.join('\n')
   })
 }

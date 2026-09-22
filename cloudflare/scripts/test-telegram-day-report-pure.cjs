@@ -334,6 +334,31 @@ for (const [name, msg] of [['/stock', stockMsg], ['/inventory', inventoryMsg]]) 
 }
 console.log('PASS /stock and /inventory: numbered sections, a real LIMIT 12, strict order with a positive control, all three language modes')
 
+// ---- a quiet day still prints every section ---------------------------------
+//
+// Owner's rule for these reports: an empty section shows N/A, it is never
+// omitted. formatDaySummary used to `return` when a section had no rows, so a
+// day with no expenses, no stock movement and no cashier activity produced a
+// /report that stopped after section 2 -- indistinguishable, on a phone, from
+// a message that had been truncated.
+const quiet = telegram.formatDaySummary(
+  { date: '2026-09-23', sales: { count: 0, cancelled: 0, usd: 0, profitUsd: 0, creditUsd: 0 }, fees: { usd: 0, khr: 0 }, stockIn: { count: 0, quantity: 0 } },
+  [],
+)
+const quietLines = quiet.split('\n')
+const quietTitles = quietLines.filter((line) => /^\d+\. /.test(line))
+check(`a quiet day prints all five numbered sections, not the two it used to (${quietTitles.length})`,
+  quietTitles.length === 5)
+check('the numbering has no gap',
+  quietTitles.every((line, index) => line.startsWith(`${index + 1}. `)))
+check('every section with nothing in it says N/A',
+  quietLines.filter((line) => line === `${lang.ROW_BULLET}N/A`).length === 3)
+check('and none of them is left as the retired bare em dash',
+  !quietLines.includes('—'))
+// POSITIVE CONTROL: a section that HAS rows must not be given an N/A as well.
+const salesBlock = quietLines.slice(quietLines.indexOf(quietTitles[0]) + 1, quietLines.indexOf(quietTitles[1]) - 1)
+check(`POSITIVE CONTROL: the Sales section still prints its own two rows (${salesBlock.length})`,
+  salesBlock.length === 2 && salesBlock.every((line) => line.startsWith(lang.ROW_BULLET) && !line.endsWith('N/A')))
 // ---- one implementation, not a lookalike ------------------------------------
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 check('telegram.ts no longer sums sale totals for the day or cashier reports at all',

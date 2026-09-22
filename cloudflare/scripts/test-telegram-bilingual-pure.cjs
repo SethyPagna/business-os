@@ -759,8 +759,12 @@ const lastSent = () => sent[sent.length - 1].body.text
     }
   }
 
-  // A shop with nothing low says so through the ABSENCE of the second block,
-  // the same way every other report drops a zero line.
+  // UPDATED Sep 23 2026. A shop with nothing low used to say so through the
+  // ABSENCE of the second block. That is not the owner's rule -- an empty
+  // section prints its numbered heading and N/A, never disappears -- and a
+  // /inventory reply that stopped after section 1 read as a message that had
+  // been cut off rather than as "nothing is low or out of stock". Dropping a
+  // zero ROW inside a section is still right; dropping the section is not.
   await wired.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
   assert.deepEqual(lastSent().split('\n'), [
     '🏷️ Inventory / ស្តុក',
@@ -768,7 +772,10 @@ const lastSent = () => sent[sent.length - 1].body.text
     '1. Products / ផលិតផល',
     '· Active products / ផលិតផលសកម្ម: 0',
     '· Units on hand / ឯកតាក្នុងស្តុក: 0',
-  ], `a shop with nothing low still printed a zero block:\n${lastSent()}`)
+    RULE,
+    '2. Stock / ស្តុក',
+    '· N/A',
+  ], `a shop with nothing low must still get a section 2:\n${lastSent()}`)
   console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
 
   const quiet = sent.length

@@ -567,8 +567,16 @@ check('the day summary renders in Khmer only when the shop chose km',
 // Section numbering follows the sections that actually print: a category the
 // owner switched off must not leave a hole in the numbering.
 const salesOff = render('both', () => telegram.formatDaySummary(dayStats, [], { sales: false, stock_in: false, stock_out: false }))
+// UPDATED Sep 23 2026: Cashiers now appears as section 2 with `· N/A` under
+// it. There is no category switch for cashiers, so an empty cashier list is
+// "nobody rang anything up today", which is a fact the report states -- while
+// Sales, Stock in and Stock out, switched OFF here, still leave nothing at
+// all. That is the distinction the fix had to keep: off removes the section,
+// empty prints N/A.
 check('numbering closes up when a switched-off category removes a section',
-  salesOff.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === '1. Expenses / ចំណាយ', salesOff)
+  salesOff.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === '1. Expenses / ចំណាយ | 2. Cashiers / អ្នកគិតប្រាក់', salesOff)
+check('a switched-off category leaves no N/A placeholder behind either',
+  !salesOff.includes('Sales / ការលក់') && !salesOff.includes('Stock / ស្តុក'), salesOff)
 
 // ---- 5. the absences -------------------------------------------------------
 // Each string below is a line the PRE-REDESIGN report printed for this very
