@@ -973,6 +973,21 @@ function isStaleBuildAsset(request, response) {
   return contentType.includes('text/html')
 }
 
+// A waiting worker normally stays parked until the user accepts Update (the
+// install handler's comment says why). That politeness is exactly wrong on
+// this one path: the shell this worker is serving cannot boot, so there is no
+// app left to show an Update prompt in, and nothing would ever release the
+// new build. Only here, only when the running build is already proven broken.
+async function releaseNewBuildForRecovery() {
+  await self.registration.update().catch(() => {})
+  try {
+    self.registration.waiting?.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
+  } catch (_) {
+    // no waiting worker, or messaging unavailable -- the shell refresh is
+    // still the recovery.
+  }
+}
+
 async function recoverStaleShell(event) {
   const refresh = (async () => {
     const cache = await caches.open(APP_SHELL_CACHE)
@@ -980,21 +995,15 @@ async function recoverStaleShell(event) {
     if (isValidDocumentResponse(response)) {
       await cache.put('/index.html', response.clone()).catch(() => {})
     }
-    await self.registration.update().catch(() => {})
-    // A waiting worker normally stays parked until the user accepts Update
-    // (the install handler's comment above says why). That politeness is
-    // exactly wrong here: the shell this worker is serving cannot boot, so
-    // there is no app left to show an Update prompt in, and nothing would
-    // ever release the waiting build. Ask it to take over -- only on this
-    // path, only when the running build is already proven broken.
-    try {
-      self.registration.waiting?.postMessage({ type: 'BUSINESS_OS_SKIP_WAITING' })
-    } catch {
-      // no waiting worker, or messaging unavailable -- the shell refresh
-      // above is still the recovery.
-    }
     await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH })
   })()
+  // Deliberately NOT on the awaited path. registration.update() re-fetches
+  // /sw.js, so awaiting it here made the page wait a full round trip -- on a
+  // slow phone, seconds -- before it even learned the chunk was gone, and
+  // that time is spent against the lazy-import timeout in
+  // utils/lazyImport.ts. The page needs the honest 404 and the fresh shell;
+  // fetching the new worker is a background concern.
+  event.waitUntil(releaseNewBuildForRecovery())
   event.waitUntil(refresh)
   await refresh
 }

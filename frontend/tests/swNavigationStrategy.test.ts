@@ -144,8 +144,14 @@ return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }
     assert.match(recover, /caches\.open\(APP_SHELL_CACHE\)/, 'the shell cache is what goes stale')
     assert.match(recover, /fetch\('\/index\.html', \{ cache: 'no-store' \}\)/, 'the fresh shell must bypass HTTP caches')
     assert.match(recover, /isValidDocumentResponse\(response\)/, 'a redirect or error page must not replace the shell')
-    assert.match(recover, /self\.registration\.update\(\)/, 'the new worker must be requested, not left to the periodic check')
-    assert.match(recover, /event\.waitUntil\(refresh\)[\s\S]{0,20}await refresh/, 'recovery is awaited so the reload that follows sees the fresh shell')
+    const release = functionBody(source, 'async function releaseNewBuildForRecovery', 'async function recoverStaleShell')
+    assert.match(release, /self\.registration\.update\(\)/, 'the new worker must still be requested, not left to the periodic check')
+    // Sep 23: update() re-fetches /sw.js. Awaiting it here held the 404 the
+    // page is blocked on for a whole round trip, spent against the lazy
+    // import timeout. Requesting the new worker is a background concern.
+    assert.match(recover, /event\.waitUntil\(releaseNewBuildForRecovery\(\)\)/, 'the new-worker request runs off the response path')
+    assert.doesNotMatch(recover, /await releaseNewBuildForRecovery/, 'and is never awaited before the 404 returns')
+    assert.match(recover, /event\.waitUntil\(refresh\)[\s\S]{0,20}await refresh/, 'the SHELL refresh is still awaited so the reload that follows sees the fresh shell')
   })
 }
 

@@ -99,7 +99,19 @@ type Outcome = {
   bootError: boolean
 }
 
-async function runScenario(workerSource: string, deploy: boolean): Promise<Outcome> {
+type FixtureOptions = {
+  /**
+   * Answer a NON-navigation read of the document with the host's bot
+   * challenge once the new generation is live. That is the production shape
+   * that makes the worker's own shell refresh a silent no-op. Off for probes
+   * that need the new worker to be able to install.
+   */
+  challengeWorkerShellReads?: boolean
+  /** Make the /sw.js round trip measurably slow, the way a phone does. */
+  swJsDelayMs?: number
+}
+
+function createFixture(workerSource: string, options: FixtureOptions = {}) {
   let generation: Generation = 'old'
   const server = http.createServer((request, response) => {
     const path = new URL(request.url ?? '/', 'http://localhost').pathname
@@ -108,7 +120,10 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
     response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
     if (path === '/sw.js') {
       response.setHeader('Content-Type', 'text/javascript')
-      response.end(workerSource.replaceAll('__BUSINESS_OS_BUILD_HASH__', build))
+      const body = workerSource.replaceAll('__BUSINESS_OS_BUILD_HASH__', build)
+      const delay = generation === 'new' ? (options.swJsDelayMs ?? 0) : 0
+      if (delay > 0) setTimeout(() => response.end(body), delay)
+      else response.end(body)
       return
     }
     if (path === '/business-os-build.json') {
@@ -148,10 +163,8 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
       response.end(document_(generation))
       return
     }
-    // The document. Once the new generation is live, a NON-navigation read of
-    // it gets the challenge page -- the production shape that makes the
-    // worker's own shell refresh a silent no-op.
-    if (!isNavigation && generation === 'new') {
+    // The document.
+    if (options.challengeWorkerShellReads && !isNavigation && generation === 'new') {
       response.writeHead(403, { 'Content-Type': 'text/html' })
       response.end('<html><body>Just a moment...</body></html>')
       return
@@ -159,6 +172,12 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
     response.setHeader('Content-Type', 'text/html')
     response.end(document_(generation))
   })
+  return { server, deploy: () => { generation = 'new' } }
+}
+
+async function runScenario(workerSource: string, deploy: boolean): Promise<Outcome> {
+  const fixture = createFixture(workerSource, { challengeWorkerShellReads: true })
+  const { server } = fixture
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const browser = await chromium.launch()
@@ -191,7 +210,7 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
       }
     })
 
-    if (deploy) generation = 'new'
+    if (deploy) fixture.deploy()
 
     // Load A: the cached (now stale) shell, whose chunks the deploy deleted.
     await page.goto(origin)
@@ -212,6 +231,80 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
+
+const SW_JS_DELAY_MS = 2_000
+
+type StaleAssetProbe = {
+  status: number
+  statusText: string
+  /** How long the PAGE waited for the honest 404. */
+  elapsedMs: number
+}
+
+/**
+ * No navigation, no guard, no reload: just ask the worker for a chunk the
+ * deploy deleted and time how long the answer takes, with /sw.js deliberately
+ * slow. That isolates one thing -- whether recoverStaleShell holds the 404
+ * while it fetches the new worker.
+ */
+async function probeStaleAsset(workerSource: string): Promise<StaleAssetProbe> {
+  const fixture = createFixture(workerSource, { swJsDelayMs: SW_JS_DELAY_MS })
+  const { server } = fixture
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const browser = await chromium.launch()
+  const context = await browser.newContext({ serviceWorkers: 'allow' })
+  const page = await context.newPage()
+  try {
+    await page.goto(origin)
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.register('/sw.js')
+      await navigator.serviceWorker.ready
+    })
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller)
+    await page.goto(origin)
+    await page.waitForSelector('#catalog', { timeout: 20_000 })
+    await page.evaluate(async () => {
+      for (const name of await caches.keys()) {
+        if (!name.startsWith('business-os-static-')) continue
+        const cache = await caches.open(name)
+        for (const request of await cache.keys()) {
+          if (request.url.includes('/assets/catalog-')) await cache.delete(request)
+        }
+      }
+    })
+    fixture.deploy()
+    return await page.evaluate(async () => {
+      const started = performance.now()
+      const response = await fetch('/assets/catalog-secondary-tabs-old.js')
+      return { status: response.status, statusText: response.statusText, elapsedMs: performance.now() - started }
+    })
+  } finally {
+    await context.close()
+    await browser.close()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
+test('the stale-chunk 404 reaches the page without waiting for the /sw.js round trip', { timeout: 180_000 }, async () => {
+  const probe = await probeStaleAsset(fixedWorker)
+  assert.equal(probe.status, 404, 'the page must still get the honest failure lazyImport.ts listens for')
+  assert.equal(probe.statusText, 'Stale build asset')
+  assert.ok(
+    probe.elapsedMs < SW_JS_DELAY_MS,
+    `the page waited ${Math.round(probe.elapsedMs)}ms for a 404 while /sw.js took ${SW_JS_DELAY_MS}ms -- `
+    + 'registration.update() is back on the response path, and that time is spent against the lazy-import timeout',
+  )
+})
+
+test('negative control: ef0489c1 made the page wait for /sw.js before the 404', { timeout: 180_000 }, async () => {
+  const probe = await probeStaleAsset(brokenWorker)
+  assert.equal(probe.status, 404, 'the old worker answered with the same honest failure')
+  assert.ok(
+    probe.elapsedMs >= SW_JS_DELAY_MS,
+    'if this ever stops holding, the delay fixture stopped measuring what it claims to measure',
+  )
+})
 
 test('the chunk-recovery reload lands on the deployed build in one hop', { timeout: 180_000 }, async () => {
   const fixed = await runScenario(fixedWorker, true)
