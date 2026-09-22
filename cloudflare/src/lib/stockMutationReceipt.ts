@@ -28,22 +28,35 @@ import type { D1Compat } from './db'
 // restructuring both kernels (which is exactly what the Milestone A
 // stock-session kernel in lib/stockSession.ts did for the session wire).
 // So this claims the request id FIRST, on the UNIQUE (actor_id, request_id)
-// index, and completes it with the response afterwards:
+// index, and completes it with the response afterwards.
 //
-//   claim -> 'claimed'   : nobody has run this id; run the kernel
+// THE WRITTEN FLAG is what makes that honest. A kernel can write stock and
+// then still fail afterwards -- "Received stock batch was not found after
+// commit" answers 400 with the lot already topped up; recomputeCatalogCost
+// runs after the receipt and outside its try; a tagged restock can be refused
+// after its receipt landed. Releasing the claim there would let the retry
+// apply the delta a second time, which is the whole defect this file exists
+// to stop. So the wrapper hands the kernel a markWritten() that it calls
+// immediately before its first stock-mutating statement:
+//
+//   written = 0 + refusal/throw -> claim DELETED; the same id retries cleanly
+//                                  (the ordinary fix-the-reason loop)
+//   written = 1 + refusal/throw -> the failure is stored as a COMPLETED
+//                                  receipt; the retry answers 409
+//                                  stock_request_partially_applied and points
+//                                  at the ledger, because some stock moved and
+//                                  only a human can say how much
+//
+//   claim -> 'claimed'   : nobody holds this id; run the kernel
 //         -> 'replay'    : completed before; return the original response
 //         -> 'conflict'  : same id, different request body -> 409
 //         -> 'in_flight' : claimed but never completed -> 409, do NOT guess
+//         -> 'partial'   : wrote stock and did not finish -> 409
+//         -> 'invalid'   : an id was sent but is not a usable one -> 400
 //         -> 'disabled'  : migration 0192 not applied here -> pre-0192 path
 //
-// A refusal or a thrown error RELEASES the claim, so the ordinary
-// fix-the-reason-and-try-again loop keeps working with the same id. Only a
-// hard crash between the claim and the completion leaves an 'in_flight' row,
-// and the honest answer there is to refuse and point at the ledger rather than
-// either double-applying or silently reporting success.
-//
-// Free/paid: no plan-sensitive capability. Two small D1 statements per
-// identified line, on the same binding the kernel already holds; no KV, no
+// Free/paid: no plan-sensitive capability. Two to three small D1 statements
+// per identified line, on the same binding the kernel already holds; no KV, no
 // Queues, no Durable Object, no cron, no custom CPU limit.
 
 const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
@@ -56,6 +69,7 @@ type StockMutationClaim =
   | { state: 'replay'; status: number; body: Record<string, unknown> }
   | { state: 'conflict' }
   | { state: 'in_flight' }
+  | { state: 'partial' }
 
 /** Accept only a stable, bounded id. */
 function normalizeStockMutationRequestId(value: unknown): string | null {
@@ -129,6 +143,7 @@ async function receiptsAvailable(db: D1Compat): Promise<boolean> {
 
 type ReceiptRow = {
   request_json: string
+  written: number | null
   response_status: number | null
   response_json: string | null
   completed_at: string | null
@@ -136,16 +151,25 @@ type ReceiptRow = {
 
 async function readReceipt(db: D1Compat, actorId: number, requestId: string): Promise<ReceiptRow | undefined> {
   return db.prepare(
-    'SELECT request_json, response_status, response_json, completed_at FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request',
+    `SELECT request_json, written, response_status, response_json, completed_at
+       FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request`,
   ).get<ReceiptRow>({ actor: actorId, request: requestId })
 }
 
 function decideFromStoredReceipt(row: ReceiptRow, canonical: string): StockMutationClaim {
   if (row.request_json !== canonical) return { state: 'conflict' }
-  if (!row.completed_at || row.response_status == null) return { state: 'in_flight' }
-  let body: Record<string, unknown> = {}
-  try { body = JSON.parse(row.response_json || '{}') as Record<string, unknown> } catch { body = {} }
-  return { state: 'replay', status: row.response_status, body }
+  const wrote = Number(row.written ?? 0) === 1
+  if (row.completed_at && row.response_status != null) {
+    // A stored FAILURE can only exist for a request that had already written
+    // stock (see completeStockMutation's caller); it is never replayed as a
+    // success, because the operator has to reconcile it by hand.
+    if (row.response_status >= 400) return { state: 'partial' }
+    let body: Record<string, unknown> = {}
+    try { body = JSON.parse(row.response_json || '{}') as Record<string, unknown> } catch { body = {} }
+    return { state: 'replay', status: row.response_status, body }
+  }
+  if (wrote) return { state: 'partial' }
+  return { state: 'in_flight' }
 }
 
 async function claimStockMutation(
@@ -172,6 +196,13 @@ async function claimStockMutation(
   return { state: 'claimed' }
 }
 
+/** Set immediately before the kernel's first stock-mutating statement. */
+async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string): Promise<void> {
+  await db.prepare(
+    'UPDATE stock_mutation_receipts SET written=1 WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL',
+  ).run({ actor: actorId, request: requestId })
+}
+
 async function completeStockMutation(
   db: D1Compat,
   actorId: number,
@@ -185,10 +216,10 @@ async function completeStockMutation(
   ).run({ actor: actorId, request: requestId, status, body: JSON.stringify(body ?? {}) })
 }
 
-/** A refused or thrown attempt moved no stock; drop the claim so the same id can be retried. */
+/** A refused or thrown attempt that moved NO stock; drop the claim so the same id can be retried. */
 async function releaseStockMutation(db: D1Compat, actorId: number, requestId: string): Promise<void> {
   await db.prepare(
-    'DELETE FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL',
+    'DELETE FROM stock_mutation_receipts WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL AND written=0',
   ).run({ actor: actorId, request: requestId })
 }
 
@@ -207,7 +238,13 @@ const STOCK_MUTATION_IN_FLIGHT = {
   code: 'stock_request_in_flight',
 }
 
-// The one wrapper both kernels use. `run` is the kernel body, unchanged.
+const STOCK_MUTATION_PARTIAL = {
+  error: 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.',
+  code: 'stock_request_partially_applied',
+}
+
+// The one wrapper both kernels use. `run` is the kernel body, unchanged apart
+// from the markWritten() call it now makes before its first stock write.
 //
 // `openDb` is a THUNK, not a database. A request that carries no
 // client_request_id must not touch D1 at all before the kernel does its own
@@ -220,7 +257,7 @@ export async function withStockMutationReceipt(
   kind: StockMutationKind,
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
-  run: () => Promise<Response>,
+  run: (markWritten: () => Promise<void>) => Promise<Response>,
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -229,25 +266,41 @@ export async function withStockMutationReceipt(
     // unprotected would be the worst of the three answers: the client believes
     // the line is deduped, and it is not.
     if (requestIdWasSupplied(supplied)) return json(STOCK_MUTATION_INVALID_ID, 400)
-    return run()
+    return run(async () => {})
   }
-  if (actorId == null) return run()
+  if (actorId == null) return run(async () => {})
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
   const claim = await claimStockMutation(db, actorId, requestId, kind, canonical)
-  if (claim.state === 'disabled') return run()
+  if (claim.state === 'disabled') return run(async () => {})
   if (claim.state === 'conflict') return json(STOCK_MUTATION_CONFLICT, 409)
   if (claim.state === 'in_flight') return json(STOCK_MUTATION_IN_FLIGHT, 409)
+  if (claim.state === 'partial') return json(STOCK_MUTATION_PARTIAL, 409)
   if (claim.state === 'replay') return json({ ...claim.body, replayed: true }, claim.status)
+
+  let wrote = false
+  const markWritten = async () => {
+    if (wrote) return
+    wrote = true
+    await markStockMutationWritten(db, actorId, requestId)
+  }
   let response: Response
   try {
-    response = await run()
+    response = await run(markWritten)
   } catch (error) {
-    await releaseStockMutation(db, actorId, requestId)
+    if (wrote) await completeStockMutation(db, actorId, requestId, 500, STOCK_MUTATION_PARTIAL)
+    else await releaseStockMutation(db, actorId, requestId)
     throw error
   }
   if (response.status < 200 || response.status >= 300) {
-    await releaseStockMutation(db, actorId, requestId)
+    if (!wrote) {
+      await releaseStockMutation(db, actorId, requestId)
+      return response
+    }
+    // Stock moved and the kernel still refused. Store the refusal so the retry
+    // is told exactly that, rather than being invited to apply the delta again.
+    const failed = await response.clone().json().catch(() => ({})) as Record<string, unknown>
+    await completeStockMutation(db, actorId, requestId, response.status, failed)
     return response
   }
   const stored = await response.clone().json().catch(() => ({})) as Record<string, unknown>

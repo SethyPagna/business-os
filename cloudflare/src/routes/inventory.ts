@@ -1436,11 +1436,16 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     'adjust',
     body,
     (value, status) => c.json(value as never, status as never),
-    () => runAdjustActionKernel(c, body),
+    (markWritten) => runAdjustActionKernel(c, body, markWritten),
   )
 }
 
-async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+// `markWritten` is the receipt guard's write barrier (lib/stockMutationReceipt.ts).
+// It is called ONCE, immediately before the first statement in this kernel that
+// can move stock, and it is what tells a retry apart from a re-apply: every
+// refusal above that line released the claim and may be retried with the same
+// id, every failure below it is reported as partially applied instead.
+async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -1847,6 +1852,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     throw error
   }
+
+  // Everything above this line is reads, validation and (for an unlocked add)
+  // at most a sibling product row that a retry resolves to again by identity.
+  // Everything below it can move stock.
+  await markWritten()
 
   if (correctionLot && addMovementCost) {
     // A physical count correction is not a new purchase. Preserve lot price,

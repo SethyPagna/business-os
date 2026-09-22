@@ -217,11 +217,13 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     'receive',
     body as unknown as Record<string, unknown>,
     (value, status) => c.json(value as never, status as never),
-    () => runReceiveBatchActionKernel(c, body),
+    (markWritten) => runReceiveBatchActionKernel(c, body, markWritten),
   )
 }
 
-async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody): Promise<Response> {
+// `markWritten` is the receipt guard's write barrier -- see the same argument
+// on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
+async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, markWritten: () => Promise<void>): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
   const db = getDb(c.env)
@@ -279,6 +281,9 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody)
   const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
   const sessionId = Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
+  // Everything above this line is reads and validation; receiveBatchStock below
+  // writes both stock ledgers, so the claim stops being releasable here.
+  await markWritten()
   try {
     received = await receiveBatchStock(db, {
       productId,
