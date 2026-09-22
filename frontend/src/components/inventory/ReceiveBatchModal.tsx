@@ -11,6 +11,7 @@ import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { clearWorkDraft, scheduleWorkDraftWrite, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
@@ -289,6 +290,11 @@ export default function ReceiveBatchModal({
       : tr('new_batch', 'a new received date')
     setPendingReceipt({
       request: {
+        // Migration 0192: minted once, with the PARKED request, and reused by
+        // every confirm of that same parked request. A receipt whose response
+        // was lost is then replayed from the stored result instead of topping
+        // the lot up a second time.
+        clientRequestId: createClientRequestId('receive'),
         productId: Number(product.id),
         branchId: parsedBranchId,
         quantity: parsedQuantity,

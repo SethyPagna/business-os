@@ -78,6 +78,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -187,6 +188,10 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
+  // the per-line receipt guard. REAL, not a stub: a body without a
+  // client_request_id must hand straight through to the kernel.
+  '../lib/stockMutationReceipt': stockMutationReceipt,
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
@@ -259,6 +264,10 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
+  // the per-line receipt guard. REAL, not a stub: a body without a
+  // client_request_id must hand straight through to the kernel.
+  '../lib/stockMutationReceipt': stockMutationReceipt,
   // The one shared reason-length cap (lib/stockReason.ts). REAL, not a
   // stub: the point of the module is that every wire measures the same way.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),

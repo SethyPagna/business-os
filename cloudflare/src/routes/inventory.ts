@@ -24,6 +24,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
+import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1421,7 +1422,25 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // body only, no logic changed. The route registration right below is now a
 // three-line wrapper: parse the body, call this, done. Exported for that one
 // other caller; nothing else should import it (use POST /adjust).
+// Per-line idempotency (migration 0192). The kernel body is unchanged and
+// lives in runAdjustActionKernel below; this wrapper only claims the
+// client_request_id the caller sent, returns the ORIGINAL response when the
+// same id comes back, and releases the claim when the kernel refuses -- so a
+// retry after a lost response cannot post the delta twice. A body with no
+// client_request_id, or a database where 0192 is not applied yet, takes the
+// pre-0192 path byte for byte (lib/stockMutationReceipt.ts).
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+  return withStockMutationReceipt(
+    () => getDb(c.env),
+    c.get('user')?.id ?? null,
+    'adjust',
+    body,
+    (value, status) => c.json(value as never, status as never),
+    () => runAdjustActionKernel(c, body),
+  )
+}
+
+async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
