@@ -699,7 +699,6 @@ function manualChunks(id: string): string | undefined {
       normalized.endsWith('/src/api/localMirrors.ts')
       || normalized.endsWith('/src/api/lazyLocalDb.ts')
       || normalized.endsWith('/src/api/queryCache.ts')
-      || normalized.endsWith('/src/api/expectedUpdatedAt.ts')
     ) {
       return 'api-local-cache'
     }

@@ -769,10 +769,10 @@ await runTest('product page save and delete actions use shared guards and bounde
   // runSingleDeleteConfirmed/runBulkDeleteConfirmed, called from the
   // modal's confirm button via runPendingDeleteConfirmed.
   assert.match(source, /const handleDelete = \(p: ProductRecord\) => \{[\s\S]*if \(!beginSingleAction\(productDeleteInFlightRef\)\) return/)
-  assert.match(source, /const runSingleDeleteConfirmed = async \(p: ProductRecord, reason: string\) => \{[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(p\.id \|\| 0, reason\), 'Delete product'\)/)
+  assert.match(source, /const runSingleDeleteConfirmed = async \(p: ProductRecord, reason: string\) => \{[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(p\.id \|\| 0, reason, p\.updated_at\), 'Delete product'\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(productDeleteInFlightRef\)[\s\S]*setDeleteConfirmBusy\(false\)[\s\S]*setPendingDelete\(null\)[\s\S]*\}/)
   assert.match(source, /const handleBulkDelete = \(\) => \{[\s\S]*if \(!selectedVisibleIds\.length \|\| bulkActionBusy\) return/)
-  assert.match(source, /const runBulkDeleteConfirmed = async \(ids: EntityId\[\], reason: string\) => \{[\s\S]*if \(!beginSingleAction\(bulkActionInFlightRef, \{ blocked: bulkActionBusy \}\)\) return[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(id, reason\), 'Delete product'\)/)
+  assert.match(source, /const runBulkDeleteConfirmed = async \(ids: EntityId\[\], reason: string\) => \{[\s\S]*if \(!beginSingleAction\(bulkActionInFlightRef, \{ blocked: bulkActionBusy \}\)\) return[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(id, reason, snapshotById\.get\(Number\(id\)\)\?\.updated_at\), 'Delete product'\)/)
   // Delete now requires a reason (progress.md's product-delete-reason
   // item): runPendingDeleteConfirmed forwards DeleteConfirmModal's own
   // required-reason field straight into both delete runners above.

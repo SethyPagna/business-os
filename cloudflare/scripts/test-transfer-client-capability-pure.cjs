@@ -17,7 +17,7 @@ function load(name) {
     // batchesTransport.ts's receive-body conversion; unused by this
     // transfer-capability test, but the module graph still imports it.
     if (id === './batchesTransport.ts') return { receiveBatchWireBody: payload => payload }
-    if (id === './query.ts' || id === './expectedUpdatedAt.ts') return {}
+    if (id === './query.ts') return {}
     throw new Error(`Unexpected dependency ${id}`)
   },module)
   return module.exports

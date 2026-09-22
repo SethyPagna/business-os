@@ -55,11 +55,12 @@ function createContact(
 
 // The optimistic-concurrency token is the version the SCREEN holds: the
 // form's record (its `updated_at`) or, for a delete, the row the tab listed.
-// Never a local mirror row: the live app has not rewritten those mirrors
-// since 12 Sep 2026 (localMirrors.ts shouldPersistLocalMirror), so a mirror
-// token was days old and the write was refused as "changed on another
-// device" (owner report, 22 Sep). A write with no version is checked by
-// nothing server-side rather than refused on a stale one.
+// The transport adds nothing. Until 22 Sep 2026 a helper filled a MISSING
+// token from a Dexie mirror row the live app stopped rewriting on 12 Sep
+// (localMirrors.ts shouldPersistLocalMirror): stale where a row existed,
+// absent otherwise, and never the version the operator was looking at. A
+// write with no version is checked by nothing server-side rather than
+// refused on a stale one.
 function updateContact(
   routeKey: string,
   endpoint: string,

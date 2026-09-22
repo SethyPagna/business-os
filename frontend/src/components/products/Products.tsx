@@ -2354,10 +2354,11 @@ function ProductsFullEditor() {
         image_gallery: uploadedGallery,
         image_path: uploadedGallery[0] || null,
         // The optimistic-concurrency token is the version THIS screen opened
-        // (the row `selected` was set from), never a local mirror row: the
-        // Dexie products mirror is only rewritten by the offline snapshot, so
-        // on a phone it was days old and every edit of a product changed since
-        // was refused as "changed on another device" (owner report, 22 Sep).
+        // (the row `selected` was set from), sent explicitly so it is the one
+        // the 409 handler below refreshes. Owner report, 22 Sep: a phone whose
+        // list (or restored draft) was days old had every edit of a product
+        // changed since refused as "changed on another device", with no way
+        // forward but a full reload.
         expectedUpdatedAt: selected?.updated_at || undefined,
         client_request_id: createClientRequestId || form.client_request_id || undefined,
         userId: user?.id,
@@ -2459,12 +2460,16 @@ function ProductsFullEditor() {
       // token the next press sends) is the version that won. The form keeps
       // the operator's edits -- its state hydrates only when the product id
       // changes (useStableHydratedState) -- so "review what won, then try
-      // again" is one more press, not the same 409 forever.
+      // again" is one more press, not the same 409 forever. The list row is
+      // patched too, so closing and reopening the form does not replay the
+      // stale token from the list.
       if (selected?.id && isWriteConflictError(e)) {
         const conflictedId = selected.id
         void fetchProductsByIds([conflictedId])
           .then(([latest]) => {
-            if (latest && productSaveFormRef.current.revision === formRevision) setSelected(latest)
+            if (!latest) return
+            patchProductRow(latest)
+            if (productSaveFormRef.current.revision === formRevision) setSelected(latest)
           })
           .catch(() => {})
       }
@@ -3897,9 +3902,10 @@ function ProductsFullEditor() {
       const productId = Number(snapshot?.id || 0)
       const currentProduct = latestMap.get(productId)
       if (!currentProduct) return
-      const payload = await buildProductWritePayload(snapshot)
+      const payload = await buildProductWritePayload(snapshot) as Record<string, unknown>
       // Undo/redo writes over whatever is current: the version is the fresh read above.
-      await runProductWriteMutation(() => productApi.updateProduct(productId, { ...payload, expectedUpdatedAt: currentProduct.updated_at || undefined }), 'Restore product')
+      payload.expectedUpdatedAt = currentProduct.updated_at || undefined
+      await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))

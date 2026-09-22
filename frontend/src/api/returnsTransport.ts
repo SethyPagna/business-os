@@ -319,7 +319,7 @@ export function bulkUpdateReturns(payload: ReturnBulkPayload): Promise<ReturnBul
   return apiFetch('POST', '/api/returns/bulk', payload) as Promise<ReturnBulkResult>
 }
 
-export async function prepareReturnUpdateRequest(id: number | string, payload: ReturnPayload = {}): Promise<PreparedReturnUpdateRequest> {
+export async function prepareReturnUpdateRequest(_id: number | string, payload: ReturnPayload = {}): Promise<PreparedReturnUpdateRequest> {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return-edit')
   return body as PreparedReturnUpdateRequest
 }

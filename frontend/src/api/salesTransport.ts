@@ -159,7 +159,7 @@ export function getSaleLineReceipt(id: number | string, kind: 'add_items' | 'ame
 }
 
 export async function prepareSaleStatusRequest(
-  id: number | string,
+  _id: number | string,
   saleStatus: unknown,
   notes?: unknown,
   // Cancellation payload (Part 383): cancel_reason / cancel_note /

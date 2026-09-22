@@ -90,10 +90,6 @@ This folder is the browser-side transport layer for Business OS.
   - notification summary polling, cooldown-aware fallback, and request sharing
   - keeps transient notification availability mechanics outside the large domain registry
 
-- `expectedUpdatedAt.ts`
-  - optimistic-update payload helpers for row and settings writes
-  - keeps updated-at conflict metadata lookup outside the large domain registry
-
 - `requestIds.ts`
   - idempotency key helpers for write payloads
   - keeps client request-id creation and trimming consistent across products, POS, contacts, inventory, and returns

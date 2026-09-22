@@ -214,23 +214,10 @@ assert.equal(emptyExportRow.customer_address, '', 'an empty options array export
 // same defect in a different container.
 assert.match(salesRoutes, /customer_address: index === 0 \? contactDisplayAddress\(sale\.customer_address\)/, 'the sales export must emit the display address')
 
-// The OFFLINE MIRROR is both. attachSaleCustomer writes the linked customer's
-// columns into the local sales table, and the sale detail reads that copy when
-// the network is down -- so mirroring customers.address raw put the options
-// JSON back on the screen the moment the device went offline, even though the
-// server had stored the display address. Same for the optimistic snapshot the
-// failure path attaches.
-const salesTransport = read('src/api/salesTransport.ts')
-assert.match(
-  salesTransport,
-  /customer_address: contactDisplayAddress\(result\?\.customer\?\.address\) \|\| null/,
-  'the offline mirror must store the display address, matching what the server wrote',
-)
-assert.match(
-  salesTransport,
-  /customer_address: contactDisplayAddress\(payload\?\.customer_address\) \|\| ''/,
-  'the attempted-write snapshot must carry the display address too',
-)
+// The offline-mirror writer (salesTransport attachSaleCustomer) was removed on
+// 22 Sep 2026: no screen called it, so the client keeps no copy of the address
+// that could drift from what the server wrote.
+assert.doesNotMatch(read('src/api/salesTransport.ts'), /attachSaleCustomer/, 'no client-side sale/customer mirror writer remains')
 
 // And the server does not trust the client: a shell built before this change,
 // or a sale it queued offline and replayed afterwards, still sends the raw

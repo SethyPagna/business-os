@@ -15,6 +15,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
+import { isWriteConflictError } from '../../api/http.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
@@ -928,6 +929,10 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     } catch (error: unknown) {
       const duplicateCheck = readContactDuplicateDecisionError(error)
       if (duplicateCheck) return { duplicateDecisionRequired: duplicateCheck }
+      // A refused version: refresh the list so the row, and the form it
+      // reopens with, carry the version that won instead of replaying the
+      // one this screen loaded with.
+      if (isWriteConflictError(error)) void load({ silent: true, label: 'Delivery contacts conflict reload' })
       notify(getErrorMessage(error, 'Failed'), 'error')
       return { success: false }
     }

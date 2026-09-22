@@ -2,19 +2,25 @@
 //
 // Owner report, 22 Sep 2026: product edits, image saves, deletes and other
 // changes were refused as "changed on another device" with an "expected"
-// version days old. Root cause, class-wide: `frontend/src/api/expectedUpdatedAt.ts`
-// filled a missing version from the Dexie mirror tables, and the live app has
-// not rewritten those mirrors since 12 Sep 2026 (`localMirrors.ts`
-// `shouldPersistLocalMirror` is false on any http(s) origin), so every token it
-// produced was frozen at the last offline snapshot -- or empty for a row the
-// snapshot never held. The settings variant read a device-local `settings_meta`
-// row with the same defect.
+// version days old, and a refused save gave no way forward but a full reload.
 //
-// The fix deletes that seam: transports send the payload they are given
-// (synchronously, no mirror read on the request path), each caller passes the
-// `updated_at` of the record its form or row shows, and a write with no
-// version is checked by nothing server-side (`assertUpdatedAtMatch` no-ops on
-// an empty token) rather than refused on a stale one.
+// What was wrong, as a class. The token a guarded write sent was whatever
+// `updated_at` rode along in the form payload -- the record the screen loaded
+// with (a list on a phone kept open for days, or a restored autosaved draft) --
+// and nothing ever refreshed it. Where the payload had no `updated_at`,
+// `frontend/src/api/expectedUpdatedAt.ts` filled one from a Dexie mirror row
+// the live app stopped rewriting on 12 Sep 2026 (`localMirrors.ts`
+// `shouldPersistLocalMirror` is false on any http(s) origin): stale where a
+// row existed, absent otherwise. The settings variant read a device-local
+// `settings_meta` row with a wrong-scope global version.
+//
+// The fix: that helper is deleted and transports send the payload they are
+// given (no mirror read on the request path); each caller passes the
+// `updated_at` of the record its form or row shows, explicitly; a refused
+// product save re-reads the row into the open form AND the list; a refused
+// contact save reloads the list; a write with no version is checked by nothing
+// server-side (`assertUpdatedAtMatch` no-ops on an empty token) rather than
+// refused on a stale one.
 //
 // Pinned here, each with a negative control where a wrong shape is cheap to
 // build:
@@ -24,7 +30,9 @@
 //      apiFetch, send exactly what the caller passed;
 //   3. the callers that had no version now pass the screen's: branch save,
 //      promotion discount save, role delete, contact deletes (single + bulk),
-//      product undo/redo restore and delete-redo.
+//      product undo/redo restore and delete-redo;
+//   4. a refused product save re-reads the row into `selected` and the list,
+//      and a refused contact save reloads its list.
 //
 // Run: node tests/writeVersionFromScreen.test.ts
 import assert from 'node:assert/strict'
@@ -127,12 +135,25 @@ for (const [file, single, bulk] of [
   ok(/const snapshotById = new Map\(snapshots\.map\(\(row\) => \[Number\(row\.id\), row\]\)\)/.test(read(file)), `${path.basename(file)}: bulk versions come from the pre-delete snapshots`)
 }
 const products = read('src/components/products/Products.tsx')
-ok(/productApi\.updateProduct\(productId, \{ \.\.\.payload, expectedUpdatedAt: currentProduct\.updated_at \|\| undefined \}\), 'Restore product'\)/.test(products),
+ok(/payload\.expectedUpdatedAt = currentProduct\.updated_at \|\| undefined\s*\n\s*await runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/.test(products),
   'undo/redo restore writes over the version it just re-read')
 ok(/const latestById = buildProductIdMap\(await fetchProductsByIds\(idsToDelete\)\)[\s\S]{0,200}productApi\.deleteProduct\(id, reason, latestById\.get\(Number\(id\)\)\?\.updated_at\)/.test(products),
   'bulk delete redo re-reads the rows and passes their versions')
 ok(/const \[latest\] = await fetchProductsByIds\(\[targetId\]\)\s*\n\s*const result = await runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(targetId, reason, latest\?\.updated_at\)/.test(products),
   'single delete redo re-reads the row and passes its version')
+// ── 4. a refused write refreshes what the screen holds ──────────────────────
+pin('src/components/products/Products.tsx',
+  /isWriteConflictError\(e\)\) \{\s*\n\s*const conflictedId = selected\.id\s*\n\s*void fetchProductsByIds\(\[conflictedId\]\)\s*\n\s*\.then\(\(\[latest\]\) => \{\s*\n\s*if \(!latest\) return\s*\n\s*patchProductRow\(latest\)\s*\n\s*if \(productSaveFormRef\.current\.revision === formRevision\) setSelected\(latest\)/,
+  'a refused product save re-reads the row into the list AND the open form', (s) => s.replace(/\r?\n\s*patchProductRow\(latest\)/, ''))
+for (const [file, label] of [
+  ['src/components/contacts/CustomersTab.tsx', 'Customers'],
+  ['src/components/contacts/SuppliersTab.tsx', 'Suppliers'],
+  ['src/components/contacts/DeliveryTab.tsx', 'Delivery contacts'],
+] as const) {
+  pin(file, new RegExp(`if \\(isWriteConflictError\\(error\\)\\) void load\\(\\{ silent: true, label: '${label} conflict reload' \\}\\)`),
+    `${path.basename(file)}: a refused save reloads the list so the reopened form carries the version that won`,
+    (s) => s.replace(/\r?\n\s*if \(isWriteConflictError\(error\)\) void load\([^\n]*/, ''))
+}
 // Contact edit forms initialise from the row, so their PUT body carries the
 // row's `updated_at` and the Worker reads that as the token.
 ok(/const initial = customer\b/.test(read('src/components/contacts/CustomerFormModal.tsx')), 'the customer form opens from the listed row (its updated_at rides in the payload)')
