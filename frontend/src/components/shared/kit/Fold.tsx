@@ -93,6 +93,24 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
   const pushedHistoryRef = useRef(false)
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  // THE close contract, and why `onClose` may never be an effect dependency.
+  //
+  // Every caller passes an inline arrow (`onClose={() => setOpenRow(null)}`),
+  // so its identity changes on EVERY render of the owning view -- including
+  // renders that have nothing to do with this panel (the app shell toggles
+  // its mobile header on scroll, App.tsx `handleScroll` -> `setVisible`,
+  // which re-renders the whole page under the fold). With `onClose` in the
+  // history effect's deps that re-render tore the effect down and back up:
+  // the cleanup called `history.back()` and the new body pushed a fresh
+  // entry, so the traversal's `popstate` landed on the NEW listener and
+  // closed the panel. Net effect for the user: scrolling/moving the page
+  // auto-closed an open detail float (owner, Sep 22: "when open as a float,
+  // click outside/click close to close... currently if i move it just auto
+  // close"). A ref keeps the latest handler reachable while the effects stay
+  // bound to `open` alone, so the ONLY things that close a fold are the
+  // header X, an outside press, Escape and the browser's own Back.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
@@ -103,28 +121,40 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
   // Anchor position (desktop only) + outside-click / Escape handling.
   useEffect(() => {
     if (!open) return undefined
-    if (!isMobile && anchorRef?.current) {
-      setAnchorRect(anchorRef.current.getBoundingClientRect())
+    const track = () => {
+      const anchor = anchorRef?.current
+      if (anchor) setAnchorRect(anchor.getBoundingClientRect())
     }
+    if (!isMobile) track()
     const closeIfOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
       if (panelRef.current?.contains(target)) return
       if (anchorRef?.current?.contains(target)) return
-      onClose()
+      onCloseRef.current()
     }
     const closeIfEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') onCloseRef.current()
     }
     document.addEventListener('mousedown', closeIfOutside)
     document.addEventListener('touchstart', closeIfOutside)
     document.addEventListener('keydown', closeIfEscape)
+    // A scroll MOVES the anchored panel with its row; it never closes it.
+    // Capture, because the scrolling node is the nested `.page-scroll`
+    // container and scroll events do not bubble (same technique AppSelect/
+    // PortalMenu use).
+    if (!isMobile) {
+      document.addEventListener('scroll', track, true)
+      window.addEventListener('resize', track)
+    }
     return () => {
       document.removeEventListener('mousedown', closeIfOutside)
       document.removeEventListener('touchstart', closeIfOutside)
       document.removeEventListener('keydown', closeIfEscape)
+      document.removeEventListener('scroll', track, true)
+      window.removeEventListener('resize', track)
     }
-  }, [open, isMobile, anchorRef, onClose])
+  }, [open, isMobile, anchorRef])
 
   // Focus trap + return focus.
   useEffect(() => {
@@ -165,7 +195,7 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
     pushedHistoryRef.current = true
     const onPopState = () => {
       pushedHistoryRef.current = false
-      onClose()
+      onCloseRef.current()
     }
     window.addEventListener('popstate', onPopState)
     return () => {
@@ -175,7 +205,10 @@ export default function Fold({ open, onClose, title, actions, children, anchorRe
         window.history.back()
       }
     }
-  }, [open, onClose])
+    // `open` ONLY -- see the onCloseRef note above: a changing handler
+    // identity here pushed and popped one history entry per render, and the
+    // popstate that produced closed the panel.
+  }, [open])
 
   if (!open || typeof document === 'undefined') return null
 
