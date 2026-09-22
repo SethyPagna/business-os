@@ -167,7 +167,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/catalogCostRecompute') return { recomputeCatalogCost: asyncNoop }
   // Migration 0192: this fixture posts no client_request_id, so the per-line
   // receipt guard must hand straight through to the kernel.
-  if (id === '../lib/stockMutationReceipt') return { withStockMutationReceipt: (_db, _actor, _kind, _body, _json, run) => run() }
+  if (id === '../lib/stockMutationReceipt') return { withStockMutationReceipt: (_db, _actor, _kind, _body, _json, run) => run(async () => {}) }
   throw new Error(`unexpected inventory route import ${id}`)
 }
 const inventoryRoute = loadModule('routes/inventory.ts', inventoryRequire)

@@ -209,6 +209,27 @@ function receiptCount(db) {
   return Number(row?.n ?? 0)
 }
 
+function receiptRow(db) {
+  return db.prepare('SELECT written, response_status, completed_at FROM stock_mutation_receipts').get({})
+}
+
+// A database that fails one specific statement, so a kernel can be made to
+// die exactly where a real one does: AFTER the stock write, not before it.
+function faultyDb(db, match) {
+  return {
+    prepare(sql) {
+      if (sql.includes(match)) {
+        const boom = () => { throw new Error(`injected failure on ${match}`) }
+        return { get: boom, all: boom, run: boom }
+      }
+      return db.prepare(sql)
+    },
+    batch: (items) => db.batch(items),
+    transaction: (fn) => db.transaction(fn),
+    raw: db.raw,
+  }
+}
+
 // The real 0192 text, so the re-probe case re-applies exactly what the owner would.
 function migration0192Sql() {
   const file = path.join(root, 'migrations', '0192_stock_mutation_receipts.sql')
@@ -422,6 +443,45 @@ async function run() {
     assert.equal(empty.status, 200, 'CONTROL: an EMPTY id means "no id", the pre-0192 path')
     assert.equal(branchStock(db), 5, 'CONTROL: and writes')
     console.log('PASS an unusable client_request_id is a 400, never silently unprotected')
+  }
+
+  // E1 -- THE KERNEL THAT WRITES AND THEN FAILS. runAdjustAction moves
+  //    stock and only afterwards writes the movement row, recomputes the
+  //    catalog cost and (for a tagged restock) holds the units. A failure
+  //    there used to RELEASE the claim, so the retry applied the delta a
+  //    second time -- the guard looked green and the shelf was still wrong.
+  {
+    const db = freshDb()
+    const c = makeContext(faultyDb(db, 'INSERT INTO inventory_movements'))
+    let threw = false
+    try { await runAdjustAction(c, addBody('stockline_77777777-dead')) } catch { threw = true }
+    assert.equal(threw, true, 'the kernel really did die after its write')
+    assert.equal(branchStock(db), 5, 'and the stock write really did land')
+    const stranded = receiptRow(db)
+    assert.equal(Number(stranded.written), 1, 'the receipt records that stock moved')
+    assert.ok(stranded.completed_at, 'and is completed rather than released')
+
+    const retry = await runAdjustAction(makeContext(db), addBody('stockline_77777777-dead'))
+    assert.equal(retry.status, 409, 'THE FIX: the retry is refused, not re-applied')
+    assert.equal((await jsonOf(retry)).code, 'stock_request_partially_applied', 'and names what happened')
+    assert.equal(branchStock(db), 5, 'THE FIX: stock stays at 5 -- before this it went to 10')
+    console.log('PASS a kernel that wrote stock and then failed refuses the retry')
+  }
+
+  // CONTROL for the case above. A failure BEFORE the write must still release,
+  //    or the ordinary fix-and-retry loop would be broken by the fix.
+  {
+    const db = freshDb()
+    const c = makeContext(faultyDb(db, 'SELECT id, name FROM branches'))
+    let threw = false
+    try { await runAdjustAction(c, addBody('stockline_77777777-beef')) } catch { threw = true }
+    assert.equal(threw, true, 'the kernel died before writing')
+    assert.equal(branchStock(db), 0, 'CONTROL: nothing was written')
+    assert.equal(receiptCount(db), 0, 'CONTROL: the claim was released')
+    const retry = await runAdjustAction(makeContext(db), addBody('stockline_77777777-beef'))
+    assert.equal(retry.status, 200, 'CONTROL: the same id retries cleanly')
+    assert.equal(branchStock(db), 5, 'CONTROL: and applies exactly once')
+    console.log('PASS a failure before the write still releases the claim (control)')
   }
 
   console.log('\nAll stock mutation receipt assertions passed')

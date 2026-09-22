@@ -10,6 +10,16 @@
 -- because transfer receipts carry provenance triggers a stock line has no
 -- answer for.
 --
+-- `written` is what makes the guard honest for a kernel that writes stock and
+-- THEN fails (a "not found after commit" 400, a catalog-cost recompute that
+-- throws, a tagged-hold that is refused after the receipt landed). The
+-- wrapper sets it to 1 immediately before the kernel's first stock-mutating
+-- statement, so:
+--   written = 0 + failure  -> the claim is DELETED; the same id retries cleanly
+--   written = 1 + failure  -> the failure is stored as a completed receipt and
+--                             a retry answers 409 stock_request_partially_applied
+--                             instead of applying the delta a second time.
+--
 -- Schema-only. No product, stock, batch, movement, audit or history backfill.
 -- Pre-assert:  SELECT COUNT(*) FROM sqlite_master WHERE name='stock_mutation_receipts'
 --              is 0; counts and sums in products,
@@ -44,6 +54,7 @@ CREATE TABLE stock_mutation_receipts (
   request_id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('adjust', 'receive')),
   request_json TEXT NOT NULL,
+  written INTEGER NOT NULL DEFAULT 0,
   response_status INTEGER,
   response_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
