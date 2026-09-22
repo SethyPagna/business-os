@@ -82,27 +82,37 @@ function canonicalStockMutationRequest(body: Record<string, unknown>): string {
 }
 
 // Migration 0192 may not be applied where this Worker is running (the repo
-// ships migrations ahead of the applied chain on purpose). Detect once per
-// isolate and fall back to the exact pre-0192 behaviour -- never refuse a
-// stock write because the receipt table is missing.
-let schemaReady: boolean | null = null
+// ships migrations ahead of the applied chain on purpose). Fall back to the
+// exact pre-0192 behaviour -- never refuse a stock write because the receipt
+// table is missing.
+//
+// ONLY THE POSITIVE RESULT IS MEMOISED. Latching "absent" for the life of the
+// isolate meant that an isolate which happened to probe during the migration
+// (or during one transient D1 error) ran UNPROTECTED until it was recycled,
+// with no signal anywhere that it was doing so. A miss costs one cheap
+// sqlite_master count on the next request and buys a guard that starts working
+// the moment the table exists.
+let schemaReady = false
 
 /** Test-only: forget the memoised probe so one process can exercise both paths. */
 export function resetStockMutationReceiptSchemaProbe(): void {
-  schemaReady = null
+  schemaReady = false
 }
 
 async function receiptsAvailable(db: D1Compat): Promise<boolean> {
-  if (schemaReady != null) return schemaReady
+  if (schemaReady) return true
   try {
     const row = await db.prepare(
       "SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='stock_mutation_receipts'",
     ).get<{ ready: number }>()
-    schemaReady = Number(row?.ready ?? 0) > 0
+    if (Number(row?.ready ?? 0) > 0) {
+      schemaReady = true
+      return true
+    }
   } catch {
-    schemaReady = false
+    // A transient read failure is not evidence the table is missing; re-probe.
   }
-  return schemaReady
+  return false
 }
 
 type ReceiptRow = {
