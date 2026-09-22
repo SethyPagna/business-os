@@ -193,6 +193,32 @@ check('SECURITY: a redacted key records THAT it changed, never either value', ()
   assert.ok(!serialized.includes('old-token-value') && !serialized.includes('new-token-value'))
 })
 
+check('E8: future encryption/signing key shapes are masked before one exists', () => {
+  for (const key of ['encryption_key', 'signing_key', 'webhook_key', 'key', 'passphrase']) {
+    assert.equal(isSecretShapedAuditKey(key), true, key + ' must never reach an audit row')
+    assert.equal(changedFields({ [key]: 'old' }, { [key]: 'new' }), null, key + ' must not produce a diff')
+  }
+  // Positive control: shapes that merely CONTAIN the letters are ordinary
+  // fields and must still be recorded, or the rule is masking real edits.
+  for (const key of ['keyboard_label', 'turkey', 'monkey_bar', 'key_visual_note']) {
+    assert.equal(isSecretShapedAuditKey(key), false, key + ' is an ordinary field')
+    assert.ok(changedFields({ [key]: 'old' }, { [key]: 'new' }), key + ' must still be recorded')
+  }
+})
+
+check('a value too large to render is stored as its length and digest, not twice', () => {
+  const small = 'x'.repeat(29)
+  const big = 'y'.repeat(8887)
+  const other = 'z'.repeat(8887)
+  const change = changedFields({ receipt_template: small }, { receipt_template: big })
+  assert.equal(change.before.receipt_template, small, 'a small side is still stored verbatim')
+  assert.match(String(change.after.receipt_template), /^\(8887 chars, #[0-9a-f]{8}\)$/)
+  // Discriminating: two same-length but different blobs must not summarize
+  // to the same text, or the digest is decorative.
+  const otherChange = changedFields({ receipt_template: big }, { receipt_template: other })
+  assert.notEqual(String(otherChange.before.receipt_template), String(otherChange.after.receipt_template))
+})
+
 check('isSecretShapedAuditKey names the shapes settings widens its own rule with', () => {
   assert.equal(isSecretShapedAuditKey('telegram_bot_token'), true)
   assert.equal(isSecretShapedAuditKey('admin_password'), true)

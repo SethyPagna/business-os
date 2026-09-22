@@ -85,7 +85,11 @@ const AUDIT_DIFF_IGNORED_KEYS = new Set(['id', 'created_at', 'updated_at', 'clie
 // Never recorded in an audit row under any circumstances: password hashes,
 // session/API tokens, raw credentials and inline binary blobs. This is a hard
 // stop, not a redaction -- the key does not appear at all.
-const AUDIT_NEVER_RECORDED = /(password|passcode|secret|token|api[_-]?key|private[_-]?key|credential|salt|_hash$|^hash$|blob|base64|data_url)/i
+// `_key$`/`^key$` is deliberately broader than the keys that exist today: it
+// pre-masks a future encryption_key / signing_key / webhook_key column instead
+// of waiting for one to leak into a row. The only current columns it catches
+// are derived lookup keys (products.name_key), which a diff excludes anyway.
+const AUDIT_NEVER_RECORDED = /(password|passcode|passphrase|secret|token|api[_-]?key|private[_-]?key|credential|salt|_key$|^key$|_hash$|^hash$|blob|base64|data_url)/i
 
 // Exposed so a caller with its own secret-key rule (settings' own
 // isSensitiveSettingKey) can widen it rather than restate it.
@@ -95,6 +99,30 @@ export function isSecretShapedAuditKey(key: string): boolean {
 
 export const AUDIT_REDACTED_BEFORE = '(hidden)'
 export const AUDIT_REDACTED_AFTER = '(hidden, changed)'
+
+// A single audit row is meant to be read by a person in a table. A receipt
+// template, a custom_fields JSON blob or a long description turns one row into
+// several kilobytes on each side, which the Audit Log cannot render usefully
+// anyway. Past this many characters the value is replaced by its length plus a
+// cheap digest -- enough to prove it changed and to tell two same-length values
+// apart, without storing the blob twice on every edit.
+export const AUDIT_LARGE_VALUE_CHARS = 2048
+
+// FNV-1a 32-bit: synchronous (crypto.subtle is async, and audit() must stay a
+// single round trip), allocation-free, and only ever used to say "these two
+// large values differ" -- never as a security primitive.
+function largeAuditValueDigest(text: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+export function summarizeLargeAuditValue(text: string): string {
+  return `(${text.length} chars, #${largeAuditValueDigest(text)})`
+}
 
 // Stable, order-independent text for comparison: two permission objects that
 // differ only in key order are the same permissions, and a boolean true and
@@ -151,8 +179,12 @@ export function changedFields(
       afterOut[key] = afterText === null ? null : AUDIT_REDACTED_AFTER
       continue
     }
-    beforeOut[key] = recordedAuditValue(beforeValue)
-    afterOut[key] = recordedAuditValue(afterValue)
+    beforeOut[key] = beforeText !== null && beforeText.length > AUDIT_LARGE_VALUE_CHARS
+      ? summarizeLargeAuditValue(beforeText)
+      : recordedAuditValue(beforeValue)
+    afterOut[key] = afterText !== null && afterText.length > AUDIT_LARGE_VALUE_CHARS
+      ? summarizeLargeAuditValue(afterText)
+      : recordedAuditValue(afterValue)
   }
   if (!changed) return null
   // A delete (after === null) records the removed record as the before image
