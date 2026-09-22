@@ -687,6 +687,8 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
     search: c.req.query('search'),
     action: c.req.query('action'),
     entity: c.req.query('entity'),
+    // One record's trail, for the per-record Records / Field history floats.
+    entityId: c.req.query('entityId'),
     userId: ownOnly ? String(user?.id ?? '') : c.req.query('userId'),
     startDate: c.req.query('startDate'),
     endDate: c.req.query('endDate'),
