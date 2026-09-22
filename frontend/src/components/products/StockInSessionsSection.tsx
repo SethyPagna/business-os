@@ -354,7 +354,15 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
               const originTag = productOriginTag(row, tr)
               return <tr key={lineKey(row)} className={selectedLine === row ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}>
                 <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0 whitespace-normal"><span className="flex min-w-0 flex-wrap items-center gap-1"><span className="break-words font-semibold">{row.product_name}</span>{originTag ? <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all dense-id text-gray-400">{row.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}</span>{[row.unit, row.tag_label].filter(Boolean).length ? <span className="block break-words text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span> : null}</span></button></td>
-                <td><span className="dense-cell-truncate dense-id">{row.batch_id || '—'}</span></td>
+                {/* The column header says Received date, so the cell shows the
+                    received-date LABEL -- the same `batchDisplayLabel` this
+                    session's own detail panel below and the Stock Changes
+                    ledger use -- rather than the raw batch id. It scrolls like
+                    every other lot label; before this it was the one dense cell
+                    in the app with neither a title nor `data-reveal-text`, so
+                    the shared reveal controller never matched it and its
+                    ellipsis was a dead end. */}
+                <td><span className="detail-scroll-text dense-id">{row.batch_id ? batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr('batch', 'Received date')) : '—'}</span></td>
                 <td><span className="detail-scroll-text text-gray-500">{row.reason || '—'}</span></td>
                 <td className="text-right font-bold tabular-nums text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</td>
                 {canViewCosts ? <td className="text-right tabular-nums">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)}`}</td> : null}
