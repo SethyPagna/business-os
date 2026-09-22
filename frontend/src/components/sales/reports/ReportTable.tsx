@@ -267,11 +267,25 @@ export default function ReportTable<Row>({
                 className={[onRowClick ? 'cursor-pointer hover:!bg-[var(--ui-accent-soft)]' : '', selected ? '!bg-[var(--ui-accent-soft)]' : ''].join(' ').trim()}
                 onClick={onRowClick ? (e) => onRowClick(row, e.currentTarget) : undefined}
               >
-                {visibleColumns.map((c) => (
-                  <td key={c.key} className={[isNumericKind(c.kind) ? 'text-right whitespace-nowrap' : 'max-w-[200px] truncate', c.emphasis ? 'font-semibold' : '', !c.emphasis && isCountKind(c.kind) ? 'text-[var(--ui-ink-2)]' : ''].join(' ').trim()} title={c.kind === 'text' || !c.kind ? String(c.value(row) ?? '') : undefined}>
-                    {formatCell(c, row, fmtMoney)}
-                  </td>
-                ))}
+                {visibleColumns.map((c) => {
+                  const numeric = isNumericKind(c.kind)
+                  return (
+                    // A text cell is a NAME cell here (product, customer,
+                    // cashier, courier, reason, receipt). It used to be
+                    // `max-w-[200px] truncate` plus a `title`, i.e. an
+                    // ellipsis whose only reveal was the browser's own
+                    // tooltip -- which disappears the moment the pointer
+                    // moves (owner, Sep 22: "product names are using
+                    // elipses when too long, remember we don't do that. we
+                    // do scroll left and right"). The shared
+                    // `.detail-scroll-text` (styles/main.css) keeps the
+                    // whole name on one line and scrolls it sideways, so
+                    // nothing is hidden and nothing has to be hovered.
+                    <td key={c.key} className={[numeric ? 'text-right whitespace-nowrap' : 'max-w-[200px]', c.emphasis ? 'font-medium' : '', !c.emphasis && isCountKind(c.kind) ? 'text-[var(--ui-ink-2)]' : ''].join(' ').trim()}>
+                      {numeric ? formatCell(c, row, fmtMoney) : <span className="detail-scroll-text">{formatCell(c, row, fmtMoney)}</span>}
+                    </td>
+                  )
+                })}
               </tr>
             )
           })}

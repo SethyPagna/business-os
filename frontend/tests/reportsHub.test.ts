@@ -837,8 +837,15 @@ test('every --ui-* token the reports surface reads is declared, and the density 
   assert.match(css, /--ui-size-body:\s*12px/, 'body text is 12px (was 13px)')
   assert.match(css, /--ui-size-meta:\s*11px/, 'meta text is 11px (was 12px)')
   assert.match(css, /--ui-cell-px:\s*6px/, 'cell padding is 6px a side (was 12px)')
-  assert.match(css, /@media screen\s*\{[\s\S]*?--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\)[\s\S]*?--ui-size-meta:\s*calc\(13px \* var\(--ui-km-boost, 1\)\)/, 'screen report text and figures are two pixels larger at compact widths')
-  assert.match(css, /@media screen and \(min-width: 1024px\)\s*\{[\s\S]*?--ui-size-body:\s*calc\(16px \* var\(--ui-km-boost, 1\)\)[\s\S]*?--ui-size-meta:\s*calc\(15px \* var\(--ui-km-boost, 1\)\)/, 'screen report text and figures stay two pixels larger at desktop widths')
+  // A Sep 11 pass added a SECOND, screen-only copy of the size tokens two
+  // pixels above the document scale (12 -> 14 compact, 14 -> 16 desktop).
+  // The owner's answer on Sep 22 was "the size is too big... can make it
+  // manageable", so that bump is gone and the scale declared above is the
+  // only one. Khmer still reads larger -- that is `--ui-km-boost`, pinned
+  // separately below and untouched by this.
+  assert.doesNotMatch(css, /@media screen\s*\{/, 'no screen-only size bump above the document scale')
+  assert.doesNotMatch(css, /--ui-size-body:\s*calc\(16px/, 'report body type never reaches 16px')
+  assert.match(css, /@media \(min-width: 1024px\)[\s\S]*?--ui-size-body:\s*calc\(14px \* var\(--ui-km-boost, 1\)\)/, 'the desktop tier remains the largest Latin size in the surface')
 })
 
 test('report title rows omit the redundant report Info button', () => {
@@ -921,9 +928,21 @@ test('Khmer keeps a line box tall enough that truncating cells cannot shear it',
 test('the receipt style puts the label and its value on a bounded line, and keeps Khmer out of the mono stack', () => {
   const sheet = read('src/components/sales/reports/ReceiptSheet.tsx')
   // A full-bleed tape flung the label to the far left and the number to the
-  // far right; the cap is what makes them "much closer" on a wide phone.
-  assert.ok(sheet.includes('max-w-[26rem]'), 'the one-tape layout is width-capped')
-  assert.ok(sheet.includes('md:max-w-none'), 'the cap is lifted where the grid already bounds each card')
+  // far right; the cap is what makes them "much closer" on a wide phone. The
+  // cap and the multi-card grid moved OUT of Tailwind's viewport variants
+  // and into container queries on the sheet itself (reports-surface.css):
+  // the same sheet is drawn inside a 320px detail float, where `md:` was
+  // measuring the 1280px window and laying three ~90px columns -- the
+  // "opened details are unreadable.. broken" report of Sep 22.
+  const css = read(SURFACE_CSS)
+  // Comments stripped first: the file explains the viewport variants it no
+  // longer uses, and naming them in prose must not read as using them.
+  const sheetCode = sheet.replace(/^\s*\/\/.*$/gm, '')
+  assert.ok(!/md:grid|xl:grid-cols|md:max-w-none/.test(sheetCode), 'the sheet never lays itself out from the viewport width')
+  assert.match(css, /\.report-receipt-sheet\s*\{[^}]*container-type:\s*inline-size/, 'the sheet is its own query container')
+  assert.match(css, /\.report-receipt-body > \*\s*\{[^}]*max-width:\s*26rem/, 'the one-tape layout is width-capped')
+  assert.match(css, /@container \(min-width: 40rem\)[\s\S]*?\[data-receipt-layout='cards'\] > \.report-receipt-body\s*\{[\s\S]*?grid-template-columns/, 'cards go side by side only once the SHEET is wide')
+  assert.match(css, /@container \(min-width: 40rem\)[\s\S]*?max-width:\s*none/, 'the cap is lifted where the grid already bounds each card')
   // `font-mono` on the container put Khmer labels into a stack with no Khmer
   // coverage, so they fell back per glyph at a different metric inside a
   // truncate box. Mono belongs on the numbers only.

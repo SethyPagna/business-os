@@ -203,20 +203,15 @@
   --ui-font-display: inherit;
 }
 
-/* Screen reports are read as documents, so their text and tabular figures
-   run two pixels larger than the original dense spreadsheet scale. Keep the
-   override explicitly screen-only: receipt/report print geometry continues
-   to use the established tokens and line boxes. */
-@media screen {
-  [data-reports-hub],
-  .reports-fold-panel,
-  [data-reports-fold] {
-    --ui-size-body: calc(14px * var(--ui-km-boost, 1));
-    --ui-size-meta: calc(13px * var(--ui-km-boost, 1));
-    --ui-size-h2: calc(17px * var(--ui-km-boost, 1));
-    --ui-size-h3: calc(16px * var(--ui-km-boost, 1));
-  }
-}
+/* SIZE, and the screen-only bump that used to sit here.
+   A Sep 11 pass added a second, screen-only copy of these four tokens two
+   pixels above the scale below (12 -> 14 on phones, 14 -> 16 from 1024px),
+   on the argument that "reports are read as documents". The owner's answer
+   on Sep 22 was "the size is too big... can make it manageable", so that
+   bump is gone and the document scale declared above/below is the only one.
+   Khmer still reads larger than Latin -- that is `--ui-km-boost` (1.2) at
+   the bottom of this file, which was a separate owner request and is
+   untouched. */
 
 /* ---------------------------------------------------------------------------
    .report-segment -- THE segment shell (owner, Sep 6: "use borders for all
@@ -240,6 +235,83 @@
   background: var(--ui-surface);
   padding: 5px 7px;
 }
+
+/* ---------------------------------------------------------------------------
+   THE RECEIPT SHEET'S CARD GRID -- measured on the SHEET, not the window.
+
+   ROOT CAUSE of "when i click on the reports rows the opened details are
+   unreadable.. broken" (owner, Sep 22). ReceiptSheet carried
+   `md:grid md:grid-cols-2 xl:grid-cols-3 md:max-w-none`, i.e. VIEWPORT media
+   queries. Every row detail in this surface (GroupedReport, PeriodReport,
+   SalesListReport, ReturnsReport, ExpensesReport, and the Overview
+   breakdowns) draws that same sheet inside a Fold panel 320-448px wide. On a
+   desktop the window is >=1280px, so the sheet inside that panel went to
+   THREE columns of ~90px: each label track collapsed to a couple of
+   characters and the figures wrapped under them. The panel was the width
+   that mattered and nothing was measuring it.
+
+   A container query measures the box the sheet is actually in, so the same
+   component is one tape in a detail float and a multi-card grid in the full
+   report frame. Where `@container` is unsupported the base rule stands --
+   one readable tape, never the broken grid.
+
+   The 26rem tape cap lives on the BLOCKS, not on the sheet: capping the
+   queried element would have frozen its own container size at 416px and the
+   grid state could never be reached. */
+.report-receipt-sheet {
+  container-type: inline-size;
+  min-width: 0;
+  width: 100%;
+}
+
+.report-receipt-body > * {
+  max-width: 26rem;
+}
+
+@container (min-width: 40rem) {
+  [data-receipt-layout='cards'] > .report-receipt-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  [data-receipt-layout='cards'] > .report-receipt-body > * {
+    max-width: none;
+    margin-top: 0;
+  }
+}
+
+@container (min-width: 64rem) {
+  [data-receipt-layout='cards'] > .report-receipt-body {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Names never end in an ellipsis on this surface (owner, Sep 22: "product
+   names are using elipses when too long, remember we don't do that. we do
+   scroll left and right"). The scroller itself is the app-wide
+   `.detail-scroll-text` in styles/main.css -- one implementation, already
+   used by the product detail surfaces -- so only the two things this surface
+   owns are declared here: the cell box it has to fit inside, and the Khmer
+   line box (an `overflow-x` scroller cannot keep `overflow-y: visible`, so
+   the height has to be bought with padding; same argument as the `.truncate`
+   rule at the bottom of this file). */
+[data-reports-hub] td > .detail-scroll-text,
+.reports-fold-panel .detail-scroll-text {
+  max-width: 100%;
+}
+
+/* The fold's own header carries the record's NAME (a product, a period, a
+   receipt). The kit gives that heading `truncate`; on this surface it
+   scrolls instead. */
+.reports-fold-panel > div > h3 {
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.reports-fold-panel > div > h3::-webkit-scrollbar { display: none; }
 
 /* A segment's two STATE tints have to be declared HERE, not as Tailwind
    background utilities on the element.
@@ -628,17 +700,6 @@
   }
 }
 
-@media screen and (min-width: 1024px) {
-  [data-reports-hub],
-  .reports-fold-panel,
-  [data-reports-fold] {
-    --ui-size-body: calc(16px * var(--ui-km-boost, 1));
-    --ui-size-meta: calc(15px * var(--ui-km-boost, 1));
-    --ui-size-h2: calc(19px * var(--ui-km-boost, 1));
-    --ui-size-h3: calc(17px * var(--ui-km-boost, 1));
-  }
-}
-
 /* Wide desktop: the 1024 clamp saturates at 48px from 1600px, which reads as
    almost no margin once a >=1280 monitor is the norm (user, Sep 6: "more
    side margin on large screens"). These two tiers only ADD to the 1024 rule
@@ -749,9 +810,17 @@ body.lang-km [data-reports-fold] .text-sm {
 }
 
 /* A truncating cell is the clip site: keep it single-line and elliptical, but
-   let the line box breathe so the ascender/descender ink stays inside it. */
+   let the line box breathe so the ascender/descender ink stays inside it.
+
+   A horizontally scrolling name cell (`.detail-scroll-text`, which replaced
+   the ellipsis on every name in this surface) is the SAME clip site: CSS
+   cannot keep `overflow-y: visible` next to `overflow-x: auto`, so its box
+   shears a Khmer cluster's superscript vowel and coeng subscript exactly the
+   way `.truncate` did unless the height is paid for. */
 body.lang-km [data-reports-hub] td.truncate,
-body.lang-km [data-reports-hub] .truncate {
+body.lang-km [data-reports-hub] .truncate,
+body.lang-km [data-reports-hub] .detail-scroll-text,
+body.lang-km .reports-fold-panel .detail-scroll-text {
   padding-block: 2px;
 }
 

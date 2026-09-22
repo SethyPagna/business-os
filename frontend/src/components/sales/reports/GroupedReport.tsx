@@ -103,25 +103,25 @@ function renderProductCard(row: ProductRow, tr: Tr, fmtMoney: (usd: number) => s
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[length:var(--ui-size-body,12px)] leading-[var(--ui-receipt-lh,16px)] [font-variant-numeric:tabular-nums]">
       <div className="min-w-0">
-        <div className="truncate text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('sales', 'Sales')}</div>
+        <div className="detail-scroll-text text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('sales', 'Sales')}</div>
         <div className="font-mono">{c.sales}</div>
       </div>
       <div className="min-w-0 text-right">
-        <div className="truncate text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('quantity', 'Quantity')}</div>
+        <div className="detail-scroll-text text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{tr('quantity', 'Quantity')}</div>
         <div className="font-mono">{c.quantity}</div>
       </div>
       <div className="col-span-2 mt-1 flex items-baseline justify-between gap-2 border-t border-[var(--ui-line-2)] pt-1">
-        <span className="min-w-0 truncate">{tr('rpt_line_sales', 'Line sales')}</span>
-        <span className="shrink-0 font-mono font-semibold">{c.lineSales}</span>
+        <span className="detail-scroll-text">{tr('rpt_line_sales', 'Line sales')}</span>
+        <span className="shrink-0 font-mono font-medium">{c.lineSales}</span>
       </div>
       {c.hasProfit ? (
         <>
           <div className="col-span-2 flex items-baseline justify-between gap-2 text-[var(--ui-ink-2)]">
-            <span className="min-w-0 truncate">{tr('cogs', 'COGS')}</span>
+            <span className="detail-scroll-text">{tr('cogs', 'COGS')}</span>
             <span className="shrink-0 font-mono">{c.cogs}</span>
           </div>
-          <div className="col-span-2 flex items-baseline justify-between gap-2 font-semibold">
-            <span className="min-w-0 truncate">{tr('rpt_gross_profit', 'Gross profit')}</span>
+          <div className="col-span-2 flex items-baseline justify-between gap-2 font-medium">
+            <span className="detail-scroll-text">{tr('rpt_gross_profit', 'Gross profit')}</span>
             <span className="shrink-0 font-mono">{c.profit} ({c.marginPct})</span>
           </div>
         </>
@@ -437,6 +437,11 @@ export default function GroupedReport(p: ReportViewProps) {
         open={!!open}
         onClose={() => setOpenKey(null)}
         anchorRef={anchorRef}
+        // A full income statement, not a two-line summary: 'lg' is the width
+        // the kit reserves for a multi-column body, and the 320px default put
+        // this statement's label/value pairs into a column the labels could
+        // not fit.
+        size="lg"
         title={open ? groupRowLabel(by, open, tr) : ''}
         actions={
           drill ? (

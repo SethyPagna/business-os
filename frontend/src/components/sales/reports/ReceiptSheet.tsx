@@ -54,7 +54,11 @@ const LINE_CLASS: Record<ReceiptLineKind, string> = {
   // The rule-over-totals border/margin moved to a spanning divider cell (see
   // the grid below) so it can cross both grid columns; this keeps only the
   // text treatment that belongs on each cell.
-  total: 'pt-1 font-semibold',
+  // 'medium', not 'semibold': a total line closes EVERY card in a list view
+  // as well as the statement's groups, so semibold here is bold repeated once
+  // per row (owner, Sep 22: 'the boldness, weight made it worse'). The rule
+  // above the line and the mono figure carry the hierarchy.
+  total: 'pt-1 font-medium',
   info: 'text-[var(--ui-ink-2)]',
   muted: 'text-[var(--ui-ink-3)]',
 }
@@ -67,6 +71,10 @@ function signOf(kind: ReceiptLineKind | undefined): string {
 
 export default function ReceiptSheet({ blocks, centered = false, className = '' }: ReceiptSheetProps) {
   return (
+    // The measured box. `container-type: inline-size` (reports-surface.css)
+    // makes it fill whatever width its host gives it -- the report frame, or
+    // a 320px detail float -- and the sheet below answers THAT width.
+    <div className="report-receipt-sheet" data-receipt-layout={centered ? 'statement' : 'cards'}>
     <div
       className={[
         // `font-mono` used to sit on the CONTAINER, which put every Khmer
@@ -86,19 +94,29 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
         // asked for line borders on every segment and for the report to stay
         // compact; the lines come from the frame and the cards, and the space
         // this wrapper was spending goes back to the content.
+        // `report-receipt-body` is what makes the multi-card layout answer to
+        // the width it ACTUALLY has (a container query in
+        // reports-surface.css) instead of the viewport's. The Tailwind
+        // `md:grid md:grid-cols-2 xl:grid-cols-3` this replaces measured the
+        // window, so the very same sheet drawn inside a 320px detail float on
+        // a 1280px desktop laid its blocks out in THREE ~90px columns -- the
+        // "opened details are unreadable / broken" the owner reported. The
+        // sheet is now two columns only when the sheet itself is wide.
+        'report-receipt-body',
         centered
           ? 'mx-auto w-full max-w-[420px]'
-          // One tape below 768px; from 768px each block becomes its own card in a
-          // grid so a wide screen shows several receipts side by side instead of
-          // one full-width column of mostly empty space.
+          // One tape while the sheet is narrow; once the sheet itself is wide
+          // enough each block becomes its own card in a grid, so a wide screen
+          // shows several receipts side by side instead of one full-width
+          // column of mostly empty space. Both the grid and the lifting of the
+          // 26rem cap are container queries now (see the class above).
           //
           // The tape is width-capped (26rem) rather than full-bleed: at
           // `justify-between` on a 900px-wide phone-landscape tape the label
           // sat at the far left and its number at the far right with a hand's
           // width of nothing between them (user, Part 586: "the fields and
-          // value can be closer much closer"). The cap is lifted at md, where
-          // the grid already bounds each card.
-          : 'w-full max-w-[26rem] md:max-w-none md:grid md:grid-cols-2 md:gap-1.5 xl:grid-cols-3',
+          // value can be closer much closer").
+          : 'w-full',
         className,
       ].join(' ').trim()}
     >
@@ -108,7 +126,14 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           <>
             {block.title != null || block.meta != null ? (
               <div className="flex items-baseline justify-between gap-2">
-                {block.title != null ? <div className="min-w-0 truncate font-semibold">{block.title}</div> : <span />}
+                {/* The block title is the record's NAME (a product, a
+                    customer, a courier, a receipt number). Names are never
+                    cut with an ellipsis on this project -- a long one scrolls
+                    sideways inside its own box (`detail-scroll-text`). Weight
+                    is `medium`, not `semibold`: in a list every card carries
+                    one, and a page of bold titles is the "boldness, weight
+                    made it worse" the owner reported. */}
+                {block.title != null ? <div className="detail-scroll-text font-medium">{block.title}</div> : <span />}
                 {block.meta != null ? <div className="shrink-0 text-[length:var(--ui-size-receipt-meta,11px)] text-[var(--ui-ink-3)]">{block.meta}</div> : null}
               </div>
             ) : null}
@@ -144,7 +169,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
                   return (
                     <Fragment key={line.key || i}>
                       {kind === 'total' ? <div className="col-span-2 mt-1 border-t border-[var(--ui-ink-3)]" /> : null}
-                      <span className={['min-w-0 truncate', cellClass].join(' ').trim()}>
+                      <span className={['detail-scroll-text', cellClass].join(' ').trim()}>
                         {signOf(kind === 'total' || kind === 'info' || kind === 'muted' ? undefined : kind)}{line.label}
                       </span>
                       <span className={[
@@ -183,7 +208,10 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           // Below md the sheet is one stacked tape (the grid's own gap takes
           // over from md up, where blocks sit side by side); the centered
           // statement never becomes a grid, so it keeps stacking.
-          index > 0 ? (centered ? 'mt-1.5' : 'mt-1.5 md:mt-0') : '',
+          // Stacked tape: every block after the first takes a top margin.
+          // In the container-query grid state reports-surface.css zeroes it
+          // again, because the grid's own gap separates the cards there.
+          index > 0 ? 'mt-1.5' : '',
           clickable ? 'w-full cursor-pointer text-left hover:bg-[var(--ui-surface-2)]' : '',
         ].join(' ').trim()
         // Selected / highlighted are DATA ATTRIBUTES, not background
@@ -213,6 +241,7 @@ export default function ReceiptSheet({ blocks, centered = false, className = '' 
           </div>
         )
       })}
+      </div>
     </div>
   )
 }

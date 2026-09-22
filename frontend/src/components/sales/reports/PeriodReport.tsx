@@ -186,6 +186,8 @@ export default function PeriodReport(p: ReportViewProps) {
         open={!!openRow}
         onClose={() => setOpenRow(null)}
         anchorRef={anchorRef}
+        // Same statement body as the grouped views -- same wide panel.
+        size="lg"
         title={openRow ? periodLabel(openRow, g, fmtDate) : ''}
         actions={
           openRow ? (
