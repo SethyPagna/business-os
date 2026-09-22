@@ -370,6 +370,9 @@ runTest('every stock surface routes its failure text through the shared helper',
   assert.match(source('components/products/forms/StockAdjustModal.tsx'), /stockFailureText\(error, tr, classified\.message\)/, 'StockAdjustModal')
   const bulk = source('components/products/forms/BulkAddStockModal.tsx')
   assert.match(bulk, /stockFailureText\(error, \(key, fallback\) => t\(key\) || fallback, failure\.message\)/, 'BulkAddStockModal')
+  // The parity gap the verifier found: this modal posted to the same route
+  // with no id at all.
+  assert.match(bulk, /client_request_id: row\.rowId,/, 'BulkAddStockModal must send the per-line dedup id')
 })
 
 runTest('the batched commit envelope carries the guard code back to the client', () => {

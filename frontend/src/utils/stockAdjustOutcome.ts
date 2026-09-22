@@ -9,11 +9,13 @@
 //
 // The three invariants the UI leans on:
 //   1. A row that reached 'done' is NEVER resubmitted. POST /api/inventory/adjust
-//      is a single-row, non-idempotent write (routes/inventory.ts:1284 --
-//      one product, one movement per call, no client request id honoured on
-//      that route), so double-apply is prevented on THIS side by excluding
-//      done rows from the retry set. `rowId` is the client-generated key that
-//      makes that exclusion stable across retries.
+//      is a single-row write: one product, one movement per call. Since
+//      migration 0192 it is ALSO server-side idempotent, but only for a
+//      request that carries a client_request_id -- so this side's exclusion of
+//      done rows is still the first line of defence and the only one an older
+//      Worker has. `rowId` is the client-generated key that makes the
+//      exclusion stable across retries, and it is the same value sent as
+//      client_request_id, so the two halves agree on what "the same row" is.
 //   2. A failure never clears a row's typed values -- only its `status` and
 //      `failure` change; `request` is carried through untouched.
 //   3. The server's own reason text is kept verbatim (the operator has to be
