@@ -168,10 +168,32 @@ function classInfo(attrs: string, attributeName = 'className'): { classText: str
 }
 
 /** A standalone `truncate`. `sm:truncate` wraps below sm -- the narrow screen,
- *  where the text is still fully readable -- and `dense-cell-truncate` is the
- *  dense-table contract that the shared reveal controller already serves. */
+ *  where the text is still fully readable. `dense-cell-truncate` is a SECOND
+ *  clip site with the same `text-overflow: ellipsis`, and it is audited by its
+ *  own whitelist in section 5 -- for one checkpoint it was audited by nothing
+ *  at all, which is how sixteen per-record values on four dense tables went on
+ *  being cut while this file reported green. */
 export function hasBareTruncate(classText: string): boolean {
   return classText.split(/\s+/).includes('truncate')
+}
+
+/** The dense-table clip site. Same ellipsis, different class. */
+export function hasDenseCellTruncate(classText: string): boolean {
+  return classText.split(/\s+/).includes('dense-cell-truncate')
+}
+
+/** Every .tsx under src/components, keyed the way `read()` takes them. */
+function walkComponents(): Array<[string, string]> {
+  const out: Array<[string, string]> = []
+  const walk = (dir: URL, prefix: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) { walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`); continue }
+      if (!/\.tsx$/.test(entry.name)) continue
+      out.push([`${prefix}${entry.name}`, fs.readFileSync(new URL(entry.name, dir), 'utf8').replace(/\r\n/g, '\n')])
+    }
+  }
+  walk(new URL('../src/components/', import.meta.url), 'components/')
+  return out
 }
 
 /** Every expression printed as a CHILD of the element whose content starts at
@@ -664,29 +686,23 @@ runTest('a clipping element never wraps a block-level scroller', () => {
   assert.ok(/none has a block-level child/.test(css), 'main.css must state the claim this check re-derives')
   let total = 0
   const blockChildren: string[] = []
-  const walk = (dir: URL): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const next = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, dir)
-      if (entry.isDirectory()) { walk(next); continue }
-      if (!/\.tsx$/.test(entry.name)) continue
-      const flat = flatten(fs.readFileSync(next, 'utf8').replace(/\r\n/g, '\n'))
-      let at = 0
-      while (at < flat.length) {
-        if (flat[at] !== '<') { at += 1; continue }
-        const tag = parseTag(flat, at)
-        if (!tag) { at += 1; continue }
-        at = tag.end
-        if (tag.closing) continue
-        const { classText } = classInfo(tag.attrs)
-        if (!/(^|\s)(\w+:)?truncate(\s|$)/.test(classText) && !classText.split(/\s+/).includes('dense-cell-truncate')) continue
-        total += 1
-        if (tag.selfClosing || !hasBareTruncate(classText)) continue
-        const inner = flat.slice(tag.end, flat.indexOf(`</${tag.name}>`, tag.end))
-        if (/detail-scroll-text/.test(inner)) blockChildren.push(`${entry.name}: ${classText.slice(0, 50)}`)
-      }
+  for (const [file, source] of walkComponents()) {
+    const flat = flatten(source)
+    let at = 0
+    while (at < flat.length) {
+      if (flat[at] !== '<') { at += 1; continue }
+      const tag = parseTag(flat, at)
+      if (!tag) { at += 1; continue }
+      at = tag.end
+      if (tag.closing) continue
+      const { classText } = classInfo(tag.attrs)
+      if (!/(^|\s)(\w+:)?truncate(\s|$)/.test(classText) && !hasDenseCellTruncate(classText)) continue
+      total += 1
+      if (tag.selfClosing || !hasBareTruncate(classText)) continue
+      const inner = flat.slice(tag.end, flat.indexOf(`</${tag.name}>`, tag.end))
+      if (/detail-scroll-text/.test(inner)) blockChildren.push(`${file}: ${classText.slice(0, 50)}`)
     }
   }
-  walk(new URL('../src/components/', import.meta.url))
   assert.deepEqual(blockChildren, [],
     'a truncating box must not contain the block-level scroller -- that is the one reflow `overflow: clip` would change')
   // The load-bearing half of that comment -- "none has a block-level child" --
@@ -698,7 +714,164 @@ runTest('a clipping element never wraps a block-level scroller', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 5. Ids keep their own contract: they wrap in full, they do not scroll
+// 5. The OTHER clip site: `.dense-cell-truncate`
+// ---------------------------------------------------------------------------
+
+// `.dense-cell-truncate` is `text-overflow: ellipsis` (main.css:1186) exactly
+// like `truncate` is, but it was outside every check in this file, and a
+// verifier found the consequence on the checkpoint the sweep above shipped in:
+// Stock Changes, Stock-in Sessions, Returns and Expenses were still cutting
+// product, supplier, customer, branch, cashier, user, lot and reason values
+// while this file reported the class closed. A blind spot is not fixed by a
+// second regex that guesses which identifiers look like names -- `label` and
+// `reason` defeat it in both directions. It is fixed by a WHITELIST: every
+// value printed inside a dense cell is named below with the kind that earns
+// it, so a name-like binding added tomorrow fails simply by not being there.
+//
+// The kinds, and why each is allowed to keep its ellipsis:
+//   'id'            -- a code, not a name. It reveals in full through the
+//                      shared controller on hover and press-and-hold.
+//   'figure'        -- a formatted number/time whose fuller form is the title.
+//   'language-pack' -- a caption from the pack, never a record's value. CHECKED.
+//   'enum-label'    -- a word the pack supplies for an ENUM column (a movement
+//                      type, a status). The field it reads is a code, so the
+//                      rendered text is bounded and belongs to the pack rather
+//                      than to the record. CHECKED.
+//   'component'     -- the shared TruncatedText span itself, which IS the
+//                      reveal; its own contract is tests/truncatedText.test.ts.
+type DenseKind = 'id' | 'figure' | 'language-pack' | 'enum-label' | 'component'
+
+interface DenseTag { tagName: string; value: string | null; attrs: string; classText: string }
+
+/** Every element carrying the dense-table clip, with each value it prints.
+ *  A tag that prints no value of its own (a component given the class as a
+ *  prop) is reported once with `value: null`. */
+export function findDenseClipped(source: string): DenseTag[] {
+  const flat = flatten(source)
+  const found: DenseTag[] = []
+  let at = 0
+  while (at < flat.length) {
+    if (flat[at] !== '<') { at += 1; continue }
+    const tag = parseTag(flat, at)
+    if (!tag) { at += 1; continue }
+    at = tag.end
+    if (tag.closing) continue
+    const { classText, helperValue } = classInfo(tag.attrs)
+    if (!hasDenseCellTruncate(classText)) continue
+    const values = helperValue ? [helperValue] : []
+    if (!tag.selfClosing) values.push(...childExpressions(flat, tag.end))
+    const real = values.filter((value) => !isStaticText(value))
+    if (!real.length) { found.push({ tagName: tag.name, value: null, attrs: tag.attrs, classText }); continue }
+    for (const value of real) found.push({ tagName: tag.name, value, attrs: tag.attrs, classText })
+  }
+  return found
+}
+
+// A dense cell is only honest if the full value is reachable. The shared
+// controller matches `[data-reveal-text]` and `.dense-cell-truncate[title]`
+// (components/shared/textAffordances.ts REVEAL_SELECTOR) -- nothing else.
+function hasReveal(attrs: string): boolean {
+  return /(^|\s)title\s*=/.test(attrs) || /data-reveal-text|REVEAL_ATTR/.test(attrs)
+}
+
+// Components that take the dense class as a prop and bring their own
+// affordance: CopyableId marks its value with `data-copy-value`, which the
+// SAME controller serves with its copy float.
+const DENSE_COMPONENTS = new Set(['CopyableId'])
+
+const DENSE_CELL_VALUES: Record<string, Array<[string, DenseKind, string]>> = {
+  'components/products/StockChangeSection.tsx': [
+    ['model.barcode', 'id', 'The barcode under the (scrolling) product name: a code, on its own muted mono line.'],
+    ['translateMovementType(row.movement_type, t)', 'enum-label', 'The movement word the pack supplies for the movement_type code, inside a coloured chip.'],
+  ],
+  'components/products/StockInSessionsSection.tsx': [
+    ["stockSessionId(session.createdAt) || session.key", 'id', 'The session id, which is the receipt an operator quotes back.'],
+    ['fmtClock24(session.createdAt)', 'figure', 'The clock; the day divider carries the date and the title carries the full stamp.'],
+  ],
+  'components/shared/TruncatedText.tsx': [
+    ['text', 'component', 'The shared reveal component itself -- it renders this cell contract on purpose.'],
+  ],
+}
+
+interface DenseAudit { unlisted: string[]; unrevealed: string[]; stale: string[] }
+
+function auditDense(files: Array<[string, string]>): DenseAudit {
+  const audit: DenseAudit = { unlisted: [], unrevealed: [], stale: [] }
+  for (const [file, source] of files) {
+    const allowed = (DENSE_CELL_VALUES[file] || []).map((entry) => [...entry] as [string, DenseKind, string])
+    for (const hit of findDenseClipped(source)) {
+      if (hit.value == null) {
+        if (!DENSE_COMPONENTS.has(hit.tagName)) audit.unrevealed.push(`${file}: <${hit.tagName}> carries the dense clip but owns no affordance`)
+        continue
+      }
+      if (!hasReveal(hit.attrs)) audit.unrevealed.push(`${file}: {${hit.value}} clips with no title and no data-reveal-text -- a dead-end ellipsis`)
+      const at = allowed.findIndex((entry) => entry[0] === hit.value)
+      if (at < 0) { audit.unlisted.push(`${file}: {${hit.value}}  [${hit.classText.slice(0, 60)}]`); continue }
+      const [, kind, reason] = allowed[at]
+      allowed.splice(at, 1)
+      if (kind === 'language-pack' && !/^[^(]*\b(t|tr|T|copy|translate)\(\s*(\w+\s*,\s*)?['"`]/.test(hit.value)) {
+        audit.unlisted.push(`${file}: {${hit.value}} is filed as language-pack but is not a translation call`)
+      }
+      if (kind === 'enum-label' && !/^(translate\w*|\w+Label)\(/.test(hit.value)) {
+        audit.unlisted.push(`${file}: {${hit.value}} is filed as enum-label but is not a label lookup`)
+      }
+      if (reason.length < 20) audit.unlisted.push(`${file}: {${hit.value}} needs a real reason, not "${reason}"`)
+    }
+    for (const [value] of allowed) audit.stale.push(`${file}: {${value}} is listed but no longer clips -- remove it before it hides the next one`)
+  }
+  return audit
+}
+
+runTest('control: the dense clip site is scanned, and an unlisted value there fails', () => {
+  // What section 0's control deliberately walks past, this scanner sees.
+  const fixture = '<span className="dense-cell-truncate" title={x}>{shop.title}</span>'
+  assert.deepEqual(findClippedValues(fixture), [], 'the bare-truncate scan does not own this class')
+  assert.deepEqual(findDenseClipped(fixture).map((hit) => hit.value), ['shop.title'], 'the dense scan does')
+
+  // Reverting a real conversion must turn this file red. Stock Changes'
+  // product name was the value the verifier caught; put its ellipsis back.
+  const path = 'components/products/StockChangeSection.tsx'
+  const live = read(path)
+  const reverted = live.replace(
+    '<span className="detail-scroll-text font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span>',
+    '<span className="block dense-cell-truncate font-semibold" title={row.product_name}>{row.product_name}</span>',
+  )
+  assert.notEqual(reverted, live, 'the product name no longer uses the scroller -- retarget this control')
+  const caught = auditDense([[path, reverted]])
+  assert.deepEqual(caught.unlisted, [`${path}: {row.product_name}  [block dense-cell-truncate font-semibold]`],
+    'a name put back into a dense cell must be reported, title or no title')
+
+  // ...and a dense cell that loses its reveal is reported separately, which is
+  // the defect the stock-in received-date cell actually had.
+  const untitled = live.replace(/ title=\{model\.barcode\}/, '')
+  assert.notEqual(untitled, live, 'the barcode cell no longer carries a title -- retarget this control')
+  assert.deepEqual(auditDense([[path, untitled]]).unrevealed,
+    [`${path}: {model.barcode} clips with no title and no data-reveal-text -- a dead-end ellipsis`],
+    'a dense cell with no reveal must be reported')
+
+  // A control for the control: the live file itself is clean on both counts.
+  const clean = auditDense([[path, live]])
+  assert.deepEqual([clean.unlisted, clean.unrevealed, clean.stale], [[], [], []], 'the live file passes the same audit')
+})
+
+runTest('no dense cell anywhere in src/components clips a record value, and every one reveals', () => {
+  const files = walkComponents()
+  // A sweep that reports every case the same way is indistinguishable from a
+  // broken instrument, so say out loud what it must have seen: the whole
+  // component tree, and dense cells inside it.
+  assert.ok(files.length > 200, `the walk must reach the whole component tree, saw ${files.length} files`)
+  const seen = files.flatMap(([, source]) => findDenseClipped(source))
+  assert.ok(seen.length >= 5, `the walk must actually find dense cells, saw ${seen.length}`)
+  const audit = auditDense(files)
+  assert.deepEqual(audit.unlisted, [],
+    'a dense-table cell clips a value that is not an id, a figure or a caption -- names scroll, they do not ellipse')
+  assert.deepEqual(audit.unrevealed, [],
+    'every .dense-cell-truncate cell must be reachable in full: a title the shared controller serves, or its own affordance')
+  assert.deepEqual(audit.stale, [], 'a listed dense exception no longer exists')
+})
+
+// ---------------------------------------------------------------------------
+// 6. Ids keep their own contract: they wrap in full, they do not scroll
 // ---------------------------------------------------------------------------
 
 runTest('a CopyableId caller never re-imposes an ellipsis on the id', () => {
