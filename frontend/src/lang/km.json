@@ -6227,6 +6227,8 @@
   "stock_deducted_now": "បានកាត់ស្តុកឥឡូវនេះ",
   "stock_released_allocation_only": "បានដោះលែងការបម្រុងទុក; មិនកាត់ស្តុក",
   "record_kind_undone": "បានត្រឡប់សកម្មភាព",
+  "no_field_changed": "គ្មានវាលណាមួយផ្លាស់ប្តូរទេ",
+  "recorded_context": "ព័ត៌មានកត់ត្រាបន្ថែម",
   "record_kind_other": "ការកែប្រែផ្សេងទៀត",
   "record_history": "កំណត់ត្រា",
   "records_open_record": "មើលអ្នកកែប្រែកំណត់ត្រានេះ",

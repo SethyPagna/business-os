@@ -30,6 +30,7 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
+import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
@@ -1375,10 +1376,23 @@ export default function AuditLog() {
 
               {(() => {
                 const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value)
+                // The recorded context: the payload the route wrote alongside
+                // the pair (a rename's linked-sale counts, a profile save's
+                // mode, the operator's reason). It used to be reachable only
+                // through "View raw data", and for an opted-in save whose
+                // columns happened not to move, the float showed nothing at
+                // all. Same builder as the pair -- a details payload has no
+                // old side, so its rows come back as context rows.
+                const contextRows = buildAuditFieldDiff(null, detailLog.details)
                 const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
-                if (!hasRawData) return null
+                if (!hasRawData && !contextRows.length) return null
                 return (
                   <div className="space-y-3">
+                    {hasRawData && !fieldDiffRows.length ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
+                        {copy('no_field_changed', 'No field changed', 'គ្មានវាលណាមួយផ្លាស់ប្តូរទេ')}
+                      </div>
+                    ) : null}
                     {fieldDiffRows.length ? (
                       <div>
                         <div className="mb-1 flex items-center justify-between gap-2">
@@ -1396,22 +1410,18 @@ export default function AuditLog() {
                           </button>
                         </div>
                         <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                          {fieldDiffRows.map((row) => (
-                            <div key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-                              <span className="w-32 flex-shrink-0 font-medium text-gray-500 dark:text-gray-400">{row.label}</span>
-                              {row.changeType === 'added' ? (
-                                <span className="break-all text-green-600 dark:text-green-400">{row.after}</span>
-                              ) : row.changeType === 'removed' ? (
-                                <span className="break-all text-red-500 line-through dark:text-red-400">{row.before}</span>
-                              ) : (
-                                <span className="flex flex-wrap items-center gap-1 break-all">
-                                  <span className="text-red-500 line-through dark:text-red-400">{row.before}</span>
-                                  <span className="text-gray-400">&rarr;</span>
-                                  <span className="text-green-600 dark:text-green-400">{row.after}</span>
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                          {fieldDiffRows.map((row) => <AuditFieldDiffLine key={row.key} row={row} />)}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {contextRows.length ? (
+                      <div>
+                        <div className="mb-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                          {copy('recorded_context', 'Recorded context', 'ព័ត៌មានកត់ត្រាបន្ថែម')}
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                          {contextRows.map((row) => <AuditFieldDiffLine key={`context:${row.key}`} row={row} />)}
                         </div>
                       </div>
                     ) : null}
