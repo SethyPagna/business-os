@@ -21,6 +21,15 @@
 --              carries a client_request_id, and lib/stockMutationReceipt.ts
 --              falls back to the pre-0192 behaviour when the table is absent,
 --              so code and schema can land in either order.
+-- Retention:   receipts are kept forever -- there is NO pruner. One row per
+--              identified stock line is the same order of magnitude as
+--              inventory_movements, which is also never pruned, so this adds
+--              no new retention problem. A future pruner deleting completed
+--              rows by age should add its own created_at index in its own
+--              migration; one is deliberately not created here because
+--              nothing in this code path reads created_at except through the
+--              UNIQUE (actor_id, request_id) lookup, and an index nothing
+--              reads is a cost on every insert.
 CREATE TABLE stock_mutation_receipts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   actor_id INTEGER NOT NULL,
@@ -33,5 +42,3 @@ CREATE TABLE stock_mutation_receipts (
   completed_at TEXT,
   UNIQUE (actor_id, request_id)
 );
-
-CREATE INDEX idx_stock_mutation_receipts_created ON stock_mutation_receipts(created_at);
