@@ -1265,7 +1265,7 @@ body.lang-km .dense-data-table td { line-height: var(--km-line-height, 1.6); }
    The one behavioural difference is that `clip` does not establish a block formatting
    context and `hidden` does, so a truncating box wrapping a block child could reflow.
    Checked, and re-checked by frontend/tests/noEllipsisOnNames.test.ts on every run
-   so the number cannot go stale: of the 145 elements in src/components whose class
+   so the claim cannot go stale: of every element in src/components whose class
    list carries a `truncate` token (bare, breakpoint-prefixed, or the dense-table
    `dense-cell-truncate`), none has a block-level child -- in particular none wraps
    the block-level `.detail-scroll-text`. */

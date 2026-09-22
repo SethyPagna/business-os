@@ -654,15 +654,14 @@ runTest('the Khmer floor is unlayered on purpose, and its cost is recorded', () 
   assert.match(css, /barcode line/, 'the cost of the floor is named in main.css, not only here')
 })
 
-runTest('a clipping element never wraps a block-level scroller, and the count in main.css is true', () => {
+runTest('a clipping element never wraps a block-level scroller', () => {
   // main.css:@supports flips `.truncate` to `overflow: clip` for Khmer, which
   // does NOT establish a block formatting context. The comment there rests on
   // a count of truncating elements with no block child; this lane added block
   // children (`.detail-scroll-text` is display:block), so the count and the
   // claim are re-derived here instead of trusted.
   const css = cssText()
-  const claimed = Number(/of the (\d+) elements in src\/components/.exec(css)?.[1])
-  assert.ok(Number.isFinite(claimed), 'main.css must state how many truncating elements it checked')
+  assert.ok(/none has a block-level child/.test(css), 'main.css must state the claim this check re-derives')
   let total = 0
   const blockChildren: string[] = []
   const walk = (dir: URL): void => {
@@ -691,12 +690,11 @@ runTest('a clipping element never wraps a block-level scroller, and the count in
   assert.deepEqual(blockChildren, [],
     'a truncating box must not contain the block-level scroller -- that is the one reflow `overflow: clip` would change')
   // The load-bearing half of that comment -- "none has a block-level child" --
-  // is re-derived above on every run, so it can never go stale. The number is
-  // provenance for it. A tolerance keeps a sibling lane that adds one ordinary
-  // `truncate` from turning this red, while a drift this size means nobody has
-  // re-read the claim in a long time.
-  assert.ok(Math.abs(total - claimed) <= 10,
-    `main.css says ${claimed} truncating elements in src/components; there are ${total}. Refresh the number -- the claim beside it is only as fresh as its count.`)
+  // is re-derived above on every run over every truncating element, so it can
+  // never go stale. The comment deliberately carries no element count: two lanes
+  // (kit Fold, reports) changed the count in one checkpoint and a tolerance on a
+  // number nothing depends on turned the composed tree red.
+  assert.ok(total > 0, 'the sweep must have seen at least one truncating element')
 })
 
 // ---------------------------------------------------------------------------
