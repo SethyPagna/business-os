@@ -59,7 +59,7 @@ const services = {
     getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
     hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
   },
-  audit: { audit: async () => {} },
+  audit: { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },

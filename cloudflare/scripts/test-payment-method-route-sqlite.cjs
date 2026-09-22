@@ -17,7 +17,7 @@ const USER = { id: 91, username: 'payments', name: 'Payment Admin', permissions:
 const overrides = {
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
-  '../lib/audit': { audit: async () => {} },
+  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
   '../lib/permissions': { hasPermission: () => true },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },

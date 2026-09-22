@@ -218,7 +218,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   // 100-bound-parameter limit, so a stub would test the stub.
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', activeUser); return next() } },
-  '../lib/audit': { audit: async (...args) => { auditCalls.push(args) } },
+  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async (...args) => { auditCalls.push(args) } },
   '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [] },
   '../lib/permissions': permissions,
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),

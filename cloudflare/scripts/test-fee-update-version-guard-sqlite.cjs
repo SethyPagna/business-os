@@ -95,7 +95,7 @@ const feeRoute = loadReal('routes/fees.ts', {
       return next()
     },
   },
-  '../lib/audit': { audit: async (...args) => { audits.push(args) } },
+  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async (...args) => { audits.push(args) } },
   '../lib/permissions': { getPermissionTier: () => 'full', getActionTier: () => 'full' },
   '../durable-objects/broadcastHub': { broadcast: async (...args) => { broadcasts.push(args) } },
   '../lib/conflictControl': conflictControl,

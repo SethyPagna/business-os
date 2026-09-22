@@ -6,7 +6,7 @@ import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../l
 import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -2760,6 +2760,9 @@ app.patch('/:id', async (c) => {
   const mutationStamp = new Date().toISOString()
   const fixedResponse = { id: returnId, updated_at: mutationStamp }
   let saleEventProvenance: { source_kind: 'return_edit'; source_id: string; generation: 0; sale_id: number } | null = null
+  // Declared out here (assigned inside the batch-building try) so the audit
+  // row after the commit records the values the UPDATE actually wrote.
+  let returnUpdateValues: Record<string, unknown> = {}
 
   // Damaged stock reversals are planned with every sellable-stock change.
   let editReversedDamaged: Awaited<ReturnType<typeof reverseDamagedLots>> = []
@@ -3023,21 +3026,27 @@ app.patch('/:id', async (c) => {
     })
   }
 
+  // Named so the audit row below records the values this statement actually
+  // wrote -- a recomputed copy would be a second source of truth that can
+  // drift from the UPDATE it claims to describe.
+  returnUpdateValues = {
+    reason: body.reason || existing.reason,
+    return_type: body.return_type || existing.return_type,
+    notes: body.notes !== undefined ? body.notes : existing.notes,
+    // The refund is derived from the sale lines, not accepted from the
+    // client: a posted total is exactly the "restate what was paid" the
+    // line-level resolution above exists to prevent.
+    total_refund_usd: Number(totalRefundUsd.toFixed(2)),
+    total_refund_khr: Math.round(totalRefundKhr),
+    branch_id: body.branch_id || existing.branch_id,
+    branch_name: branchName,
+  }
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
           total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
           branch_id=@branch_id, branch_name=@branch_name, updated_at=@updated_at WHERE id=@id`,
     params: {
-      reason: body.reason || existing.reason,
-      return_type: body.return_type || existing.return_type,
-      notes: body.notes !== undefined ? body.notes : existing.notes,
-      // The refund is derived from the sale lines, not accepted from the
-      // client: a posted total is exactly the "restate what was paid" the
-      // line-level resolution above exists to prevent.
-      total_refund_usd: Number(totalRefundUsd.toFixed(2)),
-      total_refund_khr: Math.round(totalRefundKhr),
-      branch_id: body.branch_id || existing.branch_id,
-      branch_name: branchName,
+      ...returnUpdateValues,
       updated_at: mutationStamp,
       id,
     },
@@ -3136,10 +3145,15 @@ app.patch('/:id', async (c) => {
     }, 500)
   }
 
+  // The row used to carry the submitted reason and nothing else, so the
+  // Audit Log could not say what a return edit actually changed. Every field
+  // this handler writes is now diffed against the pre-edit row.
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'return', id, {
     reason: body.reason,
     ...(saleEventProvenance ? { record_event: saleEventProvenance } : {}),
-  })
+  }, changedFields(existing as unknown as Record<string, unknown>, returnUpdateValues, {
+    keys: Object.keys(returnUpdateValues),
+  }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'return_edit', id: Number(id) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(bumpVersions(c.env, ['products', 'returns', 'sales']))
