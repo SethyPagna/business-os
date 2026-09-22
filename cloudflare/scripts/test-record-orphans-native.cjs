@@ -277,7 +277,7 @@ async function workerBundle() {
             export const cachedJsonResponse=async(_e,_k,_t,fn)=>fn()`,
           broadcastHub: 'export const broadcast=async()=>{}',
           telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendTelegramEvent=async()=>{};
-            export const sendSaleTelegramEvent=async()=>{};export const formatSaleTelegramLines=()=>[];
+            export const sendSaleTelegramEvent=async()=>{};export const formatSaleTelegramLines=()=>[];export const formatSaleStatusTelegramLines=()=>[];
             export const telegramMoney=()=>''`,
         }
         builder.onResolve({ filter: /(?:lib\/(?:auth|audit|cache|telegram)|durable-objects\/broadcastHub)$/ },

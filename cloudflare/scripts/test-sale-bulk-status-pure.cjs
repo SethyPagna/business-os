@@ -20,7 +20,7 @@ function load(rel) {
     if (name.endsWith('/cache')) return {bumpVersion:async()=>{},bumpVersions:async()=>{},getVersionWithFallback:async()=>0}
     if (name.endsWith('/broadcastHub')) return {broadcast:async()=>{}}
     if (name.endsWith('/audit')) return {audit:async()=>{}}
-    if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}
+    if (name.endsWith('/telegram')) return {formatSaleTelegramLines:()=>[],formatSaleStatusTelegramLines:()=>[],sendTelegramEvent:async()=>{},telegramMoney:()=>''}
     if (rel.endsWith('saleRecordEvents.ts') && name === './saleRecords') return { SALE_RECORD_FIELDS: recordContract.fields, SALE_RECORD_KINDS: recordContract.kinds }
     if (name.startsWith('.')) {
       const target=path.posix.normalize(path.posix.join(path.posix.dirname(rel),name))+'.ts'

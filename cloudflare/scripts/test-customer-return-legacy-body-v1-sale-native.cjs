@@ -52,7 +52,7 @@ async function workerBundle() {
         cache: 'export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};',
         broadcastHub: 'export const broadcast=async()=>{}',
         telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendTelegramEvent=async()=>{};
-          export const formatSaleTelegramLines=()=>[]`,
+          export const formatSaleTelegramLines=()=>[];export const formatSaleStatusTelegramLines=()=>[]`,
       }
       b.onResolve({ filter: /(?:lib\/(?:auth|audit|cache|telegram)|durable-objects\/broadcastHub)$/ }, args => ({
         path: args.path.split('/').pop(), namespace: 'return-fixture',

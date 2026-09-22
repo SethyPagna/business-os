@@ -47,7 +47,7 @@ const overrides = {
     mergePaymentMethods: (methods) => ({ methods, added: [], changed: false }),
   },
   '../lib/telegram': {
-    formatSaleTelegramLines: () => [],
+    formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [],
     sendTelegramEvent: async () => {},
     telegramMoney: (value) => String(value ?? ''),
   },

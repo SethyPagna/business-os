@@ -219,7 +219,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', activeUser); return next() } },
   '../lib/audit': { audit: async (...args) => { auditCalls.push(args) } },
-  '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [] },
+  '../lib/telegram': { sendReturnTelegramEvent: async () => false, sendTelegramEvent: async () => false, formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [] },
   '../lib/permissions': permissions,
   '../lib/conflictControl': loadReal('lib/conflictControl.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },

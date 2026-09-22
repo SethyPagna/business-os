@@ -36,7 +36,7 @@ const overrides = {
     cachedJsonResponse: async (_request, _context, _key, _ttl, loader) => loader(),
   },
   '../lib/telegram': {
-    formatSaleTelegramLines: () => [],
+    formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [],
     sendTelegramEvent: async () => {},
     telegramMoney: (value) => String(value ?? ''),
   },
