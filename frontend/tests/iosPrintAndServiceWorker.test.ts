@@ -325,8 +325,23 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
   check(`appShellFallback serves the cached shell immediately and revalidates in the background (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
     assert.match(body, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'the cache is read once, up front')
-    const beforeCacheCheck = body.slice(0, body.indexOf("if (cached)"))
-    assert.doesNotMatch(beforeCacheCheck, /await fetch/, 'the network must not be awaited before a cache hit can answer')
+    // Sep 23 2026: exactly ONE awaited fetch now precedes the cache hit -- the
+    // recovery navigation (__bos_reload), which exists only because the page
+    // has already proven the cached shell cannot run. Answering that one from
+    // cache is the incident this check must not re-authorise. The guarantee
+    // this check was written for is unchanged and still asserted below: an
+    // ORDINARY navigation never waits on the network when the cache can
+    // answer, which is the iOS latency fix.
+    const beforeCacheCheck = body.slice(0, body.indexOf('if (cached)'))
+    const recoveryStart = beforeCacheCheck.indexOf('if (isRecoveryNavigation(request)) {')
+    assert.ok(recoveryStart > 0, 'the recovery navigation must still be the branch that goes to the network')
+    const recoveryBranch = beforeCacheCheck.slice(recoveryStart)
+    assert.match(recoveryBranch, /await fetch\(request\)/, 'and it must fetch the navigation request itself, un-downgraded')
+    assert.doesNotMatch(
+      beforeCacheCheck.slice(0, recoveryStart),
+      /await fetch/,
+      'no OTHER network wait may precede a cache hit -- that is the round-trip lag this fix removed',
+    )
     assert.match(body, /if \(cached\) \{[\s\S]*event\.waitUntil\(revalidate\)[\s\S]*return cached[;\s]*\}/, 'a cache hit returns immediately; the network refresh happens after, off the response path')
     // The miss path moved into fetchAndCacheShell when the Sep 17 redirect fix
     // gave the poisoned-entry branch somewhere to jump to; what matters here is
