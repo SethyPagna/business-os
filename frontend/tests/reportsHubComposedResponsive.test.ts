@@ -90,8 +90,24 @@ let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
 async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 45_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) { const value = await read(); if (value !== null) return value; await new Promise((resolve) => setTimeout(resolve, 50)) }
-  throw new Error('Timed out waiting for composed ReportsHub fixture')
+  // A read that THROWS is "not ready yet", not a failure. Every read here is a
+  // `Runtime.evaluate` over a page that may still be navigating or compiling a
+  // module, so a transient CDP error used to escape this loop and end the file
+  // before a single assertion ran -- roughly one run in three under load. Only
+  // the deadline ends the wait now; the last error travels with the timeout so
+  // a persistent fault is still diagnosable rather than a bare "timed out".
+  // Same shape as stockChangeComposedResponsive.test.ts, which already had it.
+  let lastError = ''
+  while (Date.now() < deadline) {
+    try {
+      const value = await read()
+      if (value !== null) return value
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error(`Timed out waiting for composed ReportsHub fixture; last=${lastError || 'no value'}`)
 }
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
   assert.ok(socket && socket.readyState === WebSocket.OPEN)
