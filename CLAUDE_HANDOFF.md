@@ -76,7 +76,9 @@ on origin; the latest code commit and deploy record are in progress.md.
   refused contact save reloads its tab and the open contact form's version follows
   the list (`c58a847a`, so the retry saves in place); `DELETE /roles/:id` reads the body token.
   Deployed (Paid) 22 Sep from `a7c03ee7`: Worker `581d3612`, live revision `a7c03ee74f2d`,
-  frontend hash `1198099512be7c8c`; no remote migration. Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
+  frontend hash `1198099512be7c8c`; no remote migration.
+  POS hotfix deployed (Paid) 22 Sep 14:11Z from `2fd4adf7`: Worker `5d3f6aa6`, live revision `2fd4adf73a77`,
+  frontend hash `2529a3df70a96b92`; Chrome-Translate removeChild crash + non-durable committed close (see progress.md). Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
   `test-roles-delete-conflict-body-pure.cjs`, `test-products-update-conflict-current-pure.cjs`.
   New rule: `.claude/skills/blast-radius/SKILL.md` (map and verify the surroundings of
   every change; one symptom = one class). Gates green on `4c163015`.
