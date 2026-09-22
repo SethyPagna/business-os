@@ -828,7 +828,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                         {feeTypeLabel(fee.fee_type)}
                       </span>
                     </td>
-                    <td><span className="dense-cell-truncate font-medium text-blue-700 dark:text-blue-300" title={fee.label || ''}>{fee.label || ''}</span></td>
+                    <td><span className="detail-scroll-text font-medium text-blue-700 dark:text-blue-300">{fee.label || ''}</span></td>
                     <td className="whitespace-nowrap text-right font-semibold text-emerald-700 dark:text-emerald-300">
                       {fmtMoney(Number(fee.amount_usd) || 0, Number(fee.amount_khr) || 0)}
                     </td>

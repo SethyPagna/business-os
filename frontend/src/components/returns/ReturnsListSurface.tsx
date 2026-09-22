@@ -374,8 +374,8 @@ export default function ReturnsListSurface({
                                     />
                                   : <span className="text-xs text-gray-400">{tr('manual_return', 'Manual')}</span>}
                               </td>
-                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}>{retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}</span></td>
-                              <td className="text-gray-700 dark:text-gray-300"><span className="dense-cell-truncate" title={ret.reason || '-'}>{ret.reason || '-'}</span></td>
+                              <td className="text-gray-700 dark:text-gray-300"><span className="detail-scroll-text">{retScope === SUPPLIER_SCOPE ? supplierDisplay(ret.supplier_name, tr) : customerDisplayName(ret, tr('walk_in', 'General'))}</span></td>
+                              <td className="text-gray-700 dark:text-gray-300"><span className="detail-scroll-text">{ret.reason || '-'}</span></td>
                               <td>
                                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-zinc-700 dark:text-gray-200">{typeLabel}</span>
                               </td>
@@ -385,10 +385,10 @@ export default function ReturnsListSurface({
                                 </td>
                               ) : null}
                               {cols.isVisible('branch') ? (
-                                <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.branch_name || '-'}>{ret.branch_name || '-'}</span></td>
+                                <td className="text-gray-500 dark:text-gray-400"><span className="detail-scroll-text">{ret.branch_name || '-'}</span></td>
                               ) : null}
                               {cols.isVisible('cashier') ? (
-                                <td className="text-gray-500 dark:text-gray-400"><span className="dense-cell-truncate" title={ret.cashier_name || '-'}>{ret.cashier_name || '-'}</span></td>
+                                <td className="text-gray-500 dark:text-gray-400"><span className="detail-scroll-text">{ret.cashier_name || '-'}</span></td>
                               ) : null}
                               <td className="text-right">{renderAmount(ret)}</td>
                               <td className="w-10 px-2 py-2" aria-hidden="true" />

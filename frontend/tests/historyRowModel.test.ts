@@ -116,14 +116,15 @@ const sc = stockChanges.replace(/\r\n/g, '\n')
 
 // (a) Desktop table: the product cell is exactly two stacked single-line
 // cells -- the name, then the barcode on its own muted `dense-id` line.
-// The NAME line keeps the dense-cell contract served by the app-level
-// text-affordance controller. A clickable ledger row owns its ordinary tap;
-// hover or press-and-hold reveals the full clipped value. The barcode keeps
-// its own muted line.
+// The NAME line SCROLLS (owner, 22 Sep 2026: a name is never cut with an
+// ellipsis), so the row stays one line tall without losing the tail of a long
+// name. The barcode is an id, not a name: it keeps the dense-cell contract
+// served by the app-level text-affordance controller, so a clickable ledger
+// row owns its ordinary tap while hover or press-and-hold reveals it in full.
 assert.match(
   sc,
-  /<span className="block dense-cell-truncate font-semibold[^"]*" title=\{row\.product_name\}>\{row\.product_name\}<\/span>\n\s*<span className="block dense-cell-truncate dense-id[^"]*"[^>]*>\{model\.barcode\}<\/span>\n\s*<\/td>/,
-  'the desktop product cell must expose the name to the delegated reveal and keep the barcode on its own `dense-id` line',
+  /<span className="detail-scroll-text font-semibold[^"]*">\{row\.product_name\}<\/span>\n\s*<span className="block dense-cell-truncate dense-id[^"]*"[^>]*>\{model\.barcode\}<\/span>\n\s*<\/td>/,
+  'the desktop product cell must scroll the name and keep the barcode on its own `dense-id` line',
 )
 
 // (b) ...and the barcode is never emitted on the same line as the name, which
@@ -171,14 +172,25 @@ for (const [label, aria] of ROW_ACTIONS) {
 }
 console.log('PASS Stock Change barcode stays below the name and shares the compact mobile identity rail')
 
-// (e) Every truncated cell reveals itself. The dense row exists to fit six
-// columns, so `dense-cell-truncate` clips real values -- a lot code, a long
-// branch name, a reason sentence. A clipped value with no tooltip is a
-// dead-end ellipsis, and a tooltip carrying something OTHER than the value is
-// worse: the lot line used to title itself `tr(t, 'batch')`, which reads
-// "Received date" in both packs and hid the code it was covering.
+// (e) No per-record value is clipped, and whatever is still clipped reveals
+// itself. The dense row exists to fit six columns, and it used to buy that fit
+// by cutting real values -- the product name, the lot label, a branch, a
+// supplier, the acting user, a reason sentence. Those are per-record values,
+// so they SCROLL now. What legitimately stays in `dense-cell-truncate` is the
+// barcode (an id) and the movement type (a word from the language pack), and
+// each keeps the title the delegated controller reveals: a clipped value with
+// no tooltip is a dead-end ellipsis, and a tooltip carrying something OTHER
+// than the value is worse -- the lot line used to title itself `tr(t, 'batch')`,
+// which reads "Received date" in both packs and hid the code it was covering.
+for (const expression of ['{row.product_name}', '{model.branch}', '{model.actor}', '{model.reason}']) {
+  const clipped = sc.split('\n').filter((line) => line.includes(expression) && /dense-cell-truncate|"[^"]*\btruncate\b/.test(line))
+  assert.deepEqual(clipped, [], `a per-record Stock Change value is clipped again:\n${clipped.join('\n')}`)
+}
+assert.match(sc, /<span className="detail-scroll-text">\{model\.branch\}<\/span>/, 'the branch cell must scroll')
+assert.match(sc, /<span className="detail-scroll-text">\{model\.actor\}<\/span>/, 'the acting user cell must scroll')
+assert.match(sc, /className="detail-scroll-text dense-id[^"]*">\n\s*\{batchDisplayLabel\(/, 'the lot label must scroll')
 const truncated = [...sc.matchAll(/<span\b[^>]*\bdense-cell-truncate\b[^>]*>/g)].map((m) => m[0])
-assert.ok(truncated.length >= 6, `expected the dense row's truncated cells, found ${truncated.length}`)
+assert.ok(truncated.length >= 2, `expected the barcode and movement-type cells, found ${truncated.length}`)
 const untitled = truncated.filter((span) => !/\btitle=/.test(span))
 assert.deepEqual(untitled, [], `a truncated Stock Change cell has no tooltip to reveal it:\n${untitled.map((s) => `  ${s}`).join('\n')}`)
-console.log(`PASS all ${truncated.length} truncated Stock Change cells reveal their value on hover`)
+console.log(`PASS Stock Change per-record values scroll and all ${truncated.length} remaining clipped cells reveal their value`)

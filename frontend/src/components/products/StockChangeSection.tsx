@@ -777,41 +777,44 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   >
                     <td className="tabular-nums text-gray-400" title={timeUnknown ? noTimeLabel : undefined}>{timeUnknown ? '––:––' : clock}</td>
                     {/* O3/N8: name on line one, barcode on its OWN muted mono
-                        line under it. Both are single-line and clipped, so a
-                        long name can no longer wrap and stretch the whole row
-                        past the dense floor -- every row is the same height.
+                        line under it. Both stay on ONE line -- the name by
+                        scrolling, the barcode by clipping -- so a long name can
+                        no longer wrap and stretch the whole row past the dense
+                        floor; every row is the same height.
                         The batch label moved to the Supplier cell (a lot
                         belongs with its supplier) so this cell means one thing
                         per line instead of multiplexing barcode/batch/dash. */}
                     <td>
-                      {/* The app-level text-affordance controller serves this
-                          existing dense-cell contract. The row keeps its own
-                          click while hover or press-and-hold reveals the full
-                          clipped name. */}
-                      <span className="block dense-cell-truncate font-semibold text-gray-800 dark:text-gray-100" title={row.product_name}>{row.product_name}</span>
+                      {/* The NAME is never cut (owner, 22 Sep 2026: "product
+                          names are using elipses when too long, remember we
+                          don't do that. we do scroll left and right") -- it
+                          scrolls sideways in the shared `.detail-scroll-text`
+                          box, like every other name in the app. The BARCODE
+                          under it is an id, not a name: it keeps the dense-cell
+                          contract the app-level text-affordance controller
+                          serves, so hover or press-and-hold reveals it in full
+                          while the row's own tap still opens the movement. */}
+                      <span className="detail-scroll-text font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span>
                       <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
                     </td>
                     <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
                     <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
                     <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
-                    <td><span className="dense-cell-truncate" title={model.branch}>{model.branch}</span></td>
+                    <td><span className="detail-scroll-text">{model.branch}</span></td>
                     <td>
-                      <span className="block dense-cell-truncate" title={supplierDisplay(row.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}>{supplierDisplay(row.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}</span>
+                      <span className="detail-scroll-text">{supplierDisplay(row.batch_supplier_name, (key, fallback) => tr(t, key, fallback))}</span>
                       {row.batch_id ? (
-                        // Titled with the label itself, like every sibling cell in this
-                        // row. The line truncates, so its tooltip is the only way to
-                        // read a long lot code; titling it with the FIELD name instead
-                        // ("Received date", the 'batch' key) spent the one affordance
-                        // that could reveal the value on repeating the column header.
-                        <span
-                          className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400"
-                          title={batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
-                        >
+                        // The lot label is the batch's own name, so it scrolls with
+                        // the rest of them instead of ending in an ellipsis. It used
+                        // to clip, and the tooltip that was its only way of being
+                        // read once carried the FIELD name ("Received date", the
+                        // 'batch' key) rather than the code it was covering.
+                        <span className="detail-scroll-text dense-id leading-[0.85rem] text-gray-400">
                           {batchDisplayLabel({ id: row.batch_id, lot_code: row.batch_lot_code, received_at: row.batch_received_at }, tr(t, 'batch', 'Received date'))}
                         </span>
                       ) : null}
                     </td>
-                    <td><span className="dense-cell-truncate" title={model.actor}>{model.actor}</span></td>
+                    <td><span className="detail-scroll-text">{model.actor}</span></td>
                     {/* N13: WHICH RECORD leads, the free text follows. A sale
                         row used to show only its reason -- "Old-system sale
                         004419@2026-09-01" on imported rows, nothing at all on
@@ -846,7 +849,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                           valueClassName="font-semibold text-gray-600 dark:text-gray-300"
                         />
                       ) : null}
-                      <span className={`block dense-cell-truncate ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`} title={model.reason}>{model.reason}</span>
+                      {/* The free-text reason is a per-record value too: it scrolls
+                          rather than losing its tail, matching the mobile card
+                          below and the Returns/Stock-in reason cells. */}
+                      <span className={`detail-scroll-text ${model.reference.label ? 'leading-[0.85rem] text-[0.68rem] text-gray-400' : 'text-gray-500'}`}>{model.reason}</span>
                     </td>
                   </tr>
                 )

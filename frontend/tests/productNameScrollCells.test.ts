@@ -113,13 +113,17 @@ runTest('Products preserves copy wrappers, links and row gestures',()=>{
  assert.equal((source.match(/deferCopySurfaceAction\(copyTarget/g)||[]).length,4)
  assert.equal((source.match(/search=\{productName\}/g)||[]).length,2)
 })
-runTest('Stock Change mobile positively adopts rail; desktop ledger still has titled reveal',()=>{
+// The mobile card takes the two-line rail; the dense desktop row has ONE line
+// to give, so it takes the horizontal scroller instead. Neither clips. (The
+// row used to hold a titled `dense-cell-truncate` -- an ellipsis with a
+// reveal -- which the owner's 22 Sep 2026 rule rejects for a name.)
+runTest('Stock Change adopts the rail on mobile and the scroller on the dense row',()=>{
  const source=read('components/products/StockChangeSection.tsx')
  assert.match(source,/data-stock-mobile-product-name="true"[\s\S]{0,180}<ProductNameRail name=\{row\.product_name\}/)
  const tags=[...source.matchAll(/<span\b[^>]*>\{row\.product_name\}/g)].map(m=>m[0])
  assert.equal(tags.length,1)
- assert.match(tags[0],/dense-cell-truncate/)
- assert.match(tags[0],/title=/)
+ assert.match(tags[0],/detail-scroll-text/)
+ assert.doesNotMatch(tags[0],/dense-cell-truncate|\btruncate\b/)
 })
 runTest('excluded stock-in history keeps both fully wrapped name cells',()=>{
  const source=read('components/products/StockInSessionsSection.tsx')

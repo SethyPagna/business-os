@@ -212,14 +212,17 @@ assert.match(
 )
 console.log(`PASS the column budget gives Product ${product} and still leaves Reason ${Math.round(reasonPx)}px at the ${FLOOR}px floor`)
 
-// (d) The clipped name is REVEALABLE through the delegated controller mounted
-// by the app shell. The ledger keeps the dense title contract so an ordinary
-// row tap still opens the movement; press-and-hold or hover reveals the name.
+// (d) The name is not clipped at all. The first round gave it the dense title
+// contract -- an ellipsis plus a reveal -- and the owner's rule (22 Sep 2026,
+// "product names are using elipses when too long, remember we don't do that.
+// we do scroll left and right") is that a reveal does not redeem an ellipsis
+// on a name. It scrolls sideways in the shared `.detail-scroll-text` box, and
+// the ordinary row tap still opens the movement.
 assert.doesNotMatch(sc, /import TruncatedText/, 'the ledger must not install a competing per-cell reveal component')
 assert.match(
   sc,
-  /<span className="block dense-cell-truncate font-semibold[^"]*" title=\{row\.product_name\}>\{row\.product_name\}<\/span>/,
-  'the desktop product name must opt into the delegated dense-cell reveal',
+  /<span className="detail-scroll-text font-semibold[^"]*">\{row\.product_name\}<\/span>/,
+  'the desktop product name must scroll rather than clip',
 )
 
 // The receipt line is NOT the same rule. Owner ruling (Sep 6 2026), after the

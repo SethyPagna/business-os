@@ -181,17 +181,28 @@ assert.match(controller, /if \(intent\.type !== 'hover-in'\) cancelHover\(\)/,
   'a deliberate intent must cancel a pending hover, or the dwell re-opens what a click closed')
 
 // The coverage the delegation buys: these four surfaces are owned by other
-// lanes and were NOT edited, yet every one of them has titled dense cells
-// that now reveal.
-for (const file of [
-  'components/products/StockChangeSection.tsx',
-  'components/products/StockInSessionsSection.tsx',
-  'components/returns/ReturnsListSurface.tsx',
-  'components/fees/FeesPage.tsx',
-]) {
+// lanes and were NOT edited, yet their dense cells are served all the same.
+//
+// Returns and Fees have no TITLED dense cell left, and that is the no-ellipsis
+// sweep rather than a regression: a per-record value (a name, a supplier, a
+// reason, an expense label) is not clipped at all now, it scrolls, so nothing
+// on those rows needs a reveal to be readable. Returns still carries the
+// controller's other half -- CopyableId's copy float on the receipt id -- and
+// Fees, whose single dense cell WAS the expense label, now carries neither,
+// which is the right end state for a list with no id column and no clipped
+// value. Stating each surface's expected affordance (rather than "at least
+// one") is what keeps a silently deleted cell from reading as a pass.
+const DENSE_AFFORDANCE: Record<string, 'reveal' | 'copy' | 'none'> = {
+  'components/products/StockChangeSection.tsx': 'reveal',
+  'components/products/StockInSessionsSection.tsx': 'reveal',
+  'components/returns/ReturnsListSurface.tsx': 'copy',
+  'components/fees/FeesPage.tsx': 'none',
+}
+for (const [file, expected] of Object.entries(DENSE_AFFORDANCE)) {
   const source = read(file)
   const titled = (source.match(/dense-cell-truncate[^"]*"\s+title=/g) || []).length
-  assert.ok(titled > 0, `${file} must still have titled dense cells for the delegated reveal to serve`)
+  const actual = titled > 0 ? 'reveal' : /<CopyableId|data-copy-value/.test(source) ? 'copy' : 'none'
+  assert.equal(actual, expected, `${file}: the shared affordance this surface gets for free has changed`)
   // ...and every row that can open its record advertises that capability,
   // which is the reason the reveal must not take that click. Fee rows also
   // open read-only detail for viewers; edit permission is checked inside it.
