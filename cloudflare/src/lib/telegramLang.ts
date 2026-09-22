@@ -127,7 +127,9 @@ const LABELS = {
   subtotal: { en: 'Subtotal', km: 'សរុបរង' },
   discount: { en: 'Discount', km: 'បញ្ចុះតម្លៃ' },
   tax: { en: 'Tax', km: 'ពន្ធ' },
-  netTotal: { en: 'Net Total', km: 'សរុបចុងក្រោយ' },
+  // `netTotal` ("Net Total / សរុបចុងក្រោយ") was retired on Sep 23 2026: the
+  // sale's money line is labelled with the sale's STATUS now, and nothing
+  // else ever emitted the neutral word.
   paid: { en: 'Paid', km: 'បានបង់', localizeValue: true },
   change: { en: 'Change', km: 'ប្រាក់អាប់' },
   lostFee: { en: 'Lost fee', km: 'ថ្លៃដែលបាត់បង់' },
@@ -320,6 +322,28 @@ export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
 // pair here fixes every message that carries a status without any route
 // learning the status vocabulary.
 type ValuePhrase = string | { en: string; km: string }
+
+// The SALE STATUSES (lib/salesStatus.ts VALID_SALE_STATUSES, underscores
+// already replaced with spaces by the callers). Every pair is COPIED from
+// frontend/src/lang/{en,km}.json's status_* keys with the pack's leading emoji
+// dropped -- the message heading already carries the one emoji a Telegram
+// bubble needs -- so the phone message and the Sales screen name a status with
+// the same two words.
+//
+// They sit in their own table, spread into VALUE_PHRASES below, because they
+// are read TWICE: as the value of a `Status:` row, and as the LABEL of the
+// sale alert's money line (owner, Sep 23 2026 -- "a paid sale would usually
+// already use a completed status", so that line says `Completed / បានបញ្ចប់:
+// $8.00` and `Not Paid / ប្រាក់ជំពាក់: $8.00`, never a neutral "Net Total").
+// One table, so renaming a status renames it in both places at once.
+const SALE_STATUS_PHRASES = {
+  'awaiting payment': { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },              // status_awaiting_payment
+  'awaiting delivery': { en: 'Awaiting Delivery', km: 'រង់ចាំការដឹកជញ្ជូន' }, // status_awaiting_delivery
+  'partial return': { en: 'Partial Return', km: 'ប្រគល់ខ្លះ' },            // status_partial_return
+  completed: { en: 'Completed', km: 'បានបញ្ចប់' },                          // status_completed
+  cancelled: { en: 'Cancelled', km: 'បានបោះបង់' },                          // status_cancelled
+  returned: { en: 'Returned', km: 'បានប្រគល់' },                            // status_returned
+} as const satisfies Record<string, { en: string; km: string }>
 const VALUE_PHRASES: Record<string, ValuePhrase> = {
   'all branches': 'គ្រប់សាខា',
   'receipt(s)': 'វិក្កយបត្រ',
@@ -333,18 +357,7 @@ const VALUE_PHRASES: Record<string, ValuePhrase> = {
   Unknown: 'មិនស្គាល់',
   unpaid: 'មិនទាន់បង់',
   none: 'គ្មាន',
-  // Sale statuses (lib/salesStatus.ts VALID_SALE_STATUSES, underscores already
-  // replaced with spaces by the callers). Every pair is COPIED from
-  // frontend/src/lang/{en,km}.json's status_* keys with the pack's leading
-  // emoji dropped -- the message heading already carries the one emoji a
-  // Telegram bubble needs -- so the phone message and the Sales screen name a
-  // status with the same two words.
-  'awaiting payment': { en: 'Not Paid', km: 'ប្រាក់ជំពាក់' },              // status_awaiting_payment
-  'awaiting delivery': { en: 'Awaiting Delivery', km: 'រង់ចាំការដឹកជញ្ជូន' }, // status_awaiting_delivery
-  'partial return': { en: 'Partial Return', km: 'ប្រគល់ខ្លះ' },            // status_partial_return
-  completed: { en: 'Completed', km: 'បានបញ្ចប់' },                          // status_completed
-  cancelled: { en: 'Cancelled', km: 'បានបោះបង់' },                          // status_cancelled
-  returned: { en: 'Returned', km: 'បានប្រគល់' },                            // status_returned
+  ...SALE_STATUS_PHRASES,
   // return stock actions (lib/returnsStock.ts ReturnStockAction)
   restock: 'បញ្ចូលស្តុកវិញ',
   damaged: 'ខូចខាត',
@@ -370,6 +383,34 @@ const VALUE_PHRASE_RE = new RegExp(
 )
 
 const BY_ENGLISH = new Map<string, LabelEntry>(Object.values(LABELS).map((entry) => [entry.en, entry as LabelEntry]))
+// The same statuses, reachable by the name they PRINT, so a line whose label
+// is a status ("Completed: $8.00") is localized like any other label row.
+const BY_STATUS_NAME = new Map<string, { en: string; km: string }>(
+  Object.values(SALE_STATUS_PHRASES).map((entry) => [entry.en, entry]),
+)
+
+/**
+ * The English label the sale alert's money line takes: the sale's own status.
+ *
+ * Owner, Sep 23 2026, on that line: "a paid sale would usually already use a
+ * completed status" -- so the total is stated under the name of the state the
+ * sale is in (`Completed / បានបញ្ចប់: $8.00 / 32,800៛`, `Not Paid /
+ * ប្រាក់ជំពាក់: ...`). NEVER a neutral word: `Net Total` named no fact the
+ * reader did not already have, and it is gone from the table with this line.
+ *
+ * A status the table has no words for -- a value written to the database and
+ * not yet named here -- is printed AS IT IS STORED (`paid: $25.00`), still
+ * the sale's status and never a neutral stand-in. Lower case is what makes
+ * that safe: every label in the table above starts with a capital, so a raw
+ * status can never be mistaken for one of them (`Paid:` is the tender line)
+ * and it renders plainly instead of wrongly. All six live statuses
+ * (lib/salesStatus.ts) have their words here; a seventh without them is
+ * caught by scripts/test-telegram-messages-pure.cjs.
+ */
+export function saleStatusMoneyLabel(status: string): string {
+  const readable = String(status ?? '').trim().toLowerCase().replace(/_/g, ' ')
+  return SALE_STATUS_PHRASES[readable as keyof typeof SALE_STATUS_PHRASES]?.en ?? readable
+}
 
 /** `'Cashier / អ្នកគិតប្រាក់'` -- the label pair on its own. */
 export function label(key: TelegramLabelKey): string {
@@ -463,7 +504,17 @@ export function localizeTelegramLine(line: string): string {
   if (more) return ROW_BULLET + moreItems(Number(more[1]))
   const split = text.indexOf(': ')
   if (split <= 0) return text
-  const entry = BY_ENGLISH.get(text.slice(0, split))
+  const head = text.slice(0, split)
+  // A label that IS a sale status -- the sale alert's money line, whose label
+  // is the status the sale is in (saleStatusMoneyLabel). Resolved here,
+  // BEFORE the label table, so the meaning of that line never depends on
+  // which table happens to be consulted first. Two words sit in both tables
+  // ("Not Paid", "Cancelled"); scripts/test-telegram-messages-pure.cjs pins
+  // that each pair is identical in both, so this precedence cannot change
+  // what any other line says.
+  const status = BY_STATUS_NAME.get(head)
+  if (status) return row(pair(status.en, status.km), text.slice(split + 2))
+  const entry = BY_ENGLISH.get(head)
   if (!entry) return text
   let value = text.slice(split + 2)
   // routes/fees.ts puts a bare ISO `fee_date` on its Date line while every

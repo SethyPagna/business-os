@@ -238,7 +238,7 @@ assert.ok(Object.keys(SENSE_EXEMPT).length <= 3, 'too many glossary exemptions -
 console.log(`PASS glossary: ${checked} Worker terms also exist in the language packs and use the pack's Khmer (${Object.keys(SENSE_EXEMPT).length} documented sense exemption)`)
 
 // The check above transitively covers every Worker term that HAS a pack
-// counterpart. The terms that do not -- 'Net Total', 'SRET', the command
+// counterpart. The terms that do not -- 'SRET', the command
 // descriptions -- are where a rival spelling could still be born, so hold
 // those to the rival-spelling rules the app's own glossary uses.
 //

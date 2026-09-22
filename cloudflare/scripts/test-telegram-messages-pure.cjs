@@ -75,8 +75,11 @@ assert.equal(telegram.formatBusinessDateTime('garbage', Date.UTC(2026, 0, 1, 0, 
 assert.equal(telegram.formatBusinessDateTime('2026-12-25T03:00:00.000Z'), '25/12/2026 10:00', 'day first -- 25 December, not month 25')
 
 // --- sale receipt summary ---
+// `status` is a LIVE value from lib/salesStatus.ts (this fixture said 'paid',
+// which the database has never stored), because the money line at the foot of
+// the message is now labelled with it.
 const lines = telegram.formatSaleTelegramLines({
-  status: 'paid', createdAt: '2026-09-03T03:04:05.000Z', receiptNumber: '20260903-100405', cashier: 'Za',
+  status: 'completed', createdAt: '2026-09-03T03:04:05.000Z', receiptNumber: '20260903-100405', cashier: 'Za',
   customer: 'Sok Dara', phone: '012 345 678', branch: 'Shop',
   items: [
     { name: 'Coca Cola 330ml', quantity: 2, unitPriceUsd: 0.5, basePriceUsd: 0.6, lineTotalUsd: 1, promotionLabel: 'Summer sale' },
@@ -94,7 +97,7 @@ const lines = telegram.formatSaleTelegramLines({
 // event divider. Status now prints on EVERY sale, including a completed one.
 const GROUP = telegramLang.GROUP_RULE
 assert.deepEqual(lines, [
-  'Status: paid',
+  'Status: completed',
   'Date: 03/09/2026 10:04',
   'INV: 20260903-100405',
   GROUP,
@@ -114,7 +117,13 @@ assert.deepEqual(lines, [
   'Delivery service: $1.50',
   'Total: $9.75',
   'Discount: −$0.25',
-  'Net Total: $9.50 / 38,950៛',
+  // THE MONEY LINE IS THE SALE'S STATUS (owner, Sep 23 2026: "a paid sale
+  // would usually already use a completed status"). It read `Net Total`, a
+  // label naming no fact the reader did not already have: the figure is what
+  // the customer owes or paid, and what the shop wants beside it is whether
+  // it HAS been paid. The words come from telegramLang's status table, so
+  // this line and the `Status:` row at the top of the message cannot drift.
+  'Completed: $9.50 / 38,950៛',
   'Paid: $10.00 (Cash)',
   'Change: $0.50',
 ])
@@ -178,7 +187,7 @@ const orderDiscount = telegram.formatSaleTelegramLines({
 assert.ok(orderDiscount.includes('1. Gross 69 1 × $69.00 (−$4.00) = $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Total: $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Discount: −$4.00'), orderDiscount.join('\n'))
-assert.ok(orderDiscount.includes('Net Total: $61.00'), orderDiscount.join('\n'))
+assert.ok(orderDiscount.includes('Completed: $61.00'), orderDiscount.join('\n'))
 
 // Equivalent currencies use /; actual tender currencies use +. Change values
 // from saleTotals are equivalents unless the caller explicitly knows both
@@ -193,7 +202,7 @@ assert.ok(changeLines(1, 0).includes('Change: $1.00'))
 assert.ok(changeLines(0, 4000).includes('Change: 4,000៛'))
 const dualChange = changeLines(1, 4000)
 assert.ok(dualChange.includes('Change: $1.00 / 4,000៛'), dualChange.join('\n'))
-assert.ok(dualChange.includes('Net Total: $1.00 / 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Completed: $1.00 / 4,000៛'), dualChange.join('\n'))
 assert.ok(dualChange.includes('Paid: $1.00 + 4,000៛'), dualChange.join('\n'))
 const actualDualChange = telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'ACTUAL-CHANGE', exchangeRate: 4000,
@@ -294,7 +303,7 @@ const absorbed = telegram.formatSaleTelegramLines({
   subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
 }).filter(Boolean)
 assert.ok(absorbed.includes('Delivery service: $2.00 (shop paid)'), absorbed.join('\n'))
-assert.ok(absorbed.includes('Net Total: $20.00 / 82,000៛'), absorbed.join('\n'))
+assert.ok(absorbed.includes('Completed: $20.00 / 82,000៛'), absorbed.join('\n'))
 // REDESIGNED Sep 6 2026: with no discount and no tax the pre-discount Total
 // IS the Net Total, so it does not print. It printing here would mean either
 // the repeated figure the owner asked us to drop or -- the older defect --
@@ -311,8 +320,13 @@ assert.ok(!absorbed.some((line) => line.startsWith('Total: ')), absorbed.join('\
 const footing = (sale) => {
   const lines = telegram.formatSaleTelegramLines(sale).filter(Boolean)
   const money = (prefix) => { const hit = lines.find((l) => l.startsWith(prefix)); return hit ? Number(hit.replace(prefix, '').split(' ')[0].replace(/[$,\u00a0]/g, '').replace('\u2212', '-')) : 0 }
-  const total = lines.some((l) => l.startsWith('Total: ')) ? money('Total: ') : money('Net Total: ')
-  return Math.round((total - money('Discount: \u2212') + money('Tax: ') - money('Net Total: ')) * 100) / 100
+  // The net figure sits on the line labelled with the sale's STATUS now, so
+  // the footing reads it through the same helper the builder labels it with
+  // -- never a second copy of the word, which would keep passing while the
+  // message itself said something else.
+  const net = `${telegramLang.saleStatusMoneyLabel(sale.status)}: `
+  const total = lines.some((l) => l.startsWith('Total: ')) ? money('Total: ') : money(net)
+  return Math.round((total - money('Discount: \u2212') + money('Tax: ') - money(net)) * 100) / 100
 }
 assert.equal(footing({
   status: 'completed', receiptNumber: 'R4', items: [{ name: 'A', quantity: 2, unitPriceUsd: 21, basePriceUsd: 28, lineTotalUsd: 42 }, { name: 'B', quantity: 1, unitPriceUsd: 10, lineTotalUsd: 10 }],
@@ -325,7 +339,11 @@ assert.equal(footing({
   subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
 }), 0, 'shop-absorbed delivery must not be billed into Total')
 
-// long receipts are capped, never truncated silently
+// long receipts are capped, never truncated silently.
+// `status: 'paid'` is kept here ON PURPOSE as the unknown-status control: it
+// is not one of lib/salesStatus.ts's six, so the money line prints the status
+// AS STORED and in lower case, which no label in the table can be mistaken
+// for. Asserted below.
 const many = telegram.formatSaleTelegramLines({
   status: 'paid', receiptNumber: 'R2', exchangeRate: 4100, subtotalUsd: 25, discountUsd: 0, totalUsd: 25,
   items: Array.from({ length: 25 }, (_, i) => ({ name: `Item ${i + 1}`, quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 })),
@@ -335,6 +353,76 @@ assert.equal(manyItemLines.length, 20, many.join('\n'))
 assert.equal(manyItemLines[0], '1. Item 1 1 × $1.00 = $1.00', many.join('\n'))
 assert.equal(manyItemLines[19], '20. Item 20 1 × $1.00 = $1.00', many.join('\n'))
 assert.ok(many.includes('+ 5 more item(s)'))
+assert.ok(many.includes('paid: $25.00'), `a status the table has no words for prints AS STORED, never a neutral label:\n${many.join('\n')}`)
+assert.ok(!many.some((line) => line.includes('Net Total')), 'the neutral label is retired entirely')
+// ...and lower case is what keeps that safe: capitalised, `Paid:` is the
+// TENDER line's label, and the money line would have been localized as one.
+assert.equal(telegramLang.localizeTelegramLine('paid: $25.00'), 'paid: $25.00')
+assert.equal(telegramLang.localizeTelegramLine('Paid: $25.00'), '· Paid / បានបង់: $25.00')
+
+// ---- the money line, per status, in all three languages -------------------
+//
+// Owner, Sep 23 2026: "a paid sale would usually already use a completed
+// status" -- so this line is labelled with the sale's own status instead of a
+// neutral "Net Total", and the words come from the SAME table that renders
+// `Status: Not Paid -> Completed`, so renaming a status renames this too.
+const moneyLineFor = (status, mode) => {
+  const built = telegram.formatSaleTelegramLines({
+    status, receiptNumber: 'STATUS-LABEL', exchangeRate: 4100,
+    items: [{ name: 'A', quantity: 1, unitPriceUsd: 8, lineTotalUsd: 8 }],
+    subtotalUsd: 8, discountUsd: 0, totalUsd: 8, totalKhr: 32800,
+  }).filter(Boolean)
+  const previous = telegramLang.getTelegramLanguage()
+  telegramLang.setTelegramLanguage(mode)
+  // The money line is the one carrying the KHR equivalent: the item line
+  // above it repeats the same dollars, so matching on "$8.00" alone would
+  // assert against the wrong row.
+  try { return built.map(telegramLang.localizeTelegramLine).find((line) => line.includes('32,800')) }
+  finally { telegramLang.setTelegramLanguage(previous) }
+}
+for (const [status, both, en, km] of [
+  ['completed', '· Completed / បានបញ្ចប់: $8.00 / 32,800៛', '· Completed: $8.00 / 32,800៛', '· បានបញ្ចប់: $8.00 / 32,800៛'],
+  ['awaiting_payment', '· Not Paid / ប្រាក់ជំពាក់: $8.00 / 32,800៛', '· Not Paid: $8.00 / 32,800៛', '· ប្រាក់ជំពាក់: $8.00 / 32,800៛'],
+  ['awaiting_delivery', '· Awaiting Delivery / រង់ចាំការដឹកជញ្ជូន: $8.00 / 32,800៛', '· Awaiting Delivery: $8.00 / 32,800៛', '· រង់ចាំការដឹកជញ្ជូន: $8.00 / 32,800៛'],
+  ['partial_return', '· Partial Return / ប្រគល់ខ្លះ: $8.00 / 32,800៛', '· Partial Return: $8.00 / 32,800៛', '· ប្រគល់ខ្លះ: $8.00 / 32,800៛'],
+  ['cancelled', '· Cancelled / បានបោះបង់: $8.00 / 32,800៛', '· Cancelled: $8.00 / 32,800៛', '· បានបោះបង់: $8.00 / 32,800៛'],
+  ['returned', '· Returned / បានប្រគល់: $8.00 / 32,800៛', '· Returned: $8.00 / 32,800៛', '· បានប្រគល់: $8.00 / 32,800៛'],
+]) {
+  assert.equal(moneyLineFor(status, 'both'), both, `${status} money line (both)`)
+  assert.equal(moneyLineFor(status, 'en'), en, `${status} money line (en)`)
+  assert.equal(moneyLineFor(status, 'km'), km, `${status} money line (km)`)
+}
+// Every live status is covered: a seventh added to lib/salesStatus.ts with no
+// words in the table would print its raw enum on that sale's alert.
+const liveStatuses = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesStatus.ts'), 'utf8')
+  .match(/export const VALID_SALE_STATUSES: string\[\] = \[([^\]]+)\]/)[1]
+  .split(',').map((entry) => entry.trim().replace(/'/g, ''))
+assert.equal(liveStatuses.length, 6, liveStatuses.join(' | '))
+assert.deepEqual(
+  liveStatuses.filter((status) => telegramLang.saleStatusMoneyLabel(status) === status.replace(/_/g, ' ')),
+  [], 'every live sale status must have a money-line label of its own')
+// And the retired neutral label is gone from a live sale's message.
+assert.ok(!lines.some((line) => line.startsWith('Net Total: ')), lines.join('\n'))
+
+// The money line's label is resolved against the STATUS table before the
+// label table, so which one is consulted first cannot change what the line
+// says. Two words live in both; this pins that they agree, which is what
+// makes that precedence safe for every OTHER line in every message.
+for (const [english, status] of Object.entries(telegramLang.TELEGRAM_VALUE_PHRASES)) {
+  if (typeof status === 'string') continue
+  const label = telegramLang.TELEGRAM_LABELS[Object.keys(telegramLang.TELEGRAM_LABELS).find((key) => telegramLang.TELEGRAM_LABELS[key].en === status.en)]
+  if (!label) continue
+  assert.equal(label.km, status.km, `"${status.en}" is spelled two ways: the label table says ${label.km}, the status table says ${status.km} (${english})`)
+}
+// POSITIVE CONTROL for the loop above: it must actually have compared
+// something -- "Not Paid" (the credit label) and "Cancelled" are the two.
+assert.deepEqual(
+  Object.values(telegramLang.TELEGRAM_VALUE_PHRASES)
+    .filter((phrase) => typeof phrase !== 'string')
+    .map((phrase) => phrase.en)
+    .filter((english) => Object.values(telegramLang.TELEGRAM_LABELS).some((label) => label.en === english))
+    .sort(),
+  ['Cancelled', 'Not Paid'])
 
 // --- stock change with resulting on-hand ---
 assert.deepEqual(telegram.formatStockChangeTelegramLines({

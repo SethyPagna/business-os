@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE,
+  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -1372,9 +1372,6 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // it. `completed` is the same reading the app's own normalizer gives a
   // missing sale_status, and the heading already says a sale was recorded.
   const status = String(sale.status || 'completed').replace(/_/g, ' ')
-  // lib/salesStatus.ts's one unsettled status, with the underscore already
-  // taken out above. This is the ONLY thing that makes a sale credit.
-  const unsettled = status === 'awaiting payment'
   // The pre-discount, pre-tax figure the customer was quoted. When there is
   // neither a discount nor a tax it IS the Net Total, and printing the same
   // dollars twice under two labels is precisely what the owner asked us to
@@ -1424,25 +1421,23 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       // an equivalent pair unless a caller can explicitly establish that both
       // currencies were physically returned.
       //
-      // A sale the customer has NOT settled states the amount ONCE, under the
-      // word CREDIT -- the owner's ruling for this figure everywhere ("just use
-      // credit ... instead of $-n ... just $n"). It used to print the same
-      // dollars as a Net Total and then "Paid: unpaid" underneath: two lines,
-      // one number, and the word the reader was looking for on neither of them.
+      // THE MONEY LINE IS LABELLED WITH THE SALE'S STATUS (owner, Sep 23 2026:
+      // "a paid sale would usually already use a completed status"). So it
+      // reads `Completed / បានបញ្ចប់: $8.00 / 32,800៛` on a settled sale and
+      // `Not Paid / ប្រាក់ជំពាក់: $8.00 / 32,800៛` on an unsettled one -- one
+      // figure, stated once, under the name of the state the sale is in. The
+      // words come from the status table in telegramLang.ts, the same table
+      // that renders the `Status:` row at the top of this message, so renaming
+      // a status renames this line with it and the two can never disagree.
       //
-      // The trigger is the sale's own STATUS, never "no tender was passed to
-      // this builder": a replacement hand-out and a completed sale whose
-      // payment the caller did not supply are not credit, and calling them
-      // credit would put a debt on a customer who owes nothing.
-      ...(unsettled && paid <= 0
-        ? [`Not Paid: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`]
-        : [
-          `Net Total: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
-          // No recorded tender means no Paid line. The status carries the
-          // "not paid" fact already, so a line saying it again is one more
-          // line for nothing.
-          paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
-        ]),
+      // It replaced a neutral `Net Total`, which told the reader nothing the
+      // heading had not already said, and which the unsettled sale had to be
+      // special-cased away from to get its own word.
+      `${saleStatusMoneyLabel(status)}: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
+      // No recorded tender means no Paid line: the status above carries the
+      // "not paid" fact already, so a line saying it again is one more line
+      // for nothing.
+      paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
       change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
     ],
   ])
