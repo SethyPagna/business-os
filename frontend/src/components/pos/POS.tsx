@@ -954,20 +954,43 @@ export default function POS() {
       notify(t('money_checkout_recovery_required'), 'error')
       return
     }
+    let nextOrders: PosOrder[]
+    let nextActiveId: string
+    let nextCounter: number
     if (currentOrders.length === 1) {
       const reset = normalizeOrder({}, 1)
-      setOrders([reset])
-      setActiveId(reset.id)
-      setOrderCounter(2)
-      return
+      nextOrders = [reset]
+      nextActiveId = String(reset.id)
+      nextCounter = 2
+    } else {
+      const idx = currentOrders.findIndex(o => o.id === orderId)
+      // Renumber labels sequentially so tabs always show Order 1, 2, 3...
+      nextOrders = currentOrders.filter(o => o.id !== orderId).map((o, i) => ({ ...o, label: `Order ${i + 1}` }))
+      // Closing the tab that is open moves focus to its left neighbour;
+      // closing any other tab leaves the open one exactly where it was.
+      nextActiveId = String(resolvedActiveId === orderId ? nextOrders[Math.max(0, idx - 1)].id : (resolvedActiveId || nextOrders[0].id))
+      nextCounter = nextOrders.length + 1
     }
-    const idx = currentOrders.findIndex(o => o.id === orderId)
-    const remaining = currentOrders.filter(o => o.id !== orderId)
-    // Renumber labels sequentially so tabs always show Order 1, 2, 3...
-    const renumbered = remaining.map((o, i) => ({ ...o, label: `Order ${i + 1}` }))
-    setOrders(renumbered)
-    setOrderCounter(renumbered.length + 1)
-    if (resolvedActiveId === orderId) setActiveId(renumbered[Math.max(0, idx - 1)].id)
+    // A COMMITTED close (the sale is recorded on the server) must be durable
+    // before React renders it, exactly like handleCheckout persists the
+    // pending request id before the POST. The three effects above write these
+    // same keys AFTER React commits, so a render that crashes mid-commit --
+    // the Chrome Translate removeChild class, Sentry BUSINESS-OS-1A -- left
+    // storage still holding the recorded order WITH its checkoutRequestId:
+    // the reload restored it, the amber recovery banner refused new items,
+    // and every retry recovered the same receipt and crashed again. The
+    // owner's report was "it works but seems not to close the order".
+    // An uncommitted close keeps the effect-only path: there is no server
+    // state to fall out of step with, and its refusal above is unchanged.
+    if (committed) {
+      ordersRef.current = nextOrders
+      writePosDraft(posOrdersStorageKey, JSON.stringify(nextOrders))
+      writePosDraft(posActiveStorageKey, nextActiveId)
+      writePosDraft(posCounterStorageKey, String(nextCounter))
+    }
+    setOrders(nextOrders)
+    setOrderCounter(nextCounter)
+    setActiveId(nextActiveId)
   }
 
 // Collapsible section visibility

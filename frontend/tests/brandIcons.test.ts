@@ -182,9 +182,16 @@ function runBootstrap(hostname: string, pathname: string) {
     'link[rel="manifest"]': makeElement('manifest'),
     'link[rel="apple-touch-icon"]': makeElement('apple-icon'),
   }
+  // createElement/head exist because the admin branch also appends the
+  // machine-translation opt-out meta (Sep 22 2026, Chrome Translate vs React
+  // removeChild -- see tests/posCommittedCloseDurability.test.ts, which owns
+  // the assertions about it). Here they only need to keep the double running.
+  const appendedToHead = makeElement('appended-head-meta')
   const document = {
     title: 'Business OS',
     documentElement: { setAttribute(name: string, value: string) { attributes.set(name, value) } },
+    createElement(_tagName: string) { return appendedToHead },
+    head: { appendChild(node: unknown) { return node } },
     querySelector(selector: string) { return selectors[selector] || null },
     querySelectorAll(selector: string) { return selector === 'link[rel="icon"]' ? [favicon, png192, png512] : [] },
   }

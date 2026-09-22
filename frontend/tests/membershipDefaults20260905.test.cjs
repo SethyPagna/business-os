@@ -50,6 +50,12 @@ function visit(node) {
 visit(ast)
 const handlerCode = ts.transpileModule(handlers.join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 function lifecycle(seed) {
+  // A COMMITTED close now persists the draft synchronously before it renders
+  // (the Sep 22 2026 till incident: a crashed React commit left the recorded
+  // order in storage still carrying its checkoutRequestId). The draft writer
+  // and its three keys are part of closeOrder's environment here for that
+  // reason; tests/posCommittedCloseDurability.test.ts owns the ordering
+  // assertions, this harness only needs the bindings and the stored result.
   return new Function('normalizeOrder', 'createEmptyOrder', 'LAYOUT', 'seed', `
     let orders = seed, resolvedActiveId = seed[0].id;
     const ordersRef = { current: orders };
@@ -58,8 +64,11 @@ function lifecycle(seed) {
     const setOrderCounter = () => {};
     const notify = () => {};
     const t = key => key;
+    const drafts = {};
+    const posOrdersStorageKey = 'pos-orders', posActiveStorageKey = 'pos-active', posCounterStorageKey = 'pos-counter';
+    const writePosDraft = (key, value) => { drafts[key] = value };
     ${handlerCode}
-    return { addNewOrder, closeOrder, state: () => orders };
+    return { addNewOrder, closeOrder, state: () => orders, drafts: () => drafts };
   `)(normalizeOrder, constants.createEmptyOrder, constants.LAYOUT, seed)
 }
 for (const setting of ['true', 'false']) {
@@ -78,8 +87,10 @@ const uncertainOrder = normalizeOrder({ checkoutRequestId: 'frozen-request', loy
 const uncertainTabs = lifecycle([uncertainOrder])
 uncertainTabs.closeOrder(uncertainOrder.id)
 assert.equal(uncertainTabs.state()[0].checkoutRequestId, 'frozen-request', 'ordinary close cannot erase unresolved checkout or loyalty intent')
+assert.deepEqual(uncertainTabs.drafts(), {}, 'a refused close writes no draft')
 uncertainTabs.closeOrder(uncertainOrder.id, true)
 assert.equal(uncertainTabs.state()[0].checkoutRequestId, '', 'known committed close starts a fresh order with the canonical empty request ID')
+assert.equal(JSON.parse(uncertainTabs.drafts()['pos-orders'])[0].checkoutRequestId, '', 'the committed close is on disk before React renders it, so a crashed commit cannot restore the recorded order')
 async function offline() {
   const saleSource = fs.readFileSync(path.join(root, 'src/api/saleWriteTransport.ts'), 'utf8')
   const ownership = await import('../src/api/offlineQueueOwnership.ts')

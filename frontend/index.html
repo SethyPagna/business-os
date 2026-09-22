@@ -79,12 +79,23 @@
           .replace(/\/{2,}/g, '/')
           .replace(/\/+$/g, '')
           .toLowerCase() || '/'
+        // MUST list every segment src/app/pathRouting.ts routes to the admin
+        // app -- ADMIN_ROUTE_PAGE_BY_SEGMENT plus ADMIN_AUTH_ROUTE_SEGMENTS.
+        // This table drifted once already: /notes, /promotions, /promos,
+        // /review, /review-queue, /fees and /delivery-contacts were missing,
+        // so an admin reload from any of those pages (AppContext pushes them
+        // through getAdminPathForPage) took the PUBLIC branch below -- the
+        // storefront title, manifest and icons on the admin app, and no
+        // machine-translation opt-out on the very pages that crash under it.
+        // tests/posCommittedCloseDurability.test.ts drives this table from
+        // pathRouting.ts's own maps, so the next added page fails there.
         var adminRoutes = {
           '/': true,
           '/admin': true,
           '/app': true,
           '/login': true,
           '/dashboard': true,
+          '/notes': true,
           '/products': true,
           '/product': true,
           '/pos': true,
@@ -92,12 +103,18 @@
           '/inventory': true,
           '/sales': true,
           '/returns': true,
+          '/fees': true,
           '/branches': true,
           '/contacts': true,
+          '/delivery-contacts': true,
           '/catalog': true,
           '/loyalty-points': true,
           '/loyalty': true,
+          '/promotions': true,
+          '/promos': true,
           '/users': true,
+          '/review': true,
+          '/review-queue': true,
           '/audit-log': true,
           '/audit': true,
           '/receipt-settings': true,
@@ -182,6 +199,32 @@
           }
           var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
           if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
+          // Opt the ADMIN shell out of machine translation (Sep 22 2026).
+          // Chrome's built-in translator rewrites and re-parents text nodes
+          // that React still believes it owns; React's next commit then calls
+          // removeChild on a node that moved and throws "Failed to execute
+          // 'removeChild' on 'Node'". Sentry BUSINESS-OS-1A caught exactly
+          // that on POS while Chrome was translating the Khmer till into
+          // English ("Turn", "Clean the basket", "End of sale"), and it
+          // crashed the page AFTER the sale had already been recorded on the
+          // Worker -- so the till came back with the order still open and its
+          // amber recovery banner refusing further items. The admin app is
+          // already fully bilingual through its own language switch, so no
+          // staff member needs a machine translation of it.
+          //
+          // Both signals, on purpose: the meta is what Chrome/Edge read to
+          // suppress the offer entirely, translate="no" is the HTML standard
+          // attribute other engines honour. The PUBLIC branch above must stay
+          // translatable -- customers read the storefront in their own
+          // language, it has its own Google Translate widget
+          // (src/components/catalog/portalTranslateController.ts), and it
+          // already carries its own reload recovery for this crash class
+          // (src/app/publicErrorRecovery.ts).
+          var adminNoTranslate = document.createElement('meta')
+          adminNoTranslate.setAttribute('name', 'google')
+          adminNoTranslate.setAttribute('content', 'notranslate')
+          document.head.appendChild(adminNoTranslate)
+          document.documentElement.setAttribute('translate', 'no')
         }
       }())
 
