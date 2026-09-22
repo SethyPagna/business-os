@@ -302,11 +302,11 @@
    names are using elipses when too long, remember we don't do that. we do
    scroll left and right"). The scroller itself is the app-wide
    `.detail-scroll-text` in styles/main.css -- one implementation, already
-   used by the product detail surfaces -- so only the two things this surface
-   owns are declared here: the cell box it has to fit inside, and the Khmer
-   line box (an `overflow-x` scroller cannot keep `overflow-y: visible`, so
-   the height has to be bought with padding; same argument as the `.truncate`
-   rule at the bottom of this file). */
+   used by the product detail surfaces -- so the ONE thing this surface owns
+   is declared here: the cell box the scroller has to fit inside. Its Khmer
+   line box is not this file's business either; main.css buys that with the
+   unlayered `body.lang-km .detail-scroll-text` line-height floor, measured
+   sufficient on this surface (see the `.truncate` rule at the bottom). */
 [data-reports-hub] td > .detail-scroll-text,
 .reports-fold-panel .detail-scroll-text {
   max-width: 100%;
@@ -318,8 +318,8 @@
    ellipsis and a structural change in Fold's header would have slipped past
    the child selector. The scroller now lives on the heading itself
    (shared/kit/Fold.tsx, `FOLD_TITLE_CLASS`) and this override is gone with
-   it -- the Khmer padding rule at the bottom of this file already covers
-   `.reports-fold-panel .detail-scroll-text`.) */
+   it -- and the Khmer line box comes from main.css's floor, which reaches the
+   portalled fold wherever it is rendered.) */
 
 /* A segment's two STATE tints have to be declared HERE, not as Tailwind
    background utilities on the element.
@@ -819,16 +819,28 @@ body.lang-km [data-reports-fold] .text-sm {
 
 /* A truncating cell is the clip site: keep it single-line and elliptical, but
    let the line box breathe so the ascender/descender ink stays inside it.
+   `.truncate` is `overflow: hidden`, and the only other room it gets is
+   S4-22's `@supports (overflow-clip-margin: 0.3em)` block in main.css, which
+   a browser without that support does not apply at all -- so these two
+   selectors keep their padding.
 
-   A horizontally scrolling name cell (`.detail-scroll-text`, which replaced
-   the ellipsis on every name in this surface) is the SAME clip site: CSS
-   cannot keep `overflow-y: visible` next to `overflow-x: auto`, so its box
-   shears a Khmer cluster's superscript vowel and coeng subscript exactly the
-   way `.truncate` did unless the height is paid for. */
+   The horizontally scrolling name cell (`.detail-scroll-text`, which replaced
+   the ellipsis on every name in this surface) is deliberately NOT in that list
+   any more. It is the same kind of clip site -- CSS cannot keep
+   `overflow-y: visible` next to `overflow-x: auto` -- but main.css already
+   buys its height with the unlayered `body.lang-km .detail-scroll-text`
+   line-height floor, and `--km-line-height` is defined in exactly one place
+   (`:root`, 1.6). Paying twice cost 4px of height on every Khmer row for
+   nothing. Measured in headless Chrome over the real hub in lang-km, worst
+   case of all 56 scroller cells (table rows plus an open row-detail fold):
+   with the padding gone the ink sat 1.94px below the top of its box and 4.06px
+   above the bottom at 1254px (3.94/6.06 with it), and 2.52/3.48 at 526px
+   (4.52/5.48 with it). scrollHeight equalled clientHeight on all 56 in both
+   states, and an overflow hidden-vs-visible pixel comparison over the same
+   band -- with a squashed line box as its control, which that comparison does
+   report -- found no ink outside the box once the padding was removed. */
 body.lang-km [data-reports-hub] td.truncate,
-body.lang-km [data-reports-hub] .truncate,
-body.lang-km [data-reports-hub] .detail-scroll-text,
-body.lang-km .reports-fold-panel .detail-scroll-text {
+body.lang-km [data-reports-hub] .truncate {
   padding-block: 2px;
 }
 

@@ -124,10 +124,35 @@ check('NEGATIVE CONTROL: the ellipsis checker still fails a truncating cell', ()
 })
 
 check('a scrolled name keeps a Khmer line box (overflow-y cannot stay visible beside overflow-x)', () => {
+  // The box is bought ONCE, in main.css, by the unlayered line-height floor --
+  // and `--km-line-height` is defined in exactly one place, so there is no
+  // smaller value for the floor to miss. This surface used to add
+  // `padding-block: 2px` on top of it, which made every Khmer scroller row 4px
+  // taller than it needed to be. Measured in headless Chrome over the real hub
+  // in lang-km, worst case of all 56 scroller cells: with the padding gone the
+  // ink sat 1.94px below the top of its box and 4.06px above the bottom at
+  // 1254px, and 2.52px / 3.48px at 526px; scrollHeight equalled clientHeight on
+  // all 56; an overflow hidden-vs-visible pixel comparison (control: a squashed
+  // line box, which it does report) found no ink outside the box.
   assert.match(
-    surfaceCss,
-    /body\.lang-km \[data-reports-hub\] \.detail-scroll-text,\s*\n\s*body\.lang-km \.reports-fold-panel \.detail-scroll-text \{\s*\n\s*padding-block: 2px/,
-    'the Khmer block pays for the scroller line box in the report AND in the portalled fold',
+    mainCss,
+    /body\.lang-km \.detail-scroll-text,\s*\n\.detail-scroll-text\.khmer-text \{ line-height: var\(--km-line-height, 1\.6\); \}/,
+    'main.css must carry the one Khmer floor the scroller depends on',
+  )
+  assert.deepEqual(mainCss.match(/--km-line-height:\s*[\d.]+/g), ['--km-line-height: 1.6'],
+    'the floor is one number, defined once -- a second, smaller one would need its own padding case')
+  // Read without comments: this file explains the decision in prose right
+  // above the rule, and prose about padding is not padding.
+  const surfaceRules = stripComments(surfaceCss)
+  assert.doesNotMatch(surfaceRules, /detail-scroll-text[^{}]*\{\s*\n\s*padding-block/,
+    'the reports surface must not pay a second time for a line box main.css already buys')
+  // The TRUNCATING cells are a different clip site and keep their padding:
+  // `.truncate` is `overflow: hidden`, whose Khmer room comes from an
+  // @supports block a browser may not apply.
+  assert.match(
+    surfaceRules,
+    /body\.lang-km \[data-reports-hub\] td\.truncate,\s*\n\s*body\.lang-km \[data-reports-hub\] \.truncate \{\s*\n\s*padding-block: 2px/,
+    'the elliptical cells keep the padding that is their only unconditional room',
   )
 })
 
