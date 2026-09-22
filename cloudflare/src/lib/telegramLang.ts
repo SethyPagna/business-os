@@ -401,6 +401,30 @@ export function labeled(key: TelegramLabelKey, value: unknown): string {
   return row(label(key), value)
 }
 
+/**
+ * `+ 3 more item(s) / មុខទំនិញបន្ថែម` -- the line that closes a truncated item
+ * list, in the ONE place every caller shares.
+ *
+ * The count is the value and the words are the label, so only the words are
+ * doubled: `+ 3` is not printed twice. The Khmer is the packs' own two words
+ * -- មុខទំនិញ is `item(s)` in the value table below (checked against km.json
+ * by scripts/test-telegram-bilingual-pure.cjs) and បន្ថែម is what km.json says
+ * for "more" (show_more, load_more).
+ *
+ * It exists because there are FOUR callers -- the sale, transfer and return
+ * alerts, and the receipt list under /sales -- and the last of them composes
+ * its own message text, so it never passes through localizeTelegramLine. It
+ * was the one that kept shipping the English word "more" to a Khmer-only
+ * shop: `+ 3 more មុខទំនិញ`, half translated. The caller owns the prefix (a
+ * row bullet in a message of rows, three spaces under a receipt in a list);
+ * the wording is here, once.
+ */
+export function moreItems(count: number): string {
+  return `+ ${count} ${pair('more item(s)', 'មុខទំនិញបន្ថែម')}`
+}
+/** The English shape the builders emit, recognised by localizeTelegramLine. */
+const MORE_ITEMS_RE = /^\+ (\d+) more item\(s\)$/
+
 /** Ad-hoc pair for copy that is not a field label (help text, notices). */
 export function bi(en: string, km: string): string {
   return pair(en, km)
@@ -426,15 +450,17 @@ export function localizeTelegramValue(value: string): string {
  * Make one composed line bilingual. `'Cashier: Za'` -> `'Cashier /
  * អ្នកគិតប្រាក់: Za'`. Lines with no known label -- item bullets, which carry
  * only a product name and arithmetic -- are returned unchanged, except for the
- * `+ N more item(s)` continuation, whose only word IS a counter.
+ * `+ N more item(s)` continuation, whose only words ARE a counter.
  */
 export function localizeTelegramLine(line: string): string {
   const text = String(line ?? '')
   if (!text) return text
-  // The `+ N more item(s)` continuation closes the numbered item list, so
-  // it takes the row bullet too -- without it, it was the one row in the
-  // message hanging off the left margin.
-  if (text.startsWith('+ ')) return ROW_BULLET + localizeTelegramValue(text)
+  // The continuation closes the numbered item list, so it takes the row
+  // bullet too -- without it, it was the one row in the message hanging off
+  // the left margin -- and its wording comes from moreItems() above, the same
+  // function the /sales receipt list calls directly.
+  const more = text.match(MORE_ITEMS_RE)
+  if (more) return ROW_BULLET + moreItems(Number(more[1]))
   const split = text.indexOf(': ')
   if (split <= 0) return text
   const entry = BY_ENGLISH.get(text.slice(0, split))

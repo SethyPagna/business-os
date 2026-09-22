@@ -104,6 +104,13 @@ insItem.run(1, 1, 1, 30, 100, 1, 101, 'Lamp', 100, 400000)
 insItem.run(2, 2, 1, 200, 500, 1, 102, 'Sofa', 500, 2000000)
 insItem.run(3, 3, 1, 10, 40, 1, 103, 'Mug', 40, 160000)
 
+// A receipt with more items than /sales lists, on the NEXT day (Sep 23 2026).
+// It is a day of its own so that every figure asserted for 10/08/2026 above
+// and below is untouched by it: this sale exists only to make the receipt
+// list overflow and print its `+ N more` continuation.
+sale({ id: 4, sale_status: 'completed', receipt_number: '20260811-090000', subtotal_usd: 60, total_usd: 60, total_khr: 240000, cashier_id: 1, cashier_name: 'aza', created_at: '2026-08-11 05:00:00' })
+for (let i = 0; i < 6; i += 1) insItem.run(10 + i, 4, 1, 4, 10, 1, 110 + i, `Basket ${i + 1}`, 10, 40000)
+
 db.prepare('INSERT INTO returns (id, sale_id, total_refund_usd, total_refund_khr, status, return_scope, created_at, branch_id, reason) VALUES (?,?,?,?,?,?,?,?,?)')
   .run(1, 3, 15, 0, 'completed', 'customer', AT, 1, 'damaged')
 db.prepare('INSERT INTO return_items (id, return_id, quantity, cost_price_usd, return_to_stock, stock_action) VALUES (?,?,?,?,?,?)')
@@ -287,6 +294,32 @@ check(`each receipt lists its items as a numbered equation (${saleItemLines.leng
   && saleItemLines[1] === '   1. Mug 1 × $40.00 · 160,000៛ = $40.00 · 160,000៛')
 check('and the retired quantity-first em-dash form is gone from the item lines',
   !/\d+ × [A-Za-z]/.test(salesMsg) && !saleItemLines.some((line) => line.includes('—')))
+
+// ---- the `+ N more` continuation, in all three languages --------------------
+//
+// Sep 23 2026. This line is composed INSIDE salesReport, which builds its own
+// message text and never goes through localizeTelegramLine -- so it localized
+// the noun by hand and left the English word "more" standing in a Khmer-only
+// shop's message: `+ 2 more មុខទំនិញ`. Both it and the alert builders' own
+// continuation now come from one function, telegramLang's moreItems().
+const overflow = (mode) => telegram.telegramCommandReply({}, '/sales 11/08/2026', Date.now(), mode)
+const [overflowBoth, overflowEn, overflowKm] = await Promise.all([overflow('both'), overflow('en'), overflow('km')])
+const continuationOf = (text) => text.split('\n').find((line) => line.trim().startsWith('+ '))
+check(`the receipt lists 4 of its 6 items and closes with a continuation (${continuationOf(overflowBoth)})`,
+  overflowBoth.split('\n').filter((line) => /^ {3}\d+\. /.test(line)).length === 4
+  && continuationOf(overflowBoth) === '   + 2 more item(s) / មុខទំនិញបន្ថែម', overflowBoth)
+check('an English-only shop gets no Khmer on it',
+  continuationOf(overflowEn) === '   + 2 more item(s)', overflowEn)
+check('and a Khmer-only shop gets no English word "more" on it',
+  continuationOf(overflowKm) === '   + 2 មុខទំនិញបន្ថែម' && !/more/.test(continuationOf(overflowKm)), overflowKm)
+// THE SALE ALERT takes the same wording through localizeTelegramLine, with
+// the row bullet its message shape gives every row. One phrase, two prefixes.
+check('the sale alert\'s continuation is the same phrase, bulleted',
+  lang.localizeTelegramLine('+ 2 more item(s)') === `${lang.ROW_BULLET}+ 2 more item(s)${SEP}មុខទំនិញបន្ថែម`,
+  lang.localizeTelegramLine('+ 2 more item(s)'))
+check('and salesReport does not localize the noun by hand any more',
+  /moreItems\(saleItems\.length - 4\)/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8'))
+  && !/more \$\{localizeTelegramValue/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
 
 // ---- /stock and /inventory: numbered sections, over a REAL LIMIT (Sep 22 2026) ---
 // The Sep 21 2026 sectioned-layout redesign converted five replies and left

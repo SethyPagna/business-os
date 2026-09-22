@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, normalizeTelegramLanguage, ROW_BULLET, row, RULE,
+  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE,
   parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -557,7 +557,11 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
         const quantity = Number(item.quantity) || 0
         lines.push(`   ${index + 1}. ${cleanLine(item.product_name || 'Item', 100)} ${quantity} × ${money(item.applied_price_usd, item.applied_price_khr)} = ${money(round2(quantity * (Number(item.applied_price_usd) || 0)), Math.round(quantity * (Number(item.applied_price_khr) || 0)))}`)
       })
-      if (saleItems.length > 4) lines.push(`   + ${saleItems.length - 4} more ${localizeTelegramValue('item(s)')}`)
+      // Indented under its receipt like the item lines above it, and worded by
+      // the one helper the alert builders' continuation also goes through. It
+      // used to localize only the NOUN -- `+ 3 more មុខទំនិញ` -- leaving the
+      // English "more" in a Khmer-only shop's message.
+      if (saleItems.length > 4) lines.push(`   ${moreItems(saleItems.length - 4)}`)
     }
     return lines.join('\n')
   })
