@@ -201,7 +201,7 @@ ok(/useState<CloseDraft>\(blankClose\)/.test(modal) && /<DateTimeEntryInput[^>]*
 ok(/const blankClose = \(shift\?: Shift \| null\): CloseDraft => \(\{/.test(modal)
   && /closedAt: shift && !shift\.closed_at\s*\n\s*\? shiftLocalDateTimeFromMs\(carryOverCloseSeedMs\(shift\.close_before, shift\.opened_at, Date\.now\(\)\)\)\s*\n\s*: dateTimeLocal\(new Date\(\)\.toISOString\(\)\),/.test(modal),
   'historic close pre-fills its required timestamp from the server-stated bound, leaving report-only counts blank')
-ok(/setClose\(blankClose\(selected\)\); setAction\('close'\)/.test(modal), 'and the Close action seeds that draft from the SELECTED row, not from an empty one')
+ok(/const seed = blankClose\(selected\); setCloseBase\(seed\); setClose\(seed\); setAction\('close'\)/.test(modal), 'and the Close action seeds that draft (and the dirty baseline) from the SELECTED row, not from an empty one')
 ok(/\{selected\.close_before \? <p[^>]*>[\s\S]{0,200}?t\('shift_previous_open_close_before'\)[\s\S]{0,120}?fmtDateTime24\(selected\.close_before\)\}<\/p> : null\}/.test(modal),
   'the close form shows that bound -- only when the server stated one -- with the same key and formatter the POS strip uses')
 ok(/const closeReason = !close\.closedAt \? t\('shift_close_time_required'\)/.test(modal), 'only a missing/invalid close timestamp blocks the save; drawer counts never gate it')

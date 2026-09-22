@@ -212,6 +212,12 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const [action, setAction] = useState<ActionMode>(null)
   const [edit, setEdit] = useState<EditDraft | null>(null)
   const [close, setClose] = useState<CloseDraft>(blankClose)
+  // The draft the Close form opened with. `closedAt` is always prefilled
+  // (blankClose), so "any field non-empty" made the form dirty the moment it
+  // opened: the other actions disabled and the unsaved-changes guard armed
+  // before anything was typed. Dirty is now a change from this seed, the
+  // same rule `editDirty` uses against editDraft(selected).
+  const [closeBase, setCloseBase] = useState<CloseDraft>(() => close)
   const [reopen, setReopen] = useState<ReopenDraft>(blankReopen)
   const [cancelReason, setCancelReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -242,7 +248,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setPageInfo({ page, total: null })
     setLoading(true)
     setEdit(null)
-    setClose(blankClose())
+    const blank = blankClose()
+    setCloseBase(blank)
+    setClose(blank)
     setReopen(blankReopen())
     setCancelReason('')
     setPending(false)
@@ -303,7 +311,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const resetAction = () => {
     setPending(false)
     setAction(null)
-    setClose(blankClose())
+    const blank = blankClose()
+    setCloseBase(blank)
+    setClose(blank)
     setReopen(blankReopen())
     setCancelReason('')
   }
@@ -330,6 +340,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
           const value = (key: string) => saved.body[key] == null ? '' : String(saved.body[key])
           setPending(true)
           setAction(saved.action)
+          if (saved.action === 'close') setCloseBase(blankClose(result.shift))
           if (saved.action === 'close') setClose({ closedAt: dateTimeLocal(value('closed_at')), closingUsd: value('closing_counted_usd'), closingKhr: value('closing_counted_khr'), additionalUsd: value('additional_cash_usd'), additionalKhr: value('additional_cash_khr'), closingNote: value('closing_note') })
           if (saved.action === 'reopen') setReopen({ reason: value('reason'), openingUsd: value('opening_float_usd'), openingKhr: value('opening_float_khr'), openingNote: value('opening_note') })
           if (saved.action === 'cancel') setCancelReason(value('reason'))
@@ -489,7 +500,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   }
 
   const editDirty = !!(selected && edit && JSON.stringify(edit) !== JSON.stringify(editDraft(selected)))
-  const closeDirty = Object.values(close).some((value) => value.trim() !== '')
+  const closeDirty = JSON.stringify(close) !== JSON.stringify(closeBase)
   const reopenDirty = Object.values(reopen).some((value) => value.trim() !== '')
   const dirty = action === 'edit' ? editDirty : action === 'close' ? closeDirty : action === 'reopen' ? reopenDirty : action === 'cancel' ? cancelReason.trim() !== '' : false
 
@@ -550,7 +561,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
                 <section className="space-y-3" aria-label={t('shift_actions')}>
                   <div className="flex flex-wrap gap-2">
                     {selected.capabilities.can_edit ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'edit'} onClick={() => { if (action === 'edit') resetAction(); else { setEdit(editDraft(selected)); setAction('edit') } }}><Pencil className="mr-1 inline h-3.5 w-3.5" />{t('shift_action_edit')}</button> : null}
-                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { setClose(blankClose(selected)); setAction('close') } }}>{t('shift_action_close')}</button> : null}
+                    {selected.capabilities.can_close ? <button type="button" className="min-h-11 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50" disabled={saving || pending || dirty && action !== 'close'} onClick={() => { if (action === 'close') resetAction(); else { const seed = blankClose(selected); setCloseBase(seed); setClose(seed); setAction('close') } }}>{t('shift_action_close')}</button> : null}
                     {selected.capabilities.can_reopen ? <button type="button" className="btn-secondary min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'reopen'} onClick={() => { if (action === 'reopen') resetAction(); else { setReopen(blankReopen()); setAction('reopen') } }}>{t('shift_action_reopen')}</button> : null}
                     {selected.capabilities.can_cancel ? <button type="button" className="btn-danger min-h-11 px-3 text-xs" disabled={saving || pending || dirty && action !== 'cancel'} onClick={() => { if (action === 'cancel') resetAction(); else { setCancelReason(''); setAction('cancel') } }}>{t('shift_action_cancel_shift')}</button> : null}
                   </div>
