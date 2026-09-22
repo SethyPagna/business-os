@@ -407,6 +407,23 @@ async function run() {
     console.log('PASS the schema probe re-checks after a miss')
   }
 
+  // E8 -- an id that was SENT but is not usable is refused. Running it
+  //    unprotected is the worst of the three options: the client believes it
+  //    is deduped and it is not.
+  {
+    const db = freshDb()
+    const c = makeContext(db)
+    const short = await runAdjustAction(c, addBody('abc'))
+    assert.equal(short.status, 400, 'a too-short id is refused')
+    assert.equal((await jsonOf(short)).code, 'invalid_client_request_id', 'and says why')
+    assert.equal(branchStock(db), 0, 'no stock moved')
+    assert.equal(receiptCount(db), 0, 'and no receipt was written')
+    const empty = await runAdjustAction(c, { ...addBody('ignored'), client_request_id: '' })
+    assert.equal(empty.status, 200, 'CONTROL: an EMPTY id means "no id", the pre-0192 path')
+    assert.equal(branchStock(db), 5, 'CONTROL: and writes')
+    console.log('PASS an unusable client_request_id is a 400, never silently unprotected')
+  }
+
   console.log('\nAll stock mutation receipt assertions passed')
 }
 

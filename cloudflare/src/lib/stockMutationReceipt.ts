@@ -57,11 +57,23 @@ type StockMutationClaim =
   | { state: 'conflict' }
   | { state: 'in_flight' }
 
-/** Accept only a stable, bounded id; anything else means "no id was sent". */
+/** Accept only a stable, bounded id. */
 function normalizeStockMutationRequestId(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return STOCK_MUTATION_REQUEST_ID.test(trimmed) ? trimmed : null
+}
+
+/**
+ * Did the caller mean to send an id at all? Absent / null / '' means "no id,
+ * pre-0192 path". Anything else was an ATTEMPT, and an attempt that does not
+ * normalize must be refused rather than silently run unprotected -- a client
+ * that truncates its ids would otherwise look protected and not be.
+ */
+function requestIdWasSupplied(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value !== 'string') return true
+  return value.trim() !== ''
 }
 
 // The request fingerprint stored beside the receipt. Only the fields that
@@ -180,6 +192,11 @@ async function releaseStockMutation(db: D1Compat, actorId: number, requestId: st
   ).run({ actor: actorId, request: requestId })
 }
 
+const STOCK_MUTATION_INVALID_ID = {
+  error: 'client_request_id must be 8-120 characters of letters, digits, "-" or "_".',
+  code: 'invalid_client_request_id',
+}
+
 const STOCK_MUTATION_CONFLICT = {
   error: 'client_request_id was already used for different stock data.',
   code: 'idempotency_conflict',
@@ -205,8 +222,16 @@ export async function withStockMutationReceipt(
   json: (value: unknown, status?: number) => Response,
   run: () => Promise<Response>,
 ): Promise<Response> {
-  const requestId = normalizeStockMutationRequestId(body.client_request_id)
-  if (!requestId || actorId == null) return run()
+  const supplied = body.client_request_id ?? body.clientRequestId
+  const requestId = normalizeStockMutationRequestId(supplied)
+  if (!requestId) {
+    // An id that was SENT but cannot be used is refused. Running it
+    // unprotected would be the worst of the three answers: the client believes
+    // the line is deduped, and it is not.
+    if (requestIdWasSupplied(supplied)) return json(STOCK_MUTATION_INVALID_ID, 400)
+    return run()
+  }
+  if (actorId == null) return run()
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
   const claim = await claimStockMutation(db, actorId, requestId, kind, canonical)
