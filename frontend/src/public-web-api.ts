@@ -19,6 +19,10 @@ type PortalMethodName =
   | 'savePortalCart'
   | 'getPortalWishlist'
   | 'savePortalWishlist'
+  | 'setupPortalRecovery'
+  | 'verifyPortalRecovery'
+  | 'forgotPortalPassword'
+  | 'resetPortalPassword'
 type PublicPortalMethod = (...args: unknown[]) => Promise<unknown>
 type PublicPortalApi = Record<PortalMethodName, PublicPortalMethod>
 
@@ -55,6 +59,10 @@ const publicApi: PublicPortalApi = {
   savePortalCart: getPortalMethod('savePortalCart'),
   getPortalWishlist: getPortalMethod('getPortalWishlist'),
   savePortalWishlist: getPortalMethod('savePortalWishlist'),
+  setupPortalRecovery: getPortalMethod('setupPortalRecovery'),
+  verifyPortalRecovery: getPortalMethod('verifyPortalRecovery'),
+  forgotPortalPassword: getPortalMethod('forgotPortalPassword'),
+  resetPortalPassword: getPortalMethod('resetPortalPassword'),
 }
 
 if (typeof window !== 'undefined') {

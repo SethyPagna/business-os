@@ -144,6 +144,13 @@ export type Env = {
   // setting: chat IDs may be configured by an admin, but a bot token grants
   // control of the bot and must never be returned to the browser.
   TELEGRAM_BOT_TOKEN?: string
+  // Public @username of that same bot (no leading @), used only to build the
+  // customer-facing deep link `https://t.me/<username>?start=<token>` for
+  // portal account recovery (lib/portalRecovery.ts). Without it the
+  // Telegram recovery channel reports "not configured" and the storefront
+  // hides the option, same fallback shape as RESEND_API_KEY/RESEND_FROM_EMAIL
+  // above.
+  TELEGRAM_BOT_USERNAME?: string
   // Google identity login (Sign in with Google) -- see lib/googleOauth.ts.
   // CLIENT_ID/REDIRECT_URI are plain vars (not secret); CLIENT_SECRET should
   // be set with `wrangler secret put GOOGLE_LOGIN_CLIENT_SECRET` in

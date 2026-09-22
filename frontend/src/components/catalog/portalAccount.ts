@@ -17,6 +17,7 @@ import {
 // list follows the customer across devices.
 
 export type PortalAccountProfile = { membershipId: string; name: string; email: string | null }
+export type PortalRecoveryStatus = { channel: 'email' | 'telegram' | null; verified: boolean; emailMasked: string | null; telegramLinked: boolean }
 
 type PortalApi = {
   getPortalAccountMe?: () => Promise<unknown>
@@ -27,6 +28,10 @@ type PortalApi = {
   savePortalCart?: (items: unknown[]) => Promise<unknown>
   getPortalWishlist?: () => Promise<unknown>
   savePortalWishlist?: (items: unknown[]) => Promise<unknown>
+  setupPortalRecovery?: (payload: Record<string, unknown>) => Promise<unknown>
+  verifyPortalRecovery?: (payload: Record<string, unknown>) => Promise<unknown>
+  forgotPortalPassword?: (payload: Record<string, unknown>) => Promise<unknown>
+  resetPortalPassword?: (payload: Record<string, unknown>) => Promise<unknown>
 }
 
 function api(): PortalApi {
@@ -40,6 +45,18 @@ function readProfile(result: unknown): PortalAccountProfile | null {
   const name = String(account.name ?? '').trim()
   if (!membershipId && !name) return null
   return { membershipId, name, email: account.email == null ? null : String(account.email) }
+}
+
+function readRecovery(result: unknown): PortalRecoveryStatus | null {
+  const recovery = (result as { recovery?: unknown })?.recovery as Record<string, unknown> | null | undefined
+  if (!recovery || typeof recovery !== 'object') return null
+  const channel = recovery.channel === 'email' || recovery.channel === 'telegram' ? recovery.channel : null
+  return {
+    channel,
+    verified: !!recovery.verified,
+    emailMasked: recovery.emailMasked == null ? null : String(recovery.emailMasked),
+    telegramLinked: !!recovery.telegramLinked,
+  }
 }
 
 function readItems(result: unknown): unknown[] {

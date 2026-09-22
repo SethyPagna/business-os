@@ -152,6 +152,28 @@ export function getPortalAccountMe(): Promise<unknown> {
   return portalAuthRequest('/api/portal/auth/me', 'GET')
 }
 
+// ---- Account recovery (forgot password) ------------------------------------
+// setup/verify need the signed-in session cookie (choosing/confirming a
+// channel); forgot/reset are unauthenticated (a signed-out shopper resetting
+// a lost password) and always resolve to a JSON body even on a "no account
+// for that phone" outcome -- the server's response shape is enumeration-safe
+// by construction, so no special-casing is needed here.
+export function setupPortalRecovery(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/recovery/setup', 'POST', payload)
+}
+
+export function verifyPortalRecovery(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/recovery/verify', 'POST', payload)
+}
+
+export function forgotPortalPassword(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/forgot', 'POST', payload)
+}
+
+export function resetPortalPassword(payload: PortalPayload): Promise<unknown> {
+  return portalAuthRequest('/api/portal/auth/reset', 'POST', payload)
+}
+
 export function getPortalCart(): Promise<unknown> {
   return portalAuthRequest('/api/portal/account/cart', 'GET')
 }

@@ -23,6 +23,9 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
 import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
+import {
+  startRecoverySetup, confirmRecoverySetup, loadRecoveryStatus, requestPasswordReset, resetPassword,
+} from '../lib/portalRecovery'
 import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1470,7 +1473,95 @@ app.get('/auth/me', async (c) => {
     return c.json({ account: null, error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
   }
   if (!state.account) return c.json({ account: null })
-  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
+  const recovery = await loadRecoveryStatus(c.env, state.account.id)
+  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email }, recovery })
+})
+
+// ---- Account recovery (owner item: "forgot password... telegram phone
+// number, email, gmail, etc... send code, and otp. make sure we ask them to
+// do when signing up. choose one.") -- lib/portalRecovery.ts owns the DB
+// logic; these routes own the rate-limit wrapping (same shape as
+// /auth/signup and /auth/signin above) and the session cookie.
+
+app.post('/auth/recovery/setup', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const ip = getClientIp(c.req.raw)
+  const ipKey = await portalAbuseKey(c.env, 'portal:recovery:setup:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const window = await checkRateLimit(c.env, 'portal:recovery:setup:ip', ipKey, 20, 15 * 60 * 1000)
+  if (!window.allowed) {
+    c.header('Retry-After', String(window.retryAfterSeconds))
+    return c.json({ error: `Too many attempts. Try again in ${window.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const channel = body.channel === 'telegram' ? 'telegram' : body.channel === 'email' ? 'email' : null
+  if (!channel) return c.json({ error: 'Choose a recovery channel.', code: 'channel_required' }, 400)
+  const result = await startRecoverySetup(c.env, account.id, channel, body.email, ip)
+  if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status as 400 | 429 | 503)
+  return c.json(result)
+})
+
+app.post('/auth/recovery/verify', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const ip = getClientIp(c.req.raw)
+  const ipKey = await portalAbuseKey(c.env, 'portal:recovery:verify:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const window = await checkRateLimit(c.env, 'portal:recovery:verify:ip', ipKey, 30, 15 * 60 * 1000)
+  if (!window.allowed) {
+    c.header('Retry-After', String(window.retryAfterSeconds))
+    return c.json({ error: `Too many attempts. Try again in ${window.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const channel = body.channel === 'telegram' ? 'telegram' : body.channel === 'email' ? 'email' : null
+  if (!channel) return c.json({ error: 'Choose a recovery channel.', code: 'channel_required' }, 400)
+  const result = await confirmRecoverySetup(c.env, account.id, channel, String(body.code || ''))
+  if (!result.ok) {
+    const messages: Record<string, string> = {
+      invalid: 'That code is incorrect.',
+      expired: 'That code has expired. Please request a new one.',
+      attempts_exceeded: 'Too many incorrect attempts. Please request a new code.',
+    }
+    return c.json({ error: messages[result.reason], code: `code_${result.reason}` }, 400)
+  }
+  return c.json({ ok: true, recovery: await loadRecoveryStatus(c.env, account.id) })
+})
+
+app.post('/auth/forgot', async (c) => {
+  const ip = getClientIp(c.req.raw)
+  const ipKey = await portalAbuseKey(c.env, 'portal:forgot:ip', ip)
+  if (!ipKey) return c.json({ ok: true })
+  const window = await checkRateLimit(c.env, 'portal:forgot:ip', ipKey, 20, 15 * 60 * 1000)
+  if (!window.allowed) {
+    c.header('Retry-After', String(window.retryAfterSeconds))
+    // Deliberately still the generic { ok: true } shape below is NOT used
+    // here: a rate-limit reply carries no account signal either way, so
+    // surfacing it plainly costs no enumeration safety and lets the client
+    // show a real "try later" message.
+    return c.json({ error: `Too many attempts. Try again in ${window.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  return c.json(await requestPasswordReset(c.env, body.phone, ip))
+})
+
+app.post('/auth/reset', async (c) => {
+  const ip = getClientIp(c.req.raw)
+  const ipKey = await portalAbuseKey(c.env, 'portal:reset:ip', ip)
+  if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const window = await checkRateLimit(c.env, 'portal:reset:ip', ipKey, 30, 15 * 60 * 1000)
+  if (!window.allowed) {
+    c.header('Retry-After', String(window.retryAfterSeconds))
+    return c.json({ error: `Too many attempts. Try again in ${window.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  const result = await resetPassword(c.env, body.phone, body.code, body.newPassword)
+  if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status as 400)
+  return c.json({ ok: true })
 })
 
 // Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by

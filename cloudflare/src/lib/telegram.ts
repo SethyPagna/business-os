@@ -19,6 +19,7 @@ import {
   type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
+import { finishTelegramBindAndSendCode } from './portalRecovery'
 import type { Env } from '../index'
 
 export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
@@ -951,6 +952,32 @@ export async function isTelegramWebhookRequest(env: Env, suppliedSecret: string 
 export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): Promise<void> {
   const message = update?.message; const text = String(message?.text || '').trim(); const chatId = String(message?.chat?.id || '')
   if (!text.startsWith('/') || !chatId) return
+
+  // Storefront account recovery (lib/portalRecovery.ts) deliberately bypasses
+  // the owner's staff-command allow-list below: `/start <token>` only ever
+  // does anything when the token matches a live, single-use bind row a
+  // SIGNED-IN customer's own account issued a moment earlier (portal_
+  // telegram_bind_tokens) -- any other chat's `/start <garbage>` just fails
+  // to match and falls through to the normal /start help reply. A shop's own
+  // alerts bot is one Telegram bot serving both audiences, so this has to be
+  // the one webhook both go through.
+  const startMatch = /^\/start(?:@[^\s]+)?\s+(\S+)/.exec(text)
+  if (startMatch) {
+    const bound = await finishTelegramBindAndSendCode(env, startMatch[1], chatId)
+    if (bound.ok) {
+      const token = String(env.TELEGRAM_BOT_TOKEN || '').trim()
+      if (token) {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: 'Telegram connected. Check this chat for your verification code.' }),
+        }).catch(() => undefined)
+      }
+      return
+    }
+    // Not a valid/live bind token -- fall through to the normal command flow
+    // below (an owner group could legitimately type "/start something").
+  }
+
   const config = await getTelegramConfig(env)
   // No token means there is no way to reply at all, so say nothing.
   if (commandProblem(config)) return
