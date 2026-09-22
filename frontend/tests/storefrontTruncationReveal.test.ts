@@ -1,12 +1,21 @@
-// A truncated product name on the storefront must be readable in full.
+// A product NAME on the storefront is never cut; every other truncated
+// storefront value must be readable in full.
 //
-// The standing rule is that ellipsis-truncated text is never a dead end: it
-// reveals on hover and on tap, through the shared TruncatedText component.
-// The storefront had two places that broke it, and they are the two where the
-// text is a per-record value rather than chrome -- the product NAME in the
-// cart panel and in the wishlist panel (PublicCatalogPage). A customer with
-// two similar variants in the list saw "Samsung Galaxy Buds Pro 2 Wire..."
-// twice and had no way to tell them apart before sending the list to the shop.
+// Two rules, and the first one wins where they meet. A name SCROLLS: the
+// owner's ruling is absolute -- "product names are using elipses when too
+// long, remember we don't do that. we do scroll left and right" -- so the
+// cart and wishlist drawer rows render the name through the app-wide
+// `.detail-scroll-text` box and carry no ellipsis to reveal. Anything else
+// that truncates is never a DEAD END: it reveals on hover and on tap through
+// the shared TruncatedText component.
+//
+// This file used to pin the opposite for those two rows: they were the two
+// per-record values on the storefront, so they were given the reveal (a
+// customer with two similar variants in the list saw "Samsung Galaxy Buds
+// Pro 2 Wire..." twice and could not tell them apart). The reveal fixed the
+// dead end but kept the ellipsis, which the rule above does not allow on a
+// name; the rows scroll now, and the reveal contract below still governs the
+// storefront values that are not names.
 //
 // What is deliberately NOT a dead end, checked one by one rather than by rule:
 //
@@ -116,19 +125,35 @@ runTest('no storefront surface truncates a per-record value with no way back', (
   )
 })
 
-runTest('the cart and the wishlist both reveal the name through the shared component', () => {
+runTest('the cart and the wishlist scroll the name instead of cutting it', () => {
   const publicPage = read('../src/components/catalog/PublicCatalogPage.tsx')
-  assert.match(publicPage, /import TruncatedText from '\.\.\/shared\/TruncatedText\.tsx'/, 'the shared component, not a local tooltip')
-  const uses = publicPage.match(/<TruncatedText text=\{item\.name\}/g) || []
-  assert.equal(uses.length, 2, 'both the cart panel row and the wishlist panel row')
+  // The scroller is the app-wide one in styles/main.css, not a second
+  // implementation, and it is applied through `getKhmerTextProps` so a Khmer
+  // name gets `khmer-text` -- the portal does not set the admin app's
+  // `body.lang-km`, so the Khmer line box has to be bought off the value.
+  const scrollers = publicPage.match(/<div \{\.\.\.getKhmerTextProps\(item\.name, 'detail-scroll-text[^']*'\)\}>\{item\.name\}<\/div>/g) || []
+  assert.equal(scrollers.length, 2, 'both the cart panel row and the wishlist panel row scroll the name')
+  assert.match(publicPage, /import \{ getKhmerTextProps \} from '\.\.\/\.\.\/utils\/scriptTypography\.ts'/, 'the shared Khmer helper, not a local script test')
+  assert.doesNotMatch(publicPage, /TruncatedText/, 'a name must not be handed to the truncating component at all')
   // The row must keep its own layout: the name still shares the line with the
-  // quantity stepper and the remove button, so it stays a flex child that can
-  // shrink. TruncatedText renders `block truncate` itself.
-  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*<TruncatedText text=\{item\.name\}/g) || []).length, 2,
+  // quantity stepper and the remove button, so it stays inside the flex child
+  // that can shrink. A scroller that is not inside `min-w-0` would widen the
+  // row instead of scrolling inside it.
+  assert.equal((publicPage.match(/<div className="min-w-0 flex-1">\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<div \{\.\.\.getKhmerTextProps\(item\.name/g) || []).length, 2,
     'the name must stay inside the shrinking column of the row')
+  // NEGATIVE CONTROL: the shape above is specific enough to fail if the name
+  // goes back to being clipped, or leaks out of the shrinking column.
+  assert.equal((`<div className="min-w-0 flex-1">
+                    <TruncatedText text={item.name} className="text-sm" />`.match(/<div \{\.\.\.getKhmerTextProps\(item\.name, 'detail-scroll-text[^']*'\)\}>/g) || []).length, 0,
+    'the check must not pass on the markup it replaced')
 })
 
 runTest('the reveal is usable by touch, not hover alone', () => {
+  // The storefront's NAMES no longer use this component (they scroll), but
+  // the reveal contract still governs every storefront value that truncates
+  // and every surface that still hands text to TruncatedText, so it stays
+  // pinned here rather than being deleted with the two rows.
+  //
   // The component delegates its float and input handling to the one shared
   // controller. Lock the complete connection down: click, hover, keyboard,
   // and the long-press gesture available on touch screens. This replaces the

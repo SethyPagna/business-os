@@ -4,7 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
-import TruncatedText from '../shared/TruncatedText.tsx'
+import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -1668,7 +1668,18 @@ export default function PublicCatalogPage() {
               {bucket.items.map((item) => (
                 <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                   <div className="min-w-0 flex-1">
-                    <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                    {/* A product name is never cut on this project (owner:
+                        "product names are using elipses when too long,
+                        remember we don't do that. we do scroll left and
+                        right"), and the storefront is where the customer
+                        reads it. Same block-level scroller as the rest of
+                        the app. `getKhmerTextProps` because a name can be
+                        Khmer whatever the UI language is, and the portal
+                        does not carry the admin app's `body.lang-km`: the
+                        Khmer line box is bought by
+                        `.detail-scroll-text.khmer-text` (styles/main.css)
+                        off the value itself. */}
+                    <div {...getKhmerTextProps(item.name, 'detail-scroll-text text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
                     {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -1827,7 +1838,9 @@ export default function PublicCatalogPage() {
                 return (
                   <li key={item.id} className="flex items-start justify-between gap-3 border-b border-slate-50 pb-3 last:border-0 dark:border-neutral-800/60">
                     <div className="min-w-0 flex-1">
-                      <TruncatedText text={item.name} className="text-sm font-medium text-slate-900 dark:text-neutral-100" />
+                      {/* Scrolls, like the cart row above it and every other
+                          name in the app. */}
+                      <div {...getKhmerTextProps(item.name, 'detail-scroll-text text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
                       {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
