@@ -445,6 +445,22 @@ async function promotionsRoute() {
     assert.deepEqual([before.is_active, after.is_active], [1, 0])
     assert.ok(!('updated_at' in before), 'the row describes the edit, not its own timestamp')
   })
+
+  response = await route.request('/rules/1', { method: 'DELETE' }, {}, ctx)
+  assert.equal(response.status, 200, await response.text())
+  rows = auditRowsFor(db, 'promotion_rule')
+  check('promotions DELETE: the removed rule is preserved as the before image', () => {
+    const last = rows[rows.length - 1]
+    assert.equal(last.action, 'delete')
+    assert.equal(last.new_value, null)
+    const before = JSON.parse(last.old_value)
+    assert.equal(before.title, 'Buy 3 save $2')
+    assert.equal(before.scope_type, 'category')
+    assert.equal(before.category, 'Drinks')
+    assert.ok(!('id' in before), 'bookkeeping columns stay out')
+    assert.ok(renderer.buildAuditFieldDiff(last.old_value, last.new_value).length > 0,
+      'the renderer must have rows to show for a delete')
+  })
 }
 
 // ---------------------------------------------------------------------------
