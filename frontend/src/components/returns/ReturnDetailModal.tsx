@@ -7,7 +7,8 @@ import { fmtTime } from '../../utils/formatters.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
-import { getReturn as fetchReturnDetail } from '../../api/returnsReadTransport.ts'
+import { getReturn as fetchReturnDetail, getReturnRecords as fetchReturnRecords } from '../../api/returnsReadTransport.ts'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
@@ -71,6 +72,11 @@ interface ReturnDetailModalProps {
   onClose: () => void
   onMinimize: () => void
   onEdit?: () => void
+  // The return's records -- who changed it, when, from what to what. A READ,
+  // exactly like the sale's: it is not gated on the edit permission, because
+  // hiding the trail from the people who reconcile the books is the opposite
+  // of what it is for. Anyone who can open this modal can open its records.
+  onOpenRecords?: () => void
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
 }
@@ -91,7 +97,7 @@ function isPositiveMoney(value: number | string | null | undefined): boolean {
   return Number(value || 0) > 0
 }
 
-export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
+export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, onOpenRecords, fmtUSD, fmtKHR }: ReturnDetailModalProps) {
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t?.(key)
@@ -127,6 +133,32 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fm
     })()
     return () => { alive = false }
   }, [needsFetch, returnId])
+
+  // "one line called Records with total records" (owner, Sep 6 2026) -- the
+  // total, not a bare link. The sale gets its count from the list payload
+  // (records_count on every row); a return's history is a union of four
+  // sources, so counting it per row in the list read would mean four extra
+  // queries for every return on the page. It is read here instead, once, for
+  // the ONE return that is open -- and through the same cached transport key
+  // the float uses, so pressing Records does not fetch it a second time.
+  const [recordsCount, setRecordsCount] = useState<number | null>(null)
+  const wantsRecords = !!onOpenRecords && returnId != null
+  useEffect(() => {
+    if (!wantsRecords || returnId == null) { setRecordsCount(null); return }
+    let alive = true
+    setRecordsCount(null)
+    void (async () => {
+      try {
+        const payload = await fetchReturnRecords(returnId) as { records?: unknown[] } | null
+        if (!alive) return
+        setRecordsCount(Array.isArray(payload?.records) ? payload.records.length : null)
+      } catch {
+        // A failed count leaves the placeholder, never a zero: "0 records" is a
+        // claim that nobody ever touched this return.
+      }
+    })()
+    return () => { alive = false }
+  }, [wantsRecords, returnId])
 
   if (!ret) return null
   const items = propItems && propItems.length ? propItems : (fetched?.items || [])
@@ -388,6 +420,26 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, fm
                 </table>
               </div>
             </section>
+          ) : null}
+
+          {/* Records is the last body section, in the same place and the same
+              shape as the sale's -- two record details that answer the same
+              question must not disagree about where the answer lives. */}
+          {onOpenRecords ? (
+            <button
+              type="button"
+              data-return-records-action=""
+              onClick={onOpenRecords}
+              className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-left text-sm font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300"
+              title={tr('records_open_record', 'Show who changed this record')}
+            >
+              <span className="inline-flex items-center gap-2">
+                <History className="h-4 w-4" />
+                {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
+                <span className="leading-relaxed">{tr('record_history', 'Records')}</span>
+              </span>
+              <span className="tabular-nums text-xs text-gray-500 dark:text-gray-400">{recordsCount ?? '—'}</span>
+            </button>
           ) : null}
 
           {/* S4-24: the record's actions, at the end of the record. */}

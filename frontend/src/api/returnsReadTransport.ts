@@ -138,6 +138,24 @@ export function getReturn(id: number | string, options: ReturnDetailReadOptions 
   )
 }
 
+/**
+ * One return's RECORDS -- who changed it, when, and from what to what.
+ *
+ * Mirrors salesTransport.getSaleRecords, including `raceLocalFallback: false`:
+ * a cached or fabricated answer here would be a claim about who edited a
+ * return, and there is no honest offline version of that. Keyed per id, so
+ * opening return B does not render return A's history out of a shared cache
+ * slot (the defect getReturn documents above).
+ */
+export function getReturnRecords(id: number | string): Promise<unknown> {
+  return route(
+    `returns:records:${encodeId(id)}`,
+    () => apiFetch('GET', `/api/returns/${encodeId(id)}/records`),
+    null,
+    { raceLocalFallback: false },
+  )
+}
+
 export function getReturnReasonPresets(): Promise<unknown> {
   return route(
     'returns:reason-presets',
