@@ -120,8 +120,8 @@ check('"All" prints the card and the full receipt one after the other', () => {
   // installed app printed one of the two and left Print disabled (Sep 23 2026).
   const body = stripComments(functionBody(receipt, 'const exportBothSeparately = async', 'const shellStyleFor'))
   assert.doesNotMatch(body, /Promise\.all/, 'the two renditions must not be exported concurrently')
-  assert.match(body, /for \(const variant of \['compact', 'full'\] as const\) \{\s*try \{\s*await exportReceiptVariant\(printTools, mode, variant\)/,
-    'each rendition finishes before the next one starts')
+  assert.match(body, /for \(const variant of \['compact', 'full'\] as const\) \{\s*try \{\s*if \(mode === 'print' && variant === 'full'\) await printFrameReleased\(\)\s*await exportReceiptVariant\(printTools, mode, variant\)/,
+    'each rendition finishes before the next one starts, and a print waits until the card\'s print sheet has closed')
   assert.match(body, /failure = failure \?\? error/, 'a failed rendition still lets the other one through')
 })
 
@@ -278,6 +278,35 @@ await checkAsync('a second print replaces the first frame instead of stacking on
   await surface.printHtmlInHiddenFrame('<html>two</html>')
   assert.equal(first.removed, true, 'the first frame is discarded when a second print starts')
   assert.equal(created.length, before + 2, 'exactly one frame per print')
+  created[created.length - 1].afterPrint?.()
+})
+
+// "All" prints the card, then the full receipt. The second print replaces the
+// card's frame, and on iOS that cancels a print sheet still open (Sep 23 2026).
+await checkAsync('a print that follows another one can wait until the first sheet has closed', async () => {
+  let settled = false
+  await surface.printHtmlInHiddenFrame('<html>card</html>')
+  const card = created[created.length - 1]
+  void surface.printFrameReleased().then(() => { settled = true })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(settled, false, 'the card\'s sheet is still open: its frame is still there')
+  card.afterPrint?.()
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(settled, true, 'afterprint releases the wait')
+  assert.equal(card.removed, true)
+  let idle = false
+  void surface.printFrameReleased().then(() => { idle = true })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(idle, true, 'with no frame left there is nothing to wait for')
+})
+
+await checkAsync('a new print releases a waiter on the frame it replaces', async () => {
+  let settled = false
+  await surface.printHtmlInHiddenFrame('<html>first</html>')
+  void surface.printFrameReleased().then(() => { settled = true })
+  await surface.printHtmlInHiddenFrame('<html>second</html>')
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(settled, true, 'a replaced frame never leaves anyone waiting on it')
   created[created.length - 1].afterPrint?.()
 })
 

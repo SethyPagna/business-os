@@ -26,7 +26,7 @@ import {
 } from '../../utils/receiptItemColumns.ts'
 import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
-import { openPrintPreviewWindow } from '../../utils/printSurface.ts'
+import { openPrintPreviewWindow, printFrameReleased } from '../../utils/printSurface.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // PDF is a deterministic physical-size artifact. Unlike the HTML Print
@@ -997,11 +997,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       // One after the other: only one print frame exists at a time
       // (printSurface.ts), and the second print, started while the first was
       // still being prepared, replaced its frame -- the installed app printed
-      // one of the two and left Print disabled (Sep 23 2026). A failed
-      // rendition still lets the other one through.
+      // one of the two and left Print disabled (Sep 23 2026). The full receipt
+      // also waits until the card's print sheet has closed: its print replaces
+      // the card's frame, and on iOS that cancels a sheet still on screen.
+      // A failed rendition still lets the other one through.
       let failure: unknown = null
       for (const variant of ['compact', 'full'] as const) {
         try {
+          if (mode === 'print' && variant === 'full') await printFrameReleased()
           await exportReceiptVariant(printTools, mode, variant)
         } catch (error) {
           failure = failure ?? error

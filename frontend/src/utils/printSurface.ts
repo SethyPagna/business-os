@@ -23,6 +23,8 @@ let activePrintFrame: HTMLIFrameElement | null = null
 // and holds that detached document (fonts, decoded images) alive for two more
 // minutes -- on the device with the least memory of any client we have.
 let releaseActivePrintFrame: (() => void) | null = null
+// Settles once the frame printed last is gone. Already settled when there is none.
+let activePrintFrameReleased: Promise<void> = Promise.resolve()
 
 function discardActivePrintFrame(): void {
   const frame = activePrintFrame
@@ -125,6 +127,8 @@ export async function waitForFrameAssets(frameWindow: Window, frameDocument: Doc
 function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window): void {
   let removed = false
   let timer = 0
+  let released = () => {}
+  activePrintFrameReleased = new Promise<void>((resolve) => { released = resolve })
   const remove = () => {
     if (removed) return
     removed = true
@@ -134,10 +138,23 @@ function removeFrameAfterPrinting(frame: HTMLIFrameElement, frameWindow: Window)
       activePrintFrame = null
       releaseActivePrintFrame = null
     }
+    released()
   }
   timer = setTimeout(remove, PRINT_FRAME_CLEANUP_MS) as unknown as number
   releaseActivePrintFrame = remove
   frameWindow.addEventListener?.('afterprint', remove, { once: true })
+}
+
+/**
+ * Resolves once the print frame of the last print is gone: its 'afterprint'
+ * fired, or its late cleanup ran. A print that deliberately follows another
+ * one ("All": the 80x50 card, then the full receipt) waits on this first,
+ * because starting it replaces that frame, and on iOS replacing the frame while
+ * its print sheet is still open cancels the job. A new tap does not wait: it
+ * replaces the frame as before.
+ */
+export function printFrameReleased(): Promise<void> {
+  return activePrintFrameReleased
 }
 
 /**

@@ -20,7 +20,8 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
  * top of the printer paper; the print document carries the app's Khmer font, so
  * it prints in the font the app measured with (a fallback font made receipts
  * longer than their page and clipped the card); a sale's Print -> All prints the
- * card and then the full receipt, one after the other; and with the card on,
+ * card and then the full receipt, one after the other (through the hidden frame,
+ * only once the card's print dialog has closed); and with the card on,
  * Receipt Settings' test print prints the full receipt on roll paper. Every
  * printed receipt is laid out at the paper's width, not its on-screen size:
  * nothing reaches past the paper's sides and the text keeps the same margin at
@@ -95,11 +96,14 @@ type Harness = {
  * execCommand('print') returns true, which is what both Chromium and WebKit
  * return for a supported, executed print command (the spec asserts
  * queryCommandSupported('print') on the REAL prototype before stubbing it).
+ * The stubbed dialog stays "open" (no 'afterprint') until the spec closes it
+ * with closePrintDialog, the way a cashier finishes a print sheet.
  */
 async function stubPrinting(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
     type Sink = Window & {
       __e2ePrints?: Array<{ via: string; html: string; fonts: string[] }>
+      __e2ePrintViews?: Array<Window | null>
       __e2eBlockPopup?: boolean
       __e2eExecPrintSupported?: boolean | null
     }
@@ -110,6 +114,8 @@ async function stubPrinting(context: BrowserContext): Promise<void> {
     const record = (via: string, doc: Document | null | undefined) => {
       const target = sink()
       if (!target.__e2ePrints) target.__e2ePrints = []
+      if (!target.__e2ePrintViews) target.__e2ePrintViews = []
+      target.__e2ePrintViews.push(doc?.defaultView ?? null)
       const faces = doc?.fonts ? Array.from(doc.fonts as unknown as Iterable<FontFace>) : []
       target.__e2ePrints.push({
         via,
@@ -199,12 +205,30 @@ async function printCalls(page: Page): Promise<PrintCall[]> {
   return page.evaluate(() => ((window as Window & { __e2ePrints?: PrintCall[] }).__e2ePrints || []).map((call) => ({ ...call })))
 }
 
+/** Closes the print dialog of the print call at `index`: its window gets 'afterprint'. */
+async function closePrintDialog(page: Page, index: number): Promise<void> {
+  await page.evaluate((at) => {
+    const views = (window as Window & { __e2ePrintViews?: Array<Window | null> }).__e2ePrintViews || []
+    views[at]?.dispatchEvent(new Event('afterprint'))
+  }, index)
+}
+
 /**
  * Tap once, wait for the expected calls, then give an extra call time to show
  * up. Evidence first, so a red run still leaves the documents that printed.
+ * With `oneSheetAtATime`, each print but the last must wait until its dialog
+ * is closed before the next one starts; the spec closes it once that is shown.
  */
-async function tapAndCollect(page: Page, testInfo: TestInfo, label: string, before: number, expected: number, tap: () => Promise<void>): Promise<PrintCall[]> {
+async function tapAndCollect(page: Page, testInfo: TestInfo, label: string, before: number, expected: number, tap: () => Promise<void>, { oneSheetAtATime = false } = {}): Promise<PrintCall[]> {
   await tap()
+  if (oneSheetAtATime) {
+    for (let open = before + 1; open < before + expected; open += 1) {
+      await expect.poll(async () => (await printCalls(page)).length, { message: 'the tap must reach its print calls', timeout: 30_000 }).toBeGreaterThanOrEqual(open)
+      await page.waitForTimeout(1_500)
+      expect((await printCalls(page)).length, 'the next print waits while this print dialog is open').toBe(open)
+      await closePrintDialog(page, open - 1)
+    }
+  }
   await expect.poll(async () => (await printCalls(page)).length, { message: 'the tap must reach its print calls', timeout: 30_000 }).toBeGreaterThanOrEqual(before + expected)
   // printSurface.ts waits up to 4 s for assets before printing; a duplicate
   // call (print() after a successful execCommand, or a second schedule) would
@@ -542,7 +566,10 @@ for (const surface of SURFACES) {
     const printMenu = await openSaleReceipt(page)
     const renditions = await saleRenditions(page)
 
-    const calls = await tapAndCollect(page, testInfo, `all-${surface.replace(' ', '-')}`, 0, 2, printMenuItem(page, printMenu, EN.all))
+    // Through the hidden frame the full receipt's print replaces the card's
+    // frame, and on iOS that cancels a print sheet still open: it waits until
+    // the card's dialog has closed. A preview window is its own document.
+    const calls = await tapAndCollect(page, testInfo, `all-${surface.replace(' ', '-')}`, 0, 2, printMenuItem(page, printMenu, EN.all), { oneSheetAtATime: surface === 'hidden frame' })
     const expectedVia = surface === 'preview window' ? 'print' : 'execCommand'
     expect(calls.map((call) => call.via), `both print through the ${surface}`).toEqual([expectedVia, expectedVia])
     expect(await printedRendition(page, calls[0].html, renditions), 'first the card').toBe('card')
