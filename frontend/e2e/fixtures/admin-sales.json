@@ -33,9 +33,27 @@
         "unit_price_usd": 24.5,
         "total_usd": 24.5,
         "barcode": "",
-        "category": "Skincare"
+        "category": "Skincare",
+        "price_mode": "selling",
+        "product_discount_type": null,
+        "product_discount_label": null,
+        "pricing_snapshot_json": "{\"version\":1,\"line_key\":\"sale-9001-item-70001\",\"pool\":{\"version\":1,\"pool_key\":\"sale-9001\",\"evaluation_time\":\"2026-09-14T03:15:00.000Z\",\"exchange_rate\":4100,\"rules\":[],\"lines\":[{\"line_key\":\"sale-9001-item-70001\",\"source\":\"selling\",\"product\":{\"id\":1000,\"selling_price_usd\":24.5},\"selling_price_input_usd\":null,\"manual\":{\"type\":\"none\",\"value\":0}}]},\"quantities\":{\"sale-9001-item-70001\":1},\"amounts\":{\"gross_usd\":24.5,\"product_discount_usd\":0,\"manual_discount_usd\":0,\"total_usd\":24.5,\"total_khr\":100450,\"base_price_usd\":24.5,\"applied_price_usd\":24.5,\"base_price_khr\":100450,\"applied_price_khr\":100450,\"rule_id\":null},\"allocation_context\":{\"version\":1,\"lines\":[{\"line_key\":\"sale-9001-item-70001\",\"amount\":24.5}],\"discount_usd\":0,\"membership_discount_usd\":0,\"tax_usd\":0},\"receipt_allocation\":{\"discount_usd\":0,\"membership_discount_usd\":0,\"tax_usd\":0,\"net_entitlement_usd\":24.5}}",
+        "applied_price_usd": 24.5,
+        "applied_price_khr": 100450,
+        "base_price_usd": 24.5,
+        "base_price_khr": 100450,
+        "total_khr": 100450,
+        "product_discount_usd": 0,
+        "product_discount_khr": 0,
+        "manual_discount_usd": 0,
+        "manual_discount_khr": 0,
+        "manual_discount_type": null,
+        "manual_discount_value": 0
       }
-    ]
+    ],
+    "membership_discount_usd": 0,
+    "calculated_total_usd": 24.5,
+    "rounding_adjustment_usd": 0
   },
   {
     "id": 9002,
@@ -70,8 +88,26 @@
         "unit_price_usd": 11.75,
         "total_usd": 11.75,
         "barcode": "",
-        "category": "Makeup"
+        "category": "Makeup",
+        "price_mode": "selling",
+        "product_discount_type": null,
+        "product_discount_label": null,
+        "pricing_snapshot_json": "{\"version\":1,\"line_key\":\"sale-9002-item-70002\",\"pool\":{\"version\":1,\"pool_key\":\"sale-9002\",\"evaluation_time\":\"2026-09-14T04:22:00.000Z\",\"exchange_rate\":4100,\"rules\":[],\"lines\":[{\"line_key\":\"sale-9002-item-70002\",\"source\":\"selling\",\"product\":{\"id\":1001,\"selling_price_usd\":11.75},\"selling_price_input_usd\":null,\"manual\":{\"type\":\"none\",\"value\":0}}]},\"quantities\":{\"sale-9002-item-70002\":1},\"amounts\":{\"gross_usd\":11.75,\"product_discount_usd\":0,\"manual_discount_usd\":0,\"total_usd\":11.75,\"total_khr\":48175,\"base_price_usd\":11.75,\"applied_price_usd\":11.75,\"base_price_khr\":48175,\"applied_price_khr\":48175,\"rule_id\":null},\"allocation_context\":{\"version\":1,\"lines\":[{\"line_key\":\"sale-9002-item-70002\",\"amount\":11.75}],\"discount_usd\":0,\"membership_discount_usd\":0,\"tax_usd\":0},\"receipt_allocation\":{\"discount_usd\":0,\"membership_discount_usd\":0,\"tax_usd\":0,\"net_entitlement_usd\":11.75}}",
+        "applied_price_usd": 11.75,
+        "applied_price_khr": 48175,
+        "base_price_usd": 11.75,
+        "base_price_khr": 48175,
+        "total_khr": 48175,
+        "product_discount_usd": 0,
+        "product_discount_khr": 0,
+        "manual_discount_usd": 0,
+        "manual_discount_khr": 0,
+        "manual_discount_type": null,
+        "manual_discount_value": 0
       }
-    ]
+    ],
+    "membership_discount_usd": 0,
+    "calculated_total_usd": 11.75,
+    "rounding_adjustment_usd": 0
   }
 ]
