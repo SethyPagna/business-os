@@ -18,7 +18,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
-import { adjustStock, commitFastStockIn, type FastStockInCommitLine, type FastStockInCommitLineResult } from '../../api/inventoryWriteTransport.ts'
+import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLine, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
 import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -853,13 +853,48 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // itself -- network/5xx -- fails every still-saving line with that one
     // message rather than retrying the old N-request loop, which would just
     // fail the same way N times.
+    //
+    // The Worker attempts only its plan's per-request line cap and defers
+    // the rest; commitFastStockIn re-sends only those. Each round is folded
+    // in and made durable here BEFORE the next round goes out, so a crash
+    // between rounds cannot lose a committed line's "saved" and re-send it.
+    // A line still deferred when the loop stops (a real failure elsewhere)
+    // was never attempted: it goes back to queued, not to an error.
     let batched: FastStockInCommitLineResult[] | null = null
+    let lines = received
+    const unsettled = new Set(pending.map((line) => line.key))
+    const foldRound = (settled: FastStockInCommitSettled) => {
+      for (const { index, result } of settled) {
+        const line = pending[index]
+        unsettled.delete(line.key)
+        if (result?.ok) {
+          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
+        } else if (isDeferredStockInResult(result)) {
+          failed += 1
+          lines = applyLineOutcome(lines, line.key, { status: 'queued', detail: '' })
+        } else {
+          failed += 1
+          lines = applyLineOutcome(lines, line.key, {
+            detail: stockFailureText(result, tr, tr('error', 'Error')),
+            status: 'error',
+            needsRemoval: stockLineNeedsRemoval(result),
+          })
+        }
+      }
+      // Durable before the render. A crash here used to leave every line
+      // reading "queued" in the draft, so the retry re-sent work the server
+      // had already applied.
+      persistSessionDraft(lines)
+      setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
+    }
     try {
-      batched = await commitFastStockIn(pending.map(buildLineRequest))
+      batched = await commitFastStockIn(pending.map(buildLineRequest), foldRound)
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('error', 'Error')
-      failed = pending.length
-      const lines = received.map((item) => (pending.some((line) => line.key === item.key)
+      // Only lines no round has answered yet: a line already folded in as
+      // saved must keep "saved", or the retry would re-send applied stock.
+      failed += unsettled.size
+      lines = lines.map((item) => (unsettled.has(item.key)
         ? { ...item, status: 'error' as const, detail: stockFailureText(error, tr, message) }
         : item))
       persistSessionDraft(lines)
@@ -869,26 +904,6 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (batched === null) {
       // The deployed Worker predates POST /api/inventory/fast-stock-in/commit.
       failed = await performCommitSequential(pending)
-    } else if (batched.length > 0) {
-      let lines = received
-      pending.forEach((line, index) => {
-        const result = batched![index]
-        if (result?.ok) {
-          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
-        } else {
-          failed += 1
-          lines = applyLineOutcome(lines, line.key, {
-            detail: stockFailureText(result, tr, tr('error', 'Error')),
-            status: 'error',
-            needsRemoval: stockLineNeedsRemoval(result),
-          })
-        }
-      })
-      // Durable before the render. A crash here used to leave every line
-      // reading "queued" in the draft, so the retry re-sent work the server
-      // had already applied.
-      persistSessionDraft(lines)
-      setReceived(lines)
     }
     setSaving(false)
     setPendingCommit(null)

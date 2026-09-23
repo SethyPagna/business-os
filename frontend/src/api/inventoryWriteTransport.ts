@@ -146,24 +146,94 @@ export type FastStockInCommitLineResult = {
 // Returns null ONLY on a 404 -- the deployed Worker predates this route (a
 // rolling-deploy window with an old build still live) -- so the caller can
 // fall back to the original per-line loop. Any other failure (network, 5xx)
-// propagates as a thrown error; the caller decides how to report a whole-
-// commit failure, since there is no per-line detail to show in that case.
-export async function commitFastStockIn(lines: FastStockInCommitLine[]): Promise<FastStockInCommitLineResult[] | null> {
+// of the FIRST request propagates as a thrown error; the caller decides how
+// to report a whole-commit failure, since there is no per-line detail to
+// show in that case.
+//
+// One invocation may attempt only the plan's stockInLinesPerRequest lines
+// (Worker lib/planTier.ts: D1 allows 50 queries per invocation on Free and
+// 1000 on Paid); the rest come back 'deferred', untouched. This sends those
+// again, and only those, until none remain -- see commitStockInLinesInRounds.
+// `onSettled` hears each round's final answers before the next round is
+// sent, so the caller can persist "saved" lines first.
+export async function commitFastStockIn(
+  lines: FastStockInCommitLine[],
+  onSettled?: (settled: FastStockInCommitSettled) => void,
+): Promise<FastStockInCommitLineResult[] | null> {
   const wireLines = lines.map((line) => (
     line.wire === 'receive' ? { key: line.key, wire: line.wire, body: receiveBatchWireBody(line.body) } : line
   ))
-  try {
+  const send = async (batch: typeof wireLines): Promise<FastStockInCommitLineResult[]> => {
     const result = await route(
       'inventory:fastStockIn:commit',
-      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), lines: wireLines }),
+      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), lines: batch }),
       null,
       true,
     ) as { results?: FastStockInCommitLineResult[] } | null
     return result?.results ?? []
+  }
+  try {
+    return await commitStockInLinesInRounds(wireLines, send, onSettled)
   } catch (error) {
     if (error && typeof error === 'object' && (error as { status?: number }).status === 404) return null
     throw error
   }
+}
+
+/** A line the Worker did not attempt (per-request line cap): nothing was read or written for it. */
+export function isDeferredStockInResult(result: unknown): boolean {
+  const source = (result && typeof result === 'object' ? result : {}) as { ok?: unknown; code?: unknown }
+  return source.ok === false && source.code === 'deferred'
+}
+
+/** One round's final answers, by index into the caller's original line list. */
+export type FastStockInCommitSettled = Array<{ index: number; result: FastStockInCommitLineResult | undefined }>
+
+/**
+ * The continuation loop behind commitFastStockIn, with the request injected
+ * so it can be exercised without a network.
+ *
+ * Each round sends only the lines the previous round deferred -- a line the
+ * Worker answered in any other way is never sent again, because it may have
+ * moved stock. The loop stops when nothing is deferred, when a round has a
+ * real (non-deferred) failure -- the operator fixes it and completes again,
+ * and the still-deferred lines come back deferred so the caller keeps them
+ * queued -- or when a round makes no progress at all.
+ *
+ * Only the first request may throw: nothing was committed, so the caller's
+ * whole-request handling applies. A later request that throws fails only the
+ * lines it carried; the earlier rounds' results stand.
+ */
+export async function commitStockInLinesInRounds<L>(
+  lines: L[],
+  send: (batch: L[]) => Promise<Array<FastStockInCommitLineResult | undefined>>,
+  onSettled?: (settled: FastStockInCommitSettled) => void,
+): Promise<FastStockInCommitLineResult[]> {
+  const results: FastStockInCommitLineResult[] = []
+  let remaining = lines.map((_, index) => index)
+  for (let round = 0; remaining.length > 0; round += 1) {
+    let answered: Array<FastStockInCommitLineResult | undefined>
+    try {
+      answered = await send(remaining.map((index) => lines[index]))
+    } catch (error) {
+      if (round === 0) throw error
+      const source = (error && typeof error === 'object' ? error : {}) as { message?: unknown; code?: unknown }
+      const failure = { ok: false, error: String(source.message || 'Failed'), code: source.code ?? null }
+      const settled = remaining.map((index) => ({ index, result: { ...failure, key: (lines[index] as { key?: string }).key } }))
+      settled.forEach(({ index, result }) => { results[index] = result })
+      onSettled?.(settled)
+      return results
+    }
+    const thisRound = remaining.map((index, i) => ({ index, result: answered[i] }))
+    const deferred = thisRound.filter(({ result }) => isDeferredStockInResult(result))
+    const stop = deferred.length === thisRound.length || thisRound.some(({ result }) => !result?.ok && !isDeferredStockInResult(result))
+    const settled = stop ? thisRound : thisRound.filter(({ result }) => !isDeferredStockInResult(result))
+    settled.forEach(({ index, result }) => { if (result) results[index] = result })
+    onSettled?.(settled)
+    if (stop) break
+    remaining = deferred.map(({ index }) => index)
+  }
+  return results
 }
 
 // Milestone A stock-session wire. The caller owns stable request/line ids:

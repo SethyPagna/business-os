@@ -40,14 +40,14 @@ const inventoryTransport = readFrontend('src/api/inventoryWriteTransport.ts')
 const batchesTransport = readFrontend('src/api/batchesTransport.ts')
 
 runTest('the modal imports the batched commit transport', () => {
-  assert.match(modal, /import \{ adjustStock, commitFastStockIn, type FastStockInCommitLine, type FastStockInCommitLineResult \} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.ts'/)
+  assert.match(modal, /import \{ adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLine, type FastStockInCommitLineResult, type FastStockInCommitSettled \} from '\.\.\/\.\.\/api\/inventoryWriteTransport\.ts'/)
 })
 
 runTest('performCommit issues ONE commitFastStockIn call for the whole pending list, not a per-line request loop', () => {
   const start = modal.indexOf('const performCommit = async (pending: ReceivedLine[]) => {')
   assert.notEqual(start, -1, 'performCommit must exist')
   const body = modal.slice(start, modal.indexOf('\n  const successCount', start))
-  assert.match(body, /batched = await commitFastStockIn\(pending\.map\(buildLineRequest\)\)/, 'exactly one call, covering every pending line in one request')
+  assert.match(body, /batched = await commitFastStockIn\(pending\.map\(buildLineRequest\), foldRound\)/, 'exactly one call, covering every pending line (the transport re-sends only deferred lines)')
   // Positive control: the pre-fix shape awaited adjustStock/receiveBatchStock
   // directly inside a `for (const line of pending)` loop as the PRIMARY path.
   // That loop must survive only as the named 404 fallback below, not as
@@ -66,14 +66,15 @@ runTest('a 404 from the batched endpoint -- and ONLY a 404 -- falls back to the 
 runTest('one line-building function feeds both the batched request and the sequential fallback (no second, driftable copy of the wire bodies)', () => {
   assert.match(modal, /const buildLineRequest = \(line: ReceivedLine\): FastStockInCommitLine => \{/)
   // Both call sites reuse it.
-  assert.match(modal, /batched = await commitFastStockIn\(pending\.map\(buildLineRequest\)\)/)
+  assert.match(modal, /batched = await commitFastStockIn\(pending\.map\(buildLineRequest\), foldRound\)/)
   assert.match(modal, /const request = buildLineRequest\(line\)/)
 })
 
 runTest("a whole-request failure that is NOT a 404 fails every still-pending line with one message, instead of silently retrying the slow loop", () => {
   const start = modal.indexOf('const performCommit = async (pending: ReceivedLine[]) => {')
   const body = modal.slice(start, modal.indexOf('\n  const successCount', start))
-  assert.match(body, /catch \(error\) \{\s*const message = error instanceof Error \? error\.message : tr\('error', 'Error'\)\s*failed = pending\.length/)
+  assert.match(body, /catch \(error\) \{\s*const message = error instanceof Error \? error\.message : tr\('error', 'Error'\)[\s\S]*?failed \+= unsettled\.size\s*lines = lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,
+    'every line no round has answered fails with the one message; a line an earlier round saved keeps "saved"')
 })
 
 runTest("the receive-wire body is converted to the wire's snake_case shape through one shared conversion, not a second hand-written copy", () => {
