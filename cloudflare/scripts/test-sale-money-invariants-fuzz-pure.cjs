@@ -57,7 +57,7 @@ const cache = new Map()
 const actual = new Set([
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'financialPrecision',
   'saleTotals', 'saleItemPricing', 'promotionRules', 'customerReturnEntitlement',
-  'saleLineAddition', 'salesStatus', 'saleTransitions', 'nativeSaleChange',
+  'saleLineAddition', 'salesStatus','saleStatusResolution', 'saleTransitions', 'nativeSaleChange',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

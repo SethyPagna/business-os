@@ -178,3 +178,28 @@ export function actualKhrMinorUnits(value: FinancialDecimalInput): bigint {
 export function actualKhrValue(value: FinancialDecimalInput): number {
   return scaledUnitsToNumber(actualKhrMinorUnits(value), ACTUAL_KHR_DECIMALS)
 }
+
+/**
+ * A positive decimal as an EXACT integer ratio, with no quantization.
+ *
+ * Exchange rates are ratios, not money: quantizing 4100.0001 to four places
+ * before comparing scaled amounts silently changes which side of a coverage
+ * comparison a payment falls on. Callers that must compare money across
+ * currencies exactly (lib/saleStatusResolution.ts's coverage check, and
+ * through it lib/paymentSettlement.ts's `insufficient_payment`) use this so
+ * the rate never passes through a rounding step on the way into a bigint
+ * comparison.
+ *
+ * Reuses the module's own parseDecimal rather than growing a second decimal
+ * grammar -- the shape it already returns (coefficient + decimalScale) IS the
+ * ratio, once the sign is rejected and the scale is split across the two
+ * sides.
+ */
+export function exactDecimalRatio(value: FinancialDecimalInput): { numerator: bigint; denominator: bigint } {
+  const parsed = parseDecimal(value)
+  if (parsed.negative || parsed.coefficient === 0n) return fail('OUT_OF_RANGE', value)
+  return {
+    numerator: parsed.coefficient * powerOfTen(Math.max(0, -parsed.decimalScale)),
+    denominator: powerOfTen(Math.max(0, parsed.decimalScale)),
+  }
+}

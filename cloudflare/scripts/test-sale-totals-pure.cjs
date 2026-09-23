@@ -33,11 +33,11 @@ const srcPath = path.join(cloudflareRoot, 'src', 'lib', 'saleTotals.ts')
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sale-totals-'))
 const tsPath = path.join(tmpDir, 'saleTotals.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(srcPath, 'utf8'))
-for (const file of ['financialPrecision.ts', 'paymentMethodRegistry.ts', 'paymentSettlement.ts', 'moneyPrecision.ts', 'saleMoneyPrecision.ts']) {
+for (const file of ['financialPrecision.ts', 'paymentMethodRegistry.ts', 'paymentSettlement.ts', 'saleStatusResolution.ts', 'moneyPrecision.ts', 'saleMoneyPrecision.ts']) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
 }
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} financialPrecision.ts paymentMethodRegistry.ts paymentSettlement.ts moneyPrecision.ts saleMoneyPrecision.ts`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} financialPrecision.ts paymentMethodRegistry.ts paymentSettlement.ts saleStatusResolution.ts moneyPrecision.ts saleMoneyPrecision.ts`, { cwd: tmpDir, stdio: 'inherit' })
 const { computeSaleTotals, round2 } = require(path.join(tmpDir, 'saleTotals.js'))
 const { planSaleSettlement } = require(path.join(tmpDir, 'paymentSettlement.js'))
 
