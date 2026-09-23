@@ -63,12 +63,13 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     // isValidDocumentResponse. One writer left on that check is enough to
     // store it as the shell, so none may be: recovery, revalidation, cache
     // miss and stale-asset refresh all write /index.html, and each write must
-    // sit directly behind the body check.
+    // sit directly behind the body check. A null guard in front of the check
+    // (x && ...) can only narrow what reaches it.
     const writes = [...source.matchAll(/cache\.put\('\/index\.html'/g)]
     assert.equal(writes.length, 4, 'recovery, revalidation, cache miss and stale-asset refresh -- a new writer needs the same gate')
     for (const write of writes) {
       const lead = source.slice(Math.max(0, write.index - 120), write.index)
-      assert.match(lead, /if \(await isAppShellDocument\(\w+\)\)\s*\{?\s*await $/, `unguarded shell write: ...${lead.slice(-80)}`)
+      assert.match(lead, /if \((?:\w+ && )?await isAppShellDocument\(\w+\)\)\s*\{?\s*await $/, `unguarded shell write: ...${lead.slice(-80)}`)
     }
     const install = functionBody(source, 'async function precacheAppShell', 'async function cacheNamesToRetain')
     assert.match(install, /url === '\/' \|\| url === '\/index\.html'\s*\?\s*await isAppShellDocument\(response\)/, 'install admits / and /index.html through the same check')

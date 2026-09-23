@@ -151,7 +151,7 @@ function openBusinessDb() {
 }
 function txDone(tx) {
     return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => resolve(undefined);
         tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
         tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
@@ -177,9 +177,7 @@ function stableStringify(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
 }
 async function sha256(value) {
-    const bytes = value instanceof Uint8Array
-        ? value
-        : new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value));
+    const bytes = new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value));
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -399,7 +397,7 @@ async function precacheAppShell() {
         await cache.put(request, response.clone());
     }));
     const shell = await cache.match('/index.html') || await cache.match('/');
-    if (!isValidDocumentResponse(shell))
+    if (!shell || !isValidDocumentResponse(shell))
         throw new Error('Application shell could not be cached');
     // The worker is registered after the first page load, so those entry files
     // were fetched before this worker controlled the page. Discover the hashed
@@ -596,7 +594,7 @@ async function replayQueuedSale(db, row, base) {
     }
 }
 async function syncOutbox() {
-    let db = null;
+    let db;
     try {
         db = await openBusinessDb();
         const base = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '');
@@ -734,6 +732,8 @@ self.addEventListener('install', (event) => {
         await (await caches.open(APP_SHELL_CACHE)).delete(INCUMBENT_METADATA_URL);
         const incumbent = self.registration.active;
         if (incumbent) {
+            // Typed here, not on probeIncumbent: tests run that function's source
+            // as plain JavaScript.
             const identity = await probeIncumbent(incumbent);
             if (identity && self.registration.active === incumbent && identity.version !== APP_SHELL_VERSION) {
                 const cache = await caches.open(APP_SHELL_CACHE);
@@ -1109,7 +1109,7 @@ async function releaseNewBuildForRecovery() {
         const finish = () => {
             clearTimeout(deadline);
             installing.removeEventListener('statechange', onStateChange);
-            resolve();
+            resolve(undefined);
         };
         const onStateChange = () => {
             if (installing.state === 'installed')
@@ -1131,7 +1131,7 @@ async function recoverStaleShell(event) {
     const refresh = (async () => {
         const cache = await caches.open(APP_SHELL_CACHE);
         const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null);
-        if (await isAppShellDocument(response)) {
+        if (response && await isAppShellDocument(response)) {
             await cache.put('/index.html', response.clone()).catch(() => { });
         }
         await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH });

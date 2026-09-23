@@ -6,6 +6,16 @@
  * cannot be silently replaced by stale HTTP responses.
  */
 
+// tsconfig.sw.json typechecks this file against the WebWorker lib, whose self
+// is a plain WorkerGlobalScope: no registration, clients or skipWaiting, and
+// every event a bare Event. These are the scope a service worker actually runs
+// in, and Background Sync's event, which that lib does not declare. Type-only;
+// the emitted sw.js contains none of it.
+declare const self: ServiceWorkerGlobalScope
+declare global {
+  interface ServiceWorkerGlobalScopeEventMap { sync: ExtendableEvent & { readonly tag: string } }
+}
+
 const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__'
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`
 const APP_SHELL_CACHE = APP_SHELL_VERSION
@@ -144,13 +154,13 @@ function openBusinessDb() {
 
 function txDone(tx) {
   return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve()
+    tx.oncomplete = () => resolve(undefined)
     tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'))
     tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'))
   })
 }
 
-function requestResult(request) {
+function requestResult(request): Promise<any> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error || new Error('IndexedDB request failed'))
@@ -171,9 +181,7 @@ function stableStringify(value) {
 }
 
 async function sha256(value) {
-  const bytes = value instanceof Uint8Array
-    ? value
-    : new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
+  const bytes = new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -362,7 +370,7 @@ async function cacheVerifiedStaticAsset(cache, url) {
 // after activate. Module-scoped because the two run in different event
 // handlers of the same worker instance; a fresh install always overwrites it
 // before activate can read it.
-let pendingDeferredAssets = []
+let pendingDeferredAssets: unknown[] = []
 
 async function precacheDeferredAssets() {
   const assets = pendingDeferredAssets
@@ -395,7 +403,7 @@ async function precacheAppShell() {
     await cache.put(request, response.clone())
   }))
   const shell = await cache.match('/index.html') || await cache.match('/')
-  if (!isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
+  if (!shell || !isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
 
   // The worker is registered after the first page load, so those entry files
   // were fetched before this worker controlled the page. Discover the hashed
@@ -586,7 +594,7 @@ async function replayQueuedSale(db, row, base) {
 }
 
 async function syncOutbox() {
-  let db = null
+  let db
   try {
     db = await openBusinessDb()
     const base = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '')
@@ -717,7 +725,9 @@ self.addEventListener('install', (event) => {
     await (await caches.open(APP_SHELL_CACHE)).delete(INCUMBENT_METADATA_URL)
     const incumbent = self.registration.active
     if (incumbent) {
-      const identity = await probeIncumbent(incumbent)
+      // Typed here, not on probeIncumbent: tests run that function's source
+      // as plain JavaScript.
+      const identity = await probeIncumbent(incumbent) as { version: string, legacy: boolean } | null
       if (identity && self.registration.active === incumbent && identity.version !== APP_SHELL_VERSION) {
         const cache = await caches.open(APP_SHELL_CACHE)
         await cache.put(INCUMBENT_METADATA_URL, new Response(JSON.stringify({
@@ -922,7 +932,7 @@ async function appShellFallback(request, event) {
     const network = fetch(request).catch(() => null)
     let expireTimer
     const fresh = cached
-      ? await Promise.race([network, new Promise((resolve) => {
+      ? await Promise.race([network, new Promise<null>((resolve) => {
         expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS)
       })])
       : await network
@@ -1089,7 +1099,7 @@ async function releaseNewBuildForRecovery() {
     const finish = () => {
       clearTimeout(deadline)
       installing.removeEventListener('statechange', onStateChange)
-      resolve()
+      resolve(undefined)
     }
     const onStateChange = () => {
       if (installing.state === 'installed') release(installing)
@@ -1110,7 +1120,7 @@ async function recoverStaleShell(event) {
   const refresh = (async () => {
     const cache = await caches.open(APP_SHELL_CACHE)
     const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null)
-    if (await isAppShellDocument(response)) {
+    if (response && await isAppShellDocument(response)) {
       await cache.put('/index.html', response.clone()).catch(() => {})
     }
     await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH })

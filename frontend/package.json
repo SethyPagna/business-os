@@ -13,7 +13,7 @@
     "postbuild": "node ../ops/scripts/frontend/verify-built-startup.mjs",
     "verify:built-startup": "node ../ops/scripts/frontend/verify-built-startup.mjs",
     "build:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.sw.json",
     "check:source": "node tests/sourceSyntaxCheck.ts",
     "check:jsx": "npm run check:source",
     "preview": "vite preview",

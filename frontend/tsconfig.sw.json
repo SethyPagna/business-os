@@ -1,0 +1,15 @@
+{
+  "//": "The service worker's own typecheck, run by npm run typecheck after tsconfig.json. src/public-runtime/service-worker.ts runs in a ServiceWorkerGlobalScope, whose WebWorker lib cannot share a program with the app's DOM lib, and it is type-stripped into public/sw.js by ops/scripts/frontend/build-public-runtime-scripts.ts rather than bundled. It is written as untyped JavaScript -- tests run slices of its source as plain JS -- so parameters and catch variables stay implicitly any, while everything the platform types (caches, events, Response, registration, clients) is checked strictly. moduleDetection lets the file declare its own self.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "WebWorker"],
+    "types": [],
+    "strict": true,
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "moduleDetection": "force"
+  },
+  "files": ["src/public-runtime/service-worker.ts"]
+}
