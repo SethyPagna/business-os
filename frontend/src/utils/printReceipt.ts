@@ -185,7 +185,21 @@ const RECEIPT_INLINE_STYLE_PROPS = [
   'transform-origin',
 ]
 
-function cloneElementWithInlineStyles(node: unknown): HTMLElement | null {
+// What the clone of the ON-SCREEN receipt leaves out. A browser reports these
+// as the pixels the screen's layout produced -- the preview's 80mm paper at the
+// modal's width -- not what the receipt's classes ask for, so copying them
+// froze every box at its screen size: on the 72mm printer paper the 80x50
+// card's sections stayed 71mm wide and ran 3mm past the paper (its
+// right-aligned totals and date were cut off), the full receipt lost its right
+// margin, and every paper carried the modal's height (a card laid out on a
+// phone narrower than 80mm was fitted against that taller height and shrank
+// further than its content needs). Left out, the classes lay the receipt out
+// again at the paper's width: that clone is measured in the app's own
+// document. The later clones are taken from that paper-width layout for the
+// print document, which has no app stylesheet, and copy all.
+const SCREEN_LAYOUT_PROPS: ReadonlySet<string> = new Set(['width', 'height', 'grid-template-columns', 'grid-template-rows'])
+
+function cloneElementWithInlineStyles(node: unknown, leaveOut: ReadonlySet<string> = new Set()): HTMLElement | null {
   if (!node || !(node instanceof HTMLElement)) return null
 
   const cloned = node.cloneNode(true) as HTMLElement
@@ -199,6 +213,7 @@ function cloneElementWithInlineStyles(node: unknown): HTMLElement | null {
 
     const computed = window.getComputedStyle(sourceEl)
     const styleText = RECEIPT_INLINE_STYLE_PROPS
+      .filter((prop) => !leaveOut.has(prop))
       .map((prop) => `${prop}:${computed.getPropertyValue(prop)};`)
       .join('')
     const existing = clonedEl.getAttribute('style') || ''
@@ -1059,18 +1074,8 @@ async function withReceiptElement<T>(
   // custom size as tall as a document page keep paginating at full size.
   const fitToOneSheet = isSingleSheetPaperSize(printSettings.paperSize)
   if (isElementContent) {
-    const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
+    const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content, SCREEN_LAYOUT_PROPS))
     if (cloned) {
-      // cloneElementWithInlineStyles bakes the export root's COMPUTED height,
-      // i.e. its height as laid out on screen at the modal's width, not at the
-      // paper's. Every paper must drop it, or the paper-width layout is
-      // measured against, and printed inside, a box of the screen's height: a
-      // card laid out on a phone narrower than 80mm was fitted against that
-      // taller height and shrank further than its own content needs, and a
-      // roll or document page carried the modal's height into the print.
-      cloned.style.height = 'auto'
-      cloned.style.minHeight = '0'
-      cloned.style.maxHeight = 'none'
       // On continuous rolls the receipt shell's padding is the physical print
       // margin. Replace its screen-preview padding with the operator setting,
       // instead of stacking two independent margins. Fixed cards keep their

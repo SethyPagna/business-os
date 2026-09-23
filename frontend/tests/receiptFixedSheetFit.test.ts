@@ -107,21 +107,20 @@ await runTest('Print, PDF and Image inherit ONE shared fixed-sheet fit step', ()
 })
 
 await runTest('no paper inherits the frozen on-screen receipt height', () => {
-  // cloneElementWithInlineStyles bakes the computed `height` of the export
-  // root, so a card measured on a narrow phone would otherwise be fitted
-  // against blank space instead of its own content, and a roll or document
-  // page would carry the modal's height into the print (2026-09-23: the reset
-  // used to run for the 80x50 card only).
+  // A box's computed `height` is its height on screen, at the modal's
+  // width: baked into the print clone, a card measured on a narrow phone was
+  // fitted against blank space instead of its own content, and a roll or
+  // document page carried the modal's height into the print (2026-09-23). The
+  // clone of the screen leaves every box's height out, for every paper; which
+  // clones leave it out is locked in receiptTemplate.test.ts.
+  assert.match(printSource, /const SCREEN_LAYOUT_PROPS: ReadonlySet<string> = new Set\(\[[^\]]*'height'[^\]]*\]\)/)
   const cloneBlock = printSource.slice(
-    printSource.indexOf('const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))'),
+    printSource.indexOf('const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content, SCREEN_LAYOUT_PROPS))'),
     printSource.indexOf("inner.innerHTML = cloned?.outerHTML || ''"),
   )
   assert.ok(cloneBlock.length > 0, 'the export-root clone block must exist')
-  assert.match(cloneBlock, /cloned\.style\.height = 'auto'/)
-  assert.match(cloneBlock, /cloned\.style\.minHeight = '0'/)
-  assert.match(cloneBlock, /cloned\.style\.maxHeight = 'none'/)
   assert.doesNotMatch(cloneBlock, /fitToOneSheet/,
-    'the height reset must not be gated on the single-sheet preset')
+    'no paper gets the screen height back through the single-sheet preset')
   assert.match(cloneBlock, /if \(fixedSheetHeightMm == null\) cloned\.style\.padding = printPadding/,
     'continuous rolls keep replacing the screen-shell padding with the operator margins')
 })

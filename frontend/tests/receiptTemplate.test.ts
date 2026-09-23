@@ -101,7 +101,34 @@ await runTest('print export normalizes receipt root width inside paper frame', (
   assert.match(source, /function normalizeReceiptContentWidth/)
   assert.match(source, /data-receipt-export-root="true"/)
   assert.match(source, /node\.style\.maxWidth = '100%'/)
-  assert.match(source, /normalizeReceiptContentWidth\(cloneElementWithInlineStyles\(content\)\)/)
+  assert.match(source, /normalizeReceiptContentWidth\(cloneElementWithInlineStyles\(content, SCREEN_LAYOUT_PROPS\)\)/)
+})
+
+await runTest('print lays the receipt out again at the paper width, not at its screen size', () => {
+  // 2026-09-23 (owner's 72mm printer): a box's computed width is the pixels
+  // it took up on screen, on the preview's 80mm paper. Copied into the print
+  // clone, the 80x50 card's sections stayed 71mm wide and ran 3mm past the
+  // 72mm paper (its totals and date were cut off), and the full receipt lost
+  // its right margin. The browser half of this lock is the overflow check in
+  // e2e/receipt-print.spec.ts.
+  const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  const leftOut = /const SCREEN_LAYOUT_PROPS: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/.exec(source)
+  assert.ok(leftOut, 'the clone of the screen names the layout sizes it leaves out')
+  const copied = /const RECEIPT_INLINE_STYLE_PROPS = \[([^\]]*)\]/.exec(source)
+  assert.ok(copied, 'the copied style list exists')
+  for (const prop of ['width', 'height', 'grid-template-columns', 'grid-template-rows']) {
+    assert.match(leftOut[1], new RegExp(`'${prop}'`), `the screen clone leaves out ${prop}`)
+    // The print document has no app stylesheet: the clones made for it (from
+    // the paper-width host) must still carry these sizes, images' included.
+    assert.match(copied[1], new RegExp(`'${prop}'`), `the paper-width clones still copy ${prop}`)
+  }
+  assert.match(source, /\.filter\(\(prop\) => !leaveOut\.has\(prop\)\)/)
+  const calls = source.match(/cloneElementWithInlineStyles\((?!node)[^)]*\)/g)
+  assert.deepEqual(calls?.sort(), [
+    'cloneElementWithInlineStyles(content, SCREEN_LAYOUT_PROPS)', // the screen, laid out again in the app's document
+    'cloneElementWithInlineStyles(element)', // image export, of the paper-width host
+    'cloneElementWithInlineStyles(host)', // print document, of the paper-width host
+  ].sort(), 'only the clone of the screen leaves the layout sizes out')
 })
 
 
