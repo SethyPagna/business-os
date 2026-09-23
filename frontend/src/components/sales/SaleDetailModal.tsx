@@ -1868,7 +1868,16 @@ export default function SaleDetailModal({
               </DetailRowGroup>
             </SectionCard>
 
-            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
+            {/* S4-41: a cancelled sale is read-only. Every other edit on this
+                modal already refuses one (items, money, delivery, status);
+                the customer was the one surface with no status check at all,
+                on the client OR the Worker, so a cancelled sale could still
+                be re-pointed at a different buyer -- rewriting that
+                customer's purchase history to include a sale that never
+                happened. PATCH /:id/customer now refuses it too
+                (`cancelled_sale_read_only`); this hides the control that
+                would walk into that refusal. */}
+            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction && currentStatus !== 'cancelled' ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}
