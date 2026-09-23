@@ -3711,6 +3711,7 @@
   "pos_wholesale_auto_min_qty_desc": "A line is priced wholesale only when its quantity is greater than this number.",
   "pos_status_awaiting_delivery_desc": "Paid, not yet delivered — stock deducted",
   "pos_status_awaiting_payment_desc": "Not Paid — stock deducted",
+  "pos_status_paid_resolved_desc": "This sale is already paid in full, so it is recorded as paid.",
   "pos_status_choose_desc": "Choose how this sale is being processed. This will appear in Sales history.",
   "pos_status_completed_desc": "Payment received — stock deducted now",
   "pos_you_save": "You save",

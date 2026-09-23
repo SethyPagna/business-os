@@ -121,6 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -544,10 +545,19 @@ app.post('/', async (c) => {
   // Delivery" flows) -- previously ignored, so the sale was always recorded
   // (and stock always deducted) as 'completed' regardless of what the
   // cashier actually picked.
-  const saleStatus = body.sale_status ? String(body.sale_status) : 'completed'
+  // S4-41: `let`, because a fully-paid sale may not be recorded as
+  // `awaiting_payment` ("Not Paid"). The rewrite happens once the money is
+  // known, below computeSaleTotals -- see resolvePaidSaleStatus there.
+  let saleStatus = body.sale_status ? String(body.sale_status) : 'completed'
   if (!VALID_SALE_STATUSES.includes(saleStatus)) {
     return c.json({ error: `Invalid sale_status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
   }
+  // Computed from the REQUESTED status, deliberately, and it is the same
+  // value either way: the resolver only ever maps `awaiting_payment` to
+  // `completed`/`awaiting_delivery`, and all three are in
+  // STOCK_DEDUCTED_STATUSES, so the stock plan cannot change underneath it.
+  // test-sale-paid-status-resolution-pure.cjs pins that equality directly so
+  // a future status that does NOT deduct cannot join the resolver silently.
   const shouldDeductStock = STOCK_DEDUCTED_STATUSES.has(saleStatus)
 
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
@@ -983,6 +993,61 @@ app.post('/', async (c) => {
     rawAmountPaidUsd: body.amount_paid_usd,
     rawAmountPaidKhr: body.amount_paid_khr,
   })
+
+  // S4-41, the two halves of "paid means it is not Not-Paid", server side.
+  //
+  // NORMALISE, never reject. A sale whose tender covers the total must not be
+  // recorded as `awaiting_payment`; it becomes `awaiting_delivery` when it is
+  // a delivery and `completed` otherwise. This is silent on purpose: the sale
+  // has already been rung up and the customer has already paid, so refusing
+  // it would strand a real transaction behind a 4xx -- and an offline replay
+  // posting a body built by an older client must still land. The cashier sees
+  // the resolved status in the POS picker before submitting (POS.tsx runs the
+  // same resolver), so this is a backstop for stale clients, not the UI.
+  const requestedSaleStatus = saleStatus
+  saleStatus = resolvePaidSaleStatus({
+    requestedStatus: saleStatus,
+    paidUsd: amountPaidUsd,
+    paidKhr: amountPaidKhr,
+    totalUsd,
+    exchangeRate,
+    moneyPrecisionVersion: 1,
+    isDelivery,
+  })
+
+  // REJECT the mirror-image hole. The POS has always required the full amount
+  // before it would record `completed` or `awaiting_delivery` (POS.tsx's
+  // `saleStatus !== 'awaiting_payment' && totalPaid < totalUsd` gate), but
+  // that lived only in the client: the Worker accepted any combination, so a
+  // stale or scripted client could record an unpaid sale as Completed and the
+  // debt would vanish from the Not-Paid list. Frontend validation needs
+  // backend enforcement; this is that enforcement, with the same boundary.
+  //
+  // Only these two statuses are gated. `awaiting_payment` is the credit sale
+  // and is meant to be short; return statuses are set by the Returns flow;
+  // `cancelled` is not a POS checkout. A $0 total is covered trivially.
+  if (saleStatus === 'completed' || saleStatus === 'awaiting_delivery') {
+    let coveredForStatus = false
+    try {
+      coveredForStatus = paymentCoversSaleTotal({
+        paidUsd: amountPaidUsd,
+        paidKhr: amountPaidKhr,
+        totalUsd,
+        exchangeRate,
+        moneyPrecisionVersion: 1,
+      })
+    } catch {
+      coveredForStatus = false
+    }
+    if (!coveredForStatus) {
+      return c.json({
+        error: 'This sale is not fully paid, so it cannot be recorded as Completed or Awaiting Delivery. Record it as Not Paid instead.',
+        code: 'insufficient_payment_for_status',
+        sale_status: requestedSaleStatus,
+      }, 400)
+    }
+  }
+
   let nativeChange
   try {
     nativeChange = planNativeSaleChange({
@@ -1978,6 +2043,17 @@ app.patch('/:id/status', async (c) => {
       action: 'refresh_required',
     }, 400)
   }
+
+  // S4-41 -- DELIBERATELY NOT GUARDED HERE. The obvious companion to the
+  // creation-time rule would be "a paid sale may not be re-labelled Not
+  // Paid", and on THIS route it is wrong: completed/awaiting_delivery ->
+  // awaiting_payment IS the shop's payment-correction reopen. It is the only
+  // thing that turns on `payment_correction_allowed` (saleAllowsPaymentCorrection
+  // above, and the same CASE in the list query), it writes its own audit
+  // action `sale_payment_correction_opened`, and SaleSettlementEditor's
+  // correction mode is reachable ONLY through it. Refusing it would leave a
+  // mis-keyed tender uncorrectable forever, so the paid rule applies at
+  // CREATION only -- where no such correction window exists.
 
   // Which transitions are legal at all (returns-flow ownership of
   // partial_return/returned; un-cancel only back to where the sale was) --

@@ -18,6 +18,7 @@
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -3053,6 +3054,20 @@ export default function POS() {
   const paidUsdNum   = moneyVersion === 1 ? newNativeTender?.paidUsd ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
   const paidKhrNum   = moneyVersion === 1 ? newNativeTender?.paidKhr ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
+  // S4-41: the status this sale will ACTUALLY be recorded with, for a status
+  // the cashier is about to pick. The same kernel runs on the Worker's
+  // POST /sales, so the picker cannot promise one status and the ledger
+  // record another. Only `awaiting_payment` is ever rewritten, and only when
+  // the tender already covers the total.
+  const resolvePosSaleStatus = (requested: string): string => resolvePaidSaleStatus({
+    requestedStatus: requested,
+    paidUsd: paidUsdNum,
+    paidKhr: paidKhrNum,
+    totalUsd,
+    exchangeRate,
+    moneyPrecisionVersion: 1,
+    isDelivery: !!active.isDelivery,
+  })
   const computedNativeChange = (() => {
     if (moneyVersion !== 1) return null
     if (active.checkoutRequestId) {
@@ -3215,6 +3230,13 @@ export default function POS() {
     if (saleStatus !== 'awaiting_payment' && totalPaid < totalUsd - 0.005) {
       return notify(t('insufficient_amount'), 'error')
     }
+    // S4-41: the cashier could tender the full amount and still pick
+    // "Not Paid", recording a settled sale as a debt. Resolve it here, with
+    // the same shared kernel the Worker runs on POST /sales, so the body
+    // that goes out already carries the status the sale will actually have.
+    // The picker below shows this same resolved label, so nothing changes
+    // silently under the cashier.
+    const recordedSaleStatus = resolvePosSaleStatus(saleStatus)
     if (loading || checkoutInFlightRef.current) return
 
     const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchesById.has(Number(item.branch_id)))
@@ -3335,8 +3357,8 @@ export default function POS() {
       loyalty_accrual: loyaltyAccrual,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
-      payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
-      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
+      payment_method:   recordedSaleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
+      payment_details: recordedSaleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
@@ -3362,7 +3384,7 @@ export default function POS() {
       // P6: only sent when the cashier typed one -- absent stays NULL on
       // the sale so stats can tell "not recorded" from "cost 0".
       delivery_actual_cost_usd:  active.isDelivery && String(active.deliveryActualCostUsd || '').trim() !== '' ? (parseFloat(active.deliveryActualCostUsd) || 0) : undefined,
-      sale_status: saleStatus,
+      sale_status: recordedSaleStatus,
       client_time: device.clientTime,
       device_tz: device.deviceTz || '',
       device_name: device.deviceName || null,
@@ -4346,15 +4368,25 @@ export default function POS() {
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],
                 ['awaiting_delivery', getPosStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
-              ] as const).map(([status, label, desc]) => (
+              ] as const).map(([status, label, desc]) => {
+                // S4-41: when the tender already covers the sale, "Not Paid"
+                // is not an available truth -- show the status this button
+                // will actually record, and say why, instead of letting the
+                // cashier pick a debt that the server would rewrite anyway.
+                const resolved = resolvePosSaleStatus(status)
+                const rewritten = resolved !== status
+                return (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
                   disabled={loading}
+                  data-pos-status-option={status}
+                  data-pos-status-records={resolved}
                   className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50">
-                  <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{label}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{desc}</div>
+                  <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{rewritten ? getPosStatusLabel(resolved as PosSaleStatus, t) : label}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{rewritten ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it is recorded as paid.') : desc}</div>
                 </button>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>
