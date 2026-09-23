@@ -17,18 +17,18 @@
 //      the loaded page, with no extra request at all
 //
 // Harness convention: the same Vite dev server + CDP + temp-profile shape as
-// mobileSectionMenuIcons.test.ts, including its teardown (the profile
-// directory is removed with retries -- Chrome on Windows holds a lock for a
-// moment after exit and a plain rmSync throws EPERM).
+// mobileSectionMenuIcons.test.ts, with the same shared wait and teardown
+// (tests/browserProfileTeardown.ts).
 //
 // Run: node tests/promotionClickPaths.test.ts
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -183,26 +183,8 @@ let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
 const browserDiagnostics: string[] = []
 
-async function waitFor<T>(read: () => Promise<T | null>, label: string, timeoutMs = 15_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  // A read that THROWS is "not ready yet", not a failure. Every read here is a
-  // `Runtime.evaluate` over a page that may still be navigating or compiling a
-  // module, so a transient CDP error used to escape this loop and end the file
-  // before a single assertion ran -- roughly one run in three under load. Only
-  // the deadline ends the wait now; the last error travels with the timeout so
-  // a persistent fault is still diagnosable rather than a bare "timed out".
-  // Same shape as stockChangeComposedResponsive.test.ts, which already had it.
-  let lastError = ''
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (value !== null) return value
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 40))
-  }
-  throw new Error(`Timed out waiting for ${label}; last=${lastError || 'no value'}`)
+function waitFor<T>(read: () => Promise<T | null>, label: string, timeoutMs = 15_000): Promise<T> {
+  return waitForBrowser(read, label, timeoutMs)
 }
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
   assert.ok(socket && socket.readyState === WebSocket.OPEN)
@@ -244,6 +226,7 @@ async function cardNames(): Promise<string[]> {
   })`)
 }
 
+let exitCode = 0
 try {
   let target: string
   try {
@@ -348,27 +331,9 @@ try {
   assert.equal(searchRequests.length, searchesBeforeCard, 'a product already on the page is opened from the loaded list, with no extra request')
 
   console.log(`PASS the real storefront opens the banner product, applies the campaign facet and opens the promotion card product (${searchRequests.length} server searches in total)`)
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exited = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exited) {
-    if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
-    else browser.kill()
-    await Promise.race([browserExit, new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
-  }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear()
-  socket?.close()
-  await vite.close()
-  // Same retrying removal every browser test here uses -- and it still loses
-  // the race sometimes: Chrome on Windows keeps a handle on its profile for a
-  // moment after exit, and rmSync throws EPERM. A locked temp directory is not
-  // a failed test, so it is reported and left for the OS to sweep rather than
-  // turning a green run red (the other fixtures rethrow it: see
-  // mobileSectionMenuIcons.test.ts:263 and lazyPortalMenuFirstClick.test.ts:243).
-  try {
-    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-  } catch (error) {
-    console.log(`NOTE browser profile left for the OS to sweep (${(error as { code?: string })?.code || 'unknown'}): ${profile}`)
-  }
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL storefront promotion click paths')
+  console.error(error)
 }
+await closeBrowserFixture(exitCode, () => closeCdpBrowser(browser, browserExit, socket), () => vite.close(), () => removeBrowserProfile(profile))

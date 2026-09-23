@@ -53,13 +53,13 @@
 // set injected over it, where it must go red -- the control that proves the
 // instrument can still see a defect.
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
-import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -184,26 +184,8 @@ type CdpReply = { id?: number; result?: unknown; error?: { message?: string } }
 let socket: WebSocket | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
-async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 45_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  // A read that THROWS is "not ready yet", not a failure. Every read here is a
-  // `Runtime.evaluate` over a page that may still be navigating or compiling a
-  // module, so a transient CDP error used to escape this loop and end the file
-  // before a single assertion ran -- roughly one run in three under load. Only
-  // the deadline ends the wait now; the last error travels with the timeout so
-  // a persistent fault is still diagnosable rather than a bare "timed out".
-  // Same shape as stockChangeComposedResponsive.test.ts, which already had it.
-  let lastError = ''
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (value !== null) return value
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  throw new Error(`Timed out waiting for the reports float fixture; last=${lastError || 'no value'}`)
+function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 45_000): Promise<T> {
+  return waitForBrowser(read, 'the reports float fixture', timeoutMs)
 }
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
   assert.ok(socket && socket.readyState === WebSocket.OPEN)
@@ -229,6 +211,7 @@ function check(name: string, run: () => void | Promise<void>): Promise<void> {
     .catch((error) => { failed += 1; console.error(`FAIL ${name}`); console.error(error) })
 }
 
+let exitCode = 0
 try {
   const target = await waitFor(async () => {
     try {
@@ -564,14 +547,12 @@ try {
     }
     assert.equal(defective.columns, 2, `with the 64rem tier restored a 1008px sheet falls back to two columns (${defective.tracks})`)
   })
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exited = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exited) { if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' }); else browser.kill() }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear(); socket?.close(); await vite.close(); removeBrowserProfile(profile)
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL reports detail float fixture')
+  console.error(error)
 }
 
-if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1) }
-console.log('\nreports detail float: opens on a row, survives re-renders and pointer movement, closes on outside press and on the header X')
-finishBrowserTest()
+if (failed) { console.error(`\n${failed} check(s) failed`); exitCode = 1 }
+if (!exitCode) console.log('\nreports detail float: opens on a row, survives re-renders and pointer movement, closes on outside press and on the header X')
+await closeBrowserFixture(exitCode, () => closeCdpBrowser(browser, browserExit, socket), () => vite.close(), () => removeBrowserProfile(profile))

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { build, type Plugin } from 'esbuild'
-import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 // Native-browser coverage for the composed StockChangeSection. This renders
 // the real section, ProductNameRail, history model, batch-label formatter and
@@ -244,20 +244,13 @@ const pending = new Map<number, { resolve: (value: any) => void; reject: (error:
 const diagnostics: string[] = []
 
 async function waitFor<T>(label: string, read: () => Promise<T | null>, timeoutMs = 60_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  let lastError = ''
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (value !== null) return value
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 40))
+  try {
+    return await waitForBrowser(read, label, timeoutMs)
+  } catch (error) {
+    let page = ''
+    try { page = await evaluate<string>('document.body.innerText.slice(0,2000)') } catch { /* browser may not be ready */ }
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; console=${diagnostics.join(' | ') || 'empty'}; page=${page || 'empty'}`)
   }
-  let page = ''
-  try { page = await evaluate<string>('document.body.innerText.slice(0,2000)') } catch { /* browser may not be ready */ }
-  throw new Error(`${label} timed out after ${timeoutMs}ms; last=${lastError || 'no value'}; console=${diagnostics.join(' | ') || 'empty'}; page=${page || 'empty'}`)
 }
 
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -274,6 +267,7 @@ async function evaluate<T>(expression: string): Promise<T> {
   return reply.result.value as T
 }
 
+let exitCode = 0
 try {
   const target = await waitFor('Chromium debug target', async () => {
     try {
@@ -405,19 +399,9 @@ try {
     }
   }
   console.log('PASS composed StockChangeSection native 320/390 EN/KM: three bands, full tails, provenance, hidden bars, visible two-step Revert, zero page overflow')
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exitedCleanly = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exitedCleanly) {
-    if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
-    else browser.kill()
-    await Promise.race([browserExit, new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
-  }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear()
-  socket?.close()
-  await new Promise<void>((resolve) => server.close(() => resolve()))
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  removeBrowserProfile(profile)
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL composed StockChangeSection native')
+  console.error(error)
 }
-finishBrowserTest()
+await closeBrowserFixture(exitCode, () => closeCdpBrowser(browser, browserExit, socket), () => server.close(), () => removeBrowserProfile(profile))

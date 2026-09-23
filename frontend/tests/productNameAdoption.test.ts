@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { build } from 'esbuild'
 import { createRequire } from 'node:module'
-import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const require = createRequire(import.meta.url)
@@ -99,26 +99,8 @@ let socket: WebSocket | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
 
-async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 10_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  // A read that THROWS is "not ready yet", not a failure. Every read here is a
-  // `Runtime.evaluate` over a page that may still be navigating or compiling a
-  // module, so a transient CDP error used to escape this loop and end the file
-  // before a single assertion ran -- roughly one run in three under load. Only
-  // the deadline ends the wait now; the last error travels with the timeout so
-  // a persistent fault is still diagnosable rather than a bare "timed out".
-  // Same shape as stockChangeComposedResponsive.test.ts, which already had it.
-  let lastError = ''
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (value !== null) return value
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 30))
-  }
-  throw new Error(`Timed out waiting for browser state; last=${lastError || 'no value'}`)
+function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 10_000): Promise<T> {
+  return waitForBrowser(read, 'browser state', timeoutMs)
 }
 
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -135,6 +117,7 @@ async function evaluate<T>(expression: string): Promise<T> {
   return reply.result.value as T
 }
 
+let exitCode = 0
 try {
   const target = await waitFor(async () => {
     try {
@@ -213,19 +196,9 @@ try {
   assert.equal(await evaluate('window.__opens.length'),2,'card Enter action preserved')
   console.log('PASS actual ProductCard EN/KM name rail at320/390/1200 with card/image actions preserved')
 
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exitedCleanly = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exitedCleanly) {
-    if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
-    else browser.kill()
-    await Promise.race([browserExit, new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
-  }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear()
-  socket?.close()
-  await new Promise<void>((resolve) => server.close(() => resolve()))
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  removeBrowserProfile(profile)
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL actual ProductCard name rail')
+  console.error(error)
 }
-finishBrowserTest()
+await closeBrowserFixture(exitCode, () => closeCdpBrowser(browser, browserExit, socket), () => server.close(), () => removeBrowserProfile(profile))

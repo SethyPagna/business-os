@@ -1,9 +1,12 @@
-// Shared teardown helper for the browser-driven fixture tests (the ones that
-// spawn a real headless Chrome/Edge over CDP against a scratch
-// `--user-data-dir`: mobileSectionMenuIcons, dateTimeRangePickerResponsive,
-// lazyPortalMenuFirstClick, reportsHubComposedResponsive,
-// stockChangeComposedResponsive, mergeDuplicatesReviewPagination,
-// productNameRail, productNameAdoption).
+// Shared harness helpers for the browser-driven fixture tests: the CDP
+// fixtures that spawn a real headless Chrome/Edge against a scratch
+// `--user-data-dir` (dateTimeRangePickerResponsive, lazyPortalMenuFirstClick,
+// mergeDuplicatesReviewPagination, mobileSectionMenuIcons,
+// productNameAdoption, productNameRail, promotionClickPaths,
+// reportsDetailFloatClose, reportsHubComposedResponsive, reportsRenderPass,
+// stockChangeComposedResponsive), which wait with waitForBrowser and close
+// Chrome with closeCdpBrowser, and the Playwright one (helpPopoverResponsive).
+// Every one of them ends in closeBrowserFixture.
 //
 // Not a test file (no `.test.ts` suffix, so tests/runTestChain.ts does not
 // execute it directly).
@@ -30,10 +33,10 @@
 // process sat idle (confirmed live: ~0.1s of CPU time over 20 wall-clock
 // seconds, i.e. genuinely parked, not merely starved) instead of exiting --
 // a PASS that never reports itself, which is worse than a red because
-// nothing ever tells the runner or the summary that it happened.
-// `finishBrowserTest` forces the exit once teardown is done so the test's
-// own result (always 0 here -- it is only reached after `finally` completes
-// without the try block having thrown) is what actually gets reported.
+// nothing ever tells the runner or the summary that it happened. That is
+// why the teardown always ends in a forced exit (closeBrowserFixture below)
+// carrying the verdict the assertions produced.
+import { spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 
 export function removeBrowserProfile(dir: string): void {
@@ -44,14 +47,46 @@ export function removeBrowserProfile(dir: string): void {
   }
 }
 
-// Call as the last statement after the test's try/finally. Never call it
-// from inside the try block or before assertions have run -- an assertion
-// failure must keep throwing so the runner sees the real (nonzero) exit.
-export function finishBrowserTest(): never {
-  process.exit(0)
+// The one wait every CDP fixture polls its page with; each binds its own
+// label and default budget (a cold vite compile needs far more than a click).
+// A read that THROWS is "not ready yet", not a failure: every read is a
+// `Runtime.evaluate` over a page that may still be navigating or compiling a
+// module, so a transient CDP error used to escape the loop and end the file
+// before a single assertion ran -- roughly one run in three under load. Only
+// the deadline ends the wait; the last error travels with the timeout so a
+// persistent fault is still diagnosable rather than a bare "timed out".
+export async function waitForBrowser<T>(read: () => Promise<T | null>, label: string, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  let lastError = ''
+  while (Date.now() < deadline) {
+    try {
+      const value = await read()
+      if (value !== null) return value
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  }
+  throw new Error(`Timed out after ${timeoutMs} ms waiting for ${label}; last=${lastError || 'no value'}`)
 }
 
-// The same forced exit for a fixture that CANNOT let its teardown throw or
+// Quit the Chrome/Edge a CDP fixture launched: ask over the protocol, allow
+// 2s, then kill the whole process tree (taskkill /T on Windows) and allow 2s
+// more for the exit, before the profile directory is removed.
+export async function closeCdpBrowser(browser: ChildProcess, exited: Promise<unknown>, socket: WebSocket | null): Promise<void> {
+  const exitsWithin2s = () => Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolve) => { setTimeout(() => resolve(false), 2_000).unref() }),
+  ])
+  // Nobody reads the reply, so any int32 id will do.
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 1_000_000, method: 'Browser.close', params: {} }))
+  if (await exitsWithin2s()) return
+  if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
+  else browser.kill()
+  await exitsWithin2s()
+}
+
+// The forced exit, for fixtures that CANNOT let their teardown throw or
 // hang -- a Playwright `browser.close()` and a `vite.close()` both keep
 // handles that can outlive everything meaningful (see the history above) --
 // while still reporting the verdict the assertions produced.
@@ -60,19 +95,25 @@ export function finishBrowserTest(): never {
 // `finally`, so when an assertion (or a navigation) failed, the error was
 // queued to rethrow AFTER the finally block, `server.close()` parked, and
 // Node reported "Detected unsettled top-level await" with an exit code and no
-// sign of the real failure. The message a red test prints is the whole point
-// of the test, so the caller prints it and passes 1 here.
+// sign of the real failure. The CDP fixtures had the same shape (an unbounded
+// server close in a plain `finally`): a failure queued behind a close that
+// never settles is never printed and the process never exits, and
+// tests/runTestChain.ts spawns each file with no timeout and prints its
+// output only after it exits -- so the whole gate would stall in silence.
+// The message a red test prints is the whole point of the test, so the
+// caller catches it, prints it and passes 1 here.
 //
 // Each closer gets its own bounded wait: a stuck close is logged and stepped
 // over, never able to change the code. The timer is unref'd so a fast close
 // does not hold the loop open for the rest of the budget.
 export async function closeBrowserFixture(code: number, ...closers: Array<() => unknown>): Promise<never> {
-  for (const close of closers) {
+  for (const [step, close] of closers.entries()) {
     try {
-      await Promise.race([
-        Promise.resolve(close()),
-        new Promise<void>((resolve) => { setTimeout(resolve, 5_000).unref() }),
+      const finished = await Promise.race([
+        Promise.resolve(close()).then(() => true),
+        new Promise<false>((resolve) => { setTimeout(() => resolve(false), 5_000).unref() }),
       ])
+      if (!finished) console.warn(`WARN fixture teardown step ${step + 1} did not finish within 5s; stepped over`)
     } catch (error) {
       console.warn(`WARN fixture teardown step failed: ${error instanceof Error ? error.message : String(error)}`)
     }

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
-import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -129,26 +129,8 @@ let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
 const browserDiagnostics: string[] = []
 
-async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  // A read that THROWS is "not ready yet", not a failure. Every read here is a
-  // `Runtime.evaluate` over a page that may still be navigating or compiling a
-  // module, so a transient CDP error used to escape this loop and end the file
-  // before a single assertion ran -- roughly one run in three under load. Only
-  // the deadline ends the wait now; the last error travels with the timeout so
-  // a persistent fault is still diagnosable rather than a bare "timed out".
-  // Same shape as stockChangeComposedResponsive.test.ts, which already had it.
-  let lastError = ''
-  while (Date.now() < deadline) {
-    try {
-      const value = await read()
-      if (value !== null) return value
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-    }
-    await new Promise((resolve) => setTimeout(resolve, 40))
-  }
-  throw new Error(`Timed out waiting for mobile section fixture; last=${lastError || 'no value'}`)
+function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
+  return waitForBrowser(read, 'mobile section fixture', timeoutMs)
 }
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
   assert.ok(socket && socket.readyState === WebSocket.OPEN)
@@ -169,6 +151,7 @@ async function setViewport(width: number): Promise<void> {
 
 const owners = ['products', 'sales', 'branches', 'contacts', 'promotions', 'settings', 'review']
 
+let exitCode = 0
 try {
   let target: string
   try {
@@ -261,18 +244,9 @@ try {
   await evaluate(`document.querySelector('[data-bos-section="sales:returns"]').click()`)
   assert.deepEqual(await evaluate(`window.__sidebarNavigateCalls`), [{ page: 'sales', anchor: 'hub:sales:returns' }], 'a subpage click retains the existing guarded route contract')
   console.log('PASS actual mobile Sidebar renders distinct icons above fully wrapping EN/KM subpage titles at 320/390 without overflow')
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exited = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exited) {
-    if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
-    else browser.kill()
-    await Promise.race([browserExit, new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
-  }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear()
-  socket?.close()
-  await vite.close()
-  removeBrowserProfile(profile)
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL actual mobile Sidebar section icons')
+  console.error(error)
 }
-finishBrowserTest()
+await closeBrowserFixture(exitCode, () => closeCdpBrowser(browser, browserExit, socket), () => vite.close(), () => removeBrowserProfile(profile))
