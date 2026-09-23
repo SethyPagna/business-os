@@ -432,6 +432,14 @@ export function label(key: TelegramLabelKey): string {
  */
 export const ROW_BULLET = '· '
 
+/**
+ * What a line that CONTINUES the row above it opens with: the Khmer under its
+ * English in the command reference, and the rest of a list row too wide for a
+ * phone (lib/telegram.ts telegramRowLines). Only a row's first line starts at
+ * the left edge, where the bullets and the item numbers are.
+ */
+export const HANGING_INDENT = '     '
+
 /** `'· Cashier / អ្នកគិតប្រាក់: Za'` -- the one row shape every message uses. */
 export function row(labelText: string, value: unknown): string {
   return `${ROW_BULLET}${labelText}: ${String(value ?? '')}`
@@ -641,7 +649,7 @@ export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
 function referenceLines(head: string, en: string, km: string): string[] {
   if (currentLanguage === 'en') return [`${head}${en}`]
   if (currentLanguage === 'km') return [`${head}${km}`]
-  return [`${head}${en}`, `     ${km}`]
+  return [`${head}${en}`, `${HANGING_INDENT}${km}`]
 }
 
 export function telegramCommandReference(): string {
@@ -657,7 +665,7 @@ export function telegramCommandReference(): string {
     // The accepted date forms are VALUES, not labels: they are exactly what the
     // reader types, so they stay identical in every mode.
     '🗓 dd/mm/yyyy · today · yesterday',
-    `     ${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
+    `${HANGING_INDENT}${bi('blank = today', 'ទទេ = ថ្ងៃនេះ')}`,
     ...referenceLines('🔒 ', 'Only this shop chat receives data.', 'មានតែឆាតហាងនេះទេ ដែលទទួលទិន្នន័យ។'),
   )
   return lines.join('\n')

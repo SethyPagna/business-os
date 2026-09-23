@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -51,6 +51,53 @@ function isEnabled(value: string | undefined, fallback: boolean): boolean {
 function cleanLine(value: unknown, max = 300): string {
   return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
+
+// Owner, 23 Sep 2026, over a 15-item sale alert: "for each new line in this
+// report to telegram we can do some add spaced so they don't show directly
+// from new line so easier to read. like an indentation so it doesn't start
+// with numbered list." A phone wraps a row wider than its message bubble back
+// to the left edge, under the item numbers and bullets, where the rest of the
+// row reads as the next row. So a list row is broken HERE, at a width a phone
+// held upright shows whole, and every line after its first is indented. 36
+// characters: the widest price line of that sale, indented (`1 × $350.00
+// (−$10.00) = $340.00`), still fits.
+const TELEGRAM_ROW_WIDTH = 36
+
+// A marker (`1.`, `•`, `↔`) or a separator (`·`, `—`, `=`, `×`, `→`) never
+// ends a line: it stays with the word after it.
+const BINDS_FORWARD = /(?:^| )(?:\d+\.|[•↔·—=×→])$/
+function rowWords(text: string): string[] {
+  const words: string[] = []
+  for (const word of text.split(' ').filter(Boolean)) {
+    const last = words.length - 1
+    if (last >= 0 && BINDS_FORWARD.test(words[last])) words[last] += ` ${word}`
+    else words.push(word)
+  }
+  return words
+}
+
+/**
+ * A list row (`1. name …`, `• name …`) as the lines a phone shows it on.
+ * `head` breaks between words. `parts` share one line when they fit one
+ * (`1 × $28.00 (−$3.00) = $25.00`); otherwise each part stays whole where it
+ * fits, and one wider than a line breaks between its words.
+ */
+export function telegramRowLines(head: string, parts: string[] = []): string[] {
+  const rest = TELEGRAM_ROW_WIDTH - HANGING_INDENT.length
+  const lines: string[] = []
+  const place = (piece: string) => {
+    const last = lines.length - 1
+    if (last >= 0 && lines[last].length + 1 + piece.length <= (last ? rest : TELEGRAM_ROW_WIDTH)) lines[last] += ` ${piece}`
+    else lines.push(piece)
+  }
+  rowWords(head).forEach(place)
+  const tail = parts.filter(Boolean)
+  const whole = tail.join(' ')
+  if (whole && whole.length <= rest) place(whole)
+  else tail.forEach((part) => (part.length <= rest ? [part] : rowWords(part)).forEach(place))
+  return lines.map((line, index) => (index ? `${HANGING_INDENT}${line}` : line))
+}
+
 // Money formatters, kept together with money() below so a new message cannot
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
@@ -160,7 +207,12 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   // and any line added later is covered the moment its label is in the table.
   await postTelegram(config, withLanguage(config.language, () => [
     localizeTelegramHeading(event.heading || heading[event.type]),
-    ...event.lines.map((line) => localizeTelegramLine(cleanLine(line, 400))),
+    // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
+    // indent back after cleaning. It continues the row above; it is not a
+    // label row of its own to localize.
+    ...event.lines.map((line) => (line.startsWith(HANGING_INDENT)
+      ? `${HANGING_INDENT}${cleanLine(line, 400)}`
+      : localizeTelegramLine(cleanLine(line, 400)))),
   ].filter(Boolean).join('\n')))
   return true
 }
@@ -1342,8 +1394,9 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // this function), so each line gets the same "1. name ..." numbering the
   // printed receipt now carries instead of a bare bullet -- the +N more
   // line below still counts against sale.items.length, not this slice, so
-  // the numbering does not relabel the items it hides.
-  const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item, index) => {
+  // the numbering does not relabel the items it hides. An item too wide for
+  // a phone continues on indented lines (telegramRowLines).
+  const items = sale.items.slice(0, TELEGRAM_MAX_ITEM_LINES).flatMap((item, index) => {
     const quantity = Number(item.quantity) || 0
     const base = Number(item.basePriceUsd)
     const netUnitPrice = round2(Number(item.unitPriceUsd) || 0)
@@ -1354,7 +1407,11 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       : 0
     const displayedUnitPrice = lineDiscount > 0 ? grossUnitPrice : netUnitPrice
     const promotionLabel = lineDiscount > 0 ? cleanLine(item.promotionLabel, 40) : ''
-    return `${index + 1}. ${cleanLine(item.name, 100)} ${quantity} × ${usd(displayedUnitPrice)}${lineDiscount ? ` (−${usd(lineDiscount)}${promotionLabel ? ` ${promotionLabel}` : ''})` : ''} = ${usd(netLineTotal)}`
+    return telegramRowLines(`${index + 1}. ${cleanLine(item.name, 100)}`, [
+      `${quantity} × ${usd(displayedUnitPrice)}`,
+      lineDiscount ? `(−${usd(lineDiscount)}${promotionLabel ? ` ${promotionLabel}` : ''})` : '',
+      `= ${usd(netLineTotal)}`,
+    ])
   })
   const deliveryFee = Number(sale.deliveryFeeUsd) || 0
   // Who paid it comes from the ONE rule that produced total_usd

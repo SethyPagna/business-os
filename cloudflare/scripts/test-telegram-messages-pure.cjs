@@ -111,7 +111,10 @@ assert.deepEqual(lines, [
   // P3-L3: the promotion is named inside the cut's parentheses; a label on
   // a line with no cut prints nothing (the offer did not apply).
   // P10: numbered like the printed receipt, "1. name ...", not a bare bullet.
-  '1. Coca Cola 330ml 2 × $0.60 (−$0.20 Summer sale) = $1.00',
+  // Sep 23 2026: an item wider than a phone continues on the hanging indent
+  // (scripts/test-telegram-row-indent-pure.cjs); one that fits stays whole.
+  '1. Coca Cola 330ml 2 × $0.60',
+  `${telegramLang.HANGING_INDENT}(−$0.20 Summer sale) = $1.00`,
   '2. Rice 5kg 1 × $7.25 = $7.25',
   GROUP,
   'Delivery service: $1.50',
@@ -160,6 +163,11 @@ assert.ok(!noStatus.some((line) => /^[A-Za-z ]+:\s*$/.test(line)), `no row may s
 // minus the line discount, equals the authoritative net line total. The
 // applied unit price is already net, so printing it before the discount would
 // visually subtract the same discount twice.
+// The equation is read with each item folded back onto one line: WHERE a long
+// item breaks for a phone is scripts/test-telegram-row-indent-pure.cjs's pin.
+const foldItemRows = (rows, line) => (line.startsWith(telegramLang.HANGING_INDENT)
+  ? [...rows.slice(0, -1), `${rows[rows.length - 1]} ${line.trim()}`]
+  : [...rows, line])
 const equationLines = telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'EQUATIONS', exchangeRate: 4100,
   items: [
@@ -170,7 +178,7 @@ const equationLines = telegram.formatSaleTelegramLines({
     { name: 'Null base', quantity: 1, basePriceUsd: null, unitPriceUsd: 7, lineTotalUsd: 7 },
   ],
   subtotalUsd: 157, discountUsd: 0, totalUsd: 157,
-}).filter(Boolean)
+}).filter(Boolean).reduce(foldItemRows, [])
 assert.ok(equationLines.includes('1. Gross 69 1 × $69.00 (−$4.00) = $65.00'), equationLines.join('\n'))
 assert.ok(equationLines.includes('2. Quantity three 3 × $25.00 (−$12.00) = $63.00'), equationLines.join('\n'))
 assert.ok(equationLines.includes('3. No discount 1 × $12.00 = $12.00'), equationLines.join('\n'))
@@ -183,7 +191,7 @@ const orderDiscount = telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'ORDER-DISCOUNT', exchangeRate: 4100,
   items: [{ name: 'Gross 69', quantity: 1, basePriceUsd: 69, unitPriceUsd: 65, lineTotalUsd: 65 }],
   subtotalUsd: 65, discountUsd: 4, totalUsd: 61,
-}).filter(Boolean)
+}).filter(Boolean).reduce(foldItemRows, [])
 assert.ok(orderDiscount.includes('1. Gross 69 1 × $69.00 (−$4.00) = $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Total: $65.00'), orderDiscount.join('\n'))
 assert.ok(orderDiscount.includes('Discount: −$4.00'), orderDiscount.join('\n'))
