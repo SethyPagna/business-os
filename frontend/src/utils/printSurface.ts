@@ -164,10 +164,10 @@ export async function printHtmlInHiddenFrame(
     }
     removeFrameAfterPrinting(frame, frameWindow)
     frameWindow.focus()
-    // Safari (every iOS browser is Safari's engine) prints the frame's own
-    // document through execCommand; Chromium and Firefox return false here
-    // and are served by print() below. Trying both is what makes one code
-    // path work on all of them.
+    // Safari (every iOS browser is Safari's engine) and Chromium print the
+    // frame's own document through execCommand, which returns true, so
+    // print() below is skipped; Firefox returns false and is served by
+    // print(). Exactly one of the two runs, so one tap is one print job.
     let printed = false
     try {
       printed = frameDocument.execCommand?.('print', false, undefined) === true

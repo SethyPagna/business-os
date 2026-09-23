@@ -149,8 +149,8 @@ check('a missing window selects the iframe print path', () => {
 check('the iframe path waits for assets, prints, and cleans up everywhere', () => {
   assert.match(printSurface, /fonts\?\.ready/, 'fonts must have settled before printing')
   assert.match(printSurface, /frameDocument\.images/, 'and so must the images')
-  assert.match(printSurface, /execCommand\?\.\('print', false, undefined\)/, 'Safari prints a frame through execCommand')
-  assert.match(printSurface, /if \(!printed\) frameWindow\.print\(\)/, 'Chromium and Firefox through print()')
+  assert.match(printSurface, /execCommand\?\.\('print', false, undefined\)/, 'Safari and Chromium print a frame through execCommand')
+  assert.match(printSurface, /if \(!printed\) frameWindow\.print\(\)/, 'Firefox (execCommand false) through print(), never both')
   assert.match(printSurface, /addEventListener\?\.\('afterprint', remove, \{ once: true \}\)/)
   assert.match(printSurface, /setTimeout\(remove, PRINT_FRAME_CLEANUP_MS\)/, 'iOS may never fire afterprint')
   // MEMORY: one frame at a time, and every exit path clears it.
@@ -176,6 +176,8 @@ type StubFrame = {
 
 const printed: string[] = []
 const created: StubFrame[] = []
+let execCommandPrints = false
+let execCommandCalls = 0
 
 function makeFrame(): StubFrame {
   const frame: StubFrame = {
@@ -198,7 +200,7 @@ function makeFrame(): StubFrame {
       close: () => {},
       images: [],
       fonts: { ready: Promise.resolve() },
-      execCommand: () => false,
+      execCommand: () => { execCommandCalls += 1; return execCommandPrints },
     },
   }
   created.push(frame)
@@ -266,6 +268,20 @@ await checkAsync('a second print replaces the first frame instead of stacking on
   assert.equal(first.removed, true, 'the first frame is discarded when a second print starts')
   assert.equal(created.length, before + 2, 'exactly one frame per print')
   created[created.length - 1].afterPrint?.()
+})
+
+await checkAsync('a browser whose execCommand prints (Safari, Chromium) is never also sent print()', async () => {
+  printed.length = 0
+  execCommandCalls = 0
+  execCommandPrints = true
+  try {
+    assert.equal(await surface.printHtmlInHiddenFrame('<html>once</html>'), true)
+    assert.equal(execCommandCalls, 1, 'execCommand is asked exactly once')
+    assert.deepEqual(printed, [], 'print() is skipped, so one tap is one print job')
+  } finally {
+    execCommandPrints = false
+    created[created.length - 1].afterPrint?.()
+  }
 })
 
 check('a discarded frame leaves no cleanup timer behind', () => {
