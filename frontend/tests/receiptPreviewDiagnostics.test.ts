@@ -38,6 +38,21 @@ assert.ok(documentLines.some((line) => line.includes('Fixed-size document')))
 assert.equal(documentLines.length, 3)
 console.log('PASS separate single-card and fixed-document diagnostics do not claim continuous behavior')
 
+// driver-forms (the default) and driver send no @page size, so the preview
+// must not claim a page length: the print dialog's paper is the length.
+for (const pageSizeMode of ['driver-forms', 'driver']) {
+  const lines = receiptPreviewDiagnosticLines({ widthMm: 72, pageHeightMm: 207.7, continuousRoll: false, singleSheet: false, pageSizeMode },
+    receiptPreviewSettings({ marginTop: '0', marginRight: '1', marginBottom: '4', marginLeft: '1' }))
+  assert.equal(lines[0], `Requested paper: 72 mm · ${RECEIPT_PREVIEW_COPY.receipt_preview_dialog_paper}`, `${pageSizeMode}: width only`)
+  assert.ok(!lines.some((line) => line.includes('207.7')), `${pageSizeMode}: the content estimate is never shown as a requested page length`)
+  assert.ok(lines.includes(RECEIPT_PREVIEW_COPY.receipt_preview_dialog_paper_hint), `${pageSizeMode}: tells the owner which paper to pick once`)
+  assert.ok(!lines.includes(RECEIPT_PREVIEW_COPY.receipt_preview_actual_size), `${pageSizeMode}: no "select matching paper" advice for a size that is not sent`)
+  assert.ok(lines.some((line) => line.includes('0 / 1 / 4 / 1 mm')), `${pageSizeMode}: effective margins shown`)
+}
+assert.ok(receiptPreviewDiagnosticLines({ widthMm: 72, pageHeightMm: 207.7, continuousRoll: false, singleSheet: false, pageSizeMode: 'driver-forms' }, receiptPreviewSettings())
+  .includes(`Page length mode: ${RECEIPT_PREVIEW_COPY.receipt_preview_mode_driver_forms}`))
+console.log('PASS printer-paper modes report the width and the dialog paper, never an unsent page length')
+
 const localized = buildPrintablePreviewDocument({ ...card, markup: '<div>UNCHANGED</div>' }, {
   printSettings: PRINT_DEFAULTS,
   previewTranslate: (key) => key === 'receipt_preview_requested_paper' ? 'ក្រដាស <script>bad</script>' : key,

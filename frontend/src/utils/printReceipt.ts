@@ -1,7 +1,6 @@
 import {
   DEFAULT_DRIVER_FORM_WIDTH_MM,
   DEFAULT_RECEIPT_PRINT_SETTINGS,
-  normalizeDriverFormHeightsMm,
   normalizeReceiptPrintSettings,
   RECEIPT_PRINT_SETTINGS_STORAGE_KEY,
 } from './receiptAppliedConfig.ts'
@@ -99,10 +98,13 @@ function parsePrintNumber(value: unknown, fallback: number): number {
 // (see ReceiptPrintSettings.driverFormWidthMm), so the configured side
 // margins must not also eat into it -- that double-accounting is exactly the
 // "some margins left and right" the owner photographed. Cap left/right at
-// 1mm; leave top/bottom (and every other setting) untouched.
-function capDriverFormSideMargins(settings: ReceiptPrintSettings): ReceiptPrintSettings {
+// 1mm. The top margin is 0: after each cut the printer already feeds about
+// 11mm of blank paper (head to cutter) ahead of the receipt, and the 4mm
+// setting stacked on top of it was the large top space the owner reported
+// on 2026-09-23. The bottom margin (the gap before the cut) is kept.
+export function capDriverFormMargins(settings: ReceiptPrintSettings): ReceiptPrintSettings {
   const cap = (value: unknown) => String(Math.min(1, Math.max(0, parsePrintNumber(value, 4))))
-  return { ...settings, marginLeft: cap(settings.marginLeft), marginRight: cap(settings.marginRight) }
+  return { ...settings, marginTop: '0', marginLeft: cap(settings.marginLeft), marginRight: cap(settings.marginRight) }
 }
 
 const RECEIPT_INLINE_STYLE_PROPS = [
@@ -1138,13 +1140,11 @@ export function resolveReceiptPageGeometry({
   measuredHeightMm,
   savedPageSizeMode,
   fixedPageLengthMm,
-  driverFormHeightsMm,
 }: {
   fixedHeightMm: number | null
   measuredHeightMm: number
   savedPageSizeMode?: string
   fixedPageLengthMm?: unknown
-  driverFormHeightsMm?: unknown
 }): ReceiptPageGeometry {
   const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = fixedHeightMm == null
     ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode)
@@ -1152,16 +1152,17 @@ export function resolveReceiptPageGeometry({
   if (fixedHeightMm != null) {
     return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode }
   }
-  if (pageSizeMode === 'driver-forms') {
-    // The smallest registered form that still fits the measured content, so
-    // Chrome auto-selects a matching form instead of leaving the owner to
-    // pick one by hand. A receipt taller than every registered form still
-    // gets the largest one and paginates onto further forms of that same
-    // height (continuousRoll: false below already keeps items/rows intact
-    // across that page break) -- it must never clip.
-    const heights = normalizeDriverFormHeightsMm(driverFormHeightsMm)
-    const chosen = heights.find((height) => height >= measuredHeightMm) ?? heights[heights.length - 1]
-    return { pageHeightMm: chosen, continuousRoll: false, pageSizeMode }
+  if (pageSizeMode === 'driver-forms' || pageSizeMode === 'driver') {
+    // No `@page size` is emitted for either mode (see
+    // buildPrintablePreviewDocument): the paper chosen in the print dialog is
+    // the page. Chrome never switches that paper to match a CSS size -- a
+    // smaller CSS page is centred on it (the blank band above the receipt)
+    // and a larger one is shrunk or split -- whereas with no size the receipt
+    // starts at the top of whatever paper is chosen, and on the longest form
+    // (72 x 800mm on the owner's printer) the driver trims the unused paper
+    // and cuts at the end of the receipt. This number is never printed as a
+    // page length; it is the content estimate the preview reports.
+    return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: false, pageSizeMode }
   }
   if (pageSizeMode === 'fixed') {
     // A document page of the owner's chosen length; a long receipt flows
@@ -1172,15 +1173,7 @@ export function resolveReceiptPageGeometry({
   if (pageSizeMode === 'auto-longest') {
     return { pageHeightMm: RECEIPT_AUTO_LONGEST_PAGE_MM, continuousRoll: false, pageSizeMode }
   }
-  if (pageSizeMode === 'driver') {
-    // No `@page size` will be emitted at all (see buildPrintablePreviewDocument),
-    // so this number is never printed as a page length. Keep the measured
-    // estimate anyway so a caller inspecting the layout still gets a
-    // sensible content height (e.g. for the PDF export path, which stays on
-    // 'measured' geometry independent of this HTML/@page setting).
-    return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: false, pageSizeMode }
-  }
-  // 'measured' (default): current behaviour. A continuous roll is
+  // 'measured': current behaviour. A continuous roll is
   // width-only media: its one logical page grows with the complete receipt.
   // Keep this measured height for both HTML Print and PDF/Image so item
   // count can never trigger pagination or fit-to-page shrinking.
@@ -1192,17 +1185,17 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
   // driver-forms only ever governs CONTINUOUS ROLL paper (a fixed sheet keeps
   // its own explicit paperSize width): render at the printer's registered
   // form width, not the configured roll width, so a driver that only
-  // registers e.g. 72mm forms gets a page Chrome can actually auto-select
-  // instead of scaling an 80mm page down and leaving side margins.
+  // registers e.g. 72mm forms prints the receipt at the paper's full width
+  // instead of scaling an 80mm layout down and leaving side margins.
   const isDriverFormsRoll = getPaperHeightMm(printSettings) == null
     && (printSettings.pageSizeMode || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode) === 'driver-forms'
   const widthMm = options.paperWidthMm
     || (isDriverFormsRoll ? getDriverFormWidthMm(printSettings) : getPaperWidthMm(printSettings))
   // PRINT-PATH ONLY (this function). PDF/image export keep the operator's
-  // configured side margins unchanged -- see createReceiptPdfBlob and
+  // configured margins unchanged -- see createReceiptPdfBlob and
   // createReceiptImageBlob, which call withReceiptElement with the
   // untouched `printSettings`, not this capped copy.
-  const hostPrintSettings = isDriverFormsRoll ? capDriverFormSideMargins(printSettings) : printSettings
+  const hostPrintSettings = isDriverFormsRoll ? capDriverFormMargins(printSettings) : printSettings
   return withReceiptElement(content, widthMm, async (host) => {
     await waitForElementAssets(host)
 
@@ -1220,7 +1213,6 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
       measuredHeightMm,
       savedPageSizeMode: printSettings.pageSizeMode,
       fixedPageLengthMm: printSettings.fixedPageLengthMm,
-      driverFormHeightsMm: printSettings.driverFormHeightsMm,
     })
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
@@ -1252,10 +1244,12 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
 
 export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {
   const { markup, widthMm, pageHeightMm, continuousRoll, singleSheet, pageSizeMode = 'measured' } = layout
-  // 'driver' is the owner's explicit "let the printer's own registered form
-  // decide" fallback -- no `@page size` reaches the document at all (margin
-  // stays 0). Every other mode keeps an explicit, valid width x height.
-  const omitPageSize = pageSizeMode === 'driver'
+  // 'driver-forms' (the default) and 'driver' send no `@page size` at all
+  // (margin stays 0): the paper chosen in the print dialog is the page, and
+  // the receipt starts at its top instead of being centred on it (see
+  // resolveReceiptPageGeometry). Every other mode keeps an explicit, valid
+  // width x height.
+  const omitPageSize = pageSizeMode === 'driver' || pageSizeMode === 'driver-forms'
   // Three page semantics, not two. A continuous roll is one variable-height
   // logical page whose length is the measured receipt content.
   // A DOCUMENT page (A4, Letter, custom) is a stack of pages, so a long receipt

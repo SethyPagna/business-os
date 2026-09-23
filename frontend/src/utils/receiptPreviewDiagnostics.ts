@@ -18,6 +18,8 @@ export type ReceiptPreviewSettings = ReturnType<typeof receiptPreviewSettings>
 
 export const RECEIPT_PREVIEW_COPY = {
   receipt_preview_requested_paper: 'Requested paper',
+  receipt_preview_dialog_paper: 'length set by the paper chosen in the print dialog',
+  receipt_preview_dialog_paper_hint: 'In the print dialog, choose the longest paper once (e.g. 72 × 800 mm) and keep Margins and Scale at Default. Chrome remembers it, and the printer stops and cuts at the end of the receipt.',
   receipt_preview_continuous_roll: 'Continuous roll — one content-height strip',
   receipt_preview_single_card: 'Single card — fitted to one sheet',
   receipt_preview_fixed_document: 'Fixed-size document',
@@ -39,7 +41,7 @@ export const RECEIPT_PREVIEW_COPY = {
   receipt_preview_mode_fixed: 'Fixed length',
   receipt_preview_mode_driver: 'Printer driver default',
   receipt_preview_mode_auto_longest: 'Longest roll (auto)',
-  receipt_preview_mode_driver_forms: 'Printer form (auto-fit)',
+  receipt_preview_mode_driver_forms: 'Printer paper',
   receipt_preview_mode_troubleshoot: 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.',
 } as const
 
@@ -83,15 +85,17 @@ export function receiptPreviewDiagnosticLines(
   // reports pageSizeMode 'measured' and continuousRoll false, so this line
   // never appears for it.
   const showPageSizeMode = layout.continuousRoll || pageSizeMode !== 'measured'
-  // driver-forms: name the exact registered form chosen (e.g. "72 × 297 mm
-  // form") so the owner can see it matches the printer dialog.
-  const sizeLabel = pageSizeMode === 'driver-forms'
-    ? `${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm form`
-    : `${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm`
+  // 'driver-forms' and 'driver' request no page length at all (printReceipt.ts
+  // sends no @page size for them): only the width is the app's, the length is
+  // whatever paper the print dialog has selected.
+  const dialogPaper = pageSizeMode === 'driver-forms' || pageSizeMode === 'driver'
+  const paperLine = dialogPaper
+    ? `${text('receipt_preview_requested_paper')}: ${dimension(layout.widthMm)} mm · ${text('receipt_preview_dialog_paper')}`
+    : `${text('receipt_preview_requested_paper')}: ${dimension(layout.widthMm)} × ${dimension(layout.pageHeightMm)} mm · ${text(mode)}`
   return [
-    `${text('receipt_preview_requested_paper')}: ${sizeLabel} · ${text(mode)}`,
+    paperLine,
     `${text('receipt_preview_app_scale')}: ${dimension(settings.scalePercent)}% · ${text('receipt_preview_margins')}: ${settings.marginsMm.map(dimension).join(' / ')} mm`,
-    text('receipt_preview_actual_size'),
+    text(dialogPaper ? 'receipt_preview_dialog_paper_hint' : 'receipt_preview_actual_size'),
     ...(showPageSizeMode ? [`${text('receipt_preview_page_size_mode')}: ${text(RECEIPT_PAGE_SIZE_MODE_LABELS[pageSizeMode] || 'receipt_preview_mode_measured')}`] : []),
     ...(layout.continuousRoll ? [text('receipt_preview_roll_warning'), text('receipt_preview_driver_hint')]
       : layout.singleSheet ? [text('receipt_preview_card_note')] : []),

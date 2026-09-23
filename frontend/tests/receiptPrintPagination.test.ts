@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import {
   buildPrintablePreviewDocument,
   buildSingleImagePdf,
+  capDriverFormMargins,
   measureContinuousRollPageHeightMm,
   remeasureContinuousRollBeforePrint,
   resolveReceiptPageGeometry,
@@ -325,8 +326,8 @@ await runTest('resolveReceiptPageGeometry: a missing/undefined saved pageSizeMod
   const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 200, savedPageSizeMode: undefined, fixedPageLengthMm: undefined })
   assert.equal(geometry.pageSizeMode, 'driver-forms')
   assert.equal(geometry.continuousRoll, false)
-  // Owner's default four registered forms: 200mm content fits the 210mm form.
-  assert.equal(geometry.pageHeightMm, 210)
+  // The content estimate only; driver-forms sends no page size (below).
+  assert.equal(geometry.pageHeightMm, 201)
 })
 
 await runTest('resolveReceiptPageGeometry: fixed mode with a 25-item receipt uses the explicit 80x100mm page and paginates instead of clipping', () => {
@@ -398,45 +399,60 @@ await runTest('resolveReceiptPageGeometry: auto-longest emits one explicit longe
   assert.match(html, /page-break-after:\s*avoid/, 'auto-longest guards against a driver paginating anyway')
 })
 
-// --- P10-1/P10-3: driver-forms (2026-09-16 owner report + Chrome dialog photos) ---
+// --- driver-forms (2026-09-16 owner report; 2026-09-23 print photo) ---
+// Chrome never switches the dialog's paper to match a CSS @page size: a
+// smaller CSS page is centred on the chosen paper (the blank band above the
+// receipt) and a taller one is shrunk or split, and the print document lays
+// out taller than the app's estimate, so a form picked from that estimate
+// (the 2026-09-16 design) could still split. With no size the receipt starts
+// at the top of whatever paper is chosen; on the longest form the driver
+// trims the unused paper and cuts at the end of the receipt.
 
-await runTest('resolveReceiptPageGeometry: driver-forms picks the smallest registered form that fits the measured content, for each band, and the largest form when content exceeds every form (pagination, never clipping)', () => {
-  const bands = [
-    { measuredHeightMm: 150, expected: 210 },
-    { measuredHeightMm: 250, expected: 297 },
-    { measuredHeightMm: 380, expected: 400 },
-    { measuredHeightMm: 700, expected: 800 },
-    { measuredHeightMm: 900, expected: 800 }, // exceeds every form: largest wins, must paginate not clip
-  ]
-  for (const band of bands) {
-    const geometry = resolveReceiptPageGeometry({
-      fixedHeightMm: null,
-      measuredHeightMm: band.measuredHeightMm,
-      savedPageSizeMode: 'driver-forms',
-      driverFormHeightsMm: [210, 297, 400, 800],
-    })
-    assert.equal(geometry.pageHeightMm, band.expected, `${band.measuredHeightMm}mm content picks the ${band.expected}mm form`)
+await runTest('resolveReceiptPageGeometry: driver-forms sends NO @page size for any receipt length, never clips, keeps rows intact across a page break, and is not remeasured', () => {
+  for (const measuredHeightMm of [150, 250, 380, 700, 900]) {
+    const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm, savedPageSizeMode: 'driver-forms' })
+    assert.equal(geometry.pageHeightMm, measuredHeightMm + 1, `${measuredHeightMm}mm: the content estimate, not a page length`)
     assert.equal(geometry.continuousRoll, false)
     assert.equal(geometry.pageSizeMode, 'driver-forms')
 
-    const html = buildPrintablePreviewDocument({
+    const layout = {
       markup: '<section>ITEM-1|ITEM-2</section>',
       widthMm: 72,
       pageHeightMm: geometry.pageHeightMm,
       continuousRoll: geometry.continuousRoll,
       singleSheet: false,
       pageSizeMode: geometry.pageSizeMode,
-    })
-    assert.match(html, new RegExp(`size: 72mm ${band.expected}\\.00mm`), `${band.measuredHeightMm}mm: emits an explicit 72x${band.expected}mm @page so Chrome auto-selects the matching driver form`)
-    assert.doesNotMatch(html, /overflow: hidden !important/, `${band.measuredHeightMm}mm: a driver-forms page never clips a receipt taller than the chosen form`)
-    assert.match(html, /break-inside: avoid-page/, `${band.measuredHeightMm}mm: pagination onto further forms still keeps an item/row intact`)
-    assert.doesNotMatch(html, /data-receipt-length-line="true">Receipt length/, 'driver-forms mode reports the chosen form, not a measured roll length')
+    }
+    const html = buildPrintablePreviewDocument(layout)
+    const pageRuleMatch = html.match(/@page\s*\{([^}]*)\}/)
+    assert.ok(pageRuleMatch, 'the document still has an @page rule')
+    assert.doesNotMatch(pageRuleMatch![1], /size:/, `${measuredHeightMm}mm: the print dialog's paper is the page`)
+    assert.match(pageRuleMatch![1], /margin:\s*0;/, 'no page margin on top of the receipt margins')
+    assert.match(html, /width: 72mm !important;/, 'the receipt still prints at the full 72mm paper width')
+    assert.doesNotMatch(html, /overflow: hidden !important/, `${measuredHeightMm}mm: a receipt longer than the chosen paper is never clipped`)
+    assert.match(html, /break-inside: avoid-page/, `${measuredHeightMm}mm: a split onto a shorter paper still keeps an item/row intact`)
+    assert.doesNotMatch(html, /data-receipt-length-line="true">Receipt length/, 'no measured roll length is reported for a size that is not sent')
+
+    let rewritten = false
+    const fakeStyleEl = { set textContent(_value: string) { rewritten = true } } as unknown as HTMLElement
+    const fakeDoc = { getElementById: (id: string) => (id === 'receipt-page-size' ? fakeStyleEl : null), querySelector: () => null } as unknown as Document
+    remeasureContinuousRollBeforePrint(fakeDoc, layout)
+    assert.equal(rewritten, false, 'the in-document remeasure never writes a page size back in')
   }
 })
 
-await runTest('resolveReceiptPageGeometry: driver-forms with an empty/corrupted height list falls back to the owner\'s default four forms (210/297/400/800)', () => {
-  const geometry = resolveReceiptPageGeometry({ fixedHeightMm: null, measuredHeightMm: 250, savedPageSizeMode: 'driver-forms', driverFormHeightsMm: [] })
-  assert.equal(geometry.pageHeightMm, 297)
+await runTest('capDriverFormMargins: driver-forms prints with no top margin and at most 1mm sides, keeping the bottom margin and every other setting', () => {
+  const capped = capDriverFormMargins({ ...DEFAULT_RECEIPT_PRINT_SETTINGS, marginTop: '4', marginRight: '4', marginBottom: '4', marginLeft: '0.5', scale: '90' })
+  assert.equal(capped.marginTop, '0', 'the printer already feeds ~11mm of blank paper ahead of the receipt after each cut')
+  assert.equal(capped.marginRight, '1')
+  assert.equal(capped.marginLeft, '0.5', 'a side margin under the cap is kept')
+  assert.equal(capped.marginBottom, '4', 'the gap before the cut is kept')
+  assert.equal(capped.scale, '90')
+  assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop, '4', 'the saved settings are not mutated')
+
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(printSource, /const hostPrintSettings = isDriverFormsRoll \? capDriverFormMargins\(printSettings\) : printSettings/,
+    'only the driver-forms print path uses the capped margins; PDF and image keep the configured ones')
 })
 
 await runTest('resolveReceiptPageGeometry: a genuine fixed sheet (80x50mm/A4/Letter/custom height) always resolves to measured bookkeeping regardless of the saved pageSizeMode', () => {
