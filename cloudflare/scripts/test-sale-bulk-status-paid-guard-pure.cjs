@@ -16,6 +16,10 @@
 // sales (code `insufficient_payment_for_status`, the code POST /sales uses,
 // plus `sale_ids`).
 //
+// Undo and redo of a group (replaySaleBulkStatus, through the history route)
+// are held to the same rule, and refuse with 409, the status the history
+// route passes on to the client.
+//
 // DISCRIMINATING: the refusal cases are each answered 200 by the pre-fix
 // route (it wrote the paid status with the debt still on the sale). The
 // control cases pass on both, and are here so an over-broad fix -- refusing
@@ -141,6 +145,71 @@ const statuses = (f) => f.sql.prepare('SELECT id,sale_status FROM sales ORDER BY
     assert.equal(applied.status, 200, JSON.stringify(applied))
     assert.deepEqual([applied.body.changedCount, applied.body.unchangedCount], [2, 7])
     assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE id<=7 AND sale_status='awaiting_payment'").get().n, 7)
+  })
+
+  // UNDO AND REDO are status moves too (replaySaleBulkStatus, reached through
+  // the history route). A redo re-applies the group's recorded direction and
+  // an undo reverses it, so either can be the Not Paid -> paid move.
+
+  await runTest('redo cannot re-apply a group recorded before the guard to a sale that owes money', async () => {
+    const f = h.fixture(); h.seed(f, 2)
+    setMoney(f, 1, { total: 10, paidUsd: 10 })
+    setMoney(f, 2, { total: 10, paidUsd: 10 })
+    const applied = await f.call(h.sales, '/bulk-status', h.request(f, 'completed', 'bulk-redo-pre-guard'))
+    assert.equal(applied.status, 200, JSON.stringify(applied))
+    const history = applied.body.actionHistoryId
+    assert.equal((await h.replay(f, history, 'undo', 0)).status, 200)
+    assert.deepEqual(statuses(f), ['1:awaiting_payment', '2:awaiting_payment'])
+    // What a group applied before the guard left in production: the same
+    // snapshot over a sale that never had the money. The money is written
+    // under the restore flag, so the sale's revision -- the replay's own
+    // precondition -- does not move, exactly as if it had always been so.
+    f.sql.prepare(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`).run()
+    setMoney(f, 1, { total: 10 })
+    f.sql.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()
+    const before = h.snapshot(f)
+    const refused = await h.replay(f, history, 'redo', 1)
+    // Without the replay guard this answered 200 and marked R1 Completed with $0 paid.
+    assert.equal(refused.status, 409, JSON.stringify(refused))
+    assert.match(refused.body.error, /Not fully paid: R1\./)
+    assert.equal(h.snapshot(f), before, 'atomic: R2 stays put too, and the action stays redoable')
+  })
+
+  await runTest('undoing a group reopen cannot put a sale that owes money back to Completed', async () => {
+    const f = h.fixture(); h.seed(f, 9)
+    // Sales 8 and 9 are Completed. 8 is a legacy row: a NULL status (read as
+    // Completed) and nothing recorded as paid. 9 is paid in full.
+    f.sql.prepare('UPDATE sales SET sale_status=NULL WHERE id=8').run()
+    setMoney(f, 8, { total: 10 })
+    setMoney(f, 9, { total: 10, paidUsd: 10 })
+    const req = h.request(f, 'awaiting_payment', 'bulk-reopen-owed')
+    req.source_status = 'completed'
+    for (const item of req.items) if (item.expected_status === null) item.expected_status = 'completed'
+    const reopened = await f.call(h.sales, '/bulk-status', req)
+    assert.equal(reopened.status, 200, JSON.stringify(reopened))
+    assert.deepEqual(reopened.body.changedIds, [8, 9])
+    const before = h.snapshot(f)
+    const refused = await h.replay(f, reopened.body.actionHistoryId, 'undo', 0)
+    // Without the replay guard this answered 200 and put R8 back to a NULL
+    // (Completed) status with $0 paid.
+    assert.equal(refused.status, 409, JSON.stringify(refused))
+    assert.match(refused.body.error, /Not fully paid: R8\./)
+    assert.equal(h.snapshot(f), before, 'atomic: R9 stays Not Paid too, and the action stays undoable')
+  })
+
+  // CONTROL: the replay guard is about the money. Undoing a group reopen of
+  // sales that are paid in full restores them, as it always did.
+  await runTest('undoing a group reopen of fully paid sales still restores them', async () => {
+    const f = h.fixture(); h.seed(f, 9)
+    setMoney(f, 8, { total: 10, paidUsd: 10 })
+    setMoney(f, 9, { total: 10, paidKhr: 41000 })
+    const req = h.request(f, 'awaiting_payment', 'bulk-reopen-paid')
+    req.source_status = 'completed'
+    const reopened = await f.call(h.sales, '/bulk-status', req)
+    assert.equal(reopened.status, 200, JSON.stringify(reopened))
+    const undone = await h.replay(f, reopened.body.actionHistoryId, 'undo', 0)
+    assert.equal(undone.status, 200, JSON.stringify(undone))
+    assert.deepEqual(statuses(f).slice(7), ['8:completed', '9:completed'])
   })
 
   if (failed > 0) {
