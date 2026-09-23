@@ -99,6 +99,12 @@ const longCut = '(−$0.20 Buy two get the third one free this weekend)'
 const cutLines = telegramRowLines('3. Soap', ['2 × $0.60', longCut, '= $1.00'])
 assert.ok(cutLines.every((line) => line.length <= WIDTH), cutLines.join('\n'))
 assert.equal(cutLines.map((line) => line.trim()).join(' '), `3. Soap 2 × $0.60 ${longCut} = $1.00`)
+// A part wider than a line breaks at its own separators first: a figure of a
+// transfer's on-hand never leaves its branch behind ("· Shop" / "25").
+assert.deepEqual(
+  telegramRowLines('• Rice 5kg', ['10', '— Warehouse 90 · Shop 25 · all branches 115']),
+  ['• Rice 5kg 10 — Warehouse 90', `${INDENT}· Shop 25 · all branches 115`],
+)
 // The marker never ends a line on its own: a name with no space to break at
 // (a Khmer name, a long code) stays on the number's line.
 const unbroken = 'ក្រែមលាបមុខសម្រាប់ស្បែកស្ងួតខ្លាំងណាស់'

@@ -80,7 +80,8 @@ function rowWords(text: string): string[] {
  * A list row (`1. name …`, `• name …`) as the lines a phone shows it on.
  * `head` breaks between words. `parts` share one line when they fit one
  * (`1 × $28.00 (−$3.00) = $25.00`); otherwise each part stays whole where it
- * fits, and one wider than a line breaks between its words.
+ * fits, one wider than a line breaks at its own separators (`— Warehouse 90`
+ * `· Shop 25` `· all branches 115`), and a piece still wider between words.
  */
 export function telegramRowLines(head: string, parts: string[] = []): string[] {
   const rest = TELEGRAM_ROW_WIDTH - HANGING_INDENT.length
@@ -90,11 +91,13 @@ export function telegramRowLines(head: string, parts: string[] = []): string[] {
     if (last >= 0 && lines[last].length + 1 + piece.length <= (last ? rest : TELEGRAM_ROW_WIDTH)) lines[last] += ` ${piece}`
     else lines.push(piece)
   }
+  const pieces = (part: string): string[] => (part.length <= rest ? [part]
+    : part.split(/ (?=[—·] )/).flatMap((piece) => (piece.length <= rest ? [piece] : rowWords(piece))))
   rowWords(head).forEach(place)
   const tail = parts.filter(Boolean)
   const whole = tail.join(' ')
   if (whole && whole.length <= rest) place(whole)
-  else tail.forEach((part) => (part.length <= rest ? [part] : rowWords(part)).forEach(place))
+  else tail.flatMap(pieces).forEach(place)
   return lines.map((line, index) => (index ? `${HANGING_INDENT}${line}` : line))
 }
 
@@ -1616,21 +1619,26 @@ export type TelegramReturnSummary = {
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
 
-function onHandLine(parts: Array<[string, number | null | undefined]>): string {
+// The resulting on-hand of one bullet, `— Warehouse 90 · Shop 25 · all
+// branches 115`; a figure the route could not read back is left out.
+function onHandPart(parts: Array<[string, number | null | undefined]>): string {
   const shown = parts.filter(([, value]) => value != null).map(([label, value]) => `${label} ${Number(value) || 0}`)
-  return shown.length ? `On hand: ${shown.join(' · ')}` : ''
+  return shown.length ? `— ${shown.join(' · ')}` : ''
 }
 
+// Each product is one bullet; a bullet too wide for a phone continues on the
+// hanging indent (telegramRowLines), like the items of a sale alert.
 export function formatTransferTelegramLines(transfer: TelegramTransferSummary): string[] {
   const from = transfer.fromBranch || 'Source'
   const to = transfer.toBranch || 'Destination'
-  const items = transfer.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+  const items = transfer.items.slice(0, TELEGRAM_MAX_ITEM_LINES).flatMap((item) => {
     const received = receivedDateText(item.receivedDate, item.lot)
-    const onHand = onHandLine([[from, item.fromOnHand], [to, item.toOnHand], ['all branches', item.totalOnHand]])
-    return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
-      + (received ? ` (received date ${cleanLine(received, 40)})` : '')
-      + (item.mergedInto ? ` → ${cleanLine(item.mergedInto, 100)}` : '')
-      + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
+    return telegramRowLines(`• ${cleanLine(item.product, 100)}`, [
+      String(Math.abs(Number(item.quantity) || 0)),
+      received ? `(received date ${cleanLine(received, 40)})` : '',
+      item.mergedInto ? `→ ${cleanLine(item.mergedInto, 100)}` : '',
+      onHandPart([[from, item.fromOnHand], [to, item.toOnHand], ['all branches', item.totalOnHand]]),
+    ])
   })
   const total = transfer.items.reduce((sum, item) => sum + Math.abs(Number(item.quantity) || 0), 0)
   return [
@@ -1655,17 +1663,18 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
 }
 
 export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] {
-  const items = ret.items.slice(0, TELEGRAM_MAX_ITEM_LINES).map((item) => {
+  const items = ret.items.slice(0, TELEGRAM_MAX_ITEM_LINES).flatMap((item) => {
     const received = receivedDateText(item.receivedDate, item.lot)
-    const onHand = onHandLine([[ret.branch || 'Branch', item.branchOnHand], ['all branches', item.totalOnHand]])
-    return `• ${cleanLine(item.product, 100)} ${Math.abs(Number(item.quantity) || 0)}`
-      + (item.refundUsd != null ? ` = ${usd(item.refundUsd)}` : '')
-      + (item.stockAction ? ` (${String(item.stockAction).replace(/_/g, ' ')})` : '')
-      + (received ? ` (received date ${cleanLine(received, 40)})` : '')
-      + (onHand ? ` — ${onHand.slice('On hand: '.length)}` : '')
+    return telegramRowLines(`• ${cleanLine(item.product, 100)}`, [
+      String(Math.abs(Number(item.quantity) || 0)),
+      item.refundUsd != null ? `= ${usd(item.refundUsd)}` : '',
+      item.stockAction ? `(${String(item.stockAction).replace(/_/g, ' ')})` : '',
+      received ? `(received date ${cleanLine(received, 40)})` : '',
+      onHandPart([[ret.branch || 'Branch', item.branchOnHand], ['all branches', item.totalOnHand]]),
+    ])
   })
   const replacements = (ret.replacements || []).slice(0, TELEGRAM_MAX_ITEM_LINES)
-    .map((rep) => `↔ ${cleanLine(rep.product, 100)} ${Math.abs(Number(rep.quantity) || 0)}`)
+    .flatMap((rep) => telegramRowLines(`↔ ${cleanLine(rep.product, 100)}`, [String(Math.abs(Number(rep.quantity) || 0))]))
   const hasMoney = (ret.refundUsd || 0) !== 0 || (ret.refundKhr || 0) !== 0
   return [
     `Date: ${formatBusinessDateTime(ret.createdAt)}`,
