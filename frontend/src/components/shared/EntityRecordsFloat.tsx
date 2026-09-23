@@ -11,9 +11,10 @@
 // shows, through the same clause builder and the same permission gate. Two
 // readers of one table cannot drift; two endpoints over one table can.
 //
-// Six call sites share this wrapper rather than repeating the loader, the
-// adapter and the title: the entity name and the id are the only things any of
-// them actually knows.
+// Five call sites share this wrapper -- the two product detail panes and the
+// customer, supplier and delivery tabs -- rather than repeating the loader,
+// the adapter and the title: the entity name and the id are the only things
+// any of them actually knows.
 import RecordsFloat from './RecordsFloat.tsx'
 import { getEntityAuditRecords } from '../../api/auditLogTransport.ts'
 import { ENTITY_RECORDS_ADAPTER, auditPayloadToRecords } from '../../utils/entityRecords.ts'
