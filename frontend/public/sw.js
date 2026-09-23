@@ -881,6 +881,20 @@ async function appShellFallback(request, event) {
     // carries __bos_reload, so there is no stale HTTP-cache hit to guard.
     if (isRecoveryNavigation(request)) {
         const fresh = await fetch(request).catch(() => null);
+        // A navigate-mode Request carries redirect: 'manual', so a host that
+        // answers this navigation with a 3xx (an HSTS or trailing-slash hop, an
+        // edge rule, a sign-in bounce) gives back an opaqueredirect: type
+        // 'opaqueredirect', status 0, ok false. isValidDocumentResponse refuses
+        // it, and refusing it here means falling through to the cached shell the
+        // page has just proven dead, with the guard's one reload already spent --
+        // the same incident by a different road. Hand the opaqueredirect to the
+        // browser instead (only a navigation may be answered with one) and let it
+        // walk the hop itself. If the redirect keeps __bos_reload the follow-up
+        // navigation re-enters this branch; if the host drops the query, the
+        // follow-up is an ordinary navigation served from cache, which is no
+        // worse than the fallback below.
+        if (fresh && fresh.type === 'opaqueredirect')
+            return fresh;
         if (isValidDocumentResponse(fresh)) {
             await cache.put('/index.html', fresh.clone()).catch(() => { });
             return fresh;

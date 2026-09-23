@@ -110,6 +110,12 @@ const document_ = (generation: Generation) =>
 
 type Outcome = {
   recoveryReloads: number
+  /**
+   * Distinct __bos_reload values the tab navigated to. One reload token means
+   * the guard needed exactly one hop, no matter how many transport hops (a
+   * host redirect) the browser made to land it.
+   */
+  recoveryTokens: number
   shellGeneration: string | null
   catalog: string | null
   bootError: boolean
@@ -125,13 +131,25 @@ type FixtureOptions = {
   challengeWorkerShellReads?: boolean
   /** Make the /sw.js round trip measurably slow, the way a phone does. */
   swJsDelayMs?: number
+  /**
+   * Answer the FIRST recovery navigation (__bos_reload) with a 301 to the
+   * same path, query intact -- the shape a host-level normalisation hop
+   * (HSTS, trailing slash, an edge rule) has. A navigate-mode Request carries
+   * redirect: 'manual', so the worker sees an opaqueredirect, not the
+   * document. Only the first one redirects: a permanent redirect to the
+   * identical URL every time is a loop no worker can survive.
+   */
+  redirectFirstRecoveryNavigation?: boolean
 }
 
 function createFixture(workerSource: string, options: FixtureOptions = {}) {
   let generation: Generation = 'old'
+  let recoveryRedirectsSent = 0
   const server = http.createServer((request, response) => {
-    const path = new URL(request.url ?? '/', 'http://localhost').pathname
+    const requestUrl = new URL(request.url ?? '/', 'http://localhost')
+    const path = requestUrl.pathname
     const isNavigation = String(request.headers['sec-fetch-mode'] || '') === 'navigate'
+    const isRecoveryNavigation = isNavigation && requestUrl.searchParams.has('__bos_reload')
     const build = BUILD[generation]
     response.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
     if (path === '/sw.js') {
@@ -180,6 +198,14 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
       return
     }
     // The document.
+    if (options.redirectFirstRecoveryNavigation && isRecoveryNavigation && recoveryRedirectsSent === 0) {
+      recoveryRedirectsSent += 1
+      // Cache-Control: must-revalidate is already set above, so the browser
+      // cannot silently replay this permanent redirect for the next URL.
+      response.writeHead(301, { Location: request.url ?? '/' })
+      response.end()
+      return
+    }
     if (options.challengeWorkerShellReads && !isNavigation && generation === 'new') {
       response.writeHead(403, { 'Content-Type': 'text/html' })
       response.end('<html><body>Just a moment...</body></html>')
@@ -191,8 +217,8 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
   return { server, deploy: () => { generation = 'new' } }
 }
 
-async function runScenario(workerSource: string, deploy: boolean): Promise<Outcome> {
-  const fixture = createFixture(workerSource, { challengeWorkerShellReads: true })
+async function runScenario(workerSource: string, deploy: boolean, options: FixtureOptions = {}): Promise<Outcome> {
+  const fixture = createFixture(workerSource, { challengeWorkerShellReads: true, ...options })
   const { server } = fixture
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
@@ -200,8 +226,11 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
   const context = await browser.newContext({ serviceWorkers: 'allow' })
   const page = await context.newPage()
   let recoveryReloads = 0
+  const recoveryTokens = new Set<string>()
   page.on('framenavigated', (frame) => {
-    if (frame === page.mainFrame() && frame.url().includes('__bos_reload')) recoveryReloads += 1
+    if (frame !== page.mainFrame() || !frame.url().includes('__bos_reload')) return
+    recoveryReloads += 1
+    recoveryTokens.add(new URL(frame.url()).searchParams.get('__bos_reload') ?? '')
   })
   try {
     await page.goto(origin)
@@ -237,6 +266,7 @@ async function runScenario(workerSource: string, deploy: boolean): Promise<Outco
     ).catch(() => {})
     return {
       recoveryReloads,
+      recoveryTokens: recoveryTokens.size,
       shellGeneration: await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
       catalog: await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
       bootError: await page.evaluate(() => !!document.querySelector('#boot-error')),
@@ -373,6 +403,20 @@ test('the chunk-recovery reload lands on the deployed build in one hop', { timeo
   assert.equal(fixed.shellGeneration, 'new', 'the recovery navigation must be answered with the deployed shell, not the cached dead one')
   assert.equal(fixed.catalog, 'CATALOG-new', 'the lazy route must mount on the build the server is actually serving')
   assert.equal(fixed.bootError, false, 'RootErrorBoundary is what the incident showed; recovery must not reach it')
+})
+
+// E1 (verifier, Sep 23 2026): the recovery navigation meets a host redirect.
+// A navigate-mode Request has redirect: 'manual', so fetch(request) hands the
+// worker an opaqueredirect (type 'opaqueredirect', status 0, ok false) rather
+// than the document. Refusing it and falling through to the cached shell hands
+// back the very build the page just proved dead, and the guard has already
+// spent its one reload -- the original incident, reached by a different road.
+test('the recovery navigation follows a host redirect instead of falling back to the dead shell', { timeout: 180_000 }, async () => {
+  const fixed = await runScenario(fixedWorker, true, { redirectFirstRecoveryNavigation: true })
+  assert.equal(fixed.recoveryTokens, 1, 'the guard must still need exactly one reload; the redirect hop belongs to the browser, not to a second try')
+  assert.equal(fixed.shellGeneration, 'new', 'a 3xx on the recovery navigation must be followed, not answered from the stale app-shell cache')
+  assert.equal(fixed.catalog, 'CATALOG-new', 'and the deployed build must actually mount after the hop')
+  assert.equal(fixed.bootError, false, 'falling back to the cached shell here is the incident, one redirect later')
 })
 
 test('negative control: the worker deployed at ef0489c1 stays stuck on the dead shell', { timeout: 180_000 }, async () => {
