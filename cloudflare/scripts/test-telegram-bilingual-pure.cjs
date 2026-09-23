@@ -433,6 +433,33 @@ assert.equal(lang.localizeTelegramLine(lang.GROUP_RULE), lang.GROUP_RULE, 'a div
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
 
+// A cap cuts BETWEEN two characters, never inside one (Sep 23 2026). `slice`
+// counts UTF-16 units and an emoji is two of them, so a cut between the two
+// left half a character: a lone surrogate, which has no UTF-8 form. Every
+// input below puts an emoji ACROSS its cap -- an odd number of units in front
+// of it -- which is exactly where a units-based cut splits one.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+// Positive control: the detector sees what a units-based cut leaves behind.
+assert.ok(LONE_SURROGATE.test(`x${'😀'.repeat(3)}`.slice(0, 4)) && !LONE_SURROGATE.test(`x${'😀'.repeat(3)}`), 'the detector must tell a split emoji from a whole one')
+// cleanLine, which every event line and every name passes through -- here the
+// sale alert's product name, capped at 100.
+const emojiName = `x${'😀'.repeat(120)}`
+const emojiSale = telegram.formatSaleTelegramLines({
+  receiptNumber: 'R-1', cashier: 'Za', exchangeRate: 4100,
+  items: [{ name: emojiName, quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
+  subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
+})
+assert.ok(emojiSale.includes(`1. ${Array.from(emojiName).slice(0, 100).join('')}`), `the product name keeps 100 whole characters:\n${emojiSale.join('\n')}`)
+assert.ok(!LONE_SURROGATE.test(emojiSale.join('\n')), 'no half emoji anywhere in the sale alert')
+// The date a refusal echoes back (30 characters).
+const emojiDate = lang.parseReportDate(`x${'😀'.repeat(40)}`, '2026-09-04')
+assert.equal(emojiDate.ok, false)
+assert.ok(emojiDate.message.includes(`"x${'😀'.repeat(29)}"`) && !LONE_SURROGATE.test(emojiDate.message), emojiDate.message)
+// The one helper both of them cut with.
+assert.equal(lang.firstCharacters(`x${'😀'.repeat(3)}`, 3), `x${'😀'.repeat(2)}`, 'the cap counts characters')
+assert.equal(lang.firstCharacters('Za', 3), 'Za', 'text under its cap is untouched')
+console.log('PASS character cut: a capped name and an echoed date never end on half an emoji')
+
 // --- 5. the command reference -----------------------------------------------
 
 const reference = lang.telegramCommandReference()
@@ -607,6 +634,11 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   await wired.handleTelegramWebhook(env, { message: { text: '/nonsense', chat: { id: -100111 } } })
   assert.ok(lastSent().startsWith('🤔') && lastSent().includes('/report'), 'an unknown command answers with the reference')
+  // The command it echoes is capped at 32 characters, and the cut never
+  // halves an emoji: `/` is one unit, so a units-based cut split the 16th.
+  await wired.handleTelegramWebhook(env, { message: { text: `/${'😀'.repeat(40)}`, chat: { id: -100111 } } })
+  assert.ok(lastSent().startsWith('🤔') && lastSent().includes(`/${'😀'.repeat(31)}.`) && !LONE_SURROGATE.test(lastSent()),
+    `an emoji command is echoed whole, 32 characters of it:\n${lastSent().split('\n')[0]}`)
 
   for (const command of ['/help', '/start']) {
     await wired.handleTelegramWebhook(env, { message: { text: command, chat: { id: -100111 } } })

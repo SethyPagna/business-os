@@ -497,6 +497,25 @@ export function bi(en: string, km: string): string {
 }
 
 /**
+ * The first `max` characters of `text`, counted as CODE POINTS.
+ *
+ * Every cap on text the bot sends goes through here: lib/telegram.ts's
+ * cleanLine, and the command and the date a reply echoes back. `slice` counts
+ * UTF-16 units, and an emoji -- any character past U+FFFF -- is two of them,
+ * so a cut landing between the two left half a character behind: a lone
+ * surrogate, which has no UTF-8 form, so Telegram can only refuse the message
+ * or print a broken glyph in its place. Counted this way a cut only ever falls
+ * BETWEEN two characters. (A Khmer vowel sign is a code point of its own, so a
+ * cut can still part one from its consonant -- only on text longer than its
+ * cap, and what is left is still valid text.)
+ */
+export function firstCharacters(text: string, max: number): string {
+  // Text of at most `max` UTF-16 units holds at most `max` code points, so an
+  // ordinary line never builds the array.
+  return text.length > max ? Array.from(text).slice(0, max).join('') : text
+}
+
+/**
  * Translate the enumerated words inside one value.
  *
  * The `en` mode runs the pass too, and must: a `{ en, km }` entry exists
@@ -772,10 +791,11 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
     }
   }
 
+  const shown = firstCharacters(raw, 30)
   return {
     ok: false,
     message: [
-      `⚠️ ${bi(`I could not read the date "${raw.slice(0, 30)}".`, `មិនអាចអានកាលបរិច្ឆេទ "${raw.slice(0, 30)}" បានទេ។`)}`,
+      `⚠️ ${bi(`I could not read the date "${shown}".`, `មិនអាចអានកាលបរិច្ឆេទ "${shown}" បានទេ។`)}`,
       '',
       bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
       // `•`, not `▸`: the arrow is this bot's POINTER glyph -- "now send that

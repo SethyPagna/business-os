@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  bi, firstCharacters, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -48,8 +48,10 @@ const SETTING_KEYS = [
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
   return value == null || value === '' ? fallback : String(value).trim().toLowerCase() !== 'false'
 }
+// `max` counts characters, not UTF-16 units: a cut never halves an emoji
+// (firstCharacters in telegramLang.ts says why that matters).
 function cleanLine(value: unknown, max = 300): string {
-  return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
+  return firstCharacters(String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim(), max)
 }
 
 // Owner, 23 Sep 2026, over a 15-item sale alert: "for each new line in this
@@ -1287,7 +1289,7 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   if (command === '/help' || command === '/start') return withLanguage(language, telegramCommandReference)
   if (command === '/inventory') return inventorySummaryReport(env, language)
   if (command === '/stock' || command === '/lowstock') return inventoryReport(env, language)
-  if (!DATED_COMMANDS.has(command)) return withLanguage(language, () => unknownCommandReply(command.slice(0, 32)))
+  if (!DATED_COMMANDS.has(command)) return withLanguage(language, () => unknownCommandReply(firstCharacters(command, 32)))
 
   const parsed = withLanguage(language, () => parseReportDate(argument, businessToday(nowMs)))
   if (!parsed.ok) return parsed.message
