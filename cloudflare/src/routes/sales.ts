@@ -121,7 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { paymentCoversSaleTotal, resolvePaidSaleStatus, statusChangeNeedsPayment } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -3405,7 +3405,7 @@ app.post('/:id/items', async (c) => {
     subtotalUsd: moneyAfter.subtotal_usd,
     totalUsd: moneyAfter.total_usd,
     totalKhr: moneyAfter.total_khr,
-    outstandingUsd: round2(Math.max(0, moneyAfter.total_usd - (Number(sale.amount_paid_usd) || 0) - (Number(sale.amount_paid_khr) || 0) / exchangeRate)),
+    outstandingUsd: outstandingAfterLineChangeUsd(sale, moneyAfter.total_usd, exchangeRate),
     exchangeRate,
     undoActionId: null,
     actionHistoryId: null,
@@ -5199,10 +5199,24 @@ async function auditAmendment(
   ]))
 }
 
+/**
+ * What a sale still owes once a line change moved its total: the kernel's one
+ * definition of paid (zero when the recorded tender covers the new total to
+ * within half a cent, otherwise the exact shortfall), on the sale's own money
+ * basis, in cents. Money that cannot be read owes the whole total.
+ */
+function outstandingAfterLineChangeUsd(sale: RecordedSaleMoney, totalUsd: number, exchangeRate: number): number {
+  try {
+    return round2(recordedSaleOutstandingUsd({ ...sale, total_usd: totalUsd, exchange_rate: exchangeRate }))
+  } catch {
+    return round2(Math.max(0, Number(totalUsd) || 0))
+  }
+}
+
 function buildAmendmentResponsePayload(
   input: {
     saleId: number
-    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
+    sale: RecordedSaleMoney & { receipt_number?: unknown }
     money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
     exchangeRate: number
     stockMoved: boolean
@@ -5221,7 +5235,7 @@ function buildAmendmentResponsePayload(
     subtotalUsd: input.money.subtotalUsd,
     totalUsd: input.money.totalUsd,
     totalKhr: input.money.totalKhr,
-    outstandingUsd: round2(Math.max(0, input.money.totalUsd - (Number(input.sale.amount_paid_usd) || 0) - (Number(input.sale.amount_paid_khr) || 0) / input.exchangeRate)),
+    outstandingUsd: outstandingAfterLineChangeUsd(input.sale, input.money.totalUsd, input.exchangeRate),
     stockMoved: input.stockMoved,
     unitsMoved: input.unitsMoved,
     stockSkipped: input.stockSkipped,
