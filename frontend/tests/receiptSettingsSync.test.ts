@@ -94,6 +94,9 @@ assert.deepEqual(
 )
 assert.match(printSettingsSource, /print_effective_dimensions/)
 assert.match(printSettingsSource, /print_driver_size_note/)
+assert.match(printSettingsSource,
+  /\['58mm', '72mm', '80mm'\]\.includes\(ps\.paperSize\) && !\['driver-forms', 'driver'\]\.includes\(ps\.pageSizeMode \|\| 'driver-forms'\) \? \(\s*<div className="mt-1">\s*\{T\('receipt_preview_driver_hint'/,
+  'the roll-paper / blank-band hint is shown only for modes that send a page size, never for the printer-paper default')
 assert.match(settingsWriteOptionsSource, /export function normalizeSettingsWriteOptions/)
 
 console.log('PASS receipt settings sync contract')

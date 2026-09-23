@@ -248,7 +248,8 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
           <div className="mt-1">
             {T('print_driver_size_note', 'For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.')}
           </div>
-          {['58mm', '72mm', '80mm'].includes(ps.paperSize) ? (
+          {/* The printer-paper modes send no page size: nothing is centred, so there is no blank band to explain. */}
+          {['58mm', '72mm', '80mm'].includes(ps.paperSize) && !['driver-forms', 'driver'].includes(ps.pageSizeMode || 'driver-forms') ? (
             <div className="mt-1">
               {T('receipt_preview_driver_hint', 'Set the printer driver to roll / continuous paper at Actual size (no "fit to page"). A driver form taller than the receipt shows as blank space before the print that this page cannot remove.')}
             </div>
