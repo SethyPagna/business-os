@@ -81,11 +81,10 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
 }
 
 // The owner's photographed Chrome print dialog for their 72mm-head thermal
-// printer listed exactly these four registered forms (2026-09-16). Used as
-// the driver-forms fallback both here and in cloudflare/src/routes/settings.ts
-// (duplicated there for the same cross-package reason as RECEIPT_PAGE_SIZE_MODES).
+// printer listed only 72mm-wide forms (2026-09-16). Used as the driver-forms
+// fallback both here and in cloudflare/src/routes/settings.ts (duplicated
+// there for the same cross-package reason as RECEIPT_PAGE_SIZE_MODES).
 export const DEFAULT_DRIVER_FORM_WIDTH_MM = 72
-export const DEFAULT_DRIVER_FORM_HEIGHTS_MM = [210, 297, 400, 800]
 
 export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   paperSize: '80mm',
@@ -106,22 +105,9 @@ export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
   pageSizeMode: 'driver-forms',
   fixedPageLengthMm: '100',
   driverFormWidthMm: String(DEFAULT_DRIVER_FORM_WIDTH_MM),
-  driverFormHeightsMm: [...DEFAULT_DRIVER_FORM_HEIGHTS_MM],
 }
 
 const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms'])
-
-/** Unique, positive, ascending mm heights; falls back to the owner's four
- * registered forms when the input is empty, non-array or all-invalid. */
-export function normalizeDriverFormHeightsMm(value: unknown): number[] {
-  const list = Array.isArray(value) ? value : []
-  const normalized = Array.from(new Set(
-    list
-      .map((entry) => Number.parseFloat(String(entry)))
-      .filter((entry) => Number.isFinite(entry) && entry > 0),
-  )).sort((a, b) => a - b)
-  return normalized.length ? normalized : [...DEFAULT_DRIVER_FORM_HEIGHTS_MM]
-}
 
 function parseObject(value: unknown): Record<string, unknown> {
   if (!value) return {}
@@ -223,7 +209,6 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
         ? String(parsedWidth)
         : DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormWidthMm
     })(),
-    driverFormHeightsMm: normalizeDriverFormHeightsMm(parsed.driverFormHeightsMm),
   }
 }
 

@@ -9,20 +9,21 @@
 // five literal values.
 //
 // 2026-09-16 (owner report + two Chrome print-dialog photos, P10-1/P10-3):
-// 'driver-forms' added as the DEFAULT fallback (was 'measured') plus the two
-// new driverFormWidthMm/driverFormHeightsMm fields, for auto-fitting the
-// printer driver's own registered forms (their photographed dialog only
-// lists 72mm-wide forms at 210/297/400/800mm).
+// 'driver-forms' added as the DEFAULT fallback (was 'measured') plus the
+// driverFormWidthMm field (their photographed dialog only lists 72mm-wide
+// forms). 2026-09-23: driver-forms sends no @page size, so the retired
+// driverFormHeightsMm list is dropped on save instead of normalized.
 //
 // Run: node scripts/test-receipt-page-size-mode-settings.cjs
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 const Database = require('better-sqlite3')
 
 // Copied verbatim from routes/settings.ts's sanitizeReceiptPrintSettingsValue.
 const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms'])
 const DEFAULT_DRIVER_FORM_WIDTH_MM = 72
-const DEFAULT_DRIVER_FORM_HEIGHTS_MM = [210, 297, 400, 800]
 function sanitizeReceiptPrintSettingsValue(raw) {
   const asString = typeof raw === 'string' ? raw : JSON.stringify(raw)
   let parsed
@@ -38,13 +39,7 @@ function sanitizeReceiptPrintSettingsValue(raw) {
   parsed.fixedPageLengthMm = Number.isFinite(fixedLength) && fixedLength > 0 ? String(fixedLength) : '100'
   const formWidth = Number.parseFloat(String(parsed.driverFormWidthMm ?? ''))
   parsed.driverFormWidthMm = Number.isFinite(formWidth) && formWidth > 0 ? String(formWidth) : String(DEFAULT_DRIVER_FORM_WIDTH_MM)
-  const formHeightsRaw = Array.isArray(parsed.driverFormHeightsMm) ? parsed.driverFormHeightsMm : []
-  const formHeights = Array.from(new Set(
-    formHeightsRaw
-      .map((entry) => Number.parseFloat(String(entry)))
-      .filter((entry) => Number.isFinite(entry) && entry > 0),
-  )).sort((a, b) => a - b)
-  parsed.driverFormHeightsMm = formHeights.length ? formHeights : [...DEFAULT_DRIVER_FORM_HEIGHTS_MM]
+  delete parsed.driverFormHeightsMm
   return JSON.stringify(parsed)
 }
 
@@ -82,13 +77,13 @@ function check(name, fn) {
   }
 }
 
-check('default: settings with no pageSizeMode field are written as driver-forms with a 100mm fixed-length fallback and the owner\'s four registered forms', () => {
+check('default: settings with no pageSizeMode field are written as driver-forms with a 100mm fixed-length fallback and a 72mm paper width', () => {
   const stored = sanitizeReceiptPrintSettingsValue(JSON.stringify({ paperSize: '80mm' }))
   const parsed = JSON.parse(stored)
   assert.strictEqual(parsed.pageSizeMode, 'driver-forms')
   assert.strictEqual(parsed.fixedPageLengthMm, '100')
   assert.strictEqual(parsed.driverFormWidthMm, '72')
-  assert.deepStrictEqual(parsed.driverFormHeightsMm, [210, 297, 400, 800])
+  assert.ok(!('driverFormHeightsMm' in parsed), 'the retired form-height list is never written back')
   assert.strictEqual(parsed.paperSize, '80mm', 'other print settings fields pass through untouched')
 })
 
@@ -115,16 +110,24 @@ check('driverFormWidthMm: zero, negative and non-numeric values fall back to 72'
   assert.strictEqual(JSON.parse(stored).driverFormWidthMm, '58')
 })
 
-check('driverFormHeightsMm: dedupes, drops non-positive/non-numeric entries, and sorts ascending', () => {
-  const stored = sanitizeReceiptPrintSettingsValue(JSON.stringify({ driverFormHeightsMm: [400, 210, 210, -5, 'nope', 800] }))
-  assert.deepStrictEqual(JSON.parse(stored).driverFormHeightsMm, [210, 400, 800])
+check('driverFormHeightsMm: a list an older client still sends is dropped, and the rest of the blob survives', () => {
+  for (const legacy of [[210, 297, 400, 800], [400, 210, -5, 'nope'], [], 'not-an-array', null, 42]) {
+    const stored = sanitizeReceiptPrintSettingsValue(JSON.stringify({ paperSize: '80mm', marginTop: '0', driverFormWidthMm: '72', driverFormHeightsMm: legacy }))
+    const parsed = JSON.parse(stored)
+    assert.ok(!('driverFormHeightsMm' in parsed), `retired list must be dropped for ${JSON.stringify(legacy)}`)
+    assert.strictEqual(parsed.paperSize, '80mm')
+    assert.strictEqual(parsed.marginTop, '0')
+    assert.strictEqual(parsed.driverFormWidthMm, '72')
+  }
 })
 
-check('driverFormHeightsMm: an empty list or a non-array value falls back to the owner\'s four registered forms', () => {
-  for (const bogus of [[], 'not-an-array', null, undefined, 42]) {
-    const stored = sanitizeReceiptPrintSettingsValue(JSON.stringify({ driverFormHeightsMm: bogus }))
-    assert.deepStrictEqual(JSON.parse(stored).driverFormHeightsMm, [210, 297, 400, 800], `expected fallback list for bogus value ${JSON.stringify(bogus)}`)
-  }
+check('the mirror above matches the real Worker source for the retired field', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
+  const start = source.indexOf('function sanitizeReceiptPrintSettingsValue(')
+  const body = source.slice(start, source.indexOf('\napp.post(', start))
+  assert.ok(start > 0 && body.length > 0, 'sanitizeReceiptPrintSettingsValue must exist in routes/settings.ts')
+  assert.match(body, /delete parsed\.driverFormHeightsMm/, 'the Worker drops the retired list on save')
+  assert.doesNotMatch(source, /DEFAULT_DRIVER_FORM_HEIGHTS_MM/, 'no form-height default survives in the Worker')
 })
 
 check('fixedPageLengthMm: a valid positive number round-trips as a string', () => {

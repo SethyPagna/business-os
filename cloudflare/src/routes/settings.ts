@@ -865,15 +865,14 @@ function sanitizeReceiptTemplateValue(raw: unknown): string {
 //
 // 2026-09-16 (owner report + two Chrome print-dialog photos): 'driver-forms'
 // added as the DEFAULT fallback (was 'measured') -- a saved blob with no
-// pageSizeMode, or an unrecognized one, now resolves to auto-fitting the
-// printer's own registered forms instead of repeating the measured/driver
-// width mismatch the owner photographed.
+// pageSizeMode, or an unrecognized one, now resolves to printing on the
+// printer's own paper instead of repeating the measured/driver width
+// mismatch the owner photographed.
 const RECEIPT_PAGE_SIZE_MODES = new Set(['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms'])
 // The owner's photographed Chrome dialog for their 72mm-head printer.
 // Mirrors frontend/src/utils/receiptAppliedConfig.ts's
-// DEFAULT_DRIVER_FORM_WIDTH_MM / DEFAULT_DRIVER_FORM_HEIGHTS_MM.
+// DEFAULT_DRIVER_FORM_WIDTH_MM.
 const DEFAULT_DRIVER_FORM_WIDTH_MM = 72
-const DEFAULT_DRIVER_FORM_HEIGHTS_MM = [210, 297, 400, 800]
 function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
   const asString = typeof raw === 'string' ? raw : JSON.stringify(raw)
   let parsed: Record<string, unknown>
@@ -891,13 +890,9 @@ function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
   parsed.fixedPageLengthMm = Number.isFinite(fixedLength) && fixedLength > 0 ? String(fixedLength) : '100'
   const formWidth = Number.parseFloat(String(parsed.driverFormWidthMm ?? ''))
   parsed.driverFormWidthMm = Number.isFinite(formWidth) && formWidth > 0 ? String(formWidth) : String(DEFAULT_DRIVER_FORM_WIDTH_MM)
-  const formHeightsRaw = Array.isArray(parsed.driverFormHeightsMm) ? parsed.driverFormHeightsMm : []
-  const formHeights = Array.from(new Set(
-    formHeightsRaw
-      .map((entry) => Number.parseFloat(String(entry)))
-      .filter((entry) => Number.isFinite(entry) && entry > 0),
-  )).sort((a, b) => a - b)
-  parsed.driverFormHeightsMm = formHeights.length ? formHeights : [...DEFAULT_DRIVER_FORM_HEIGHTS_MM]
+  // Retired 2026-09-23: driver-forms sends no @page size, so no form height
+  // is ever picked; a list an older client still sends is dropped on save.
+  delete parsed.driverFormHeightsMm
   return JSON.stringify(parsed)
 }
 

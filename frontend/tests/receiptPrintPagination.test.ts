@@ -473,7 +473,7 @@ await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm def
   assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode, 'driver-forms')
   assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.fixedPageLengthMm, '100')
   assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormWidthMm, '72')
-  assert.deepEqual(DEFAULT_RECEIPT_PRINT_SETTINGS.driverFormHeightsMm, [210, 297, 400, 800])
+  assert.ok(!('driverFormHeightsMm' in DEFAULT_RECEIPT_PRINT_SETTINGS), 'driver-forms picks no form height any more (no @page size)')
 
   // A settings blob saved before this feature existed (no pageSizeMode key at
   // all) -- the exact shape of the live org's settings when the owner filed
@@ -483,7 +483,6 @@ await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm def
   assert.equal(migrated.pageSizeMode, 'driver-forms')
   assert.equal(migrated.fixedPageLengthMm, '100')
   assert.equal(migrated.driverFormWidthMm, '72')
-  assert.deepEqual(migrated.driverFormHeightsMm, [210, 297, 400, 800])
 
   const savedFixed = normalizeReceiptPrintSettings({ paperSize: '80mm', pageSizeMode: 'fixed', fixedPageLengthMm: '150' })
   assert.equal(savedFixed.pageSizeMode, 'fixed')
@@ -497,15 +496,13 @@ await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm def
   assert.equal(bogus.pageSizeMode, 'driver-forms')
   assert.equal(bogus.fixedPageLengthMm, '100')
 
-  // driverFormWidthMm/driverFormHeightsMm normalize independently: zero/
-  // negative/non-numeric collapse to defaults, duplicates and unsorted input
-  // collapse to a unique ascending list.
-  const customForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '58', driverFormHeightsMm: [400, 210, 210, -5, 'nope', 800] })
+  // driverFormWidthMm: zero/negative/non-numeric collapse to 72. A blob an
+  // older client saved with the retired form-height list reads without it.
+  const customForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '58', driverFormHeightsMm: [400, 210, 800] })
   assert.equal(customForms.driverFormWidthMm, '58')
-  assert.deepEqual(customForms.driverFormHeightsMm, [210, 400, 800])
-  const badForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '-10', driverFormHeightsMm: 'not-an-array' })
+  assert.ok(!('driverFormHeightsMm' in customForms), 'the retired list is not carried into the normalized settings')
+  const badForms = normalizeReceiptPrintSettings({ driverFormWidthMm: '-10' })
   assert.equal(badForms.driverFormWidthMm, '72')
-  assert.deepEqual(badForms.driverFormHeightsMm, [210, 297, 400, 800])
 })
 
 if (failed > 0) process.exitCode = 1
