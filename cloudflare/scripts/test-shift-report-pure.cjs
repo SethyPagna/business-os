@@ -313,7 +313,7 @@ for (const english of ORDER) {
 // for. The list rows carry the same `·` since Sep 23 2026, so they are
 // counted too -- none of this fixture's names contains ': '. The title is
 // not a row: since Sep 23 2026 it carries a colon of its own (`Shift report
-// / របាយការណ៍វេន: Closed / បានបិទ`), and it is judged on its own below.
+// / របាយការណ៍វេន: Closed / បិទ`), and it is judged on its own below.
 const labelled = lines.slice(1).filter((line) => line.includes(': ') && !line.startsWith('  '))
 assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the layout did not budget for:\n${report}`)
 console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines within them, in the fixed sequence`)

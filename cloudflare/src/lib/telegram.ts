@@ -930,8 +930,10 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // The TITLE states the shift's state, the way the owner's reference does
   // ("Shift Report - Open or Closed"), after a colon since Sep 23 2026. An
   // open shift says `Open / បើក` ("also for open khmer just call បើក"): the
-  // same entry as the Open row below, so the word is spelled once.
-  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : shift.closed_at ? bi('Closed', 'បានបិទ') : label('open')
+  // same entry as the Open row below, so the word is spelled once. A closed
+  // shift follows suit since Sep 24 2026: `Closed / បិទ`, the Khmer of the
+  // Close row below, never the longer បានបិទ.
+  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : shift.closed_at ? bi('Closed', 'បិទ') : label('open')
   const lines = [
     `🧑‍💼 ${label('shiftReport')}: ${state} · ${formatBusinessDay(shift.business_date)}`,
     labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),

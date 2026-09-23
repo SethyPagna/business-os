@@ -203,7 +203,7 @@ assert.deepEqual(lines, [
   // ("Shift Report - Open or Closed"), then the business day -- after a
   // colon since Sep 23 2026. Then the owner's Sep 23 identity block: the
   // shift's two moments, the shop, the cashier and the id, in that order.
-  '🧑‍💼 Shift report / របាយការណ៍វេន: Closed / បានបិទ · 06/09/2026',
+  '🧑‍💼 Shift report / របាយការណ៍វេន: Closed / បិទ · 06/09/2026',
   '· Open / បើក: 06/09/2026 08:15',
   '· Close / បិទ: 06/09/2026 20:02',
   '· Shop / ហាង: Sunrise Mart',
@@ -306,7 +306,7 @@ check('the \'en\' mode report carries no Khmer word at all (the riel sign is a s
 // translated; only the label side changes.
 const khmerReport = render('km', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW))
 assert.deepEqual(khmerReport.split('\n'), [
-  '🧑‍💼 របាយការណ៍វេន: បានបិទ · 06/09/2026',
+  '🧑‍💼 របាយការណ៍វេន: បិទ · 06/09/2026',
   '· បើក: 06/09/2026 08:15',
   '· បិទ: 06/09/2026 20:02',
   '· ហាង: Sunrise Mart',
@@ -403,6 +403,17 @@ check('an open shift shows the opening count and no difference against a count n
   && openReport.includes('· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
   && !openReport.includes('Closing cash')
   && !openReport.includes('Difference'), openReport)
+// A CLOSED shift's title takes the short Khmer too (Sep 24 2026), like the
+// open shift's `បើក`: the Close row's own word, `បិទ`, never the longer
+// បានបិទ -- read from the Close row's label, so the two cannot drift apart.
+const closeKhmer = render('km', () => telegramLang.label('close'))
+check(`a closed shift's title says Closed / ${closeKhmer}, the Close row's Khmer, in every mode, and nothing says បានបិទ`,
+  closeKhmer === 'បិទ'
+  && report.split('\n')[0] === `🧑‍💼 Shift report / របាយការណ៍វេន: Closed / ${closeKhmer} · 06/09/2026`
+  && englishReport.split('\n')[0] === '🧑‍💼 Shift report: Closed · 06/09/2026'
+  && khmerReport.split('\n')[0] === `🧑‍💼 របាយការណ៍វេន: ${closeKhmer} · 06/09/2026`
+  && khmerReport.split('\n').includes(`· ${closeKhmer}: 06/09/2026 20:02`)
+  && ![report, englishReport, khmerReport].some((text) => text.includes('បានបិទ')), `${report}\n${khmerReport}`)
 // FIXED Sep 22 2026, KEPT by the Sep 23 layout. The end of the window used to
 // print `formatBusinessDateTime(now)`, which on a shift opened minutes ago
 // rendered IDENTICAL to its start -- a window that reads as zero minutes
