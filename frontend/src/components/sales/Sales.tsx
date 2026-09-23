@@ -2228,11 +2228,11 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     }
   }
 
-  const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
-    if (!canBulkSales) return
-    if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return
-    if (!retryRequest && !matched.length) return
-    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
+  const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload): Promise<boolean> => {
+    if (!canBulkSales) return false
+    if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return false
+    if (!retryRequest && !matched.length) return false
+    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return false
     setBulkFieldSaving(true)
     try {
       const payload: BulkSaleUpdatePayload = retryRequest || {
@@ -2250,6 +2250,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
+      return result.changedCount > 0
     } catch (error) {
       // A group holding a cancelled sale is refused before anything is written
       // (a committed original would have been answered with its receipt), so
@@ -2260,10 +2261,23 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         void loadSales(true)
       }
       notify(cancelled ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      return false
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkFieldSaving(false)
     }
+  }
+
+  // G3: change or clear ONE sale's driver from its detail. It is the group
+  // driver change with one sale, so it writes the same before/after record,
+  // passes the same permission checks and gets the same Undo.
+  const changeSaleDriver = async (sale: SaleRecord, target: { id: number; name: string } | null): Promise<boolean> => {
+    if (pendingBulkFieldRequest) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return false
+    }
+    const source = choiceForSale(sale, 'delivery_contact')
+    return submitBulkFieldChange('delivery_contact', source, linkedChoice(target?.id, target?.name, ''), [{ id: Number(sale.id), receipt: String(sale.receipt_number || sale.id), currentKeys: [source.key] }], [sale])
   }
 
   const customerRows = (result: unknown): Array<Record<string, unknown>> => {
@@ -2786,6 +2800,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // can open the sale can see how it got that way (the Worker
             // gates it on read access), so it is passed unconditionally.
             onAmend={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? handleAmendSale : undefined}
+            // Same grants as the group Driver change it reuses (sales:bulk + sales:amend).
+            onDriverChange={canBulkSales && canAmendSales ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
             onLoadAmendments={loadSaleAmendments}
             onOpenRecords={(sale) => {
               setRecordsSale(sale as SaleRecord)
