@@ -1047,21 +1047,22 @@ async function withReceiptElement<T>(
   const fitToOneSheet = isSingleSheetPaperSize(printSettings.paperSize)
   if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))
-    // On continuous rolls the receipt shell's padding is the physical print
-    // margin. Replace its screen-preview padding with the operator setting,
-    // instead of stacking two independent margins. Fixed cards keep their
-    // deliberately designed internal card padding.
-    if (cloned && fixedSheetHeightMm == null) {
-      cloned.style.padding = printPadding
-    } else if (cloned && fitToOneSheet) {
-      // A fixed sheet keeps that designed card padding but must NEVER keep the
-      // frozen on-screen height: cloneElementWithInlineStyles bakes the computed
-      // `height` of the export root, so a card measured on a viewport narrower
-      // than 80mm would be fitted against its taller phone-layout height and
-      // shrink further than its own content needs.
+    if (cloned) {
+      // cloneElementWithInlineStyles bakes the export root's COMPUTED height,
+      // i.e. its height as laid out on screen at the modal's width, not at the
+      // paper's. Every paper must drop it, or the paper-width layout is
+      // measured against, and printed inside, a box of the screen's height: a
+      // card laid out on a phone narrower than 80mm was fitted against that
+      // taller height and shrank further than its own content needs, and a
+      // roll or document page carried the modal's height into the print.
       cloned.style.height = 'auto'
       cloned.style.minHeight = '0'
       cloned.style.maxHeight = 'none'
+      // On continuous rolls the receipt shell's padding is the physical print
+      // margin. Replace its screen-preview padding with the operator setting,
+      // instead of stacking two independent margins. Fixed cards keep their
+      // deliberately designed internal card padding.
+      if (fixedSheetHeightMm == null) cloned.style.padding = printPadding
     }
     inner.innerHTML = cloned?.outerHTML || ''
   } else {

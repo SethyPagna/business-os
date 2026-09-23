@@ -106,12 +106,23 @@ await runTest('Print, PDF and Image inherit ONE shared fixed-sheet fit step', ()
   assert.match(printSource, /host\.style\.overflow = 'hidden'/)
 })
 
-await runTest('a fixed sheet does not inherit the frozen on-screen card height', () => {
+await runTest('no paper inherits the frozen on-screen receipt height', () => {
   // cloneElementWithInlineStyles bakes the computed `height` of the export
   // root, so a card measured on a narrow phone would otherwise be fitted
-  // against blank space instead of its own content.
-  assert.match(printSource, /cloned\.style\.height = 'auto'/)
-  assert.match(printSource, /cloned\.style\.padding = printPadding/,
+  // against blank space instead of its own content, and a roll or document
+  // page would carry the modal's height into the print (2026-09-23: the reset
+  // used to run for the 80x50 card only).
+  const cloneBlock = printSource.slice(
+    printSource.indexOf('const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content))'),
+    printSource.indexOf("inner.innerHTML = cloned?.outerHTML || ''"),
+  )
+  assert.ok(cloneBlock.length > 0, 'the export-root clone block must exist')
+  assert.match(cloneBlock, /cloned\.style\.height = 'auto'/)
+  assert.match(cloneBlock, /cloned\.style\.minHeight = '0'/)
+  assert.match(cloneBlock, /cloned\.style\.maxHeight = 'none'/)
+  assert.doesNotMatch(cloneBlock, /fitToOneSheet/,
+    'the height reset must not be gated on the single-sheet preset')
+  assert.match(cloneBlock, /if \(fixedSheetHeightMm == null\) cloned\.style\.padding = printPadding/,
     'continuous rolls keep replacing the screen-shell padding with the operator margins')
 })
 
