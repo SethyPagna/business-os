@@ -138,7 +138,7 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
             {cancelledCount > 0 ? <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{translate('sale_bulk_cancelled_skipped', '{n} cancelled sale(s) left out: a cancelled sale cannot be edited.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(cancelledCount))}</div> : null}
             {blocked.length ? (
               <div role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                {translate('sale_bulk_status_unpaid_skipped', '{n} Not Paid sales are not fully paid and will be skipped. Record their payment on each sale first.', 'ការលក់ប្រាក់ជំពាក់ {n} មិនទាន់ទូទាត់គ្រប់ចំនួន ហើយនឹងមិនត្រូវបានកែប្រែទេ។ សូមកត់ត្រាការទូទាត់លើការលក់នីមួយៗជាមុនសិន។').replace('{n}', String(blocked.length))}
+                {translate('sale_bulk_status_unpaid_skipped', '{n} Not Paid sale(s) left out: not fully paid. Record the payment on each sale first.', 'ការលក់ប្រាក់ជំពាក់ {n} មិនទាន់ទូទាត់គ្រប់ចំនួន ហើយនឹងមិនត្រូវបានកែប្រែទេ។ សូមកត់ត្រាការទូទាត់លើការលក់នីមួយៗជាមុនសិន។').replace('{n}', String(blocked.length))}
                 <span className="block font-semibold">{blocked.map((row) => row.receipt).join(', ')}</span>
               </div>
             ) : null}

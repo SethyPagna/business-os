@@ -204,7 +204,7 @@ const confirmButton = (html: string): string => {
 
 await runTest('the review names the sales that owe money and leaves them out of the change', () => {
   const html = renderReview('value:completed', SALES)
-  assert.match(html, /2 Not Paid sales are not fully paid and will be skipped\. Record their payment on each sale first\./)
+  assert.match(html, /2 Not Paid sale\(s\) left out: not fully paid\. Record the payment on each sale first\./)
   assert.match(html, />R1, R4</, 'the skipped receipts are named so the shop knows which to settle')
   assert.match(html, />R2<\/div>/, 'the paid Not Paid sale is listed for the change')
   assert.doesNotMatch(html, />R1<\/div>|>R4<\/div>/, 'an owing sale must not be listed as changing')
@@ -213,8 +213,17 @@ await runTest('the review names the sales that owe money and leaves them out of 
 
 await runTest('with every matching sale owing money there is nothing to confirm', () => {
   const html = renderReview('value:awaiting_delivery', SALES.filter(({ blocked }) => blocked.length))
-  assert.match(html, /2 Not Paid sales are not fully paid/)
+  assert.match(html, /2 Not Paid sale\(s\) left out: not fully paid/)
   assert.match(confirmButton(html), /disabled=""/)
+})
+
+await runTest('one owing sale reads right: the pack counts with "(s)"', () => {
+  // "1 Not Paid sales are not fully paid" read wrong on the commonest case,
+  // a single sale still owing.
+  const html = renderReview('value:completed', SALES.filter(({ row }) => row.id !== 4))
+  assert.match(html, /1 Not Paid sale\(s\) left out: not fully paid/)
+  assert.doesNotMatch(html, /1 Not Paid sales/)
+  assert.match(html, />R1</, 'the one owing receipt is named')
 })
 
 await runTest('a target that is not a paid status skips nobody', () => {

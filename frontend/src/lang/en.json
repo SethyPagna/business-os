@@ -6038,7 +6038,7 @@
   "bulk_to": "To",
   "bulk_matching_count": "{n} matching",
   "bulk_skipped_count": "{n} selected with another source value will be skipped.",
-  "sale_bulk_status_unpaid_skipped": "{n} Not Paid sales are not fully paid and will be skipped. Record their payment on each sale first.",
+  "sale_bulk_status_unpaid_skipped": "{n} Not Paid sale(s) left out: not fully paid. Record the payment on each sale first.",
   "bulk_cancel_review_hint": "Review every sale before cancelling.",
   "choose": "Choose",
   "ready": "Ready",
