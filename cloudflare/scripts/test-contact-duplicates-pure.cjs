@@ -159,6 +159,24 @@ function makeFakeDb({ contactRows, dismissalRows = [] }) {
   assert.strictEqual(clusters[0], phoneCluster, 'phone_conflict must sort ahead of name_only')
 })
 
+  await runTest('findDuplicateContactClusters: every cluster entry carries updated_at for the Resolve grid stale check', async () => {
+  // POST {path}/merge refuses a stale record by comparing each record's
+  // expected updated_at; the grid can only send one if the sweep returns it.
+  const contactRows = [
+    { id: 1, name: 'Sok Dara', phone: '012345678', address: null, membership_number: null, updated_at: '2026-09-20 10:00:00' },
+    { id: 2, name: 'Chan Sopheak', phone: '012345678', address: null, membership_number: null, updated_at: '2026-09-21 11:30:00' },
+    { id: 3, name: 'Ly Ratha', phone: '099999999', address: null, membership_number: null },
+    { id: 4, name: 'ly ratha', phone: '011111111', address: null, membership_number: null, updated_at: '2026-09-22 09:15:00' },
+  ]
+  const { db } = makeFakeDb({ contactRows })
+  const clusters = await findDuplicateContactClusters(db, 'customers', 'address')
+  const byId = new Map(clusters.flatMap((cluster) => cluster.contacts).map((entry) => [entry.id, entry]))
+  assert.strictEqual(byId.get(1).updated_at, '2026-09-20 10:00:00')
+  assert.strictEqual(byId.get(2).updated_at, '2026-09-21 11:30:00')
+  assert.strictEqual(byId.get(3).updated_at, null, 'a row without updated_at reports null, never undefined')
+  assert.strictEqual(byId.get(4).updated_at, '2026-09-22 09:15:00')
+})
+
   await runTest('findDuplicateContactClusters: a dismissed cluster does not resurface', async () => {
   const contactRows = [
     { id: 3, name: 'Ly Ratha', phone: '099999999', address: null, membership_number: null },

@@ -26,7 +26,7 @@ function loadReal(relPath, overrides = {}) {
 
 const anonymous = loadReal('lib/anonymousCustomer.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
-const merge = loadReal('lib/contactMerge.ts', { './contactOptions': contactOptions })
+const merge = loadReal('lib/contactMerge.ts', { './contactOptions': contactOptions, './phone': loadReal('lib/phone.ts') })
 
 function seedPair() {
   const db = openDb(loadAll())
@@ -86,7 +86,7 @@ function seedPair() {
   const merged = db.prepare('SELECT * FROM customers WHERE id=2').get()
   const plan = merge.buildContactMergePlan({
     table: 'customers', entity: 'customer', editableColumns: ['name','phone','email','address','membership_number','gender'],
-    keeper, merged, hasCustomerReceivables: false, hasSupplierInvoices: false,
+    keeper, members: [merged], hasCustomerReceivables: false, hasSupplierInvoices: false,
     audit: { operationId: 'f72-race', userId: 1, userName: 'reviewer', deviceName: null, deviceTz: null },
   })
   db.prepare('UPDATE customers SET is_anonymous=1 WHERE id=2').run()
