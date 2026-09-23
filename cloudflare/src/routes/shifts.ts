@@ -727,6 +727,20 @@ app.get('/', async (c) => {
   if (!validDate(from) || !validDate(to) || (from != null && to != null && from > to)) {
     return c.json({ error: 'Invalid shift business date range.' }, 400)
   }
+  // ---- SEARCH BY CASHIER OR ID (owner, 23 Sep 2026) ----------------------
+  //
+  // "also make sure when entering shift, i can search the cashier, or id."
+  // `q` matches a substring of the cashier name the row records or of the
+  // shift ID, ignoring case for ASCII letters (SQLite LIKE). The caller's %, _
+  // and \ are escaped, so they match themselves. The ID half takes the rows
+  // whose ID matches plus every continuation after them: the list shows a
+  // reopened shift as its last segment (see below), but the ID in its first
+  // Telegram report is the first segment's. Part of `filters`, so it composes
+  // with visibility, branch, user and dates, and the page count counts only
+  // what it lets through.
+  const q = (c.req.query('q') ?? '').trim()
+  if (Array.from(q).length > 80) return c.json({ error: 'Shift search must be 80 characters or fewer.' }, 400)
+  const search = q ? `%${q.replace(/[\\%_]/g, '\\$&')}%` : null
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
   const paged = c.req.query('page') != null || c.req.query('page_size') != null
   const page = Number(c.req.query('page') ?? 1)
@@ -757,8 +771,13 @@ app.get('/', async (c) => {
       AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
-      AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
-  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit }
+      AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
+      AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
+        WITH RECURSIVE hit(id) AS (
+          SELECT segment.id FROM shift_sessions segment WHERE segment.shift_code LIKE @search ESCAPE '\\'
+          UNION SELECT later.id FROM shift_sessions later JOIN hit ON later.parent_shift_id = hit.id)
+        SELECT id FROM hit))`
+  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit, search }
   if (paged) {
     // One statement gives count, clamping and page rows the same SQLite read
     // snapshot. The LEFT JOIN retains metadata even for an empty match set.
