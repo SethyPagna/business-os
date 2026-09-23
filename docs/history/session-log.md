@@ -20368,3 +20368,49 @@ changed since `ef0489c1`; highest applied migration stays 0184. `wrangler deploy
 and plain HTTP from this egress receives the zone's bot challenge, so no page-level evidence exists for this deploy.
 Owner check: open admin and storefront once. A device still running the old service worker can show the old start
 error one last time; a reload brings up the new build, and from then on the recovery fix is active.
+
+## Part 630 (23 Sep 2026, coordinator) — receipt print hotfix deployed: the receipt prints at the paper's width
+
+**Ask.** Owner, urgent, with a photo of two identical receipts on one strip and a large blank band on top: "An error
+with printing, it prints twice, repeats in one print ... also the top of the print still has quite a large space,
+make sure you remember my conversation regarding the printer model, the options the printer has and the various
+issues and conditions and fixed session. so you don't break it and made it worse."
+
+**What was found.** The printer (XP-K200L, 80 mm roll, 72 mm printable, driver forms 72 x 210/297/400/800 mm) feeds
+~11 mm from head to cutter; the app cannot remove that. The rest of the ~16 mm band was the app's 4 mm top margin.
+The print pipeline cloned the on-screen receipt with every computed style, and a browser reports width, height and
+grid tracks as the pixels the SCREEN produced (the preview's 80 mm paper at the modal's width): every box stayed at
+its screen size, so on 72 mm paper the 80x50 card's sections ran 3.24 mm past the paper (right-aligned totals and
+date cut off) and the full receipt lost its right margin. A print document without the app's @font-face rules fell
+back to a system Khmer font with other metrics (a receipt measured at 208.7 mm printed 224.2 mm long). The duplicate
+is not the app's: one tap is exactly one print call on both delivery surfaces (hidden frame: execCommand('print')
+returns true in Chromium and Safari, print() only when it returns false; preview window: print()), counted by the
+e2e in a real Chromium. Two copies on one uncut strip come from the dialog (Copies), the driver or the spooler.
+
+**What changed.** 17 commits on 22918a56, one fix each (owner rule), pushed to main, the working branch and
+rc/receipt-print-20260923 at 35bddf53. Core: `printReceipt.ts` SCREEN_LAYOUT_PROPS (width, height,
+grid-template-columns, grid-template-rows) are left out of the clone of the screen only, so the receipt's classes lay
+it out again at the paper's width; later clones (print document, image export) copy everything; the separate root
+height reset became redundant and was removed. Also: the card prints from the top of the printer paper; the print
+document carries the app's fonts (appFontFaceCss, absolute URLs); "All" prints the card then the full receipt; the
+Receipt Settings test print prints the rendition the paper prints; Print Settings shows the paper and how to set the
+dialog; the unused form-height list is retired (Worker drops driverFormHeightsMm on save; production clients before
+this deploy fall back to their built-in list). Tests: receiptTemplate/receiptFixedSheetFit locks, and
+e2e/receipt-print.spec.ts measuring the printed document in mm (overflow past the sides, clipped content, equal side
+margins, one receipt root, exactly one print call), with the fixture server keeping per-context settings.
+
+**Verified.** Committed HEAD 35bddf53 in isolated worktrees: frontend typecheck 0, verify:i18n OK, 521 passed, 0 red
+of 521 test files, vite build green; e2e receipt-print.spec 21 passed, and red on the old printReceipt.ts (card
+overflow 3.24 mm, full receipt right margin 0.00 mm); Worker tsc 0, 498/501 green, the three reds green standalone
+(product-conflict apply/remove native: the recorded contention pair; sale-customer-safety native: 8/8 twice on
+35bddf53 and at 22918a56). Deploy from
+the isolated worktree: paid and free dry-runs exit 0; Worker `89f806df-8d49-4081-918a-42fa5d7adda8`, revision
+35bddf53034a, Worker hash 2aa5b6805c0f8ed7, frontend hash 027d4cdfe3787df4 (index-BzXqAA8s.js); no migration
+(highest applied 0184); deployments list shows 89f806df at 100% since 10:32:19Z.
+
+**Not done.** Live smoke (bot challenge on this egress; the production browser check is refused by the session
+classifier): the owner prints one receipt and the card. The printer-side duplicate needs the owner's settings
+(Copies 1 in the dialog; printer properties: bidirectional support off, "Start printing after last page is
+spooled", one USB port). Found on main and live since 5cd8e093, fix lane next: a confirmed logout no longer clears
+the previous cashier's POS drafts, and blocked site data shows a dead "Finish signing out" screen; stale
+storefront-pager and compact-pager e2e specs.
