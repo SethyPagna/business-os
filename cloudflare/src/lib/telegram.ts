@@ -918,10 +918,13 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
-    // 48, up from 40 on Sep 23 2026: the owner's sample id carries the
-    // cashier's name after the time (S-20260922-0807-Za), and an id cut
-    // short is one nobody can search for.
-    labeled('shift', cleanLine(shift.shift_code, 48)),
+    // 80 characters (40 until Sep 23 2026): the owner's sample id carries the
+    // cashier's name after the time (S-20260922-0807-Za). The new ids keep up
+    // to 24 characters of that name and add `-2`, `-3` when the same cashier
+    // opens twice in one minute, and an id cut short is one nobody can search
+    // for. cleanLine counts characters, so a Khmer or emoji name is never cut
+    // in half either.
+    labeled('shift', cleanLine(shift.shift_code, 80)),
   ]
   if (cancelled) {
     lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))

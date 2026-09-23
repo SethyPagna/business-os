@@ -433,13 +433,31 @@ assert.deepEqual(ownerSample.split('\n').slice(0, 7), [
   '-----Invoices / វិក្កយបត្រ-----',
 ], ownerSample)
 check('the owner\'s Sep 23 2026 sample renders line for line', true)
-// The ID row keeps 48 characters (40 until Sep 23 2026): the sample's id
-// carries the cashier's name after the time, and an id cut short is one
-// nobody can search for. 48 is still a cap -- a longer code stops there.
-const longCode = `S-20260922-0807-${'Sokunthearith'.repeat(5)}`
-const longIdLines = render('both', () => telegram.formatShiftReport('Sunrise Mart', { ...shift, shift_code: longCode }, figures, NOW)).split('\n')
-check('the ID row keeps 48 characters of the shift code and stops there',
-  longCode.length > 48 && longIdLines.includes(telegramLang.labeled('shift', longCode.slice(0, 48))), longIdLines.join('\n'))
+// The ID row keeps 80 CHARACTERS (40 until Sep 23 2026). The sample's id
+// carries the cashier's name after the time; the new ids keep up to 24
+// characters of it and add `-2` when one cashier opens twice in a minute, and
+// an id cut short is one nobody can search for. A character is a code point,
+// never a UTF-16 unit: an emoji is two units, and 24 of them used to lose the
+// suffix and end on half an emoji.
+const idRowOf = (code) => render('both', () => telegram.formatShiftReport('Sunrise Mart', { ...shift, shift_code: code }, figures, NOW))
+  .split('\n').find((line) => line.startsWith(telegramLang.labeled('shift', ''))) || '(no ID row)'
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+for (const code of [
+  `S-20260922-0807-${'😀'.repeat(24)}-2`,
+  'S-20260922-0807-សុខ-ដារ៉ា',
+  'S-20260922-0807-Sok-Dara-2',
+]) {
+  check(`the ID row carries ${code} whole`, idRowOf(code) === telegramLang.labeled('shift', code), idRowOf(code))
+}
+// Still a cap: a longer code stops at 80 characters, and the cut falls
+// between two of them even when every one is two units wide.
+const longCode = `S-20260922-0807-${'😀'.repeat(70)}`
+check('a code longer than 80 characters stops at 80, never inside an emoji',
+  Array.from(longCode).length > 80 && idRowOf(longCode) === telegramLang.labeled('shift', Array.from(longCode).slice(0, 80).join(''))
+  && !LONE_SURROGATE.test(idRowOf(longCode)), idRowOf(longCode))
+const longLatin = `S-20260922-0807-${'Sokunthearith'.repeat(7)}`
+check('a long Latin code stops at 80 characters too',
+  longLatin.length > 80 && idRowOf(longLatin) === telegramLang.labeled('shift', longLatin.slice(0, 80)), idRowOf(longLatin))
 
 const partiallyRegistered = render('both', () => telegram.formatShiftReport('Sunrise Mart', {
   ...openShift, opening_float_usd: null, opening_float_khr: 0,
