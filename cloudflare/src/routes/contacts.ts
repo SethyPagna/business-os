@@ -47,12 +47,16 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import {
   buildContactMergePlan,
+  stepContactMergePlan,
+  contactMergeStatementBudget,
+  contactMergeContinuation,
   CONTACT_MERGE_MAX_RECORDS,
   type ContactMergeChoice,
   type ContactMergeInput,
   type ContactMergePlan,
   type ContactMergePortalAccount,
 } from '../lib/contactMerge'
+import { getPlanLimits } from '../lib/planTier'
 import {
   ANONYMOUS_CUSTOMER_ERROR_CODE,
   ANONYMOUS_CUSTOMER_MUTATION_ERROR,
@@ -1301,6 +1305,10 @@ function registerContactRoutes(config: ContactConfig) {
             after: receipt.new_value ? JSON.parse(receipt.new_value) : null,
             operationId: details.operationId ?? null,
             replayed: true,
+            ...(merged.length ? {
+              remaining_merge_ids: merged.map((row) => Number(row.id)),
+              continuation: contactMergeContinuation(keeper, merged, config.columns, request.clientRequestId),
+            } : {}),
           })
         }
       }
@@ -1391,6 +1399,10 @@ function registerContactRoutes(config: ContactConfig) {
       if (refusal) return c.json(refusal.body, refusal.status)
       throw error
     }
+    // Free plan: a merge too large for this request's D1 query budget merges
+    // the first records now and returns the request that merges the rest.
+    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation))
+    plan = step.plan
 
     let committedKeeper: Record<string, unknown> = plan.finalKeeper
     try {
@@ -1453,6 +1465,10 @@ function registerContactRoutes(config: ContactConfig) {
       before: plan.before,
       after: plan.after,
       operationId,
+      ...(step.remaining.length ? {
+        remaining_merge_ids: step.remaining.map((row) => Number(row.id)),
+        continuation: contactMergeContinuation(committedKeeper, step.remaining, config.columns, request.clientRequestId),
+      } : {}),
     })
   })
 

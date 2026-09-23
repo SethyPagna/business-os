@@ -10,8 +10,10 @@
 //        other account is unlinked (contact_id NULL); a missing decision is 400
 //   T27  a record changed since the grid read it returns 409 naming it, and a
 //        change racing the write fails the in-batch guard with nothing written
-// plus: the old { keepId, mergeId } body keeps its exact behaviour, and every
-// table that references a contact is re-pointed for three records of each kind.
+// plus: the old { keepId, mergeId } body keeps its exact behaviour, every table
+// that references a contact is re-pointed for three records of each kind, and
+// the Cloudflare free plan merges six records in steps inside its query budget
+// while the paid plan merges them in one batch -- both ending in the same state.
 //
 // Run (from cloudflare/scripts): node test-contact-merge-n-records-native.cjs
 const assert = require('node:assert/strict')
@@ -40,6 +42,7 @@ const contactOptions = load('lib/contactOptions.ts')
 const phone = load('lib/phone.ts')
 const sqlBinding = load('lib/sqlBinding.ts')
 const contactMerge = load('lib/contactMerge.ts', { './contactOptions': contactOptions, './phone': phone })
+const planTier = load('lib/planTier.ts')
 
 // One Worker app for the whole run; each fixture swaps in a fresh database.
 const state = { db: null, batches: [], broadcasts: [], hook: null, lost: false }
@@ -54,6 +57,7 @@ const contacts = load('routes/contacts.ts', {
   '../lib/phone': phone,
   '../lib/sqlBinding': sqlBinding,
   '../lib/contactMerge': contactMerge,
+  '../lib/planTier': planTier,
   '../lib/conflictControl': load('lib/conflictControl.ts'),
   '../lib/anonymousCustomer': load('lib/anonymousCustomer.ts'),
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {} },
@@ -79,8 +83,11 @@ function fresh(seed) {
   return native.db
 }
 
-async function post(url, body) {
-  const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}, { waitUntil: () => {} })
+async function post(url, body, tier = 'paid') {
+  // The tier is cached per isolate; a test serving both plans resets it.
+  planTier.__resetPlanTierCacheForTests()
+  const env = tier === 'free' ? { PLAN_TIER: 'free' } : {}
+  const res = await app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, env, { waitUntil: () => {} })
   const text = await res.text()
   try { return { status: res.status, body: JSON.parse(text) } } catch { throw new Error(`POST ${url} ${res.status}: ${text}`) }
 }
@@ -148,6 +155,7 @@ async function main() {
     assert.equal(ruled.status, 200, JSON.stringify(ruled.body))
     assert.deepEqual(ruled.body.merged_ids, [2, 3])
     assert.equal(ruled.body.keeper.id, 1)
+    assert.equal(ruled.body.continuation, undefined, 'the paid plan merges every record in one request')
     assert.deepEqual(state.batches.length, 1, 'one atomic batch')
     assert.deepEqual(state.broadcasts, [{ channel: 'customers', message: { action: 'merge', id: 1, mergedIds: [2, 3] } }])
   })
@@ -361,6 +369,104 @@ async function main() {
       { id: 503, delivery_contact_id: 21, delivery_contact_name: 'Rith' },
     ])
     assert.deepEqual(rows(raw, 'SELECT id, delivery_contact_id FROM fees WHERE delivery_contact_id IS NOT NULL ORDER BY id'), [{ id: 90601, delivery_contact_id: 21 }, { id: 90602, delivery_contact_id: 21 }])
+  })
+
+  // Six customers, every one with links in every table; the kept record and
+  // record 5 have storefront accounts; five records hold different numbers.
+  const SIX_SEED = [
+    `INSERT INTO customers(id,name,phone,phone_normalized,notes,membership_number,is_anonymous,created_at,updated_at) VALUES
+      (1,'Chan',NULL,NULL,'First visit 2024','LC-00001',0,'2024-01-01 09:00:00','2026-09-01 10:00:00'),
+      (2,'Chan','012 200 200','012200200',NULL,'LC-00002',0,'2024-02-01 09:00:00','2026-09-02 10:00:00'),
+      (3,'Chan',NULL,NULL,NULL,'LC-00003',0,'2024-03-01 09:00:00','2026-09-03 10:00:00'),
+      (4,'Chan',NULL,NULL,NULL,'LC-00004',0,'2024-04-01 09:00:00','2026-09-04 10:00:00'),
+      (5,'Chan',NULL,NULL,NULL,NULL,0,'2024-05-01 09:00:00','2026-09-05 10:00:00'),
+      (6,'Chan',NULL,NULL,NULL,'LC-00006',0,'2024-06-01 09:00:00','2026-09-06 10:00:00');`,
+    `INSERT INTO portal_accounts(id,membership_id,name,phone,password_hash,contact_id) VALUES (71,'P-1','Chan','012100100','hash',1),(75,'P-5','Chan','012500500','hash',5);`,
+    ...[1, 2, 3, 4, 5, 6].map((id) => `
+      INSERT INTO sales(id,receipt_number,customer_id,customer_name) VALUES (${100 + id},'S-${id}',${id},'Chan');
+      INSERT INTO returns(id,customer_id,customer_name,return_scope) VALUES (${200 + id},${id},'Chan','customer');
+      INSERT INTO customer_share_submissions(id,customer_id,customer_name) VALUES (${300 + id},${id},'Chan');
+      INSERT INTO loyalty_point_adjustments(id,customer_id,points) VALUES (${400 + id},${id},${id});
+      INSERT INTO customer_receivables(id,legacy_id,customer_id,customer_name,invoice_date,status,source_file,source_row) VALUES (${500 + id},${id},${id},'Chan','2026-01-01','outstanding','ar.csv',${id}),(${600 + id},${10 + id},NULL,'Chan','2026-01-02','outstanding','ar.csv',${10 + id});`),
+  ].join('\n')
+  const sixBody = (raw) => ({
+    keepId: 1, mergeIds: [2, 3, 4, 5, 6], client_request_id: 'r11-six',
+    expected: expectedFor(raw, 'customers', [1, 2, 3, 4, 5, 6]),
+    choices: { phone: { source_id: 2 } },
+    membership_source_id: 4,
+    portal_keep_contact_id: 5,
+  })
+  const settled = (raw) => ({
+    keeper: (({ updated_at: _updatedAt, ...rest }) => rest)(one(raw, 'SELECT * FROM customers WHERE id = 1')),
+    ids: rows(raw, 'SELECT id FROM customers ORDER BY id').map((row) => row.id),
+    // Linked rows are compared on everything the merge can write; their own
+    // insert-time timestamps (created_at, imported_at, ...) differ between
+    // the two fixtures.
+    linked: CUSTOMER_TABLES.slice(1, -1).map((table) => rows(raw, `SELECT * FROM ${table} ORDER BY id`)
+      .map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !key.endsWith('_at'))))),
+  })
+
+  let paidState = null
+  let paidStatements = 0
+  await check('paid plan: six records merge in one request and one batch inside the 80-statement cap', async () => {
+    const raw = fresh(SIX_SEED)
+    const merged = await post('/api/customers/merge', sixBody(raw), 'paid')
+    assert.equal(merged.status, 200, JSON.stringify(merged.body))
+    assert.deepEqual(merged.body.merged_ids, [2, 3, 4, 5, 6])
+    assert.equal(merged.body.continuation, undefined)
+    assert.equal(state.batches.length, 1)
+    paidStatements = state.batches[0]
+    assert.ok(paidStatements <= contactMerge.CONTACT_MERGE_MAX_STATEMENTS, `${paidStatements} statements`)
+    paidState = settled(raw)
+    assert.deepEqual(paidState.ids, [1])
+    assert.equal(paidState.keeper.membership_number, 'LC-00004')
+    assert.equal(paidState.keeper.notes, 'First visit 2024\nMerged membership: LC-00001\nMerged membership: LC-00002\nMerged membership: LC-00003\nMerged membership: LC-00006')
+    assert.equal(paidState.keeper.phone, '012 200 200')
+    assert.equal(paidState.keeper.phone_normalized, '012200200')
+    assert.deepEqual(rows(raw, 'SELECT id, contact_id FROM portal_accounts ORDER BY id'), [{ id: 71, contact_id: null }, { id: 75, contact_id: 1 }])
+  })
+
+  await check('free plan: six records merge in steps inside the 50-query budget, never failing, ending as the paid merge does', async () => {
+    const raw = fresh(SIX_SEED)
+    const body = sixBody(raw)
+    const first = await post('/api/customers/merge', body, 'free')
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.deepEqual(first.body.merged_ids, [4, 5], 'the records holding the chosen number and account go first')
+    assert.deepEqual(first.body.remaining_merge_ids, [2, 3, 6])
+    assert.equal(first.body.continuation.client_request_id, 'r11-six:r3')
+
+    // The same request retried after its first step committed answers from the
+    // audit row with the same remaining work, instead of a false conflict.
+    const retried = await post('/api/customers/merge', body, 'free')
+    assert.equal(retried.status, 200, JSON.stringify(retried.body))
+    assert.equal(retried.body.replayed, true)
+    assert.deepEqual(retried.body.remaining_merge_ids, [2, 3, 6])
+    assert.deepEqual(retried.body.continuation, first.body.continuation)
+
+    let next = first.body.continuation
+    let requests = 1
+    while (next) {
+      const response = await post('/api/customers/merge', next, 'free')
+      assert.equal(response.status, 200, JSON.stringify(response.body))
+      requests += 1
+      next = response.body.continuation
+      assert.ok(requests < 6, 'every step makes progress')
+    }
+    assert.equal(requests, 3)
+    // 50 D1 queries per request on the free plan, less what the route spends
+    // outside its batch; the one-batch merge would not have fitted.
+    const budget = contactMerge.contactMergeStatementBudget(50)
+    assert.equal(budget + contactMerge.CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES, 50)
+    assert.ok(paidStatements > budget, `the ${paidStatements}-statement paid batch needs stepping under the free budget of ${budget}`)
+    for (const statements of state.batches) {
+      assert.ok(statements <= budget, `a ${statements}-statement batch exceeds the free-plan budget of ${budget}`)
+    }
+    // The stepped merge ends exactly as the one-batch merge.
+    const freeState = settled(raw)
+    assert.deepEqual(freeState.ids, paidState.ids)
+    assert.deepEqual(freeState.keeper, paidState.keeper, 'the kept record')
+    CUSTOMER_TABLES.slice(1, -1).forEach((table, index) => assert.deepEqual(freeState.linked[index], paidState.linked[index], table))
+    assert.deepEqual(rows(raw, "SELECT details FROM audit_logs WHERE action = 'merge' ORDER BY id").map((row) => JSON.parse(row.details).clientRequestId), ['r11-six', 'r11-six:r3', 'r11-six:r1'])
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')

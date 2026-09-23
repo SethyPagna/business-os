@@ -51,6 +51,9 @@ export type ContactMergePlan = {
   // membership note and the derived phone key).
   backfilled: string[]
   finalKeeper: Record<string, unknown>
+  // Every field's chosen value before the membership note is appended; a
+  // stepped merge replays these as explicit values in its first step.
+  resolved: Record<string, unknown>
   mergedIds: number[]
   before: ContactMergeSnapshot
   after: ContactMergeSnapshot
@@ -61,6 +64,11 @@ export const CONTACT_MERGE_MAX_BINDS_PER_STATEMENT = 80
 // One Resolve merges at most six records (the kept one plus five). Six
 // customers plan to about 55 statements, inside the 80-statement cap.
 export const CONTACT_MERGE_MAX_RECORDS = 6
+// D1 queries POST {path}/merge spends outside its write batch: session auth
+// (up to 3), the record, storefront, table and device reads (4), the identity
+// re-check (2), failure reconciliation (3), the cache-version bump (up to 9)
+// and the refresh read (1). Each batch statement counts as one more query.
+export const CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES = 22
 
 const SAFE_COLUMN = /^[a-z][a-z0-9_]*$/
 const MEMBERSHIP_NOTE_PREFIX = 'Merged membership: '
@@ -405,7 +413,65 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     ...keeperUpdate,
   ]
   assertPlanBounds(statements)
-  return { statements, backfilled, finalKeeper, mergedIds, before, after }
+  return { statements, backfilled, finalKeeper, resolved, mergedIds, before, after }
+}
+
+export function contactMergeStatementBudget(queriesPerInvocation: number): number {
+  return Math.max(1, Math.min(CONTACT_MERGE_MAX_STATEMENTS, Math.floor(queriesPerInvocation) - CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES))
+}
+
+// Free plan: a merge whose batch would not fit the request's D1 query budget
+// takes fewer records now and hands back the rest. The records holding the
+// chosen membership number and storefront account go first, and every field
+// is replayed as the value already resolved from all records, so the kept
+// record ends exactly as one full merge would leave it.
+export function stepContactMergePlan(
+  input: ContactMergeInput,
+  full: ContactMergePlan,
+  statementBudget: number,
+): { plan: ContactMergePlan; remaining: Record<string, unknown>[] } {
+  if (full.statements.length <= statementBudget || input.members.length < 2) return { plan: full, remaining: [] }
+  const sources = new Set([Number(input.membershipSourceId), Number(input.portalKeepContactId)])
+  const ordered = [
+    ...input.members.filter((member) => sources.has(Number(member.id))),
+    ...input.members.filter((member) => !sources.has(Number(member.id))),
+  ]
+  const minimum = Math.max(1, input.members.filter((member) => sources.has(Number(member.id))).length)
+  const choices = Object.fromEntries(Object.entries(full.resolved).map(([column, value]) => [column, { custom: value }]))
+  let step: { plan: ContactMergePlan; remaining: Record<string, unknown>[] } = { plan: full, remaining: [] }
+  for (let size = ordered.length - 1; size >= minimum; size -= 1) {
+    const stepIds = new Set([Number(input.keeper.id), ...ordered.slice(0, size).map((member) => Number(member.id))])
+    const plan = buildContactMergePlan({
+      ...input,
+      members: ordered.slice(0, size),
+      choices,
+      portalAccounts: (input.portalAccounts || []).filter((account) => stepIds.has(Number(account.contact_id))),
+    })
+    step = { plan, remaining: ordered.slice(size) }
+    if (plan.statements.length <= statementBudget) break
+  }
+  return step
+}
+
+// The request that finishes a stepped merge: the kept record now holds every
+// chosen value, number and account, so the rest simply keep the kept record's.
+export function contactMergeContinuation(
+  keeper: Record<string, unknown>,
+  remaining: Record<string, unknown>[],
+  editableColumns: readonly string[],
+  clientRequestId: string | null,
+) {
+  const keepId = Number(keeper.id)
+  return {
+    keepId,
+    mergeIds: remaining.map((row) => Number(row.id)),
+    manual: true,
+    client_request_id: clientRequestId ? `${clientRequestId.replace(/:r\d+$/, '')}:r${remaining.length}` : null,
+    expected: [keeper, ...remaining].map((row) => ({ id: Number(row.id), updated_at: row.updated_at ?? null })),
+    choices: Object.fromEntries(editableColumns.filter((column) => column !== 'membership_number').map((column) => [column, { source_id: keepId }])),
+    membership_source_id: keepId,
+    portal_keep_contact_id: keepId,
+  }
 }
 import { contactDisplayAddress } from './contactOptions'
 import { canonicalizePhone } from './phone'
