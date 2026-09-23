@@ -425,12 +425,14 @@ export function label(key: TelegramLabelKey): string {
  * without a parse mode -- postTelegram sends plain text, so indentation is the
  * only structure available and `*bold*` would print as asterisks.
  *
- * `·` is for a LABEL row, and since Sep 23 2026 for EVERY row of the shift
- * report -- its payment-method, delivery and expense lists included (owner:
- * "and for inside each section do bullet points ·"). `•` stays the marker for
- * the LIST rows of the other reports (cashiers, receipts, expenses, stock) and
- * of the event messages, and a numbered `1.` opens an item. Three shapes,
- * three meanings, and none of them is a second way of writing another.
+ * `·` is for a LABEL row, and since Sep 23 2026 for EVERY row inside a report
+ * section: the shift report's payment-method, delivery and expense lists
+ * (owner: "and for inside each section do bullet points ·"), and the cashier,
+ * receipt, expense and stock lists of the other reports, which took the same
+ * rule with their `=====` headers. `•` stays the marker for the LIST rows of
+ * the event messages (the products of a transfer or a return), and a numbered
+ * `1.` opens an item. Three shapes, three meanings, and none of them is a
+ * second way of writing another.
  */
 export const ROW_BULLET = '· '
 
@@ -558,22 +560,25 @@ export function localizeTelegramHeading(heading: string): string {
 // hanging indent -- all of which survive Telegram's phone-width wrapping,
 // which `*bold*` would not (it would render as literal asterisks).
 
-// The ONE section rule every report draws, and the whole of what replaced the
-// explanatory sentences the owner asked us to delete ("no explanation just
-// arrange all reports more concise with breakdowns clearly"). A bare rule
-// reads as a break at phone width; a section heading would cost a line per
-// block and a blank line reads as an accident rather than a divider. Exported
-// so lib/telegram.ts draws the SAME rule -- two copies drift by one glyph.
+// The rule between WHOLE blocks: the shift reports one `/shift` answer joins,
+// and the command reference's heading, list and footer. It used to open every
+// report SECTION as well. Since Sep 23 2026 a section opens with its own name
+// between two edges instead (SHIFT_SECTION_EDGE and REPORT_SECTION_EDGE below;
+// owner: "for telegram reports, instead of plain line ------we can do
+// =====section name===== instead."), so a drawn rule now always means "a new
+// block starts here". A blank line would read as an accident rather than a
+// divider. Exported so lib/telegram.ts draws the SAME rule -- two copies drift
+// by one glyph.
 export const RULE = '━'.repeat(18)
 
 /**
  * The divider for an EVENT message -- the sale alert and the status change.
  *
- * Those two are not sectioned reports: they have no numbered headings, only
+ * Those two are not sectioned reports: they have no section headings, only
  * groups of rows (who/when, who rang it up, who bought it, what was bought,
  * what it came to), and the owner's Sep 22 2026 reference layout separates
  * those groups with a plain dashed row. A lighter weight than `RULE` says
- * "next group" rather than "next numbered section", and the SAME width keeps
+ * "next group" rather than "next block", and the SAME width keeps
  * every Business OS message the same shape in the chat. One constant per
  * family, never a literal at a call site -- two hand-typed rules drift by a
  * glyph or by a length and the feed starts looking accidental.
@@ -591,6 +596,19 @@ export const GROUP_RULE = '─'.repeat(18)
  * change it here and every shift section follows.
  */
 export const SHIFT_SECTION_EDGE = '-'.repeat(5)
+
+/**
+ * What stands on either side of a section's name in every OTHER sectioned
+ * report -- the `/report` day summary (and the evening push, which sends the
+ * same text), `/sales`, `/fees`, `/stock` and `/inventory`:
+ * `=====Sales / ការលក់=====`, one line, no number and no rule above it.
+ *
+ * Owner, Sep 23 2026: "for telegram reports, instead of plain line ------we
+ * can do =====section name===== instead." The shift report keeps the dashed
+ * edge above, which the owner asked for separately. Both are five a side, so
+ * the two families differ only in the glyph.
+ */
+export const REPORT_SECTION_EDGE = '='.repeat(5)
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 

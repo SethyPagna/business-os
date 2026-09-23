@@ -114,6 +114,10 @@ const RULE = '━'.repeat(18)
 // below, so the checks judge the text the chat receives.
 const SHIFT_EDGE = '-----'
 const isShiftSection = (line) => line.length > 2 * SHIFT_EDGE.length && line.startsWith(SHIFT_EDGE) && line.endsWith(SHIFT_EDGE)
+// Every OTHER report's section title (Sep 23 2026): the name between five `=`
+// a side.
+const REPORT_EDGE = '====='
+const isReportSection = (line) => line.length > 2 * REPORT_EDGE.length && line.startsWith(REPORT_EDGE) && line.endsWith(REPORT_EDGE)
 
 /** Render one message in one language mode, then put the mode back. */
 const render = (mode, build) => {
@@ -521,33 +525,36 @@ const dayStats = {
 }
 const daySummary = render('both', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }, { cashier: 'sok', count: 6, usd: 186.25 }]))
 const daySections = daySummary.split('\n')
+// Sep 23 2026 (owner: "for telegram reports, instead of plain line ------we
+// can do =====section name===== instead."): the day summary's sections open
+// with `=====Name=====`, not the shift report's dashes, and its cashier list
+// is `·` rows like every other row.
 assert.deepEqual(daySections, [
   '📊 Business summary / សង្ខេបអាជីវកម្ម — 06/09/2026',
-  RULE,
-  '1. Sales / ការលក់',
+  '=====Sales / ការលក់=====',
   '· Revenue / ចំណូល: $486.25',
   '· Profit / ចំណេញ: $142.60',
   '· Delivery fee / ថ្លៃដឹក: $12.00',
   '· Not Paid / ប្រាក់ជំពាក់: $38.00',
   '· Refunds / ការសងប្រាក់: $15.00',
-  RULE,
-  '2. Invoices / វិក្កយបត្រ',
+  '=====Invoices / វិក្កយបត្រ=====',
   '· Total / សរុប: 24 · Cancelled / បានបោះបង់: 1',
-  RULE,
-  '3. Expenses / ចំណាយ',
+  '=====Expenses / ចំណាយ=====',
   '· Actual delivery cost / ថ្លៃដឹកដើម: $7.50',
   '· Other expenses / ចំណាយផ្សេងទៀត: $9.50 · 20,000៛',
   '· Total / សរុប: $17.00 · 20,000៛',
-  RULE,
-  '4. Stock / ស្តុក',
+  '=====Stock / ស្តុក=====',
   '· Stock in / ស្តុកចូល: 3 movement(s) / ចលនាស្តុក · 120 unit(s) / ឯកតា',
   '· Stock out / ស្តុកចេញ: 1 movement(s) / ចលនាស្តុក · 4 unit(s) / ឯកតា',
-  RULE,
-  '5. Cashiers / អ្នកគិតប្រាក់',
-  '• za01 — 18 · $300.00',
-  '• sok — 6 · $186.25',
+  '=====Cashiers / អ្នកគិតប្រាក់=====',
+  '· za01 — 18 · $300.00',
+  '· sok — 6 · $186.25',
 ], daySummary)
-check(`the day summary is titled, numbered and divided the same way (${daySections.length} lines)`, true)
+check(`the day summary is titled and sectioned the same way (${daySections.length} lines)`, true)
+check('with its own `=====` edge: no dashed shift header, no rule, no number, no `•` row',
+  telegramLang.REPORT_SECTION_EDGE === REPORT_EDGE
+  && daySections.filter(isReportSection).length === 5 && !daySections.some(isShiftSection)
+  && !daySections.includes(RULE) && !daySections.some((line) => /^\d+\.\s/.test(line)) && !daySummary.includes('•'), daySummary)
 // The day's Expenses total is arithmetic, exactly as the shift's is above: the
 // fees table plus the courier money actually paid out, and nothing else. They
 // print the same word, so they may not name two different sums -- they did
@@ -555,15 +562,18 @@ check(`the day summary is titled, numbered and divided the same way (${daySectio
 check('the day Expenses total is the fees table plus the recorded delivery cost',
   Math.round((9.5 + 7.5) * 100) / 100 === 17
   && daySummary.includes('Total / សរុប: $17.00 · 20,000៛'), daySummary)
-check('the day summary fits one phone screen too', daySections.length <= 26, daySummary)
-check('and its cashier bullets are name, receipts, money -- nothing else',
-  daySummary.includes('• za01 — 18 · $300.00') && daySummary.includes('• sok — 6 · $186.25'), daySummary)
+// The cap keeps the two lines of slack it had over this fixture before
+// Sep 23 2026, when each section's rule and numbered title (two lines) became
+// one header line.
+check('the day summary fits one phone screen too', daySections.length <= 21, daySummary)
+check('and its cashier rows are name, receipts, money -- nothing else',
+  daySections.includes('· za01 — 18 · $300.00') && daySections.includes('· sok — 6 · $186.25'), daySummary)
 
 // THE SHARED SALES SECTION, BYTE FOR BYTE. A section runs from its title line
-// -- `N. Title` in the day summary, `-----Title-----` in the shift report --
-// to the next title or rule.
-const isAnyTitle = (line) => /^\d+\. /.test(line) || isShiftSection(line)
-const titleText = (line) => (isShiftSection(line) ? line.slice(SHIFT_EDGE.length, -SHIFT_EDGE.length) : line.replace(/^\d+\. /, ''))
+// -- `=====Title=====` in the day summary, `-----Title-----` in the shift
+// report -- to the next title, or to the rule between two whole shift reports.
+const isAnyTitle = (line) => isReportSection(line) || isShiftSection(line)
+const titleText = (line) => (isShiftSection(line) ? line.slice(SHIFT_EDGE.length, -SHIFT_EDGE.length) : line.slice(REPORT_EDGE.length, -REPORT_EDGE.length))
 const sectionBlock = (text, title) => {
   const rows = text.split('\n')
   const first = rows.findIndex((line) => isAnyTitle(line) && titleText(line) === title)
@@ -581,33 +591,33 @@ check('one set of numbers renders a byte-identical Sales section in both reports
 const dayKm = render('km', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }]))
 check('the day summary renders in Khmer only when the shop chose km',
   dayKm.startsWith('📊 សង្ខេបអាជីវកម្ម — 06/09/2026')
-  && dayKm.includes('1. ការលក់') && dayKm.includes('ចំណូល: $486.25')
-  && !/[A-Za-z]/.test(dayKm.split('\n')[3]), dayKm)
-// Section numbering follows the sections that actually print: a category the
-// owner switched off must not leave a hole in the numbering.
+  && dayKm.split('\n')[1] === '=====ការលក់=====' && dayKm.split('\n')[2] === '· ចំណូល: $486.25'
+  && dayKm.split('\n').filter(isReportSection).every((line) => !/[A-Za-z]/.test(line)), dayKm)
+// A category the owner switched off leaves no heading behind: the sections
+// that do print close up.
 const salesOff = render('both', () => telegram.formatDaySummary(dayStats, [], { sales: false, stock_in: false, stock_out: false }))
-// UPDATED Sep 23 2026: Cashiers now appears as section 2 with `· N/A` under
-// it. There is no category switch for cashiers, so an empty cashier list is
+// UPDATED Sep 23 2026: Cashiers now appears, second, with `· N/A` under it.
+// There is no category switch for cashiers, so an empty cashier list is
 // "nobody rang anything up today", which is a fact the report states -- while
 // Sales, Stock in and Stock out, switched OFF here, still leave nothing at
 // all. That is the distinction the fix had to keep: off removes the section,
 // empty prints N/A.
-check('numbering closes up when a switched-off category removes a section',
-  salesOff.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === '1. Expenses / ចំណាយ | 2. Cashiers / អ្នកគិតប្រាក់', salesOff)
+check('the sections close up when a switched-off category removes one',
+  salesOff.split('\n').filter(isReportSection).join(' | ') === '=====Expenses / ចំណាយ===== | =====Cashiers / អ្នកគិតប្រាក់=====', salesOff)
 check('a switched-off category leaves no N/A placeholder behind either',
   !salesOff.includes('Sales / ការលក់') && !salesOff.includes('Stock / ស្តុក'), salesOff)
 
 // Sep 23 2026: `{ fees: false }` ALONE. The Expenses section used to survive
 // this switch whenever Sales was on -- the gate read `fees !== false ||
-// showSales` -- so a shop that had switched Expenses off was still sent
-// `3. Expenses / ចំណាយ`, carrying either the courier money alone or, on a day
+// showSales` -- so a shop that had switched Expenses off was still sent the
+// Expenses section, carrying either the courier money alone or, on a day
 // with no deliveries, nothing but `· N/A`. Off must mean gone.
 const feesOff = render('both', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }], { fees: false }))
 check('fees:false removes the Expenses section outright -- no heading, no N/A',
   !feesOff.includes('Expenses / ចំណាយ') && !feesOff.includes('ចំណាយ'), feesOff)
-check('and the numbering closes up behind it, with no gap',
-  feesOff.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ')
-  === '1. Sales / ការលក់ | 2. Invoices / វិក្កយបត្រ | 3. Stock / ស្តុក | 4. Cashiers / អ្នកគិតប្រាក់', feesOff)
+check('and the sections close up behind it, with no gap',
+  feesOff.split('\n').filter(isReportSection).join(' | ')
+  === '=====Sales / ការលក់===== | =====Invoices / វិក្កយបត្រ===== | =====Stock / ស្តុក===== | =====Cashiers / អ្នកគិតប្រាក់=====', feesOff)
 // The courier money is not a fee -- it comes out of the day's deliveries --
 // so switching the fees table off must not take it off the report. It moves
 // to the Sales section it came from, beside the fee the customer paid.
@@ -626,7 +636,7 @@ check('and the fees table\'s own money is gone with the section',
 // parts, so the check above is about the SWITCH and not about the fixture.
 const feesOn = render('both', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }], { fees: true }))
 check('POSITIVE CONTROL: fees:true still prints Expenses, and Sales has no cost row',
-  feesOn.includes('3. Expenses / ចំណាយ') && feesOn.includes('· Total / សរុប: $17.00 · 20,000៛')
+  feesOn.split('\n').includes('=====Expenses / ចំណាយ=====') && feesOn.includes('· Total / សរុប: $17.00 · 20,000៛')
   && !sectionBlock(feesOn, 'Sales / ការលក់').some((line) => line.includes('ថ្លៃដឹកដើម')), feesOn)
 // A day with no deliveries either: the section is still gone, and nothing is
 // added to Sales in its place.
@@ -634,7 +644,7 @@ const feesOffQuiet = render('both', () => telegram.formatDaySummary(
   { ...dayStats, sales: { ...dayStats.sales, deliveryCostUsd: 0, deliveryCostRecorded: 0 } }, [], { fees: false }))
 check('with no courier cost either, Expenses is simply absent and Sales gains nothing',
   !feesOffQuiet.includes('ចំណាយ') && !feesOffQuiet.includes('ថ្លៃដឹកដើម')
-  && feesOffQuiet.split('\n').filter((line) => /^\d\. /.test(line)).length === 4, feesOffQuiet)
+  && feesOffQuiet.split('\n').filter(isReportSection).length === 4, feesOffQuiet)
 
 // ---- 5. the absences -------------------------------------------------------
 // Each string below is a line the PRE-REDESIGN report printed for this very

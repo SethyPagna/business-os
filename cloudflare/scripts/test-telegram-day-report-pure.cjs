@@ -170,6 +170,15 @@ const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`
 const SEP = lang.BILINGUAL_SEPARATOR
 // The riel SIGN is Khmer script but it is a currency symbol, not a word.
 const khmerText = (value) => /[ក-៿]/.test(String(value).replace(/៛/g, ''))
+// Sep 23 2026: a report section opens with its name between two `=====`
+// edges (owner: "for telegram reports, instead of plain line ------we can do
+// =====section name===== instead."). A literal here, not the exported
+// constant, so the checks below read the TEXT the chat receives.
+const EDGE = '====='
+const isSection = (line) => line.length > 2 * EDGE.length && line.startsWith(EDGE) && line.endsWith(EDGE)
+const sectionName = (line) => line.slice(EDGE.length, -EDGE.length)
+const DAY_SECTIONS = ['sales', 'invoices', 'expenses', 'stock', 'cashiers']
+const headerOf = (key) => `${EDGE}${lang.label(key)}${EDGE}`
 
 ;(async () => {
 // ---- POSITIVE CONTROL: what the reports used to say --------------------------
@@ -196,12 +205,19 @@ check(`the Revenue line carries the KERNEL revenue, not the old gross ($115.00 p
   report.includes('$115.00') && !report.includes('$643.00'))
 // SECTIONED Sep 21 2026 (owner: "same for other telegram report enough
 // spacing and separations ... using dividers, numbered list, etc... title
-// etc..."). A title line, then numbered titled sections, in the same
-// vocabulary the shift report uses.
-const sectionTitles = report.split('\n').filter((line) => /^\d\. /.test(line))
-check(`the day summary is a title line and ${sectionTitles.length} numbered sections`,
+// etc..."). A title line, then titled sections, in the same vocabulary the
+// shift report uses -- since Sep 23 2026 each opening with `=====Name=====`.
+const sectionTitles = report.split('\n').filter(isSection)
+check(`the day summary is a title line and ${sectionTitles.length} titled sections`,
   /^📊 Business summary \/ [^\n]+ — 10\/08\/2026$/.test(report.split('\n')[0])
+  && sectionTitles.join(' | ') === DAY_SECTIONS.map(headerOf).join(' | ')
   && sectionTitles.every((line) => line.includes(SEP)), report)
+check('each section opens with `=====Name / ឈ្មោះ=====`: no rule above it, no number in front',
+  report.split('\n').includes('=====Sales / ការលក់=====') && lang.REPORT_SECTION_EDGE === EDGE
+  && !report.includes(lang.RULE) && !/^\d+\.\s/m.test(report), report)
+check('and every row inside a section is a `·` row, the cashier list included',
+  report.split('\n').slice(1).every((line) => isSection(line) || line.startsWith(lang.ROW_BULLET) || line.startsWith(lang.HANGING_INDENT))
+  && report.split('\n').includes('· aza — 1 · $90.00') && !report.includes('•'), report)
 // REDESIGNED Sep 6 2026: one figure per line. The counts of the SAME thing
 // share one compact row (Sep 21 2026), under the Invoices section.
 check('and the kernel receipt count, not the count that included the void',
@@ -212,9 +228,11 @@ check('the voided receipt is REPORTED as voided rather than silently counted or 
   /Cancelled \/ [^\n]*: 1/.test(report))
 // The whole point of the redesign, stated as a measurement rather than a
 // claim: the pre-redesign message spread the same day over prose-tagged
-// lines. This one is sections of figures, each under its own title.
+// lines. This one is sections of figures, each under its own title. The cap
+// keeps the six lines of slack it had over this fixture before Sep 23 2026,
+// when each section's rule and numbered title (two lines) became one header.
 check(`the day summary fits one phone screen (${report.split('\n').length} lines)`,
-  report.split('\n').length <= 26)
+  report.split('\n').length <= 21)
 check('and its Sales section leads with revenue and profit, the two that always print',
   /^· Revenue \/ [^\n]*: \$115\.00$/m.test(report) && /^· Profit \/ /m.test(report))
 check('the tax and the delivery fee are not inside the sales figure',
@@ -237,13 +255,17 @@ const reportKm = await telegram.telegramCommandReply({}, '/report 10/08/2026', D
 check("'en' drops the Khmer half of every label and keeps every figure",
   !khmerText(reportEn) && reportEn.includes('$115.00')
   && reportEn.split('\n').includes('· Revenue: $115.00')
-  && reportEn.split('\n').filter((line) => /^\d\. /.test(line)).join(' | ') === sectionTitles.map((line) => line.split(SEP)[0]).join(' | '))
+  && reportEn.split('\n').includes('=====Sales=====')
+  && reportEn.split('\n').filter(isSection).map(sectionName).join(' | ') === sectionTitles.map((line) => sectionName(line).split(SEP)[0]).join(' | '))
 check("'km' drops the English half and still carries the same figures",
   reportKm.includes('$115.00') && reportKm.startsWith('📊 ')
+  && reportKm.split('\n').includes('=====ការលក់=====')
+  && reportKm.split('\n').filter(isSection).length === sectionTitles.length
+  && reportKm.split('\n').filter(isSection).every((line) => !/[A-Za-z]/.test(line))
   && reportKm.split('\n').every((line) => {
     const split = line.indexOf(': ')
-    return line.startsWith('•') || split <= 0 || !/[A-Za-z]/.test(line.slice(0, split))
-  }))
+    return split <= 0 || !/[A-Za-z]/.test(line.slice(0, split))
+  }), reportKm)
 check('all three renderings have the same number of lines -- one report, three languages',
   report.split('\n').length === reportEn.split('\n').length
   && report.split('\n').length === reportKm.split('\n').length)
@@ -260,18 +282,18 @@ check('cashier names survive every mode untouched',
 // whether the shop waited for it or asked for it. A shop that had switched
 // Expenses off saw it every time anybody typed /report.
 const reportFeesOff = await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'both', { fees: false })
-const titlesOf = (text) => text.split('\n').filter((line) => /^\d\. /.test(line)).map((line) => line.split(SEP)[0].trim())
+const titlesOf = (text) => text.split('\n').filter(isSection).map((line) => sectionName(line).split(SEP)[0].trim())
 check(`/report honours fees:false -- the Expenses section is gone (${titlesOf(reportFeesOff).join(' | ')})`,
-  !titlesOf(reportFeesOff).includes('3. Expenses') && !reportFeesOff.includes('Expenses'), reportFeesOff)
-check('and the numbering behind it stays contiguous',
-  titlesOf(reportFeesOff).every((title, index) => title.startsWith(`${index + 1}. `)), reportFeesOff)
-check('a sales:false /report drops Sales and Invoices and renumbers from 1',
+  !titlesOf(reportFeesOff).includes('Expenses') && !reportFeesOff.includes('Expenses'), reportFeesOff)
+check('and the sections behind it keep their order, with nothing left in its place',
+  titlesOf(reportFeesOff).join(' | ') === 'Sales | Invoices | Stock | Cashiers', reportFeesOff)
+check('a sales:false /report drops Sales and Invoices and leaves no gap',
   titlesOf(await telegram.telegramCommandReply({}, '/report 10/08/2026', Date.now(), 'both', { sales: false }))
-    .join(' | ') === '1. Expenses | 2. Stock | 3. Cashiers')
+    .join(' | ') === 'Expenses | Stock | Cashiers')
 // POSITIVE CONTROL: the same command with no switches still prints them, so
 // the two checks above are about the SWITCH and not about this fixture.
 check('POSITIVE CONTROL: /report with no categories still prints every section',
-  titlesOf(report).includes('3. Expenses') && titlesOf(report).includes('1. Sales'), report)
+  titlesOf(report).join(' | ') === 'Sales | Invoices | Expenses | Stock | Cashiers', report)
 // And the webhook has to HAND them over: the parameter existing proves
 // nothing if the one live caller still leaves it out.
 check('handleTelegramWebhook passes the shop\'s switches into the command reply',
@@ -303,6 +325,12 @@ check('and an item too wide for a phone continues under its own number, never at
   && salesLines.includes(`${itemContinuation}= $100.00 · 400,000៛`), salesMsg)
 check('and the retired quantity-first em-dash form is gone from the item lines',
   !/\d+ × [A-Za-z]/.test(salesMsg) && !saleItemLines.some((line) => line.includes('—')))
+// Sep 23 2026: /sales takes the `=====` headers too, and each receipt is a
+// `·` row; only the items under a receipt stay numbered.
+check('/sales opens its three sections with `=====` headers and lists each receipt as a `·` row',
+  salesLines.filter(isSection).join(' | ') === ['sales', 'invoices', 'latestReceipts'].map(headerOf).join(' | ')
+  && salesLines.includes('· 20260810-090000') && salesLines.includes('· 20260810-110000')
+  && !salesMsg.includes('•') && !salesLines.includes(lang.RULE), salesMsg)
 
 // ---- the `+ N more` continuation, in all three languages --------------------
 //
@@ -330,57 +358,77 @@ check('and salesReport does not localize the noun by hand any more',
   /moreItems\(saleItems\.length - 4\)/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8'))
   && !/more \$\{localizeTelegramValue/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
 
-// ---- /stock and /inventory: numbered sections, over a REAL LIMIT (Sep 22 2026) ---
+// ---- /fees: the same `=====` headers and `·` rows (Sep 23 2026) -------------
+// Two expenses on 12/08/2026, a day of their own, so no figure asserted for
+// any other day moves. /fees was the one sectioned reply no test rendered.
+const insFee = db.prepare('INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date) VALUES (?,?,?,?,?,?)')
+insFee.run(1, 'Rent', 'August', 120, 0, '2026-08-12')
+insFee.run(2, 'Transport', null, 0, 20000, '2026-08-12')
+const feesMsg = await telegram.telegramCommandReply({}, '/fees 12/08/2026')
+check('/fees is its title, two `=====` sections and one `·` row per expense, newest first',
+  JSON.stringify(feesMsg.split('\n')) === JSON.stringify([
+    '💸 Expenses / ចំណាយ — 12/08/2026',
+    '=====Expenses / ចំណាយ=====',
+    '· Total / សរុប: $120.00 · 20,000៛',
+    '=====Each expense / ចំណាយនីមួយៗ=====',
+    '· Transport: 20,000៛',
+    '· Rent — August: $120.00',
+  ]), feesMsg)
+const feesKm = await telegram.telegramCommandReply({}, '/fees 12/08/2026', Date.now(), 'km')
+check('and a Khmer-only shop gets the same six lines under Khmer headers',
+  feesKm.split('\n').length === 6
+  && feesKm.split('\n').filter(isSection).join(' | ') === '=====ចំណាយ===== | =====ចំណាយនីមួយៗ=====', feesKm)
+
+// ---- /stock and /inventory: titled sections, over a REAL LIMIT (Sep 22 2026) ---
 // The Sep 21 2026 sectioned-layout redesign converted five replies and left
-// these two as a single un-numbered block; this closes that gap. Run against
+// these two as a single un-sectioned block; this closes that gap. Run against
 // the real SQLite engine above (not a regex stub), so the query's
 // `LIMIT 12` and `is_active = 1` are the ones actually executing.
 const stockMsg = await telegram.telegramCommandReply({}, '/stock')
 const inventoryMsg = await telegram.telegramCommandReply({}, '/inventory')
 
-check('the LIMIT 12 the query has always carried still caps the bullet list (14 qualifying rows, 12 shown)',
-  stockMsg.split('\n').filter((line) => line.startsWith('•')).length === 12
-  && /^· Products \/ [^\n]*: 12$/m.test(stockMsg))
+// The product list is `·` rows since Sep 23 2026, like every row in a section.
+check('the LIMIT 12 the query has always carried still caps the product list (14 qualifying rows, 12 shown)',
+  stockMsg.split('\n').filter((line) => /^· (?:OUT|LOW) \/ /.test(line)).length === 12
+  && /^· Products \/ [^\n]*: 12$/m.test(stockMsg), stockMsg)
 check('is_active = 0 still excludes a product from /stock entirely', !stockMsg.includes('Inactive item'))
 check('a product above both thresholds is not listed', !stockMsg.includes('Healthy item'))
 check('/inventory counts only the active catalogue (14 qualifying + 1 healthy = 15), never the inactive row',
   /Active products \/ [^\n]*: 15$/m.test(inventoryMsg) && /Units on hand \/ [^\n]*: 124$/m.test(inventoryMsg)
   && /Low stock \/ [^\n]*: 8$/m.test(inventoryMsg) && /Out of stock \/ [^\n]*: 6$/m.test(inventoryMsg))
 
-// The numbered-section shape itself: a title line, then "N. <title>" headers,
-// each immediately preceded by the shared RULE and never left bare.
+// The section shape itself (Sep 23 2026): a title line, then
+// `=====<title>=====` headers -- no drawn rule, no number and no `•` row
+// anywhere -- each followed by a `·` row, never left bare.
 for (const [name, msg, sectionKeys] of [['/stock', stockMsg, ['stock']], ['/inventory', inventoryMsg, ['products', 'stock']]]) {
   const rows = msg.split('\n')
-  check(`${name} opens with its title, not a section`, !/^\d+\.\s/.test(rows[0]))
+  check(`${name} opens with its title, not a section`, !isSection(rows[0]) && !/^\d+\.\s/.test(rows[0]))
+  check(`${name}: no drawn rule, no numbered header and no \`•\` row`,
+    !rows.includes(lang.RULE) && !rows.some((row) => /^\d+\.\s/.test(row)) && !msg.includes('•'), msg)
   rows.forEach((row, index) => {
-    if (row === lang.RULE) check(`${name}: the divider at line ${index} is followed by a numbered header, never left bare`, /^\d+\.\s/.test(rows[index + 1] || ''))
+    if (isSection(row)) check(`${name}: the header at line ${index} is followed by a \`·\` row, never left bare`, (rows[index + 1] || '').startsWith(lang.ROW_BULLET))
   })
   // Strict-after loop (scripts/test-shift-report-pure.cjs's ORDER pattern):
   // each section header must be found AFTER the previous one, not merely
   // present anywhere in the message.
   let cursor = -1
   sectionKeys.forEach((key, position) => {
-    const expected = `${position + 1}. ${lang.label(key)}`
-    const at = rows.findIndex((row, index) => index > cursor && row === expected)
+    const at = rows.findIndex((row, index) => index > cursor && row === headerOf(key))
     check(`${name}: section "${key}" appears in order at position ${position + 1}`, at > cursor)
     cursor = at
   })
-  // POSITIVE CONTROL: renumbering the FIRST header to look like the LAST
-  // one (a swap that only makes sense when there are two or more sections)
-  // must make the same strict-after loop reject the text -- proving the
-  // check discriminates order, not just membership. With one section this
-  // duplicates the header outright, which the loop must also reject: two
-  // "1. <title>" rows can never satisfy "found strictly after the previous
-  // hit" for a second, distinct key.
+  // POSITIVE CONTROL: swapping the FIRST header with the LAST one (a swap
+  // that only makes sense when there are two or more sections) must make the
+  // same strict-after loop reject the text -- proving the check discriminates
+  // order, not just membership.
   if (sectionKeys.length > 1) {
-    const first = `1. ${lang.label(sectionKeys[0])}`
-    const last = `${sectionKeys.length}. ${lang.label(sectionKeys[sectionKeys.length - 1])}`
+    const first = headerOf(sectionKeys[0])
+    const last = headerOf(sectionKeys[sectionKeys.length - 1])
     const brokenRows = rows.map((row) => (row === first ? last : row === last ? first : row))
     let brokenCursor = -1
     let rejected = false
-    for (const [position, key] of sectionKeys.entries()) {
-      const expected = `${position + 1}. ${lang.label(key)}`
-      const at = brokenRows.findIndex((row, index) => index > brokenCursor && row === expected)
+    for (const key of sectionKeys) {
+      const at = brokenRows.findIndex((row, index) => index > brokenCursor && row === headerOf(key))
       if (!(at > brokenCursor)) { rejected = true; break }
       brokenCursor = at
     }
@@ -396,47 +444,49 @@ const inventoryEn = await telegram.telegramCommandReply({}, '/inventory', Date.n
 const inventoryKm = await telegram.telegramCommandReply({}, '/inventory', Date.now(), 'km')
 check("'/stock' en mode keeps the figures and drops the Khmer", !khmerText(stockEn) && /Products: 12$/m.test(stockEn))
 check("'/stock' km mode keeps the figures and drops the English section header letters",
-  khmerText(stockKm) && stockKm.includes(': 12') && !/^\d+\.\s[A-Za-z]/m.test(stockKm))
+  khmerText(stockKm) && stockKm.includes(': 12') && stockKm.split('\n').includes('=====ស្តុក=====')
+  && !stockKm.split('\n').filter(isSection).some((row) => /[A-Za-z]/.test(row)), stockKm)
 check("'/inventory' en mode keeps every figure (15, 124, 8, 6)",
   !khmerText(inventoryEn) && ['15', '124', '8', '6'].every((n) => inventoryEn.includes(n)))
 check("'/inventory' km mode keeps every figure too", ['15', '124', '8', '6'].every((n) => inventoryKm.includes(n)))
 check('all three /inventory renderings carry the same number of sections',
-  [inventoryMsg, inventoryEn, inventoryKm].every((text) => text.split('\n').filter((row) => /^\d+\.\s/.test(row)).length === 2))
+  [inventoryMsg, inventoryEn, inventoryKm].every((text) => text.split('\n').filter(isSection).length === 2))
 
-// RETIRED: the "bare divider" shape (a RULE with no numbered header right
-// after it) is already disproven by the divider loop above for every RULE in
-// both replies; these pin the two sentences an earlier redesign (Sep 7 2026)
+// RETIRED: the "bare divider" shape (a RULE with nothing but a header after
+// it) cannot come back: no RULE is drawn in either reply at all (checked
+// above). These pin the two sentences an earlier redesign (Sep 7 2026)
 // already retired from this pair of replies, so a later change cannot bring
 // them back.
 for (const [name, msg] of [['/stock', stockMsg], ['/inventory', inventoryMsg]]) {
   check(`${name}: the retired pointer sentence stays out`, !msg.includes('▸'))
   check(`${name}: the retired combined health line stays out`, !/Low stock:.*Out of stock:/.test(msg))
 }
-console.log('PASS /stock and /inventory: numbered sections, a real LIMIT 12, strict order with a positive control, all three language modes')
+console.log('PASS /stock and /inventory: `=====` sections, a real LIMIT 12, strict order with a positive control, all three language modes')
 
 // ---- a quiet day still prints every section ---------------------------------
 //
 // Owner's rule for these reports: an empty section shows N/A, it is never
 // omitted. formatDaySummary used to `return` when a section had no rows, so a
 // day with no expenses, no stock movement and no cashier activity produced a
-// /report that stopped after section 2 -- indistinguishable, on a phone, from
-// a message that had been truncated.
+// /report that stopped after its second section -- indistinguishable, on a
+// phone, from a message that had been truncated.
 const quiet = telegram.formatDaySummary(
   { date: '2026-09-23', sales: { count: 0, cancelled: 0, usd: 0, profitUsd: 0, creditUsd: 0 }, fees: { usd: 0, khr: 0 }, stockIn: { count: 0, quantity: 0 } },
   [],
 )
 const quietLines = quiet.split('\n')
-const quietTitles = quietLines.filter((line) => /^\d+\. /.test(line))
-check(`a quiet day prints all five numbered sections, not the two it used to (${quietTitles.length})`,
+const quietTitles = quietLines.filter(isSection)
+check(`a quiet day prints all five sections, not the two it used to (${quietTitles.length})`,
   quietTitles.length === 5)
-check('the numbering has no gap',
-  quietTitles.every((line, index) => line.startsWith(`${index + 1}. `)))
+check('in the report\'s own order, with no gap',
+  quietTitles.join(' | ') === DAY_SECTIONS.map(headerOf).join(' | '), quiet)
 check('every section with nothing in it says N/A',
   quietLines.filter((line) => line === `${lang.ROW_BULLET}N/A`).length === 3)
 check('and none of them is left as the retired bare em dash',
   !quietLines.includes('—'))
 // POSITIVE CONTROL: a section that HAS rows must not be given an N/A as well.
-const salesBlock = quietLines.slice(quietLines.indexOf(quietTitles[0]) + 1, quietLines.indexOf(quietTitles[1]) - 1)
+// It runs from its header to the next one: nothing is drawn between them.
+const salesBlock = quietLines.slice(quietLines.indexOf(quietTitles[0]) + 1, quietLines.indexOf(quietTitles[1]))
 check(`POSITIVE CONTROL: the Sales section still prints its own two rows (${salesBlock.length})`,
   salesBlock.length === 2 && salesBlock.every((line) => line.startsWith(lang.ROW_BULLET) && !line.endsWith('N/A')))
 // ---- one implementation, not a lookalike ------------------------------------

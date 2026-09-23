@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -414,26 +414,28 @@ function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCo
 // for other telegram report enough spacing and separations that it feels easy
 // to read and clean, using dividers, numbered list, etc... title etc..."
 //
-// Every report is now: a TITLE line, then numbered, titled sections separated
-// by the one RULE this file draws. A section is `N. <bilingual title>` and
-// then one figure per line, or bullets when it is a list. Nothing else
-// changed: the figures, their sources and the zero-line rules are untouched.
+// Every report is: a TITLE line, then titled sections. Inside a section every
+// row opens with `·` -- one figure per line, or one list entry per line --
+// and only the items under a /sales receipt stay numbered.
 //
-// The SHIFT REPORT dropped the rule and the number on Sep 23 2026: each of
-// its sections opens with ONE line, the name between two dashed edges
-// (SHIFT_SECTION_EDGE), and every row under it is a `·` row. The owner's
-// words are with formatShiftReport below.
+// Sep 23 2026 the drawn rule and the `N.` number that opened each section
+// went. A section now opens with ONE line, its name between two edges and
+// nothing drawn above it: `=====Sales / ការលក់=====` in the day summary,
+// /sales, /fees, /stock and /inventory (REPORT_SECTION_EDGE; owner: "for
+// telegram reports, instead of plain line ------we can do =====section
+// name===== instead."), and `-----Invoices / វិក្កយបត្រ-----` in the shift
+// report (SHIFT_SECTION_EDGE; the owner's words are with formatShiftReport
+// below). RULE is left for what separates WHOLE blocks: the shift reports a
+// `/shift` answer joins, and the command reference.
 
-/** `1. Invoices / វិក្កយបត្រ` -- the divider and the numbered section title. */
-const sectionTitle = (index: number, key: TelegramLabelKey): string[] => [RULE, `${index}. ${label(key)}`]
-
-/** `-----Invoices / វិក្កយបត្រ-----` -- a section's name between its two edges,
- *  on one line, with nothing drawn above it. */
+/** `=====Sales / ការលក់=====` -- a section's name between its two edges, on
+ *  one line, with nothing drawn above it. The edge names the family:
+ *  REPORT_SECTION_EDGE or SHIFT_SECTION_EDGE. */
 const sectionHeader = (key: TelegramLabelKey, edge: string): string => `${edge}${label(key)}${edge}`
 
-/** A section the shop has no rows for still prints, so the numbering and the
- *  shape of the message never move (the owner's reference shows every
- *  section, empty ones included).
+/** A section the shop has no rows for still prints, so the shape of the
+ *  message never moves (the owner's reference shows every section, empty
+ *  ones included).
  *
  *  `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced read
  *  as a rendering accident -- a row whose value failed to print -- rather than
@@ -469,11 +471,16 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
  * SAME SHAPE AS THE SHIFT REPORT, deliberately (owner, Sep 6 2026: "arrange
  * all reports more concise with breakdowns clearly", and Sep 21 2026: "same
  * for other telegram report ... using dividers, numbered list, etc... title
- * etc..."): a title line, then numbered titled sections -- Sales, Invoices,
- * Expenses, Stock, Cashiers -- one figure per line, a zero-value line simply
- * not printed, and not one explanatory sentence. Two people reading the
- * evening `/report` and tonight's shift message see the same section titles
- * carrying the same figures in the same order.
+ * etc..."): a title line, then titled sections -- Sales, Invoices, Expenses,
+ * Stock, Cashiers -- one figure per line, a zero-value line simply not
+ * printed, and not one explanatory sentence. Two people reading the evening
+ * `/report` and tonight's shift message see the same section titles carrying
+ * the same figures in the same order.
+ *
+ * Each section opens with `=====Sales / ការលក់=====` since Sep 23 2026
+ * (owner: "for telegram reports, instead of plain line ------we can do
+ * =====section name===== instead."): no rule above it and no number in
+ * front, and the cashier list is `·` rows like every figure.
  *
  * Credit is a POSITIVE "Credit $n" line, never a negative and never
  * subtracted from the totals above it: it is unpaid revenue that already
@@ -488,28 +495,24 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
 export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
-  // Sections are numbered as they APPEAR: a category the owner switched off
-  // takes its section out entirely rather than leaving a gap in the numbering.
-  let index = 0
-  // A section with no rows still prints its numbered heading and says N/A,
-  // the rule every other report already follows (the shift report and
-  // /fees). It used to return here, so a quiet day's /report stopped after
-  // section 2 and the reader had to work out whether the shop had no
-  // expenses or whether the message had been cut short. A category the
-  // owner switched OFF is still removed entirely -- that gate is the
-  // `if (showSales)`-style check at each call site, not this emptiness.
+  // A section with no rows still prints its heading and says N/A, the rule
+  // every other report already follows (the shift report and /fees). It used
+  // to return here, so a quiet day's /report stopped after its second section
+  // and the reader had to work out whether the shop had no expenses or
+  // whether the message had been cut short. A category the owner switched
+  // OFF is still removed entirely -- that gate is the `if (showSales)`-style
+  // check at each call site, not this emptiness.
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     // Switched OFF is not the same fact as empty, and only the call site
     // knows which one it has: a category the owner turned off leaves no
-    // heading and no number, while a category that is on and simply had
-    // nothing today says N/A under its heading.
+    // heading, while a category that is on and simply had nothing today says
+    // N/A under its heading.
     if (!enabled) return
-    index += 1
-    lines.push(...sectionTitle(index, key), ...(rows.length ? rows : [EMPTY_SECTION]))
+    lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
 
   // Expenses is computed first because the Sales section needs one figure out
-  // of it: the courier money. See the section-3 comment below.
+  // of it: the courier money. See the Expenses comment below.
   const showExpenses = categories?.fees !== false
   const expenses = expenseTotals({
     otherUsd: showExpenses ? stats.fees?.usd : 0,
@@ -518,7 +521,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
   })
 
-  // 1. Sales -- Revenue and Profit print even at $0.00: a day that took
+  // Sales -- Revenue and Profit print even at $0.00: a day that took
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
@@ -539,13 +542,13 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     if (stats.sales?.removalLossUsd) sales.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
     if (stats.sales?.refundUsd) sales.push(labeled('refunds', usd(stats.sales.refundUsd)))
     section('sales', sales)
-    // 2. Invoices -- the counts, on their own. They are the breakdown of the
+    // Invoices -- the counts, on their own. They are the breakdown of the
     // Revenue above (refunds subtracted, voids contributing nothing), never a
     // second total.
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
   }
 
-  // 3. Expenses -- the SAME sum the shift report prints, through the same
+  // Expenses -- the SAME sum the shift report prints, through the same
   // function: the fees of the day plus the courier money actually paid out.
   const expenseRows: string[] = []
   // The two component lines print only when the total really has two parts.
@@ -555,25 +558,25 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
   }
   if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  // OFF means gone -- no heading, no number and no `N/A` placeholder. It used
-  // to stay alive whenever Sales was on, so a shop that switched Expenses off
-  // was still sent `3. Expenses / ចំណាយ` with `· N/A` under it on every quiet
+  // OFF means gone -- no heading and no `N/A` placeholder. It used to stay
+  // alive whenever Sales was on, so a shop that switched Expenses off was
+  // still sent the Expenses heading with `· N/A` under it on every quiet
   // day: a section they had asked not to see, saying nothing. `N/A` is for a
   // section that is ON and had nothing today; that distinction is the whole
   // point of the `enabled` argument.
   section('expenses', expenseRows, showExpenses)
 
-  // 4. Stock
+  // Stock
   const stock: string[] = []
   if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
   if (categories?.stock_out !== false && (stats.stockOut?.count || stats.stockOut?.quantity)) stock.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
   section('stock', stock, categories?.stock_in !== false || categories?.stock_out !== false)
 
-  // 5. Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
+  // Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
   // is dropped here and only here: the section is a list of cashiers, so the
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
-  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`• ${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
+  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
   return lines.join('\n')
 }
 
@@ -604,17 +607,17 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
   const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
   const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
   // The same sectioned shape as every other report (Sep 21 2026): the money,
-  // the count, then the list -- each under its own numbered title.
+  // the count, then the list -- each under its own `=====` header.
   return withLanguage(language, () => {
     const lines = [
       reportTitle('🛍️', 'Sales', 'ការលក់', date),
-      ...sectionTitle(1, 'sales'), labeled('revenue', usd(stats.sales?.usd)),
-      ...sectionTitle(2, 'invoices'), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
-      ...sectionTitle(3, 'latestReceipts'),
+      sectionHeader('sales', REPORT_SECTION_EDGE), labeled('revenue', usd(stats.sales?.usd)),
+      sectionHeader('invoices', REPORT_SECTION_EDGE), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
+      sectionHeader('latestReceipts', REPORT_SECTION_EDGE),
     ]
     const nest = '   '
     for (const sale of sales) {
-      lines.push(...telegramRowLines(`• ${sale.receipt_number || `#${sale.id}`}`, [
+      lines.push(...telegramRowLines(`${ROW_BULLET}${sale.receipt_number || `#${sale.id}`}`, [
         `· ${money(sale.total_usd, sale.total_khr)}`,
         `· ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`,
       ]))
@@ -650,11 +653,11 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
   return withLanguage(language, () => {
     const lines = [
       reportTitle('💸', 'Expenses', 'ចំណាយ', date),
-      ...sectionTitle(1, 'expenses'), labeled('total', money(stats.fees?.usd, stats.fees?.khr)),
-      ...sectionTitle(2, 'eachExpense'),
+      sectionHeader('expenses', REPORT_SECTION_EDGE), labeled('total', money(stats.fees?.usd, stats.fees?.khr)),
+      sectionHeader('eachExpense', REPORT_SECTION_EDGE),
     ]
     if (!fees.length) lines.push(EMPTY_SECTION)
-    for (const fee of fees) lines.push(...telegramRowLines(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
+    for (const fee of fees) lines.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
     return lines.join('\n')
   })
 }
@@ -672,13 +675,13 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     // The Sep 21 2026 sectioned shape (owner: "same for other telegram
     // report ... using dividers, numbered list, etc... title etc..."), the
     // one this reply and /inventory were the two replies left out of when the
-    // rest of the reports took it on. One section -- there is only one thing
-    // here to number -- carrying the count row it already printed, then the
-    // capped list, unchanged.
-    const lines = [title, ...sectionTitle(1, 'stock'), labeled('products', rows.length)]
+    // rest of the reports took it on. One section carrying the count row it
+    // already printed, then the capped list, unchanged; its header and its
+    // `·` rows are the Sep 23 2026 ones every report shares.
+    const lines = [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length)]
     for (const row of rows) {
       const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(...telegramRowLines(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
+      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
     }
     return lines.join('\n')
   })
@@ -704,15 +707,16 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
   // nothing low simply has no second section, the same way every other report
   // drops a zero line.
   //
-  // Sep 22 2026: both sections are now numbered like every other report,
-  // reusing the SAME 'products'/'stock' section titles the day summary and
-  // /stock draw from -- no new label, no new divider.
+  // Sep 22 2026: both sections are titled like every other report, reusing
+  // the SAME 'products'/'stock' section titles the day summary and /stock
+  // draw from -- no new label. Since Sep 23 2026 each opens with its
+  // `=====` header, like theirs.
   const lowStock = Number(row?.low_stock || 0)
   const outOfStock = Number(row?.out_of_stock || 0)
   return withLanguage(language, () => {
     const lines = [
       reportTitle('🏷️', 'Inventory', 'ស្តុក'),
-      ...sectionTitle(1, 'products'),
+      sectionHeader('products', REPORT_SECTION_EDGE),
       labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
       labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
     ]
@@ -721,8 +725,8 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
     if (outOfStock) health.push(labeled('outOfStock', outOfStock))
     // Prints even when the shop has neither: "no low or out-of-stock
     // products" is the answer to the question /inventory was asked, and a
-    // missing section 2 reads as a truncated message instead.
-    lines.push(...sectionTitle(2, 'stock'), ...(health.length ? health : [EMPTY_SECTION]))
+    // missing Stock section reads as a truncated message instead.
+    lines.push(sectionHeader('stock', REPORT_SECTION_EDGE), ...(health.length ? health : [EMPTY_SECTION]))
     return lines.join('\n')
   })
 }
