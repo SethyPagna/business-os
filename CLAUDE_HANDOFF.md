@@ -80,7 +80,10 @@ on origin; the latest code commit and deploy record are in progress.md.
   POS hotfix deployed (Paid) 22 Sep 14:11Z from `2fd4adf7`: Worker `5d3f6aa6`, live revision `2fd4adf73a77`,
   frontend hash `2529a3df70a96b92`; Chrome-Translate removeChild crash + non-durable committed close (see progress.md).
   Checkpoint 2 deployed (Paid) 22 Sep 21:23Z from `ef0489c1`: Worker `61a1afaa`, live revision `ef0489c12856`,
-  frontend hash `722582f2f6b38731`; Reports readability + no-ellipsis class, frontend only (see progress.md). Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
+  frontend hash `722582f2f6b38731`; Reports readability + no-ellipsis class, frontend only (see progress.md).
+  Checkpoint 3 PUSHED, NOT DEPLOYED 23 Sep 02:10Z as `c96d7480` (deploy blocked: wrangler OAuth refresh bot-challenged from this egress; deploy `c96d7480` unchanged once the owner fixes egress/login):
+  frontend hash `36dcfbfbed0de256`; SW stale-shell root cause + redirect/timeout holes fixed (BUSINESS-OS-4), Telegram layout/status, no-ellipsis follow-up (see progress.md).
+  Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,
   `test-roles-delete-conflict-body-pure.cjs`, `test-products-update-conflict-current-pure.cjs`.
   New rule: `.claude/skills/blast-radius/SKILL.md` (map and verify the surroundings of
   every change; one symptom = one class). Gates green on `4c163015`.
