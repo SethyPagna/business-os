@@ -35,21 +35,36 @@ function row(db, table, id) {
   return db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get([id])
 }
 
-function plan(db, table, keepId, mergeId, operationId) {
+// The route reads every storefront account linked to the records before it
+// plans; the batch refuses to run if that set changed.
+function portalAccountsOf(db, table, ids) {
+  if (table !== 'customers') return []
+  return db.prepare(`SELECT id, contact_id, membership_id, name FROM portal_accounts WHERE contact_id IN (${ids.map(() => '?').join(', ')}) ORDER BY id`).all(ids)
+}
+
+function plan(db, table, keepId, mergeId, operationId, extra = {}) {
+  const mergeIds = Array.isArray(mergeId) ? mergeId : [mergeId]
   const keeper = row(db, table, keepId)
-  const merged = row(db, table, mergeId)
+  const members = mergeIds.map((id) => row(db, table, id))
   assert.ok(keeper, `${table} keeper fixture ${keepId} is missing`)
-  assert.ok(merged, `${table} merged fixture ${mergeId} is missing`)
+  members.forEach((member, index) => assert.ok(member, `${table} merged fixture ${mergeIds[index]} is missing`))
   return subject.buildContactMergePlan({
     table,
     entity: CONFIG[table].entity,
     editableColumns: CONFIG[table].columns,
     keeper,
-    merged,
+    members,
+    portalAccounts: portalAccountsOf(db, table, [keepId, ...mergeIds]),
     hasCustomerReceivables: table === 'customers',
     hasSupplierInvoices: table === 'suppliers',
     audit: { operationId, userId: 7, userName: 'operator', deviceName: 'Browser', deviceTz: 'Asia/Phnom_Penh' },
+    ...extra,
   })
+}
+
+// lib/db.ts binds every @name occurrence as its own positional slot.
+function bindSlots(statement) {
+  return (statement.sql.match(/@\w+/g) || []).length
 }
 
 let passed = 0
@@ -89,6 +104,7 @@ async function successfulMerges() {
     assert.ok(built.statements.length <= subject.CONTACT_MERGE_MAX_STATEMENTS)
     for (const statement of built.statements) {
       assert.ok(Object.keys(statement.params || {}).length <= subject.CONTACT_MERGE_MAX_BINDS_PER_STATEMENT)
+      assert.ok(bindSlots(statement) <= subject.CONTACT_MERGE_MAX_BINDS_PER_STATEMENT)
     }
     await db.batch(built.statements)
   }
@@ -161,24 +177,85 @@ async function whitespaceMembershipPreservesLoserIdentity() {
   assert.equal(JSON.parse(audit.details).operationId, 'whitespace-membership-contact-merge')
 }
 
+// T23 (Resolve grid): the kept record plus two merged ones is ONE statement
+// list -- a snapshot guard for each record, every link of both merged records
+// moved, both deleted, and one audit row carrying the before-state and the
+// ids of every moved row.
+async function threeRecordsOneStatementList() {
+  const db = openDb(loadAll())
+  const run = (sql, params) => db.prepare(sql).run(params)
+  run("INSERT INTO customers(id,name,phone,notes,membership_number) VALUES(1,'Sokha',NULL,'VIP',NULL),(2,'Sokha Chan','012 222 222',NULL,'LC-00002'),(3,'sokha','012 333 333','Paid cash','LC-00003')")
+  run("INSERT INTO sales(id,customer_id,customer_name) VALUES(1,2,'Sokha Chan'),(2,3,'sokha'),(3,1,'Sokha')")
+  run("INSERT INTO returns(id,customer_id,customer_name,return_scope) VALUES(1,3,'sokha','customer')")
+  run("INSERT INTO customer_share_submissions(id,customer_id,customer_name) VALUES(1,2,'Sokha Chan')")
+  run('INSERT INTO loyalty_point_adjustments(id,customer_id,points) VALUES(1,2,5),(2,3,7)')
+  run("INSERT INTO customer_receivables(id,legacy_id,customer_id,customer_name,invoice_date,status,source_file,source_row) VALUES(1,1,3,'sokha','2026-01-01','outstanding','ar.csv',1),(2,2,NULL,'Sokha Chan','2026-01-02','outstanding','ar.csv',2)")
+
+  const built = plan(db, 'customers', 1, [2, 3], 't23-three-records', { membershipSourceId: 3, choices: { phone: { source_id: 2 } } })
+  const guards = built.statements.filter((statement) => /FROM customers AS r/.test(statement.sql))
+  assert.deepEqual(guards.map((statement) => statement.params.id), [1, 2, 3], 'one snapshot guard per record')
+  assert.deepEqual(built.statements.filter((statement) => /^DELETE FROM customers/.test(statement.sql)).map((statement) => statement.params.id), [2, 3])
+  assert.equal(built.statements.filter((statement) => /INSERT INTO audit_logs/.test(statement.sql)).length, 1)
+  assert.deepEqual(built.mergedIds, [2, 3])
+  for (const statement of built.statements) assert.ok(bindSlots(statement) <= subject.CONTACT_MERGE_MAX_BINDS_PER_STATEMENT)
+  await db.batch(built.statements)
+
+  assert.equal(row(db, 'customers', 2), undefined)
+  assert.equal(row(db, 'customers', 3), undefined)
+  const keeper = row(db, 'customers', 1)
+  assert.equal(keeper.membership_number, 'LC-00003', 'the chosen record supplies the number')
+  assert.equal(keeper.notes, 'VIP\nMerged membership: LC-00002', 'the other number is appended to the notes')
+  assert.equal(keeper.phone, '012 222 222', 'the chosen phone applies')
+  assert.equal(keeper.phone_normalized, '012222222', 'the storefront phone key follows the chosen phone')
+  assert.deepEqual(db.prepare('SELECT id, customer_id, customer_name, customer_phone FROM sales ORDER BY id').all().map((sale) => ({ ...sale })), [
+    { id: 1, customer_id: 1, customer_name: 'Sokha', customer_phone: '012 222 222' },
+    { id: 2, customer_id: 1, customer_name: 'Sokha', customer_phone: '012 222 222' },
+    { id: 3, customer_id: 1, customer_name: 'Sokha', customer_phone: '012 222 222' },
+  ])
+  assert.equal(db.prepare('SELECT customer_id FROM returns WHERE id=1').get().customer_id, 1)
+  assert.equal(db.prepare('SELECT customer_id FROM customer_share_submissions WHERE id=1').get().customer_id, 1)
+  assert.deepEqual(db.prepare('SELECT customer_id FROM loyalty_point_adjustments ORDER BY id').all().map((adjustment) => adjustment.customer_id), [1, 1])
+  assert.deepEqual(db.prepare('SELECT customer_id, customer_name FROM customer_receivables ORDER BY id').all().map((receivable) => ({ ...receivable })), [
+    { customer_id: 1, customer_name: 'Sokha' },
+    { customer_id: null, customer_name: 'Sokha' },
+  ])
+  const audits = db.prepare("SELECT old_value, new_value, details FROM audit_logs WHERE action='merge'").all()
+  assert.equal(audits.length, 1)
+  const before = JSON.parse(audits[0].old_value)
+  assert.deepEqual(before.members.map((member) => member.membership_number), ['LC-00002', 'LC-00003'], 'the audit keeps every merged record as it was')
+  assert.deepEqual(before.moved.sales, [[1, 2], [2, 3]], 'the audit names every moved sale and its former owner')
+  assert.deepEqual(before.moved.loyalty_point_adjustments, [[1, 2], [2, 3]])
+  assert.deepEqual(before.moved.customer_receivables_by_name, [[2, 'Sokha Chan']])
+  const after = JSON.parse(audits[0].new_value)
+  assert.deepEqual(after.merged_ids, [2, 3])
+  assert.deepEqual(after.membership_to_notes, ['LC-00002'])
+  assert.deepEqual(JSON.parse(audits[0].details).mergedIds, [2, 3])
+}
+
 async function main() {
   await check('all three contact merges commit backfill, every repoint, delete and audit atomically within bounds', successfulMerges)
   await check('a stale contact identity fails the in-batch CAS without any partial write', staleSnapshotRollsBack)
   await check('an audit write failure rolls back backfill, repoints and delete', auditFailureRollsBack)
   await check('an all-whitespace keeper membership preserves the loser exact identity', whitespaceMembershipPreservesLoserIdentity)
-  await check('distinct nonblank membership identities are refused byte-exact, including legacy case variants', async () => {
-    assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: 'LC-00001' }, { membership_number: 'LC-00002' }), true)
-    assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: 'LC-00001' }, { membership_number: 'lc-00001' }), true)
-    assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: ' LC-00001 ' }, { membership_number: 'LC-00001' }), true)
-    assert.equal(subject.contactMergeHasDistinctMemberships({ membership_number: 'LC-00001' }, { membership_number: 'LC-00001' }), false)
-    assert.throws(() => subject.buildContactMergePlan({
+  await check('distinct nonblank membership numbers need a chosen record, compared byte-exact including legacy case variants', async () => {
+    const attempt = (keeperNumber, mergedNumber, extra = {}) => () => subject.buildContactMergePlan({
       table: 'customers', entity: 'customer', editableColumns: CONFIG.customers.columns,
-      keeper: { id: 1, name: 'Same', membership_number: 'LC-00001' },
-      merged: { id: 2, name: 'Same', membership_number: 'LEGACY-A' },
+      keeper: { id: 1, name: 'Same', membership_number: keeperNumber },
+      members: [{ id: 2, name: 'Same', membership_number: mergedNumber }],
       hasCustomerReceivables: false, hasSupplierInvoices: false,
       audit: { operationId: 'blocked', userId: 7, userName: 'operator', deviceName: null, deviceTz: null },
-    }), /contact_merge_membership_lineage_required/)
+      ...extra,
+    })
+    for (const [keeperNumber, mergedNumber] of [['LC-00001', 'LC-00002'], ['LC-00001', 'lc-00001'], [' LC-00001 ', 'LC-00001'], ['LC-00001', 'LEGACY-A']]) {
+      assert.throws(attempt(keeperNumber, mergedNumber), /contact_merge_membership_lineage_required/, `${keeperNumber} vs ${mergedNumber}`)
+    }
+    assert.doesNotThrow(attempt('LC-00001', 'LC-00001'))
+    assert.throws(attempt('LC-00001', 'LEGACY-A', { membershipSourceId: 9 }), /contact_merge_membership_lineage_required/, 'a record outside the merge cannot supply the number')
+    const chosen = attempt('LC-00001', 'LEGACY-A', { membershipSourceId: 2 })()
+    assert.equal(chosen.finalKeeper.membership_number, 'LEGACY-A', 'the chosen record supplies the surviving number')
+    assert.equal(chosen.finalKeeper.notes, 'Merged membership: LC-00001', 'the other number is kept in the notes, never dropped')
   })
+  await check('T23: three records plan to one statement list with a guard per record, every link moved and one audit row', threeRecordsOneStatementList)
 
   const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
   await check('the route re-proves duplicate identity and executes only the planned atomic write batch', async () => {

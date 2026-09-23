@@ -207,7 +207,7 @@ function applyHelper(sqlite) {
           entity: 'supplier',
           editableColumns: SUPPLIER_COLUMNS,
           keeper,
-          merged,
+          members: [merged],
           hasCustomerReceivables: false,
           hasSupplierInvoices: true,
           audit: { operationId: `test-${loser.id}`, userId: null, userName: 'test', deviceName: null, deviceTz: null },
