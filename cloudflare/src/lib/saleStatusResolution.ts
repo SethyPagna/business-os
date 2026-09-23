@@ -24,12 +24,15 @@
 // which gives the owner's sentence back unchanged for the counter sale, and
 // keeps the delivery queue intact for the rest.
 //
-// COVERAGE IS NOT RE-DERIVED HERE. paymentCoversSaleTotalUnits below is THE
-// coverage formula, and lib/paymentSettlement.ts's `insufficient_payment`
-// check calls it rather than keeping the inline copy it used to carry. One
-// formula, two callers: a sale that settlement calls covered is a sale this
-// resolver calls paid, and no drift is possible because there is nothing to
-// drift from.
+// COVERAGE IS NOT RE-DERIVED ANYWHERE ELSE. paymentCoversSaleTotalUnits below
+// is THE coverage formula and saleOutstandingUsd is the same comparison read
+// as an amount. The POS checkout gate and status picker, POST /sales,
+// lib/paymentSettlement.ts's `insufficient_payment` check, this resolver,
+// statusChangeNeedsPayment, and every "outstanding / balance due" figure (the
+// receipt, the sale detail, the settlement editor, the Worker's edit
+// responses) call them rather than keeping inline copies. A sale that one
+// surface calls paid is a sale every surface calls paid, and no drift is
+// possible because there is nothing to drift from.
 //
 // NORMALISING IS CREATION ONLY, AND SILENT. POST /sales normalises without a
 // 4xx -- a stale or offline client must not be told its already-rung sale is
@@ -50,17 +53,25 @@
 // picker all ask it. A settlement in the same request is the other way in,
 // and it has its own coverage check (lib/paymentSettlement.ts).
 //
-// THE CREATION GATE HAS A HALF-CENT BAND, AND ONLY THE CREATION GATE.
-// "May this sale be BORN with a paid status" is tenderAllowsPaidStatus below:
-// covered to within half a US cent. That is the boundary the POS has always
-// enforced (its gate refused only a shortfall beyond $0.005), a shortfall
-// under half a cent shows as $0.00 at two decimals so the cashier cannot see
-// it, and POS clients already deployed -- including sales queued offline --
-// were built on that band and must still land instead of replaying into a
-// 400. Both the POS and POST /sales ask the same function, in exact integer
-// units, so the two can never disagree. Coverage itself stays EXACT:
-// paymentCoversSaleTotal, the Not-Paid resolver, statusChangeNeedsPayment and
-// settlement do not take the band.
+// ONE DEFINITION OF PAID: COVERED TO WITHIN HALF A US CENT. A tender covers a
+// sale when it falls short by at most PAID_STATUS_SHORTFALL_TOLERANCE_UNITS
+// ($0.005), compared in exact integer units, never floats. Two facts make
+// that the real boundary rather than a rounding convenience: a shortfall under
+// half a cent prints as $0.00, so nobody at the counter can see it, and riel
+// has no coin below 100, so nobody could hand it over either. 39,400 riel for
+// a $9.61 sale at 4,100 (39,401 riel) is a normal full payment.
+//
+// The band is the ONLY coverage answer, everywhere. It used to apply to
+// creation alone, and that made two definitions of "paid": the owner's tender
+// was recorded Completed, then printed a red "Balance due $0.00 / 1 riel",
+// pre-filled $0.01 to settle, could still be recorded Not Paid, and could not
+// be settled or completed with the same money. A paid sale is Completed and an
+// unpaid one is Not Paid, so every question -- may it be born paid, does
+// Not Paid resolve to paid, may it move to a paid status, does a settlement
+// cover it, what is still owed -- asks the same comparison. The POS clients
+// already deployed, including sales queued offline, were built on this band,
+// so their sales still land. Refunds, change and overpayment are not coverage
+// questions and do not take the band.
 //
 // Neither half moves a sale by itself -- the resolver only picks the status a
 // sale is BORN with, and the guard only refuses -- so a pending
@@ -112,82 +123,75 @@ function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVersion: n
 }
 
 /**
- * Does the tender cover the sale total? THE coverage formula.
- *
- * Exact integer comparison, never floating point: a mixed USD+KHR tender that
- * covers the balance by a single riel must not be rounded into a shortfall
- * (or a shortfall rounded into coverage, which would label a debt "Completed"
- * and lose the shop money quietly).
- *
- * Takes bigint UNITS so a caller that summed tender rows exactly can hand its
- * exact sum straight in without a round trip through a JS number.
- */
-export function paymentCoversSaleTotalUnits(input: SaleCoverageInput & {
-  paidUsdUnits: bigint
-  paidKhrUnits: bigint
-}): boolean {
-  return tenderCoversWithin(input, 0n)
-}
-
-/**
- * The one integer comparison behind both answers: does the tender reach the
- * total less `shortfallUnits`? Cross-multiplied by the rate ratio so no
- * division (and no rounding) ever happens.
- */
-function tenderCoversWithin(input: SaleCoverageInput & {
-  paidUsdUnits: bigint
-  paidKhrUnits: bigint
-}, shortfallUnits: bigint): boolean {
-  const { numerator, denominator } = rateRatio(input.exchangeRate, input.moneyPrecisionVersion)
-  const totalUsdUnits = financialCalculationUnits(input.totalUsd)
-  return input.paidUsdUnits * numerator + input.paidKhrUnits * denominator >= (totalUsdUnits - shortfallUnits) * numerator
-}
-
-/** Number-taking convenience over paymentCoversSaleTotalUnits. Same formula. */
-export function paymentCoversSaleTotal(input: SaleCoverageInput & {
-  paidUsd: FinancialDecimalInput
-  paidKhr: FinancialDecimalInput
-}): boolean {
-  return paymentCoversSaleTotalUnits({
-    ...input,
-    paidUsdUnits: financialCalculationUnits(input.paidUsd),
-    paidKhrUnits: financialCalculationUnits(input.paidKhr),
-  })
-}
-
-/**
  * Half a US cent, in financial calculation units (four decimals): the most a
- * tender may fall short and still record a sale as Completed or Awaiting
- * Delivery at creation. See tenderAllowsPaidStatus.
+ * tender may fall short of the total and still cover it. See the header --
+ * a shortfall under half a cent prints as $0.00 and riel has no coin that
+ * could close it.
  */
 export const PAID_STATUS_SHORTFALL_TOLERANCE_UNITS = 50n
 
+type UnitsTender = SaleCoverageInput & { paidUsdUnits: bigint; paidKhrUnits: bigint }
+type AmountTender = SaleCoverageInput & { paidUsd: FinancialDecimalInput; paidKhr: FinancialDecimalInput }
+
 /**
- * May a NEW sale be recorded with a paid status (completed /
- * awaiting_delivery) on this tender? THE creation boundary, shared by the
- * POS checkout gate and POST /sales so they cannot disagree.
- *
- * Covered within half a cent (shortfall <= $0.005), compared exactly in
- * integer units: the POS has always accepted that band (a shortfall under
- * half a cent reads $0.00 at two decimals -- e.g. 39,400 riel for $9.61 at
- * 4,100), and sales already queued offline by deployed clients were built on
- * it, so the Worker must accept it too or those sales replay into a
- * non-retryable 400 and are lost. One riel more short than the band is
- * refused.
- *
- * Throws on an unreadable amount or rate (a zero or negative rate included);
- * every caller treats a throw as "not allowed" -- money that cannot be read
- * is not evidence of a payment.
+ * The one integer expression behind both answers: the shortfall
+ * (total - tender, in calculation units) multiplied by the rate numerator, so
+ * no division and no rounding ever happens. Positive means short.
  */
-export function tenderAllowsPaidStatus(input: SaleCoverageInput & {
-  paidUsd: FinancialDecimalInput
-  paidKhr: FinancialDecimalInput
-}): boolean {
-  return tenderCoversWithin({
+function scaledShortfall(input: UnitsTender): { scaled: bigint; numerator: bigint } {
+  const { numerator, denominator } = rateRatio(input.exchangeRate, input.moneyPrecisionVersion)
+  const totalUsdUnits = financialCalculationUnits(input.totalUsd)
+  return { scaled: (totalUsdUnits - input.paidUsdUnits) * numerator - input.paidKhrUnits * denominator, numerator }
+}
+
+function unitsTender(input: AmountTender): UnitsTender {
+  return {
     ...input,
     paidUsdUnits: financialCalculationUnits(input.paidUsd),
     paidKhrUnits: financialCalculationUnits(input.paidKhr),
-  }, PAID_STATUS_SHORTFALL_TOLERANCE_UNITS)
+  }
+}
+
+/**
+ * Does the tender cover the sale total? THE coverage formula: short by at
+ * most half a cent.
+ *
+ * Exact integer comparison, never floating point: a mixed USD+KHR tender at
+ * the edge of the band must not be rounded across it in either direction (a
+ * shortfall rounded into coverage would label a debt "Completed" and lose the
+ * shop money quietly).
+ *
+ * Takes bigint UNITS so a caller that summed tender rows exactly can hand its
+ * exact sum straight in without a round trip through a JS number.
+ *
+ * Throws on an unreadable amount or rate (a zero or negative rate included);
+ * every caller treats a throw as "not covered" -- money that cannot be read
+ * is not evidence of a payment.
+ */
+export function paymentCoversSaleTotalUnits(input: UnitsTender): boolean {
+  const { scaled, numerator } = scaledShortfall(input)
+  return scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator
+}
+
+/** Number-taking convenience over paymentCoversSaleTotalUnits. Same formula. */
+export function paymentCoversSaleTotal(input: AmountTender): boolean {
+  return paymentCoversSaleTotalUnits(unitsTender(input))
+}
+
+/**
+ * What is still owed on the sale, in dollars at four decimals. The same
+ * comparison as paymentCoversSaleTotal, read as an amount: 0 when the tender
+ * covers the sale, otherwise the exact shortfall rounded half-up to the
+ * calculation unit -- which is always more than half a cent, so it never
+ * prints as $0.00. Overpayment is change, not a negative balance: it reads 0.
+ *
+ * Throws like paymentCoversSaleTotal; a caller that has to show a figure
+ * decides what an unreadable sale owes.
+ */
+export function saleOutstandingUsd(input: AmountTender): number {
+  const { scaled, numerator } = scaledShortfall(unitsTender(input))
+  if (scaled <= PAID_STATUS_SHORTFALL_TOLERANCE_UNITS * numerator) return 0
+  return Number((2n * scaled + numerator) / (2n * numerator)) / 10_000
 }
 
 export type PaidStatusResolutionInput = SaleCoverageInput & {
@@ -253,6 +257,33 @@ function statusWord(status: unknown): string {
 }
 
 /**
+ * A stored sale's money as the coverage formula takes it, read on the basis
+ * the sale was written with: V1 when it carries recorded V1 money (the same
+ * two columns the Worker's hasRecordedSaleMoneyPrecision and the frontend's
+ * saleUsesSavedExchangeRate ask), legacy otherwise -- at the sale's OWN
+ * booked rate, the rate its tender was taken at. Throws when unreadable.
+ */
+function recordedTender(sale: RecordedSaleMoney): AmountTender {
+  return {
+    paidUsd: storedAmount(sale.amount_paid_usd, true),
+    paidKhr: storedAmount(sale.amount_paid_khr, true),
+    totalUsd: storedAmount(sale.total_usd, false),
+    exchangeRate: storedAmount(sale.exchange_rate, false),
+    moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
+  }
+}
+
+/**
+ * What a STORED sale still owes: saleOutstandingUsd over recordedTender. The
+ * receipt, the sale detail and anything else printing a balance due read the
+ * row through this, so the figure and the paid statuses cannot disagree.
+ * Throws when the money cannot be read.
+ */
+export function recordedSaleOutstandingUsd(sale: RecordedSaleMoney): number {
+  return saleOutstandingUsd(recordedTender(sale))
+}
+
+/**
  * Would moving an EXISTING sale from `fromStatus` to `toStatus` assert a
  * payment the sale does not have?
  *
@@ -262,13 +293,10 @@ function statusWord(status: unknown): string {
  * (a delivered order, or a legacy row), cancelling, and the returns flow's
  * statuses are not this rule's business.
  *
- * The money is read on the basis the sale was written with -- V1 when it
- * carries recorded V1 money (the same two columns the Worker's
- * hasRecordedSaleMoneyPrecision and the frontend's saleUsesSavedExchangeRate
- * ask), legacy otherwise -- at the sale's OWN booked rate, the rate its
- * tender was taken at. Unreadable money counts as NOT covered, the same
- * stance as resolvePaidSaleStatus: money that cannot be read is not evidence
- * of a payment.
+ * The money is read by recordedTender, on the basis the sale was written
+ * with. Unreadable money counts as NOT covered, the same stance as
+ * resolvePaidSaleStatus: money that cannot be read is not evidence of a
+ * payment.
  *
  * A missing status is a legacy completed sale, the reading both packages
  * give a NULL `sale_status` -- and an undo can put one back.
@@ -277,13 +305,7 @@ export function statusChangeNeedsPayment(fromStatus: unknown, toStatus: unknown,
   if (statusWord(fromStatus) !== NOT_PAID_STATUS) return false
   if (!PAID_SALE_STATUSES.includes(statusWord(toStatus))) return false
   try {
-    return !paymentCoversSaleTotal({
-      paidUsd: storedAmount(sale.amount_paid_usd, true),
-      paidKhr: storedAmount(sale.amount_paid_khr, true),
-      totalUsd: storedAmount(sale.total_usd, false),
-      exchangeRate: storedAmount(sale.exchange_rate, false),
-      moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
-    })
+    return !paymentCoversSaleTotal(recordedTender(sale))
   } catch {
     return true
   }

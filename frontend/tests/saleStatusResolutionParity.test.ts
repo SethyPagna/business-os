@@ -15,11 +15,21 @@
 //   * fully paid + awaiting_payment  -> old: 'awaiting_payment'  new: 'completed'
 //   * fully paid + awaiting_payment + delivery
 //                                    -> old: 'awaiting_payment'  new: 'awaiting_delivery'
-// and so the boundary cannot be moved without a red:
-//   * short by ONE riel              -> stays 'awaiting_payment' (a debt is a debt)
-//   * covered by exactly one riel of KHR against a USD total -> resolves
-// A float implementation passes the first two and fails the last two, which
-// is the whole reason the kernel compares exact integers.
+// and so the boundary cannot be moved without a red. Paid means covered to
+// within half a cent (PAID_STATUS_SHORTFALL_TOLERANCE_UNITS), everywhere:
+//   * short by exactly half a cent, or by one riel -> resolves (it prints as
+//     $0.00 and riel has no coin to close it)
+//   * short by $0.0051, one unit past the band -> stays 'awaiting_payment'
+//     (a debt is a debt)
+// A float implementation drifts across that edge, which is the whole reason
+// the kernel compares exact integers.
+//
+// ONE DEFINITION OF PAID. The band used to apply to sale creation alone, so
+// the owner's 39,400-riel tender for a $9.61 sale at 4,100 was recorded
+// Completed and then called short by everything else. The rows marked
+// `exact: false` below are the ones the old exact formula refused: each is
+// red on that tree (resolver, statusChangeNeedsPayment, coverage and the
+// outstanding amount all answered "short").
 //
 // The same two files carry the forward half on EXISTING sales,
 // statusChangeNeedsPayment: the Worker asks it before moving a Not Paid sale
@@ -111,10 +121,41 @@ const FIXTURES: Fixture[] = [
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'completed', expectedBeforeFix: 'awaiting_payment',
   },
+  // Inside the half-cent band: a full payment. Each of these stayed Not Paid
+  // under the old exact resolver while the same tender could be recorded
+  // Completed at creation -- two definitions of paid.
   {
-    name: 'SHORT BY ONE RIEL stays Not Paid -- a debt is a debt',
+    name: 'the owner case: 39,400 riel for $9.61 at 4,100 requested Not Paid -> Completed',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'completed', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'the owner case on a DELIVERY requested Not Paid -> Awaiting Delivery',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: true,
+    expected: 'awaiting_delivery', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'short by ONE RIEL is paid in full (inside the band) -> Completed',
     requestedStatus: 'awaiting_payment',
     paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'completed', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'short by exactly half a cent (50 units) -> Completed',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'completed', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'SHORT BY $0.0051 (51 units, one past the band) stays Not Paid -- a debt is a debt',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100,
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'awaiting_payment',
   },
@@ -126,9 +167,16 @@ const FIXTURES: Fixture[] = [
     expected: 'completed', expectedBeforeFix: 'awaiting_payment',
   },
   {
-    name: 'mixed tender one riel short stays Not Paid',
+    name: 'mixed tender one riel short is paid in full (inside the band)',
     requestedStatus: 'awaiting_payment',
     paidUsd: 5, paidKhr: 20499, totalUsd: 10, exchangeRate: 4100,
+    moneyPrecisionVersion: 1, isDelivery: false,
+    expected: 'completed', expectedBeforeFix: 'awaiting_payment',
+  },
+  {
+    name: 'mixed tender $0.0051 short stays Not Paid',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 4.9949, paidKhr: 20500, totalUsd: 10, exchangeRate: 4100,
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'awaiting_payment',
   },
@@ -233,6 +281,8 @@ type StatusChangeFixture = {
   expected: boolean
   /** The pre-guard routes allowed every move: "needs payment" was always false. */
   expectedBeforeFix?: false
+  /** Inside the half-cent band: the old exact rule answered true (needs payment). */
+  band?: true
 }
 
 const v1Row = (money: Record<string, unknown>): Record<string, unknown> => ({
@@ -261,9 +311,26 @@ const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
     expected: true, expectedBeforeFix: false,
   },
   {
-    name: 'one riel short still needs the payment',
-    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_khr: 40999 }),
+    name: '$0.0051 short (one unit past the band) still needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_usd: 9.9949 }),
     expected: true, expectedBeforeFix: false,
+  },
+  // Inside the band the sale is paid: the old exact rule refused each of
+  // these, so a Not Paid sale holding a full riel payment could never move.
+  {
+    name: 'one riel short does not (inside the half-cent band)',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_khr: 40999 }),
+    expected: false, band: true,
+  },
+  {
+    name: 'the owner case (39,400 riel for $9.61 at 4,100) does not',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ total_usd: 9.61, calculated_total_usd: 9.61, amount_paid_khr: 39400 }),
+    expected: false, band: true,
+  },
+  {
+    name: 'exactly half a cent short does not, to Awaiting Delivery either',
+    from: 'awaiting_payment', to: 'awaiting_delivery', sale: v1Row({ amount_paid_usd: 9.995 }),
+    expected: false, band: true,
   },
   {
     name: 'covered exactly in riel does not',
@@ -290,19 +357,20 @@ const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
     from: 'awaiting_payment', to: 'completed', sale: legacyRow({ amount_paid_khr: 41000, exchange_rate: 0 }),
     expected: true, expectedBeforeFix: false,
   },
-  // Which money basis a row is read on: 4100 riel against $1 at 4100.00004
-  // is short on the EXACT (V1) rate and covered on the rate quantized to four
-  // places (legacy). calculated_total_usd alone marks recorded V1 money.
+  // Which money basis a row is read on: 204,999,980 riel against $50,000 at
+  // 4100.00004 is $0.0054 short on the EXACT (V1) rate -- past the half-cent
+  // band -- and $0.0049 short, inside it, on the rate quantized to four places
+  // (legacy). calculated_total_usd alone marks recorded V1 money.
   {
     name: 'calculated_total_usd alone selects the exact V1 rate',
     from: 'awaiting_payment', to: 'completed',
-    sale: legacyRow({ total_usd: 1, calculated_total_usd: 1, amount_paid_khr: 4100, exchange_rate: 4100.00004 }),
+    sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }),
     expected: true, expectedBeforeFix: false,
   },
   {
     name: 'without a V1 marker the legacy quantized rate is used',
     from: 'awaiting_payment', to: 'completed',
-    sale: legacyRow({ total_usd: 1, amount_paid_khr: 4100, exchange_rate: 4100.00004 }),
+    sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }),
     expected: false,
   },
   {
@@ -353,42 +421,43 @@ const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
   },
 ]
 
-// THE CREATION BAND. tenderAllowsPaidStatus answers "may a NEW sale be
-// recorded Completed / Awaiting Delivery on this tender": covered within half
-// a cent, exact integer units. The POS checkout gate and POST /sales both ask
-// it; before it existed the POS used a float half-cent gate and the Worker the
-// exact formula, so a 39,400-riel tender for $9.61 at 4,100 passed the POS and
-// was refused by the Worker (an offline replay of it was lost).
-// `exact` is what paymentCoversSaleTotal says for the same tender -- the rows
-// where it differs from `allowed` are the band, and exact coverage must not
-// have moved.
+// ONE DEFINITION OF PAID. paymentCoversSaleTotal answers "does this tender
+// pay for the sale" -- covered within half a cent, exact integer units -- for
+// every caller: the POS gate and picker, POST /sales, the resolver,
+// statusChangeNeedsPayment and settlement. saleOutstandingUsd is the same
+// comparison read as an amount, for every balance-due figure: 0 when covered,
+// otherwise the exact shortfall (always more than half a cent, so it never
+// prints $0.00). `exact` is what the OLD exact formula said -- the rows where
+// it differs from `covered` are the band, and each is red on that tree.
 type BandFixture = {
   name: string
   paidUsd: number
   paidKhr: number
   totalUsd: number
   exchangeRate: number
-  allowed: boolean | 'throws'
+  covered: boolean | 'throws'
   exact?: boolean
+  outstandingUsd?: number
 }
 
 const BAND_FIXTURES: BandFixture[] = [
-  { name: 'exactly half a cent short is allowed', paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
-  { name: 'one riel short at 4,100 is allowed', paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
-  { name: 'the owner case: 39,400 riel for $9.61 at 4,100 is allowed', paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100, allowed: true, exact: false },
-  { name: 'a mixed tender one riel short is allowed', paidUsd: 5, paidKhr: 20499, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
-  { name: '$0.00525 short (37,979 riel for $9.50 at 4,000) is refused', paidUsd: 0, paidKhr: 37979, totalUsd: 9.5, exchangeRate: 4000, allowed: false, exact: false },
-  { name: 'one unit past the band ($0.0051 short) is refused', paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: false, exact: false },
-  { name: 'zero tender is refused', paidUsd: 0, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: false, exact: false },
-  { name: 'an exactly covering tender is allowed', paidUsd: 0, paidKhr: 41000, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: true },
-  { name: 'an overpaid tender is allowed', paidUsd: 20, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: true },
-  { name: 'a $0 sale with no tender is allowed', paidUsd: 0, paidKhr: 0, totalUsd: 0, exchangeRate: 4100, allowed: true, exact: true },
-  { name: 'a zero rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: 0, allowed: 'throws' },
-  { name: 'a negative rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: -4100, allowed: 'throws' },
-  { name: 'a NaN tender throws (callers refuse)', paidUsd: Number.NaN, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: 'throws' },
+  { name: 'exactly half a cent (50 units) short is covered', paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
+  { name: 'one riel short at 4,100 is covered', paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
+  { name: 'the owner case: 39,400 riel for $9.61 at 4,100 is covered', paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
+  { name: 'a mixed tender one riel short is covered', paidUsd: 5, paidKhr: 20499, totalUsd: 10, exchangeRate: 4100, covered: true, exact: false, outstandingUsd: 0 },
+  { name: '$0.00525 short (37,979 riel for $9.50 at 4,000) is not covered', paidUsd: 0, paidKhr: 37979, totalUsd: 9.5, exchangeRate: 4000, covered: false, exact: false, outstandingUsd: 0.0053 },
+  { name: 'one unit past the band ($0.0051 short) is not covered', paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: false, exact: false, outstandingUsd: 0.0051 },
+  { name: 'a partial riel tender owes the rest', paidUsd: 3, paidKhr: 12600, totalUsd: 10, exchangeRate: 4200, covered: false, exact: false, outstandingUsd: 4 },
+  { name: 'zero tender owes the whole total', paidUsd: 0, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: false, exact: false, outstandingUsd: 10 },
+  { name: 'an exactly covering tender owes nothing', paidUsd: 0, paidKhr: 41000, totalUsd: 10, exchangeRate: 4100, covered: true, exact: true, outstandingUsd: 0 },
+  { name: 'an overpaid tender owes nothing (change is not a negative balance)', paidUsd: 20, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: true, exact: true, outstandingUsd: 0 },
+  { name: 'a $0 sale with no tender owes nothing', paidUsd: 0, paidKhr: 0, totalUsd: 0, exchangeRate: 4100, covered: true, exact: true, outstandingUsd: 0 },
+  { name: 'a zero rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: 0, covered: 'throws' },
+  { name: 'a negative rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: -4100, covered: 'throws' },
+  { name: 'a NaN tender throws (callers refuse)', paidUsd: Number.NaN, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, covered: 'throws' },
 ]
 
-await runTest('both copies apply the same half-cent creation band, and correctly', async () => {
+await runTest('both copies apply the one half-cent band to coverage and to the amount owed', async () => {
   const worker = await loadWorkerCopy()
   assert.equal(uiCopy.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS, 50n, 'half a cent at four calculation decimals')
   assert.equal(worker.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS, uiCopy.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS)
@@ -398,29 +467,59 @@ await runTest('both copies apply the same half-cent creation band, and correctly
       exchangeRate: fixture.exchangeRate, moneyPrecisionVersion: 1,
     }
     for (const copy of [uiCopy, worker]) {
-      if (fixture.allowed === 'throws') {
-        assert.throws(() => copy.tenderAllowsPaidStatus(input), `"${fixture.name}" must throw`)
+      if (fixture.covered === 'throws') {
+        assert.throws(() => copy.paymentCoversSaleTotal(input), `"${fixture.name}" must throw`)
+        assert.throws(() => copy.saleOutstandingUsd(input), `"${fixture.name}" must throw for the amount too`)
         continue
       }
-      assert.equal(copy.tenderAllowsPaidStatus(input), fixture.allowed, `wrong band answer for "${fixture.name}"`)
-      assert.equal(copy.paymentCoversSaleTotal(input), fixture.exact, `exact coverage moved for "${fixture.name}"`)
+      assert.equal(copy.paymentCoversSaleTotal(input), fixture.covered, `wrong coverage for "${fixture.name}"`)
+      assert.equal(copy.saleOutstandingUsd(input), fixture.outstandingUsd, `wrong amount owed for "${fixture.name}"`)
+      assert.equal(copy.saleOutstandingUsd(input) === 0, fixture.covered, `"${fixture.name}": owing nothing IS being covered`)
     }
   }
 })
 
-await runTest('the band fixtures discriminate: the band is not exact coverage, and not a float', () => {
-  // Rows the exact formula refuses but the band allows: the Worker's old gate
-  // answered 400 on each, the whole defect.
-  const bandOnly = BAND_FIXTURES.filter((fixture) => fixture.allowed === true && fixture.exact === false)
+await runTest('the band fixtures discriminate: one definition, not exact coverage, and not a float', () => {
+  // Rows the old exact formula refused but the one definition covers: on the
+  // pre-fix tree paymentCoversSaleTotal, the resolver, statusChangeNeedsPayment
+  // and settlement all called these short, while creation called them paid.
+  const bandOnly = BAND_FIXTURES.filter((fixture) => fixture.covered === true && fixture.exact === false)
   assert.ok(bandOnly.length >= 3, 'expected several rows inside the band but not exactly covered')
   // Rows a band that was too wide would let through.
-  const refusedShort = BAND_FIXTURES.filter((fixture) => fixture.allowed === false && fixture.totalUsd > 0)
+  const refusedShort = BAND_FIXTURES.filter((fixture) => fixture.covered === false && fixture.totalUsd > 0)
   assert.ok(refusedShort.length >= 3, 'expected rows just past the band that must stay refused')
-  // The resolver does NOT take the band: a Not Paid sale one riel short stays Not Paid.
-  assert.equal(uiCopy.resolvePaidSaleStatus({
-    requestedStatus: 'awaiting_payment', paidUsd: 0, paidKhr: 40999, totalUsd: 10,
-    exchangeRate: 4100, moneyPrecisionVersion: 1, isDelivery: false,
-  }), 'awaiting_payment')
+  // The creation-only copy is gone: there is one coverage function to ask.
+  assert.equal('tenderAllowsPaidStatus' in uiCopy, false, 'a second coverage function is a second definition of paid')
+})
+
+// THE STORED ROW. recordedSaleOutstandingUsd is what the receipt and the sale
+// detail print as "balance due": the same reading of the row that
+// statusChangeNeedsPayment makes, so a sale that may move to Completed never
+// shows money still owed, and one that may not always does.
+const RECORDED_OUTSTANDING_FIXTURES: Array<{ name: string; sale: Record<string, unknown>; expected: number | 'throws' }> = [
+  { name: 'the owner case owes nothing (it printed "$0.00 / 1 riel" before)', sale: v1Row({ total_usd: 9.61, calculated_total_usd: 9.61, amount_paid_khr: 39400 }), expected: 0 },
+  { name: 'exactly half a cent short owes nothing', sale: v1Row({ amount_paid_usd: 9.995 }), expected: 0 },
+  { name: '$0.0051 short owes $0.0051', sale: v1Row({ amount_paid_usd: 9.9949 }), expected: 0.0051 },
+  { name: 'exact payment owes nothing', sale: v1Row({ amount_paid_khr: 41000 }), expected: 0 },
+  { name: 'a credit sale owes its total', sale: v1Row({}), expected: 10 },
+  { name: 'legacy rows read on the quantized rate', sale: legacyRow({ total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }), expected: 0 },
+  { name: 'V1 rows read on the exact rate', sale: legacyRow({ total_usd: 50000, calculated_total_usd: 50000, amount_paid_khr: 204999980, exchange_rate: 4100.00004 }), expected: 0.0054 },
+  { name: 'an unreadable total throws', sale: v1Row({ total_usd: null }), expected: 'throws' },
+]
+
+await runTest('both copies read a stored sale\'s balance due identically, and in step with the paid statuses', async () => {
+  const worker = await loadWorkerCopy()
+  for (const fixture of RECORDED_OUTSTANDING_FIXTURES) {
+    for (const copy of [uiCopy, worker]) {
+      if (fixture.expected === 'throws') {
+        assert.throws(() => copy.recordedSaleOutstandingUsd(fixture.sale), `"${fixture.name}" must throw`)
+        continue
+      }
+      assert.equal(copy.recordedSaleOutstandingUsd(fixture.sale), fixture.expected, `wrong balance due for "${fixture.name}"`)
+      assert.equal(copy.statusChangeNeedsPayment('awaiting_payment', 'completed', fixture.sale), fixture.expected > 0,
+        `"${fixture.name}": a sale owes money exactly when it cannot move to Completed`)
+    }
+  }
 })
 
 await runTest('the UI and Worker copies differ only in the import specifier', () => {
@@ -489,9 +588,13 @@ await runTest('coverage is exact integer arithmetic, not floating point', async 
     assert.equal(copy.paymentCoversSaleTotal({
       paidUsd: 0.3, paidKhr: 0, totalUsd: 0.3, exchangeRate: 4100, moneyPrecisionVersion: 1,
     }), true, 'an exactly-covering USD tender is covered')
+    // The riel edge of the half-cent band at 4,100 is 20.5 riel.
     assert.equal(copy.paymentCoversSaleTotal({
-      paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
-    }), false, 'one riel short is NOT covered')
+      paidUsd: 0, paidKhr: 40980, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), true, '20 riel short ($0.00488) is inside the band')
+    assert.equal(copy.paymentCoversSaleTotal({
+      paidUsd: 0, paidKhr: 40979, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
+    }), false, '21 riel short ($0.00512) is NOT covered')
     assert.equal(copy.paymentCoversSaleTotal({
       paidUsd: 0, paidKhr: 41000, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1,
     }), true, 'exactly covering in riel IS covered')
@@ -533,6 +636,11 @@ await runTest('the status-change fixtures discriminate against the pre-guard rou
   for (const fixture of discriminating) {
     assert.equal(fixture.expected, true, `"${fixture.name}" does not separate the old routes from the new`)
   }
+  // And against the exact-only rule that followed: a Not Paid sale holding a
+  // tender inside the band could never be completed with its own money.
+  const band = STATUS_CHANGE_FIXTURES.filter((fixture) => fixture.band)
+  assert.ok(band.length >= 3, 'expected several in-band moves the exact rule refused')
+  for (const fixture of band) assert.equal(fixture.expected, false, `"${fixture.name}" is inside the band`)
 })
 
 if (failed > 0) {

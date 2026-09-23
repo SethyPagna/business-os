@@ -102,7 +102,11 @@ const SALES: Array<{ row: Row; blocked: string[]; why: string }> = [
   { row: listRow(1, 'awaiting_payment', {}), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'owes the whole total' },
   { row: listRow(2, 'awaiting_payment', { amount_paid_khr: 41000 }), blocked: [], why: 'paid to the riel in KHR' },
   { row: listRow(3, 'completed', {}), blocked: [], why: 'already Completed: not this rule\'s move' },
-  { row: listRow(4, 'awaiting_payment', { amount_paid_usd: 9.99, amount_paid_khr: 40 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'one riel short on a mixed tender' },
+  // Paid means covered to within half a US cent (the one definition in
+  // saleStatusResolution.ts). $9.99 + 20 riel at 4,100 is $0.0051 short, one
+  // step past the band. (This row used to be $9.99 + 40 riel, $0.00024 short:
+  // a tender the POS records Completed, so it is paid now -- pinned below.)
+  { row: listRow(4, 'awaiting_payment', { amount_paid_usd: 9.99, amount_paid_khr: 20 }), blocked: ['value:completed', 'value:awaiting_delivery'], why: 'just over half a cent short on a mixed tender' },
   { row: listRow(5, null, {}), blocked: [], why: 'a NULL status is a legacy Completed' },
 ]
 
@@ -116,6 +120,14 @@ await runTest('the page asks the shared rule which targets each sale may not tak
   for (const status of uiRule.PAID_SALE_STATUSES) assert.equal(status, status.toLocaleLowerCase())
   for (const { row, blocked, why } of SALES) {
     assert.deepEqual(blockedTargets!(uiRule.PAID_SALE_STATUSES, uiRule.statusChangeNeedsPayment, row), blocked, `R${row.id}: ${why}`)
+  }
+  // Inside the band: one riel short on a mixed tender, and the owner's 39,400
+  // riel for $9.61 at 4,100, are paid and may move to a paid status.
+  for (const money of [
+    { amount_paid_usd: 9.99, amount_paid_khr: 40 },
+    { total_usd: 9.61, calculated_total_usd: 9.61, amount_paid_khr: 39400 },
+  ]) {
+    assert.deepEqual(blockedTargets!(uiRule.PAID_SALE_STATUSES, uiRule.statusChangeNeedsPayment, listRow(6, 'awaiting_payment', money)), [], JSON.stringify(money))
   }
 })
 

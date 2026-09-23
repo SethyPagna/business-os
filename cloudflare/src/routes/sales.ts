@@ -121,7 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { resolvePaidSaleStatus, statusChangeNeedsPayment, tenderAllowsPaidStatus } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, resolvePaidSaleStatus, statusChangeNeedsPayment } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -1022,12 +1022,12 @@ app.post('/', async (c) => {
   // Completed and the debt would vanish from the Not-Paid list. Frontend
   // validation needs backend enforcement; this is that enforcement.
   //
-  // The boundary is tenderAllowsPaidStatus, the SAME function the POS gate
-  // calls: covered within half a cent, exact integer units. Not the exact
-  // paymentCoversSaleTotal -- a shortfall under half a cent shows as $0.00 at
-  // two decimals (39,400 riel for $9.61 at 4,100), the deployed POS accepts
-  // it, and an offline sale queued on that boundary must land here rather
-  // than replay into a non-retryable 400 and be lost.
+  // The boundary is paymentCoversSaleTotal, the SAME function the POS gate,
+  // the resolver above and every balance-due figure call: covered within half
+  // a cent, exact integer units. A shortfall under half a cent shows as $0.00
+  // and riel has no coin to close it (39,400 riel for $9.61 at 4,100 is a full
+  // payment), the deployed POS accepts it, and an offline sale queued on that
+  // boundary must land here rather than replay into a non-retryable 400.
   //
   // Only these two statuses are gated. `awaiting_payment` is the credit sale
   // and is meant to be short; return statuses are set by the Returns flow;
@@ -1035,7 +1035,7 @@ app.post('/', async (c) => {
   if (saleStatus === 'completed' || saleStatus === 'awaiting_delivery') {
     let coveredForStatus = false
     try {
-      coveredForStatus = tenderAllowsPaidStatus({
+      coveredForStatus = paymentCoversSaleTotal({
         paidUsd: amountPaidUsd,
         paidKhr: amountPaidKhr,
         totalUsd,

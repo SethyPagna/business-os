@@ -1,3 +1,5 @@
+import { saleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
+
 export type SettlementPaymentInput = {
   method?: string | null
   amount_usd?: number | string | null
@@ -148,6 +150,33 @@ export function settlementTotals(rows: readonly SettlementRow[], exchangeRate: n
     amountPaidUsd,
     amountPaidKhr,
     paidEquivalentUsd: amountPaidUsd + amountPaidKhr / rate,
+  }
+}
+
+/**
+ * What the settlement rows still leave owed on the sale: the kernel's one
+ * definition of paid (covered within half a cent, exact integer units) read
+ * as an amount, on the same money basis the Worker's settlement uses. The
+ * completion gate, the pay-in-full prefill and the editor's Outstanding row
+ * all read this, so none of them can call short a tender the Worker's
+ * settlement accepts. Money that cannot be read owes the whole total.
+ */
+export function settlementOutstandingUsd(rows: readonly SettlementRow[], sale: {
+  totalUsd: number
+  exchangeRate: number
+  moneyPrecisionVersion: 0 | 1
+}): number {
+  const totals = settlementTotals(rows, sale.exchangeRate)
+  try {
+    return saleOutstandingUsd({
+      paidUsd: totals.amountPaidUsd,
+      paidKhr: totals.amountPaidKhr,
+      totalUsd: sale.totalUsd,
+      exchangeRate: sale.exchangeRate,
+      moneyPrecisionVersion: sale.moneyPrecisionVersion,
+    })
+  } catch {
+    return Math.max(0, Number(sale.totalUsd) || 0)
   }
 }
 

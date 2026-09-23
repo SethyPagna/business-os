@@ -70,8 +70,8 @@ import {
   initialSettlementRows,
   recordedSettlementIssue,
   settlementRowsEqual,
+  settlementOutstandingUsd,
   settlementRowsIssue,
-  settlementTotals,
   type SettlementRow,
 } from './saleSettlement.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -1586,8 +1586,9 @@ export default function SaleDetailModal({
         setPayError(translateOr('payment_amount_required', 'Enter the amount received.', 'បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។'))
         return
       }
-      const reviewedTotals = settlementTotals(settlementRows, settlementSession.exchangeRate)
-      if (Math.round(reviewedTotals.paidEquivalentUsd * 10000) < Math.round(totalUsd * 10000)) {
+      // The one definition of paid, on the basis the Worker's settlement uses:
+      // a tender inside the half-cent band completes the sale here and there.
+      if (settlementOutstandingUsd(settlementRows, { totalUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
         setPayError(translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.', 'ត្រូវទូទាត់គ្រប់ចំនួនសរុប មុនបញ្ចប់ការលក់។'))
         return
       }
