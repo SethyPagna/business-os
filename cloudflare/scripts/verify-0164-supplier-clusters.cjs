@@ -52,6 +52,7 @@ function compile(file, dir, stubs = {}) {
 const { contactDisplayAddress } = { contactDisplayAddress: (a) => (typeof a === 'string' ? a : '') }
 const { buildContactMergePlan } = compile('contactMerge.ts', 'lib', {
   './contactOptions': { contactDisplayAddress },
+  './phone': compile('phone.ts', 'lib'),
 })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')

@@ -23,7 +23,7 @@ function loadTs(file, stubs = {}) {
 }
 
 const contactOptions = loadTs('contactOptions.ts')
-const subject = loadTs('contactMerge.ts', { './contactOptions': contactOptions })
+const subject = loadTs('contactMerge.ts', { './contactOptions': contactOptions, './phone': loadTs('phone.ts') })
 
 const CONFIG = {
   customers: { entity: 'customer', columns: ['name', 'phone', 'email', 'address', 'notes', 'membership_number', 'gender', 'created_at'] },
@@ -96,6 +96,7 @@ async function successfulMerges() {
   assert.equal(row(db, 'customers', 2), undefined)
   assert.equal(row(db, 'customers', 1).membership_number, 'LC-00002')
   assert.equal(row(db, 'customers', 1).phone, '012 222 222')
+  assert.equal(row(db, 'customers', 1).phone_normalized, '012222222', 'the storefront phone key follows the phone the merge filled in')
   assert.equal(db.prepare('SELECT customer_id FROM sales WHERE id=1').get().customer_id, 1)
   assert.equal(db.prepare('SELECT customer_id FROM loyalty_point_adjustments WHERE id=1').get().customer_id, 1)
   assert.equal(db.prepare('SELECT contact_id FROM portal_accounts WHERE id=1').get().contact_id, 1)

@@ -26,7 +26,7 @@ function loadReal(relPath, overrides = {}) {
 
 const anonymous = loadReal('lib/anonymousCustomer.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
-const merge = loadReal('lib/contactMerge.ts', { './contactOptions': contactOptions })
+const merge = loadReal('lib/contactMerge.ts', { './contactOptions': contactOptions, './phone': loadReal('lib/phone.ts') })
 
 function seedPair() {
   const db = openDb(loadAll())

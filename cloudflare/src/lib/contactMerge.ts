@@ -126,6 +126,12 @@ export function buildContactMergePlan(input: {
     const mergedHasValue = !contactMergeValueIsBlank(column, mergedValue)
     if (keeperBlank && mergedHasValue) backfill[column] = mergedValue
   }
+  if (table === 'customers') {
+    // phone_normalized is the storefront's lookup key for phone; it moves
+    // with the phone it is derived from.
+    const phoneNormalized = canonicalizePhone('phone' in backfill ? backfill.phone : keeper.phone)
+    if (phoneNormalized !== (keeper.phone_normalized ?? null)) backfill.phone_normalized = phoneNormalized
+  }
   const finalKeeper = { ...keeper, ...backfill }
   const keeperName = String(finalKeeper.name || '')
   const statements: ContactMergeStatement[] = [contactSnapshotGuard(table, editableColumns, keeper, merged)]
@@ -210,3 +216,4 @@ export function buildContactMergePlan(input: {
   return { statements, backfilled, finalKeeper }
 }
 import { contactDisplayAddress } from './contactOptions'
+import { canonicalizePhone } from './phone'
