@@ -80,6 +80,7 @@ import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMu
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
+import { PAID_SALE_STATUSES, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -2036,7 +2037,15 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     setBulkChangePrompt({
       field,
       sales: frozenSales,
-      rows: frozenSales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`), currentKeys: choicesForSale(sale, field).map((choice) => choice.key) })),
+      rows: frozenSales.map((sale) => ({
+        id: Number(sale.id),
+        receipt: String(sale.receipt_number || `#${sale.id}`),
+        currentKeys: choicesForSale(sale, field).map((choice) => choice.key),
+        // S4-41: a Not Paid sale whose recorded payment does not cover it cannot
+        // become paid. The Worker refuses a group containing one, so the review
+        // names it and leaves it out instead (the same rule, shared file).
+        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(sale.sale_status, status, sale)).map((status) => `value:${status}`) } : {}),
+      })),
       sourceChoices,
       targetChoices,
     })
@@ -2185,7 +2194,19 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       for (const channel of ['inventory', 'products', 'returns']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.', 'បានកែប្រែការលក់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
     } catch (error) {
-      notify(getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
+      // The Worker refuses an unpaid member before it writes anything or records
+      // the request id (a committed original would have been answered with its
+      // receipt instead), so the outcome is known and there is nothing to retry.
+      // The review saw that sale as paid, so this page's copy of it is stale:
+      // reload, and the next review names it.
+      const unpaid = (error as { code?: string } | null)?.code === 'insufficient_payment_for_status'
+      if (unpaid) {
+        savePendingBulkRequest(null)
+        void loadSales(true)
+      }
+      notify(unpaid
+        ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')
@@ -2925,12 +2946,14 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           translate={translateOr}
           onSearchTargets={bulkChangePrompt.field === 'customer' || bulkChangePrompt.field === 'delivery_contact' ? searchBulkLinkedTargets : undefined}
           onClose={() => { if (!bulkFieldSaving && !bulkStatusSaving) setBulkChangePrompt(null) }}
-          onConfirm={(source, target, matched) => {
+          onConfirm={(source, target, matched, blocked) => {
             const matchedIds = new Set(matched.map((row) => row.id))
             const matchedSales = bulkChangePrompt.sales.filter((sale) => matchedIds.has(Number(sale.id)))
             if (bulkChangePrompt.field === 'status') {
+              // A blocked sale is not sent at all: it would match the source and refuse the group.
+              const blockedIds = new Set(blocked.map((row) => row.id))
               setBulkChangePrompt(null)
-              void handleScopedBulkStatusUpdate(String(target.value || ''), null, false, false, matchedSales, String(source.value || 'completed'), bulkChangePrompt.sales)
+              void handleScopedBulkStatusUpdate(String(target.value || ''), null, false, false, matchedSales, String(source.value || 'completed'), bulkChangePrompt.sales.filter((sale) => !blockedIds.has(Number(sale.id))))
               return
             }
             void submitBulkFieldChange(bulkChangePrompt.field, source, target, matched, bulkChangePrompt.sales)

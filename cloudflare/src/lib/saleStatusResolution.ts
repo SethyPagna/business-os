@@ -46,9 +46,9 @@
 // completed or awaiting_delivery -- a paid status asserting a payment nobody
 // made, and a debt gone from every Not Paid list. statusChangeNeedsPayment
 // below is the one answer to "may this sale take that status with the money
-// it has"; the status route and lib/saleBulkStatus.ts both ask it. A
-// settlement in the same request is the other way in, and it has its own
-// coverage check (lib/paymentSettlement.ts).
+// it has"; the status route, lib/saleBulkStatus.ts and the Sales page's group
+// picker all ask it. A settlement in the same request is the other way in,
+// and it has its own coverage check (lib/paymentSettlement.ts).
 //
 // Neither half moves a sale by itself -- the resolver only picks the status a
 // sale is BORN with, and the guard only refuses -- so a pending
