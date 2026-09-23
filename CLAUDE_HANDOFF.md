@@ -81,6 +81,9 @@ on origin; the latest code commit and deploy record are in progress.md.
   frontend hash `2529a3df70a96b92`; Chrome-Translate removeChild crash + non-durable committed close (see progress.md).
   Checkpoint 2 deployed (Paid) 22 Sep 21:23Z from `ef0489c1`: Worker `61a1afaa`, live revision `ef0489c12856`,
   frontend hash `722582f2f6b38731`; Reports readability + no-ellipsis class, frontend only (see progress.md).
+  Checkpoint 3 DEPLOYED (Paid) 23 Sep 02:50Z from `27a9d156` (code = `c96d7480`): Worker `5fe31d79`, live revision `27a9d156cdcc`,
+  frontend hash `90036a0403c54b77`. The "deploy blocked" note below was a misdiagnosis: `npx wrangler whoami` bypasses the
+  auth wrapper; the deploy path uses the configured API token. Check auth with `node scripts/with-wrangler-auth.cjs wrangler whoami`.
   Checkpoint 3 PUSHED, NOT DEPLOYED 23 Sep 02:10Z as `c96d7480` (deploy blocked: wrangler OAuth refresh bot-challenged from this egress; deploy `c96d7480` unchanged once the owner fixes egress/login):
   frontend hash `36dcfbfbed0de256`; SW stale-shell root cause + redirect/timeout holes fixed (BUSINESS-OS-4), Telegram layout/status, no-ellipsis follow-up (see progress.md).
   Pinned by `writeVersionFromScreen.test.ts`, `productWriteConflictToken.test.ts`,

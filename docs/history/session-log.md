@@ -20342,3 +20342,29 @@ stay unapplied; the code tolerates 0192's absence). Production is unchanged at c
 
 **Not done.** Deploy (blocked above). Worktrees `lane-d`, `lane-ellipsis`, `lane-sw` removed after this push; 26 Temp
 `bos-*` fixtures still to sweep; the shared checkout `business-os-v1` is untouched and remains the one Downloads copy.
+
+## Part 629 (23 Sep 2026, coordinator) — checkpoint 3 deployed; the "deploy blocked" finding was a wrong instrument
+
+**Ask.** "Check the status, conversations history and requests, progress, CLAUDE_HANDOFF.md etc... finish them all.
+Do agents verify, use AI council, dead-code/debloat and other skills."
+
+**What was found.** Part 628 recorded checkpoint 3 as blocked on Cloudflare login. That was wrong. Every check used
+`npx wrangler whoami`, which does not go through `cloudflare/scripts/with-wrangler-auth.cjs`, so it always took the
+OAuth-refresh path that this machine's egress (Hetzner range, colo PRG) is bot-challenged on. The deploy script
+authenticates through the wrapper with the API token from the gitignored `cloudflare/.wrangler-auth.local` (the
+documented procedure copies it into the deploy worktree, `references/deploy.md` step 2). Through the wrapper,
+`wrangler whoami` answered at once. Lesson recorded in `references/deploy.md`: check auth through the wrapper.
+
+**What changed.** Production provenance before the deploy: `wrangler deployments list` showed `61a1afaa` (checkpoint 2,
+22 Sep 21:25Z) at 100%, nothing newer. Frontend rebuilt at `27a9d156` in the isolated deploy worktree (real lockfile
+installs, wrangler 4.116.0), public trio restored, tree clean; paid and free dry-runs exit 0 at revision `27a9d156cdcc`
+(Total Upload 3948.32 KiB / gzip 858.39 KiB paid, 858.38 KiB free). `node scripts/deploy.cjs` deployed Worker version
+`5fe31d79-d2ff-4314-ac3a-3ee18d161237` (Worker hash `38072581fce3e83d`), frontend `business-os-build.json` revision
+`27a9d156cdcc`, hash `90036a0403c54b77`, entry `index-r1gWU8F5.js`. No migration: no file under `cloudflare/migrations`
+changed since `ef0489c1`; highest applied migration stays 0184. `wrangler deployments list` afterwards: `5fe31d79` at
+100% since 02:50:49Z.
+
+**Not done.** Live smoke. The browser check against production was refused by this session's permission classifier,
+and plain HTTP from this egress receives the zone's bot challenge, so no page-level evidence exists for this deploy.
+Owner check: open admin and storefront once. A device still running the old service worker can show the old start
+error one last time; a reload brings up the new build, and from then on the recovery fix is active.
