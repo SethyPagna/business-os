@@ -69,10 +69,13 @@ import type { D1Compat } from './db'
 // limit. It does spend D1 queries on the binding the kernel already holds:
 // four per identified line that succeeds (the receipt read, the claim insert,
 // the written mark, the completion), three for a refusal that wrote nothing,
-// plus one schema probe per isolate. That count is plan-sensitive where many
-// lines share one invocation: the batched fast stock-in commit
-// (routes/stockInCommit.ts) runs every line in one request, against a budget
-// of 1000 queries per invocation on Paid and 50 on Free.
+// plus one schema probe per isolate once the table exists. Until 0192 is
+// applied the probe runs again for EVERY identified line (only a positive
+// answer is memoised, see receiptsAvailable), so the pre-0192 cost is one
+// query per line. That count is plan-sensitive where many lines share one
+// invocation: the batched fast stock-in commit (routes/stockInCommit.ts) runs
+// every line in one request, against a budget of 1000 queries per invocation
+// on Paid and 50 on Free.
 
 /** Long enough that a truncated or hand-typed value cannot collide by accident. */
 const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
