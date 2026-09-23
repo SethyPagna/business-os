@@ -83,8 +83,10 @@ export interface ReceiptPrintSettings {
   customWidth: string
   customHeight: string
   // How the printable page length is decided for CONTINUOUS ROLL paper
-  // (58/72/80mm) only -- a fixed physical sheet (80x50mm/A4/Letter/custom
-  // with a height) already has an explicit height and ignores this field.
+  // (58/72/80mm). The 80x50mm card keeps its one-card height but follows the
+  // printer-paper modes ('driver-forms', 'driver'): it then sends no page size
+  // either and starts at the top of the chosen paper. A4/Letter/custom with a
+  // height have an explicit height and ignore this field.
   // 'driver-forms' (DEFAULT; the owner's 72mm-head thermal driver registers
   // only fixed 72 x 210/297/400/800mm forms, never a bare roll): no `@page`
   // size at all, the receipt laid out `driverFormWidthMm` wide with no top
