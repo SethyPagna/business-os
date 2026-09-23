@@ -171,6 +171,15 @@ await runTest('the fit is measured only after the card assets have settled', () 
     'measure the card only once its fonts and images are ready')
 })
 
+await runTest('the app stylesheet carries no print geometry of its own', () => {
+  // Receipts print their own document (popup or hidden frame), never the app
+  // page. The old `body * { visibility: hidden }` + #receipt-print rule targeted
+  // an id nothing renders, so it only blanked a browser print of an app page.
+  const mainCss = fs.readFileSync(new URL('../src/styles/main.css', import.meta.url), 'utf8')
+  assert.doesNotMatch(mainCss, /body \*\s*\{\s*visibility:\s*hidden/)
+  assert.doesNotMatch(mainCss, /#receipt-print\b/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

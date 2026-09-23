@@ -903,12 +903,6 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   text-shadow: none !important;
 }
 
-@media print {
-  body * { visibility: hidden; }
-  #receipt-print, #receipt-print * { visibility: visible; }
-  #receipt-print { position: absolute; left:0; top:0; width:80mm; }
-}
-
 /* Receipt text contrast: Normal | Maximum black (Section 4, 2026-09-02 RC).
    Receipt.tsx sets data-receipt-contrast="maximum" on the receipt shell
    root(s) -- the on-screen preview, the interactive receipt view, and (via
