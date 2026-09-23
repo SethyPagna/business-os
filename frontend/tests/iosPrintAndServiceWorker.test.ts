@@ -377,6 +377,40 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
 // because APP_SHELL_CACHE is named after this worker's own BUILD_HASH, so it
 // can never serve a stale build's shell under a new build's version.)
 
+// The recovery navigation's answer, as an executable rule (Part 628 ticket 4).
+// Matching fetch(request) alone passed a call nobody waits for: fired,
+// forgotten, and the navigation answered from the dead shell anyway. The
+// fetch must be held, raced against the recovery budget, the race awaited,
+// and what the race produced must be what the navigation is answered with.
+function answersWithTheAwaitedRace(input: string): boolean {
+  const body = stripComments(input)
+  const held = /const (\w+) = fetch\(request\)/.exec(body)
+  if (!held) return false
+  const race = new RegExp(`const (\\w+) = [^;]{0,40}?await Promise\\.race\\(\\[${held[1]}, [^;]{0,200}?RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS`).exec(body)
+  return race !== null && new RegExp(`\\breturn ${race[1]}\\b`).test(body)
+}
+
+// Positive control: every way of dropping the answer must fail the rule.
+check('the recovery answer rule catches a fetch nobody waits for (positive control)', () => {
+  const answered = `
+    const network = fetch(request).catch(() => null)
+    const fresh = cached
+      ? await Promise.race([network, new Promise((resolve) => { setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS) })])
+      : await network
+    if (fresh) return fresh
+  `
+  assert.equal(answersWithTheAwaitedRace(answered), true, 'the rule must accept the awaited race answering the navigation')
+  for (const [shape, from, to] of [
+    ['fired and forgotten', 'const network = fetch(request)', 'fetch(request)'],
+    ['raced, never awaited', 'await Promise.race', 'Promise.race'],
+    ['awaited, then ignored', 'return fresh', 'return cached'],
+  ]) {
+    const broken = answered.replace(from, to)
+    assert.notEqual(broken, answered, `${shape}: the mutation must apply`)
+    assert.equal(answersWithTheAwaitedRace(broken), false, `the rule must flag: ${shape}`)
+  }
+})
+
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   check(`appShellFallback serves the cached shell immediately and revalidates in the background (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
@@ -392,15 +426,15 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     const recoveryStart = beforeCacheCheck.indexOf('if (isRecoveryNavigation(request)) {')
     assert.ok(recoveryStart > 0, 'the recovery navigation must still be the branch that goes to the network')
     const recoveryBranch = beforeCacheCheck.slice(recoveryStart)
-    assert.match(recoveryBranch, /fetch\(request\)/, 'and it must fetch the navigation request itself')
     // Measured, not assumed: an init object rebuilds the Request and turns
     // navigate mode into same-origin, and the origin then sees
     // sec-fetch-mode: same-origin -- the read this host answers with a bot
     // challenge rather than the page. That includes { signal }, which is why
     // the wait below is bounded by a clock and not by an AbortController.
     assert.doesNotMatch(recoveryBranch, /fetch\(request,/, 'un-downgraded: no init object on it, not even a signal')
-    assert.match(recoveryBranch, /RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS/,
-      'and the one network wait allowed before a cache hit must be bounded -- an origin that accepts the connection and never answers left the tab blank')
+    assert.ok(answersWithTheAwaitedRace(recoveryBranch),
+      'the navigation must be answered with the awaited race of its own fetch against the recovery budget -- '
+      + 'an origin that accepts the connection and never answers left the tab blank')
     assert.doesNotMatch(
       beforeCacheCheck.slice(0, recoveryStart),
       /await fetch/,
