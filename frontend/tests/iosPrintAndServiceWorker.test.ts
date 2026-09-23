@@ -114,6 +114,17 @@ check('the Receipt Print action opens the window inside the tap', () => {
   assert.match(printReceipt, /previewWindow\?: Window \| null/, 'the print options carry it')
 })
 
+check('"All" prints the card and the full receipt one after the other', () => {
+  // Only one print frame exists at a time. Started together, the second print
+  // replaced the first one's frame while it was still being prepared: the
+  // installed app printed one of the two and left Print disabled (Sep 23 2026).
+  const body = stripComments(functionBody(receipt, 'const exportBothSeparately = async', 'const shellStyleFor'))
+  assert.doesNotMatch(body, /Promise\.all/, 'the two renditions must not be exported concurrently')
+  assert.match(body, /for \(const variant of \['compact', 'full'\] as const\) \{\s*try \{\s*await exportReceiptVariant\(printTools, mode, variant\)/,
+    'each rendition finishes before the next one starts')
+  assert.match(body, /failure = failure \?\? error/, 'a failed rendition still lets the other one through')
+})
+
 check('openPrintExport opens its window before anything else', () => {
   const body = functionBody(exportOptions, 'export function openPrintExport', '\n}')
   assert.equal(opensWindowAfterAnAwait(body), false)

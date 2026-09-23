@@ -1002,12 +1002,20 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     setPdfBusy(mode)
     try {
       const printTools = await loadReceiptPrintModule()
-      const results = await Promise.allSettled([
-        exportReceiptVariant(printTools, mode, 'compact'),
-        exportReceiptVariant(printTools, mode, 'full'),
-      ])
-      const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-      if (failure) throw failure.reason
+      // One after the other: only one print frame exists at a time
+      // (printSurface.ts), and the second print, started while the first was
+      // still being prepared, replaced its frame -- the installed app printed
+      // one of the two and left Print disabled (Sep 23 2026). A failed
+      // rendition still lets the other one through.
+      let failure: unknown = null
+      for (const variant of ['compact', 'full'] as const) {
+        try {
+          await exportReceiptVariant(printTools, mode, variant)
+        } catch (error) {
+          failure = failure ?? error
+        }
+      }
+      if (failure) throw failure
     } catch (error) {
       window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
     } finally {
