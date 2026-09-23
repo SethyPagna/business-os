@@ -1277,7 +1277,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales()
         return false
       }
-      notify(`Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
+      // S4-41: the Worker will not give a Not Paid sale that still owes money a
+      // paid status without a payment. The payment form always sends one, so this
+      // is an Undo or Redo (or its retry) asking for it: say why, in the shop's language.
+      notify(problem.code === 'insufficient_payment_for_status'
+        ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : `Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
       return false
     } finally {
       finishKeyedAction(statusActionRef, actionKey)

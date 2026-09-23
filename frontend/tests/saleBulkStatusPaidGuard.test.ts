@@ -1,4 +1,5 @@
-// S4-41 on the Sales page's group Status action.
+// S4-41 on the Sales page's group Status action (and the single-sale path's
+// reading of the same refusal).
 //
 // The owner's rule: a paid sale carries the completed status, and the paid
 // statuses (completed, awaiting_delivery) mean the sale IS paid. The Worker
@@ -22,7 +23,8 @@
 //   3. THE WIRING. A skipped sale is not sent; a refusal (stale rows) clears
 //      the retry body, reloads the rows and maps to a translated message; and
 //      the new key exists in both language packs with the modal's inline
-//      fallbacks matching them.
+//      fallbacks matching them. The single-sale status path, which meets the
+//      same refusal on an Undo or Redo of a reopen, translates it too.
 //
 // DISCRIMINATING: on the page before this change the expression does not
 // exist (part 1 red), the review lists the owing sales and never mentions
@@ -237,6 +239,17 @@ await runTest('the skipped-sales message exists in both packs, and the inline fa
   assert.equal(call[2], km[key], 'Khmer fallback matches km.json')
   assert.equal(typeof en.sale_settlement_full_required, 'string')
   assert.equal(typeof km.sale_settlement_full_required, 'string')
+})
+
+await runTest('the single-sale status path translates the same refusal', () => {
+  // The payment form always sends a settlement for a Not Paid -> paid move
+  // (SaleDetailModal needsPaymentEntry), so the refusal arrives through
+  // replaySaleStatusHistory / retryPendingDirectStatusRequest and ends here.
+  assert.match(salesPage, /const problem = error as \{ syncErrorId\?: string; syncErrorChannel\?: string; code\?: string \}/)
+  assert.match(
+    salesPage,
+    /notify\(problem\.code === 'insufficient_payment_for_status'\s+\? translateOr\('sale_settlement_full_required', '[^']+'\)\s+: `Failed to update status: /,
+  )
 })
 
 if (failed > 0) {
