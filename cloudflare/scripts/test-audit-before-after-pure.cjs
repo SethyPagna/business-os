@@ -421,6 +421,9 @@ async function promotionsRoute() {
 // ---------------------------------------------------------------------------
 check('every route in scope still threads a before/after into its audit write', () => {
   const expectations = [
+    ['routes/users.ts', /'update', 'user', id, null, changedFields\(/, 'admin user edit'],
+    ['routes/users.ts', /'update', 'user', targetId, \{ mode: 'profile' \}, changedFields\(/, 'self-service profile edit'],
+    ['routes/users.ts', /roleChange = auditChangeColumns\(changedFields\(/, 'role edit (in its own batch)'],
     ['routes/promotions.ts', /'update', 'promotion_rule', id,[\s\S]{0,200}?changedFields\(/, 'promotion rule edit'],
     ['routes/promotions.ts', /'update', 'promotion', id, \{ title: input\.title \},[\s\S]{0,40}?changedFields\(/, 'announcement edit'],
     ['routes/settings.ts', /paymentMethodChange = auditChangeColumns\(changedFields\(/, 'payment-method rename'],

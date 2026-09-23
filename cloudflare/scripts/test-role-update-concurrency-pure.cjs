@@ -42,6 +42,7 @@ const SCHEMA = `
     details TEXT,
     table_name TEXT,
     record_id TEXT,
+    old_value TEXT,
     new_value TEXT,
     device_name TEXT,
     device_tz TEXT,
@@ -84,7 +85,7 @@ const usersRoute = load('routes/users.ts', {
     requireAuth: async (c, next) => { c.set('user', currentActor); return next() },
     revokeUserSessions: async () => {},
   },
-  '../lib/audit': { audit: async () => { legacyAuditCalls += 1 } },
+  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
   '../lib/permissions': { isAdminControlUser: (actor) => actor?.isAdmin === true },
   '../lib/conflictControl': conflictControl,
   '../durable-objects/broadcastHub': {
