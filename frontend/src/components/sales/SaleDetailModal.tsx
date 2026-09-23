@@ -1933,7 +1933,8 @@ export default function SaleDetailModal({
                 on the client OR the Worker, so a cancelled sale could still
                 be re-pointed at a different buyer -- rewriting that
                 customer's purchase history to include a sale that never
-                happened. PATCH /:id/customer now refuses it too
+                happened. The button's write, POST /api/sales/bulk-update
+                (lib/saleBulkUpdate.ts), now refuses it too
                 (`cancelled_sale_read_only`); this hides the control that
                 would walk into that refusal. */}
             <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction && currentStatus !== 'cancelled' ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>

@@ -2719,8 +2719,12 @@ app.patch('/:id/status', async (c) => {
 app.patch('/:id/customer', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
-  // Same reasoning as PATCH /:id/status above -- only reachable from the
-  // 'sales'-gated Sales page (Sales.tsx's attachSaleCustomer caller).
+  // Same reasoning as PATCH /:id/status above. No screen calls this route
+  // any more: its one caller, Sales.tsx's attachSaleCustomer, was removed in
+  // 02a017d8, and the Sales page now changes a sale's customer through
+  // POST /bulk-update (lib/saleBulkUpdate.ts), which carries the cancelled-
+  // sale refusal. It stays for clients still running an older build; remove
+  // it once no deployed build can call it.
   if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
