@@ -48,9 +48,22 @@ for (const pageSizeMode of ['driver-forms', 'driver']) {
   assert.ok(lines.includes(RECEIPT_PREVIEW_COPY.receipt_preview_dialog_paper_hint), `${pageSizeMode}: tells the owner which paper to pick once`)
   assert.ok(!lines.includes(RECEIPT_PREVIEW_COPY.receipt_preview_actual_size), `${pageSizeMode}: no "select matching paper" advice for a size that is not sent`)
   assert.ok(lines.some((line) => line.includes('0 / 1 / 4 / 1 mm')), `${pageSizeMode}: effective margins shown`)
+  // Sep 23 2026: the troubleshoot line sent the owner from the default mode to
+  // Fixed length and Longest roll -- the explicit page sizes Chrome centres on
+  // the 72 x 800mm form (the blank band this mode removes).
+  assert.ok(!lines.includes(RECEIPT_PREVIEW_COPY.receipt_preview_mode_troubleshoot), `${pageSizeMode}: no advice to leave the printer-paper mode`)
 }
 assert.ok(receiptPreviewDiagnosticLines({ widthMm: 72, pageHeightMm: 207.7, continuousRoll: false, singleSheet: false, pageSizeMode: 'driver-forms' }, receiptPreviewSettings())
   .includes(`Page length mode: ${RECEIPT_PREVIEW_COPY.receipt_preview_mode_driver_forms}`))
+// A fallback mode keeps the troubleshoot line, and it leads back to Printer
+// paper before any mode that sends an explicit page size.
+for (const pageSizeMode of ['fixed', 'auto-longest']) {
+  assert.ok(receiptPreviewDiagnosticLines({ widthMm: 80, pageHeightMm: 150, continuousRoll: false, singleSheet: false, pageSizeMode }, receiptPreviewSettings())
+    .includes(RECEIPT_PREVIEW_COPY.receipt_preview_mode_troubleshoot), `${pageSizeMode}: troubleshoot line shown`)
+}
+const troubleshoot = RECEIPT_PREVIEW_COPY.receipt_preview_mode_troubleshoot
+assert.ok(troubleshoot.includes('Printer paper') && troubleshoot.indexOf('Printer paper') < troubleshoot.indexOf('Fixed length'),
+  'the troubleshoot advice names Printer paper first')
 console.log('PASS printer-paper modes report the width and the dialog paper, never an unsent page length')
 
 const localized = buildPrintablePreviewDocument({ ...card, markup: '<div>UNCHANGED</div>' }, {

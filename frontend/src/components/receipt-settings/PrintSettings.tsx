@@ -279,7 +279,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             </p>
             <InfoHint
               label={T('print_page_size_mode_title', 'Page length handling')}
-              text={T('receipt_preview_mode_troubleshoot', 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.')}
+              text={T('receipt_preview_mode_troubleshoot', 'Still seeing a blank band or a split strip? Choose Printer paper and pick the longest paper in the print dialog (e.g. 72 × 800 mm). If that still fails, try Fixed length, then Longest roll.')}
             />
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

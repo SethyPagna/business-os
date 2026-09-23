@@ -6623,7 +6623,7 @@
   "receipt_preview_mode_driver": "Printer driver default",
   "receipt_preview_mode_auto_longest": "Longest roll (auto)",
   "receipt_preview_mode_driver_forms": "Printer paper",
-  "receipt_preview_mode_troubleshoot": "Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.",
+  "receipt_preview_mode_troubleshoot": "Still seeing a blank band or a split strip? Choose Printer paper and pick the longest paper in the print dialog (e.g. 72 × 800 mm). If that still fails, try Fixed length, then Longest roll.",
   "money_rounding_adjustment": "Rounding adjustment",
   "money_precision_unavailable": "Pricing update is not ready. Refresh, then try again.",
   "money_receipt_unavailable": "Sale saved. Reload the receipt to confirm its saved totals.",

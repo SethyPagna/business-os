@@ -42,7 +42,7 @@ export const RECEIPT_PREVIEW_COPY = {
   receipt_preview_mode_driver: 'Printer driver default',
   receipt_preview_mode_auto_longest: 'Longest roll (auto)',
   receipt_preview_mode_driver_forms: 'Printer paper',
-  receipt_preview_mode_troubleshoot: 'Still seeing a blank band or a split strip? In Print Settings, try Fixed length, then Longest roll, then Printer driver default.',
+  receipt_preview_mode_troubleshoot: 'Still seeing a blank band or a split strip? Choose Printer paper and pick the longest paper in the print dialog (e.g. 72 × 800 mm). If that still fails, try Fixed length, then Longest roll.',
 } as const
 
 export type ReceiptPreviewTranslate = (key: string) => string | undefined
@@ -87,7 +87,8 @@ export function receiptPreviewDiagnosticLines(
   const showPageSizeMode = layout.continuousRoll || pageSizeMode !== 'measured'
   // 'driver-forms' and 'driver' request no page length at all (printReceipt.ts
   // sends no @page size for them): only the width is the app's, the length is
-  // whatever paper the print dialog has selected.
+  // whatever paper the print dialog has selected. The dialog-paper hint is
+  // their advice; the troubleshoot line would only repeat it.
   const dialogPaper = pageSizeMode === 'driver-forms' || pageSizeMode === 'driver'
   const paperLine = dialogPaper
     ? `${text('receipt_preview_requested_paper')}: ${dimension(layout.widthMm)} mm · ${text('receipt_preview_dialog_paper')}`
@@ -99,6 +100,6 @@ export function receiptPreviewDiagnosticLines(
     ...(showPageSizeMode ? [`${text('receipt_preview_page_size_mode')}: ${text(RECEIPT_PAGE_SIZE_MODE_LABELS[pageSizeMode] || 'receipt_preview_mode_measured')}`] : []),
     ...(layout.continuousRoll ? [text('receipt_preview_roll_warning'), text('receipt_preview_driver_hint')]
       : layout.singleSheet ? [text('receipt_preview_card_note')] : []),
-    ...(showPageSizeMode ? [text('receipt_preview_mode_troubleshoot')] : []),
+    ...(showPageSizeMode && !dialogPaper ? [text('receipt_preview_mode_troubleshoot')] : []),
   ]
 }
