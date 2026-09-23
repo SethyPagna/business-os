@@ -6,7 +6,7 @@ import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, custo
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -274,6 +274,11 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   if (!Number.isFinite(n)) return fallback
   return Math.min(max, Math.max(min, n))
 }
+
+// Columns a contact write derives from another column it already records
+// (the canonical phone key, the search-normalized name). Recording them in a
+// before/after would show the same edit twice in different spellings.
+const CONTACT_DERIVED_COLUMNS = new Set(['phone_normalized', 'phone_lookup', 'name_normalized', 'search_normalized'])
 
 function pickColumns(body: Record<string, unknown>, columns: string[]): Record<string, unknown> {
   const payload: Record<string, unknown> = {}
@@ -1709,6 +1714,15 @@ function registerContactRoutes(config: ContactConfig) {
         historical_snapshots_preserved: true,
       })
     }
+    // `payload` is exactly the set of columns this edit wrote (pickColumns
+    // already dropped everything the request did not send, and the review
+    // tier's name-only narrowing), and `current` is the row as it was read
+    // before the batch -- so diffing the two is the real changed-field set for
+    // customers, suppliers and delivery contacts alike. Derived/lookup columns
+    // are excluded: they are a restatement of a field already in the diff, not
+    // something an operator changed. Read AFTER the batch so a deferred
+    // membership mint records the number actually written.
+    const contactDiffKeys = Object.keys(payload).filter((column) => !CONTACT_DERIVED_COLUMNS.has(column))
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
       name,
       ...(duplicateDecision.decision ? {
@@ -1716,7 +1730,7 @@ function registerContactRoutes(config: ContactConfig) {
         duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
         duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
       } : {}),
-    })
+    }, changedFields(current, payload, { keys: contactDiffKeys }))
     const updateVersions: string[] = [config.table]
     if (nameChanged && snapshotCarry) {
       if (config.table === 'customers') {
