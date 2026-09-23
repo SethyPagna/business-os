@@ -432,6 +432,7 @@ check('every route in scope still threads a before/after into its audit write', 
     ['routes/settings.ts', /'update', 'settings', null, \{ keys: attemptedKeys \},[\s\S]{0,200}?changedFields\(/, 'settings save'],
     ['routes/fees.ts', /'update', 'fee', id, \{[\s\S]{0,200}?\}, changedFields\(/, 'expense edit'],
     ['routes/fees.ts', /'delete', 'fee', id, \{ before: existing, after: null \},[\s\S]{0,120}?changedFields\(/, 'expense delete'],
+    ['routes/returns.ts', /'update', 'return', id, \{[\s\S]{0,200}?\}, changedFields\(/, 'return edit'],
   ]
   for (const entry of expectations) {
     const source = fs.readFileSync(workerSrc(entry[0]), 'utf8')
