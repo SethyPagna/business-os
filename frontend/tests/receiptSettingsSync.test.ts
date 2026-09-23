@@ -140,6 +140,12 @@ assert.match(printSettingsSource, /\{onPrinterPaper && testRendition === 'full' 
 assert.match(printSettingsSource,
   /\['58mm', '72mm', '80mm'\]\.includes\(ps\.paperSize\) && !\['driver-forms', 'driver'\]\.includes\(ps\.pageSizeMode \|\| 'driver-forms'\) \? \(\s*<div className="mt-1">\s*\{T\('receipt_preview_driver_hint'/,
   'the roll-paper / blank-band hint is shown only for modes that send a page size, never for the printer-paper default')
+// Sep 23 2026: the 80x50 card prints through the page length mode too, so its
+// paper shows the mode picker and "Test print this mode" -- the card test
+// print (testRendition 'card') had no reachable button before.
+assert.match(printSettingsSource,
+  /\{\['58mm', '72mm', '80mm', '80x50mm'\]\.includes\(ps\.paperSize\) \? \(\s*<Section icon=\{Ruler\} title=\{T\('print_page_size_mode_title'/,
+  'the page length section, with its mode picker and test print, renders for 80 x 50 paper')
 assert.match(settingsWriteOptionsSource, /export function normalizeSettingsWriteOptions/)
 
 console.log('PASS receipt settings sync contract')

@@ -271,7 +271,9 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
         </div>
       </Section>
 
-      {['58mm', '72mm', '80mm'].includes(ps.paperSize) ? (
+      {/* 80 x 50 paper too: the card follows the page length mode (the printer-paper
+          modes send it no page size), and that paper's full receipt prints on the 80mm roll. */}
+      {['58mm', '72mm', '80mm', '80x50mm'].includes(ps.paperSize) ? (
         <Section icon={Ruler} title={T('print_page_size_mode_title', 'Page length handling')}>
           <div className="mb-2 flex items-center gap-1.5">
             <p className="text-xs text-gray-500">
