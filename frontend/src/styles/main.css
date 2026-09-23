@@ -824,6 +824,11 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   scroll-padding: var(--rg-head, 0px) var(--rg-final) 0 var(--rg-label);
   border: 1px solid var(--rg-line);
   border-radius: 0.5rem;
+  /* Its own stacking context: the pinned cells' z-index stays inside the
+     grid. Without it, on a short screen where the modal body scrolls, the
+     pinned Final and header cells painted over the sticky Resolve footer and
+     took its taps. */
+  isolation: isolate;
 }
 .dark .resolve-grid-scroll {
   --rg-surface: #1f2937;
