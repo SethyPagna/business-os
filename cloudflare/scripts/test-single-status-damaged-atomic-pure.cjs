@@ -1,6 +1,7 @@
 // Reuse the sibling's actual Hono/D1Compat/SQLite fixture without running its
-// suite. Only the dependency loader gains the real damaged-stock/money helpers
-// and an inert notification adapter. No production or network access.
+// suite. Only the dependency loader gains the real damaged-stock/money helpers;
+// the sibling's own inert notification adapter is reused. No production or
+// network access.
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
@@ -12,9 +13,10 @@ fixtureSource = fixtureSource.slice(0, end)
 const loaderAnchor = "const sales = load('routes/sales.ts').default"
 assert.ok(fixtureSource.includes(loaderAnchor))
 fixtureSource = fixtureSource.replace(loaderAnchor, "actual.add('returnsStock'); actual.add('saleTotals');\n" + loaderAnchor)
-const importAnchor = "if (name==='hono') return require(name)"
-assert.ok(fixtureSource.includes(importAnchor))
-fixtureSource = fixtureSource.replace(importAnchor, importAnchor + "\n    if (name.endsWith('/telegram')) return { sendTelegramEvent: async()=>{} }")
+// The sibling's loader already answers '/telegram' with an inert adapter
+// covering every name routes/sales.ts imports. A narrower copy inserted here
+// used to shadow it, and broke once sales.ts imported the message formatters.
+assert.ok(fixtureSource.includes("name.endsWith('/telegram')"), 'sibling fixture must keep its inert telegram adapter')
 const { fixture, seed, sales, request, snapshot, setUser } = new Function('require', '__dirname',
   fixtureSource + '\nreturn { fixture, seed, sales, request, snapshot, setUser(value) { user=value } }')(require, __dirname)
 sales.onError((error, c) => c.json({ error: error.message }, 500))
@@ -35,9 +37,14 @@ function damagedFixture(count = 2) {
 }
 const stock = f => f.sql.prepare('SELECT quantity_remaining q FROM damaged_stock_lots WHERE id=1').get().q
 const movements = f => f.sql.prepare("SELECT COALESCE(SUM(quantity),0) q FROM inventory_movements WHERE movement_type IN ('damage_in','damage_out')").get().q
+// PATCH /:id/status refuses a body without client_request_id
+// (`client_request_id_required`, since 2026-09-05), so every single-status
+// call carries a fresh one, as the sibling suite's single calls do.
+let singleRequestSeq = 0
 const single = (f, id, target, extra = {}) => f.call(sales, `/${id}/status`, {
   sale_status: target, ...(target === 'cancelled' ? { cancel_reason: 'mistake' } : {}),
   expected_updated_at: f.sql.prepare('SELECT updated_at FROM sales WHERE id=?').get(id).updated_at,
+  client_request_id: `single-damaged-${++singleRequestSeq}`,
   ...extra,
 }, 'PATCH')
 function pause(f) {
@@ -47,11 +54,33 @@ function pause(f) {
   f.barrier(async () => { entered(); await gate })
   return { ready, release }
 }
+// A request that answers before it reaches its write never enters the
+// barrier, so `await barrier.ready` alone would wait forever: the event loop
+// drains and Node exits 0 with no assertion run -- a silent green in every
+// sweep. Race the barrier against the request settling, and fail with the
+// response the request actually gave.
+async function reachesBarrier(barrier, pending, label) {
+  const first = await Promise.race([
+    barrier.ready.then(() => ({ entered: true })),
+    pending.then(res => ({ entered: false, res })),
+  ])
+  if (!first.entered) {
+    const body = first.res && typeof first.res.json === 'function' ? await first.res.json().catch(() => null) : first.res
+    assert.fail(`${label} answered before reaching its write: ${first.res && first.res.status} ${JSON.stringify(body)}`)
+  }
+}
+let finished = false
+process.on('beforeExit', () => {
+  if (!finished && !process.exitCode) {
+    console.error('FAIL the suite stopped before its last check (a promise never settled)')
+    process.exitCode = 1
+  }
+})
 async function run() {
   let f = damagedFixture()
   const barrier = pause(f)
   const cancelling = single(f, 1, 'cancelled')
-  await barrier.ready
+  await reachesBarrier(barrier, cancelling, 'the paused cancel')
   let grouped, consumer, committed, provisional
   try {
     provisional = stock(f)
@@ -79,7 +108,7 @@ async function run() {
   f.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='awaiting_delivery' WHERE id=1; UPDATE sale_items SET quantity=4 WHERE id=1; UPDATE damaged_stock_lots SET quantity_remaining=4")
   const drawBarrier = pause(f)
   const draw = single(f, 1, 'awaiting_delivery')
-  await drawBarrier.ready
+  await reachesBarrier(drawBarrier, draw, 'the paused draw')
   let winner, afterWinner
   try { winner = await single(f, 2, 'awaiting_delivery'); afterWinner = snapshot(f) }
   finally { drawBarrier.release() }
@@ -168,5 +197,6 @@ async function run() {
   assert.equal(snapshot(f), before)
   f.sql.close()
   console.log('PASS sticky skip, no-op and permission behavior preserved')
+  finished = true
 }
 run().catch(error => { console.error(error); process.exitCode = 1 })
