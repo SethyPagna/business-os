@@ -219,8 +219,13 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
   })
 }
 
-export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate = 4100 }: FastStockInModalProps) {
-  const { user } = useApp() as { user: any }
+export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate: exchangeRateOverride }: FastStockInModalProps) {
+  // The rate and symbols come from Settings through the app context, like
+  // every other price surface; every host (Inventory, Stock Change, the
+  // stock-in session "add more", a minimized restore) gets them unasked.
+  const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
+  const { user, usdSymbol, khrSymbol } = app
+  const exchangeRate = exchangeRateOverride ?? app.exchangeRate
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   // This modal only receives the fallback-aware tr(); DateEntryInput wants a
@@ -940,7 +945,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       { label: tr('set', 'Set'), value: modeCount(pendingCommit, 'set') },
     ]),
     { label: tr('total_units', 'Total units'), value: pendingCommit.reduce((total, line) => total + line.quantity, 0) },
-    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `$${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
+    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `${usdSymbol}${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
     // Receipt fields describe adds (and sets, which may add); a pure
     // remove session has none to review.
     ...(pendingCommit.some((line) => line.mode !== 'remove') ? [
@@ -996,8 +1001,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           onSave={(payload) => createProductForScannedBarcode((payload || {}) as Record<string, unknown>)}
           onClose={() => setCreateBarcode('')}
           t={(key: string) => tr(key, key)}
-          usdSymbol="$"
-          khrSymbol="៛"
+          usdSymbol={usdSymbol}
+          khrSymbol={khrSymbol}
           exchangeRate={exchangeRate}
         />
       </Suspense>
@@ -1144,7 +1149,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 }} /></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
-                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
+                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: {usdSymbol}{(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
                 </div>
                 {/* N14-D: $0.00 is a claim the operator makes, never a default.
                     Its own row under the inputs: inside the cost cell it made that
