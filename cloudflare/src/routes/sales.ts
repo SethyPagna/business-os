@@ -120,7 +120,7 @@ import {
   type SaleRecordEventRow,
   type SaleRecordChange,
 } from '../lib/saleRecords'
-import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { resolvePaidSaleStatus, statusChangeNeedsPayment, tenderAllowsPaidStatus } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
@@ -549,8 +549,8 @@ app.post('/', async (c) => {
   // `awaiting_payment` ("Not Paid"). The rewrite happens once the money is
   // known, below computeSaleTotals -- see resolvePaidSaleStatus there.
   let saleStatus = body.sale_status ? String(body.sale_status) : 'completed'
-  if (!VALID_SALE_STATUSES.includes(saleStatus)) {
-    return c.json({ error: `Invalid sale_status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
+  if (!CREATABLE_SALE_STATUSES.includes(saleStatus)) {
+    return c.json({ error: `Invalid sale_status. Must be one of: ${CREATABLE_SALE_STATUSES.join(', ')}` }, 400)
   }
   // Computed from the REQUESTED status, deliberately, and it is the same
   // value either way: the resolver only ever maps `awaiting_payment` to

@@ -196,6 +196,25 @@ async function patchStatus(db, id, body) {
     assert.equal(saleRow(f).sale_status, 'completed')
   })
 
+  // A NEW sale is born Completed, Not Paid or Awaiting Delivery -- nothing
+  // else. Cancelled and the two return statuses are what happens to a sale
+  // AFTERWARDS (PATCH /:id/status with its reason and stock release, a return
+  // with its return rows). The route accepted all six, so a sale could be
+  // written already "returned" with no return behind it and no stock
+  // deducted, and a zero-tender "partial_return" skipped the paid-status
+  // gate, which only asks about completed and awaiting_delivery.
+  for (const status of ['cancelled', 'partial_return', 'returned']) {
+    await runTest(`a new sale cannot be born ${status}`, async () => {
+      const f = h.fixture()
+      const stockBefore = branchStock(f)
+      const created = await h.postSale(f.route, paidRequest(`born-${status}`, { sale_status: status }))
+      assert.equal(created.status, 400, JSON.stringify(created.body))
+      assert.match(String(created.body.error), /Must be one of: completed, awaiting_payment, awaiting_delivery$/)
+      assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, 'nothing may be written')
+      assert.equal(branchStock(f), stockBefore)
+    })
+  }
+
   // THE HALF-CENT BAND. The POS has always let a paid status through when the
   // tender is short by no more than half a cent (it reads $0.00 at two
   // decimals), and both it and this route now ask the same

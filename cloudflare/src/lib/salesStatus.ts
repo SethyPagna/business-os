@@ -7,6 +7,15 @@ export const VALID_SALE_STATUSES: string[] = ['completed', 'awaiting_payment', '
 
 export type SaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery' | 'cancelled' | 'partial_return' | 'returned'
 
+// The statuses a NEW sale may be born with through POST /sales (the POS and
+// its offline replays). Cancelled and the two return statuses are what
+// happens to a sale afterwards -- PATCH /:id/status records the cancel reason
+// and releases the stock, routes/returns.ts writes the return rows -- so a
+// sale created directly in one of them carries the status without the record
+// behind it. Sales import validates against VALID_SALE_STATUSES instead: a
+// historical row's status is the only signal it will ever get.
+export const CREATABLE_SALE_STATUSES: readonly string[] = ['completed', 'awaiting_payment', 'awaiting_delivery']
+
 // S4-3/S4-4: `awaiting_payment` HOLDS stock. The goods are promised to a
 // named buyer the moment the order is taken, so they are not available to
 // sell to anyone else -- which is what the POS has told the cashier all
