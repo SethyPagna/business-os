@@ -451,18 +451,65 @@ await runTest('capDriverFormMargins: driver-forms prints with no top margin and 
   assert.equal(DEFAULT_RECEIPT_PRINT_SETTINGS.marginTop, '4', 'the saved settings are not mutated')
 
   const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  assert.match(printSource, /const hostPrintSettings = isDriverFormsRoll \? capDriverFormMargins\(printSettings\) : printSettings/,
+  assert.match(printSource, /const hostPrintSettings = printsOnDriverForms \? capDriverFormMargins\(printSettings\) : printSettings/,
     'only the driver-forms print path uses the capped margins; PDF and image keep the configured ones')
 })
 
-await runTest('resolveReceiptPageGeometry: a genuine fixed sheet (80x50mm/A4/Letter/custom height) always resolves to measured bookkeeping regardless of the saved pageSizeMode', () => {
+await runTest('resolveReceiptPageGeometry: a document sheet (A4/Letter/custom height) always resolves to measured bookkeeping regardless of the saved pageSizeMode', () => {
   for (const savedPageSizeMode of ['measured', 'fixed', 'driver', 'auto-longest', 'driver-forms', undefined]) {
-    const geometry = resolveReceiptPageGeometry({ fixedHeightMm: 50, measuredHeightMm: 999, savedPageSizeMode, fixedPageLengthMm: '150' })
-    assert.equal(geometry.pageHeightMm, 50, `paperSize's own explicit height wins regardless of pageSizeMode=${savedPageSizeMode}`)
-    assert.equal(geometry.continuousRoll, false)
-    assert.equal(geometry.pageSizeMode, 'measured')
+    for (const fixedHeightMm of [297, 279.4, 150]) {
+      const geometry = resolveReceiptPageGeometry({ fixedHeightMm, measuredHeightMm: 999, savedPageSizeMode, fixedPageLengthMm: '150' })
+      assert.equal(geometry.pageHeightMm, fixedHeightMm, `paperSize's own explicit height wins regardless of pageSizeMode=${savedPageSizeMode}`)
+      assert.equal(geometry.continuousRoll, false)
+      assert.equal(geometry.pageSizeMode, 'measured')
+    }
   }
-  assert.equal(isSingleSheetPaperSize('80x50mm'), true, '80x50mm keeps its existing fit-to-one-card identity untouched by this feature')
+  assert.equal(isSingleSheetPaperSize('80x50mm'), true, '80x50mm keeps its existing fit-to-one-card identity')
+  assert.equal(isSingleSheetPaperSize('A4'), false)
+})
+
+// 2026-09-23: the 80x50 card is enabled in production and prints on the same
+// roll printer as the full receipt. With the longest paper chosen once in the
+// print dialog (72 x 800mm), a card that kept `@page size: 80mm 50mm` was
+// centred on that paper, about 37cm down the strip.
+await runTest('resolveReceiptPageGeometry: the 80x50 card follows the printer-paper modes and keeps its one-card height', () => {
+  for (const savedPageSizeMode of ['driver-forms', 'driver', undefined]) {
+    const geometry = resolveReceiptPageGeometry({ fixedHeightMm: 50, measuredHeightMm: 999, savedPageSizeMode, singleSheet: true })
+    assert.equal(geometry.pageHeightMm, 50, `${savedPageSizeMode}: still one 50mm card`)
+    assert.equal(geometry.continuousRoll, false)
+    assert.equal(geometry.pageSizeMode, savedPageSizeMode || 'driver-forms', `${savedPageSizeMode}: no @page size, like the roll`)
+  }
+  for (const savedPageSizeMode of ['measured', 'fixed', 'auto-longest']) {
+    const geometry = resolveReceiptPageGeometry({ fixedHeightMm: 50, measuredHeightMm: 999, savedPageSizeMode, singleSheet: true })
+    assert.equal(geometry.pageSizeMode, 'measured', `${savedPageSizeMode}: the modes that send a size keep the card's explicit 80 x 50mm page`)
+  }
+
+  const html = buildPrintablePreviewDocument({
+    markup: '<section>SHOP|TOTAL|ABA</section>',
+    widthMm: 72,
+    pageHeightMm: 50,
+    continuousRoll: false,
+    singleSheet: true,
+    pageSizeMode: 'driver-forms',
+  })
+  const pageRule = html.match(/@page\s*\{([^}]*)\}/)
+  assert.ok(pageRule)
+  assert.doesNotMatch(pageRule![1], /size:/, 'the print dialog paper is the page, so the card starts at its top')
+  assert.match(pageRule![1], /margin:\s*0;/)
+  assert.match(html, /width: 72mm !important;/, 'the card prints at the printer paper width')
+  assert.match(html, /height: 50\.00mm !important;/, 'still clipped to one card')
+  assert.match(html, /overflow: hidden !important/)
+  assert.match(html, /break-inside: avoid-page/)
+  assert.doesNotMatch(html, /data-receipt-length-line/)
+
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(printSource, /const printsOnDriverForms = \(getPaperHeightMm\(printSettings\) == null \|\| singleSheet\)/,
+    'driver-forms renders the card at the printer paper width too')
+  assert.match(printSource, /\}, hostPrintSettings, \{ cardFromTopEdge: printsOnDriverForms && singleSheet \}\)/,
+    'only the driver-forms print path drops the card top padding')
+  assert.match(printSource, /else if \(cardFromTopEdge\) cloned\.style\.paddingTop = '0'/)
+  assert.equal((printSource.match(/cardFromTopEdge/g) || []).length, 4,
+    'declared, defaulted, used once, passed once: PDF and image never drop the card padding')
 })
 
 await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm default and migrate existing saved settings', () => {

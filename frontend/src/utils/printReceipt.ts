@@ -1016,6 +1016,7 @@ async function withReceiptElement<T>(
   widthMm: number,
   action: (host: HTMLElement) => T | Promise<T>,
   printSettings: ReceiptPrintSettings = getPrintSettings(),
+  { cardFromTopEdge = false }: { cardFromTopEdge?: boolean } = {},
 ): Promise<T> {
   const isElementContent = typeof HTMLElement !== 'undefined' && content instanceof HTMLElement
   const host = document.createElement('div')
@@ -1065,6 +1066,11 @@ async function withReceiptElement<T>(
       // instead of stacking two independent margins. Fixed cards keep their
       // deliberately designed internal card padding.
       if (fixedSheetHeightMm == null) cloned.style.padding = printPadding
+      // Except at the top when the card prints on the printer's paper: the
+      // printer has already fed ~11mm of blank paper past the cutter, the
+      // same reason the roll's top margin is 0 there (capDriverFormMargins).
+      // Only the print path passes this; PDF and image keep the card as is.
+      else if (cardFromTopEdge) cloned.style.paddingTop = '0'
     }
     inner.innerHTML = cloned?.outerHTML || ''
   } else {
@@ -1130,29 +1136,35 @@ export type ReceiptPageGeometry = {
  * createPrintableReceiptMarkup as a pure function so it is directly testable
  * without a DOM (that function also clones/measures the live host, which
  * needs `document`). `fixedHeightMm` is getPaperHeightMm(printSettings): a
- * genuine fixed sheet (80x50mm/A4/Letter/custom with a height) always keeps
- * its own explicit height and 'measured' bookkeeping, regardless of what
- * pageSizeMode happens to be saved as -- pageSizeMode only ever governs
- * CONTINUOUS ROLL paper (58/72/80mm, fixedHeightMm null).
+ * document sheet (A4/Letter/custom with a height) always keeps its own
+ * explicit height and 'measured' bookkeeping, regardless of what
+ * pageSizeMode happens to be saved as -- pageSizeMode governs CONTINUOUS ROLL
+ * paper (58/72/80mm, fixedHeightMm null) and the 80x50 card (`singleSheet`),
+ * which prints on the same roll printer as the full receipt.
  */
 export function resolveReceiptPageGeometry({
   fixedHeightMm,
   measuredHeightMm,
   savedPageSizeMode,
   fixedPageLengthMm,
+  singleSheet = false,
 }: {
   fixedHeightMm: number | null
   measuredHeightMm: number
   savedPageSizeMode?: string
   fixedPageLengthMm?: unknown
+  singleSheet?: boolean
 }): ReceiptPageGeometry {
-  const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = fixedHeightMm == null
-    ? ((savedPageSizeMode as ReceiptPrintSettings['pageSizeMode']) || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode)
-    : 'measured'
+  const pageSizeMode: ReceiptPrintSettings['pageSizeMode'] = (savedPageSizeMode as ReceiptPrintSettings['pageSizeMode'])
+    || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode
+  const printerPaper = pageSizeMode === 'driver-forms' || pageSizeMode === 'driver'
   if (fixedHeightMm != null) {
-    return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode }
+    // In the printer-paper modes the card sends no @page size either, so it
+    // starts at the top of the chosen paper instead of being centred on it
+    // (about 37cm down a 72 x 800mm form); it keeps its one-card height.
+    return { pageHeightMm: fixedHeightMm, continuousRoll: false, pageSizeMode: singleSheet && printerPaper ? pageSizeMode : 'measured' }
   }
-  if (pageSizeMode === 'driver-forms' || pageSizeMode === 'driver') {
+  if (printerPaper) {
     // No `@page size` is emitted for either mode (see
     // buildPrintablePreviewDocument): the paper chosen in the print dialog is
     // the page. Chrome never switches that paper to match a CSS size -- a
@@ -1182,20 +1194,22 @@ export function resolveReceiptPageGeometry({
 
 async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
-  // driver-forms only ever governs CONTINUOUS ROLL paper (a fixed sheet keeps
-  // its own explicit paperSize width): render at the printer's registered
-  // form width, not the configured roll width, so a driver that only
-  // registers e.g. 72mm forms prints the receipt at the paper's full width
-  // instead of scaling an 80mm layout down and leaving side margins.
-  const isDriverFormsRoll = getPaperHeightMm(printSettings) == null
+  const singleSheet = isSingleSheetPaperSize(printSettings.paperSize)
+  // driver-forms governs the roll and the 80x50 card printed on it (a
+  // document sheet keeps its own explicit paperSize width): render at the
+  // printer's registered form width, not the configured roll width, so a
+  // driver that only registers e.g. 72mm forms prints the receipt at the
+  // paper's full width instead of scaling an 80mm layout down and leaving
+  // side margins.
+  const printsOnDriverForms = (getPaperHeightMm(printSettings) == null || singleSheet)
     && (printSettings.pageSizeMode || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode) === 'driver-forms'
   const widthMm = options.paperWidthMm
-    || (isDriverFormsRoll ? getDriverFormWidthMm(printSettings) : getPaperWidthMm(printSettings))
+    || (printsOnDriverForms ? getDriverFormWidthMm(printSettings) : getPaperWidthMm(printSettings))
   // PRINT-PATH ONLY (this function). PDF/image export keep the operator's
   // configured margins unchanged -- see createReceiptPdfBlob and
   // createReceiptImageBlob, which call withReceiptElement with the
   // untouched `printSettings`, not this capped copy.
-  const hostPrintSettings = isDriverFormsRoll ? capDriverFormMargins(printSettings) : printSettings
+  const hostPrintSettings = printsOnDriverForms ? capDriverFormMargins(printSettings) : printSettings
   return withReceiptElement(content, widthMm, async (host) => {
     await waitForElementAssets(host)
 
@@ -1213,6 +1227,7 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
       measuredHeightMm,
       savedPageSizeMode: printSettings.pageSizeMode,
       fixedPageLengthMm: printSettings.fixedPageLengthMm,
+      singleSheet,
     })
 
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
@@ -1233,13 +1248,13 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
       widthMm,
       pageHeightMm,
       continuousRoll,
-      singleSheet: isSingleSheetPaperSize(printSettings.paperSize),
+      singleSheet,
       // hostPrintSettings so the shown margins match what actually printed
       // (capped side margins in driver-forms mode, unchanged otherwise).
       previewSettings: receiptPreviewSettings(hostPrintSettings),
       pageSizeMode,
     }
-  }, hostPrintSettings)
+  }, hostPrintSettings, { cardFromTopEdge: printsOnDriverForms && singleSheet })
 }
 
 export function buildPrintablePreviewDocument(layout: PrintableReceiptLayout, options: ReceiptPrintOptions = {}): string {

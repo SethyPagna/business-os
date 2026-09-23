@@ -140,8 +140,10 @@ await runTest('the print document consumes the layout flags so a single sheet ca
     'the printed page must not force overflow visible for a single sheet')
   assert.match(printSource, /const fixedFrameHeightCss = clipToOnePage/,
     'a single sheet pins the printed frame to the page height')
-  assert.match(printSource, /singleSheet: isSingleSheetPaperSize\(printSettings\.paperSize\)/,
+  assert.match(printSource, /const singleSheet = isSingleSheetPaperSize\(printSettings\.paperSize\)/,
     'the layout must carry which kind of page this is')
+  assert.match(printSource, /continuousRoll,\r?\n\s*singleSheet,\r?\n/,
+    'the printable layout returns that same flag')
 })
 
 await runTest('only the explicit 80x50 preset is fitted onto one physical card', () => {

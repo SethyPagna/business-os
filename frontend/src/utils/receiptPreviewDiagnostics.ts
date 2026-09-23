@@ -78,12 +78,12 @@ export function receiptPreviewDiagnosticLines(
   const mode = layout.continuousRoll ? 'receipt_preview_continuous_roll'
     : layout.singleSheet ? 'receipt_preview_single_card' : 'receipt_preview_fixed_document'
   const pageSizeMode = layout.pageSizeMode || 'measured'
-  // A page-size-mode fallback only ever applies to continuous-roll paper: the
-  // roll's OWN measured page (continuousRoll true) or one of the three
-  // fallbacks a roll can be switched to (pageSizeMode !== 'measured'). A
-  // genuine fixed sheet/document (80x50mm/A4/Letter/custom height) always
-  // reports pageSizeMode 'measured' and continuousRoll false, so this line
-  // never appears for it.
+  // A page-size-mode fallback applies to the roll printer's paper: the roll's
+  // OWN measured page (continuousRoll true), one of the fallbacks a roll can
+  // be switched to (pageSizeMode !== 'measured'), or the 80x50 card printed
+  // in a printer-paper mode. A document sheet (A4/Letter/custom height)
+  // always reports pageSizeMode 'measured' and continuousRoll false, so this
+  // line never appears for it.
   const showPageSizeMode = layout.continuousRoll || pageSizeMode !== 'measured'
   // 'driver-forms' and 'driver' request no page length at all (printReceipt.ts
   // sends no @page size for them): only the width is the app's, the length is
