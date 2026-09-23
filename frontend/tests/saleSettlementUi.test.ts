@@ -9,6 +9,7 @@ import {
   configuredSettlementMethods,
   initialSettlementRows,
   recordedSettlementIssue,
+  settlementOutstandingUsd,
   settlementRowsIssue,
   settlementTotals,
   type SettlementRow,
@@ -231,6 +232,7 @@ const partial = initialSettlementRows({
   amountPaidKhr: 12600,
   totalUsd: 10,
   exchangeRate: 4200,
+  moneyPrecisionVersion: 1,
   configuredMethods: ['Cash', 'ABA Bank'],
 })
 assert.deepEqual(partial.slice(0, 2).map(({ method, usd, khr }) => ({ method, usd, khr })), [
@@ -238,6 +240,41 @@ assert.deepEqual(partial.slice(0, 2).map(({ method, usd, khr }) => ({ method, us
   { method: 'ABA Bank', usd: '', khr: '12600' },
 ])
 assert.equal(partial[2]?.usd, '4.00', 'latest reviewed settings rate calculates a cent-precision outstanding row')
+
+// The one definition of paid (saleStatusResolution.ts): a tender covering the
+// total to within half a US cent owes nothing. The owner's sale -- $9.61 at
+// 4,100 paid with 39,400 riel, one riel short -- is Completed at the POS, so
+// the pay-in-full prefill must not add a "$0.01" row for it (the float
+// ceiling did: 9.61 - 39,400 / 4,100 = $0.00024, ceiled to a cent).
+const ownerSale = { totalUsd: 9.61, exchangeRate: 4100, moneyPrecisionVersion: 1 as const }
+const ownerRows = initialSettlementRows({
+  paymentDetails: [{ method: 'Cash', amount_usd: 0, amount_khr: 39400 }],
+  paymentMethod: 'Cash', amountPaidUsd: 0, amountPaidKhr: 39400,
+  ...ownerSale, configuredMethods: ['Cash'],
+})
+assert.deepEqual(ownerRows.map(({ usd, khr }) => ({ usd, khr })), [{ usd: '', khr: '39400' }], 'the owner tender is paid: no outstanding row is prefilled')
+assert.equal(settlementOutstandingUsd(ownerRows, ownerSale), 0)
+const tenSale = { totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1 as const }
+const cash = (usd: string, khr = ''): SettlementRow[] => [{ id: 'x', method: 'Cash', usd, khr }]
+assert.equal(settlementOutstandingUsd(cash('10'), tenSale), 0, 'exact payment owes nothing')
+assert.equal(settlementOutstandingUsd(cash('', '40980'), tenSale), 0, '20 riel ($0.0049) short is inside the band')
+assert.equal(settlementOutstandingUsd(cash('', '40979'), tenSale), 0.0051, '21 riel short is one step past it and owed exactly')
+assert.equal(settlementOutstandingUsd(cash('', '41500'), tenSale), 0, 'an overpayment is change, never a balance')
+const pastBand = initialSettlementRows({
+  paymentDetails: [{ method: 'Cash', amount_usd: 0, amount_khr: 40979 }],
+  paymentMethod: 'Cash', amountPaidUsd: 0, amountPaidKhr: 40979,
+  ...tenSale, configuredMethods: ['Cash'],
+})
+assert.equal(pastBand[1]?.usd, '0.01', 'past the band the shortfall is prefilled, rounded up to a whole cent')
+// The editor's Outstanding row and the completion gate read the same answer.
+assert.match(editorSource, /const remaining = settlementOutstandingUsd\(rows, \{ totalUsd, exchangeRate, moneyPrecisionVersion \}\)/)
+assert.doesNotMatch(editorSource, /totalUsd - totals\.paidEquivalentUsd/, 'the float shortfall must not decide Outstanding')
+assert.match(modalSource, /<SaleSettlementEditor[\s\S]*?moneyPrecisionVersion=\{usesSavedExchangeRate \? 1 : 0\}/)
+assert.match(modalSource, /settlementOutstandingUsd\(settlementRows, \{ totalUsd, exchangeRate: settlementSession\.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate \? 1 : 0 \}\) > 0/)
+assert.match(modalSource, /moneyPrecisionVersion: savedRate \? 1 : 0,\s*configuredMethods,/, 'the prefill reads the sale on the basis settlement checks')
+// The add-items projection of what is still owed reads the same kernel answer.
+assert.match(modalSource, /recordedSaleOutstandingUsd\(\{ \.\.\.sale, total_usd: projectedTotalUsd, exchange_rate: totals\.exchangeRate \}\)/)
+assert.doesNotMatch(modalSource, /projectedTotalUsd - totals\.paidTotalUsd/, 'the float shortfall must not decide the projected balance')
 assert.deepEqual(settlementTotals([
   { id: 'precision', method: 'Cash', usd: '1.005', khr: '' },
 ], 4100), { amountPaidUsd: 1.005, amountPaidKhr: 0, paidEquivalentUsd: 1.005 })
@@ -282,6 +319,7 @@ const legacyNative = initialSettlementRows({
   amountPaidKhr: 4100.1234,
   totalUsd: 5,
   exchangeRate: 4100,
+  moneyPrecisionVersion: 0,
   configuredMethods: ['Cash'],
 })
 assert.deepEqual(legacyNative[0], { id: 'recorded-0', method: 'Retired', usd: '2.1234', khr: '4100.1234' })

@@ -302,4 +302,33 @@ const storeAbsorbedDelivery = {
   assert.equal(credit.outstandingKhr, 123000)
 }
 
+// ---------------------------------------------------------------------------
+// 8. Balance due is the one definition of paid (saleStatusResolution.ts):
+//    zero when the tender covers the total to within half a US cent, the
+//    exact shortfall otherwise. The owner's sale -- $9.61 at 4,100, paid with
+//    39,400 riel, one riel short of 39,401 -- is recorded Completed, so its
+//    receipt must not print "Balance due $0.00 / 4 riel". The exact
+//    subtraction printed $0.0002 here (outstandingKhr 1) on a V1 sale.
+// ---------------------------------------------------------------------------
+{
+  const v1 = (money: Record<string, number>) => receiptTotalsFigures({
+    money_precision_version: 1, exchange_rate: 4100, subtotal_usd: money.total_usd, discount_usd: 0, calculated_total_usd: money.total_usd, rounding_adjustment_usd: 0, ...money,
+  })
+  const owner = v1({ total_usd: 9.61, amount_paid_usd: 0, amount_paid_khr: 39400 })
+  assert.equal(owner.outstandingUsd, 0, 'the owner tender is paid: nothing is still owed')
+  assert.equal(owner.outstandingKhr, 0, 'and no riel balance either')
+  // Exact payment and the 50-unit edge ($0.0050 short) owe nothing.
+  assert.equal(v1({ total_usd: 9.61, amount_paid_usd: 0, amount_paid_khr: 39401 }).outstandingUsd, 0)
+  assert.equal(v1({ total_usd: 10, amount_paid_usd: 9.995, amount_paid_khr: 0 }).outstandingUsd, 0, '$0.0050 short is inside the band')
+  // One unit past the band is a debt, printed exactly.
+  const past = v1({ total_usd: 10, amount_paid_usd: 9.9949, amount_paid_khr: 0 })
+  assert.equal(past.outstandingUsd, 0.0051, '$0.0051 short is owed')
+  assert.equal(past.outstandingKhr, 21)
+  // Legacy basis: same rule, the legacy two-decimal column.
+  const legacy = receiptTotalsFigures({ exchange_rate: 4100, subtotal_usd: 9.61, discount_usd: 0, total_usd: 9.61, amount_paid_usd: 0, amount_paid_khr: 39400 })
+  assert.equal(legacy.outstandingUsd, 0)
+  const legacyPartial = receiptTotalsFigures({ exchange_rate: 4100, subtotal_usd: 10, discount_usd: 0, total_usd: 10, amount_paid_usd: 3, amount_paid_khr: 12300 })
+  assert.equal(legacyPartial.outstandingUsd, 4, 'a partial tender still names its balance')
+}
+
 console.log('receiptTotals: column foots to total_usd on every fixture (all-three-discounts, split payment, partial return, KHR-primary, absorbed delivery, production 16433)')

@@ -1,13 +1,15 @@
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { SettlementRow } from './saleSettlement.ts'
-import { paymentMethodIdentity, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
+import { paymentMethodIdentity, settlementOutstandingUsd, settlementRowsIssue, settlementTotals } from './saleSettlement.ts'
 
 type Props = {
   rows: SettlementRow[]
   configuredMethods: string[]
   exchangeRate: number
   totalUsd: number
+  /** The sale's money basis, the one the Worker's settlement checks coverage on. */
+  moneyPrecisionVersion: 0 | 1
   saving: boolean
   error: string
   recordedIssue: 'malformed' | 'mismatch' | 'allocation' | null
@@ -20,9 +22,12 @@ type Props = {
 
 export const MAX_SETTLEMENT_ROWS = 12
 
-export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, saving, error, recordedIssue, allowRecordedEdits = false, translate, fmtUSD, fmtKHR, onChange }: Props) {
+export default function SaleSettlementEditor({ rows, configuredMethods, exchangeRate, totalUsd, moneyPrecisionVersion, saving, error, recordedIssue, allowRecordedEdits = false, translate, fmtUSD, fmtKHR, onChange }: Props) {
   const totals = settlementTotals(rows, exchangeRate)
-  const remaining = Math.max(0, totalUsd - totals.paidEquivalentUsd)
+  // Outstanding is the one definition of paid read as an amount: a tender
+  // inside the half-cent band owes nothing (it completes the sale), so it is
+  // never shown as a red fraction-of-a-cent balance.
+  const remaining = settlementOutstandingUsd(rows, { totalUsd, exchangeRate, moneyPrecisionVersion })
   const change = Math.max(0, totals.paidEquivalentUsd - totalUsd)
   const balance = remaining > 0 ? remaining : change
   const balanceText = balance > 0 && balance < 0.01 ? `${balance.toFixed(4)} USD` : fmtUSD(balance)

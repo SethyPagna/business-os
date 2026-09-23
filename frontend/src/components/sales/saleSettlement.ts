@@ -187,6 +187,7 @@ export function initialSettlementRows(input: {
   amountPaidKhr?: unknown
   totalUsd: number
   exchangeRate: number
+  moneyPrecisionVersion: 0 | 1
   configuredMethods: readonly string[]
 }): SettlementRow[] {
   const details = parseSettlementDetails(input.paymentDetails)
@@ -201,8 +202,10 @@ export function initialSettlementRows(input: {
     usd: amount(detail.amount_usd) > 0 ? String(amount(detail.amount_usd)) : '',
     khr: amount(detail.amount_khr) > 0 ? String(roundLegacyKhr(amount(detail.amount_khr))) : '',
   }))
-  const paid = settlementTotals(rows, input.exchangeRate).paidEquivalentUsd
-  const outstandingUsd = Math.ceil(Math.max(0, input.totalUsd - paid) * 100 - Number.EPSILON) / 100
+  // A tender inside the half-cent band owes nothing, so it gets no "$0.01"
+  // row; a real shortfall is prefilled rounded UP to a whole cent.
+  const owed = settlementOutstandingUsd(rows, input)
+  const outstandingUsd = Math.ceil(owed * 100 - Number.EPSILON) / 100
   if (outstandingUsd > 0 || rows.length === 0) {
     rows.push({
       id: 'settlement-new',
