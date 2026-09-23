@@ -129,6 +129,8 @@ type Outcome = {
   recoveryCommitMs: number | null
   /** The origin really did receive the recovery navigation it then stalled. */
   recoveryRequestStalled: boolean
+  /** Recovery navigations the origin answered with its bot challenge. */
+  recoveryChallengesServed: number
   shellGeneration: string | null
   catalog: string | null
   bootError: boolean
@@ -165,6 +167,13 @@ type FixtureOptions = {
    * is slower than the worker's budget and still alive.
    */
   delayRecoveryNavigationMs?: number
+  /**
+   * Answer the recovery navigation with the host's bot challenge at this
+   * status (403 managed challenge, 503 the legacy JS challenge) until the
+   * page has run. Like the real one, the page sets its clearance cookie and
+   * reloads the URL it was served for.
+   */
+  challengeRecoveryNavigation?: 403 | 503
 }
 
 function createFixture(workerSource: string, options: FixtureOptions = {}) {
@@ -172,6 +181,7 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
   let recoveryRedirectsSent = 0
   let firstStallAt: number | null = null
   let challengedRecoveryReads = 0
+  let recoveryChallengesServed = 0
   const openSockets = new Set<import('node:net').Socket>()
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://localhost')
@@ -239,6 +249,12 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
       }, options.delayRecoveryNavigationMs)
       return
     }
+    if (options.challengeRecoveryNavigation && isRecoveryNavigation && !String(request.headers.cookie ?? '').includes('clearance=1')) {
+      recoveryChallengesServed += 1
+      response.writeHead(options.challengeRecoveryNavigation, { 'Content-Type': 'text/html' })
+      response.end('<!doctype html><title>Just a moment...</title><script>document.cookie = "clearance=1; path=/"; location.reload()</script>')
+      return
+    }
     if (options.redirectFirstRecoveryNavigation && isRecoveryNavigation && recoveryRedirectsSent === 0) {
       recoveryRedirectsSent += 1
       // Cache-Control: must-revalidate is already set above, so the browser
@@ -268,6 +284,7 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
     firstStallAt: () => firstStallAt,
     /** Worker-context reads of the recovery URL the host answered with its challenge. */
     challengedRecoveryReads: () => challengedRecoveryReads,
+    recoveryChallengesServed: () => recoveryChallengesServed,
     // A stalled request holds its socket open, and server.close() waits for
     // every connection: destroy them or the test process never exits.
     close: () => new Promise<void>((resolve) => {
@@ -349,6 +366,7 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
       recoveryTokens: recoveryTokens.size,
       recoveryCommitMs: stalledAt !== null && recoveryCommittedAt !== null ? recoveryCommittedAt - stalledAt : null,
       recoveryRequestStalled: stalledAt !== null,
+      recoveryChallengesServed: fixture.recoveryChallengesServed(),
       shellGeneration: blankTab ? null : await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
       catalog: blankTab ? null : await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
       bootError: blankTab ? false : await page.evaluate(() => !!document.querySelector('#boot-error')),
@@ -649,3 +667,20 @@ test('a poisoned cached shell does not turn the recovery navigation into a worke
   assert.equal(poisoned.shellGeneration, 'new', 'the dropped shell is replaced by the deployed one')
   assert.equal(poisoned.catalog, 'CATALOG-new')
 })
+
+// Part 628 ticket 3. The origin answers the recovery navigation with its bot
+// challenge. The worker used to refuse every answer that was not the document
+// and fall back to the cached shell: the dead build, with the guard's one
+// reload spent. Shown instead, the challenge clears itself and reloads the
+// same URL, and that reload is the recovery. 503 is the legacy JS challenge,
+// and stands in for an origin error page: the worker serves both the same way.
+for (const status of [403, 503] as const) {
+  test(`a ${status} challenge on the recovery navigation is shown and lands on the deployed build`, { timeout: 180_000 }, async () => {
+    const challenged = await runScenario(fixedWorker, true, { challengeRecoveryNavigation: status })
+    assert.equal(challenged.recoveryChallengesServed, 1, 'the origin must really have challenged the recovery navigation, once')
+    assert.equal(challenged.recoveryTokens, 1, 'the challenge reloads the same URL; the guard still spends exactly one reload')
+    assert.equal(challenged.shellGeneration, 'new', 'the challenge must reach the tab, not be swapped for the cached dead shell')
+    assert.equal(challenged.catalog, 'CATALOG-new', 'and once cleared, the deployed build must mount')
+    assert.equal(challenged.bootError, false, 'the dead shell is where this used to end')
+  })
+}

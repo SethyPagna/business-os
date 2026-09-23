@@ -941,23 +941,26 @@ async function appShellFallback(request, event) {
                 })])
             : await network;
         clearTimeout(expireTimer);
-        // A navigate-mode Request carries redirect: 'manual', so a host that
-        // answers this navigation with a 3xx (an HSTS or trailing-slash hop, an
-        // edge rule, a sign-in bounce) gives back an opaqueredirect: type
-        // 'opaqueredirect', status 0, ok false. isValidDocumentResponse refuses
-        // it, and refusing it here means falling through to the cached shell the
-        // page has just proven dead, with the guard's one reload already spent --
-        // the same incident by a different road. Hand the opaqueredirect to the
-        // browser instead (only a navigation may be answered with one) and let it
-        // walk the hop itself. If the redirect keeps __bos_reload the follow-up
-        // navigation re-enters this branch; if the host drops the query, the
-        // follow-up is an ordinary navigation served from cache, which is no
-        // worse than the fallback below.
-        if (fresh && fresh.type === 'opaqueredirect')
-            return fresh;
-        if (isValidDocumentResponse(fresh)) {
-            // Served either way -- it is what the origin answered -- but a
-            // challenge interstitial is not a shell, so only the app is kept.
+        // Whatever the origin answered is what this navigation gets, exactly as
+        // it would be with no worker at all; the cached shell answers only when
+        // nothing did (a network failure, the budget above). The page has just
+        // proven that shell dead and the guard has spent its one reload, so
+        // handing it back for an answer the origin DID give is the same incident
+        // by a different road. The answers that used to take that road:
+        //   - a 3xx. A navigate-mode Request carries redirect: 'manual', so a host
+        //     hop (HSTS, trailing slash, an edge rule, a sign-in bounce) arrives
+        //     as an opaqueredirect -- status 0, ok false. Only a navigation may be
+        //     answered with one, and the browser walks the hop itself. If the
+        //     redirect keeps __bos_reload the follow-up re-enters this branch; if
+        //     the host drops the query, the follow-up is an ordinary navigation
+        //     served from cache, no worse than before.
+        //   - the host's bot challenge (403 "Just a moment...", 503 on the legacy
+        //     JS challenge). Shown, it clears itself and reloads this same URL,
+        //     which comes back here with clearance.
+        //   - an origin error page. Reloading it retries this recovery; reloading
+        //     the dead shell cannot, because the guard will not reload again.
+        if (fresh) {
+            // Only the app itself is kept as the shell.
             if (await isAppShellDocument(fresh))
                 await cache.put('/index.html', fresh.clone()).catch(() => { });
             return fresh;
