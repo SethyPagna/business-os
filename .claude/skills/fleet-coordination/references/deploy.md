@@ -53,6 +53,14 @@ Coordinate by message: tell peers a deploy is happening but that an **isolated-w
 not require them to pause** (their local envs are untouched); ask only that nobody else run
 `migrate:remote` / `wrangler deploy` concurrently.
 
+**Check auth through the wrapper, never bare wrangler.** `npx wrangler whoami` does not load
+`.wrangler-auth.local`, so it falls back to the OAuth cache and its refresh call to
+`dash.cloudflare.com/oauth2/token`, which some egress IPs receive as a bot-challenge 403. That reads
+as "deploy blocked" when it is not (23 Sep 2026: six false "blocked" checks, then the real deploy
+worked first time). The deploy path authenticates with the configured API token, so test the same
+path: `node scripts/with-wrangler-auth.cjs wrangler whoami` (and `... wrangler deployments list` for
+read-only provenance).
+
 ## Post-deploy live verification
 
 A deploy ships the **entire committed HEAD** — every committed lane's work, not just your fixes.
