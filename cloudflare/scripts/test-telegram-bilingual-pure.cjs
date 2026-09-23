@@ -673,8 +673,11 @@ const lastSent = () => sent[sent.length - 1].body.text
     RULE,
     '1. Stock / ស្តុក',
     '· Products / ផលិតផល: 2',
-    '• OUT / អស់ស្តុក — Coca-Cola 330ml — 0 (⚠ 5)',
-    '• LOW / ស្តុកទាប — Rice 5kg — 3 (⚠ 5)',
+    // Sep 23 2026: a bullet too wide for a phone continues on the hanging indent.
+    '• OUT / អស់ស្តុក — Coca-Cola 330ml',
+    `${lang.HANGING_INDENT}— 0 (⚠ 5)`,
+    '• LOW / ស្តុកទាប — Rice 5kg',
+    `${lang.HANGING_INDENT}— 3 (⚠ 5)`,
   ], `/stock does not have the shared numbered-section shape:\n${stockReply}`)
 
   // RETIRED (Sep 22 2026): a bare RULE with no numbered header after it -- the

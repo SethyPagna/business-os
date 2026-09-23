@@ -287,11 +287,20 @@ check('the receipt LIST does not show the voided receipt under a total it is not
 // -- quantity first, an em dash where every other message puts an equals sign,
 // and NO line total, so the one figure the reader wanted was the one they had
 // to multiply out. They now print the sale alert's own numbered equation.
-const saleItemLines = salesMsg.split('\n').filter((line) => /^ {3}\d+\. /.test(line))
+// An item too wide for a phone continues nested under its receipt on the
+// hanging indent (Sep 23 2026); read back as one line each, it is unchanged.
+const salesLines = salesMsg.split('\n')
+const itemContinuation = `   ${lang.HANGING_INDENT}`
+const saleItemLines = salesLines
+  .reduce((rows, line) => (line.startsWith(itemContinuation) ? [...rows.slice(0, -1), `${rows[rows.length - 1]} ${line.trim()}`] : [...rows, line]), [])
+  .filter((line) => /^ {3}\d+\. /.test(line))
 check(`each receipt lists its items as a numbered equation (${saleItemLines.length} item lines)`,
   saleItemLines.length === 2
   && saleItemLines[0] === '   1. Lamp 1 × $100.00 · 400,000៛ = $100.00 · 400,000៛'
   && saleItemLines[1] === '   1. Mug 1 × $40.00 · 160,000៛ = $40.00 · 160,000៛')
+check('and an item too wide for a phone continues under its own number, never at the receipt\'s edge',
+  salesLines.includes('   1. Lamp 1 × $100.00 · 400,000៛')
+  && salesLines.includes(`${itemContinuation}= $100.00 · 400,000៛`), salesMsg)
 check('and the retired quantity-first em-dash form is gone from the item lines',
   !/\d+ × [A-Za-z]/.test(salesMsg) && !saleItemLines.some((line) => line.includes('—')))
 

@@ -82,13 +82,16 @@ function rowWords(text: string): string[] {
  * (`1 × $28.00 (−$3.00) = $25.00`); otherwise each part stays whole where it
  * fits, one wider than a line breaks at its own separators (`— Warehouse 90`
  * `· Shop 25` `· all branches 115`), and a piece still wider between words.
+ * `nest` indents the whole row under the row above it (a /sales receipt's
+ * items), and its continuation lines by the hanging indent beyond that.
  */
-export function telegramRowLines(head: string, parts: string[] = []): string[] {
-  const rest = TELEGRAM_ROW_WIDTH - HANGING_INDENT.length
+export function telegramRowLines(head: string, parts: string[] = [], nest = ''): string[] {
+  const first = TELEGRAM_ROW_WIDTH - nest.length
+  const rest = first - HANGING_INDENT.length
   const lines: string[] = []
   const place = (piece: string) => {
     const last = lines.length - 1
-    if (last >= 0 && lines[last].length + 1 + piece.length <= (last ? rest : TELEGRAM_ROW_WIDTH)) lines[last] += ` ${piece}`
+    if (last >= 0 && lines[last].length + 1 + piece.length <= (last ? rest : first)) lines[last] += ` ${piece}`
     else lines.push(piece)
   }
   const pieces = (part: string): string[] => (part.length <= rest ? [part]
@@ -98,7 +101,7 @@ export function telegramRowLines(head: string, parts: string[] = []): string[] {
   const whole = tail.join(' ')
   if (whole && whole.length <= rest) place(whole)
   else tail.flatMap(pieces).forEach(place)
-  return lines.map((line, index) => (index ? `${HANGING_INDENT}${line}` : line))
+  return lines.map((line, index) => `${nest}${index ? HANGING_INDENT : ''}${line}`)
 }
 
 // Money formatters, kept together with money() below so a new message cannot
@@ -561,7 +564,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // is dropped here and only here: the section is a list of cashiers, so the
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
-  section('cashiers', cashiers.map((row) => `• ${cleanLine(row.cashier, 60)} — ${Number(row.count) || 0} · ${usd(row.usd)}`))
+  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`• ${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
   return lines.join('\n')
 }
 
@@ -600,8 +603,12 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
       ...sectionTitle(2, 'invoices'), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
       ...sectionTitle(3, 'latestReceipts'),
     ]
+    const nest = '   '
     for (const sale of sales) {
-      lines.push(`• ${sale.receipt_number || `#${sale.id}`} · ${money(sale.total_usd, sale.total_khr)} · ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`)
+      lines.push(...telegramRowLines(`• ${sale.receipt_number || `#${sale.id}`}`, [
+        `· ${money(sale.total_usd, sale.total_khr)}`,
+        `· ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`,
+      ]))
       const saleItems = bySale.get(sale.id) || []
       // The same `1. name qty × price = total` equation the sale alert
       // prints (formatSaleTelegramLines), indented under its receipt. It
@@ -610,13 +617,16 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
       // was the one they had to multiply out themselves.
       saleItems.slice(0, 4).forEach((item, index) => {
         const quantity = Number(item.quantity) || 0
-        lines.push(`   ${index + 1}. ${cleanLine(item.product_name || 'Item', 100)} ${quantity} × ${money(item.applied_price_usd, item.applied_price_khr)} = ${money(round2(quantity * (Number(item.applied_price_usd) || 0)), Math.round(quantity * (Number(item.applied_price_khr) || 0)))}`)
+        lines.push(...telegramRowLines(`${index + 1}. ${cleanLine(item.product_name || 'Item', 100)}`, [
+          `${quantity} × ${money(item.applied_price_usd, item.applied_price_khr)}`,
+          `= ${money(round2(quantity * (Number(item.applied_price_usd) || 0)), Math.round(quantity * (Number(item.applied_price_khr) || 0)))}`,
+        ], nest))
       })
       // Indented under its receipt like the item lines above it, and worded by
       // the one helper the alert builders' continuation also goes through. It
       // used to localize only the NOUN -- `+ 3 more មុខទំនិញ` -- leaving the
       // English "more" in a Khmer-only shop's message.
-      if (saleItems.length > 4) lines.push(`   ${moreItems(saleItems.length - 4)}`)
+      if (saleItems.length > 4) lines.push(`${nest}${moreItems(saleItems.length - 4)}`)
     }
     return lines.join('\n')
   })
@@ -635,7 +645,7 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
       ...sectionTitle(2, 'eachExpense'),
     ]
     if (!fees.length) lines.push(EMPTY_SECTION)
-    for (const fee of fees) lines.push(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}: ${money(fee.amount_usd, fee.amount_khr)}`)
+    for (const fee of fees) lines.push(...telegramRowLines(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
     return lines.join('\n')
   })
 }
@@ -659,7 +669,7 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     const lines = [title, ...sectionTitle(1, 'stock'), labeled('products', rows.length)]
     for (const row of rows) {
       const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)} — ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`)
+      lines.push(...telegramRowLines(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
     }
     return lines.join('\n')
   })
@@ -982,16 +992,18 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   lines.push(...sectionTitle(4, 'paymentMethods'))
   const paymentMethods = figures.paymentMethods || []
   lines.push(...(paymentMethods.length
-    ? paymentMethods.map((row) => `• ${cleanLine(row.method, 40)} — ${Number(row.count) || 0} · ${usd(row.usd)}`)
+    ? paymentMethods.flatMap((row) => telegramRowLines(`• ${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
     : [EMPTY_SECTION]))
 
   lines.push(...sectionTitle(5, 'delivery'))
   const deliveries = figures.deliveries || []
   lines.push(...(deliveries.length
-    ? deliveries.map((row) => `• ${cleanLine(row.name, 40)} — ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`
+    ? deliveries.flatMap((row) => telegramRowLines(`• ${cleanLine(row.name, 40)}`, [
+      `— ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
       // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
       // would claim the courier worked for free, so it is left off instead.
-      + (Number(row.costUsd) > 0 ? ` · ${usd(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : ''))
+      Number(row.costUsd) > 0 ? `· ${usd(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : '',
+    ]))
     : [EMPTY_SECTION]))
 
   // 6. Expenses -- every expense paid out of this drawer as its own bullet,
@@ -1003,14 +1015,14 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
   })
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(`• ${label('deliveryCost')} — ${usd(expenses.courierUsd)}`)
+  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`• ${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
   const details = figures.expenseDetails || []
   if (details.length) {
-    for (const detail of details) expenseRows.push(`• ${cleanLine(detail.label, 60)} — ${money(detail.usd, detail.khr)}`)
+    for (const detail of details) expenseRows.push(...telegramRowLines(`• ${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
   } else if (expenses.otherUsd || expenses.otherKhr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(`• ${label('expensesOther')} — ${money(expenses.otherUsd, expenses.otherKhr)}`)
+    expenseRows.push(...telegramRowLines(`• ${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
   }
   lines.push(...sectionTitle(6, 'expenses'))
   lines.push(...(expenseRows.length

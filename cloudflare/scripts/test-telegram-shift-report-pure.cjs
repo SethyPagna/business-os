@@ -139,13 +139,17 @@ const figures = {
 const NOW = Date.parse('2026-09-06T14:00:00.000Z')
 const report = render('both', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW))
 const lines = report.split('\n')
+// A row too wide for a phone continues on the hanging indent (Sep 23 2026).
+// It is still ONE row, so the at-a-glance measures below count rows -- what
+// they counted when every row was one line.
+const rowsOf = (text) => text.split('\n').filter((line) => !line.startsWith(telegramLang.HANGING_INDENT))
 
 // ---- 1. the line cap -------------------------------------------------------
 // The cap moved from 28 to 38 on Sep 21 2026 with the two breakdown sections
 // and the two discount rows the owner's reference reinstated. It is still a
-// ceiling: this fixture, with every optional block on, renders in 36.
-check(`the shift report stays at a glance (${lines.length} lines, cap 38)`,
-  lines.length <= 38, report)
+// ceiling: this fixture, with every optional block on, renders in 37 rows.
+check(`the shift report stays at a glance (${rowsOf(report).length} rows, cap 38)`,
+  rowsOf(report).length <= 38, report)
 check('and the fixture really is a busy shift, not a quiet one',
   figures.invoices > 20 && figures.creditUsd > 0 && figures.refundUsd > 0
   && figures.deliveryCostRecorded > 0 && figures.otherExpenseKhr > 0
@@ -155,8 +159,8 @@ check('and the fixture really is a busy shift, not a quiet one',
 // than prose. Prose would show up in either mode; this one is unambiguous.
 const englishReport = render('en', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW))
 check('no line is a sentence -- the longest is a label and a figure',
-  englishReport.split('\n').every((line) => line.split(' ').length <= 12),
-  englishReport.split('\n').filter((line) => line.split(' ').length > 12).join('\n'))
+  englishReport.split('\n').every((line) => line.trim().split(' ').length <= 12),
+  englishReport.split('\n').filter((line) => line.trim().split(' ').length > 12).join('\n'))
 
 // ---- 2. the exact lines, in all three modes --------------------------------
 assert.deepEqual(lines, [
@@ -197,12 +201,15 @@ assert.deepEqual(lines, [
   '• ABA — 6 · $186.25',
   RULE,
   '5. Delivery / ការដឹកជញ្ជូន',
-  '• Grab — 3 · $12.00 fee / ថ្លៃដឹក · $7.50 cost / ថ្លៃដើម',
+  // Sep 23 2026: a bullet too wide for a phone continues on the hanging indent.
+  '• Grab — 3 · $12.00 fee / ថ្លៃដឹក',
+  `${telegramLang.HANGING_INDENT}· $7.50 cost / ថ្លៃដើម`,
   RULE,
   // The courier payout is a ROW here, not just a figure inside the total:
   // the bullets and the Total have to add up on the reader's own screen.
   '6. Expenses / ចំណាយ',
-  '• Actual delivery cost / ថ្លៃដឹកដើម — $7.50',
+  '• Actual delivery cost / ថ្លៃដឹកដើម',
+  `${telegramLang.HANGING_INDENT}— $7.50`,
   '• Rent — $9.50 · 20,000៛',
   '· Total / សរុប: $17.00 · 20,000៛',
 ], report)
@@ -298,7 +305,8 @@ assert.deepEqual(khmerReport.split('\n'), [
   '• ABA — 6 · $186.25',
   RULE,
   '5. ការដឹកជញ្ជូន',
-  '• Grab — 3 · $12.00 ថ្លៃដឹក · $7.50 ថ្លៃដើម',
+  '• Grab — 3 · $12.00 ថ្លៃដឹក',
+  `${telegramLang.HANGING_INDENT}· $7.50 ថ្លៃដើម`,
   RULE,
   '6. ចំណាយ',
   '• ថ្លៃដឹកដើម — $7.50',
@@ -317,11 +325,11 @@ check(`no English word survives on a label position in 'km' mode (${khmerLabelPo
 check('...while the VALUES are untouched in every mode',
   khmerReport.includes('Sunrise Mart') && khmerReport.includes('• Cash — 18 · $300.00')
   && khmerReport.includes('• Rent — $9.50 · 20,000៛'), khmerReport)
-// Every mode is the SAME report: same number of lines, same rules in the same
+// Every mode is the SAME report: same number of rows, same rules in the same
 // places. That is what "one message, three renderings" means.
-const rulePositions = (text) => text.split('\n').map((line, index) => (line === RULE ? index : -1)).filter((index) => index >= 0)
-check('all three modes render the same line count and the same divider positions',
-  lines.length === englishReport.split('\n').length && lines.length === khmerReport.split('\n').length
+const rulePositions = (text) => rowsOf(text).map((line, index) => (line === RULE ? index : -1)).filter((index) => index >= 0)
+check('all three modes render the same row count and the same divider positions',
+  rowsOf(report).length === rowsOf(englishReport).length && rowsOf(report).length === rowsOf(khmerReport).length
   && JSON.stringify(rulePositions(report)) === JSON.stringify(rulePositions(englishReport))
   && JSON.stringify(rulePositions(report)) === JSON.stringify(rulePositions(khmerReport)))
 // The mode is a module-level variable; leaving it set would poison the next

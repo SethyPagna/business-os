@@ -191,6 +191,14 @@ const NOW = Date.parse('2026-09-04T12:00:00.000Z')
 
 const report = telegram.formatShiftReport('Sok Meng Shop', CLOSED, FIGURES, NOW)
 const lines = report.split('\n')
+// A row too wide for a phone continues on the hanging indent (Sep 23 2026).
+// Those lines are the same row, so a reader that judges a whole row rejoins them.
+const rowsOf = (text) => text.split('\n').reduce((joined, line) => {
+  if (joined.length && line.startsWith(lang.HANGING_INDENT)) joined[joined.length - 1] += ` ${line.trim()}`
+  else joined.push(line)
+  return joined
+}, [])
+const rows = rowsOf(report)
 const lineWith = (english) => {
   const prefix = `${lang.ROW_BULLET}${english}${SEP}`
   const found = lines.find((line) => line.startsWith(prefix))
@@ -202,7 +210,7 @@ const valueOf = (english) => lineWith(english).slice(lineWith(english).indexOf('
 // two expense/delivery/payment breakdown rows need their own reader.
 const bulletValue = (english) => {
   const prefix = `• ${english}${SEP}`
-  const found = lines.find((line) => line.startsWith(prefix))
+  const found = rows.find((row) => row.startsWith(prefix))
   assert.ok(found, `the report has no "${english}" bullet:\n${report}`)
   return found.slice(found.indexOf(' — ') + 3)
 }
@@ -211,7 +219,7 @@ const bulletValue = (english) => {
 // both the invoice-count row and the expense total) can be read at its own
 // occurrence instead of the first one anywhere in the message.
 const sectionBlock = (text, key) => {
-  const rows = text.split('\n')
+  const rows = rowsOf(text)
   const title = rows.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
   assert.ok(title >= 0, `the report has no "${key}" section:\n${text}`)
   const next = rows.findIndex((row, index) => index > title && row === lang.RULE)
@@ -345,7 +353,7 @@ for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Final a
 // And no explanatory sentence anywhere: every line is a label and a figure, a
 // bullet, a rule, a numbered section title, an empty-section marker, or the
 // report's own title line.
-for (const line of lines.slice(1)) {
+for (const line of rows.slice(1)) {
   if (!line.trim() || line === lang.RULE || line.startsWith('•') || line === EMPTY_SECTION_MARKER || /^\d+\.\s/.test(line)) continue
   assert.ok(line.includes(': '), `"${line}" is prose, not a labelled figure`)
   assert.ok(!/\. /.test(line), `"${line}" reads as a sentence`)
@@ -826,17 +834,18 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // A bullet's label is either a lang.label() pair (deliveryCost) or a raw
   // DB row label (the expense query's own "Example expense"), so this takes
   // the already-rendered prefix rather than a TelegramLabelKey.
+  const mappedRows = rowsOf(reply)
   const mappedBulletValue = (renderedPrefix) => {
     const prefix = `• ${renderedPrefix} — `
-    const found = mapped.find((line) => line.startsWith(prefix))
+    const found = mappedRows.find((row) => row.startsWith(prefix))
     assert.ok(found, `the report has no "${renderedPrefix}" bullet:\n${reply}`)
     return found.slice(prefix.length)
   }
   const mappedSection = (key) => {
-    const title = mapped.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
+    const title = mappedRows.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
     assert.ok(title >= 0, `the report has no "${key}" section:\n${reply}`)
-    const next = mapped.findIndex((row, index) => index > title && row === lang.RULE)
-    return mapped.slice(title + 1, next < 0 ? mapped.length : next)
+    const next = mappedRows.findIndex((row, index) => index > title && row === lang.RULE)
+    return mappedRows.slice(title + 1, next < 0 ? mappedRows.length : next)
   }
   // Each of these is a DIFFERENT number, so a line reading from the wrong
   // kernel column cannot coincidentally match.
