@@ -200,9 +200,13 @@ const batchesMod = loadReal('routes/batches.ts', {
   '../lib/moneyPrecision': moneyMod,
 })
 
+// The per-request line cap (lib/planTier.ts stockInLinesPerRequest). Real,
+// not autoStubbed: a stub would answer undefined for the limit table.
+const planTierMod = loadReal('lib/planTier.ts')
 const stockInCommitMod = loadReal('routes/stockInCommit.ts', {
   '../lib/auth': authStub,
   '../lib/permissions': permissionsMod,
+  '../lib/planTier': planTierMod,
   './inventory': inventoryMod,
   './batches': batchesMod,
 })
@@ -344,10 +348,44 @@ async function run() {
       lines.push({ key: `p${i}`, wire: 'receive', body: { product_id: i, branch_id: 1, quantity: 1, unit_cost_usd: 1, supplier_name: 'Acme', payment_status: 'paid' } })
     }
     const db = wrapFlat(rawDb)
+    // Paid (PLAN_TIER unset) attempts stockInLinesPerRequest lines per
+    // request; the client re-sends only the deferred rest.
+    const cap = planTierMod.PLAN_LIMITS_BY_TIER.paid.stockInLinesPerRequest
+    assert.ok(cap < 30, 'this case spans the per-request cap')
     const results = await runStockInCommit(makeContext(db, ADMIN_USER), lines)
     assert.equal(results.length, 30)
-    assert.ok(results.every((r) => r.ok), `all 30 lines across a >100-param session succeed: ${JSON.stringify(results.filter((r) => !r.ok))}`)
-    console.log('PASS a 30-line session (well past the 100-bound-parameter cap for one statement) commits every line')
+    assert.ok(results.slice(0, cap).every((r) => r.ok), `the first ${cap} lines succeed: ${JSON.stringify(results.filter((r) => !r.ok && r.code !== 'deferred'))}`)
+    assert.ok(results.slice(cap).every((r) => !r.ok && r.code === 'deferred'), 'the lines past the cap are deferred, not failed')
+    const rest = lines.slice(cap)
+    const second = await runStockInCommit(makeContext(db, ADMIN_USER), rest)
+    assert.ok(second.every((r) => r.ok), 're-sending only the deferred lines saves them')
+    for (let i = 1; i <= 30; i += 1) assert.equal(branchStock(db, i), 1, `product ${i} received exactly once`)
+    console.log('PASS a 30-line session (well past the 100-bound-parameter cap for one statement) commits every line exactly once across the per-request cap')
+  }
+
+  // 5) The cap follows the deployment's plan: Free attempts only its own
+  //    stockInLinesPerRequest and never touches the rest.
+  {
+    planTierMod.__resetPlanTierCacheForTests()
+    const db = freshDb()
+    const c = makeContext(db, ADMIN_USER)
+    c.env = { DB: {}, PLAN_TIER: 'free' }
+    const cap = planTierMod.PLAN_LIMITS_BY_TIER.free.stockInLinesPerRequest
+    const lines = [
+      { key: 'a', wire: 'receive', body: { product_id: 1, branch_id: 1, quantity: 5, unit_cost_usd: 2, supplier_name: 'Acme', payment_status: 'paid' } },
+      { key: 'b', wire: 'receive', body: { product_id: 2, branch_id: 1, quantity: 4, unit_cost_usd: 3, supplier_name: 'Acme', payment_status: 'paid' } },
+    ]
+    assert.ok(cap < lines.length, 'the Free cap is below this two-line session')
+    auditCalls = []
+    const results = await runStockInCommit(c, lines)
+    planTierMod.__resetPlanTierCacheForTests()
+    assert.deepEqual(results.map((r) => r.ok), [true, false])
+    assert.equal(results[1].code, 'deferred')
+    assert.equal(results[1].key, 'b')
+    assert.equal(branchStock(db, 1), 5)
+    assert.equal(branchStock(db, 2), 0, 'the deferred line moved no stock')
+    assert.equal(auditCalls.length, 1, 'and wrote nothing at all')
+    console.log('PASS Free attempts only its own per-request line cap; the rest is deferred untouched')
   }
 }
 

@@ -189,6 +189,42 @@ export type PlanLimits = {
   // answer that silently skipped rows is worse than no answer.
   catalogIntegrityMaxProducts: number
 
+  // ---- Fast stock-in commit ------------------------------------------------
+
+  // routes/stockInCommit.ts POST /api/inventory/fast-stock-in/commit runs
+  // every line of a stock-in session inside ONE invocation, so the line
+  // count has to fit d1QueriesPerInvocation below. Lines past this cap are
+  // answered { ok: false, code: 'deferred' } without a single read or write,
+  // and the client re-sends only those (inventoryWriteTransport.ts).
+  //
+  // MEASURED 2026-09-24 against the real module graph behind the route (only
+  // auth, the broadcast Durable Object and outbound fetch stubbed), counting
+  // at the D1 binding. D1 calls / statements per line, Free tier, migration
+  // 0192 applied, every line carrying its client request id (as the modal
+  // sends it):
+  //   receive                 16 calls / 23 statements
+  //   adjust remove (tagged)  16 / 20
+  //   adjust set (raising)    22 / 28
+  //   adjust add, tagged      24 / 33   <- worst line
+  // Paid is one call lower per line (paid kv_write skips the quota_usage
+  // counter). Before 0192 is applied an identified line costs one schema
+  // probe instead of four receipt queries, so the post-0192 figures are the
+  // higher ones. scripts/test-stock-in-commit-d1-budget-pure.cjs re-measures
+  // these on every run.
+  //
+  // Per-request overhead outside the loop, worst case (cold isolate):
+  //   ensureCoreDataInvariantsOnce fast path 8 + maintenance flag 1 +
+  //   session lookup 1 + session touch 1 + session slide 1 + receipt-table
+  //   probe 1 = 13.
+  //
+  // Per-line budget 33: the worst line's STATEMENT count, which is also above
+  // its call count with a 25% margin (24 x 1.25 = 30) -- so the cap holds
+  // whether D1 counts a batch() as one query or as one per statement, and
+  // leaves room for withD1Retry's single retry on some calls.
+  //   Paid: floor((1000 - 13) / 33) = 29
+  //   Free: floor((50 - 13) / 33)   = 1
+  stockInLinesPerRequest: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -244,6 +280,7 @@ const PAID_LIMITS: PlanLimits = {
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
+  stockInLinesPerRequest: 29,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -265,6 +302,7 @@ const FREE_LIMITS: PlanLimits = {
   importRetentionMaxJobsPerTier: 5,
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
+  stockInLinesPerRequest: 1,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

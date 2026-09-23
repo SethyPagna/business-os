@@ -157,6 +157,9 @@ const batchesMod = loadReal('routes/batches.ts', {
 const stockInCommitMod = loadReal('routes/stockInCommit.ts', {
   '../lib/auth': authStub,
   '../lib/permissions': permissionsMod,
+  // The per-request line cap. Real, not autoStubbed: a stub would answer
+  // undefined for the limit table and defer every line.
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   './inventory': inventoryMod,
   './batches': batchesMod,
 })
