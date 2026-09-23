@@ -12,7 +12,7 @@ import { receiptDeliveryFigures, receiptLineFigures, receiptLineSavingsUsd } fro
 import { receiptTotalsFigures } from '../../utils/receiptTotals'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { RECEIPT_LANGUAGE_OPTIONS } from '../receipt-settings/constants'
-import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
+import { buildAppliedReceiptConfig, isReceiptCardPaper, receiptRenditionPrintSettings } from '../../utils/receiptAppliedConfig.ts'
 import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -369,20 +369,12 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const contrastMode = normalizeReceiptTextContrast(tpl.text_contrast)
   const contrastAttrs = { [RECEIPT_CONTRAST_ATTR]: contrastMode }
   const contrastTextColor = contrastMode === 'maximum' ? '#000000' : undefined
-  const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
+  const compactSalesReceipt = tpl.sales_receipt_enabled === true || isReceiptCardPaper(appliedPrintSettings)
   // B5: enabling the 80x50 card must not make the FULL receipt unreachable
-  // -- with it on, BOTH renditions preview and Print offers BOTH sizes.
-  // The card prints on its fixed 80x50 sheet (zero margins, the sheet IS
-  // the layout); the full receipt prints on the continuous roll -- an
-  // '80x50mm' paper setting maps to the 80mm roll for it, any other
-  // configured size is kept as the operator set it.
-  // Keep the named preset on the object passed to printReceipt. That is the
-  // explicit single-card intent; an arbitrary custom 80 x 50 document must
-  // remain a normal paginated document rather than being inferred as compact.
-  const compactPrintSettings = { ...appliedPrintSettings, paperSize: '80x50mm', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
-  const fullPrintSettings = String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
-    ? { ...appliedPrintSettings, paperSize: '80mm' }
-    : appliedPrintSettings
+  // -- with it on, BOTH renditions preview and Print offers BOTH sizes, each
+  // with its own print settings (receiptRenditionPrintSettings).
+  const compactPrintSettings = receiptRenditionPrintSettings(appliedPrintSettings, 'card')
+  const fullPrintSettings = receiptRenditionPrintSettings(appliedPrintSettings, 'full')
   const effectivePrintSettings = compactSalesReceipt ? compactPrintSettings : appliedPrintSettings
   const receiptWidthMm = getReceiptPaperWidthMm(effectivePrintSettings, tpl.width || 80)
   const fullReceiptWidthMm = getReceiptPaperWidthMm(fullPrintSettings, tpl.width || 80)
@@ -1048,18 +1040,20 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // in Receipt Settings -- the settings preview now stacks BOTH renditions
     // (each labeled with the size its Print button uses), the same way the
     // receipt view has since B5. Non-compact configs preview the single full
-    // receipt exactly as before.
+    // receipt exactly as before. Each rendition names itself, so the test
+    // prints in Print Settings print the one the configured paper prints (the
+    // card only was marked, so a roll test printed the card, Sep 23 2026).
     if (compactSalesReceipt) {
       return (
         <div>
           <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">80 × 50 mm</p>
-          <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{compactReceiptBlock}</div>
+          <div data-receipt-export-root="true" data-receipt-rendition="card" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{compactReceiptBlock}</div>
           <p className="mb-1 mt-4 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-400">{fullReceiptWidthMm} mm</p>
-          <div data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
+          <div data-receipt-export-root="true" data-receipt-rendition="full" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyleFor(fullReceiptWidthMm)}>{renderedSections}{qrBlock}</div>
         </div>
       )
     }
-    return <div data-receipt-export-root="true" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{renderedSections}{qrBlock}</div>
+    return <div data-receipt-export-root="true" data-receipt-rendition="full" data-receipt-high-contrast={highContrastBold ? 'true' : 'false'} {...contrastAttrs} style={shellStyle}>{renderedSections}{qrBlock}</div>
   }
 
   return (

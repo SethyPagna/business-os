@@ -10,7 +10,7 @@ import {
   writeContinuousRollPageSize,
 } from '../src/utils/printReceipt.ts'
 import { computeImagePageSegments, isSingleSheetPaperSize } from '../src/utils/receiptPdfLayout.ts'
-import { DEFAULT_RECEIPT_PRINT_SETTINGS, normalizeReceiptPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
+import { DEFAULT_RECEIPT_PRINT_SETTINGS, normalizeReceiptPrintSettings, receiptRenditionPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
 
 let failed = 0
 
@@ -133,10 +133,10 @@ await runTest('explicit 80x50 card remains one fitted sheet', () => {
   assert.equal(y, 0)
 
   const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
-  assert.match(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: '80x50mm'/,
-    'the actual compact Print/PDF caller preserves the named single-card intent')
-  assert.doesNotMatch(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: 'custom'/,
-    'the compact caller cannot be confused with an arbitrary custom document')
+  assert.match(receiptSource, /const compactPrintSettings = receiptRenditionPrintSettings\(appliedPrintSettings, 'card'\)/,
+    'the actual compact Print/PDF caller prints with the card rendition settings')
+  assert.equal(receiptRenditionPrintSettings({ ...DEFAULT_RECEIPT_PRINT_SETTINGS, paperSize: 'custom' }, 'card').paperSize, '80x50mm',
+    'the card keeps the named single-card preset, never an arbitrary custom document')
 })
 
 await runTest('direct continuous print keeps a VALID width-by-measured-height @page (never `auto` combined with a length), and never a forced page break', () => {

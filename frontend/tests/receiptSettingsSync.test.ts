@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { normalizeReceiptPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
+import { DEFAULT_RECEIPT_PRINT_SETTINGS, isReceiptCardPaper, normalizeReceiptPrintSettings, receiptRenditionPrintSettings } from '../src/utils/receiptAppliedConfig.ts'
 
 const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
 const receiptSettingsSource = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
@@ -25,7 +25,22 @@ assert.match(receiptSettingsSource, /buildAppliedReceiptConfig/)
 assert.match(printSettingsSource, /receipt_print_settings/)
 assert.match(printSettingsSource, /saveAppSettings/)
 assert.match(printSettingsSource, /reason:\s*'receipt-print-settings-saved'/)
-assert.match(printSettingsSource, /printSettings:\s*ps/)
+// Sep 23 2026: a test prints what a sale's Print prints on the configured
+// paper -- the 80x50 card on 80 x 50 paper, otherwise the full receipt -- with
+// that rendition's own settings. With the card enabled the settings preview
+// holds both renditions and only the card was an export root, so the roll
+// test printed the card; and the card test was handed the stored roll
+// margins instead of the card's own zero-margin settings.
+assert.equal((printSettingsSource.match(/printSettings:\s*testPrintSettings,/g) || []).length, 3,
+  'all three test buttons print with the rendition settings')
+assert.doesNotMatch(printSettingsSource, /printSettings:\s*ps\b/)
+assert.match(printSettingsSource, /const testRendition: ReceiptRendition = isReceiptCardPaper\(ps\) \? 'card' : 'full'/)
+assert.match(printSettingsSource, /const testPrintSettings = receiptRenditionPrintSettings\(ps, testRendition\)/)
+assert.match(printSettingsSource, /exportRoots\.find\(\(root\) => root\.getAttribute\('data-receipt-rendition'\) === rendition\) \|\| exportRoots\[0\]/)
+assert.match(receiptSource, /data-receipt-export-root="true" data-receipt-rendition="card"/,
+  'the settings preview card names itself')
+assert.equal((receiptSource.match(/data-receipt-export-root="true" data-receipt-rendition="full"/g) || []).length, 2,
+  'the settings preview full receipt is an export root in both preview shapes')
 // The two contrast controls ship together and each stays pinned: the older
 // per-print highContrastBold checkbox, and the newer Text Contrast mode.
 assert.match(printSettingsSource, /setValue\('highContrastBold', event\.target\.checked\)/)
@@ -34,9 +49,9 @@ assert.match(printSettingsSource, /Extra-dark bold receipt text/)
 // Receipt.tsx's data-receipt-contrast attribute), but the synthetic fallback
 // HTML used when that DOM isn't mounted must still honour Text Contrast
 // instead of silently reverting to grey.
-assert.match(printSettingsSource, /import \{ normalizeReceiptTemplate \} from '\.\.\/\.\.\/utils\/receiptAppliedConfig'/)
+assert.match(printSettingsSource, /import \{ isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSettings, type ReceiptRendition \} from '\.\.\/\.\.\/utils\/receiptAppliedConfig'/)
 assert.match(printSettingsSource, /const contrastMode = normalizeReceiptTemplate\(settings\.receipt_template\)\.text_contrast/)
-assert.match(printSettingsSource, /buildSafePreviewSource\(previewNode, ps, T, contrastMode\)/)
+assert.match(printSettingsSource, /buildSafePreviewSource\(previewNode, testRendition, testPrintSettings, T, contrastMode\)/)
 assert.match(printSettingsSource, /const isMaxContrast = contrastMode === 'maximum'/)
 
 assert.match(receiptPreviewSource, /buildAppliedReceiptConfig\(\{ settings, template: tpl \}\)\.settings/)
@@ -45,16 +60,31 @@ assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildApplied
 // an 80 x 50mm, zero-margin effective print configuration. The printable
 // path must receive that resolved object, not the untouched stored settings.
 assert.match(receiptSource, /const effectivePrintSettings = compactSalesReceipt/)
-assert.match(receiptSource, /paperSize: '80x50mm', customWidth: '80', customHeight: '50'/,
-  'the compact caller must preserve the named single-card intent')
-assert.doesNotMatch(receiptSource, /const compactPrintSettings = \{[^\n]+paperSize: 'custom'/,
-  'an arbitrary custom document must not be treated as the 80x50 card')
 // B5: the printable path receives the RESOLVED per-variant object -- the
 // forced 80x50 zero-margin configuration for the card, the roll settings
 // for the full receipt (an '80x50mm' stored size maps to the 80mm roll).
+assert.match(receiptSource, /const compactPrintSettings = receiptRenditionPrintSettings\(appliedPrintSettings, 'card'\)/)
+assert.match(receiptSource, /const fullPrintSettings = receiptRenditionPrintSettings\(appliedPrintSettings, 'full'\)/)
 assert.match(receiptSource, /const variantSettings = variant === 'compact' \? compactPrintSettings : fullPrintSettings/)
 assert.match(receiptSource, /printSettings:\s*variantSettings/)
-assert.match(receiptSource, /\? \{ \.\.\.appliedPrintSettings, paperSize: '80mm' \}/)
+{
+  const roll = { ...DEFAULT_RECEIPT_PRINT_SETTINGS, paperSize: '72mm', marginLeft: '4', scale: '90', pageSizeMode: 'driver-forms' as const }
+  const card = receiptRenditionPrintSettings(roll, 'card')
+  assert.deepEqual(
+    [card.paperSize, card.customWidth, card.customHeight, card.marginTop, card.marginRight, card.marginBottom, card.marginLeft],
+    ['80x50mm', '80', '50', '0', '0', '0', '0'],
+    'the card keeps the named single-card preset on its own zero-margin sheet',
+  )
+  assert.equal(card.scale, '90', 'every other print setting carries over to the card')
+  assert.equal(card.pageSizeMode, 'driver-forms')
+  assert.equal(receiptRenditionPrintSettings(roll, 'full'), roll, 'a roll paper prints the full receipt as set')
+  const cardPaper = { ...DEFAULT_RECEIPT_PRINT_SETTINGS, paperSize: '80X50MM' }
+  assert.equal(isReceiptCardPaper(cardPaper), true, 'the card paper matches in any case')
+  assert.equal(receiptRenditionPrintSettings(cardPaper, 'full').paperSize, '80mm', 'on card paper the full receipt prints on the 80mm roll')
+  const customEightyByFifty = { ...DEFAULT_RECEIPT_PRINT_SETTINGS, paperSize: 'custom', customWidth: '80', customHeight: '50' }
+  assert.equal(isReceiptCardPaper(customEightyByFifty), false,
+    'an arbitrary custom 80 x 50 document is not the card')
+}
 
 assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)

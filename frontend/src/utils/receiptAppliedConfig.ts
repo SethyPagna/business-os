@@ -212,6 +212,28 @@ export function normalizeReceiptPrintSettings(value: unknown): ReceiptPrintSetti
   }
 }
 
+export type ReceiptRendition = 'card' | 'full'
+
+/** 80 x 50 paper prints the card; every other paper prints the full receipt. */
+export function isReceiptCardPaper(printSettings: { paperSize?: unknown }): boolean {
+  return String(printSettings.paperSize || '').toLowerCase() === '80x50mm'
+}
+
+// B5: the settings each rendition prints with -- one rule for the sale's Print
+// menu and the Receipt Settings test prints, so a test prints what a sale
+// prints. The card prints on its fixed 80x50 sheet with zero margins (the
+// sheet IS the layout) and keeps the named preset: that is the explicit
+// single-card intent, while an arbitrary custom 80 x 50 document remains a
+// normal paginated document. The full receipt prints on the roll: an
+// '80x50mm' paper setting maps to the 80mm roll, any other size is kept as
+// the operator set it.
+export function receiptRenditionPrintSettings(printSettings: ReceiptPrintSettings, rendition: ReceiptRendition): ReceiptPrintSettings {
+  if (rendition === 'card') {
+    return { ...printSettings, paperSize: '80x50mm', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+  }
+  return isReceiptCardPaper(printSettings) ? { ...printSettings, paperSize: '80mm' } : printSettings
+}
+
 export function readReceiptPrintSettingsFromSettings(settings: Record<string, unknown> = {}): ReceiptPrintSettings {
   return normalizeReceiptPrintSettings(settings.receipt_print_settings)
 }

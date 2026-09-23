@@ -7,7 +7,7 @@ import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
 import { downloadReceiptPdf, getPaperWidthMm, getPrintSettings, openReceiptPdf, printReceipt, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
-import { normalizeReceiptTemplate } from '../../utils/receiptAppliedConfig'
+import { isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSettings, type ReceiptRendition } from '../../utils/receiptAppliedConfig'
 import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -85,12 +85,14 @@ function buildFallbackPreviewHtml(printSettings: ReceiptPrintSettings, T: (key: 
   `
 }
 
-function buildSafePreviewSource(previewNode: unknown, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string | HTMLElement {
+function buildSafePreviewSource(previewNode: unknown, rendition: ReceiptRendition, printSettings: ReceiptPrintSettings, T: (key: string, fallback: string) => string, contrastMode: string): string | HTMLElement {
   if (!(previewNode instanceof HTMLElement)) {
     return buildFallbackPreviewHtml(printSettings, T, contrastMode)
   }
   try {
-    const exportRoot = previewNode.querySelector('[data-receipt-export-root="true"]')
+    // With the 80x50 card enabled the preview holds both renditions.
+    const exportRoots = Array.from(previewNode.querySelectorAll('[data-receipt-export-root="true"]'))
+    const exportRoot = exportRoots.find((root) => root.getAttribute('data-receipt-rendition') === rendition) || exportRoots[0]
     return exportRoot instanceof HTMLElement ? exportRoot : previewNode
   } catch (_) {
     return buildFallbackPreviewHtml(printSettings, T, contrastMode)
@@ -195,9 +197,14 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
   // the real preview DOM branch already carries its own contrast attribute.
   const contrastMode = normalizeReceiptTemplate(settings.receipt_template).text_contrast
 
+  // A test prints what a sale's Print prints on this paper: the 80x50 card on
+  // 80 x 50 paper, otherwise the full receipt, each with its own settings.
+  const testRendition: ReceiptRendition = isReceiptCardPaper(ps) ? 'card' : 'full'
+  const testPrintSettings = receiptRenditionPrintSettings(ps, testRendition)
+
   const getPreviewSource = () => {
     const previewNode = previewTargetRef?.current
-    return buildSafePreviewSource(previewNode, ps, T, contrastMode)
+    return buildSafePreviewSource(previewNode, testRendition, testPrintSettings, T, contrastMode)
   }
 
   return (
@@ -350,7 +357,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
               try {
                 await printReceipt(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
-                  printSettings: ps,
+                  printSettings: testPrintSettings,
                 })
               } catch (error) {
                 console.error('[PrintSettings] Test print failed:', error)
@@ -442,7 +449,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                 await openReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
-                  printSettings: ps,
+                  printSettings: testPrintSettings,
                   previewFallback: true,
                   previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
@@ -463,7 +470,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
                 await downloadReceiptPdf(getPreviewSource(), {
                   title: T('receipt_test_pdf', 'Receipt Test'),
                   fileName: 'receipt-test',
-                  printSettings: ps,
+                  printSettings: testPrintSettings,
                   previewFallback: true,
                   previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
                 })
