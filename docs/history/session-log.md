@@ -20414,3 +20414,45 @@ classifier): the owner prints one receipt and the card. The printer-side duplica
 spooled", one USB port). Found on main and live since 5cd8e093, fix lane next: a confirmed logout no longer clears
 the previous cashier's POS drafts, and blocked site data shows a dead "Finish signing out" screen; stale
 storefront-pager and compact-pager e2e specs.
+
+## Part 631 (23 Sep 2026, coordinator) — Telegram rows hang-indent; print follow-ups; checkpoint deployed
+
+**Ask.** Owner, 23 Sep, over a 15-item sale alert: "i think for each new line in this report to telegram we can do
+some add spaced so they don't show directly from new line so easier to read. like an indentation so it doesn't start
+with numbered list." Plus the follow-ups found while reviewing the Part 630 print hotfix.
+
+**What changed.** 8 commits on 951b8170, one fix each, pushed to main, the working branch and
+rc/telegram-item-indent-20260923 at f064e844.
+- Telegram: `telegramRowLines` breaks a list row at a width a phone shows whole (36 characters) and starts every
+  continuation with HANGING_INDENT (five spaces); a marker or separator never ends a line, and sendTelegramEvent keeps
+  the indent after cleaning (e64b51b8). Transfers and returns: the on-hand figures are one part that breaks at its own
+  separators first (38ff44f8). /report cashiers, /sales receipts with their items nested, /fees, /stock and the
+  shift report's payment, delivery and expense rows (8329066b). Label rows (`· Label / ស្លាក: value`) unchanged.
+- Print: the troubleshoot advice names Printer paper and the longest dialog paper first and is hidden in the
+  printer-paper modes (66a4f563); 80x50 paper shows the Page length section and the card test print (52890a80); the
+  receiptContracts pageSizeMode comment (0d6464c1); report and list print documents embed the app's @font-face and
+  print after document.fonts.ready, capped at the hidden frame's 4 s (b7513c1d); on the hidden-frame path "All" waits
+  until the card's print sheet is released (afterprint, or the 2-minute cleanup) before the full receipt, because
+  replacing the frame under an open iOS sheet cancels the card (f064e844). A new tap still replaces the frame at once.
+
+**What was found (recorded, not changed).** Since Part 630, driver-forms mode sends no @page 80x50 for the card: the
+card starts at the top of the paper chosen in the dialog. Intended. The e2e "All" preview-window path passes because
+Playwright disables the popup blocker; a real Chrome may block the second window opened after the await and fall
+back to the hidden frame, which the hidden-frame "All" test covers. Test gap, not a defect seen live.
+
+**Verified.** Committed HEAD f064e844 in an isolated worktree: frontend typecheck 0, verify:i18n OK (5903 keys), 521
+test files run one by one, 0 red; vite build green; e2e receipt-print.spec 21 passed (desktop-chromium,
+android-chromium, ios-webkit). The new checks fail on the old source (printFrameReleased missing; font rule and wait
+absent). Worker tsc 0; 502 test files, 0 red (three native files failed once under the parallel sweep's load and
+passed on rerun and standalone). Deploy from the worktree: paid and free dry-runs exit 0 (3950.64 KiB / gzip 859.10
+KiB); Worker `250d3591-b7ee-42db-be1b-db2863d3c158`, revision f064e84473a6, Worker hash d47871376f8b64aa, frontend
+hash 9f27fb95457888ab (index-BecUn1kp.js); deployments list shows 250d3591 at 100% since 12:40:30Z; no migration
+(highest applied 0184). wrangler exited 1 after the upload because one queue-consumer PUT answered Cloudflare API
+500; no trigger config changed, and `wrangler queues info` shows all three queues with producer and consumer
+worker:business-os.
+
+**Not done.** Live smoke (bot challenge on this egress). Owner: one physical print of the card and the full receipt
+on 72 x 800. Registered, not started (owner task register, 23 Sep): Telegram named section headers, the sale and
+status-change message tops, the shift report top and dash headers, shift ID `S-<yyyymmdd>-<HHMM>-<cashier>`, shift
+search by cashier or ID, the Reports overview sent to Telegram one minute after a shift closes, and the product
+conflict / Records / stock-in edit asks N1-N6.
