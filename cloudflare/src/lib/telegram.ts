@@ -207,14 +207,18 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
 export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise<boolean> {
   const config = await getTelegramConfig(env)
   if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
-  const heading: Record<TelegramEventType, string> = { sales: '🛍️ Sale recorded', status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
+  // No default for `sales`: the sale alert's heading names its receipt number
+  // (owner's Sep 23 2026 sample, "🛍️ Sale Invoice / វិក្កយបត្រការលក់:
+  // 20260923-153527"), which only formatSaleTelegramLines knows, so its first
+  // line IS the heading. A route's own heading still wins (a return).
+  const heading: Partial<Record<TelegramEventType, string>> = { status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
   // the composed line (rather than in each builder) means the two routes that
   // still assemble their lines inline -- routes/sales.ts's status change and
   // routes/fees.ts's fee -- are covered without editing files other lanes own,
   // and any line added later is covered the moment its label is in the table.
   await postTelegram(config, withLanguage(config.language, () => [
-    localizeTelegramHeading(event.heading || heading[event.type]),
+    localizeTelegramHeading(event.heading || heading[event.type] || ''),
     // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
     // indent back after cleaning. It continues the row above; it is not a
     // label row of its own to localize.
@@ -1400,6 +1404,18 @@ function eventGroups(groups: string[][]): string[] {
     .flatMap((group, index) => (index ? [GROUP_RULE, ...group] : group))
 }
 
+/**
+ * An event message's TITLE line: its heading and the one record it is about,
+ * `🛍️ Sale Invoice: 20260923-153527` (owner's Sep 23 2026 sample). The
+ * heading words are localized like any heading (localizeTelegramLine), the
+ * number is a value and never is. With no number it is the bare heading --
+ * never a heading that ends on a colon.
+ */
+function eventTitle(words: string, record: unknown): string {
+  const value = cleanLine(record, 40)
+  return value ? `${words}: ${value}` : words
+}
+
 // dd/mm/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
 // convention (day-first since Sep 4 2026). D1's CURRENT_TIMESTAMP is
 // 'YYYY-MM-DD HH:MM:SS' UTC without a zone marker; client-sent created_at is
@@ -1479,7 +1495,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // Defaulted, because the Status row is unconditional since Sep 22 2026 and a
   // caller that omits the status must not produce `Status:` with nothing after
   // it. `completed` is the same reading the app's own normalizer gives a
-  // missing sale_status, and the heading already says a sale was recorded.
+  // missing sale_status, and the title already says this is a sale invoice.
   const status = String(sale.status || 'completed').replace(/_/g, ' ')
   // The pre-discount, pre-tax figure the customer was quoted. When there is
   // neither a discount nor a tax it IS the Net Total, and printing the same
@@ -1487,7 +1503,12 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // stop doing -- so on the ordinary sale it does not print at all.
   const grossTotalUsd = round2((Number(sale.subtotalUsd) || 0) + customerDelivery)
   const totalRepeatsNet = grossTotalUsd === round2(Number(sale.totalUsd) || 0)
-  return eventGroups([
+  // THE TITLE NAMES THE RECEIPT (owner's Sep 23 2026 sample: "🛍️ Sale Invoice
+  // / វិក្កយបត្រការលក់: 20260923-153527"). The number used to sit on an INV row
+  // under the status and date; it is the invoice the whole message is about,
+  // so it heads the message. sendTelegramEvent gives a sales event no heading
+  // of its own: this first line is the heading.
+  return [eventTitle('🛍️ Sale Invoice', sale.receiptNumber), ...eventGroups([
     // WHAT HAPPENED. Status leads, and it prints on EVERY sale now (owner's
     // Sep 22 2026 reference layout opens on it). It used to be dropped on a
     // completed sale as "the norm the heading already announces" -- but the
@@ -1496,10 +1517,10 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     // status that appears only when something is unusual is a row whose
     // ABSENCE has to be interpreted. The value's wording comes from
     // telegramLang's status table, so it says "Not Paid / ប្រាក់ជំពាក់".
+    // Status and Date only since Sep 23 2026: the INV row moved into the title.
     [
       `Status: ${status}`,
       `Date: ${formatBusinessDateTime(sale.createdAt)}`,
-      `INV: ${sale.receiptNumber}`,
     ],
     // WHO RANG IT UP.
     [
@@ -1549,7 +1570,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
       change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
     ],
-  ])
+  ])]
 }
 
 /**

@@ -142,8 +142,24 @@ assert.equal(
   'a value containing " / " must survive a single-language rendering intact',
 )
 // The heading keeps its emoji in every mode; only the words change.
-assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ បានកត់ត្រាការលក់')
-assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ Sale recorded')
+assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ វិក្កយបត្រការលក់')
+assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ Sale Invoice')
+// Since Sep 23 2026 the sale alert's heading names its receipt (the owner's
+// sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527"), and the
+// builder sends it as its first line. That line is a HEADING -- heading
+// words, no row bullet -- and the number after it is a value, never touched.
+for (const [mode, title] of [
+  ['both', '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527'],
+  ['en', '🛍️ Sale Invoice: 20260923-153527'],
+  ['km', '🛍️ វិក្កយបត្រការលក់: 20260923-153527'],
+]) {
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the title line`)
+  assert.equal(inMode(mode, () => lang.localizeTelegramHeading('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the same title as a heading`)
+}
+// The retired heading is no title any more, and neither is a word every plain
+// object "has": the heading table is looked up as a Map.
+assert.equal(lang.localizeTelegramLine('🛍️ Sale recorded: 1'), '🛍️ Sale recorded: 1', 'the retired heading passes through untouched')
+assert.equal(lang.localizeTelegramLine('constructor: x'), 'constructor: x', 'a prototype key is not a heading')
 // Anything that is not one of the three values is the bilingual default: a
 // typo in a settings row must not blank the shop's reports.
 for (const junk of ['', null, undefined, 'klingon', 'EN-GB', 'both ']) {
@@ -362,6 +378,8 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   driver: { name: 'Dara', phone: '099 111 222' },
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
+assert.equal(saleLines[0], '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260903-100405', `the sale alert opens on its bilingual title:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.some((line) => line.startsWith('· INV')), 'the INV row moved into the title')
 // RENAMED Sep 22 2026. This line used to read
 // `Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់` -- a phrase the
 // app had already replaced everywhere the owner could see it except here.

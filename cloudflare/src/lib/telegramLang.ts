@@ -304,9 +304,17 @@ export type TelegramLabelKey = keyof typeof LABELS
 /** Exported for scripts/test-telegram-bilingual-pure.cjs (glossary check). */
 export const TELEGRAM_LABELS: Record<string, LabelEntry> = LABELS
 
-/** Message headings. Emoji stays in front of BOTH languages. */
+/**
+ * Message headings. Emoji stays in front of BOTH languages. A heading may be
+ * followed by the one record it is about -- `🛍️ Sale Invoice: 20260923-153527`
+ * -- and that value is kept exactly as it is (localizeTelegramHeading).
+ */
 const HEADINGS = {
-  '🛍️ Sale recorded': 'បានកត់ត្រាការលក់',
+  // The sale alert's title, which names the receipt since Sep 23 2026 (the
+  // owner's sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527").
+  // It replaced "Sale recorded / បានកត់ត្រាការលក់" and the INV row that
+  // carried the number under the status and date.
+  '🛍️ Sale Invoice': 'វិក្កយបត្រការលក់',
   // SHORTENED Sep 22 2026 to the owner's own wording. បង្កាន់ដៃ (receipt) is
   // already named by the `Receipt / វិក្កយបត្រ` line directly underneath.
   '🧾 Receipt status updated': 'ស្ថានភាពបានផ្លាស់ប្ដូរ',
@@ -319,6 +327,20 @@ const HEADINGS = {
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
+// Looked up through a Map, like the labels below: a title line comes out of a
+// builder, and a plain object would also "know" `constructor` or `toString`.
+const HEADING_KM = new Map<string, string>(Object.entries(HEADINGS))
+
+/**
+ * `['🛍️ Sale Invoice', ': 20260923-153527']` when `text` is a heading -- on
+ * its own or followed by the one value it names -- and null for any other
+ * line.
+ */
+function headingParts(text: string): [head: string, rest: string] | null {
+  const split = text.indexOf(': ')
+  const head = split > 0 ? text.slice(0, split) : text
+  return HEADING_KM.has(head) ? [head, text.slice(head.length)] : null
+}
 
 // Enumerated words that appear INSIDE a value. Applied in one pass (longest
 // first) only to labels flagged `localizeValue`, so free-text values -- product
@@ -535,7 +557,8 @@ export function localizeTelegramValue(value: string): string {
  * Make one composed line bilingual. `'Cashier: Za'` -> `'Cashier /
  * អ្នកគិតប្រាក់: Za'`. Lines with no known label -- item bullets, which carry
  * only a product name and arithmetic -- are returned unchanged, except for the
- * `+ N more item(s)` continuation, whose only words ARE a counter.
+ * `+ N more item(s)` continuation, whose only words ARE a counter. A TITLE
+ * line (a heading and the record it names) is rendered as that heading.
  */
 export function localizeTelegramLine(line: string): string {
   const text = String(line ?? '')
@@ -546,6 +569,11 @@ export function localizeTelegramLine(line: string): string {
   // function the /sales receipt list calls directly.
   const more = text.match(MORE_ITEMS_RE)
   if (more) return ROW_BULLET + moreItems(Number(more[1]))
+  // The sale alert opens on its own title line, `🛍️ Sale Invoice: <receipt>`,
+  // because only its builder knows the receipt number the owner's Sep 23 2026
+  // sample puts in the title. It is a heading, not a label row: heading words,
+  // no bullet.
+  if (headingParts(text)) return localizeTelegramHeading(text)
   const split = text.indexOf(': ')
   if (split <= 0) return text
   const head = text.slice(0, split)
@@ -572,16 +600,22 @@ export function localizeTelegramLine(line: string): string {
   return row(pair(entry.en, entry.km), value)
 }
 
-/** Make a message heading bilingual, keeping its emoji in front. */
+/**
+ * Make a message heading bilingual, keeping its emoji in front. The record a
+ * heading names is a value and is kept as it is: `🛍️ Sale Invoice:
+ * 20260923-153527` -> `🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527`.
+ */
 export function localizeTelegramHeading(heading: string): string {
   const text = String(heading ?? '').trim()
-  const km = HEADINGS[text as keyof typeof HEADINGS]
+  const parts = headingParts(text)
+  if (!parts) return text
+  const [head, rest] = parts
+  const km = HEADING_KM.get(head) as string
   // The emoji belongs to the heading itself, so the Khmer-only rendering keeps
   // it and drops only the English words after it.
-  if (!km) return text
-  const emoji = text.match(/^(\S+)\s+(.*)$/)
-  if (currentLanguage === 'km' && emoji) return `${emoji[1]} ${km}`
-  return pair(text, km)
+  const emoji = head.match(/^(\S+)\s+(.*)$/)
+  if (currentLanguage === 'km' && emoji) return `${emoji[1]} ${km}${rest}`
+  return `${pair(head, km)}${rest}`
 }
 
 // ---------------------------------------------------------------------------
