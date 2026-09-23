@@ -20,6 +20,12 @@
 //   * covered by exactly one riel of KHR against a USD total -> resolves
 // A float implementation passes the first two and fails the last two, which
 // is the whole reason the kernel compares exact integers.
+//
+// The same two files carry the forward half on EXISTING sales,
+// statusChangeNeedsPayment: the Worker asks it before moving a Not Paid sale
+// to a paid status (PATCH /:id/status, the group status action). Its fixture
+// table below runs through both copies the same way, and every "needs the
+// payment" row is one the pre-guard routes allowed.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -207,6 +213,144 @@ const FIXTURES: Fixture[] = [
     moneyPrecisionVersion: 1, isDelivery: false,
     expected: 'awaiting_payment',
   },
+  // The legacy path used to quantize a zero rate to a zero numerator, and
+  // with it every tender "covered" every total: this row resolved to
+  // 'completed' with nothing paid. V1 already refused a zero rate.
+  {
+    name: 'a zero LEGACY exchange rate leaves the status alone too',
+    requestedStatus: 'awaiting_payment',
+    paidUsd: 0, paidKhr: 0, totalUsd: 10, exchangeRate: 0,
+    moneyPrecisionVersion: 0, isDelivery: false,
+    expected: 'awaiting_payment',
+  },
+]
+
+type StatusChangeFixture = {
+  name: string
+  from: unknown
+  to: unknown
+  sale: Record<string, unknown>
+  expected: boolean
+  /** The pre-guard routes allowed every move: "needs payment" was always false. */
+  expectedBeforeFix?: false
+}
+
+const v1Row = (money: Record<string, unknown>): Record<string, unknown> => ({
+  total_usd: 10, amount_paid_usd: 0, amount_paid_khr: 0, exchange_rate: 4100,
+  money_precision_version: 1, calculated_total_usd: 10, ...money,
+})
+const legacyRow = (money: Record<string, unknown>): Record<string, unknown> => ({
+  total_usd: 10, amount_paid_usd: 0, amount_paid_khr: 0, exchange_rate: 4100,
+  money_precision_version: 0, calculated_total_usd: null, ...money,
+})
+
+const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
+  {
+    name: 'Not Paid -> Completed with nothing paid needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({}),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'Not Paid -> Awaiting Delivery with nothing paid needs the payment',
+    from: 'awaiting_payment', to: 'awaiting_delivery', sale: v1Row({}),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'partly paid still needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_usd: 4 }),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'one riel short still needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_khr: 40999 }),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'covered exactly in riel does not',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_khr: 41000 }),
+    expected: false,
+  },
+  {
+    name: 'a mixed tender covering exactly does not',
+    from: 'awaiting_payment', to: 'awaiting_delivery', sale: v1Row({ amount_paid_usd: 5, amount_paid_khr: 20500 }),
+    expected: false,
+  },
+  {
+    name: 'a reopened sale that kept its tender does not (the reopen\'s Undo)',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ amount_paid_usd: 10 }),
+    expected: false,
+  },
+  {
+    name: 'a legacy row paid in dollars does not',
+    from: 'awaiting_payment', to: 'completed', sale: legacyRow({ amount_paid_usd: 10 }),
+    expected: false,
+  },
+  {
+    name: 'a legacy row with a zero rate is unreadable, so it needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: legacyRow({ amount_paid_khr: 41000, exchange_rate: 0 }),
+    expected: true, expectedBeforeFix: false,
+  },
+  // Which money basis a row is read on: 4100 riel against $1 at 4100.00004
+  // is short on the EXACT (V1) rate and covered on the rate quantized to four
+  // places (legacy). calculated_total_usd alone marks recorded V1 money.
+  {
+    name: 'calculated_total_usd alone selects the exact V1 rate',
+    from: 'awaiting_payment', to: 'completed',
+    sale: legacyRow({ total_usd: 1, calculated_total_usd: 1, amount_paid_khr: 4100, exchange_rate: 4100.00004 }),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'without a V1 marker the legacy quantized rate is used',
+    from: 'awaiting_payment', to: 'completed',
+    sale: legacyRow({ total_usd: 1, amount_paid_khr: 4100, exchange_rate: 4100.00004 }),
+    expected: false,
+  },
+  {
+    name: 'absent payment columns count as nothing paid',
+    from: 'awaiting_payment', to: 'completed', sale: { total_usd: 10, exchange_rate: 4100 },
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'an unreadable total needs the payment',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ total_usd: null, amount_paid_usd: 10 }),
+    expected: true, expectedBeforeFix: false,
+  },
+  {
+    name: 'a $0 sale needs nothing',
+    from: 'awaiting_payment', to: 'completed', sale: v1Row({ total_usd: 0, calculated_total_usd: 0 }),
+    expected: false,
+  },
+  {
+    name: 'status words are matched case- and space-insensitively',
+    from: ' Awaiting_Payment ', to: 'COMPLETED', sale: v1Row({}),
+    expected: true, expectedBeforeFix: false,
+  },
+  // Not this rule's business: nothing here asserts a payment the sale lacks.
+  {
+    name: 'Completed -> Not Paid (the payment-correction reopen) is not refused',
+    from: 'completed', to: 'awaiting_payment', sale: v1Row({}),
+    expected: false,
+  },
+  {
+    name: 'Awaiting Delivery -> Completed (paid to paid) is not refused',
+    from: 'awaiting_delivery', to: 'completed', sale: v1Row({}),
+    expected: false,
+  },
+  {
+    name: 'Not Paid -> Cancelled is not refused',
+    from: 'awaiting_payment', to: 'cancelled', sale: v1Row({}),
+    expected: false,
+  },
+  {
+    name: 'a NULL status is a legacy Completed, not Not Paid',
+    from: null, to: 'completed', sale: v1Row({}),
+    expected: false,
+  },
+  {
+    name: 'Not Paid -> a NULL status (the legacy Completed an undo restores) needs the payment',
+    from: 'awaiting_payment', to: null, sale: v1Row({}),
+    expected: true, expectedBeforeFix: false,
+  },
 ]
 
 await runTest('the UI and Worker copies differ only in the import specifier', () => {
@@ -292,6 +436,33 @@ await runTest('NOT_PAID_STATUS is the credit status both packages agree on', asy
   const worker = await loadWorkerCopy()
   assert.equal(uiCopy.NOT_PAID_STATUS, 'awaiting_payment')
   assert.equal(worker.NOT_PAID_STATUS, uiCopy.NOT_PAID_STATUS)
+})
+
+await runTest('the paid statuses are the same two in both packages', async () => {
+  const worker = await loadWorkerCopy()
+  assert.deepEqual([...uiCopy.PAID_SALE_STATUSES], ['completed', 'awaiting_delivery'])
+  assert.deepEqual([...worker.PAID_SALE_STATUSES], [...uiCopy.PAID_SALE_STATUSES])
+})
+
+await runTest('both copies answer statusChangeNeedsPayment identically, and correctly', async () => {
+  const worker = await loadWorkerCopy()
+  for (const fixture of STATUS_CHANGE_FIXTURES) {
+    const ui = uiCopy.statusChangeNeedsPayment(fixture.from, fixture.to, fixture.sale)
+    const wk = worker.statusChangeNeedsPayment(fixture.from, fixture.to, fixture.sale)
+    assert.equal(ui, wk, `UI and Worker disagree on "${fixture.name}"`)
+    assert.equal(ui, fixture.expected, `wrong answer for "${fixture.name}"`)
+  }
+})
+
+await runTest('the status-change fixtures discriminate against the pre-guard routes', () => {
+  // Before the guard, PATCH /:id/status and the group action allowed every
+  // one of these moves. If no fixture expected a refusal, this table would
+  // pass against the broken routes and prove nothing.
+  const discriminating = STATUS_CHANGE_FIXTURES.filter((fixture) => fixture.expectedBeforeFix !== undefined)
+  assert.ok(discriminating.length >= 4, 'expected several moves the old routes allowed wrongly')
+  for (const fixture of discriminating) {
+    assert.equal(fixture.expected, true, `"${fixture.name}" does not separate the old routes from the new`)
+  }
 })
 
 if (failed > 0) {

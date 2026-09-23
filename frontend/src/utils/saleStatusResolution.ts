@@ -31,20 +31,29 @@
 // resolver calls paid, and no drift is possible because there is nothing to
 // drift from.
 //
-// CREATION ONLY, AND SILENTLY. POST /sales normalises without a 4xx -- a
-// stale or offline client must not be told its already-rung sale is invalid.
-// The rule deliberately does NOT extend to PATCH /:id/status: there,
-// completed/awaiting_delivery -> awaiting_payment IS the shop's
-// payment-correction reopen (it is the only thing that turns on
+// NORMALISING IS CREATION ONLY, AND SILENT. POST /sales normalises without a
+// 4xx -- a stale or offline client must not be told its already-rung sale is
+// invalid. Nothing re-labels an EXISTING paid sale as Not Paid by itself: on
+// PATCH /:id/status, completed/awaiting_delivery -> awaiting_payment IS the
+// shop's payment-correction reopen (it is the only thing that turns on
 // `payment_correction_allowed` and it writes its own audit action
 // `sale_payment_correction_opened`), so refusing it would leave a mis-keyed
 // tender uncorrectable forever.
 //
-// That containment is also what keeps undo safe: this rule only ever picks
-// the status a sale is BORN with, and never moves an existing sale between
-// statuses, so a pending `sale.add_items` undo (which requires the sale to
-// still be in the status it was added in, lib/undoAppliers.ts) can never be
-// invalidated by it.
+// THE FORWARD MOVE IS REFUSED ON EXISTING SALES. The mirror-image hole had two
+// more mouths: PATCH /:id/status without payment fields, and the Sales page's
+// group status action, both moved a Not Paid sale that still owed money to
+// completed or awaiting_delivery -- a paid status asserting a payment nobody
+// made, and a debt gone from every Not Paid list. statusChangeNeedsPayment
+// below is the one answer to "may this sale take that status with the money
+// it has"; the status route and lib/saleBulkStatus.ts both ask it. A
+// settlement in the same request is the other way in, and it has its own
+// coverage check (lib/paymentSettlement.ts).
+//
+// Neither half moves a sale by itself -- the resolver only picks the status a
+// sale is BORN with, and the guard only refuses -- so a pending
+// `sale.add_items` undo (which requires the sale to still be in the status it
+// was added in, lib/undoAppliers.ts) can never be invalidated by either.
 //
 // This file is the mirror of cloudflare/src/lib/saleStatusResolution.ts. The
 // ONLY permitted difference is the import specifier (this copy needs the
@@ -52,13 +61,17 @@
 // resolves extensionless). Everything below the import must stay identical:
 // frontend/tests/saleStatusResolutionParity.test.ts enforces exactly that and
 // drives BOTH copies through the same fixture table, and
-// cloudflare/scripts/test-sale-paid-status-resolution-pure.cjs drives the
-// Worker copy against the route's own combinations.
+// cloudflare/scripts/test-sale-paid-status-resolution-pure.cjs and
+// test-sale-bulk-status-paid-guard-pure.cjs drive the Worker copy through
+// the real routes.
 
 import { exactDecimalRatio, financialCalculationUnits, type FinancialDecimalInput } from './financialPrecision.ts'
 
 /** The credit status: the sale asserts the customer still owes the money. */
 export const NOT_PAID_STATUS = 'awaiting_payment'
+
+/** The statuses that assert the sale IS paid: the counter sale, and the paid order still waiting for its driver. */
+export const PAID_SALE_STATUSES: readonly string[] = ['completed', 'awaiting_delivery']
 
 export type SaleCoverageInput = {
   totalUsd: FinancialDecimalInput
@@ -74,11 +87,16 @@ export type SaleCoverageInput = {
  * legacy rows quantize it to the calculation scale first, which is what the
  * rows were written with. Both are expressed as one ratio so the comparison
  * below is a single integer expression either way.
+ *
+ * A zero or negative rate is refused on BOTH paths (exactDecimalRatio already
+ * refuses it for V1): with a zero numerator every tender would "cover" every
+ * total, which is the one answer this formula must never give by accident.
  */
 function rateRatio(exchangeRate: FinancialDecimalInput, moneyPrecisionVersion: number | undefined): { numerator: bigint; denominator: bigint } {
-  return moneyPrecisionVersion === 1
-    ? exactDecimalRatio(exchangeRate)
-    : { numerator: financialCalculationUnits(exchangeRate), denominator: 10_000n }
+  if (moneyPrecisionVersion === 1) return exactDecimalRatio(exchangeRate)
+  const numerator = financialCalculationUnits(exchangeRate)
+  if (numerator <= 0n) throw new RangeError('The exchange rate must be positive.')
+  return { numerator, denominator: 10_000n }
 }
 
 /**
@@ -145,4 +163,69 @@ export function resolvePaidSaleStatus(input: PaidStatusResolutionInput): string 
   }
   if (!covered) return input.requestedStatus
   return input.isDelivery ? 'awaiting_delivery' : 'completed'
+}
+
+/**
+ * A stored sale's money, in the shape both packages already hold it: the
+ * Worker reads the row (`SELECT s.*`) and the Sales page lists the same
+ * columns under the same names, so both hand the SAME object to the rule
+ * below and nothing is re-mapped on either side.
+ */
+export type RecordedSaleMoney = {
+  total_usd?: unknown
+  amount_paid_usd?: unknown
+  amount_paid_khr?: unknown
+  exchange_rate?: unknown
+  money_precision_version?: unknown
+  calculated_total_usd?: unknown
+  /** The rest of the row rides along untouched (and keeps this from being a weak type). */
+  [column: string]: unknown
+}
+
+/** A stored amount as the formula takes it: an absent PAYMENT is none; an absent total or rate is unreadable. */
+function storedAmount(value: unknown, absentIsZero: boolean): FinancialDecimalInput {
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'bigint') return value
+  if (value == null && absentIsZero) return 0
+  throw new TypeError('The sale money cannot be read.')
+}
+
+function statusWord(status: unknown): string {
+  return String(status || 'completed').trim().toLowerCase()
+}
+
+/**
+ * Would moving an EXISTING sale from `fromStatus` to `toStatus` assert a
+ * payment the sale does not have?
+ *
+ * True only for Not Paid -> a paid status, and only when the payment already
+ * recorded on the sale does not cover its total. Everything else is false:
+ * the payment-correction reopen (a paid status -> Not Paid), paid -> paid
+ * (a delivered order, or a legacy row), cancelling, and the returns flow's
+ * statuses are not this rule's business.
+ *
+ * The money is read on the basis the sale was written with -- V1 when it
+ * carries recorded V1 money (the same two columns the Worker's
+ * hasRecordedSaleMoneyPrecision and the frontend's saleUsesSavedExchangeRate
+ * ask), legacy otherwise -- at the sale's OWN booked rate, the rate its
+ * tender was taken at. Unreadable money counts as NOT covered, the same
+ * stance as resolvePaidSaleStatus: money that cannot be read is not evidence
+ * of a payment.
+ *
+ * A missing status is a legacy completed sale, the reading both packages
+ * give a NULL `sale_status` -- and an undo can put one back.
+ */
+export function statusChangeNeedsPayment(fromStatus: unknown, toStatus: unknown, sale: RecordedSaleMoney): boolean {
+  if (statusWord(fromStatus) !== NOT_PAID_STATUS) return false
+  if (!PAID_SALE_STATUSES.includes(statusWord(toStatus))) return false
+  try {
+    return !paymentCoversSaleTotal({
+      paidUsd: storedAmount(sale.amount_paid_usd, true),
+      paidKhr: storedAmount(sale.amount_paid_khr, true),
+      totalUsd: storedAmount(sale.total_usd, false),
+      exchangeRate: storedAmount(sale.exchange_rate, false),
+      moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
+    })
+  } catch {
+    return true
+  }
 }

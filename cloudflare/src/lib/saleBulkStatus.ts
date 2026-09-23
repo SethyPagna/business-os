@@ -11,6 +11,7 @@ import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
+import { statusChangeNeedsPayment } from './saleStatusResolution';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -92,7 +93,15 @@ export type BulkStatusRequest = {
     skip_stock?: boolean;
 };
 export class SaleBulkError extends Error {
-    constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) { super(message); }
+    // `details` rides next to `error` in the route's JSON (a machine-readable
+    // code and the sales it names), for refusals a client acts on.
+    constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly details: Record<string, unknown> = {}) { super(message); }
+}
+// S4-41: a member moving from Not Paid to a paid status must already be paid
+// for (lib/saleStatusResolution.ts). The whole group is refused, like every
+// other per-sale refusal here, and the answer names each sale that owes money.
+function refuseUnpaid(unpaid: Row[]): never {
+    throw new SaleBulkError(`Not fully paid: ${unpaid.map(s => String(s.receipt_number || s.id)).join(', ')}. Record the payment before marking a sale Completed or Awaiting Delivery. Nothing in the group was changed.`, 400, { code: 'insufficient_payment_for_status', sale_ids: unpaid.map(s => Number(s.id)) });
 }
 const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
 // reference_id is polymorphic: use a conservative read guard, never revision
@@ -310,8 +319,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         return JSON.parse(String(previous.receipt_json));
     }
     const ids = request.items.map(i => i.id);
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
-    const sourceMatchedIds: number[] = [];
+    // The money columns feed only the S4-41 check below; the revision guard
+    // every changed member carries makes the batch refuse if they move before
+    // it commits.
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
         if (!sale)
@@ -324,7 +336,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         if (sale.movement_fingerprint === null)
             throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
         sourceMatchedIds.push(expected.id);
+        if (statusChangeNeedsPayment(sale.sale_status || 'completed', request.target_status, sale))
+            unpaid.push(sale);
     }
+    if (unpaid.length)
+        refuseUnpaid(unpaid);
     const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);

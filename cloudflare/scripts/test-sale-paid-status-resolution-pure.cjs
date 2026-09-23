@@ -23,13 +23,19 @@
 // `completed` -- forcing `completed` would empty the shop's delivery queue.
 // The delivery/non-delivery pair below is what pins that.
 //
-// WHY THERE IS NO MATCHING RULE ON PATCH /:id/status: see the last case.
+// ON PATCH /:id/status ONLY THE FORWARD MOVE IS GUARDED. Paid -> Not Paid is
+// the shop's payment-correction reopen and stays open (its own case below);
+// Not Paid -> completed/awaiting_delivery is refused unless the payment
+// already recorded on the sale covers it (the PATCH cases at the end).
 //
 // DISCRIMINATING: every assertion here is on a combination the pre-S4-41 tree
 // produced the opposite answer for -- it recorded whatever status was asked
 // for and never compared it to the money. Cases 1 and 2 are each red on the
-// old route; the last case is red on the first (over-broad) attempt at this
-// fix, which is why it is here.
+// old route; the reopen case is red on the first (over-broad) attempt at this
+// fix, which is why it is here. The three PATCH refusals are red on the route
+// before the forward guard (it answered 200 and wrote the paid status); the
+// two PATCH controls pass on both and go red under a guard that refuses every
+// Not Paid -> Completed move instead of the uncovered ones.
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -195,7 +201,7 @@ async function patchStatus(db, id, body) {
   // settlement editor's correction mode is reachable only through it.
   // Refusing it left a mis-keyed tender uncorrectable, and broke
   // test-d1-pattern-limit-native.cjs's reopen case. This pins that the
-  // creation-time rule did NOT leak onto the status route.
+  // reverse move stays open on the status route.
   await runTest('a paid sale may still be reopened to Not Paid -- that is the payment-correction window', async () => {
     const f = h.fixture()
     const created = await h.postSale(f.route, paidRequest('reopen-paid-1', { sale_status: 'completed' }))
@@ -215,6 +221,111 @@ async function patchStatus(db, id, body) {
       'the reopen must still record the correction-window audit row the read query keys off',
     )
     h.setUser(h.USER)
+  })
+
+  // THE FORWARD HALF ON PATCH /:id/status. The reverse move above stays open;
+  // the forward move is the one that erases a debt. With no payment fields
+  // the route used to accept awaiting_payment -> completed/awaiting_delivery
+  // for a sale that still owed its whole total, and the sale left every Not
+  // Paid list. It is refused now unless the payment ALREADY RECORDED on the
+  // sale covers it, or the same request settles it (the settlement branch,
+  // which has always had its own `insufficient_payment` check).
+  const patchAsAdmin = async (f, body) => {
+    const updatedAt = f.raw.prepare('SELECT updated_at FROM sales WHERE id=1').get().updated_at
+    h.setUser(STATUS_USER)
+    try {
+      return await patchStatus(f.route, 1, { expected_updated_at: updatedAt, ...body })
+    } finally {
+      h.setUser(h.USER)
+    }
+  }
+  // Everything a status change writes: the row, its revision, stock, audit
+  // and the sale record stream. A refusal must leave all of it as it was.
+  const writtenState = (f) => JSON.stringify({
+    sale: f.raw.prepare('SELECT * FROM sales WHERE id=1').get(),
+    revisions: f.raw.prepare('SELECT * FROM sale_write_revisions ORDER BY sale_id').all(),
+    stock: branchStock(f),
+    movements: f.raw.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
+    audits: f.raw.prepare('SELECT COUNT(*) n FROM audit_logs').get().n,
+    events: f.raw.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n,
+  })
+
+  await runTest('PATCH: an unpaid Not Paid sale cannot be marked Completed without a payment', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, unpaidRequest('patch-unpaid-completed', { sale_status: 'awaiting_payment' }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const before = writtenState(f)
+    const refused = await patchAsAdmin(f, { sale_status: 'completed', client_request_id: 'patch-unpaid-completed-1' })
+    // The old route answered 200 here and wrote 'completed' with $0 paid.
+    assert.equal(refused.status, 400, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'insufficient_payment_for_status')
+    assert.equal(writtenState(f), before, 'a refused status change must write nothing')
+    assert.equal(saleRow(f).sale_status, 'awaiting_payment')
+  })
+
+  await runTest('PATCH: an unpaid Not Paid delivery cannot be marked Awaiting Delivery without a payment', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, unpaidRequest('patch-unpaid-delivery', {
+      sale_status: 'awaiting_payment', is_delivery: 1, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const before = writtenState(f)
+    const refused = await patchAsAdmin(f, { sale_status: 'awaiting_delivery', client_request_id: 'patch-unpaid-delivery-1' })
+    assert.equal(refused.status, 400, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'insufficient_payment_for_status')
+    assert.equal(writtenState(f), before)
+  })
+
+  await runTest('PATCH: a partly-paid Not Paid sale cannot be marked Completed -- the boundary is coverage', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, unpaidRequest('patch-partial-completed', {
+      sale_status: 'awaiting_payment', payment_method: 'Cash', amount_paid_usd: 4,
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    assert.equal(Number(saleRow(f).amount_paid_usd), 4)
+    const before = writtenState(f)
+    const refused = await patchAsAdmin(f, { sale_status: 'completed', client_request_id: 'patch-partial-completed-1' })
+    assert.equal(refused.status, 400, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'insufficient_payment_for_status')
+    assert.equal(writtenState(f), before)
+  })
+
+  // CONTROL: the rule is about the money, not the transition. A sale that was
+  // reopened for a payment correction still carries its full tender, so
+  // putting it back to Completed (the Undo of the reopen) asserts nothing
+  // false and must keep working. An over-broad guard that refused every
+  // Not Paid -> Completed move goes red here.
+  await runTest('PATCH: a Not Paid sale whose recorded payment covers it can still be marked Completed', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, paidRequest('patch-covered-reopen', { sale_status: 'completed' }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const reopened = await patchAsAdmin(f, { sale_status: 'awaiting_payment', client_request_id: 'patch-covered-reopen-1' })
+    assert.equal(reopened.status, 200, JSON.stringify(reopened.body))
+    assert.equal(saleRow(f).sale_status, 'awaiting_payment')
+    const restored = await patchAsAdmin(f, { sale_status: 'completed', client_request_id: 'patch-covered-reopen-2' })
+    assert.equal(restored.status, 200, JSON.stringify(restored.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+    assert.equal(Number(saleRow(f).amount_paid_usd), 9.5)
+  })
+
+  // CONTROL: settling in the same request is how the Sales page completes a
+  // Not Paid sale (SaleDetailModal's needsPaymentEntry); the guard must not
+  // stand in front of it.
+  await runTest('PATCH: settling the payment in the same request still completes an unpaid sale', async () => {
+    const f = h.fixture()
+    f.raw.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\"]')").run()
+    const created = await h.postSale(f.route, unpaidRequest('patch-settle-completed', { sale_status: 'awaiting_payment' }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const rate = Number(f.raw.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate)
+    const settled = await patchAsAdmin(f, {
+      sale_status: 'completed',
+      client_request_id: 'patch-settle-completed-1',
+      expected_exchange_rate: rate,
+      payment_details: [{ method: 'Cash', amount_usd: 9.5, amount_khr: 0 }],
+    })
+    assert.equal(settled.status, 200, JSON.stringify(settled.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+    assert.equal(Number(saleRow(f).amount_paid_usd), 9.5)
   })
   if (failed > 0) {
     console.error(`${failed} test(s) failed`)

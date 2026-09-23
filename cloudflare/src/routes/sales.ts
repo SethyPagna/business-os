@@ -121,7 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, resolvePaidSaleStatus, statusChangeNeedsPayment } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -1811,7 +1811,7 @@ app.post('/bulk-status', async (c) => {
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
-    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }
 })
 
@@ -2044,22 +2044,36 @@ app.patch('/:id/status', async (c) => {
     }, 400)
   }
 
-  // S4-41 -- DELIBERATELY NOT GUARDED HERE. The obvious companion to the
-  // creation-time rule would be "a paid sale may not be re-labelled Not
-  // Paid", and on THIS route it is wrong: completed/awaiting_delivery ->
-  // awaiting_payment IS the shop's payment-correction reopen. It is the only
-  // thing that turns on `payment_correction_allowed` (saleAllowsPaymentCorrection
-  // above, and the same CASE in the list query), it writes its own audit
-  // action `sale_payment_correction_opened`, and SaleSettlementEditor's
-  // correction mode is reachable ONLY through it. Refusing it would leave a
-  // mis-keyed tender uncorrectable forever, so the paid rule applies at
-  // CREATION only -- where no such correction window exists.
-
   // Which transitions are legal at all (returns-flow ownership of
   // partial_return/returned; un-cancel only back to where the sale was) --
   // see lib/saleTransitions.ts.
   const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // S4-41, the forward half. A Not Paid sale may take a paid status
+  // (completed / awaiting_delivery) only when the payment already recorded on
+  // it covers its total; otherwise the paid status asserts money nobody paid
+  // and the debt drops out of every Not Paid list. A request that settles the
+  // payment itself takes the settlement branch below instead, which refuses a
+  // short tender with `insufficient_payment` -- so this check is for the
+  // direct path only. The money was read with the sale above, and the
+  // saleRevisionGuard below refuses the write if the sale changed since.
+  //
+  // The REVERSE move stays open on purpose: completed/awaiting_delivery ->
+  // awaiting_payment IS the shop's payment-correction reopen. It is the only
+  // thing that turns on `payment_correction_allowed` (saleAllowsPaymentCorrection
+  // above, and the same CASE in the list query), it writes its own audit
+  // action `sale_payment_correction_opened`, and SaleSettlementEditor's
+  // correction mode is reachable ONLY through it. Refusing it would leave a
+  // mis-keyed tender uncorrectable forever. A reopened sale keeps its tender,
+  // so putting a fully paid one back (the reopen's Undo) passes the check below.
+  if (!paymentFieldsSent && statusChangeNeedsPayment(oldStatus, saleStatus, sale)) {
+    return c.json({
+      error: 'This sale is not fully paid, so it cannot be marked Completed or Awaiting Delivery. Record the payment first.',
+      code: 'insufficient_payment_for_status',
+      sale_status: saleStatus,
+    }, 400)
+  }
 
   // S4-2: is this transition outside the stock ledger? Either the admin
   // asked for it now, or this sale was ALREADY marked stock-skipped by an
