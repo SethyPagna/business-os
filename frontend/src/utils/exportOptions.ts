@@ -5,11 +5,11 @@
 // PDF deliberately has NO library: the dialog opens a clean printable
 // document and calls print() -- every platform's print dialog offers
 // "Save as PDF", which keeps the bundle small, works offline, and renders
-// Khmer with the system fonts instead of whatever glyphs a JS PDF engine
+// Khmer with the app's own fonts instead of whatever glyphs a JS PDF engine
 // ships. "Excel" uses the existing xlsxExport bridge; CSV the existing
 // csv utils.
 
-import { openPrintPreviewWindow, printHtmlInHiddenFrame } from './printSurface.ts'
+import { PRINT_FRAME_ASSET_TIMEOUT_MS, appFontFaceCss, openPrintPreviewWindow, printHtmlInHiddenFrame } from './printSurface.ts'
 
 export interface ExportColumn {
   key: string
@@ -98,7 +98,11 @@ export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint =
 }): string {
   const headCells = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')
   const bodyRows = rows.map((row) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('\n')
+  // The print document only has the fonts it declares: without the app's own
+  // @font-face rules 'Noto Sans Khmer' falls back to a system font (as the
+  // receipt did before Sep 23 2026).
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+${appFontFaceCss()}
   body { font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans Khmer', 'Khmer OS', sans-serif; margin: 24px; color: #0f172a; }
   h1 { font-size: 16px; margin: 0 0 2px; }
   p.meta { font-size: 11px; color: #64748b; margin: 0 0 12px; }
@@ -114,7 +118,14 @@ export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint =
 <table><thead><tr>${headCells}</tr></thead><tbody>
 ${bodyRows}
 </tbody></table>
-${autoPrint ? "<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 150); });</script>" : ''}
+${autoPrint ? `<script>window.addEventListener('load', function () {
+  // Print once the declared fonts have loaded (or after the same wait the
+  // hidden-frame path allows), so the Khmer text prints in the app font.
+  var print = function () { setTimeout(function () { window.print(); }, 150); };
+  var fonts = document.fonts;
+  if (!fonts || !fonts.ready) return print();
+  Promise.race([fonts.ready, new Promise(function (resolve) { setTimeout(resolve, ${PRINT_FRAME_ASSET_TIMEOUT_MS}); })]).then(print, print);
+});</script>` : ''}
 </body></html>`
 }
 

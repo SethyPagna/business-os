@@ -46,6 +46,7 @@ globals.document = {
 
 const { appFontFaceCss } = await import('../src/utils/printSurface.ts')
 const { buildPrintablePreviewDocument } = await import('../src/utils/printReceipt.ts')
+const { buildPrintDocument } = await import('../src/utils/exportOptions.ts')
 
 await check('the print document gets every @font-face rule the app has, and nothing else', () => {
   const css = appFontFaceCss()
@@ -76,6 +77,64 @@ await check('the receipt print document embeds those rules', () => {
   const head = html.slice(0, html.indexOf('</head>'))
   assert.match(head, /@font-face \{ font-family: "Noto Sans Khmer"; font-weight: 400; src: url\("https:\/\/pos\.example\/assets\/khmer-400\.woff2"\)/,
     'the Khmer face the receipt was measured with is declared in the document that prints it')
+})
+
+// The export dialog's Print / PDF document (product, contact, branch, fee,
+// return and expense lists) is the same kind of separate document.
+await check('the report and list print document embeds those rules too', () => {
+  const html = buildPrintDocument({ title: 'Products', headers: ['Name'], rows: [{ Name: 'ផលិតផល' }] })
+  const head = html.slice(0, html.indexOf('</head>'))
+  assert.match(head, /@font-face \{ font-family: "Noto Sans Khmer"; font-weight: 400; src: url\("https:\/\/pos\.example\/assets\/khmer-400\.woff2"\)/,
+    'the Khmer names in the list print with the app font, not a system fallback')
+})
+
+// Its print window prints itself on load. Declaring the font is not enough if
+// print() runs before the font has arrived, so the script waits for it.
+function runListPrintScript(fontsReady: Promise<void>) {
+  const html = buildPrintDocument({ title: 'Products', headers: ['Name'], rows: [{ Name: 'ផលិតផល' }] })
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] || ''
+  const timers: Array<{ ms: number; fn: () => void }> = []
+  const run = {
+    printed: 0,
+    onLoad: () => {},
+    // Runs the timers due within `upToMs`; later ones stay pending.
+    flush: (upToMs: number) => {
+      const due = timers.filter((timer) => timer.ms <= upToMs)
+      timers.splice(0, timers.length, ...timers.filter((timer) => timer.ms > upToMs))
+      for (const timer of due) timer.fn()
+    },
+  }
+  const fakeWindow = {
+    addEventListener: (type: string, fn: () => void) => { if (type === 'load') run.onLoad = fn },
+    print: () => { run.printed += 1 },
+  }
+  const fakeSetTimeout = (fn: () => void, ms: number) => { timers.push({ fn, ms }) }
+  new Function('window', 'document', 'setTimeout', script)(fakeWindow, { fonts: { ready: fontsReady } }, fakeSetTimeout)
+  return run
+}
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+await check('the list print window prints only after the fonts have loaded', async () => {
+  let fontsLoaded = () => {}
+  const run = runListPrintScript(new Promise<void>((resolve) => { fontsLoaded = resolve }))
+  run.onLoad()
+  await settle()
+  run.flush(150)
+  assert.equal(run.printed, 0, 'no print while the Khmer font is still loading')
+  fontsLoaded()
+  await settle()
+  run.flush(150)
+  assert.equal(run.printed, 1, 'one print once the font is there')
+})
+
+await check('a font that never arrives does not stop the list from printing', async () => {
+  const run = runListPrintScript(new Promise<void>(() => {}))
+  run.onLoad()
+  await settle()
+  run.flush(4000)
+  await settle()
+  run.flush(150)
+  assert.equal(run.printed, 1, 'prints once after the same wait the hidden-frame path allows')
 })
 
 await check('without a DOM there is nothing to copy, and nothing throws', () => {

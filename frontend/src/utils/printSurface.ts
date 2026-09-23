@@ -35,7 +35,7 @@ function discardActivePrintFrame(): void {
 
 // A slow webfont must never be the reason a receipt does not print: after this
 // the frame is printed with whatever has loaded.
-const PRINT_FRAME_ASSET_TIMEOUT_MS = 4000
+export const PRINT_FRAME_ASSET_TIMEOUT_MS = 4000
 // iOS does not reliably fire 'afterprint', and removing the frame while the
 // print sheet is still open cancels the job -- so cleanup is late on purpose.
 const PRINT_FRAME_CLEANUP_MS = 120_000
