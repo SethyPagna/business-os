@@ -1822,7 +1822,7 @@ app.post('/bulk-update', async (c) => {
     return c.json(result)
   } catch (error) {
     if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
-    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }
 })
 
