@@ -6021,6 +6021,8 @@
   "shift_history_all": "ប្រវត្តិវេនហាងដែលអ្នកមានសិទ្ធិមើល",
   "shift_history_own": "វេនដែលបានកត់ត្រារបស់អ្នក",
   "shift_history_empty": "មិនទាន់មានវេនដែលបានកត់ត្រាទេ។",
+  "shift_search_placeholder": "ស្វែងរកអ្នកគិតប្រាក់ ឬលេខសម្គាល់",
+  "shift_search_no_match": "គ្មានវេនត្រូវនឹងការស្វែងរកទេ។",
   "shift_no_amendments": "មិនទាន់មានការកែប្រែដែលបានកត់ត្រាទេ។",
   "shift_amend": "កែប្រែវេន",
   "shift_opening_note": "កំណត់សម្គាល់ពេលបើកវេន",

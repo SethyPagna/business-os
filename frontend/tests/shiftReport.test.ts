@@ -45,6 +45,10 @@ test('mounted Shift selection pages beyond200 and revokes old detail before date
     if (id.includes('PaginationControls')) return { __esModule: true, default: Pager, DEFAULT_PAGE_SIZE: 20 }
     if (id.includes('AppContext')) return { useApp: () => ({ user }) }
     if (id.includes('permissions')) return { isAdminControlUser: (u: any) => u.role_code === 'admin' }
+    // The search pause is not under test here (shiftReportSearch.test.ts
+    // drives it); these scenarios never type, so the value passes through.
+    if (id.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
+    if (id.includes('formatters')) return require('../src/utils/formatters.ts')
     if (id.includes('shiftTransport')) return {
       listShifts: async (input: any) => { listCalls.push(input); return { shifts: [shift(input.page === 1 ? 1 : 250)], page: input.page, total: 275, page_size: 20 } },
       fetchShiftHistory: async (id: number) => { detailCalls.push(id); return holdDetail ? new Promise((resolve) => { lateResolve = resolve }) : { shift: shift(id) } },
@@ -117,7 +121,11 @@ test('Reports uses authorized selection/detail and shared comparison rows rather
   assert.match(report, /listShifts\(/)
   assert.match(report, /from: filters.startDate, to: filters.endDate/, 'server filters records before applying its limit')
   assert.match(report, /JSON.stringify\(\[branchId, filters.startDate, filters.endDate,/, 'range changes invalidate list, selection and detail scope')
-  assert.match(report, /selection.scope === listKey/, 'old selection is discarded outside its report page scope')
+  // S1: a pick is scoped to the dates/branch/actor (depsKey), not to the
+  // search page, so searching for the next shift keeps the one on screen;
+  // shiftReportSearch.test.ts drives that behaviour and its negative control.
+  assert.match(report, /const pickedId = selection\.scope === depsKey \? selection\.id : null/, 'old selection is discarded outside its date, branch and actor scope')
+  assert.match(report, /const pageScope = JSON\.stringify\(\[depsKey, query\]\)/, 'a new search restarts paging')
   assert.match(report, /`\$\{listKey\}:\$\{selectedId \?\? ''\}`/, 'detail invalidation includes the same date and page scope')
   assert.match(report, /from: filters.startDate, to: filters.endDate, page, pageSize/)
   assert.match(report, /totalItems=\{listing.data.total \?\? shifts.length\}/)
