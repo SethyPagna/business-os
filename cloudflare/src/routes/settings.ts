@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, changedFields, auditChangeColumns } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings } from '../lib/settingsSensitive'
+import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
@@ -1046,12 +1046,20 @@ app.post('/', async (c) => {
     }
   }
 
+  // The audit row used to say only WHICH keys were saved. Read the stored
+  // values once before the batch so the row can say what each key changed
+  // from and to; secret-bearing keys (settings' own isSensitiveSettingKey,
+  // widened by the audit module's secret-shaped-key test) record that they
+  // changed without recording either value.
+  const settingsBefore = await getSettingsValues(c.env, attemptedKeys)
+  const settingsAfter: Record<string, unknown> = {}
   const db = getDb(c.env)
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = attemptedKeys.map((key) => {
     const raw = body[key]
     const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw)
       : key === 'receipt_print_settings' ? sanitizeReceiptPrintSettingsValue(raw)
         : (typeof raw === 'string' ? raw : JSON.stringify(raw))
+    settingsAfter[key] = value
     return {
       sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
@@ -1085,7 +1093,11 @@ app.post('/', async (c) => {
   }
 
   const updatedAt = await getSettingsUpdatedAt(c.env)
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys },
+    changedFields(settingsBefore, settingsAfter, {
+      keys: attemptedKeys,
+      redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),
+    }))
   // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
   // config/catalog responses keyed on a version this route never bumped,
   // so every customer_portal_* save -- map embed included, the user's
