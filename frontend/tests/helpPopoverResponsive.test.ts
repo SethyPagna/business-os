@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { helpPopoverGeometry } from '../src/utils/helpPopoverGeometry.ts'
 import { existsSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { createServer, transformWithEsbuild } from 'vite'
 import { chromium, expect } from '@playwright/test'
+import { closeBrowserFixture } from './browserProfileTeardown.ts'
 
 for (const width of [160, 240, 320, 375, 768, 1440]) {
   for (const height of [80, 160, 320, 800]) {
@@ -52,7 +54,25 @@ createRoot(document.getElementById('root')).render(<div style={{position:'fixed'
  <InfoHint label="Long hint" text={words + ' https://example.com/' + 'x'.repeat(300)} />
  <ButtonGuidePopover title="Guide" entries={Array.from({length:12},(_,i)=>({label:'Action '+i,description:words}))}/>
 </div>);`
-const server = await createServer({ root, logLevel: 'error', server: { host: '127.0.0.1', port: 0 }, plugins: [{
+// A free port asked for by number, not `port: 0`. Vite treats 0 as "not
+// set" and falls back to its DEFAULT 5173 -- the port the owner's own dev
+// server uses -- so this fixture used to fight a live dev server for it and
+// then navigate to whatever answered. `strictPort` stays off: if the chosen
+// port is taken in the moment between the probe closing and vite listening,
+// vite steps up to the next free one instead of failing the file.
+async function freePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address()
+      assert.ok(address && typeof address !== 'string')
+      probe.close((error) => error ? reject(error) : resolve(address.port))
+    })
+  })
+}
+
+const server = await createServer({ root, logLevel: 'error', server: { host: '127.0.0.1', port: await freePort(), strictPort: false }, plugins: [{
   name: 'help-fixture',
   resolveId(id) { if (id === 'virtual:help-fixture') return fixtureId },
   load(id) { if (id === fixtureId) return fixture },
@@ -66,12 +86,21 @@ const server = await createServer({ root, logLevel: 'error', server: { host: '12
   }) },
 }] })
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+let exitCode = 0
 try {
   await server.listen()
+  assert.doesNotMatch(server.resolvedUrls!.local[0], /:5173\//, 'the fixture must never take the dev server port')
   const executablePath = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium'].find(existsSync)
   browser = await chromium.launch({ executablePath, headless: true })
   const page = await browser.newPage()
-  await page.goto(`${server.resolvedUrls!.local[0]}help-fixture`)
+  // The FIRST navigation pays for a cold vite transform of the whole
+  // InfoHint/ButtonGuidePopover graph plus styles/main.css. Playwright allows
+  // 30s by default, which is a fine budget for a page and a poor one for a
+  // compiler: on a loaded machine (several browser fixtures at once) this
+  // file failed here, before a single assertion, and the timeout was read as
+  // a broken popover. The sibling CDP fixtures give their first ready-wait
+  // 45-60s for the same reason; this one asks for a compile, so it gets more.
+  await page.goto(`${server.resolvedUrls!.local[0]}help-fixture`, { timeout: 180_000 })
   for (const width of [240, 320, 390, 1024]) for (const height of [160, 640]) {
     await page.setViewportSize({ width, height })
     for (const label of ['Long hint', 'Guide']) {
@@ -106,7 +135,14 @@ try {
   await page.mouse.click(0, 0)
   await hoverPanel.waitFor({ state: 'detached' })
   console.log('PASS browser help popovers: narrow/short viewports, Khmer/URL wrapping, list semantics, keyboard scroll and Escape focus return')
-} finally {
-  await browser?.close()
-  await server.close()
+} catch (error) {
+  // PRINT it, then decide the exit code here. Rethrowing would leave the
+  // error queued behind a teardown that can park (vite keeps a handle), and
+  // the failure a red test exists to show would never reach the runner.
+  exitCode = 1
+  console.error('FAIL browser help popovers')
+  console.error(error)
 }
+// Bounded close, then the verdict the assertions produced -- never a hang,
+// never a teardown-decided result.
+await closeBrowserFixture(exitCode, () => browser?.close(), () => server.close())

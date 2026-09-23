@@ -50,3 +50,32 @@ export function removeBrowserProfile(dir: string): void {
 export function finishBrowserTest(): never {
   process.exit(0)
 }
+
+// The same forced exit for a fixture that CANNOT let its teardown throw or
+// hang -- a Playwright `browser.close()` and a `vite.close()` both keep
+// handles that can outlive everything meaningful (see the history above) --
+// while still reporting the verdict the assertions produced.
+//
+// Why it exists: helpPopoverResponsive ran its teardown inside a plain
+// `finally`, so when an assertion (or a navigation) failed, the error was
+// queued to rethrow AFTER the finally block, `server.close()` parked, and
+// Node reported "Detected unsettled top-level await" with an exit code and no
+// sign of the real failure. The message a red test prints is the whole point
+// of the test, so the caller prints it and passes 1 here.
+//
+// Each closer gets its own bounded wait: a stuck close is logged and stepped
+// over, never able to change the code. The timer is unref'd so a fast close
+// does not hold the loop open for the rest of the budget.
+export async function closeBrowserFixture(code: number, ...closers: Array<() => unknown>): Promise<never> {
+  for (const close of closers) {
+    try {
+      await Promise.race([
+        Promise.resolve(close()),
+        new Promise<void>((resolve) => { setTimeout(resolve, 5_000).unref() }),
+      ])
+    } catch (error) {
+      console.warn(`WARN fixture teardown step failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  process.exit(code)
+}
