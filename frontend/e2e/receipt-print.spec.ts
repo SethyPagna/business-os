@@ -21,7 +21,10 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
  * it prints in the font the app measured with (a fallback font made receipts
  * longer than their page and clipped the card); a sale's Print -> All prints the
  * card and then the full receipt, one after the other; and with the card on,
- * Receipt Settings' test print prints the full receipt on roll paper.
+ * Receipt Settings' test print prints the full receipt on roll paper. Every
+ * printed receipt is laid out at the paper's width, not its on-screen size:
+ * nothing reaches past the paper's sides and the text keeps the same margin at
+ * both.
  *
  * What is REAL here: the built app from dist, the /receipt-settings and /sales
  * pages, their Print controls, printReceipt(), the document it writes and the
@@ -257,8 +260,14 @@ type Geometry = {
   firstTextTopMm: number
   receiptFrames: number
   receiptRoots: number
+  /** How far any laid-out element reaches past the receipt frame's sides. */
+  overflowMm: number
+  /** The element that reaches furthest past a side (evidence for a red run). */
+  overflowAt: string
   /** Content the receipt root cuts off (its scroll size beyond its box). */
   clippedMm: number
+  /** Blank paper between each side of the frame and the nearest laid-out text. */
+  textMarginsMm: { left: number; right: number }
 }
 
 /** Runs inside the document that printed, with print media emulated. */
@@ -266,9 +275,12 @@ function measure(pxToMm: number): Geometry {
   const frame = document.querySelector('.receipt-frame') as HTMLElement | null
   if (!frame) throw new Error('no .receipt-frame in the printed document')
   const docTop = document.documentElement.getBoundingClientRect().top
+  const frameRect = frame.getBoundingClientRect()
   const walker = document.createTreeWalker(frame, NodeFilter.SHOW_TEXT)
   let firstText = ''
   let firstTextTopPx = Number.NaN
+  let textLeftPx = Number.POSITIVE_INFINITY
+  let textRightPx = Number.NEGATIVE_INFINITY
   while (walker.nextNode()) {
     const node = walker.currentNode as Text
     if (!node.nodeValue?.trim()) continue
@@ -276,20 +288,40 @@ function measure(pxToMm: number): Geometry {
     range.selectNodeContents(node)
     const rect = range.getBoundingClientRect()
     if (rect.width === 0 && rect.height === 0) continue
-    firstText = node.nodeValue.trim().slice(0, 40)
-    firstTextTopPx = rect.top - docTop
-    break
+    if (!firstText) {
+      firstText = node.nodeValue.trim().slice(0, 40)
+      firstTextTopPx = rect.top - docTop
+    }
+    for (const line of Array.from(range.getClientRects())) {
+      if (!line.width) continue
+      textLeftPx = Math.min(textLeftPx, line.left)
+      textRightPx = Math.max(textRightPx, line.right)
+    }
+  }
+  let overflowPx = 0
+  let overflowAt = ''
+  for (const element of Array.from(frame.querySelectorAll('*'))) {
+    const rect = element.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) continue
+    const past = Math.max(rect.right - frameRect.right, frameRect.left - rect.left)
+    if (past > overflowPx) {
+      overflowPx = past
+      overflowAt = `${element.tagName.toLowerCase()}.${String(element.getAttribute('class') || '').trim().split(/\s+/).slice(0, 4).join('.')} "${(element.textContent || '').trim().slice(0, 30)}"`
+    }
   }
   const root = frame.querySelector('[data-receipt-export-root]') as HTMLElement | null
   const clippedPx = root ? Math.max(0, root.scrollHeight - root.clientHeight, root.scrollWidth - root.clientWidth) : Number.NaN
   return {
     printMedia: window.matchMedia('print').matches,
-    frameWidthMm: frame.getBoundingClientRect().width * pxToMm,
+    frameWidthMm: frameRect.width * pxToMm,
     firstText,
     firstTextTopMm: firstTextTopPx * pxToMm,
     receiptFrames: document.querySelectorAll('.receipt-frame').length,
     receiptRoots: frame.querySelectorAll('[data-receipt-export-root]').length,
+    overflowMm: overflowPx * pxToMm,
+    overflowAt,
     clippedMm: clippedPx * pxToMm,
+    textMarginsMm: { left: (textLeftPx - frameRect.left) * pxToMm, right: (frameRect.right - textRightPx) * pxToMm },
   }
 }
 
@@ -332,11 +364,21 @@ async function printOnce(page: Page, testInfo: TestInfo, surface: Surface, label
 
 const tapTestPrint = (page: Page) => () => page.getByRole('button', { name: EN.print_test_this_mode, exact: true }).click()
 
-/** Printed in the face it was measured with, and nothing cut off. */
+/**
+ * Printed in the face it was measured with, nothing cut off or spilling past
+ * the paper, and the text laid out to the paper: the same blank margin at both
+ * sides (the roll's 1mm, the card's own padding). Text running to the very edge
+ * on one side means a box kept a width from somewhere other than the paper.
+ */
 function expectPrintedWhole(call: PrintCall, geometry: Geometry | null, what: string): void {
   expect(call.fonts, `${what}: the Khmer face is loaded in the print document when print is called`).toContain(KHMER_FONT)
   if (!geometry) return
+  expect(geometry.overflowMm, `${what}: nothing reaches past the paper's sides (${geometry.overflowAt})`).toBeLessThanOrEqual(0.3)
   expect(geometry.clippedMm, `${what}: the receipt cuts nothing off`).toBeLessThanOrEqual(0.3)
+  const { left, right } = geometry.textMarginsMm
+  const margins = `left ${left.toFixed(2)} mm, right ${right.toFixed(2)} mm`
+  expect(Math.min(left, right), `${what}: the text keeps a margin at both sides (${margins})`).toBeGreaterThanOrEqual(0.5)
+  expect(Math.abs(left - right), `${what}: the two side margins match (${margins})`).toBeLessThanOrEqual(0.5)
 }
 
 /** Open the first sale's receipt from the Sales list; returns its Print menu. */
