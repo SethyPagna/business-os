@@ -44,9 +44,11 @@ async function pointsConfig(db: D1Compat): Promise<PointsConfig> {
 
 // One authoritative unclamped formula shared by reassignment and checkout.
 // Do not round individual ledger entries: portal rounds only its final output.
+// A Not Paid sale earns nothing until it is paid, but the points redeemed on it
+// are already spent: the discount is off what the customer owes.
 function rawPointsSql(accountSql: string): string {
-  return `(COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(sale_status,''),'completed') NOT IN ('cancelled','awaiting_payment') THEN
-    CASE WHEN COALESCE(loyalty_accrual,1)=1 THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_khr,0)*cfg.khr ELSE COALESCE(total_usd,0)*cfg.usd END ELSE 0 END
+  return `(COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'cancelled' THEN
+    CASE WHEN COALESCE(NULLIF(sale_status,''),'completed')<>'awaiting_payment' AND COALESCE(loyalty_accrual,1)=1 THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_khr,0)*cfg.khr ELSE COALESCE(total_usd,0)*cfg.usd END ELSE 0 END
     - COALESCE(membership_points_redeemed,0) ELSE 0 END) FROM sales WHERE customer_id=${accountSql}),0)
     - COALESCE((SELECT SUM(CASE WHEN COALESCE(NULLIF(status,''),'completed')<>'cancelled' THEN CASE WHEN cfg.basis='khr' THEN COALESCE(total_refund_khr,0)*cfg.khr ELSE COALESCE(total_refund_usd,0)*cfg.usd END ELSE 0 END) FROM returns WHERE customer_id=${accountSql}),0)
     + COALESCE((SELECT SUM(reward_points) FROM customer_share_submissions WHERE customer_id=${accountSql} AND status='approved' AND reward_points_voided_at IS NULL),0)

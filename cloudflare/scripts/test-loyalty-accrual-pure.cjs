@@ -249,4 +249,32 @@ assert.ok(
   'notifications still omits the manual-adjustment term (known drift, tracked separately) -- if this now fails, the drift was fixed and this assertion should be inverted',
 )
 
+// ---- 8. Points redeemed on a Not Paid sale are spent. The discount is
+// already off what the customer owes, so the points leave the balance when the
+// sale is rung up, not when it is paid; only EARNING waits for payment. All
+// three balance sites used to skip a Not Paid sale entirely, so the same
+// points could be redeemed again on the next sale. A cancelled sale still
+// gives its redemption back.
+{
+  const db = new Database(':memory:')
+  for (const migration of loadAll()) db.exec(migration)
+  db.prepare(`INSERT INTO customers (id, name) VALUES (8, 'Sokha')`).run()
+  const add = db.prepare(`INSERT INTO sales (receipt_number, customer_id, total_usd, total_khr, membership_points_redeemed, sale_status)
+    VALUES (@r, 8, @usd, @khr, @redeemed, @status)`)
+  add.run({ r: 'NP-1', usd: 100, khr: 410000, redeemed: 0, status: 'completed' })
+  add.run({ r: 'NP-2', usd: 30, khr: 123000, redeemed: 40, status: 'awaiting_payment' })
+  add.run({ r: 'NP-3', usd: 20, khr: 82000, redeemed: 25, status: 'cancelled' })
+  const raw = db.prepare(`WITH cfg AS (SELECT 'usd' AS basis, 1 AS usd, 0 AS khr) SELECT ${rawPointsSql('8')} AS raw FROM cfg`).get().raw
+  assert.equal(raw, 60, 'checkout balance: earned 100 minus the 40 spent on the Not Paid sale')
+  const notif = db.prepare(notifMatch[1]).all().find((r) => r.customer_id === 8)
+  assert.equal(notif.sales_usd, 100, 'notifications: the Not Paid sale earns nothing yet')
+  assert.equal(notif.redeemed, 40, 'notifications: the Not Paid redemption is spent, the cancelled one is not')
+  const rows = db.prepare(`SELECT sale_status, total_usd, total_khr, membership_points_redeemed, COALESCE(loyalty_accrual, 1) AS loyalty_accrual FROM sales WHERE customer_id = 8`).all()
+  const npSummary = summarizePoints(rows, [], [], config)
+  assert.equal(npSummary.earned, 100, 'summarizePoints: the Not Paid sale earns nothing yet')
+  assert.equal(npSummary.redeemed, 40, 'summarizePoints: the Not Paid redemption is spent, the cancelled one is not')
+  assert.equal(npSummary.balance, raw, 'the balance the POS shows is the balance checkout enforces')
+  db.close()
+}
+
 console.log('test-loyalty-accrual-pure: all checks passed')
