@@ -124,6 +124,19 @@ assert.deepEqual(
 )
 assert.match(printSettingsSource, /print_effective_dimensions/)
 assert.match(printSettingsSource, /print_driver_size_note/)
+// Sep 23 2026: in printer-paper mode (the default) the panel describes what
+// printing does -- the printer paper's width with the capped margins, and the
+// print dialog settings that mode needs (longest paper once, Copies 1) --
+// instead of "select the same paper size in Chrome and the driver" and the
+// roll size with the full 4mm margins.
+assert.match(printSettingsSource, /const onPrinterPaper = printsOnPrinterPaper\(testPrintSettings\)/)
+assert.match(printSettingsSource, /const printedSettings = onPrinterPaper \? capDriverFormMargins\(testPrintSettings\) : testPrintSettings/)
+assert.match(printSettingsSource, /const paperWidthMm = onPrinterPaper \? getDriverFormWidthMm\(ps\) : getPaperWidthMm\(ps\)/)
+assert.match(printSettingsSource, /marginNumber\(printedSettings\.marginLeft\)/)
+assert.match(printSettingsSource, /marginNumber\(printedSettings\.marginRight\)/)
+assert.match(printSettingsSource, /\{onPrinterPaper\s*\? T\('print_driver_forms_dialog_note'/)
+assert.match(printSettingsSource, /\{onPrinterPaper && testRendition === 'full' \? \(/,
+  'the margins section says what printer paper does with the margins, for the roll')
 assert.match(printSettingsSource,
   /\['58mm', '72mm', '80mm'\]\.includes\(ps\.paperSize\) && !\['driver-forms', 'driver'\]\.includes\(ps\.pageSizeMode \|\| 'driver-forms'\) \? \(\s*<div className="mt-1">\s*\{T\('receipt_preview_driver_hint'/,
   'the roll-paper / blank-band hint is shown only for modes that send a page size, never for the printer-paper default')

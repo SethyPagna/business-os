@@ -4,7 +4,9 @@ import {
   buildPrintablePreviewDocument,
   buildSingleImagePdf,
   capDriverFormMargins,
+  getDriverFormWidthMm,
   measureContinuousRollPageHeightMm,
+  printsOnPrinterPaper,
   remeasureContinuousRollBeforePrint,
   resolveReceiptPageGeometry,
   writeContinuousRollPageSize,
@@ -503,13 +505,34 @@ await runTest('resolveReceiptPageGeometry: the 80x50 card follows the printer-pa
   assert.doesNotMatch(html, /data-receipt-length-line/)
 
   const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
-  assert.match(printSource, /const printsOnDriverForms = \(getPaperHeightMm\(printSettings\) == null \|\| singleSheet\)/,
+  assert.match(printSource, /const printsOnDriverForms = printsOnPrinterPaper\(printSettings\)/,
     'driver-forms renders the card at the printer paper width too')
   assert.match(printSource, /\}, hostPrintSettings, \{ cardFromTopEdge: printsOnDriverForms && singleSheet \}\)/,
     'only the driver-forms print path drops the card top padding')
   assert.match(printSource, /else if \(cardFromTopEdge\) cloned\.style\.paddingTop = '0'/)
   assert.equal((printSource.match(/cardFromTopEdge/g) || []).length, 4,
     'declared, defaulted, used once, passed once: PDF and image never drop the card padding')
+})
+
+// Sep 23 2026: one predicate decides "prints on the printer paper" for the
+// print path and for the Print Settings panel that describes it.
+await runTest('printsOnPrinterPaper: in driver-forms the roll and the 80x50 card print on the printer paper; a document sheet and the other modes do not', () => {
+  const production = normalizeReceiptPrintSettings({ paperSize: '80mm', marginTop: '4', marginRight: '4', marginBottom: '4', marginLeft: '4', scale: '100' })
+  assert.equal(printsOnPrinterPaper(production), true, 'production settings (no saved mode) print on the printer paper')
+  assert.equal(printsOnPrinterPaper(receiptRenditionPrintSettings(production, 'card')), true, 'the card prints on the same printer paper')
+  for (const paperSize of ['58mm', '72mm']) {
+    assert.equal(printsOnPrinterPaper({ ...production, paperSize }), true, paperSize)
+  }
+  for (const paperSize of ['A4', 'letter']) {
+    assert.equal(printsOnPrinterPaper({ ...production, paperSize }), false, paperSize + ' keeps its own sheet')
+  }
+  assert.equal(printsOnPrinterPaper({ ...production, paperSize: 'custom', customHeight: '150' }), false, 'a custom sheet keeps its own size')
+  for (const pageSizeMode of ['measured', 'fixed', 'driver', 'auto-longest'] as const) {
+    assert.equal(printsOnPrinterPaper({ ...production, pageSizeMode }), false, pageSizeMode)
+  }
+  const printed = capDriverFormMargins(production)
+  assert.equal(getDriverFormWidthMm(production) - Number(printed.marginLeft) - Number(printed.marginRight), 70,
+    'the panel reads "Paper 72mm · content 70mm" for production, as it prints')
 })
 
 await runTest('normalizeReceiptPrintSettings: pageSizeMode/fixedPageLengthMm default and migrate existing saved settings', () => {

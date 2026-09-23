@@ -107,6 +107,16 @@ export function capDriverFormMargins(settings: ReceiptPrintSettings): ReceiptPri
   return { ...settings, marginTop: '0', marginLeft: cap(settings.marginLeft), marginRight: cap(settings.marginRight) }
 }
 
+// driver-forms governs the roll and the 80x50 card printed on it (a document
+// sheet keeps its own explicit paperSize width): these print at the printer's
+// registered form width, not the configured roll width, so a driver that only
+// registers e.g. 72mm forms prints the receipt at the paper's full width
+// instead of scaling an 80mm layout down and leaving side margins.
+export function printsOnPrinterPaper(settings: ReceiptPrintSettings): boolean {
+  return (getPaperHeightMm(settings) == null || isSingleSheetPaperSize(settings.paperSize))
+    && (settings.pageSizeMode || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode) === 'driver-forms'
+}
+
 const RECEIPT_INLINE_STYLE_PROPS = [
   'display',
   'position',
@@ -1195,14 +1205,7 @@ export function resolveReceiptPageGeometry({
 async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
   const singleSheet = isSingleSheetPaperSize(printSettings.paperSize)
-  // driver-forms governs the roll and the 80x50 card printed on it (a
-  // document sheet keeps its own explicit paperSize width): render at the
-  // printer's registered form width, not the configured roll width, so a
-  // driver that only registers e.g. 72mm forms prints the receipt at the
-  // paper's full width instead of scaling an 80mm layout down and leaving
-  // side margins.
-  const printsOnDriverForms = (getPaperHeightMm(printSettings) == null || singleSheet)
-    && (printSettings.pageSizeMode || DEFAULT_RECEIPT_PRINT_SETTINGS.pageSizeMode) === 'driver-forms'
+  const printsOnDriverForms = printsOnPrinterPaper(printSettings)
   const widthMm = options.paperWidthMm
     || (printsOnDriverForms ? getDriverFormWidthMm(printSettings) : getPaperWidthMm(printSettings))
   // PRINT-PATH ONLY (this function). PDF/image export keep the operator's

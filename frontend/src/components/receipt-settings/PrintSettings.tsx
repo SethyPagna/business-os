@@ -6,7 +6,7 @@ import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
-import { downloadReceiptPdf, getPaperWidthMm, getPrintSettings, openReceiptPdf, printReceipt, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { capDriverFormMargins, downloadReceiptPdf, getDriverFormWidthMm, getPaperWidthMm, getPrintSettings, openReceiptPdf, printReceipt, printsOnPrinterPaper, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
 import { isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSettings, type ReceiptRendition } from '../../utils/receiptAppliedConfig'
 import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
@@ -179,7 +179,16 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     ['marginBottom', T('print_bottom', 'Bottom')],
     ['marginLeft', T('print_left', 'Left')],
   ]
-  const paperWidthMm = getPaperWidthMm(ps)
+  // A test prints what a sale's Print prints on this paper: the 80x50 card on
+  // 80 x 50 paper, otherwise the full receipt, each with its own settings.
+  const testRendition: ReceiptRendition = isReceiptCardPaper(ps) ? 'card' : 'full'
+  const testPrintSettings = receiptRenditionPrintSettings(ps, testRendition)
+  // Printer-paper mode prints at the printer paper's width with no top margin
+  // and at most 1mm at the sides (printReceipt.ts), so the figures and the
+  // print dialog advice below describe that, not the paper size picked above.
+  const onPrinterPaper = printsOnPrinterPaper(testPrintSettings)
+  const printedSettings = onPrinterPaper ? capDriverFormMargins(testPrintSettings) : testPrintSettings
+  const paperWidthMm = onPrinterPaper ? getDriverFormWidthMm(ps) : getPaperWidthMm(ps)
   const marginNumber = (value: unknown): number => {
     const parsed = Number.parseFloat(String(value ?? ''))
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
@@ -188,19 +197,14 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
   // but its shell still owns the same 16px design padding on each side. Show
   // that real content width instead of incorrectly promising all 80mm.
   const fixedCardPaddingMm = RECEIPT_SHELL_HORIZONTAL_PADDING_PX * 25.4 / 96
-  const effectiveLeftMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginLeft)
-  const effectiveRightMm = ps.paperSize === '80x50mm' ? fixedCardPaddingMm / 2 : marginNumber(ps.marginRight)
+  const effectiveLeftMm = testRendition === 'card' ? fixedCardPaddingMm / 2 : marginNumber(printedSettings.marginLeft)
+  const effectiveRightMm = testRendition === 'card' ? fixedCardPaddingMm / 2 : marginNumber(printedSettings.marginRight)
   const contentWidthMm = Math.max(0, paperWidthMm - effectiveLeftMm - effectiveRightMm)
   const mm = (value: number): string => Number.isInteger(value) ? String(value) : value.toFixed(1)
 
   // Only the fallback synthetic HTML (buildFallbackPreviewHtml) reads this --
   // the real preview DOM branch already carries its own contrast attribute.
   const contrastMode = normalizeReceiptTemplate(settings.receipt_template).text_contrast
-
-  // A test prints what a sale's Print prints on this paper: the 80x50 card on
-  // 80 x 50 paper, otherwise the full receipt, each with its own settings.
-  const testRendition: ReceiptRendition = isReceiptCardPaper(ps) ? 'card' : 'full'
-  const testPrintSettings = receiptRenditionPrintSettings(ps, testRendition)
 
   const getPreviewSource = () => {
     const previewNode = previewTargetRef?.current
@@ -253,7 +257,10 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
               .replace('{content}', mm(contentWidthMm))}
           </div>
           <div className="mt-1">
-            {T('print_driver_size_note', 'For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.')}
+            {onPrinterPaper
+              ? T('print_driver_forms_dialog_note', 'In the print dialog choose the longest paper once (e.g. {width} × 800 mm), Scale Default, Margins Default or None, Copies 1, headers and footers off. The printer stops and cuts at the end of the receipt.')
+                .replace('{width}', mm(paperWidthMm))
+              : T('print_driver_size_note', 'For physical printing, select the same paper size in Chrome and the printer driver, use 100% / Actual size, browser margins None, and disable headers and footers.')}
           </div>
           {/* The printer-paper modes send no page size: nothing is centred, so there is no blank band to explain. */}
           {['58mm', '72mm', '80mm'].includes(ps.paperSize) && !['driver-forms', 'driver'].includes(ps.pageSizeMode || 'driver-forms') ? (
@@ -405,6 +412,15 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
       </Section>
 
       <Section icon={Ruler} title={T('print_margins', 'Margins (mm)')}>
+        {onPrinterPaper && testRendition === 'full' ? (
+          <div className="mb-2 flex items-center gap-1.5">
+            <p className="text-xs text-gray-500">{T('print_margins_printer_paper', 'Printer paper: top 0 · sides up to 1 mm')}</p>
+            <InfoHint
+              label={T('print_margins', 'Margins (mm)')}
+              text={T('print_margins_printer_paper_hint', 'The printer already feeds blank paper ahead of each receipt (from the print head to the cutter), so printing adds no top margin and at most 1 mm at the sides. The bottom margin is the gap before the cut. PDF and image exports use the values set here.')}
+            />
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {marginFields.map(([key, label]) => (
             <div key={key}>
