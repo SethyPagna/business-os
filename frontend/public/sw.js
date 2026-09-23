@@ -877,14 +877,18 @@ function isRecoveryNavigation(request) {
 // cached shell yet, e.g. the very first navigation this worker serves.
 async function appShellFallback(request, event) {
     const cache = await caches.open(APP_SHELL_CACHE);
-    const cached = await cache.match('/index.html') || await cache.match('/');
+    let cached = await cache.match('/index.html') || await cache.match('/');
     // A cached shell that cannot legally answer a navigation -- the redirected
     // response an older worker stored -- is dropped here rather than served.
     // Without this, a device already holding one never recovers on its own.
+    // What is left is a plain cache miss and is handled as one below. It used
+    // to answer with a worker-context read of /index.html instead, so a
+    // recovery navigation on such a device never reached the origin as a
+    // navigation -- the read this host answers with a bot challenge.
     if (cached && !isValidDocumentResponse(cached)) {
         await cache.delete('/index.html').catch(() => { });
         await cache.delete('/').catch(() => { });
-        return fetchAndCacheShell(new Request(new URL('/index.html', self.location.origin)), cache);
+        cached = undefined;
     }
     // A recovery navigation says, in its own URL, that the build this worker is
     // serving is already proven broken. Answering it from APP_SHELL_CACHE hands
@@ -912,6 +916,16 @@ async function appShellFallback(request, event) {
         // than the stale shell this branch exists to avoid. On expiry the cached
         // shell answers, exactly as it does for a network error below.
         //
+        // Only when there IS a cached shell to answer with. There is none after
+        // App.tsx's page-chunk recovery (it deletes every shell cache before
+        // this reload) or once a poisoned entry is dropped above, and then the
+        // clock buys nothing: expiring it sent a second request through
+        // fetchAndCacheShell -- init object, so same-origin, so challenged --
+        // and threw away the navigation's own answer, so an origin slower than
+        // the budget showed the bot challenge instead of the app. With nothing
+        // to fall back to, wait for the navigation the way the browser itself
+        // would without this worker.
+        //
         // No AbortController: passing ANY init object (even { signal }) rebuilds
         // the Request and downgrades navigate mode to same-origin -- measured,
         // the origin sees sec-fetch-mode: same-origin -- which is the read this
@@ -919,11 +933,13 @@ async function appShellFallback(request, event) {
         // fetch is left to the browser, which drops it when this worker goes
         // idle; keeping the navigation a navigation is worth that much more than
         // reclaiming one socket.
+        const network = fetch(request).catch(() => null);
         let expireTimer;
-        const expired = new Promise((resolve) => {
-            expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS);
-        });
-        const fresh = await Promise.race([fetch(request).catch(() => null), expired]);
+        const fresh = cached
+            ? await Promise.race([network, new Promise((resolve) => {
+                    expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS);
+                })])
+            : await network;
         clearTimeout(expireTimer);
         // A navigate-mode Request carries redirect: 'manual', so a host that
         // answers this navigation with a 3xx (an HSTS or trailing-slash hop, an

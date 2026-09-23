@@ -380,7 +380,7 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   check(`appShellFallback serves the cached shell immediately and revalidates in the background (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'the cache is read once, up front')
+    assert.match(body, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'the cache is read once, up front')
     // Sep 23 2026: exactly ONE awaited fetch now precedes the cache hit -- the
     // recovery navigation (__bos_reload), which exists only because the page
     // has already proven the cached shell cannot run. Answering that one from

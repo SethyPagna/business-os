@@ -101,7 +101,7 @@ runTest('service worker serves cached app shell for offline navigations only', (
   // revalidation now (see tests/swNavigationStrategy.test.ts for the full
   // pin) -- a cache hit answers immediately and the network refresh runs
   // through event.waitUntil, not before the response.
-  assert.match(source, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/)
+  assert.match(source, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/)
   assert.match(source, /event\.waitUntil\(revalidate\)/)
 })
 

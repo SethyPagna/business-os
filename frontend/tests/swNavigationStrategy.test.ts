@@ -46,7 +46,7 @@ function functionBody(source: string, startMarker: string, endMarker: string): s
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   runTest(`appShellFallback answers a cache hit without awaiting the network (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'must read the cache before touching the network')
+    assert.match(body, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'must read the cache before touching the network')
     assert.match(body, /if \(cached\) \{/, 'must branch on a cache hit')
     const cacheHitBranch = body.slice(body.indexOf('if (cached) {'), body.indexOf('return cached') + 'return cached'.length)
     assert.doesNotMatch(cacheHitBranch, /await fetch/, 'a cache hit must not await the network -- that is exactly the round-trip lag this fix removes')
@@ -124,6 +124,10 @@ return isValidDocumentResponse`)() as (response: unknown) => boolean
       /if \(cached && !isValidDocumentResponse\(cached\)\) \{[\s\S]{0,200}cache\.delete\('\/index\.html'\)[\s\S]{0,200}cache\.delete\('\/'\)/,
       'a cached shell that cannot answer a navigation must be dropped, not served again',
     )
+    // Part 628 ticket 1: and dropping it leaves a plain cache miss, so a
+    // recovery navigation still goes out as a navigation below -- not as the
+    // worker-context read of /index.html this branch used to return.
+    assert.match(body, /cache\.delete\('\/'\)[\s\S]{0,40}cached = undefined/, 'the dropped entry must fall through as a cache miss')
   })
   runTest(`a chunk the deploy deleted refreshes the cached shell before the response returns (${label})`, () => {
     const body = functionBody(source, 'async function cacheFirstStatic', 'function isStaleBuildAsset')

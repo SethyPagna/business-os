@@ -160,12 +160,18 @@ type FixtureOptions = {
    * worker is the only thing standing between the user and a blank tab.
    */
   stallRecoveryNavigation?: boolean
+  /**
+   * Answer the recovery navigation, but only after this long: an origin that
+   * is slower than the worker's budget and still alive.
+   */
+  delayRecoveryNavigationMs?: number
 }
 
 function createFixture(workerSource: string, options: FixtureOptions = {}) {
   let generation: Generation = 'old'
   let recoveryRedirectsSent = 0
   let firstStallAt: number | null = null
+  let challengedRecoveryReads = 0
   const openSockets = new Set<import('node:net').Socket>()
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://localhost')
@@ -225,6 +231,14 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
       if (firstStallAt === null) firstStallAt = Date.now()
       return
     }
+    if (options.delayRecoveryNavigationMs && isRecoveryNavigation) {
+      const answeredGeneration = generation
+      setTimeout(() => {
+        response.setHeader('Content-Type', 'text/html')
+        response.end(document_(answeredGeneration))
+      }, options.delayRecoveryNavigationMs)
+      return
+    }
     if (options.redirectFirstRecoveryNavigation && isRecoveryNavigation && recoveryRedirectsSent === 0) {
       recoveryRedirectsSent += 1
       // Cache-Control: must-revalidate is already set above, so the browser
@@ -234,6 +248,9 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
       return
     }
     if (options.challengeWorkerShellReads && !isNavigation && generation === 'new') {
+      // Only reads of the recovery URL itself: a newly deployed worker's own
+      // install reads of / and /index.html are challenged here too.
+      if (requestUrl.searchParams.has('__bos_reload')) challengedRecoveryReads += 1
       response.writeHead(403, { 'Content-Type': 'text/html' })
       response.end('<html><body>Just a moment...</body></html>')
       return
@@ -249,6 +266,8 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
     server,
     deploy: () => { generation = 'new' },
     firstStallAt: () => firstStallAt,
+    /** Worker-context reads of the recovery URL the host answered with its challenge. */
+    challengedRecoveryReads: () => challengedRecoveryReads,
     // A stalled request holds its socket open, and server.close() waits for
     // every connection: destroy them or the test process never exits.
     close: () => new Promise<void>((resolve) => {
@@ -341,6 +360,81 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
     await context.close()
     await browser.close()
   }
+}
+
+type RecoveryReloadOutcome = {
+  /** Worker-context reads of the recovery URL the host had to challenge. */
+  challengedRecoveryReads: number
+  /** The recovery navigation committed the host's challenge page. */
+  challenged: boolean
+  shellGeneration: string | null
+  catalog: string | null
+}
+
+/**
+ * The recovery reload the lazy-chunk path does not cover: App.tsx's page-chunk
+ * guard deletes every shell cache and THEN reloads with __bos_reload, so the
+ * worker meets that navigation with no cached shell at all. 'poisoned' is the
+ * other way a worker is left without a usable shell: an entry it cannot serve,
+ * which it drops on sight.
+ */
+async function runRecoveryReload(workerSource: string, shell: 'cleared' | 'poisoned', options: FixtureOptions = {}): Promise<RecoveryReloadOutcome> {
+  const fixture = createFixture(workerSource, { challengeWorkerShellReads: true, ...options })
+  const { server } = fixture
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const browser = await chromium.launch()
+  const context = await browser.newContext({ serviceWorkers: 'allow' })
+  const page = await context.newPage()
+  try {
+    await page.goto(origin)
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.register('/sw.js')
+      await navigator.serviceWorker.ready
+    })
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller)
+    await page.goto(origin)
+    await page.waitForSelector('#catalog', { timeout: 20_000 })
+    fixture.deploy()
+    await page.evaluate(async (mode) => {
+      for (const name of await caches.keys()) {
+        if (mode === 'cleared' && (name.startsWith('business-os-app-shell-') || name.startsWith('business-os-static-'))) {
+          await caches.delete(name)
+        } else if (mode === 'poisoned' && name.startsWith('business-os-app-shell-')) {
+          await (await caches.open(name)).put('/index.html', await fetch('/business-os-build.json'))
+        }
+      }
+    }, shell)
+    await page.goto(`${origin}/?__bos_reload=recovery-token`, { waitUntil: 'commit', timeout: 60_000 })
+    await page.waitForFunction(
+      () => !!document.querySelector('#catalog') || !!document.querySelector('#boot-error')
+        || !!document.body?.textContent?.includes('Just a moment'),
+      null,
+      { timeout: 60_000 },
+    ).catch(() => {})
+    return {
+      challengedRecoveryReads: fixture.challengedRecoveryReads(),
+      challenged: await page.evaluate(() => !!document.body?.textContent?.includes('Just a moment')),
+      shellGeneration: await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
+      catalog: await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
+    }
+  } finally {
+    await fixture.close()
+    await context.close()
+    await browser.close()
+  }
+}
+
+// The recovery budget, shortened so a slower-than-budget origin does not have
+// to sit out the shipped 8 s. Only its order against the origin's delay counts.
+const QUICK_RECOVERY_BUDGET_MS = 1_000
+function withQuickRecoveryBudget(workerSource: string): string {
+  const quick = workerSource.replace(
+    /RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS = [0-9_]+/,
+    `RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS = ${QUICK_RECOVERY_BUDGET_MS}`,
+  )
+  assert.notEqual(quick, workerSource, 'the budget needle must match the shipped worker')
+  return quick
 }
 
 const SW_JS_DELAY_MS = 2_000
@@ -528,4 +622,30 @@ test('positive control: a healthy build is not forced through a recovery reload'
   assert.equal(healthy.recoveryReloads, 0, 'no deploy, no stale chunk, no reload -- updates stay consent-based')
   assert.equal(healthy.shellGeneration, 'old', 'the running build must keep serving itself')
   assert.equal(healthy.catalog, 'CATALOG-old', 'the lazy route still loads from the network after a cache eviction')
+})
+
+// Part 628 ticket 1. With no cached shell the recovery budget has nothing to
+// fall back to, so expiring it bought nothing -- and it sent a SECOND request
+// through fetchAndCacheShell (an init object, so same-origin, so challenged on
+// this host) while throwing the navigation's own answer away. An origin that
+// was merely slower than the budget put its bot challenge in front of the user
+// instead of the app. A no-worker navigation would simply have waited.
+test('with no cached shell, a recovery navigation slower than the budget still lands on the app', { timeout: 180_000 }, async () => {
+  const slow = await runRecoveryReload(withQuickRecoveryBudget(fixedWorker), 'cleared', {
+    delayRecoveryNavigationMs: QUICK_RECOVERY_BUDGET_MS * 3,
+  })
+  assert.equal(slow.challengedRecoveryReads, 0, 'no second, downgraded request may chase the navigation when the budget runs out')
+  assert.equal(slow.challenged, false, 'the host challenge must not replace the answer the navigation was about to get')
+  assert.equal(slow.shellGeneration, 'new', 'the navigation\'s own answer -- the deployed shell -- is what the tab must get')
+  assert.equal(slow.catalog, 'CATALOG-new', 'and the deployed build must mount')
+})
+
+// Same ticket: a poisoned entry was answered with a worker-context read of
+// /index.html instead of the navigation, so the recovery never reached the
+// origin as a navigation. Dropping the entry now leaves a plain cache miss.
+test('a poisoned cached shell does not turn the recovery navigation into a worker read', { timeout: 180_000 }, async () => {
+  const poisoned = await runRecoveryReload(fixedWorker, 'poisoned')
+  assert.equal(poisoned.challenged, false, 'the recovery must reach the origin as the navigation it is, not as a challenged read')
+  assert.equal(poisoned.shellGeneration, 'new', 'the dropped shell is replaced by the deployed one')
+  assert.equal(poisoned.catalog, 'CATALOG-new')
 })
