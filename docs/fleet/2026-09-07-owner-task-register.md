@@ -1,3 +1,31 @@
+## September 23 — owner asks and their states (checkpoint f064e844 DEPLOYED, Worker 250d3591)
+
+Owner, 23 Sep: "make sure you don't lose track of any conversations and tasks and update and note". Every ask is a
+row here with its state; progress.md and the session log (Parts 630-631) carry the evidence.
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| Receipt printed twice on one strip; large blank band on top (urgent) | **Deployed** (Worker 89f806df, 35bddf53); the owner's physical print on 72 x 800 is still owed | Part 630; printer settings steps given to the owner |
+| Print follow-ups: "All" waits for the card's print sheet, report print documents use the app's Khmer font, 80x50 paper shows the page length section, the advice leads to Printer paper | **Deployed** (Worker 250d3591, f064e844) | f064e844, b7513c1d, 52890a80, 66a4f563, 0d6464c1; Part 631 |
+| Telegram rows too wide for a phone continue on a hanging indent | **Deployed** (Worker 250d3591) | e64b51b8, 38ff44f8, 8329066b; Part 631 |
+| A paid POS sale is always Completed; a Not Paid sale that still owes cannot be marked paid; sale edits in every status except Cancelled | **In progress**: lane rc/sale-status-guard-20260923 (9 commits), also composed into rc/cp4-integration-20260923; not deployed | S4-41; the edit-in-every-status coverage is re-verified at integration |
+| Checkpoint 4 lanes: service-worker residuals, native test harness, per-line stock idempotency (migration 0192, needs a council), Records lane phase 2 | **In progress**: rc/sw-residuals-20260923, rc/native-harness-20260923, rc/cp4-integration-20260923; not deployed | Part 628 tickets |
+| T4 Telegram reports: section headers `=====Section name=====` instead of plain lines | **Not yet** | owner 23 Sep |
+| T5 Sale message top: `🛍️ Sale Invoice / វិក្កយបត្រការលក់: <no>`, then `· Status / ស្ថានភាព` and `· Date / កាលបរិច្ឆេទ` | **Not yet** | owner 23 Sep |
+| T6 Status-change message: `🧾 Invoice / វិក្កយបត្រ: <no>`, `· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: old → new`, a divider, `· Customer / អតិថិជន`, `· By / ដោយ` | **Not yet** | owner 23 Sep |
+| T7 Shift report: dash section headers `---------Invoices / វិក្កយបត្រ--------` (dashes, not a drawn line), `·` bullets inside every section | **Not yet** | owner 23 Sep |
+| T8 Shift report top: `🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · dd/mm/yyyy`, then Open, Close (N/A while open), Shop, Cashier, ID; "Open" in Khmer is only បើក | **Not yet** | owner 23 Sep |
+| T9 Shift ID `S-<yyyymmdd>-<HHMM>-<cashier>`, "no need other things" | **Not yet** | shifts.ts shiftCode() appends six random hex characters today |
+| S1 Shifts searchable by cashier or by ID | **Not yet** | owner 23 Sep |
+| T10 One minute after a shift closes, the Reports overview is sent to Telegram too | **Not yet** | needs a Free-plan path and a Paid path with automatic fallback, one send per shift |
+| N1 Product conflict: merge into Keep follows the kept product, its barcode included, and never fails on a barcode difference | **Not yet** | owner 23 Sep |
+| N2 Small-screen conflict rows: tap opens the product preview (long-press still shows the full name); the name takes its own full row with no ellipsis; barcode, Cost: and Selling: on one row; Keep / Merge / Resolve on the stock row | **Not yet** | owner 23 Sep |
+| N3 Every conflict type: Keep / Merge / Resolve applies the choice and shows before and after, never "failed" or "different" | **Not yet** | owner 23 Sep |
+| N4 Cost price editable from the conflict view for admin and permitted users | **Not yet** | owner 23 Sep |
+| N5 Product detail "Records": every change with before and after, like each sale's history | **In progress**: Records lane phase 2 in rc/cp4-integration-20260923 (Field history on both product detail panes, plain product edits audited); not deployed | 3bf827ae, 824bb3a0, 19c40379 |
+| N6 Stock-in sessions editable (today only add or delete) | **Not yet** | owner 23 Sep |
+
+---
 ## September 16 Program 10 checkpoint A LIVE
 
 | Item | State | Evidence |
