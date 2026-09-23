@@ -21,7 +21,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
@@ -1927,6 +1927,23 @@ app.post('/rename-brand', async (c) => {
   return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
 })
 
+// Plain product fields whose edit history the Audit Log now records as a
+// before/after row. Deliberately NOT here:
+//   - cost_price_usd / cost_price_khr: a manual cost override already writes
+//     its own 'cost_override' audit row with old_value/new_value inside the
+//     same guarded batch (lib/productWrites.ts) -- listing them again would
+//     put the same change on two rows;
+//   - derived/search columns (name_key, name_normalized, brand_compact,
+//     categories, brands) which restate a field already in the list;
+//   - stock_quantity, which belongs to the stock ledger, not a field edit.
+const PRODUCT_FIELD_AUDIT_COLUMNS = [
+  'name', 'barcode', 'sku', 'category', 'brand', 'unit', 'description', 'supplier',
+  'image_path', 'is_active',
+  'selling_price_usd', 'selling_price_khr',
+  'wholesale_price_usd', 'wholesale_price_khr',
+  'purchase_price_usd', 'purchase_price_khr',
+] as const
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -2186,6 +2203,13 @@ app.put('/:id', async (c) => {
   // back out of the plan avoids a second SELECT for the common (non-fold)
   // case. Absent for a create/group-rename-only plan, in which case there is
   // no cost field to record anyway.
+  // A plain field edit (price, barcode, category, unit, description, image,
+  // active flag) wrote NOTHING to audit_logs before this -- the Audit Log had
+  // no record that a selling price had ever been changed, by whom, or from
+  // what. One row per edit, carrying only the columns that actually moved.
+  const productBefore = await getDb(c.env)
+    .prepare(`SELECT ${PRODUCT_FIELD_AUDIT_COLUMNS.join(', ')} FROM products WHERE id = @id`)
+    .get<Record<string, unknown>>({ id })
   try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
@@ -2211,6 +2235,19 @@ app.put('/:id', async (c) => {
   // is not an error.
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
+  // A group rename already has its own 'rename'/'product_group' row (above and
+  // in the applyRenameCarry branch) carrying from/to, so the name is left out
+  // of this row rather than recorded twice. An edit that changed nothing
+  // audited (an image-gallery-only reorder, a resave of identical values)
+  // yields no diff and therefore no row at all.
+  const productFieldChange = changedFields(productBefore, item as Record<string, unknown>, {
+    keys: appliedGroupRename || renamedProductName
+      ? PRODUCT_FIELD_AUDIT_COLUMNS.filter((column) => column !== 'name')
+      : PRODUCT_FIELD_AUDIT_COLUMNS,
+  })
+  if (productFieldChange) {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
+  }
   if (renamedProductName && renamedProductIds.length) {
     await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
   }

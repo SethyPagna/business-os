@@ -424,6 +424,7 @@ check('every route in scope still threads a before/after into its audit write', 
     ['routes/users.ts', /'update', 'user', id, null, changedFields\(/, 'admin user edit'],
     ['routes/users.ts', /'update', 'user', targetId, \{ mode: 'profile' \}, changedFields\(/, 'self-service profile edit'],
     ['routes/users.ts', /roleChange = auditChangeColumns\(changedFields\(/, 'role edit (in its own batch)'],
+    ['routes/products.ts', /'update', 'product', id, null, productFieldChange/, 'product plain field edit'],
     ['routes/promotions.ts', /'update', 'promotion_rule', id,[\s\S]{0,200}?changedFields\(/, 'promotion rule edit'],
     ['routes/promotions.ts', /'update', 'promotion', id, \{ title: input\.title \},[\s\S]{0,40}?changedFields\(/, 'announcement edit'],
     ['routes/settings.ts', /paymentMethodChange = auditChangeColumns\(changedFields\(/, 'payment-method rename'],
@@ -434,6 +435,16 @@ check('every route in scope still threads a before/after into its audit write', 
     const source = fs.readFileSync(workerSrc(entry[0]), 'utf8')
     assert.match(source, entry[1], entry[0] + ': ' + entry[2] + ' no longer records a before/after')
   }
+})
+
+check('the cost-override and group-rename rows are not duplicated by the plain product diff', () => {
+  const products = fs.readFileSync(workerSrc('routes/products.ts'), 'utf8')
+  const allowlist = products.match(/const PRODUCT_FIELD_AUDIT_COLUMNS = \[([\s\S]*?)\] as const/)
+  assert.ok(allowlist, 'products.ts must declare its plain-field allowlist')
+  assert.ok(!/cost_price_usd|cost_price_khr/.test(allowlist[1]),
+    'cost belongs to the cost_override row (lib/productWrites.ts); listing it here would record the same change twice')
+  assert.match(products, /appliedGroupRename \|\| renamedProductName[\s\S]{0,160}?filter\(\(column\) => column !== 'name'\)/,
+    'a group rename already has its own product_group row; the name must drop out of the plain diff')
 })
 
 async function main() {
