@@ -35,7 +35,10 @@
 // fix, which is why it is here. The three PATCH refusals are red on the route
 // before the forward guard (it answered 200 and wrote the paid status); the
 // two PATCH controls pass on both and go red under a guard that refuses every
-// Not Paid -> Completed move instead of the uncovered ones.
+// Not Paid -> Completed move instead of the uncovered ones. The one-riel-short
+// Completed case is red on the exact-formula gate (400) and pins the shared
+// half-cent creation band; the $0.00525 and zero-tender refusals go red under
+// a band that is too wide.
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -191,6 +194,59 @@ async function patchStatus(db, id, body) {
     const created = await h.postSale(f.route, paidRequest('paid-completed-1', { sale_status: 'completed' }))
     assert.equal(created.status, 200, JSON.stringify(created.body))
     assert.equal(saleRow(f).sale_status, 'completed')
+  })
+
+  // THE HALF-CENT BAND. The POS has always let a paid status through when the
+  // tender is short by no more than half a cent (it reads $0.00 at two
+  // decimals), and both it and this route now ask the same
+  // tenderAllowsPaidStatus. The route used the EXACT formula before, so the
+  // first case below was a 400 -- and, queued offline, a lost sale.
+  // A $9.61 line at 4,100 costs 39,401 riel; the cashier hands over 39,400.
+  function rielRequest(clientRequestId, { priceUsd, priceKhr, rate, paidKhr, status }) {
+    const body = h.request(clientRequestId)
+    const line = body.items[0]
+    line.applied_price_usd = priceUsd
+    line.pricing_quote = { ...line.pricing_quote, gross_usd: priceUsd, total_usd: priceUsd, total_khr: priceKhr }
+    return {
+      ...body, exchange_rate: rate, payment_currency: 'KHR',
+      amount_paid_usd: 0, amount_paid_khr: paidKhr, sale_status: status,
+    }
+  }
+  const setPrice = (f, usd, khr) => f.raw.prepare(
+    `UPDATE products SET selling_price_usd=${usd}, selling_price_khr=${khr} WHERE id=10`,
+  ).run()
+
+  await runTest('Completed with one riel short ($9.61 at 4,100, 39,400 riel) is accepted and recorded completed', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.61, 39401)
+    const created = await h.postSale(f.route, rielRequest('band-one-riel-short', {
+      priceUsd: 9.61, priceKhr: 39401, rate: 4100, paidKhr: 39400, status: 'completed',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const row = saleRow(f)
+    assert.equal(row.sale_status, 'completed')
+    assert.equal(Number(row.total_usd), 9.61)
+    assert.equal(Number(row.amount_paid_khr), 39400)
+  })
+
+  await runTest('Completed short by $0.00525 ($9.50 at 4,000, 37,979 riel) is refused -- past the band', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, rielRequest('band-past-half-cent', {
+      priceUsd: 9.5, priceKhr: 38000, rate: 4000, paidKhr: 37979, status: 'completed',
+    }))
+    assert.equal(created.status, 400, JSON.stringify(created.body))
+    assert.equal(created.body.code, 'insufficient_payment_for_status')
+    assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, 'nothing may be written')
+  })
+
+  await runTest('Completed with zero tender (A7) is still refused under the band', async () => {
+    const f = h.fixture()
+    const created = await h.postSale(f.route, rielRequest('band-zero-tender', {
+      priceUsd: 9.5, priceKhr: 38000, rate: 4000, paidKhr: 0, status: 'completed',
+    }))
+    assert.equal(created.status, 400, JSON.stringify(created.body))
+    assert.equal(created.body.code, 'insufficient_payment_for_status')
+    assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
   })
 
   // THE DELIBERATE NON-RULE. The obvious companion -- 'a paid sale cannot be

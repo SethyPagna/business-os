@@ -50,6 +50,18 @@
 // picker all ask it. A settlement in the same request is the other way in,
 // and it has its own coverage check (lib/paymentSettlement.ts).
 //
+// THE CREATION GATE HAS A HALF-CENT BAND, AND ONLY THE CREATION GATE.
+// "May this sale be BORN with a paid status" is tenderAllowsPaidStatus below:
+// covered to within half a US cent. That is the boundary the POS has always
+// enforced (its gate refused only a shortfall beyond $0.005), a shortfall
+// under half a cent shows as $0.00 at two decimals so the cashier cannot see
+// it, and POS clients already deployed -- including sales queued offline --
+// were built on that band and must still land instead of replaying into a
+// 400. Both the POS and POST /sales ask the same function, in exact integer
+// units, so the two can never disagree. Coverage itself stays EXACT:
+// paymentCoversSaleTotal, the Not-Paid resolver, statusChangeNeedsPayment and
+// settlement do not take the band.
+//
 // Neither half moves a sale by itself -- the resolver only picks the status a
 // sale is BORN with, and the guard only refuses -- so a pending
 // `sale.add_items` undo (which requires the sale to still be in the status it
@@ -114,9 +126,21 @@ export function paymentCoversSaleTotalUnits(input: SaleCoverageInput & {
   paidUsdUnits: bigint
   paidKhrUnits: bigint
 }): boolean {
+  return tenderCoversWithin(input, 0n)
+}
+
+/**
+ * The one integer comparison behind both answers: does the tender reach the
+ * total less `shortfallUnits`? Cross-multiplied by the rate ratio so no
+ * division (and no rounding) ever happens.
+ */
+function tenderCoversWithin(input: SaleCoverageInput & {
+  paidUsdUnits: bigint
+  paidKhrUnits: bigint
+}, shortfallUnits: bigint): boolean {
   const { numerator, denominator } = rateRatio(input.exchangeRate, input.moneyPrecisionVersion)
   const totalUsdUnits = financialCalculationUnits(input.totalUsd)
-  return input.paidUsdUnits * numerator + input.paidKhrUnits * denominator >= totalUsdUnits * numerator
+  return input.paidUsdUnits * numerator + input.paidKhrUnits * denominator >= (totalUsdUnits - shortfallUnits) * numerator
 }
 
 /** Number-taking convenience over paymentCoversSaleTotalUnits. Same formula. */
@@ -129,6 +153,41 @@ export function paymentCoversSaleTotal(input: SaleCoverageInput & {
     paidUsdUnits: financialCalculationUnits(input.paidUsd),
     paidKhrUnits: financialCalculationUnits(input.paidKhr),
   })
+}
+
+/**
+ * Half a US cent, in financial calculation units (four decimals): the most a
+ * tender may fall short and still record a sale as Completed or Awaiting
+ * Delivery at creation. See tenderAllowsPaidStatus.
+ */
+export const PAID_STATUS_SHORTFALL_TOLERANCE_UNITS = 50n
+
+/**
+ * May a NEW sale be recorded with a paid status (completed /
+ * awaiting_delivery) on this tender? THE creation boundary, shared by the
+ * POS checkout gate and POST /sales so they cannot disagree.
+ *
+ * Covered within half a cent (shortfall <= $0.005), compared exactly in
+ * integer units: the POS has always accepted that band (a shortfall under
+ * half a cent reads $0.00 at two decimals -- e.g. 39,400 riel for $9.61 at
+ * 4,100), and sales already queued offline by deployed clients were built on
+ * it, so the Worker must accept it too or those sales replay into a
+ * non-retryable 400 and are lost. One riel more short than the band is
+ * refused.
+ *
+ * Throws on an unreadable amount or rate (a zero or negative rate included);
+ * every caller treats a throw as "not allowed" -- money that cannot be read
+ * is not evidence of a payment.
+ */
+export function tenderAllowsPaidStatus(input: SaleCoverageInput & {
+  paidUsd: FinancialDecimalInput
+  paidKhr: FinancialDecimalInput
+}): boolean {
+  return tenderCoversWithin({
+    ...input,
+    paidUsdUnits: financialCalculationUnits(input.paidUsd),
+    paidKhrUnits: financialCalculationUnits(input.paidKhr),
+  }, PAID_STATUS_SHORTFALL_TOLERANCE_UNITS)
 }
 
 export type PaidStatusResolutionInput = SaleCoverageInput & {

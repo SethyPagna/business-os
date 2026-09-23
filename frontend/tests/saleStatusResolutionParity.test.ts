@@ -353,6 +353,76 @@ const STATUS_CHANGE_FIXTURES: StatusChangeFixture[] = [
   },
 ]
 
+// THE CREATION BAND. tenderAllowsPaidStatus answers "may a NEW sale be
+// recorded Completed / Awaiting Delivery on this tender": covered within half
+// a cent, exact integer units. The POS checkout gate and POST /sales both ask
+// it; before it existed the POS used a float half-cent gate and the Worker the
+// exact formula, so a 39,400-riel tender for $9.61 at 4,100 passed the POS and
+// was refused by the Worker (an offline replay of it was lost).
+// `exact` is what paymentCoversSaleTotal says for the same tender -- the rows
+// where it differs from `allowed` are the band, and exact coverage must not
+// have moved.
+type BandFixture = {
+  name: string
+  paidUsd: number
+  paidKhr: number
+  totalUsd: number
+  exchangeRate: number
+  allowed: boolean | 'throws'
+  exact?: boolean
+}
+
+const BAND_FIXTURES: BandFixture[] = [
+  { name: 'exactly half a cent short is allowed', paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
+  { name: 'one riel short at 4,100 is allowed', paidUsd: 0, paidKhr: 40999, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
+  { name: 'the owner case: 39,400 riel for $9.61 at 4,100 is allowed', paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100, allowed: true, exact: false },
+  { name: 'a mixed tender one riel short is allowed', paidUsd: 5, paidKhr: 20499, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: false },
+  { name: '$0.00525 short (37,979 riel for $9.50 at 4,000) is refused', paidUsd: 0, paidKhr: 37979, totalUsd: 9.5, exchangeRate: 4000, allowed: false, exact: false },
+  { name: 'one unit past the band ($0.0051 short) is refused', paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: false, exact: false },
+  { name: 'zero tender is refused', paidUsd: 0, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: false, exact: false },
+  { name: 'an exactly covering tender is allowed', paidUsd: 0, paidKhr: 41000, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: true },
+  { name: 'an overpaid tender is allowed', paidUsd: 20, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: true, exact: true },
+  { name: 'a $0 sale with no tender is allowed', paidUsd: 0, paidKhr: 0, totalUsd: 0, exchangeRate: 4100, allowed: true, exact: true },
+  { name: 'a zero rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: 0, allowed: 'throws' },
+  { name: 'a negative rate throws (callers refuse)', paidUsd: 10, paidKhr: 0, totalUsd: 10, exchangeRate: -4100, allowed: 'throws' },
+  { name: 'a NaN tender throws (callers refuse)', paidUsd: Number.NaN, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, allowed: 'throws' },
+]
+
+await runTest('both copies apply the same half-cent creation band, and correctly', async () => {
+  const worker = await loadWorkerCopy()
+  assert.equal(uiCopy.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS, 50n, 'half a cent at four calculation decimals')
+  assert.equal(worker.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS, uiCopy.PAID_STATUS_SHORTFALL_TOLERANCE_UNITS)
+  for (const fixture of BAND_FIXTURES) {
+    const input = {
+      paidUsd: fixture.paidUsd, paidKhr: fixture.paidKhr, totalUsd: fixture.totalUsd,
+      exchangeRate: fixture.exchangeRate, moneyPrecisionVersion: 1,
+    }
+    for (const copy of [uiCopy, worker]) {
+      if (fixture.allowed === 'throws') {
+        assert.throws(() => copy.tenderAllowsPaidStatus(input), `"${fixture.name}" must throw`)
+        continue
+      }
+      assert.equal(copy.tenderAllowsPaidStatus(input), fixture.allowed, `wrong band answer for "${fixture.name}"`)
+      assert.equal(copy.paymentCoversSaleTotal(input), fixture.exact, `exact coverage moved for "${fixture.name}"`)
+    }
+  }
+})
+
+await runTest('the band fixtures discriminate: the band is not exact coverage, and not a float', () => {
+  // Rows the exact formula refuses but the band allows: the Worker's old gate
+  // answered 400 on each, the whole defect.
+  const bandOnly = BAND_FIXTURES.filter((fixture) => fixture.allowed === true && fixture.exact === false)
+  assert.ok(bandOnly.length >= 3, 'expected several rows inside the band but not exactly covered')
+  // Rows a band that was too wide would let through.
+  const refusedShort = BAND_FIXTURES.filter((fixture) => fixture.allowed === false && fixture.totalUsd > 0)
+  assert.ok(refusedShort.length >= 3, 'expected rows just past the band that must stay refused')
+  // The resolver does NOT take the band: a Not Paid sale one riel short stays Not Paid.
+  assert.equal(uiCopy.resolvePaidSaleStatus({
+    requestedStatus: 'awaiting_payment', paidUsd: 0, paidKhr: 40999, totalUsd: 10,
+    exchangeRate: 4100, moneyPrecisionVersion: 1, isDelivery: false,
+  }), 'awaiting_payment')
+})
+
 await runTest('the UI and Worker copies differ only in the import specifier', () => {
   const workerBody = read(workerPath).replace(/from '\.\/financialPrecision'/, "from './financialPrecision.ts'")
   const uiBody = read(uiPath)

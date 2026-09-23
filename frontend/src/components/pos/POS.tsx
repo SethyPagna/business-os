@@ -18,7 +18,7 @@
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import { resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
+import { resolvePaidSaleStatus, tenderAllowsPaidStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -3226,9 +3226,24 @@ export default function POS() {
     // Y10: an awaiting-payment sale is exactly the "decide the payment
     // later on the Sales page" flow -- requiring the full amount (and with
     // it a payment method) up front defeated it. Paid statuses keep the
-    // gate.
-    if (saleStatus !== 'awaiting_payment' && totalPaid < totalUsd - 0.005) {
-      return notify(t('insufficient_amount'), 'error')
+    // gate: tenderAllowsPaidStatus, the one creation boundary POST /sales
+    // also enforces (covered within half a cent, exact integer units), so a
+    // sale this gate lets through -- online or queued offline -- is never
+    // answered with a 400 by the Worker. An unreadable rate refuses.
+    if (saleStatus !== 'awaiting_payment') {
+      let allowsPaidStatus = false
+      try {
+        allowsPaidStatus = tenderAllowsPaidStatus({
+          paidUsd: paidUsdNum,
+          paidKhr: paidKhrNum,
+          totalUsd,
+          exchangeRate,
+          moneyPrecisionVersion: 1,
+        })
+      } catch {
+        allowsPaidStatus = false
+      }
+      if (!allowsPaidStatus) return notify(t('insufficient_amount'), 'error')
     }
     // S4-41: the cashier could tender the full amount and still pick
     // "Not Paid", recording a settled sale as a debt. Resolve it here, with
