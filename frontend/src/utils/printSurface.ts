@@ -76,6 +76,33 @@ function withTimeout(work: Promise<unknown>, timeoutMs: number): Promise<void> {
   })
 }
 
+/**
+ * The app's own @font-face rules, for a document the app prints. A print
+ * document (the preview window or the hidden frame) has only the fonts it
+ * declares itself, so without these its Khmer text fell back to a system font
+ * with other metrics: a receipt the app measured at 208.7mm printed 224.2mm
+ * long and spilled onto a second page, and the 80x50 card lost its bottom
+ * 3.7mm (Sep 23 2026). URLs are made absolute so they resolve the same from a
+ * popup or a frame; a face is only fetched when text uses it, from the files
+ * the app has already loaded.
+ */
+export function appFontFaceCss(): string {
+  if (typeof document === 'undefined' || typeof CSSFontFaceRule === 'undefined') return ''
+  const rules: string[] = []
+  for (const sheet of Array.from(document.styleSheets || [])) {
+    let sheetRules: CSSRuleList
+    try { sheetRules = sheet.cssRules } catch { continue } // a cross-origin sheet is unreadable
+    const base = sheet.href || document.baseURI
+    for (const rule of Array.from(sheetRules)) {
+      if (!(rule instanceof CSSFontFaceRule)) continue
+      rules.push(rule.cssText.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (whole, _quote: string, url: string) => {
+        try { return `url("${new URL(url, base).href}")` } catch { return whole }
+      }))
+    }
+  }
+  return rules.join('\n')
+}
+
 // Exported so a caller that needs to act on the print document AFTER its
 // fonts/images have settled but BEFORE print() is invoked (receipt printing
 // re-measures its @page height in exactly that window) can await the same
