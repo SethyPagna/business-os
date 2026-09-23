@@ -7,7 +7,7 @@
 // that is only compact on a desktop column. Measured here, not assumed:
 // document scrollWidth against the viewport, and the height of every row.
 import assert from 'node:assert/strict'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
@@ -15,7 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { build } from 'esbuild'
 import { buildAuditFieldDiff } from '../src/utils/auditLogFieldDiff.ts'
-import { finishBrowserTest, removeBrowserProfile } from './browserProfileTeardown.ts'
+import { closeBrowserFixture, closeCdpBrowser, removeBrowserProfile, waitForBrowser } from './browserProfileTeardown.ts'
 
 const root = path.resolve(import.meta.dirname, '..')
 const browserCandidates = process.platform === 'win32'
@@ -147,14 +147,8 @@ let socket: WebSocket | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>()
 
-async function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const value = await read()
-    if (value !== null) return value
-    await new Promise((resolve) => setTimeout(resolve, 30))
-  }
-  throw new Error('Timed out waiting for browser state')
+function waitFor<T>(read: () => Promise<T | null>, timeoutMs = 15_000): Promise<T> {
+  return waitForBrowser(read, 'the audit detail small-screen fixture', timeoutMs)
 }
 
 async function send(method: string, params: Record<string, unknown> = {}): Promise<any> {
@@ -171,6 +165,7 @@ async function evaluate<T>(expression: string): Promise<T> {
   return reply.result.value as T
 }
 
+let exitCode = 0
 try {
   const target = await waitFor(async () => {
     try {
@@ -246,19 +241,15 @@ try {
   assert.equal(rows.filter((row) => row.type === 'added').length, 0, 'no row here was added to anything')
 
   console.log(`PASS audit detail rows at 375px: ${rows.length} rows, page ${page.scrollWidth}/${page.clientWidth}px, tallest ${Math.max(...rows.map((row) => row.height))}px`)
-} finally {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
-  const exitedCleanly = await Promise.race([browserExit.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 2_000))])
-  if (!exitedCleanly) {
-    if (process.platform === 'win32' && browser.pid) spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' })
-    else browser.kill()
-    await Promise.race([browserExit, new Promise<void>((resolve) => setTimeout(resolve, 2_000))])
-  }
-  for (const waiter of pending.values()) waiter.reject(new Error('Browser closed'))
-  pending.clear()
-  socket?.close()
-  await new Promise<void>((resolve) => server.close(() => resolve()))
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  removeBrowserProfile(profile)
+} catch (error) {
+  exitCode = 1
+  console.error('FAIL audit detail small-screen fixture')
+  console.error(error)
 }
-finishBrowserTest()
+
+await closeBrowserFixture(
+  exitCode,
+  () => closeCdpBrowser(browser, browserExit, socket),
+  () => new Promise<void>((resolve) => server.close(() => resolve())),
+  () => removeBrowserProfile(profile),
+)

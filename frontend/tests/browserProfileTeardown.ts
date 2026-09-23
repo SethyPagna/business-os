@@ -1,6 +1,7 @@
 // Shared harness helpers for the browser-driven fixture tests: the CDP
 // fixtures that spawn a real headless Chrome/Edge against a scratch
-// `--user-data-dir` (dateTimeRangePickerResponsive, lazyPortalMenuFirstClick,
+// `--user-data-dir` (auditDetailContextSmallScreen,
+// dateTimeRangePickerResponsive, lazyPortalMenuFirstClick,
 // mergeDuplicatesReviewPagination, mobileSectionMenuIcons,
 // productNameAdoption, productNameRail, promotionClickPaths,
 // reportsDetailFloatClose, reportsHubComposedResponsive, reportsRenderPass,
