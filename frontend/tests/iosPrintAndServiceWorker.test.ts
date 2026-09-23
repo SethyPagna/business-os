@@ -336,7 +336,15 @@ for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]]
     const recoveryStart = beforeCacheCheck.indexOf('if (isRecoveryNavigation(request)) {')
     assert.ok(recoveryStart > 0, 'the recovery navigation must still be the branch that goes to the network')
     const recoveryBranch = beforeCacheCheck.slice(recoveryStart)
-    assert.match(recoveryBranch, /await fetch\(request\)/, 'and it must fetch the navigation request itself, un-downgraded')
+    assert.match(recoveryBranch, /fetch\(request\)/, 'and it must fetch the navigation request itself')
+    // Measured, not assumed: an init object rebuilds the Request and turns
+    // navigate mode into same-origin, and the origin then sees
+    // sec-fetch-mode: same-origin -- the read this host answers with a bot
+    // challenge rather than the page. That includes { signal }, which is why
+    // the wait below is bounded by a clock and not by an AbortController.
+    assert.doesNotMatch(recoveryBranch, /fetch\(request,/, 'un-downgraded: no init object on it, not even a signal')
+    assert.match(recoveryBranch, /RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS/,
+      'and the one network wait allowed before a cache hit must be bounded -- an origin that accepts the connection and never answers left the tab blank')
     assert.doesNotMatch(
       beforeCacheCheck.slice(0, recoveryStart),
       /await fetch/,

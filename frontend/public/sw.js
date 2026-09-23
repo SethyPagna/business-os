@@ -24,6 +24,16 @@ const SYNC_LEASE_MS = 60_000;
 // releaseNewBuildForRecovery). Bounded so a worker stuck in its own install
 // handler cannot hold a fetch event's lifetime open indefinitely.
 const RECOVERY_TAKEOVER_TIMEOUT_MS = 30_000;
+// How long the one recovery navigation (__bos_reload) may wait on the network
+// before the cached shell answers instead. An origin that accepts the
+// connection and never replies -- a captive portal, a stalled radio, a hung
+// edge -- is indistinguishable from a slow one until a clock says so, and
+// navigator.onLine is still true, so nothing upstream refuses this reload.
+// Long enough that a genuinely slow phone still gets the fresh document it
+// needs (the cached shell is already proven dead, so giving up early is the
+// expensive mistake here); short enough that the fallback still beats a
+// browser's own navigation patience and the user never sees a blank tab.
+const RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS = 8_000;
 const OFFLINE_OWNER_REVIEW_MESSAGE = 'Keep this pending sale. Sign in to its original account and server to sync it. Older unowned sales need review in the current app; do not recreate or discard them.';
 // Standalone public runtime: parity-tested against offlineQueueOwnership.ts.
 function normalizeOfflineSaleOwner(value) {
@@ -880,7 +890,25 @@ async function appShellFallback(request, event) {
     // and / are served must-revalidate (frontend/public/_headers), and this URL
     // carries __bos_reload, so there is no stale HTTP-cache hit to guard.
     if (isRecoveryNavigation(request)) {
-        const fresh = await fetch(request).catch(() => null);
+        // Bounded, because this is the only awaited fetch on the response path:
+        // an origin that accepts the connection and never answers made
+        // respondWith hang forever and the tab stayed blank -- strictly worse
+        // than the stale shell this branch exists to avoid. On expiry the cached
+        // shell answers, exactly as it does for a network error below.
+        //
+        // No AbortController: passing ANY init object (even { signal }) rebuilds
+        // the Request and downgrades navigate mode to same-origin -- measured,
+        // the origin sees sec-fetch-mode: same-origin -- which is the read this
+        // host answers with a bot challenge instead of the page. The abandoned
+        // fetch is left to the browser, which drops it when this worker goes
+        // idle; keeping the navigation a navigation is worth that much more than
+        // reclaiming one socket.
+        let expireTimer;
+        const expired = new Promise((resolve) => {
+            expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS);
+        });
+        const fresh = await Promise.race([fetch(request).catch(() => null), expired]);
+        clearTimeout(expireTimer);
         // A navigate-mode Request carries redirect: 'manual', so a host that
         // answers this navigation with a 3xx (an HSTS or trailing-slash hop, an
         // edge rule, a sign-in bounce) gives back an opaqueredirect: type

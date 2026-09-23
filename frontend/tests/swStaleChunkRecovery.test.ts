@@ -62,6 +62,11 @@ const fixedWorker = fs.readFileSync(new URL('public/sw.js', FRONTEND), 'utf8')
 const brokenWorker = execFileSync('git', ['show', 'ef0489c1:frontend/public/sw.js'], { encoding: 'utf8' })
 
 const BUILD = { old: 'aaaaaaaaaaaaaaa1', new: 'bbbbbbbbbbbbbbb2' } as const
+// Read out of the shipped worker so the budget and the test cannot drift
+// apart. The literal is only what the pre-fix control was measured against.
+const RECOVERY_FETCH_TIMEOUT_MS = Number(
+  (/RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS = ([0-9_]+)/.exec(fixedWorker)?.[1] ?? '8000').replace(/_/g, ''),
+)
 type Generation = 'old' | 'new'
 
 function bundleEntry(generation: Generation): string {
@@ -116,6 +121,14 @@ type Outcome = {
    * host redirect) the browser made to land it.
    */
   recoveryTokens: number
+  /**
+   * How long the tab waited between the origin receiving the recovery
+   * navigation and the browser committing a document for it. null means it
+   * never committed -- the blank tab.
+   */
+  recoveryCommitMs: number | null
+  /** The origin really did receive the recovery navigation it then stalled. */
+  recoveryRequestStalled: boolean
   shellGeneration: string | null
   catalog: string | null
   bootError: boolean
@@ -140,11 +153,20 @@ type FixtureOptions = {
    * identical URL every time is a loop no worker can survive.
    */
   redirectFirstRecoveryNavigation?: boolean
+  /**
+   * Accept the recovery navigation and never answer it: a captive portal, a
+   * stalled radio, an origin holding the connection open. navigator.onLine is
+   * still true, so the app-side guard does not refuse the reload, and the
+   * worker is the only thing standing between the user and a blank tab.
+   */
+  stallRecoveryNavigation?: boolean
 }
 
 function createFixture(workerSource: string, options: FixtureOptions = {}) {
   let generation: Generation = 'old'
   let recoveryRedirectsSent = 0
+  let firstStallAt: number | null = null
+  const openSockets = new Set<import('node:net').Socket>()
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://localhost')
     const path = requestUrl.pathname
@@ -198,6 +220,11 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
       return
     }
     // The document.
+    if (options.stallRecoveryNavigation && isRecoveryNavigation) {
+      // No response, ever. The socket is destroyed by close() below.
+      if (firstStallAt === null) firstStallAt = Date.now()
+      return
+    }
     if (options.redirectFirstRecoveryNavigation && isRecoveryNavigation && recoveryRedirectsSent === 0) {
       recoveryRedirectsSent += 1
       // Cache-Control: must-revalidate is already set above, so the browser
@@ -214,7 +241,21 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
     response.setHeader('Content-Type', 'text/html')
     response.end(document_(generation))
   })
-  return { server, deploy: () => { generation = 'new' } }
+  server.on('connection', (socket) => {
+    openSockets.add(socket)
+    socket.on('close', () => openSockets.delete(socket))
+  })
+  return {
+    server,
+    deploy: () => { generation = 'new' },
+    firstStallAt: () => firstStallAt,
+    // A stalled request holds its socket open, and server.close() waits for
+    // every connection: destroy them or the test process never exits.
+    close: () => new Promise<void>((resolve) => {
+      for (const socket of openSockets) socket.destroy()
+      server.close(() => resolve())
+    }),
+  }
 }
 
 async function runScenario(workerSource: string, deploy: boolean, options: FixtureOptions = {}): Promise<Outcome> {
@@ -227,10 +268,12 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
   const page = await context.newPage()
   let recoveryReloads = 0
   const recoveryTokens = new Set<string>()
+  let recoveryCommittedAt: number | null = null
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame() || !frame.url().includes('__bos_reload')) return
     recoveryReloads += 1
     recoveryTokens.add(new URL(frame.url()).searchParams.get('__bos_reload') ?? '')
+    if (recoveryCommittedAt === null) recoveryCommittedAt = Date.now()
   })
   try {
     await page.goto(origin)
@@ -259,26 +302,52 @@ async function runScenario(workerSource: string, deploy: boolean, options: Fixtu
 
     // Load A: the cached (now stale) shell, whose chunks the deploy deleted.
     await page.goto(origin)
-    await page.waitForFunction(
-      () => !!document.querySelector('#catalog') || !!document.querySelector('#boot-error'),
-      null,
-      { timeout: 60_000 },
-    ).catch(() => {})
+    if (options.stallRecoveryNavigation) {
+      // While the recovery navigation hangs, the tab has no execution context
+      // to poll and Playwright cannot even interrupt one: a page.waitForFunction
+      // with a 60s timeout took 106s to give up here. Watch the commit from
+      // Node instead, which is where the timestamps are taken anyway.
+      const deadline = Date.now() + STALLED_RECOVERY_OBSERVATION_MS
+      while (recoveryCommittedAt === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    }
+    const stalledAt = fixture.firstStallAt()
+    // A recovery navigation that never got a response leaves the tab mid-
+    // navigation forever, and page.evaluate would wait for an execution
+    // context that never arrives. That IS the defect being measured, so read
+    // it off recoveryCommitMs and do not touch the DOM.
+    const blankTab = stalledAt !== null && recoveryCommittedAt === null
+    if (!blankTab) {
+      await page.waitForFunction(
+        () => !!document.querySelector('#catalog') || !!document.querySelector('#boot-error'),
+        null,
+        { timeout: 60_000 },
+      ).catch(() => {})
+    }
     return {
       recoveryReloads,
       recoveryTokens: recoveryTokens.size,
-      shellGeneration: await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
-      catalog: await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
-      bootError: await page.evaluate(() => !!document.querySelector('#boot-error')),
+      recoveryCommitMs: stalledAt !== null && recoveryCommittedAt !== null ? recoveryCommittedAt - stalledAt : null,
+      recoveryRequestStalled: stalledAt !== null,
+      shellGeneration: blankTab ? null : await page.evaluate(() => (window as unknown as Record<string, string>).__SHELL_GENERATION ?? null),
+      catalog: blankTab ? null : await page.evaluate(() => document.querySelector('#catalog')?.textContent ?? null),
+      bootError: blankTab ? false : await page.evaluate(() => !!document.querySelector('#boot-error')),
     }
   } finally {
+    // The server goes first: a stalled request the browser is still waiting on
+    // has to be cut before the page will let go of it.
+    await fixture.close()
     await context.close()
     await browser.close()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
   }
 }
 
 const SW_JS_DELAY_MS = 2_000
+// How long a stalled recovery navigation is watched before the tab is called
+// blank. Comfortably past the worker's own budget, so a pass means the worker
+// gave up on the network, not that the observer did.
+const STALLED_RECOVERY_OBSERVATION_MS = 30_000
 
 type StaleAssetProbe = {
   status: number
@@ -357,7 +426,7 @@ async function probeStaleAsset(workerSource: string): Promise<StaleAssetProbe> {
   } finally {
     await context.close()
     await browser.close()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await fixture.close()
   }
 }
 
@@ -417,6 +486,31 @@ test('the recovery navigation follows a host redirect instead of falling back to
   assert.equal(fixed.shellGeneration, 'new', 'a 3xx on the recovery navigation must be followed, not answered from the stale app-shell cache')
   assert.equal(fixed.catalog, 'CATALOG-new', 'and the deployed build must actually mount after the hop')
   assert.equal(fixed.bootError, false, 'falling back to the cached shell here is the incident, one redirect later')
+})
+
+// E2 (verifier, Sep 23 2026): the origin accepts the recovery navigation and
+// never answers it -- a captive portal, a stalled radio, a hung edge. The app
+// side cannot refuse this reload (triggerLazyChunkRecovery only checks
+// navigator.onLine === false), so an unbounded `await fetch(request)` means
+// respondWith never settles and the user watches a blank tab. ef0489c1, for
+// all its faults, served the cached shell in milliseconds.
+test('a stalled origin still gets the cached shell, within the recovery fetch budget', { timeout: 180_000 }, async () => {
+  const stalled = await runScenario(fixedWorker, true, { stallRecoveryNavigation: true })
+  assert.equal(stalled.recoveryRequestStalled, true, 'the guard must have issued the recovery reload and the origin must have swallowed it')
+  assert.notEqual(
+    stalled.recoveryCommitMs,
+    null,
+    'the recovery navigation never committed: an unbounded fetch on a stalled origin leaves respondWith pending and the tab blank',
+  )
+  assert.ok(
+    (stalled.recoveryCommitMs ?? Infinity) < RECOVERY_FETCH_TIMEOUT_MS + 2_500,
+    `the tab waited ${stalled.recoveryCommitMs}ms for a document while the budget is ${RECOVERY_FETCH_TIMEOUT_MS}ms`,
+  )
+  assert.ok(
+    (stalled.recoveryCommitMs ?? 0) > RECOVERY_FETCH_TIMEOUT_MS / 2,
+    'nothing but the timeout can release this navigation, so a much faster answer means the fixture stopped stalling',
+  )
+  assert.equal(stalled.shellGeneration, 'old', 'the fallback is the cached shell -- the only document this worker still has')
 })
 
 test('negative control: the worker deployed at ef0489c1 stays stuck on the dead shell', { timeout: 180_000 }, async () => {
