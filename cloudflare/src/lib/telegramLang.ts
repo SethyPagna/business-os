@@ -425,10 +425,12 @@ export function label(key: TelegramLabelKey): string {
  * without a parse mode -- postTelegram sends plain text, so indentation is the
  * only structure available and `*bold*` would print as asterisks.
  *
- * `·` is for a LABEL row; `•` stays the marker for the LIST rows (payment
- * methods, deliveries, expenses, cashiers) and a numbered `1.` opens an item.
- * Three shapes, three meanings, and none of them is a second way of writing
- * another.
+ * `·` is for a LABEL row, and since Sep 23 2026 for EVERY row of the shift
+ * report -- its payment-method, delivery and expense lists included (owner:
+ * "and for inside each section do bullet points ·"). `•` stays the marker for
+ * the LIST rows of the other reports (cashiers, receipts, expenses, stock) and
+ * of the event messages, and a numbered `1.` opens an item. Three shapes,
+ * three meanings, and none of them is a second way of writing another.
  */
 export const ROW_BULLET = '· '
 
@@ -577,6 +579,18 @@ export const RULE = '━'.repeat(18)
  * glyph or by a length and the feed starts looking accidental.
  */
 export const GROUP_RULE = '─'.repeat(18)
+
+/**
+ * What stands on either side of a SHIFT REPORT section's name:
+ * `-----Invoices / វិក្កយបត្រ-----`, one line, no number and no rule above it.
+ *
+ * Owner, Sep 23 2026: "for shift instead of line. do ---------Invoices /
+ * វិក្កយបត្រ-------- use dash not line. and for inside each section do bullet
+ * points ·". Plain hyphen-minus on purpose: the drawn `━` rule is exactly
+ * what the owner asked to replace. Five a side is a width, not a meaning --
+ * change it here and every shift section follows.
+ */
+export const SHIFT_SECTION_EDGE = '-'.repeat(5)
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 

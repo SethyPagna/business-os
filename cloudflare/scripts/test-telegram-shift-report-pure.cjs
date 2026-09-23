@@ -17,6 +17,12 @@
 // spacing and separations that it feels easy to read and clean, using
 // dividers, numbered list, etc... title etc...".
 //
+// On Sep 23 2026 the shift sections lost their drawn rule and their number:
+// "for shift instead of line. do ---------Invoices / វិក្កយបត្រ-------- use
+// dash not line. and for inside each section do bullet points ·". Each
+// section now opens with ONE line, `-----Invoices / វិក្កយបត្រ-----`, and
+// every row inside it is a `·` row, the lists included.
+//
 // What this file checks, each one of which the PRE-REDESIGN report fails:
 //
 //   1. A HARD LINE CAP. A shift with sales, both discount cuts, expenses, a
@@ -28,8 +34,8 @@
 //      figures the owner asked for, and a language mode cannot be met by
 //      cutting a finished string in half (values contain " / " too).
 //   3. THE STABLE SHAPE. An open shift, a cancelled shift and a shift that
-//      took nothing still print the same six numbered sections, in the same
-//      order, with an empty section marked rather than missing.
+//      took nothing still print the same six sections, in the same order,
+//      with an empty section marked rather than missing.
 //   4. THE ABSENCES. The verbose lines the owner called "so long" are named
 //      one by one and must not come back: the five-part drawer formula, the
 //      two assumption sentences, the itemised cost/average/discount-split
@@ -103,6 +109,11 @@ const SEP = telegramLang.BILINGUAL_SEPARATOR
 const KHMER = /[ក-៿]/
 const khmerText = (value) => KHMER.test(String(value).replace(/៛/g, ''))
 const RULE = '━'.repeat(18)
+// A shift section's title line: its name between two dashed edges (Sep 23
+// 2026), five plain hyphen-minus a side. Spelled out, like the exact arrays
+// below, so the checks judge the text the chat receives.
+const SHIFT_EDGE = '-----'
+const isShiftSection = (line) => line.length > 2 * SHIFT_EDGE.length && line.startsWith(SHIFT_EDGE) && line.endsWith(SHIFT_EDGE)
 
 /** Render one message in one language mode, then put the mode back. */
 const render = (mode, build) => {
@@ -146,10 +157,12 @@ const rowsOf = (text) => text.split('\n').filter((line) => !line.startsWith(tele
 
 // ---- 1. the line cap -------------------------------------------------------
 // The cap moved from 28 to 38 on Sep 21 2026 with the two breakdown sections
-// and the two discount rows the owner's reference reinstated. It is still a
-// ceiling: this fixture, with every optional block on, renders in 37 rows.
-check(`the shift report stays at a glance (${rowsOf(report).length} rows, cap 38)`,
-  rowsOf(report).length <= 38, report)
+// and the two discount rows the owner's reference reinstated, and from 38 to
+// 32 on Sep 23 2026, when the six drawn rules came off the sections (their
+// titles are one dashed line each now). It is still a ceiling with the same
+// one row of slack: this fixture, with every optional block on, renders in 31.
+check(`the shift report stays at a glance (${rowsOf(report).length} rows, cap 32)`,
+  rowsOf(report).length <= 32, report)
 check('and the fixture really is a busy shift, not a quiet one',
   figures.invoices > 20 && figures.creditUsd > 0 && figures.refundUsd > 0
   && figures.deliveryCostRecorded > 0 && figures.otherExpenseKhr > 0
@@ -172,11 +185,11 @@ assert.deepEqual(lines, [
   '· Cashier / អ្នកគិតប្រាក់: Za',
   '· From / ពី: 06/09/2026 08:15',
   '· To / ទៅ: 06/09/2026 20:02',
-  RULE,
-  '1. Invoices / វិក្កយបត្រ',
+  // Sep 23 2026: ONE dashed line opens each section -- no drawn rule above
+  // it and no number in front of it ("use dash not line").
+  '-----Invoices / វិក្កយបត្រ-----',
   '· Total / សរុប: 24 · Cancelled / បានបោះបង់: 1 · Edited / បានកែប្រែ: 2',
-  RULE,
-  '2. Sales / ការលក់',
+  '-----Sales / ការលក់-----',
   '· Revenue / ចំណូល: $486.25',
   '· Discount on items / ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
   '· Discount on invoices / ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
@@ -187,33 +200,31 @@ assert.deepEqual(lines, [
   // the Revenue or Profit lines above it.
   '· Not Paid / ប្រាក់ជំពាក់: $38.00',
   '· Refunds / ការសងប្រាក់: $15.00',
-  RULE,
   // The gap the owner named: registered opening and closing cash, both
   // currencies, then the expected drawer and ONE difference line.
-  '3. Cash count / ការរាប់សាច់ប្រាក់',
+  '-----Cash count / ការរាប់សាច់ប្រាក់-----',
   '· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
   '· Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
-  RULE,
-  '4. Payment methods / វិធីទូទាត់',
-  '• Cash — 18 · $300.00',
-  '• ABA — 6 · $186.25',
-  RULE,
-  '5. Delivery / ការដឹកជញ្ជូន',
-  // Sep 23 2026: a bullet too wide for a phone continues on the hanging indent.
-  '• Grab — 3 · $12.00 fee / ថ្លៃដឹក',
+  // Every row inside a section is a `·` row, the lists included (Sep 23
+  // 2026: "for inside each section do bullet points ·").
+  '-----Payment methods / វិធីទូទាត់-----',
+  '· Cash — 18 · $300.00',
+  '· ABA — 6 · $186.25',
+  '-----Delivery / ការដឹកជញ្ជូន-----',
+  // Sep 23 2026: a row too wide for a phone continues on the hanging indent.
+  '· Grab — 3 · $12.00 fee / ថ្លៃដឹក',
   `${telegramLang.HANGING_INDENT}· $7.50 cost / ថ្លៃដើម`,
-  RULE,
   // The courier payout is a ROW here, not just a figure inside the total:
-  // the bullets and the Total have to add up on the reader's own screen.
-  '6. Expenses / ចំណាយ',
-  '• Actual delivery cost / ថ្លៃដឹកដើម',
+  // the rows and the Total have to add up on the reader's own screen.
+  '-----Expenses / ចំណាយ-----',
+  '· Actual delivery cost / ថ្លៃដឹកដើម',
   `${telegramLang.HANGING_INDENT}— $7.50`,
-  '• Rent — $9.50 · 20,000៛',
+  '· Rent — $9.50 · 20,000៛',
   '· Total / សរុប: $17.00 · 20,000៛',
 ], report)
-check('the exact owner sequence renders: title, identity, six numbered sections', true)
+check('the exact owner sequence renders: title, identity, six dashed sections', true)
 
 // The Expenses total IS its two bullets, not a third figure: 9.50 + 7.50.
 check('the Expenses total is exactly its two bullet rows',
@@ -234,11 +245,9 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Cashier: Za',
   '· From: 06/09/2026 08:15',
   '· To: 06/09/2026 20:02',
-  RULE,
-  '1. Invoices',
+  '-----Invoices-----',
   '· Total: 24 · Cancelled: 1 · Edited: 2',
-  RULE,
-  '2. Sales',
+  '-----Sales-----',
   '· Revenue: $486.25',
   '· Discount on items: $12.40',
   '· Discount on invoices: $5.00',
@@ -247,23 +256,19 @@ assert.deepEqual(englishReport.split('\n'), [
   '· Delivery fee: $12.00',
   '· Not Paid: $38.00',
   '· Refunds: $15.00',
-  RULE,
-  '3. Cash count',
+  '-----Cash count-----',
   '· Opening cash: $50.00 · 100,000៛',
   '· Closing cash: $182.50 · 240,000៛',
   '· Expected cash: $178.00 · 240,000៛',
   '· Difference: +$4.50 · 0៛',
-  RULE,
-  '4. Payment methods',
-  '• Cash — 18 · $300.00',
-  '• ABA — 6 · $186.25',
-  RULE,
-  '5. Delivery',
-  '• Grab — 3 · $12.00 fee · $7.50 cost',
-  RULE,
-  '6. Expenses',
-  '• Actual delivery cost — $7.50',
-  '• Rent — $9.50 · 20,000៛',
+  '-----Payment methods-----',
+  '· Cash — 18 · $300.00',
+  '· ABA — 6 · $186.25',
+  '-----Delivery-----',
+  '· Grab — 3 · $12.00 fee · $7.50 cost',
+  '-----Expenses-----',
+  '· Actual delivery cost — $7.50',
+  '· Rent — $9.50 · 20,000៛',
   '· Total: $17.00 · 20,000៛',
 ], englishReport)
 check('the \'en\' mode report carries no Khmer word at all (the riel sign is a symbol, not a word)',
@@ -280,11 +285,9 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· អ្នកគិតប្រាក់: Za',
   '· ពី: 06/09/2026 08:15',
   '· ទៅ: 06/09/2026 20:02',
-  RULE,
-  '1. វិក្កយបត្រ',
+  '-----វិក្កយបត្រ-----',
   '· សរុប: 24 · បានបោះបង់: 1 · បានកែប្រែ: 2',
-  RULE,
-  '2. ការលក់',
+  '-----ការលក់-----',
   '· ចំណូល: $486.25',
   '· ការបញ្ចុះតម្លៃលើទំនិញ: $12.40',
   '· ការបញ្ចុះតម្លៃលើវិក្កយបត្រ: $5.00',
@@ -293,45 +296,54 @@ assert.deepEqual(khmerReport.split('\n'), [
   '· ថ្លៃដឹក: $12.00',
   '· ប្រាក់ជំពាក់: $38.00',
   '· ការសងប្រាក់: $15.00',
-  RULE,
-  '3. ការរាប់សាច់ប្រាក់',
+  '-----ការរាប់សាច់ប្រាក់-----',
   '· សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
   '· សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   '· សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· ភាពខុសគ្នា: +$4.50 · 0៛',
-  RULE,
-  '4. វិធីទូទាត់',
-  '• Cash — 18 · $300.00',
-  '• ABA — 6 · $186.25',
-  RULE,
-  '5. ការដឹកជញ្ជូន',
-  '• Grab — 3 · $12.00 ថ្លៃដឹក',
+  '-----វិធីទូទាត់-----',
+  '· Cash — 18 · $300.00',
+  '· ABA — 6 · $186.25',
+  '-----ការដឹកជញ្ជូន-----',
+  '· Grab — 3 · $12.00 ថ្លៃដឹក',
   `${telegramLang.HANGING_INDENT}· $7.50 ថ្លៃដើម`,
-  RULE,
-  '6. ចំណាយ',
-  '• ថ្លៃដឹកដើម — $7.50',
-  '• Rent — $9.50 · 20,000៛',
+  '-----ចំណាយ-----',
+  '· ថ្លៃដឹកដើម — $7.50',
+  '· Rent — $9.50 · 20,000៛',
   '· សរុប: $17.00 · 20,000៛',
 ], khmerReport)
-// A label position is everything before the first ': ' on a non-bullet line.
-// Product names, payment methods and couriers live on bullets and after the
-// colon, and must survive untouched -- "Sunrise Mart" is not translatable.
+// A label position is everything before the first ': '. Product names,
+// payment methods and couriers live on list rows (`· name — figure`, no
+// colon) and after the colon, and must survive untouched -- "Sunrise Mart"
+// is not translatable.
 const khmerLabelPositions = khmerReport.split('\n')
-  .filter((line) => !line.startsWith('•') && line.includes(': '))
+  .filter((line) => line.includes(': '))
   .map((line) => line.slice(0, line.indexOf(': ')))
 check(`no English word survives on a label position in 'km' mode (${khmerLabelPositions.length} labels)`,
   khmerLabelPositions.every((labelPart) => !/[A-Za-z]/.test(labelPart)),
   khmerLabelPositions.filter((labelPart) => /[A-Za-z]/.test(labelPart)).join('\n'))
 check('...while the VALUES are untouched in every mode',
-  khmerReport.includes('Sunrise Mart') && khmerReport.includes('• Cash — 18 · $300.00')
-  && khmerReport.includes('• Rent — $9.50 · 20,000៛'), khmerReport)
-// Every mode is the SAME report: same number of rows, same rules in the same
-// places. That is what "one message, three renderings" means.
-const rulePositions = (text) => rowsOf(text).map((line, index) => (line === RULE ? index : -1)).filter((index) => index >= 0)
-check('all three modes render the same row count and the same divider positions',
+  khmerReport.includes('Sunrise Mart') && khmerReport.includes('· Cash — 18 · $300.00')
+  && khmerReport.includes('· Rent — $9.50 · 20,000៛'), khmerReport)
+// Every mode is the SAME report: same number of rows, same section titles in
+// the same places. That is what "one message, three renderings" means.
+const titlePositions = (text) => rowsOf(text).map((line, index) => (isShiftSection(line) ? index : -1)).filter((index) => index >= 0)
+check('all three modes render the same row count and the same section-title positions',
   rowsOf(report).length === rowsOf(englishReport).length && rowsOf(report).length === rowsOf(khmerReport).length
-  && JSON.stringify(rulePositions(report)) === JSON.stringify(rulePositions(englishReport))
-  && JSON.stringify(rulePositions(report)) === JSON.stringify(rulePositions(khmerReport)))
+  && titlePositions(report).length === 6
+  && JSON.stringify(titlePositions(report)) === JSON.stringify(titlePositions(englishReport))
+  && JSON.stringify(titlePositions(report)) === JSON.stringify(titlePositions(khmerReport)))
+check('the one exported edge constant is the text the section titles carry',
+  telegramLang.SHIFT_SECTION_EDGE === SHIFT_EDGE)
+// Sep 23 2026, in every mode: no drawn rule, no numbered title, no `•` row.
+// The owner asked for dashes instead of the line and `·` inside the sections,
+// and a language mode is not allowed to keep the old shape.
+for (const [mode, text] of [['both', report], ['en', englishReport], ['km', khmerReport]]) {
+  const rendered = text.split('\n')
+  check(`'${mode}': the sections open with a dashed title, never a rule or a number, and hold only · rows`,
+    !rendered.includes(RULE) && !rendered.some((line) => /^\d+\.\s/.test(line)) && !text.includes('•')
+    && rendered.slice(1).every((line) => isShiftSection(line) || line.startsWith('· ') || line.startsWith(telegramLang.HANGING_INDENT)), text)
+}
 // The mode is a module-level variable; leaving it set would poison the next
 // message. render() restores it, and this is the check that says so.
 check('rendering in another mode does not change the default',
@@ -344,10 +356,10 @@ check('an unknown or empty language setting falls back to both',
   && render('', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW)) === report)
 
 // ---- 3. the shape is stable across shift states ----------------------------
-const sectionTitles = (text) => text.split('\n').filter((line) => /^\d\. /.test(line))
+const sectionTitles = (text) => text.split('\n').filter(isShiftSection)
 const SIX_SECTIONS = [
-  '1. Invoices / វិក្កយបត្រ', '2. Sales / ការលក់', '3. Cash count / ការរាប់សាច់ប្រាក់',
-  '4. Payment methods / វិធីទូទាត់', '5. Delivery / ការដឹកជញ្ជូន', '6. Expenses / ចំណាយ',
+  '-----Invoices / វិក្កយបត្រ-----', '-----Sales / ការលក់-----', '-----Cash count / ការរាប់សាច់ប្រាក់-----',
+  '-----Payment methods / វិធីទូទាត់-----', '-----Delivery / ការដឹកជញ្ជូន-----', '-----Expenses / ចំណាយ-----',
 ]
 assert.deepEqual(sectionTitles(report), SIX_SECTIONS, report)
 
@@ -418,11 +430,9 @@ assert.deepEqual(quiet.split('\n'), [
   '· Cashier / អ្នកគិតប្រាក់: Za',
   '· From / ពី: 06/09/2026 08:15',
   '· To / ទៅ: Open / កំពុងបើក',
-  RULE,
-  '1. Invoices / វិក្កយបត្រ',
+  '-----Invoices / វិក្កយបត្រ-----',
   '· Total / សរុប: 0',
-  RULE,
-  '2. Sales / ការលក់',
+  '-----Sales / ការលក់-----',
   // A shift that took nothing prints $0.00 and NOTHING in riel. The owner's
   // Sep 22 2026 paste showed `Revenue: $0.00 · 000៛` -- a riel figure with no
   // value, and a zero-padding no formatter in lib/telegram.ts produces. These
@@ -430,20 +440,16 @@ assert.deepEqual(quiet.split('\n'), [
   // riel equivalent has to face the zero case first.
   '· Revenue / ចំណូល: $0.00',
   '· Profit / ចំណេញ: $0.00',
-  RULE,
-  '3. Cash count / ការរាប់សាច់ប្រាក់',
+  '-----Cash count / ការរាប់សាច់ប្រាក់-----',
   '· Opening cash / សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
   '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
-  RULE,
-  '4. Payment methods / វិធីទូទាត់',
+  '-----Payment methods / វិធីទូទាត់-----',
   // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced
   // read as a value that failed to render rather than as "nothing here".
   '· N/A',
-  RULE,
-  '5. Delivery / ការដឹកជញ្ជូន',
+  '-----Delivery / ការដឹកជញ្ជូន-----',
   '· N/A',
-  RULE,
-  '6. Expenses / ចំណាយ',
+  '-----Expenses / ចំណាយ-----',
   '· N/A',
 ], quiet)
 check(`a shift that took nothing keeps all six sections and marks the empty ones (${quiet.split('\n').length} lines)`,
@@ -461,7 +467,7 @@ const noCourierCost = render('both', () => telegram.formatShiftReport('Sunrise M
   ...figures, deliveries: [{ name: 'Grab', count: 3, feeUsd: 12, costUsd: 0 }],
 }, NOW))
 check('a courier with no recorded payout shows no $0.00 cost tail',
-  noCourierCost.includes('• Grab — 3 · $12.00 fee / ថ្លៃដឹក')
+  noCourierCost.includes('· Grab — 3 · $12.00 fee / ថ្លៃដឹក')
   && !noCourierCost.includes('$0.00 cost'), noCourierCost)
 
 // p5/losses (Sep 15 2026, owner: "i see the report says row removed has 1 no
@@ -490,8 +496,8 @@ const many = render('both', () => telegram.formatShiftReport('Sunrise Mart', shi
     .concat([{ method: 'Other / ផ្សេងទៀត', count: 5, usd: 5 }]),
 }, NOW))
 check('a capped payment breakdown prints its fold row like any other row',
-  many.split('\n').filter((line) => line.startsWith('• M')).length === 7
-  && many.includes('• Other / ផ្សេងទៀត — 5 · $5.00'), many)
+  many.split('\n').filter((line) => line.startsWith('· M')).length === 7
+  && many.includes('· Other / ផ្សេងទៀត — 5 · $5.00'), many)
 
 // ---- 4. the day summary, same treatment ------------------------------------
 // One set of numbers, two reports. The Sales section is the SAME block of
@@ -553,11 +559,16 @@ check('the day summary fits one phone screen too', daySections.length <= 26, day
 check('and its cashier bullets are name, receipts, money -- nothing else',
   daySummary.includes('• za01 — 18 · $300.00') && daySummary.includes('• sok — 6 · $186.25'), daySummary)
 
-// THE SHARED SALES SECTION, BYTE FOR BYTE.
+// THE SHARED SALES SECTION, BYTE FOR BYTE. A section runs from its title line
+// -- `N. Title` in the day summary, `-----Title-----` in the shift report --
+// to the next title or rule.
+const isAnyTitle = (line) => /^\d+\. /.test(line) || isShiftSection(line)
+const titleText = (line) => (isShiftSection(line) ? line.slice(SHIFT_EDGE.length, -SHIFT_EDGE.length) : line.replace(/^\d+\. /, ''))
 const sectionBlock = (text, title) => {
   const rows = text.split('\n')
-  const first = rows.findIndex((line) => line.endsWith(title))
-  const next = rows.indexOf(RULE, first + 1)
+  const first = rows.findIndex((line) => isAnyTitle(line) && titleText(line) === title)
+  assert.ok(first >= 0, `no "${title}" section:\n${text}`)
+  const next = rows.findIndex((line, index) => index > first && (line === RULE || isAnyTitle(line)))
   return rows.slice(first + 1, next < 0 ? rows.length : next)
 }
 const shiftNoDiscounts = render('both', () => telegram.formatShiftReport('Sunrise Mart', shift, { ...figures, itemDiscountUsd: 0, invoiceDiscountUsd: 0 }, NOW))

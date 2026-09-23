@@ -250,9 +250,12 @@ assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយក
 // bullet rule can miss.
 assert.ok(cancelledReport.includes('· Cancelled by / បោះបង់ដោយ: Manager'), cancelledReport)
 assert.ok(cancelledReport.includes('· Reason / មូលហេតុ: Duplicate opening'), cancelledReport)
-assert.ok(cancelledReport.includes('1. Invoices / វិក្កយបត្រ\n· Total / សរុប: 3'), cancelledReport)
+// Sep 23 2026: a shift section opens with ONE dashed line, no rule and no
+// number ("use dash not line"), and nothing inside it is a `•` row any more.
+assert.ok(cancelledReport.includes('-----Invoices / វិក្កយបត្រ-----\n· Total / សរុប: 3'), cancelledReport)
+assert.ok(!cancelledReport.includes(telegramLang.RULE) && !/^\d+\. /m.test(cancelledReport) && !cancelledReport.includes('•'), cancelledReport)
 for (const line of cancelledReport.split('\n')) {
-  if (!/: /.test(line) || line.startsWith('•') || /^\d+\. /.test(line)) continue
+  if (!/: /.test(line)) continue
   assert.ok(line.startsWith('· '), `every label row carries the bullet; this one does not: ${line}`)
 }
 assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
@@ -278,7 +281,7 @@ assert.ok(closedCancelledReport.includes('Closing cash / សាច់ប្រ�
 assert.ok(!closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់:'), closedCancelledReport)
 // ... beside the OPENING count, which is the half the owner said was missing.
 assert.ok(closedCancelledReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('1. Invoices / វិក្កយបត្រ\n· Total / សរុប: 3'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('-----Invoices / វិក្កយបត្រ-----\n· Total / សរុប: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
 
@@ -576,7 +579,7 @@ assert.equal(lossLines[lossAt], '· Loss / ខាតបង់: $30.00', lossRepo
 assert.equal(lossLines[lossAt].split(':').length, 2, lossLines[lossAt])
 // The canonical totals above are untouched by it. (The money line is labelled
 // `Revenue` since Sep 21 2026 -- `Sales` names the SECTION it sits in.)
-assert.ok(lossLines.includes('2. Sales / ការលក់'), lossReport)
+assert.ok(lossLines.includes('-----Sales / ការលក់-----'), lossReport)
 assert.ok(lossLines.includes('· Revenue / ចំណូល: $25.00'), lossReport)
 assert.ok(lossLines.includes('· Profit / ចំណេញ: $15.00'), lossReport)
 // A shift that took nothing prints $0.00 and NOTHING in riel. The owner's

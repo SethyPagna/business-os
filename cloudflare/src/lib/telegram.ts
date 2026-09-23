@@ -4,7 +4,7 @@ import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
-  parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
+  parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
 import {
@@ -418,9 +418,18 @@ function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCo
 // by the one RULE this file draws. A section is `N. <bilingual title>` and
 // then one figure per line, or bullets when it is a list. Nothing else
 // changed: the figures, their sources and the zero-line rules are untouched.
+//
+// The SHIFT REPORT dropped the rule and the number on Sep 23 2026: each of
+// its sections opens with ONE line, the name between two dashed edges
+// (SHIFT_SECTION_EDGE), and every row under it is a `·` row. The owner's
+// words are with formatShiftReport below.
 
 /** `1. Invoices / វិក្កយបត្រ` -- the divider and the numbered section title. */
 const sectionTitle = (index: number, key: TelegramLabelKey): string[] => [RULE, `${index}. ${label(key)}`]
+
+/** `-----Invoices / វិក្កយបត្រ-----` -- a section's name between its two edges,
+ *  on one line, with nothing drawn above it. */
+const sectionHeader = (key: TelegramLabelKey, edge: string): string => `${edge}${label(key)}${edge}`
 
 /** A section the shop has no rows for still prints, so the numbering and the
  *  shape of the message never move (the owner's reference shows every
@@ -732,7 +741,7 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 // enough spacing and separations that it feels easy to read and clean, using
 // dividers, numbered list, etc... title etc...". So the message is now a
 // TITLE line carrying the shift's state, a short identity block, and SIX
-// numbered, titled sections:
+// titled sections, always in this order:
 //
 //   1. Invoices     total · cancelled · edited, one compact row
 //   2. Sales        revenue, the two discount cuts, profit, delivery fee,
@@ -752,9 +761,16 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 //   5. Delivery         reinstated by the Sep 21 reference
 //   6. Expenses     every expense as its own bullet, then the total
 //
-// Sections 4-6 print their title and a single "—" when the shift has no rows
-// for them: the owner's reference shows every section, so the shape of the
+// Sections 4-6 print their title and `· N/A` when the shift has no rows for
+// them: the owner's reference shows every section, so the shape of the
 // message never moves between one shift and the next.
+//
+// Sep 23 2026: the numbers and the drawn rules came off the sections. Each
+// one opens with a single dashed line, `-----Invoices / វិក្កយបត្រ-----`
+// (SHIFT_SECTION_EDGE), and EVERY row inside it is a `·` row -- the payment,
+// delivery and expense lists as well as the figures. The owner: "for shift
+// instead of line. do ---------Invoices / វិក្កយបត្រ-------- use dash not line.
+// and for inside each section do bullet points ·".
 //
 // Per-account vs shop-wide scope, and which sales the window covers, are
 // unchanged -- see lib/shiftReconciliation.ts and shiftFilters() below.
@@ -896,7 +912,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   }
 
   // 1. Invoices -- total, and the two counts that qualify it.
-  lines.push(...sectionTitle(1, 'invoices'), countRow([
+  lines.push(sectionHeader('invoices', SHIFT_SECTION_EDGE), countRow([
     ['total', Number(figures.invoices) || 0],
     ['cancelled', Number(figures.cancelled) || 0],
     ['edited', Number(figures.edited) || 0],
@@ -922,7 +938,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // by it, exactly as Not Paid behaves.
   if (figures.removalLossUsd) sales.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
-  lines.push(...sectionTitle(2, 'sales'), ...sales)
+  lines.push(sectionHeader('sales', SHIFT_SECTION_EDGE), ...sales)
 
   // 3. Cash count -- the owner's specific gap: registered opening and closing
   // cash, both currencies. A factual readout, and an open shift (no count
@@ -984,21 +1000,21 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
       cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
     }
   }
-  lines.push(...sectionTitle(3, 'cashCount'), ...cash)
+  lines.push(sectionHeader('cashCount', SHIFT_SECTION_EDGE), ...cash)
 
   // 4. Payment methods and 5. Delivery -- both reinstated by the owner's
-  // Sep 21 2026 reference. Bullets, because they are lists: the name, how
-  // many, and the money.
-  lines.push(...sectionTitle(4, 'paymentMethods'))
+  // Sep 21 2026 reference. One row per method or courier: the name, how
+  // many, and the money, on the same `·` bullet as every other shift row.
+  lines.push(sectionHeader('paymentMethods', SHIFT_SECTION_EDGE))
   const paymentMethods = figures.paymentMethods || []
   lines.push(...(paymentMethods.length
-    ? paymentMethods.flatMap((row) => telegramRowLines(`• ${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
+    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
     : [EMPTY_SECTION]))
 
-  lines.push(...sectionTitle(5, 'delivery'))
+  lines.push(sectionHeader('delivery', SHIFT_SECTION_EDGE))
   const deliveries = figures.deliveries || []
   lines.push(...(deliveries.length
-    ? deliveries.flatMap((row) => telegramRowLines(`• ${cleanLine(row.name, 40)}`, [
+    ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}`, [
       `— ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
       // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
       // would claim the courier worked for free, so it is left off instead.
@@ -1006,25 +1022,25 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     ]))
     : [EMPTY_SECTION]))
 
-  // 6. Expenses -- every expense paid out of this drawer as its own bullet,
-  // then the ONE total. The total is expenseTotals(): the fees plus the
-  // courier money actually paid out, the same sum the day summary prints, so
-  // the courier payout is a bullet here rather than a figure with no row.
+  // 6. Expenses -- every expense paid out of this drawer as its own row, then
+  // the ONE total. The total is expenseTotals(): the fees plus the courier
+  // money actually paid out, the same sum the day summary prints, so the
+  // courier payout is a row here rather than a figure with no row.
   const expenses = expenseTotals({
     otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
     deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
   })
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`• ${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
+  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
   const details = figures.expenseDetails || []
   if (details.length) {
-    for (const detail of details) expenseRows.push(...telegramRowLines(`• ${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
+    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
   } else if (expenses.otherUsd || expenses.otherKhr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`• ${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
   }
-  lines.push(...sectionTitle(6, 'expenses'))
+  lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
     ? [...expenseRows, labeled('total', money(expenses.totalUsd, expenses.otherKhr))]
     : [EMPTY_SECTION]))

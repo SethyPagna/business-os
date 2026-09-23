@@ -16,6 +16,12 @@
 // breakdown sections (payment methods, delivery) as bullets rather than the
 // prose blocks the pre-Sep-6 report used.
 //
+// On Sep 23 2026 the rule and the number came off each section: "for shift
+// instead of line. do ---------Invoices / វិក្កយបត្រ-------- use dash not line.
+// and for inside each section do bullet points ·". A section now opens with
+// ONE line, `-----Invoices / វិក្កយបត្រ-----`, and every row inside it -- the
+// payment, delivery and expense lists too -- is a `·` row.
+//
 // What this file guards AFTER the Sep 21 layout:
 //
 //   * The ORDER the redesign fixed, at two levels: the identity block
@@ -206,36 +212,60 @@ const lineWith = (english) => {
   return found
 }
 const valueOf = (english) => lineWith(english).slice(lineWith(english).indexOf(': ') + 2)
-// A bullet reads `• Label / ស្លាក — value` (an em dash, never ': '), so the
-// two expense/delivery/payment breakdown rows need their own reader.
+// A list row reads `· Label / ស្លាក — value` (an em dash, never ': '), so the
+// expense/delivery/payment breakdown rows need their own reader.
 const bulletValue = (english) => {
-  const prefix = `• ${english}${SEP}`
-  const found = rows.find((row) => row.startsWith(prefix))
-  assert.ok(found, `the report has no "${english}" bullet:\n${report}`)
+  const prefix = `${lang.ROW_BULLET}${english}${SEP}`
+  const found = rows.find((row) => row.startsWith(prefix) && row.includes(' — '))
+  assert.ok(found, `the report has no "${english}" list row:\n${report}`)
   return found.slice(found.indexOf(' — ') + 3)
 }
-// The rows between `N. <title>` and the next rule (or the end) -- one
+// A section opens with ONE line: its name between two dashed edges (owner,
+// Sep 23 2026: "do ---------Invoices / វិក្កយបត្រ-------- use dash not line").
+// Spelled out here rather than read from lang.SHIFT_SECTION_EDGE, so these
+// checks judge the text the chat receives; the constant is pinned to it below.
+const EDGE = '-----'
+const sectionTitleOf = (key) => `${EDGE}${lang.label(key)}${EDGE}`
+const isSectionTitle = (row) => row.length > 2 * EDGE.length && row.startsWith(EDGE) && row.endsWith(EDGE)
+// The rows between a section's title and the next title (or the end) -- one
 // section's own lines, so a label that repeats across sections ("Total" is
 // both the invoice-count row and the expense total) can be read at its own
 // occurrence instead of the first one anywhere in the message.
 const sectionBlock = (text, key) => {
   const rows = rowsOf(text)
-  const title = rows.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
+  const title = rows.indexOf(sectionTitleOf(key))
   assert.ok(title >= 0, `the report has no "${key}" section:\n${text}`)
-  const next = rows.findIndex((row, index) => index > title && row === lang.RULE)
+  const next = rows.findIndex((row, index) => index > title && isSectionTitle(row))
   return rows.slice(title + 1, next < 0 ? rows.length : next)
 }
 
-// --- 1. the Sep 21 2026 sectioned layout, in its fixed order -----------------
-// The owner's reference: identity block, then six numbered sections --
-// Invoices, Sales, Cash count, Payment methods, Delivery, Expenses -- each
-// opened by a rule and a title. Both levels of order are content: a cashier
-// reads top to bottom on a phone at closing time.
+// --- 1. the sectioned layout, in its fixed order -----------------------------
+// The owner's Sep 21 2026 reference: identity block, then six sections --
+// Invoices, Sales, Cash count, Payment methods, Delivery, Expenses. Both levels
+// of order are content: a cashier reads top to bottom on a phone at closing
+// time.
 
 const SECTION_KEYS = ['invoices', 'sales', 'cashCount', 'paymentMethods', 'delivery', 'expenses']
-const sectionTitleLines = (text) => text.split('\n').filter((line) => /^\d+\.\s/.test(line))
-assert.deepEqual(sectionTitleLines(report), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`),
+const sectionTitleLines = (text) => text.split('\n').filter(isSectionTitle)
+assert.deepEqual(sectionTitleLines(report), SECTION_KEYS.map(sectionTitleOf),
   `the six sections are not in the Sep 21 2026 order:\n${report}`)
+
+// Sep 23 2026, the section title's own shape. Plain hyphen-minus, five a side,
+// the name in between, on ONE line: no drawn rule above it and no number in
+// front of it -- the two things the owner asked to replace.
+assert.equal(sectionTitleLines(report)[0], '-----Invoices / វិក្កយបត្រ-----')
+assert.equal(lang.SHIFT_SECTION_EDGE, EDGE, 'the exported shift section edge is the five plain hyphen-minus characters the chat receives')
+assert.ok(!lines.includes(lang.RULE), `a shift section still opens with the drawn rule:\n${report}`)
+assert.ok(!lines.some((line) => /^\d+\.\s/.test(line)), `a shift section is still numbered:\n${report}`)
+// And every row inside every section is a `·` row -- the lists included
+// ("for inside each section do bullet points ·"). A row too wide for a phone
+// continues on the hanging indent, so rows are judged rejoined.
+assert.ok(!report.includes('•'), `a shift list row still opens with •:\n${report}`)
+for (const row of rows.slice(1)) {
+  if (isSectionTitle(row)) continue
+  assert.ok(row.startsWith(lang.ROW_BULLET), `"${row}" is inside a shift section but is not a · row`)
+}
+console.log('PASS sections: one dashed title line each, no rule, no number, every row a · row')
 
 // Inside the identity block and inside each section, the field order the
 // layout fixed. Matched strictly AFTER the previous hit (not from the top of
@@ -263,8 +293,10 @@ for (const english of ORDER) {
   cursor = at
 }
 // And nothing else labelled: a line with ': ' that is not on the list (and is
-// not a bullet or a section title) is a line the layout did not budget for.
-const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('•') && !line.startsWith('  '))
+// not the continuation of a row above it) is a line the layout did not budget
+// for. The list rows carry the same `·` since Sep 23 2026, so they are
+// counted too -- none of this fixture's names contains ': '.
+const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('  '))
 assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the layout did not budget for:\n${report}`)
 console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines within them, in the fixed sequence`)
 
@@ -351,11 +383,11 @@ for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Final a
   assert.ok(!new RegExp(banned, 'i').test(report), `the report reintroduced "${banned}" -- the cash block is a readout, not a check:\n${report}`)
 }
 // And no explanatory sentence anywhere: every line is a label and a figure, a
-// bullet, a rule, a numbered section title, an empty-section marker, or the
-// report's own title line.
+// list row (a name, an em dash, a figure), a section title, an empty-section
+// marker, or the report's own title line.
 for (const line of rows.slice(1)) {
-  if (!line.trim() || line === lang.RULE || line.startsWith('•') || line === EMPTY_SECTION_MARKER || /^\d+\.\s/.test(line)) continue
-  assert.ok(line.includes(': '), `"${line}" is prose, not a labelled figure`)
+  if (isSectionTitle(line) || line === EMPTY_SECTION_MARKER) continue
+  assert.ok(line.includes(': ') || line.includes(' — '), `"${line}" is prose, not a labelled figure`)
   assert.ok(!/\. /.test(line), `"${line}" reads as a sentence`)
 }
 console.log('PASS readout: registered opening and closing cash, no alarm wording, no explanatory sentences')
@@ -372,7 +404,7 @@ const noCost = telegram.formatShiftReport('Shop', CLOSED, {
 assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
 assert.ok(noCostLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
-assert.deepEqual(sectionBlock(noCost, 'expenses'), [`• ${lang.label('expensesOther')} — $4.00`, lang.labeled('total', '$4.00')],
+assert.deepEqual(sectionBlock(noCost, 'expenses'), [`${lang.ROW_BULLET}${lang.label('expensesOther')} — $4.00`, lang.labeled('total', '$4.00')],
   'an unrecorded courier cost must not be folded into the expense total as a zero, nor as its own bullet')
 console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
 
@@ -574,7 +606,7 @@ const stillExpected = [...new Set(ORDER)].filter((entry) => entry !== 'Closing c
 for (const english of stillExpected) {
   assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`)), `open shift dropped the "${english}" line`)
 }
-assert.deepEqual(sectionTitleLines(openReport), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`),
+assert.deepEqual(sectionTitleLines(openReport), SECTION_KEYS.map(sectionTitleOf),
   'an open shift still renders all six sections, in order')
 console.log(`PASS open shift: renders ${stillExpected.length} lines up to now, without inventing a closing count`)
 
@@ -604,7 +636,7 @@ for (const dropped of ['Delivery fee', 'Not Paid', 'Refunds']) {
 assert.equal(sectionBlock(empty, 'invoices')[0], lang.labeled('total', 0))
 // All six sections still print, the ones with nothing marked rather than
 // missing (the owner's reference shows every section, empty ones included).
-assert.deepEqual(sectionTitleLines(empty), SECTION_KEYS.map((key, index) => `${index + 1}. ${lang.label(key)}`))
+assert.deepEqual(sectionTitleLines(empty), SECTION_KEYS.map(sectionTitleOf))
 assert.deepEqual(sectionBlock(empty, 'expenses'), [EMPTY_SECTION_MARKER],
   'a quiet shift must mark the Expenses section empty rather than print a $0.00 bullet or total')
 // The retired em-dash marker (Sep 22 2026) must not survive on ANY of the
@@ -831,20 +863,20 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     assert.ok(found, `the report has no "${english}" line:\n${reply}`)
     return found.slice(found.indexOf(': ') + 2)
   }
-  // A bullet's label is either a lang.label() pair (deliveryCost) or a raw
+  // A list row's label is either a lang.label() pair (deliveryCost) or a raw
   // DB row label (the expense query's own "Example expense"), so this takes
   // the already-rendered prefix rather than a TelegramLabelKey.
   const mappedRows = rowsOf(reply)
   const mappedBulletValue = (renderedPrefix) => {
-    const prefix = `• ${renderedPrefix} — `
+    const prefix = `${lang.ROW_BULLET}${renderedPrefix} — `
     const found = mappedRows.find((row) => row.startsWith(prefix))
-    assert.ok(found, `the report has no "${renderedPrefix}" bullet:\n${reply}`)
+    assert.ok(found, `the report has no "${renderedPrefix}" list row:\n${reply}`)
     return found.slice(prefix.length)
   }
   const mappedSection = (key) => {
-    const title = mappedRows.findIndex((row) => /^\d+\.\s/.test(row) && row.endsWith(lang.label(key)))
+    const title = mappedRows.indexOf(sectionTitleOf(key))
     assert.ok(title >= 0, `the report has no "${key}" section:\n${reply}`)
-    const next = mappedRows.findIndex((row, index) => index > title && row === lang.RULE)
+    const next = mappedRows.findIndex((row, index) => index > title && isSectionTitle(row))
     return mappedRows.slice(title + 1, next < 0 ? mappedRows.length : next)
   }
   // Each of these is a DIFFERENT number, so a line reading from the wrong
