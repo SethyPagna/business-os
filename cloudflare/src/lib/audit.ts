@@ -51,6 +51,126 @@ export function buildAuditLogRetentionDeleteSql(): string {
   )`
 }
 
+// ---------------------------------------------------------------------------
+// Before/after field diffs (records/history lane, phase 1)
+//
+// The Audit Log page already renders a Field | Before | After table for any
+// row whose old_value/new_value hold a flat JSON object of fields
+// (frontend/src/utils/auditLogFieldDiff.ts -> buildAuditFieldDiff). Almost
+// every update route wrote new_value only (a copy of `details`), so that
+// table had nothing to show and the page fell back to a raw blob. This is the
+// ONE shared "which fields changed" helper for every route that now records a
+// before/after -- users, roles, products, contacts, promotions, settings, fees
+// and returns all call it, so the written shape can never drift between them.
+//
+// Rules, chosen to match what the renderer will actually display:
+//   - a key whose before and after normalize to the same text is NOT written
+//     (the renderer would drop the row anyway, so writing it is noise);
+//   - bookkeeping keys the renderer ignores are never written;
+//   - secret-shaped keys are never written at all, and a caller can mark
+//     further keys as redacted (the key is recorded as having changed, the
+//     values are masked).
+// Returns null when nothing changed, which is a route's signal to fall back to
+// its plain audit() call (or to skip the row entirely).
+// ---------------------------------------------------------------------------
+export interface AuditFieldChange {
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+}
+
+// Mirrors IGNORED_DIFF_KEYS in frontend/src/utils/auditLogFieldDiff.ts -- the
+// renderer drops these, so a writer must not spend a row on them.
+const AUDIT_DIFF_IGNORED_KEYS = new Set(['id', 'created_at', 'updated_at', 'client_request_id'])
+
+// Never recorded in an audit row under any circumstances: password hashes,
+// session/API tokens, raw credentials and inline binary blobs. This is a hard
+// stop, not a redaction -- the key does not appear at all.
+const AUDIT_NEVER_RECORDED = /(password|passcode|secret|token|api[_-]?key|private[_-]?key|credential|salt|_hash$|^hash$|blob|base64|data_url)/i
+
+// Exposed so a caller with its own secret-key rule (settings' own
+// isSensitiveSettingKey) can widen it rather than restate it.
+export function isSecretShapedAuditKey(key: string): boolean {
+  return AUDIT_NEVER_RECORDED.test(key)
+}
+
+export const AUDIT_REDACTED_BEFORE = '(hidden)'
+export const AUDIT_REDACTED_AFTER = '(hidden, changed)'
+
+// Stable, order-independent text for comparison: two permission objects that
+// differ only in key order are the same permissions, and a boolean true and
+// the integer 1 D1 stores for it are the same flag.
+function canonicalAuditText(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'boolean') return value ? '1' : '0'
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : null
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return JSON.stringify(value.map((entry) => canonicalAuditText(entry)))
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [key, canonicalAuditText(entry)] as const)
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    return JSON.stringify(entries)
+  }
+  return String(value)
+}
+
+// What actually lands in old_value/new_value. Booleans become the 0/1 the
+// column holds so a diff never reads "No -> 1"; everything else is stored as
+// the route supplied it.
+function recordedAuditValue(value: unknown): unknown {
+  if (typeof value === 'boolean') return value ? 1 : 0
+  return value === undefined ? null : value
+}
+
+export function changedFields(
+  before: Record<string, unknown> | null | undefined,
+  after: Record<string, unknown> | null | undefined,
+  options: { keys?: readonly string[]; redact?: (key: string) => boolean } = {},
+): AuditFieldChange | null {
+  const candidates = options.keys && options.keys.length
+    ? options.keys
+    : [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])]
+  const beforeOut: Record<string, unknown> = {}
+  const afterOut: Record<string, unknown> = {}
+  let changed = 0
+  for (const key of candidates) {
+    if (AUDIT_DIFF_IGNORED_KEYS.has(key)) continue
+    // A redacted key only ever records two fixed strings, so redaction is
+    // checked BEFORE the never-recorded stop: "the API key changed" is useful
+    // and leaks nothing, while an unredacted secret-shaped key is dropped.
+    const redacted = options.redact?.(key) === true
+    if (!redacted && AUDIT_NEVER_RECORDED.test(key)) continue
+    const beforeValue = before ? before[key] : undefined
+    const afterValue = after ? after[key] : undefined
+    const beforeText = canonicalAuditText(beforeValue)
+    const afterText = after ? canonicalAuditText(afterValue) : null
+    if (beforeText === afterText) continue
+    changed += 1
+    if (redacted) {
+      beforeOut[key] = beforeText === null ? null : AUDIT_REDACTED_BEFORE
+      afterOut[key] = afterText === null ? null : AUDIT_REDACTED_AFTER
+      continue
+    }
+    beforeOut[key] = recordedAuditValue(beforeValue)
+    afterOut[key] = recordedAuditValue(afterValue)
+  }
+  if (!changed) return null
+  // A delete (after === null) records the removed record as the before image
+  // and a null after, which is what makes the renderer show every field as
+  // removed instead of as an unexplained blank.
+  return { before: beforeOut, after: after ? afterOut : null }
+}
+
+// Serializers for routes that build their audit row inside their own D1 batch
+// (roles, payment-method rename) instead of calling audit().
+export function auditChangeColumns(change: AuditFieldChange | null | undefined): { old_value: string | null; new_value: string | null } {
+  if (!change) return { old_value: null, new_value: null }
+  return {
+    old_value: change.before ? JSON.stringify(change.before) : null,
+    new_value: change.after ? JSON.stringify(change.after) : null,
+  }
+}
+
 // Ported from backend/src/helpers.ts's audit(). Deliberately swallows its
 // own errors (matching the original's comment: "Audit failures must never
 // crash the main request") -- an audit log write failing should never be
@@ -113,18 +233,28 @@ export async function audit(
   entity: string,
   entityId: string | number | null,
   details: unknown = null,
+  // Optional field-level before/after (build it with changedFields above).
+  // Three distinct cases, and the difference matters:
+  //   - argument ABSENT: old_value stays NULL and new_value stays the details
+  //     blob -- byte-for-byte what every pre-existing call site already wrote;
+  //   - argument null (a route that opted in, on a save that changed nothing):
+  //     BOTH columns are NULL, so the Audit Log shows an empty diff instead of
+  //     a details blob it would otherwise render as "every field was added";
+  //   - a real change: the two columns hold the changed fields.
+  change?: AuditFieldChange | null,
 ): Promise<void> {
   try {
     const detailsStr = details != null
       ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
       : null
+    const changeColumns = auditChangeColumns(change)
     const db = getDb(env)
     await db.prepare(`
-      INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value, device_name, device_tz)
+      INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
       SELECT
         @user_id,
         COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
-        @action, @entity, @entity_id, @details, @table_name, @record_id, @new_value,
+        @action, @entity, @entity_id, @details, @table_name, @record_id, @old_value, @new_value,
         s.device_name,
         s.device_tz
       FROM (SELECT 1 AS one) AS _dummy
@@ -145,7 +275,8 @@ export async function audit(
       details: detailsStr,
       table_name: entity,
       record_id: entityId,
-      new_value: detailsStr,
+      old_value: changeColumns.old_value,
+      new_value: change === undefined ? detailsStr : changeColumns.new_value,
     })
   } catch (_) {
     // Swallow -- see comment above.

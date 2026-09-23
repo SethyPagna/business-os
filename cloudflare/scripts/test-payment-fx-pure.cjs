@@ -40,7 +40,7 @@ function load(rel) {
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
-    if (name.endsWith('/audit')) return { audit: async () => {} }
+    if (name.endsWith('/audit')) return { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
     if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
     if (name.startsWith('.')) {

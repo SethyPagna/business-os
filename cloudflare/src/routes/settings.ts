@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -702,6 +702,14 @@ app.post('/payment-methods/replace', async (c) => {
   const nextRaw = JSON.stringify(next)
   const sourceVariants = JSON.stringify(impact.sourceVariants)
   const identityVariants = JSON.stringify(impact.identityVariants)
+  // The configured-methods before/after already existed, but only nested in
+  // `details`, where the Audit Log's Field | Before | After renderer never
+  // looks. `details` keeps its exact shape for existing consumers; the same
+  // pair is also written to old_value/new_value.
+  const paymentMethodChange = auditChangeColumns(changedFields(
+    { payment_method: from, configured_methods: setting.methods },
+    { payment_method: to, configured_methods: next },
+  ))
   const auditDetails = {
     action: 'payment_method_replace',
     operationId,
@@ -723,17 +731,15 @@ app.post('/payment-methods/replace', async (c) => {
       params: { expectedRaw: setting.raw, expectedSaleRevisionSum, sourceVariants, identityVariants },
     },
     {
-      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value,device_name,device_tz,created_at)
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name,device_tz,created_at)
             SELECT @userId,@userName,'replace','payment_method',@operationId,
               json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
                 '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
-              'payment_method',@operationId,
-              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
-                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
+              'payment_method',@operationId,@old_value,@new_value,
               (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               @stamp`,
-      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp, ...paymentMethodChange },
     },
     {
       sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)

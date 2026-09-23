@@ -13,7 +13,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
   }
 }
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -51,6 +51,14 @@ import type { Env } from '../index'
 // NOT silently fall back to any other permission.
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+// The editable surface of an expense -- what a before/after row should show.
+// created_by/created_by_name and the id/timestamps are bookkeeping, not an
+// edit the operator made.
+const FEE_AUDIT_COLUMNS = [
+  'fee_type', 'label', 'amount_usd', 'amount_khr', 'fee_date',
+  'sale_id', 'branch_id', 'delivery_contact_id', 'notes',
+] as const
 app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
@@ -730,12 +738,17 @@ app.put('/:id', async (c) => {
   }
 
   const fee = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
+  // The before/after was already computed here, but it lived only inside
+  // `details`, where the Audit Log's Field | Before | After renderer never
+  // looks. `details` is unchanged for the consumers that read it; the same
+  // pair now also lands in old_value/new_value, reduced to the fields that
+  // actually moved.
   await audit(c.env, user.id, user.username || null, 'update', 'fee', id, {
     before: existing,
     after: fee,
     sale_id: saleId,
     branch_id: branchId,
-  })
+  }, changedFields(existing as unknown as Record<string, unknown>, fee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS }))
   await broadcast(c.env, 'fees', { type: 'updated', id })
   return c.json({ fee })
 })
@@ -769,7 +782,9 @@ app.delete('/:id', async (c) => {
   }
 
   await db.prepare(`DELETE FROM fees WHERE id = @id`).run({ id })
-  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null })
+  // after === null records every field of the deleted expense as removed.
+  await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },
+    changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS }))
   await broadcast(c.env, 'fees', { type: 'deleted', id })
   return c.json({ success: true })
 })
