@@ -172,12 +172,23 @@ const SEP = lang.BILINGUAL_SEPARATOR
 const khmerText = (value) => /[ក-៿]/.test(String(value).replace(/៛/g, ''))
 // Sep 23 2026: a report section opens with its name between two `=====`
 // edges (owner: "for telegram reports, instead of plain line ------we can do
-// =====section name===== instead."). A literal here, not the exported
-// constant, so the checks below read the TEXT the chat receives.
+// =====section name===== instead."), five a side, or fewer when five would
+// push the line onto a second row (owner, the same day: "for the header
+// marks, make sure the line stays in one line/row. this means you can use
+// less header marks if it pushes to next row for the telegram message").
+// Literals here, not the exported constant, so the checks below read the
+// TEXT the chat receives.
 const EDGE = '====='
-const isSection = (line) => line.length > 2 * EDGE.length && line.startsWith(EDGE) && line.endsWith(EDGE)
-const sectionName = (line) => line.slice(EDGE.length, -EDGE.length)
+const SECTION = /^(={1,5})([^=](?:.*[^=])?)(={1,5})$/
+const sectionParts = (line) => {
+  const match = String(line).match(SECTION)
+  return match && match[1] === match[3] ? [match[1].length, match[2]] : null
+}
+const isSection = (line) => sectionParts(line) !== null
+const sectionName = (line) => sectionParts(line)[1]
 const DAY_SECTIONS = ['sales', 'invoices', 'expenses', 'stock', 'cashiers']
+// The header of a section whose name has room for all five marks -- every
+// section this file names except /sales's Latest receipts in both languages.
 const headerOf = (key) => `${EDGE}${lang.label(key)}${EDGE}`
 
 ;(async () => {
@@ -213,7 +224,7 @@ check(`the day summary is a title line and ${sectionTitles.length} titled sectio
   && sectionTitles.join(' | ') === DAY_SECTIONS.map(headerOf).join(' | ')
   && sectionTitles.every((line) => line.includes(SEP)), report)
 check('each section opens with `=====Name / ឈ្មោះ=====`: no rule above it, no number in front',
-  report.split('\n').includes('=====Sales / ការលក់=====') && lang.REPORT_SECTION_EDGE === EDGE
+  report.split('\n').includes('=====Sales / ការលក់=====') && lang.REPORT_SECTION_EDGE === '='
   && !report.includes(lang.RULE) && !/^\d+\.\s/m.test(report), report)
 check('and every row inside a section is a `·` row, the cashier list included',
   report.split('\n').slice(1).every((line) => isSection(line) || line.startsWith(lang.ROW_BULLET) || line.startsWith(lang.HANGING_INDENT))
@@ -326,11 +337,25 @@ check('and an item too wide for a phone continues under its own number, never at
 check('and the retired quantity-first em-dash form is gone from the item lines',
   !/\d+ × [A-Za-z]/.test(salesMsg) && !saleItemLines.some((line) => line.includes('—')))
 // Sep 23 2026: /sales takes the `=====` headers too, and each receipt is a
-// `·` row; only the items under a receipt stay numbered.
+// `·` row; only the items under a receipt stay numbered. Latest receipts, in
+// both languages, is 36 characters before its marks -- a phone row on its
+// own -- so it keeps one `=` a side instead of five ("you can use less header
+// marks if it pushes to next row"), while Sales and Invoices keep all five.
 check('/sales opens its three sections with `=====` headers and lists each receipt as a `·` row',
-  salesLines.filter(isSection).join(' | ') === ['sales', 'invoices', 'latestReceipts'].map(headerOf).join(' | ')
+  salesLines.filter(isSection).join(' | ') === [headerOf('sales'), headerOf('invoices'), '=Latest receipts / វិក្កយបត្រចុងក្រោយ='].join(' | ')
   && salesLines.includes('· 20260810-090000') && salesLines.includes('· 20260810-110000')
   && !salesMsg.includes('•') && !salesLines.includes(lang.RULE), salesMsg)
+check('a section name too long for five marks within one row gets fewer: Latest receipts keeps one a side',
+  salesLines.includes('=Latest receipts / វិក្កយបត្រចុងក្រោយ=') && !salesMsg.includes('==Latest receipts'), salesMsg)
+check('POSITIVE CONTROL: a name with room keeps all five, in the same message',
+  salesLines.includes('=====Sales / ការលក់=====') && salesLines.includes('=====Invoices / វិក្កយបត្រ====='), salesMsg)
+// The single-language renderings have room for all five on every title.
+const [salesEn, salesKm] = await Promise.all([
+  telegram.telegramCommandReply({}, '/sales 10/08/2026', Date.now(), 'en'),
+  telegram.telegramCommandReply({}, '/sales 10/08/2026', Date.now(), 'km'),
+])
+check('in one language Latest receipts is short enough for all five',
+  salesEn.split('\n').includes('=====Latest receipts=====') && salesKm.split('\n').includes('=====វិក្កយបត្រចុងក្រោយ====='), `${salesEn}\n${salesKm}`)
 
 // ---- the `+ N more` continuation, in all three languages --------------------
 //
@@ -489,6 +514,51 @@ check('and none of them is left as the retired bare em dash',
 const salesBlock = quietLines.slice(quietLines.indexOf(quietTitles[0]) + 1, quietLines.indexOf(quietTitles[1]))
 check(`POSITIVE CONTROL: the Sales section still prints its own two rows (${salesBlock.length})`,
   salesBlock.length === 2 && salesBlock.every((line) => line.startsWith(lang.ROW_BULLET) && !line.endsWith('N/A')))
+
+// ---- every section title keeps to one row (Sep 23 2026) ----------------------
+// Owner: "for the header marks, make sure the line stays in one line/row.
+// this means you can use less header marks if it pushes to next row for the
+// telegram message." A title takes the most marks, up to five, that keep it
+// within one phone row -- 36, counted with `.length`, the width
+// telegramRowLines breaks a list row at -- and never fewer than one: a name
+// that fills the row on its own keeps one a side, because the marks are what
+// make it a title. Judged over every reply this file renders, in every mode.
+const ROW_WIDTH = 36
+/** Why `title` breaks that rule, or '' when it keeps it. */
+const titleFault = (title) => {
+  const parts = sectionParts(title)
+  if (!parts) return 'not a run of one to five `=`, the name, and the same run again'
+  const [marks, name] = parts
+  if (title.length > ROW_WIDTH && marks > 1) return `${title.length} characters with ${marks} marks a side: it wraps, and fewer marks would not`
+  if (marks < 5 && name.length + 2 * (marks + 1) <= ROW_WIDTH) return `${marks} marks a side where ${marks + 1} still fit one row`
+  return ''
+}
+check('POSITIVE CONTROL: the title judge rejects the fixed five that wraps, a needless cut and uneven sides',
+  titleFault('=====Latest receipts / វិក្កយបត្រចុងក្រោយ=====') !== ''
+  && titleFault('====Sales / ការលក់====') !== ''
+  && titleFault('====Sales / ការលក់=====') !== ''
+  && titleFault('=Latest receipts / វិក្កយបត្រចុងក្រោយ=') === ''
+  && titleFault('=====Sales / ការលក់=====') === '')
+const feesEn = await telegram.telegramCommandReply({}, '/fees 12/08/2026', Date.now(), 'en')
+const composedTitleFaults = []
+let composedTitles = 0
+for (const [what, text] of [
+  ['/report, both', report], ['/report, en', reportEn], ['/report, km', reportKm], ['quiet day', quiet],
+  ['/sales, both', salesMsg], ['/sales, en', salesEn], ['/sales, km', salesKm],
+  ['/sales overflow, both', overflowBoth], ['/sales overflow, en', overflowEn], ['/sales overflow, km', overflowKm],
+  ['/fees, both', feesMsg], ['/fees, en', feesEn], ['/fees, km', feesKm],
+  ['/stock, both', stockMsg], ['/stock, en', stockEn], ['/stock, km', stockKm],
+  ['/inventory, both', inventoryMsg], ['/inventory, en', inventoryEn], ['/inventory, km', inventoryKm],
+]) {
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('=')) continue
+    composedTitles += 1
+    const fault = titleFault(line)
+    if (fault) composedTitleFaults.push(`${what}: ${line} -- ${fault}`)
+  }
+}
+check(`every section title the report commands print keeps to one row with the most marks that fit (${composedTitles} titles)`,
+  composedTitles === 53 && composedTitleFaults.length === 0, composedTitleFaults.join('\n'))
 // ---- one implementation, not a lookalike ------------------------------------
 const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 check('telegram.ts no longer sums sale totals for the day or cashier reports at all',

@@ -721,8 +721,12 @@ const lastSent = () => sent[sent.length - 1].body.text
   // Sep 23 2026 (owner: "for telegram reports, instead of plain line ------we
   // can do =====section name===== instead."): a section opens with its name
   // between two `=====` edges, with no rule above it and no number in front,
-  // and every row inside it is a `·` row, the product list included. The
-  // edge is a literal here so the arrays below pin the text the chat gets.
+  // and every row inside it is a `·` row, the product list included. Five is
+  // the most a side, fewer only when five would push the title onto a second
+  // row (owner, the same day: "you can use less header marks if it pushes to
+  // next row for the telegram message"); these two replies' names are short
+  // enough for all five, so the edge is a literal here and the arrays below
+  // pin the text the chat gets.
   const EDGE = '====='
   const isSection = (row) => row.length > 2 * EDGE.length && row.startsWith(EDGE) && row.endsWith(EDGE)
   await stocked.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
@@ -749,7 +753,7 @@ const lastSent = () => sent[sent.length - 1].body.text
     '· LOW / ស្តុកទាប — Rice 5kg',
     `${lang.HANGING_INDENT}— 3 (⚠ 5)`,
   ], `/stock does not have the shared section shape:\n${stockReply}`)
-  assert.equal(lang.REPORT_SECTION_EDGE, EDGE, 'the report section edge is five = a side')
+  assert.equal(lang.REPORT_SECTION_EDGE, '=', 'a report section title is marked with `=`')
 
   // RETIRED (Sep 23 2026): the drawn RULE and the `N.` number that opened a
   // section, and the `•` list row. None of the three is left in either reply,

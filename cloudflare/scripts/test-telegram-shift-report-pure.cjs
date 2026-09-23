@@ -21,7 +21,10 @@
 // "for shift instead of line. do ---------Invoices / វិក្កយបត្រ-------- use
 // dash not line. and for inside each section do bullet points ·". Each
 // section now opens with ONE line, `-----Invoices / វិក្កយបត្រ-----`, and
-// every row inside it is a `·` row, the lists included.
+// every row inside it is a `·` row, the lists included. That line stays on
+// one row: "for the header marks, make sure the line stays in one line/row.
+// this means you can use less header marks if it pushes to next row for the
+// telegram message" -- so `---Cash count / ការរាប់សាច់ប្រាក់---` (section 4b).
 //
 // The same day the top of the report took the owner's own sample:
 // "🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · 22/09/2026", "Open/បើក:
@@ -117,14 +120,22 @@ const KHMER = /[ក-៿]/
 const khmerText = (value) => KHMER.test(String(value).replace(/៛/g, ''))
 const RULE = '━'.repeat(18)
 // A shift section's title line: its name between two dashed edges (Sep 23
-// 2026), five plain hyphen-minus a side. Spelled out, like the exact arrays
+// 2026), plain hyphen-minus. Every OTHER report's section title: the name
+// between `=` marks. Five a side, or fewer when five would push the title
+// onto a second row (owner, Sep 23 2026: "for the header marks, make sure
+// the line stays in one line/row. this means you can use less header marks
+// if it pushes to next row for the telegram message") -- and never none, and
+// never a different count on each side. Spelled out, like the exact arrays
 // below, so the checks judge the text the chat receives.
-const SHIFT_EDGE = '-----'
-const isShiftSection = (line) => line.length > 2 * SHIFT_EDGE.length && line.startsWith(SHIFT_EDGE) && line.endsWith(SHIFT_EDGE)
-// Every OTHER report's section title (Sep 23 2026): the name between five `=`
-// a side.
-const REPORT_EDGE = '====='
-const isReportSection = (line) => line.length > 2 * REPORT_EDGE.length && line.startsWith(REPORT_EDGE) && line.endsWith(REPORT_EDGE)
+const SHIFT_TITLE = /^(-{1,5})([^-](?:.*[^-])?)(-{1,5})$/
+const REPORT_TITLE = /^(={1,5})([^=](?:.*[^=])?)(={1,5})$/
+/** `[marks a side, name]` when `line` is a section title of that family. */
+const titleParts = (line, pattern) => {
+  const match = String(line).match(pattern)
+  return match && match[1] === match[3] ? [match[1].length, match[2]] : null
+}
+const isShiftSection = (line) => titleParts(line, SHIFT_TITLE) !== null
+const isReportSection = (line) => titleParts(line, REPORT_TITLE) !== null
 
 /** Render one message in one language mode, then put the mode back. */
 const render = (mode, build) => {
@@ -214,15 +225,18 @@ assert.deepEqual(lines, [
   '· Not Paid / ប្រាក់ជំពាក់: $38.00',
   '· Refunds / ការសងប្រាក់: $15.00',
   // The gap the owner named: registered opening and closing cash, both
-  // currencies, then the expected drawer and ONE difference line.
-  '-----Cash count / ការរាប់សាច់ប្រាក់-----',
+  // currencies, then the expected drawer and ONE difference line. Three
+  // dashes a side, not five: five would push this title onto a second row
+  // (owner, Sep 23 2026: "you can use less header marks if it pushes to next
+  // row"). Payment methods, below, has room for four.
+  '---Cash count / ការរាប់សាច់ប្រាក់---',
   '· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛',
   '· Closing cash / សាច់ប្រាក់បិទវេន: $182.50 · 240,000៛',
   '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $178.00 · 240,000៛',
   '· Difference / ភាពខុសគ្នា: +$4.50 · 0៛',
   // Every row inside a section is a `·` row, the lists included (Sep 23
   // 2026: "for inside each section do bullet points ·").
-  '-----Payment methods / វិធីទូទាត់-----',
+  '----Payment methods / វិធីទូទាត់----',
   '· Cash — 18 · $300.00',
   '· ABA — 6 · $186.25',
   '-----Delivery / ការដឹកជញ្ជូន-----',
@@ -346,8 +360,8 @@ check('all three modes render the same row count and the same section-title posi
   && titlePositions(report).length === 6
   && JSON.stringify(titlePositions(report)) === JSON.stringify(titlePositions(englishReport))
   && JSON.stringify(titlePositions(report)) === JSON.stringify(titlePositions(khmerReport)))
-check('the one exported edge constant is the text the section titles carry',
-  telegramLang.SHIFT_SECTION_EDGE === SHIFT_EDGE)
+check('the one exported mark is the plain hyphen-minus the section titles carry',
+  telegramLang.SHIFT_SECTION_EDGE === '-')
 // Sep 23 2026, in every mode: no drawn rule, no numbered title, no `•` row.
 // The owner asked for dashes instead of the line and `·` inside the sections,
 // and a language mode is not allowed to keep the old shape.
@@ -371,8 +385,8 @@ check('an unknown or empty language setting falls back to both',
 // ---- 3. the shape is stable across shift states ----------------------------
 const sectionTitles = (text) => text.split('\n').filter(isShiftSection)
 const SIX_SECTIONS = [
-  '-----Invoices / វិក្កយបត្រ-----', '-----Sales / ការលក់-----', '-----Cash count / ការរាប់សាច់ប្រាក់-----',
-  '-----Payment methods / វិធីទូទាត់-----', '-----Delivery / ការដឹកជញ្ជូន-----', '-----Expenses / ចំណាយ-----',
+  '-----Invoices / វិក្កយបត្រ-----', '-----Sales / ការលក់-----', '---Cash count / ការរាប់សាច់ប្រាក់---',
+  '----Payment methods / វិធីទូទាត់----', '-----Delivery / ការដឹកជញ្ជូន-----', '-----Expenses / ចំណាយ-----',
 ]
 assert.deepEqual(sectionTitles(report), SIX_SECTIONS, report)
 
@@ -516,10 +530,10 @@ assert.deepEqual(quiet.split('\n'), [
   // riel equivalent has to face the zero case first.
   '· Revenue / ចំណូល: $0.00',
   '· Profit / ចំណេញ: $0.00',
-  '-----Cash count / ការរាប់សាច់ប្រាក់-----',
+  '---Cash count / ការរាប់សាច់ប្រាក់---',
   '· Opening cash / សាច់ប្រាក់ដើមវេន: $0.00 · 0៛',
   '· Expected cash / សាច់ប្រាក់ត្រូវមាន: $0.00 · 0៛',
-  '-----Payment methods / វិធីទូទាត់-----',
+  '----Payment methods / វិធីទូទាត់----',
   // `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced
   // read as a value that failed to render rather than as "nothing here".
   '· N/A',
@@ -624,7 +638,7 @@ assert.deepEqual(daySections, [
 ], daySummary)
 check(`the day summary is titled and sectioned the same way (${daySections.length} lines)`, true)
 check('with its own `=====` edge: no dashed shift header, no rule, no number, no `•` row',
-  telegramLang.REPORT_SECTION_EDGE === REPORT_EDGE
+  telegramLang.REPORT_SECTION_EDGE === '='
   && daySections.filter(isReportSection).length === 5 && !daySections.some(isShiftSection)
   && !daySections.includes(RULE) && !daySections.some((line) => /^\d+\.\s/.test(line)) && !daySummary.includes('•'), daySummary)
 // The day's Expenses total is arithmetic, exactly as the shift's is above: the
@@ -645,7 +659,7 @@ check('and its cashier rows are name, receipts, money -- nothing else',
 // -- `=====Title=====` in the day summary, `-----Title-----` in the shift
 // report -- to the next title, or to the rule between two whole shift reports.
 const isAnyTitle = (line) => isReportSection(line) || isShiftSection(line)
-const titleText = (line) => (isShiftSection(line) ? line.slice(SHIFT_EDGE.length, -SHIFT_EDGE.length) : line.slice(REPORT_EDGE.length, -REPORT_EDGE.length))
+const titleText = (line) => (titleParts(line, SHIFT_TITLE) || titleParts(line, REPORT_TITLE))[1]
 const sectionBlock = (text, title) => {
   const rows = text.split('\n')
   const first = rows.findIndex((line) => isAnyTitle(line) && titleText(line) === title)
@@ -717,6 +731,105 @@ const feesOffQuiet = render('both', () => telegram.formatDaySummary(
 check('with no courier cost either, Expenses is simply absent and Sales gains nothing',
   !feesOffQuiet.includes('ចំណាយ') && !feesOffQuiet.includes('ថ្លៃដឹកដើម')
   && feesOffQuiet.split('\n').filter(isReportSection).length === 4, feesOffQuiet)
+
+// ---- 4b. a section title stays on one row (Sep 23 2026) --------------------
+// Owner: "for the header marks, make sure the line stays in one line/row.
+// this means you can use less header marks if it pushes to next row for the
+// telegram message." Five marks a side is the most, not a fixed count: a
+// title takes the most marks, up to five, that keep it within one phone row
+// -- 36, counted with `.length`, the width telegramRowLines breaks a list
+// row at -- and never fewer than one. A name that fills the row on its own
+// keeps one mark a side, because the marks are what make it a title.
+const ROW_WIDTH = 36
+/** Why `title` breaks that rule, or '' when it keeps it. */
+const titleFault = (title, pattern) => {
+  const parts = titleParts(title, pattern)
+  if (!parts) return 'not a run of one to five marks, the name, and the same run again'
+  const [marks, name] = parts
+  if (title.length > ROW_WIDTH && marks > 1) return `${title.length} characters with ${marks} marks a side: it wraps, and fewer marks would not`
+  if (marks < 5 && name.length + 2 * (marks + 1) <= ROW_WIDTH) return `${marks} marks a side where ${marks + 1} still fit one row`
+  return ''
+}
+// POSITIVE CONTROL: the judge rejects the shapes it exists to reject -- the
+// fixed five that wraps, a count thinner than the row needs, and uneven sides
+// -- and accepts the right ones.
+check('POSITIVE CONTROL: the title judge rejects a wrapping five, a needless cut and uneven sides',
+  titleFault('-----Cash count / ការរាប់សាច់ប្រាក់-----', SHIFT_TITLE) !== ''
+  && titleFault('--Cash count / ការរាប់សាច់ប្រាក់--', SHIFT_TITLE) !== ''
+  && titleFault('----Sales / ការលក់-----', SHIFT_TITLE) !== ''
+  && titleFault('======Sales / ការលក់======', REPORT_TITLE) !== ''
+  && titleFault('---Cash count / ការរាប់សាច់ប្រាក់---', SHIFT_TITLE) === ''
+  && titleFault('=Latest receipts / វិក្កយបត្រចុងក្រោយ=', REPORT_TITLE) === ''
+  && titleFault('=====Sales / ការលក់=====', REPORT_TITLE) === '')
+
+// Every section lib/telegram.ts titles, found in its source rather than
+// listed here, so a section added later is judged too -- in every language
+// mode and with both families' marks.
+const headerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
+const titledKeys = [...new Set([...headerSource.matchAll(/\bsection(?:Header)?\('(\w+)'/g)].map((match) => match[1]))]
+const EVERY_TITLED_KEY = ['sales', 'invoices', 'latestReceipts', 'expenses', 'eachExpense', 'stock', 'products', 'cashiers', 'cashCount', 'paymentMethods', 'delivery']
+check(`the source scan finds every section title the reports print (${titledKeys.length} keys)`,
+  EVERY_TITLED_KEY.every((key) => titledKeys.includes(key)), titledKeys.join(', '))
+const titleFaults = []
+for (const mode of ['both', 'en', 'km']) {
+  for (const key of titledKeys) {
+    for (const [mark, pattern] of [[telegramLang.SHIFT_SECTION_EDGE, SHIFT_TITLE], [telegramLang.REPORT_SECTION_EDGE, REPORT_TITLE]]) {
+      const title = render(mode, () => telegram.sectionHeader(key, mark))
+      const fault = titleFault(title, pattern)
+      if (fault) titleFaults.push(`${mode} ${key}: ${title} -- ${fault}`)
+      else if (titleParts(title, pattern)[1] !== render(mode, () => telegramLang.label(key))) titleFaults.push(`${mode} ${key}: ${title} -- the name is not the label`)
+    }
+  }
+}
+check(`every section title, in all three modes and both families, keeps to one row with the most marks that fit (${titledKeys.length * 6} titles)`,
+  titleFaults.length === 0, titleFaults.join('\n'))
+// Today's names all leave the row an even number of characters to spare, so
+// they cannot tell rounding down from rounding up. A name of every length
+// from 1 to 40 can: the same sectionHeader, over a language table that names
+// a probe key after itself, so an odd spare character, a name exactly the
+// row's width and a name longer than it are all judged too.
+const probeTelegram = loadReal('lib/telegram.ts', {
+  './lowStockSettings': lowStockStub, './db': noDb, './businessDateWindow': businessDateWindow,
+  './telegramLang': { ...telegramLang, label: (key) => (/^n+$/.test(key) ? key : telegramLang.label(key)) },
+  './salesAnalytics': salesAnalytics, './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation,
+})
+const lengthFaults = []
+for (let length = 1; length <= 40; length += 1) {
+  for (const [mark, pattern] of [[telegramLang.SHIFT_SECTION_EDGE, SHIFT_TITLE], [telegramLang.REPORT_SECTION_EDGE, REPORT_TITLE]]) {
+    const title = probeTelegram.sectionHeader('n'.repeat(length), mark)
+    const fault = titleFault(title, pattern)
+    if (fault) lengthFaults.push(`a ${length}-character name: ${title} -- ${fault}`)
+  }
+}
+check('a name of every length from 1 to 40 gets the most marks, up to five, that keep it to one row, and at least one (80 titles)',
+  lengthFaults.length === 0, lengthFaults.join('\n'))
+check('Latest receipts in both languages fills the row by itself, so it keeps one mark a side',
+  render('both', () => telegram.sectionHeader('latestReceipts', telegramLang.REPORT_SECTION_EDGE)) === '=Latest receipts / វិក្កយបត្រចុងក្រោយ=')
+check('POSITIVE CONTROL: Sales has room, so it keeps all five a side in every mode',
+  ['both', 'en', 'km'].every((mode) => titleParts(render(mode, () => telegram.sectionHeader('sales', telegramLang.REPORT_SECTION_EDGE)), REPORT_TITLE)[0] === 5))
+check('in the shift report, Cash count takes three dashes a side and Payment methods four; the rest keep five',
+  sectionTitles(report).map((title) => titleParts(title, SHIFT_TITLE)[0]).join(',') === '5,5,3,4,5,5', sectionTitles(report).join('\n'))
+
+// And in the messages themselves: every line that opens with a mark is a
+// title that keeps the rule, in every state and mode rendered above.
+const dayEn = render('en', () => telegram.formatDaySummary(dayStats, [{ cashier: 'za01', count: 18, usd: 300 }]))
+const composedTitleFaults = []
+let composedTitles = 0
+for (const [what, text] of [
+  ['closed shift, both', report], ['closed shift, en', englishReport], ['closed shift, km', khmerReport],
+  ['open shift', openReport], ['cancelled shift', cancelledReport], ['quiet shift', quiet],
+  ['day summary, both', daySummary], ['day summary, en', dayEn], ['day summary, km', dayKm],
+]) {
+  for (const line of text.split('\n')) {
+    if (!/^[-=]/.test(line)) continue
+    composedTitles += 1
+    const fault = titleFault(line, line.startsWith('-') ? SHIFT_TITLE : REPORT_TITLE)
+    if (fault) composedTitleFaults.push(`${what}: ${line} -- ${fault}`)
+  }
+}
+check(`every title the shift reports and day summaries print keeps to one row (${composedTitles} titles)`,
+  composedTitles === 51 && composedTitleFaults.length === 0, composedTitleFaults.join('\n'))
 
 // ---- 5. the absences -------------------------------------------------------
 // Each string below is a line the PRE-REDESIGN report printed for this very

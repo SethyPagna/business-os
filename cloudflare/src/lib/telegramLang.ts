@@ -663,29 +663,36 @@ export const RULE = '━'.repeat(18)
 export const GROUP_RULE = '─'.repeat(18)
 
 /**
- * What stands on either side of a SHIFT REPORT section's name:
+ * The mark on either side of a SHIFT REPORT section's name:
  * `-----Invoices / វិក្កយបត្រ-----`, one line, no number and no rule above it.
  *
  * Owner, Sep 23 2026: "for shift instead of line. do ---------Invoices /
  * វិក្កយបត្រ-------- use dash not line. and for inside each section do bullet
  * points ·". Plain hyphen-minus on purpose: the drawn `━` rule is exactly
- * what the owner asked to replace. Five a side is a width, not a meaning --
- * change it here and every shift section follows.
+ * what the owner asked to replace.
+ *
+ * HOW MANY stand on each side is lib/telegram.ts's sectionHeader's job: five,
+ * or fewer when five would push the header onto a second row. The owner, the
+ * same day: "for the header marks, make sure the line stays in one line/row.
+ * this means you can use less header marks if it pushes to next row for the
+ * telegram message." So `---Cash count / ការរាប់សាច់ប្រាក់---` in both
+ * languages, and five a side for the shorter names.
  */
-export const SHIFT_SECTION_EDGE = '-'.repeat(5)
+export const SHIFT_SECTION_EDGE = '-'
 
 /**
- * What stands on either side of a section's name in every OTHER sectioned
+ * The mark on either side of a section's name in every OTHER sectioned
  * report -- the `/report` day summary (and the evening push, which sends the
  * same text), `/sales`, `/fees`, `/stock` and `/inventory`:
  * `=====Sales / ការលក់=====`, one line, no number and no rule above it.
  *
  * Owner, Sep 23 2026: "for telegram reports, instead of plain line ------we
  * can do =====section name===== instead." The shift report keeps the dashed
- * edge above, which the owner asked for separately. Both are five a side, so
- * the two families differ only in the glyph.
+ * mark above, which the owner asked for separately. Both families take their
+ * count from sectionHeader -- five, or fewer when the row would wrap ("make
+ * sure the line stays in one line/row") -- so they differ only in the glyph.
  */
-export const REPORT_SECTION_EDGE = '='.repeat(5)
+export const REPORT_SECTION_EDGE = '='
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 

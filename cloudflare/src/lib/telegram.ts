@@ -433,13 +433,38 @@ function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCo
 // telegram reports, instead of plain line ------we can do =====section
 // name===== instead."), and `-----Invoices / វិក្កយបត្រ-----` in the shift
 // report (SHIFT_SECTION_EDGE; the owner's words are with formatShiftReport
-// below). RULE is left for what separates WHOLE blocks: the shift reports a
-// `/shift` answer joins, and the command reference.
+// below). Five marks a side is the most: sectionHeader takes fewer when five
+// would push the line onto a second row. RULE is left for what separates
+// WHOLE blocks: the shift reports a `/shift` answer joins, and the command
+// reference.
 
-/** `=====Sales / ការលក់=====` -- a section's name between its two edges, on
- *  one line, with nothing drawn above it. The edge names the family:
- *  REPORT_SECTION_EDGE or SHIFT_SECTION_EDGE. */
-const sectionHeader = (key: TelegramLabelKey, edge: string): string => `${edge}${label(key)}${edge}`
+/** The most marks a section header stands on either side of its name. */
+const SECTION_EDGE_MARKS = 5
+
+/**
+ * `=====Sales / ការលក់=====` -- a section's name between its marks, on one
+ * line, with nothing drawn above it. The mark names the family:
+ * REPORT_SECTION_EDGE or SHIFT_SECTION_EDGE.
+ *
+ * Five a side is the most, not a fixed count. Owner, Sep 23 2026: "for the
+ * header marks, make sure the line stays in one line/row. this means you can
+ * use less header marks if it pushes to next row for the telegram message."
+ * So a header takes the most marks, up to five a side, that keep it within
+ * one phone row -- TELEGRAM_ROW_WIDTH, counted with `.length` exactly as
+ * telegramRowLines counts a row -- and never fewer than one:
+ * `---Cash count / ការរាប់សាច់ប្រាក់---`. A name that fills the row on its
+ * own keeps one mark a side, because the marks are what make it a header:
+ * `=Latest receipts / វិក្កយបត្រចុងក្រោយ=` is 36 by that count before its
+ * marks, and `.length` counts every Khmer vowel sign and subscript as a
+ * character, so it takes 29 characters on screen.
+ *
+ * Exported for scripts/test-telegram-shift-report-pure.cjs.
+ */
+export const sectionHeader = (key: TelegramLabelKey, edge: string): string => {
+  const name = label(key)
+  const marks = edge.repeat(Math.max(1, Math.min(SECTION_EDGE_MARKS, Math.floor((TELEGRAM_ROW_WIDTH - name.length) / 2))))
+  return `${marks}${name}${marks}`
+}
 
 /** A section the shop has no rows for still prints, so the shape of the
  *  message never moves (the owner's reference shows every section, empty

@@ -222,19 +222,27 @@ const bulletValue = (english) => {
   return found.slice(found.indexOf(' — ') + 3)
 }
 // A section opens with ONE line: its name between two dashed edges (owner,
-// Sep 23 2026: "do ---------Invoices / វិក្កយបត្រ-------- use dash not line").
-// Spelled out here rather than read from lang.SHIFT_SECTION_EDGE, so these
-// checks judge the text the chat receives; the constant is pinned to it below.
-const EDGE = '-----'
-const sectionTitleOf = (key) => `${EDGE}${lang.label(key)}${EDGE}`
-const isSectionTitle = (row) => row.length > 2 * EDGE.length && row.startsWith(EDGE) && row.endsWith(EDGE)
+// Sep 23 2026: "do ---------Invoices / វិក្កយបត្រ-------- use dash not line"),
+// five a side, or fewer when five would push the line onto a second row (the
+// owner, the same day: "you can use less header marks if it pushes to next
+// row"). Spelled out here rather than read from lang.SHIFT_SECTION_EDGE, so
+// these checks judge the text the chat receives; the mark is pinned below.
+const SECTION_TITLE = /^(-{1,5})([^-](?:.*[^-])?)(-{1,5})$/
+/** The section name a title row carries, or null for any other row. */
+const titleName = (row) => {
+  const match = String(row).match(SECTION_TITLE)
+  return match && match[1] === match[3] ? match[2] : null
+}
+const isSectionTitle = (row) => titleName(row) !== null
+// Found by NAME, so a title with fewer marks is still its section's title.
+const titleIndexOf = (rows, key) => rows.findIndex((row) => titleName(row) === lang.label(key))
 // The rows between a section's title and the next title (or the end) -- one
 // section's own lines, so a label that repeats across sections ("Total" is
 // both the invoice-count row and the expense total) can be read at its own
 // occurrence instead of the first one anywhere in the message.
 const sectionBlock = (text, key) => {
   const rows = rowsOf(text)
-  const title = rows.indexOf(sectionTitleOf(key))
+  const title = titleIndexOf(rows, key)
   assert.ok(title >= 0, `the report has no "${key}" section:\n${text}`)
   const next = rows.findIndex((row, index) => index > title && isSectionTitle(row))
   return rows.slice(title + 1, next < 0 ? rows.length : next)
@@ -248,14 +256,21 @@ const sectionBlock = (text, key) => {
 
 const SECTION_KEYS = ['invoices', 'sales', 'cashCount', 'paymentMethods', 'delivery', 'expenses']
 const sectionTitleLines = (text) => text.split('\n').filter(isSectionTitle)
-assert.deepEqual(sectionTitleLines(report), SECTION_KEYS.map(sectionTitleOf),
+const sectionNames = (text) => sectionTitleLines(text).map(titleName)
+assert.deepEqual(sectionNames(report), SECTION_KEYS.map((key) => lang.label(key)),
   `the six sections are not in the Sep 21 2026 order:\n${report}`)
 
-// Sep 23 2026, the section title's own shape. Plain hyphen-minus, five a side,
-// the name in between, on ONE line: no drawn rule above it and no number in
-// front of it -- the two things the owner asked to replace.
-assert.equal(sectionTitleLines(report)[0], '-----Invoices / វិក្កយបត្រ-----')
-assert.equal(lang.SHIFT_SECTION_EDGE, EDGE, 'the exported shift section edge is the five plain hyphen-minus characters the chat receives')
+// Sep 23 2026, the section title's own shape. Plain hyphen-minus, the name in
+// between, on ONE line: no drawn rule above it and no number in front of it
+// -- the two things the owner asked to replace. Five a side where the row has
+// room; Cash count and Payment methods, in both languages, have room for
+// three and four.
+assert.deepEqual(sectionTitleLines(report), [
+  '-----Invoices / វិក្កយបត្រ-----', '-----Sales / ការលក់-----', '---Cash count / ការរាប់សាច់ប្រាក់---',
+  '----Payment methods / វិធីទូទាត់----', '-----Delivery / ការដឹកជញ្ជូន-----', '-----Expenses / ចំណាយ-----',
+], report)
+assert.ok(sectionTitleLines(report).every((title) => title.length <= 36), `a section title is wider than one phone row:\n${report}`)
+assert.equal(lang.SHIFT_SECTION_EDGE, '-', 'the exported shift section mark is the plain hyphen-minus the chat receives')
 assert.ok(!lines.includes(lang.RULE), `a shift section still opens with the drawn rule:\n${report}`)
 assert.ok(!lines.some((line) => /^\d+\.\s/.test(line)), `a shift section is still numbered:\n${report}`)
 // And every row inside every section is a `·` row -- the lists included
@@ -612,7 +627,7 @@ const stillExpected = [...new Set(ORDER)].filter((entry) => entry !== 'Closing c
 for (const english of stillExpected) {
   assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`)), `open shift dropped the "${english}" line`)
 }
-assert.deepEqual(sectionTitleLines(openReport), SECTION_KEYS.map(sectionTitleOf),
+assert.deepEqual(sectionTitleLines(openReport), sectionTitleLines(report),
   'an open shift still renders all six sections, in order')
 console.log(`PASS open shift: renders ${stillExpected.length} lines up to now, without inventing a closing count`)
 
@@ -642,7 +657,7 @@ for (const dropped of ['Delivery fee', 'Not Paid', 'Refunds']) {
 assert.equal(sectionBlock(empty, 'invoices')[0], lang.labeled('total', 0))
 // All six sections still print, the ones with nothing marked rather than
 // missing (the owner's reference shows every section, empty ones included).
-assert.deepEqual(sectionTitleLines(empty), SECTION_KEYS.map(sectionTitleOf))
+assert.deepEqual(sectionTitleLines(empty), sectionTitleLines(report))
 assert.deepEqual(sectionBlock(empty, 'expenses'), [EMPTY_SECTION_MARKER],
   'a quiet shift must mark the Expenses section empty rather than print a $0.00 bullet or total')
 // The retired em-dash marker (Sep 22 2026) must not survive on ANY of the
@@ -880,7 +895,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     return found.slice(prefix.length)
   }
   const mappedSection = (key) => {
-    const title = mappedRows.indexOf(sectionTitleOf(key))
+    const title = titleIndexOf(mappedRows, key)
     assert.ok(title >= 0, `the report has no "${key}" section:\n${reply}`)
     const next = mappedRows.findIndex((row, index) => index > title && isSectionTitle(row))
     return mappedRows.slice(title + 1, next < 0 ? mappedRows.length : next)
