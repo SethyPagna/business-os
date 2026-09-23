@@ -32,10 +32,11 @@
 //
 // HOW ROUTES GET IT FOR FREE
 // --------------------------
-// Two call sites build their lines inline as English strings
-// (routes/sales.ts's status change, routes/fees.ts's fee), and those files
-// belong to other lanes. So `localizeTelegramLine` works on the COMPOSED line:
-// it splits at the first ': ', looks the English label up, and rewrites it.
+// One call site still builds its lines inline as English strings
+// (routes/fees.ts's fee; routes/sales.ts's status change did until Sep 22
+// 2026), and that file belongs to another lane. So `localizeTelegramLine`
+// works on the COMPOSED line: it splits at the first ': ', looks the English
+// label up, and rewrites it.
 // A label it does not know passes through untouched, so nothing can break by
 // adding a line; the pure test pins that every label the routes actually emit
 // IS known.
@@ -110,13 +111,20 @@ type LabelEntry = {
 const LABELS = {
   // --- receipt summary (formatSaleTelegramLines) ---
   status: { en: 'Status', km: 'ស្ថានភាព', localizeValue: true },
+  // The status change's own row (formatSaleStatusTelegramLines), in the
+  // owner's Sep 23 2026 words: "· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ:
+  // Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់". `localizeValue` names both
+  // statuses the way the app does, as it does on the plain Status row.
+  statusUpdated: { en: 'Invoice Status Updated', km: 'ស្ថានភាពផ្លាស់ប្ដូរ', localizeValue: true },
   date: { en: 'Date', km: 'កាលបរិច្ឆេទ' },
   // SHORTENED Sep 22 2026 (owner: "i changed some khmer that is too long and
   // no need so long"). វិក្កយបត្រ IS the invoice; លេខ- ("number of") added a
   // word the reader does not need next to a value that is obviously a number.
-  // Same Khmer as `receipt` below on purpose: one noun, one spelling.
+  // Same Khmer as the `🧾 Invoice` heading on purpose: one noun, one
+  // spelling. (The status change's `Receipt` row, which also said
+  // វិក្កយបត្រ, moved into that heading on Sep 23 2026, and its label went
+  // with it.)
   inv: { en: 'INV', km: 'វិក្កយបត្រ' },
-  receipt: { en: 'Receipt', km: 'វិក្កយបត្រ' },
   cashier: { en: 'Cashier', km: 'អ្នកគិតប្រាក់', localizeValue: true },
   customer: { en: 'Customer', km: 'អតិថិជន' },
   tel: { en: 'Tel', km: 'ទូរស័ព្ទ' },
@@ -315,9 +323,11 @@ const HEADINGS = {
   // It replaced "Sale recorded / បានកត់ត្រាការលក់" and the INV row that
   // carried the number under the status and date.
   '🛍️ Sale Invoice': 'វិក្កយបត្រការលក់',
-  // SHORTENED Sep 22 2026 to the owner's own wording. បង្កាន់ដៃ (receipt) is
-  // already named by the `Receipt / វិក្កយបត្រ` line directly underneath.
-  '🧾 Receipt status updated': 'ស្ថានភាពបានផ្លាស់ប្ដូរ',
+  // The status change's title, which names the invoice since Sep 23 2026
+  // (the owner's sample: "🧾 Invoice / វិក្កយបត្រ: 20260922-110132"). It
+  // replaced "Receipt status updated / ស្ថានភាពបានផ្លាស់ប្ដូរ" and the Receipt
+  // row under it; the change itself is the `statusUpdated` row now.
+  '🧾 Invoice': 'វិក្កយបត្រ',
   '💸 Fee recorded': 'បានកត់ត្រាចំណាយ',
   '📥 Stock in': 'ស្តុកចូល',
   '📤 Stock out': 'ស្តុកចេញ',
@@ -569,10 +579,11 @@ export function localizeTelegramLine(line: string): string {
   // function the /sales receipt list calls directly.
   const more = text.match(MORE_ITEMS_RE)
   if (more) return ROW_BULLET + moreItems(Number(more[1]))
-  // The sale alert opens on its own title line, `🛍️ Sale Invoice: <receipt>`,
-  // because only its builder knows the receipt number the owner's Sep 23 2026
-  // sample puts in the title. It is a heading, not a label row: heading words,
-  // no bullet.
+  // The sale alert and the status change open on their own title line,
+  // `🛍️ Sale Invoice: <receipt>` and `🧾 Invoice: <receipt>`, because only
+  // their builders know the receipt number the owner's Sep 23 2026 samples
+  // put in the title. It is a heading, not a label row: heading words, no
+  // bullet.
   if (headingParts(text)) return localizeTelegramHeading(text)
   const split = text.indexOf(': ')
   if (split <= 0) return text

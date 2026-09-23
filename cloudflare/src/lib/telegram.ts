@@ -207,16 +207,18 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
 export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise<boolean> {
   const config = await getTelegramConfig(env)
   if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
-  // No default for `sales`: the sale alert's heading names its receipt number
-  // (owner's Sep 23 2026 sample, "🛍️ Sale Invoice / វិក្កយបត្រការលក់:
-  // 20260923-153527"), which only formatSaleTelegramLines knows, so its first
-  // line IS the heading. A route's own heading still wins (a return).
-  const heading: Partial<Record<TelegramEventType, string>> = { status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
+  // No default for `sales` or `status`: those alerts' headings name their
+  // receipt number (owner's Sep 23 2026 samples, "🛍️ Sale Invoice /
+  // វិក្កយបត្រការលក់: 20260923-153527" and "🧾 Invoice / វិក្កយបត្រ:
+  // 20260922-110132"), which only formatSaleTelegramLines and
+  // formatSaleStatusTelegramLines know, so their first line IS the heading.
+  // A route's own heading still wins (a return).
+  const heading: Partial<Record<TelegramEventType, string>> = { fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
-  // the composed line (rather than in each builder) means the two routes that
-  // still assemble their lines inline -- routes/sales.ts's status change and
-  // routes/fees.ts's fee -- are covered without editing files other lanes own,
-  // and any line added later is covered the moment its label is in the table.
+  // the composed line (rather than in each builder) means the one route that
+  // still assembles its lines inline -- routes/fees.ts's fee -- is covered
+  // without editing a file another lane owns, and any line added later is
+  // covered the moment its label is in the table.
   await postTelegram(config, withLanguage(config.language, () => [
     localizeTelegramHeading(event.heading || heading[event.type] || ''),
     // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
@@ -1576,6 +1578,20 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
 /**
  * The receipt-status change -- `PATCH /api/sales/:id/status`'s alert.
  *
+ * Laid out as the owner's Sep 23 2026 sample:
+ *
+ *   🧾 Invoice / វិក្កយបត្រ: 20260922-110132
+ *   · Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់
+ *   ──────────────────
+ *   · Customer / អតិថិជន: bong meta
+ *   · By / ដោយ: admin
+ *
+ * The title names the invoice, like the sale alert's (it replaced the
+ * "Receipt status updated" heading and the Receipt row under it), and the
+ * change is the one row above the rule. The rows the sample does not show --
+ * Reason, Stock skipped, Lost fee -- keep their order, after Customer and
+ * before By.
+ *
  * It lived INLINE in routes/sales.ts until Sep 22 2026, and that is exactly
  * why the owner found `Status: awaiting payment → completed` on their phone
  * months after the app stopped using those words anywhere else: a route
@@ -1610,11 +1626,8 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
   const lostFeeUsd = Number(change.lostFeeUsd) || 0
   const lostFeeKhr = Number(change.lostFeeKhr) || 0
   const customer = cleanLine(change.customer, 120)
-  return eventGroups([
-    [
-      `Receipt: ${cleanLine(change.receipt, 40)}`,
-      `Status: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`,
-    ],
+  return [eventTitle('🧾 Invoice', change.receipt), ...eventGroups([
+    [`Invoice Status Updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`],
     [
       customer ? `Customer: ${customer}` : '',
       change.reason ? `Reason: ${change.reason}` : '',
@@ -1634,7 +1647,7 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
       lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
       change.by ? `By: ${change.by}` : '',
     ],
-  ])
+  ])]
 }
 
 // Stock alerts carry the RESULTING on-hand figures (this branch, all

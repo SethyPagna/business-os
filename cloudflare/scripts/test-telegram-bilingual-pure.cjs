@@ -2,8 +2,9 @@
 // no bot token, no live chat, no network. Four things it must prove:
 //
 //   1. Every line a message sends carries BOTH languages (every English label
-//      is followed by its Khmer), including the two routes that still build
-//      their lines inline (routes/sales.ts status, routes/fees.ts fee).
+//      is followed by its Khmer), including the one route that still builds
+//      its lines inline (routes/fees.ts fee; routes/sales.ts's status change
+//      did until Sep 22 2026).
 //   2. The Khmer in the Worker dictionary is the SAME Khmer the app uses --
 //      cross-checked against frontend/src/lang/km.json, so a second, divergent
 //      spelling of a retail term cannot be born on the server side. This
@@ -156,9 +157,19 @@ for (const [mode, title] of [
   assert.equal(inMode(mode, () => lang.localizeTelegramLine('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the title line`)
   assert.equal(inMode(mode, () => lang.localizeTelegramHeading('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the same title as a heading`)
 }
-// The retired heading is no title any more, and neither is a word every plain
-// object "has": the heading table is looked up as a Map.
+// The status change opens the same way since Sep 23 2026 (the owner's sample:
+// "🧾 Invoice / វិក្កយបត្រ: 20260922-110132").
+for (const [mode, title] of [
+  ['both', '🧾 Invoice / វិក្កយបត្រ: 20260922-110132'],
+  ['en', '🧾 Invoice: 20260922-110132'],
+  ['km', '🧾 វិក្កយបត្រ: 20260922-110132'],
+]) {
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🧾 Invoice: 20260922-110132')), title, `${mode}: the status change's title line`)
+}
+// The retired headings are no titles any more, and neither is a word every
+// plain object "has": the heading table is looked up as a Map.
 assert.equal(lang.localizeTelegramLine('🛍️ Sale recorded: 1'), '🛍️ Sale recorded: 1', 'the retired heading passes through untouched')
+assert.equal(lang.localizeTelegramLine('🧾 Receipt status updated'), '🧾 Receipt status updated', 'the retired status heading passes through untouched')
 assert.equal(lang.localizeTelegramLine('constructor: x'), 'constructor: x', 'a prototype key is not a heading')
 // Anything that is not one of the three values is the bilingual default: a
 // typo in a settings row must not blank the shop's reports.
@@ -293,8 +304,9 @@ console.log(`PASS rival spellings: ${everyWorkerKhmer.length} Worker Khmer strin
 
 // --- 3. every label the Worker actually emits is in the dictionary ----------
 // A source-shape check: scan lib/telegram.ts's builders AND the two routes
-// that compose lines inline for `Something: ` line prefixes, and require each
-// to be a known label. This is what stops a new line shipping English-only.
+// that have composed lines inline (routes/fees.ts still does) for
+// `Something: ` line prefixes, and require each to be a known label. This is
+// what stops a new line shipping English-only.
 const known = new Set(englishLabels)
 const LINE_LABEL = /[`'"]([A-Z][A-Za-z ]{1,24}): \$\{/g
 const scanned = []
@@ -431,7 +443,11 @@ const statusLines = assertAllBilingual(telegram.formatSaleStatusTelegramLines({
   receipt: '20260903-100405', fromStatus: 'awaiting_payment', toStatus: 'completed',
   customer: 'Sok Dara', reason: 'Customer cancelled', lostFeeUsd: 2, by: 'Sethy',
 }), 'sale status change')
-assert.ok(statusLines.includes('· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់'), statusLines.join('\n'))
+// Sep 23 2026: the receipt moved into the title and the Status row became
+// the owner's "Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ".
+assert.equal(statusLines[0], '🧾 Invoice / វិក្កយបត្រ: 20260903-100405', `the status change opens on its bilingual title:\n${statusLines.join('\n')}`)
+assert.equal(statusLines[1], '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់', statusLines.join('\n'))
+assert.ok(!statusLines.some((line) => /^· (Receipt|Status) /.test(line)), `the Receipt and Status rows are retired:\n${statusLines.join('\n')}`)
 // routes/fees.ts is the one route still composing lines inline.
 const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
