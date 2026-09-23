@@ -442,8 +442,10 @@ const sectionHeader = (key: TelegramLabelKey, edge: string): string => `${edge}$
  *  as the fact that there is nothing to report. `N/A` is left untranslated on
  *  purpose: it is the same two letters in the Khmer half of every form in this
  *  app, and a Khmer paraphrase of "no data" would be longer than the rows it
- *  stands in for. */
-const EMPTY_SECTION = `${ROW_BULLET}N/A`
+ *  stands in for. The shift report's Close row says the same `N/A` while the
+ *  shift is still open (the owner's Sep 23 2026 sample: "Close / បិទ: N/A"). */
+const NOT_APPLICABLE = 'N/A'
+const EMPTY_SECTION = `${ROW_BULLET}${NOT_APPLICABLE}`
 
 /**
  * `· Total: 24 · Cancelled: 1 · Edited: 2` -- one compact row for counts of
@@ -776,6 +778,14 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 // instead of line. do ---------Invoices / វិក្កយបត្រ-------- use dash not line.
 // and for inside each section do bullet points ·".
 //
+// The same day the TOP took the owner's sample: "🧑‍💼 Shift report /
+// របាយការណ៍វេន: Open / បើក · 22/09/2026", then "Open/បើក: 22/09/2026 08:07",
+// "Close / បិទ: N/A", "Shop / ហាង: Leang Cosmetics", "Cashier /
+// អ្នកគិតប្រាក់: Za", "ID សម្គាល់: S-20260922-0807-Za" -- and "also for open
+// khmer just call បើក". A colon after the title instead of a dash, the
+// shift's own two moments (Open, Close) in place of From and To, and the ID
+// last.
+//
 // Per-account vs shop-wide scope, and which sales the window covers, are
 // unchanged -- see lib/shiftReconciliation.ts and shiftFilters() below.
 //
@@ -877,40 +887,42 @@ export type ShiftReportFigures = {
 }
 
 /**
- * The whole message, pure -- no D1, no clock beyond the `nowMs` an open shift
- * needs for its "to" bound. scripts/test-shift-report-pure.cjs drives it
- * directly, so the shape and the arithmetic are pinned without a database.
+ * The whole message, pure -- no D1 and no clock: `nowMs` is only
+ * formatBusinessDateTime's fallback for a stored time that does not parse.
+ * scripts/test-shift-report-pure.cjs drives it directly, so the shape and the
+ * arithmetic are pinned without a database.
  */
 export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
   const cancelled = !!shift.cancelled_at
-  const open = !shift.closed_at && !cancelled
-  // A later soft cancellation must not extend an already closed shift's
-  // financial window. The original close remains the operational end; only
-  // an open-cancelled row uses cancellation as its terminal bound.
-  const endedAt = shift.closed_at || shift.cancelled_at
   // The TITLE states the shift's state, the way the owner's reference does
-  // ("Shift Report - Open or Closed"). It used to be a tag on the To line;
-  // saying it twice is the repeated fact the redesign takes out.
-  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : open ? bi('Open', 'កំពុងបើក') : bi('Closed', 'បានបិទ')
+  // ("Shift Report - Open or Closed"), after a colon since Sep 23 2026. An
+  // open shift says `Open / បើក` ("also for open khmer just call បើក"): the
+  // same entry as the Open row below, so the word is spelled once.
+  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : shift.closed_at ? bi('Closed', 'បានបិទ') : label('open')
   const lines = [
-    `🧑‍💼 ${label('shiftReport')} — ${state} · ${formatBusinessDay(shift.business_date)}`,
+    `🧑‍💼 ${label('shiftReport')}: ${state} · ${formatBusinessDay(shift.business_date)}`,
+    labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
+    // Close is the moment the shift was CLOSED and nothing else. A shift that
+    // is still open has none, so the row says `N/A` (the owner's sample)
+    // rather than a time: printing `now` here once rendered a close identical
+    // to the open on a shift opened minutes ago (the owner's Sep 22 2026
+    // paste), and on a long shift a closing time that never happened. A shift
+    // left running overnight is still the honest record (migration 0116
+    // refuses to close one on a timer) and still renders. A cancellation is
+    // not a close either: a shift cancelled while open keeps `N/A` here and
+    // states its cancellation time on its own row below, and a later soft
+    // cancellation leaves an already closed shift's close -- the end of its
+    // money window, see shiftFilters -- exactly where it was.
+    labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('shift', cleanLine(shift.shift_code, 40)),
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
-    labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
-    // An OPEN shift has no end. It used to print `formatBusinessDateTime(now)`
-    // here, which on a shift opened minutes ago rendered `To:` identical to
-    // `From:` -- the owner's Sep 22 2026 paste shows exactly that, a window
-    // that reads as zero minutes long -- and on a long shift rendered a
-    // precise closing time that never happened. The honest value is the
-    // state itself, and it is the SAME pair the title already carries, so no
-    // new label and no new Khmer: `To / ទៅ: Open / កំពុងបើក`. A shift left
-    // running overnight is still the honest record (migration 0116 refuses to
-    // close one on a timer) and still renders.
-    labeled('to', open ? state : formatBusinessDateTime(endedAt, nowMs)),
+    // 48, up from 40 on Sep 23 2026: the owner's sample id carries the
+    // cashier's name after the time (S-20260922-0807-Za), and an id cut
+    // short is one nobody can search for.
+    labeled('shift', cleanLine(shift.shift_code, 48)),
   ]
   if (cancelled) {
-    if (shift.closed_at) lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
+    lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
     lines.push(row(bi('Cancelled by', 'បោះបង់ដោយ'), cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)))
     lines.push(row(bi('Reason', 'មូលហេតុ'), cleanLine(shift.cancel_reason || 'Not recorded', 500)))
   }

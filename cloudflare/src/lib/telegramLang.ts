@@ -202,17 +202,30 @@ const LABELS = {
 
   // --- shift report (S4-7, redesigned Sep 6 2026 per the owner's "so long...
   // much more simpler so easy to understand at a glance" ruling) -----------
-  // The line set is now the SHORT one: shift id, from/to, shop, cashier, a header block
-  // of key totals (sales, profit, expenses, delivery fee, credit), invoice
-  // counts, registered opening vs closing cash (the owner's explicit ask -- "you
-  // didn't mention the registered cash dollar and khr in open vs end"), then
-  // expenses split into delivery cost / other expenses and one informational
-  // difference line. No arithmetic is spelled out
-  // and no line explains itself in a sentence -- see formatShiftReport.
-  // From/To/Cashier reuse the labels below rather than growing
-  // shift-specific twins.
+  // The line set is now the SHORT one: open and close times, shop, cashier,
+  // shift id, a header block of key totals (sales, profit, expenses, delivery
+  // fee, credit), invoice counts, registered opening vs closing cash (the
+  // owner's explicit ask -- "you didn't mention the registered cash dollar and
+  // khr in open vs end"), then expenses split into delivery cost / other
+  // expenses and one informational difference line. No arithmetic is spelled
+  // out and no line explains itself in a sentence -- see formatShiftReport.
+  // Cashier reuses the receipt summary's label rather than growing a
+  // shift-specific twin.
+  //
+  // Open and Close replaced From and To on Sep 23 2026 (the owner's sample
+  // reads "Open/បើក: 22/09/2026 08:07" and "Close / បិទ: N/A", and "also for
+  // open khmer just call បើក"). The owner's short Khmer, as km.json has it for
+  // `shift_registered_open` and `open` (បើក) and for `close` (បិទ); the shift
+  // screen's `shift_open_time` / `shift_close_time` add ម៉ោង ("time"), which
+  // the sample drops. `open` is ALSO an open shift's state in the report
+  // title -- the sample uses the same two words for both -- so the word is
+  // spelled once. `from`/`to` above stay for the transfer message.
+  open: { en: 'Open', km: 'បើក' },
+  close: { en: 'Close', km: 'បិទ' },
   shop: { en: 'Shop', km: 'ហាង' },
-  shift: { en: 'ID', km: 'លេខសម្គាល់' },
+  // SHORTENED Sep 23 2026 to the owner's "ID សម្គាល់": the លេខ- ("number
+  // of") prefix went, as it did from `inv` on Sep 22.
+  shift: { en: 'ID', km: 'សម្គាល់' },
   invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
   // The owner said "deleted". Nothing in this system deletes a sale -- the
   // only two `DELETE FROM sales` sites in routes/sales.ts and routes/returns.ts

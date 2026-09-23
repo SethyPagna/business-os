@@ -242,8 +242,9 @@ const cancelledFigures = {
 }
 const cancelledReport = telegram.formatShiftReport('Shop', cancelledShift, cancelledFigures, Date.parse('2026-09-04T12:00:00.000Z'))
 // SECTIONED Sep 21 2026: the state moved from a tag on the To line into the
-// report TITLE, the way the owner's reference layout states it.
-assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Cancelled / បានបោះបង់'), cancelledReport)
+// report TITLE, the way the owner's reference layout states it -- after a
+// colon since Sep 23 2026 (the owner's sample).
+assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន: Cancelled / បានបោះបង់ · 04/09/2026\n'), cancelledReport)
 // BULLETED Sep 22 2026 ("we can do bullet points"): every LABEL row opens
 // with `· `, including the two ad-hoc cancellation rows, which are composed
 // from bi() rather than the label table and so are exactly the rows a
@@ -254,11 +255,17 @@ assert.ok(cancelledReport.includes('· Reason / មូលហេតុ: Duplicate
 // number ("use dash not line"), and nothing inside it is a `•` row any more.
 assert.ok(cancelledReport.includes('-----Invoices / វិក្កយបត្រ-----\n· Total / សរុប: 3'), cancelledReport)
 assert.ok(!cancelledReport.includes(telegramLang.RULE) && !/^\d+\. /m.test(cancelledReport) && !cancelledReport.includes('•'), cancelledReport)
-for (const line of cancelledReport.split('\n')) {
+// The title (line 0) is not a row -- since Sep 23 2026 it carries a colon of
+// its own -- so the bullet rule is judged from line 1.
+for (const line of cancelledReport.split('\n').slice(1)) {
   if (!/: /.test(line)) continue
   assert.ok(line.startsWith('· '), `every label row carries the bullet; this one does not: ${line}`)
 }
-assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
+// Cancelled while OPEN: the shift was never closed, so its Close row says N/A
+// and the cancellation time has a row of its own (it rode on the To row until
+// the Sep 23 2026 layout retired From and To).
+assert.ok(cancelledReport.split('\n').includes('· Close / បិទ: N/A'), cancelledReport)
+assert.ok(cancelledReport.split('\n').includes('· Cancelled at / បោះបង់នៅ: 04/09/2026 09:30'), cancelledReport)
 assert.ok(!cancelledReport.includes('still open'), cancelledReport)
 assert.ok(!cancelledReport.includes('Counted /'), cancelledReport)
 assert.equal(telegram.shiftFilters(cancelledShift, Date.parse('2026-09-04T12:00:00.000Z')).createdTo, cancelledShift.cancelled_at)
@@ -275,7 +282,7 @@ const closedThenCancelled = {
 }
 const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCancelled, cancelledFigures, Date.parse('2026-09-05T12:00:00.000Z'))
 assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
-assert.ok(closedCancelledReport.includes('To / ទៅ: 04/09/2026 17:02'), closedCancelledReport)
+assert.ok(closedCancelledReport.split('\n').includes('· Close / បិទ: 04/09/2026 17:02'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Cancelled at / បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Closing cash / សាច់ប្រាក់បិទវេន: $75.00 · 100,000៛'), closedCancelledReport)
 assert.ok(!closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់:'), closedCancelledReport)

@@ -23,6 +23,13 @@
 // section now opens with ONE line, `-----Invoices / វិក្កយបត្រ-----`, and
 // every row inside it is a `·` row, the lists included.
 //
+// The same day the top of the report took the owner's own sample:
+// "🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · 22/09/2026", "Open/បើក:
+// 22/09/2026 08:07", "Close / បិទ: N/A", "Shop / ហាង: Leang Cosmetics",
+// "Cashier / អ្នកគិតប្រាក់: Za", "ID សម្គាល់: S-20260922-0807-Za", and "also
+// for open khmer just call បើក". A colon after the title, then Open, Close,
+// Shop, Cashier and ID; the From and To rows are gone.
+//
 // What this file checks, each one of which the PRE-REDESIGN report fails:
 //
 //   1. A HARD LINE CAP. A shift with sales, both discount cuts, expenses, a
@@ -182,13 +189,15 @@ check('no line is a sentence -- the longest is a label and a figure',
 // ---- 2. the exact lines, in all three modes --------------------------------
 assert.deepEqual(lines, [
   // The TITLE carries the state, the way the owner's reference does
-  // ("Shift Report - Open or Closed"), then the business day.
-  '🧑‍💼 Shift report / របាយការណ៍វេន — Closed / បានបិទ · 06/09/2026',
+  // ("Shift Report - Open or Closed"), then the business day -- after a
+  // colon since Sep 23 2026. Then the owner's Sep 23 identity block: the
+  // shift's two moments, the shop, the cashier and the id, in that order.
+  '🧑‍💼 Shift report / របាយការណ៍វេន: Closed / បានបិទ · 06/09/2026',
+  '· Open / បើក: 06/09/2026 08:15',
+  '· Close / បិទ: 06/09/2026 20:02',
   '· Shop / ហាង: Sunrise Mart',
-  '· ID / លេខសម្គាល់: S-0906-01',
   '· Cashier / អ្នកគិតប្រាក់: Za',
-  '· From / ពី: 06/09/2026 08:15',
-  '· To / ទៅ: 06/09/2026 20:02',
+  '· ID / សម្គាល់: S-0906-01',
   // Sep 23 2026: ONE dashed line opens each section -- no drawn rule above
   // it and no number in front of it ("use dash not line").
   '-----Invoices / វិក្កយបត្រ-----',
@@ -243,12 +252,12 @@ check('refunds are stated once, in the Sales section',
 
 // --- 'en': the English report, with no Khmer word anywhere ------------------
 assert.deepEqual(englishReport.split('\n'), [
-  '🧑‍💼 Shift report — Closed · 06/09/2026',
+  '🧑‍💼 Shift report: Closed · 06/09/2026',
+  '· Open: 06/09/2026 08:15',
+  '· Close: 06/09/2026 20:02',
   '· Shop: Sunrise Mart',
-  '· ID: S-0906-01',
   '· Cashier: Za',
-  '· From: 06/09/2026 08:15',
-  '· To: 06/09/2026 20:02',
+  '· ID: S-0906-01',
   '-----Invoices-----',
   '· Total: 24 · Cancelled: 1 · Edited: 2',
   '-----Sales-----',
@@ -283,12 +292,12 @@ check('the \'en\' mode report carries no Khmer word at all (the riel sign is a s
 // translated; only the label side changes.
 const khmerReport = render('km', () => telegram.formatShiftReport('Sunrise Mart', shift, figures, NOW))
 assert.deepEqual(khmerReport.split('\n'), [
-  '🧑‍💼 របាយការណ៍វេន — បានបិទ · 06/09/2026',
+  '🧑‍💼 របាយការណ៍វេន: បានបិទ · 06/09/2026',
+  '· បើក: 06/09/2026 08:15',
+  '· បិទ: 06/09/2026 20:02',
   '· ហាង: Sunrise Mart',
-  '· លេខសម្គាល់: S-0906-01',
   '· អ្នកគិតប្រាក់: Za',
-  '· ពី: 06/09/2026 08:15',
-  '· ទៅ: 06/09/2026 20:02',
+  '· សម្គាល់: S-0906-01',
   '-----វិក្កយបត្រ-----',
   '· សរុប: 24 · បានបោះបង់: 1 · បានកែប្រែ: 2',
   '-----ការលក់-----',
@@ -369,34 +378,68 @@ assert.deepEqual(sectionTitles(report), SIX_SECTIONS, report)
 
 // An OPEN shift has taken no closing count, so it shows the opening half and
 // no difference at all -- printing one would read as a missing-cash alarm on
-// every till still trading. The title, not a tag on the To line, says it.
+// every till still trading. The title says it: `Open / បើក` since Sep 23
+// 2026 ("also for open khmer just call បើក"), never the longer កំពុងបើក.
 const openShift = { ...shift, closed_at: null, closing_counted_usd: null, closing_counted_khr: null }
 const openReport = render('both', () => telegram.formatShiftReport('Sunrise Mart', openShift, figures, NOW))
 assert.deepEqual(sectionTitles(openReport), SIX_SECTIONS, openReport)
 check('an open shift shows the opening count and no difference against a count nobody took',
-  openReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Open / កំពុងបើក · 06/09/2026')
+  openReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · 06/09/2026')
+  && !openReport.includes('កំពុងបើក')
   && openReport.includes('· Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛')
   && !openReport.includes('Closing cash')
   && !openReport.includes('Difference'), openReport)
-// FIXED Sep 22 2026. The To line used to print `formatBusinessDateTime(now)`,
-// which on a shift opened minutes ago rendered IDENTICAL to the From line --
-// a window that reads as zero minutes long, which is what the owner pasted --
-// and on a long one rendered a closing time that never happened. It now
-// carries the same state pair the title does, so it cannot be misread as a
-// timestamp at all.
-check('an open shift states "open" on its To line instead of a closing time that never happened',
-  openReport.includes('· To / ទៅ: Open / កំពុងបើក')
-  && !openReport.includes('· To / ទៅ: 06/09/2026'), openReport)
+// FIXED Sep 22 2026, KEPT by the Sep 23 layout. The end of the window used to
+// print `formatBusinessDateTime(now)`, which on a shift opened minutes ago
+// rendered IDENTICAL to its start -- a window that reads as zero minutes
+// long, which is what the owner pasted -- and on a long one rendered a
+// closing time that never happened. An open shift's Close row says `N/A`
+// (the owner's sample), so it cannot be misread as a timestamp at all.
+check('an open shift says N/A on its Close row instead of a closing time that never happened',
+  openReport.split('\n').includes('· Close / បិទ: N/A')
+  && !/^· Close \/ បិទ: \d/m.test(openReport), openReport)
 // The defect in its own right: a shift opened one minute ago must not print
-// the same value on both bound lines.
+// the same value on both of its moments.
 const justOpened = render('both', () => telegram.formatShiftReport('Sunrise Mart', { ...openShift, opened_at: '2026-09-06T13:59:00.000Z' }, figures, NOW))
-const boundLines = justOpened.split('\n').filter((line) => /^· (From|To) \//.test(line))
-check('the From and To lines of a just-opened shift are never the same string',
-  boundLines.length === 2 && boundLines[0] !== boundLines[1], justOpened)
-// A CLOSED shift still prints its real closing timestamp -- the fix is scoped
+const momentValues = justOpened.split('\n').filter((line) => /^· (Open|Close) \//.test(line)).map((line) => line.slice(line.indexOf(': ') + 2))
+check('the Open and Close values of a just-opened shift are never the same',
+  momentValues.length === 2 && momentValues[0] === '06/09/2026 20:59' && momentValues[1] !== momentValues[0], justOpened)
+// A CLOSED shift still prints its real closing timestamp -- the N/A is scoped
 // to the open case and nothing else.
 check('a closed shift still prints its real closing time',
-  report.includes('· To / ទៅ: 06/09/2026 20:02'), report)
+  report.split('\n').includes('· Close / បិទ: 06/09/2026 20:02'), report)
+// From and To are RETIRED (Sep 23 2026), in every mode and every state: the
+// shift's two moments are Open and Close now, and a second pair beside them
+// would be the same fact twice.
+for (const [mode, text] of [['both', report], ['en', englishReport], ['km', khmerReport], ['both, open', openReport]]) {
+  check(`'${mode}': no From or To row, and the title takes a colon, never a dash`,
+    !/^· (From|To|ពី|ទៅ)( \/|:)/m.test(text) && !text.split('\n')[0].includes(' — '), text)
+}
+
+// The owner's own Sep 23 2026 sample, line for line: the same shop, day,
+// times, cashier and id, in the same order. (Single spaces where the sample
+// has doubles, and a `/` on the ID row like every other pair -- both are
+// typing in the sample, not layout.)
+const ownerSample = render('both', () => telegram.formatShiftReport('Leang Cosmetics', {
+  ...openShift, shift_code: 'S-20260922-0807-Za', business_date: '2026-09-22', opened_at: '2026-09-22T01:07:00.000Z',
+}, figures, Date.parse('2026-09-22T03:00:00.000Z')))
+assert.deepEqual(ownerSample.split('\n').slice(0, 7), [
+  '🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · 22/09/2026',
+  '· Open / បើក: 22/09/2026 08:07',
+  '· Close / បិទ: N/A',
+  '· Shop / ហាង: Leang Cosmetics',
+  '· Cashier / អ្នកគិតប្រាក់: Za',
+  '· ID / សម្គាល់: S-20260922-0807-Za',
+  '-----Invoices / វិក្កយបត្រ-----',
+], ownerSample)
+check('the owner\'s Sep 23 2026 sample renders line for line', true)
+// The ID row keeps 48 characters (40 until Sep 23 2026): the sample's id
+// carries the cashier's name after the time, and an id cut short is one
+// nobody can search for. 48 is still a cap -- a longer code stops there.
+const longCode = `S-20260922-0807-${'Sokunthearith'.repeat(5)}`
+const longIdLines = render('both', () => telegram.formatShiftReport('Sunrise Mart', { ...shift, shift_code: longCode }, figures, NOW)).split('\n')
+check('the ID row keeps 48 characters of the shift code and stops there',
+  longCode.length > 48 && longIdLines.includes(telegramLang.labeled('shift', longCode.slice(0, 48))), longIdLines.join('\n'))
 
 const partiallyRegistered = render('both', () => telegram.formatShiftReport('Sunrise Mart', {
   ...openShift, opening_float_usd: null, opening_float_khr: 0,
@@ -404,18 +447,29 @@ const partiallyRegistered = render('both', () => telegram.formatShiftReport('Sun
 check('blank opening cash stays unknown while explicit zero stays measured',
   partiallyRegistered.includes('Opening cash / សាច់ប្រាក់ដើមវេន: — · 0៛'), partiallyRegistered)
 
-// A cancelled shift is terminal, and says who cancelled it and why. The state
-// is in the title; the three provenance lines sit under the identity block.
+// A cancelled shift is terminal, and says when, by whom and why it was
+// cancelled. The state is in the title; the three provenance rows sit under
+// the identity block. A shift cancelled while OPEN was never closed, so its
+// Close row says N/A like any open shift's and the cancellation time has its
+// own row -- it used to ride on the retired To row.
 const cancelledReport = render('both', () => telegram.formatShiftReport('Sunrise Mart', {
   ...openShift, cancelled_at: '2026-09-06T04:30:00.000Z',
   cancelled_by_user_name: 'Manager', cancel_reason: 'Duplicate opening',
 }, figures, NOW))
 assert.deepEqual(sectionTitles(cancelledReport), SIX_SECTIONS, cancelledReport)
-check('a cancelled shift names the state in the title and keeps its by/reason lines',
-  cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Cancelled / បានបោះបង់ · 06/09/2026')
-  && cancelledReport.includes('Cancelled by / បោះបង់ដោយ: Manager')
-  && cancelledReport.includes('Reason / មូលហេតុ: Duplicate opening')
-  && cancelledReport.includes('To / ទៅ: 06/09/2026 11:30'), cancelledReport)
+assert.deepEqual(cancelledReport.split('\n').slice(0, 10), [
+  '🧑‍💼 Shift report / របាយការណ៍វេន: Cancelled / បានបោះបង់ · 06/09/2026',
+  '· Open / បើក: 06/09/2026 08:15',
+  '· Close / បិទ: N/A',
+  '· Shop / ហាង: Sunrise Mart',
+  '· Cashier / អ្នកគិតប្រាក់: Za',
+  '· ID / សម្គាល់: S-0906-01',
+  '· Cancelled at / បោះបង់នៅ: 06/09/2026 11:30',
+  '· Cancelled by / បោះបង់ដោយ: Manager',
+  '· Reason / មូលហេតុ: Duplicate opening',
+  '-----Invoices / វិក្កយបត្រ-----',
+], cancelledReport)
+check('a cancelled shift names the state in the title and keeps its when/by/reason rows', true)
 
 // A quiet shift drops every zero line but still states the two totals the shop
 // always wants -- a $0.00 day is a fact, not a blank -- and still prints all
@@ -428,12 +482,12 @@ const quiet = render('both', () => telegram.formatShiftReport('Sunrise Mart', { 
   cash: { usd: 0, khr: 0, needsReview: false },
 }, NOW))
 assert.deepEqual(quiet.split('\n'), [
-  '🧑‍💼 Shift report / របាយការណ៍វេន — Open / កំពុងបើក · 06/09/2026',
+  '🧑‍💼 Shift report / របាយការណ៍វេន: Open / បើក · 06/09/2026',
+  '· Open / បើក: 06/09/2026 08:15',
+  '· Close / បិទ: N/A',
   '· Shop / ហាង: Sunrise Mart',
-  '· ID / លេខសម្គាល់: S-0906-01',
   '· Cashier / អ្នកគិតប្រាក់: Za',
-  '· From / ពី: 06/09/2026 08:15',
-  '· To / ទៅ: Open / កំពុងបើក',
+  '· ID / សម្គាល់: S-0906-01',
   '-----Invoices / វិក្កយបត្រ-----',
   '· Total / សរុប: 0',
   '-----Sales / ការលក់-----',

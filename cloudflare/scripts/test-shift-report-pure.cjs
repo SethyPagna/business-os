@@ -25,7 +25,8 @@
 // What this file guards AFTER the Sep 21 layout:
 //
 //   * The ORDER the redesign fixed, at two levels: the identity block
-//     (Shop, ID, Cashier, From, To) before the six sections, and the six
+//     (Open, Close, Shop, Cashier, ID -- the owner's Sep 23 2026 sample,
+//     which replaced From and To) before the six sections, and the six
 //     sections themselves in their fixed sequence. Order is content here --
 //     a cashier reads this on a phone at closing time -- so it is asserted,
 //     not just membership, and a positive control (a deliberately swapped
@@ -272,9 +273,9 @@ console.log('PASS sections: one dashed title line each, no rule, no number, ever
 // the message) so the repeated "Total" label -- once for the invoice counts,
 // once for the expense sum -- is checked at its own occurrence each time.
 const ORDER = [
-  // The identity block, id and time inside shop/cashier the way the owner's
-  // reference orders it.
-  'Shop', 'ID', 'Cashier', 'From', 'To',
+  // The identity block in the owner's Sep 23 2026 order: the shift's two
+  // moments, then the shop, the cashier and the id.
+  'Open', 'Close', 'Shop', 'Cashier', 'ID',
   // 1. Invoices -- the one compact counts row.
   'Total',
   // 2. Sales -- Not Paid is the last of the header totals and is a positive
@@ -295,8 +296,10 @@ for (const english of ORDER) {
 // And nothing else labelled: a line with ': ' that is not on the list (and is
 // not the continuation of a row above it) is a line the layout did not budget
 // for. The list rows carry the same `·` since Sep 23 2026, so they are
-// counted too -- none of this fixture's names contains ': '.
-const labelled = lines.filter((line) => line.includes(': ') && !line.startsWith('  '))
+// counted too -- none of this fixture's names contains ': '. The title is
+// not a row: since Sep 23 2026 it carries a colon of its own (`Shift report
+// / របាយការណ៍វេន: Closed / បានបិទ`), and it is judged on its own below.
+const labelled = lines.slice(1).filter((line) => line.includes(': ') && !line.startsWith('  '))
 assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the layout did not budget for:\n${report}`)
 console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines within them, in the fixed sequence`)
 
@@ -368,10 +371,11 @@ assert.ok(!/\bCredit\b|ឥណទាន/.test(report), 'the superseded Credit wor
 assert.equal(valueOf('Opening cash'), '$50.00 · 100,000៛')
 assert.equal(valueOf('Closing cash'), '$256.00 · 100,000៛')
 
-// From/To are the shift's own moments in the project's dd/mm/yyyy 24-hour
-// convention, rendered in business local time (UTC+7): 01:15Z is 08:15 local.
-assert.equal(valueOf('From'), '04/09/2026 08:15')
-assert.equal(valueOf('To'), '04/09/2026 17:02')
+// Open and Close are the shift's own two moments in the project's dd/mm/yyyy
+// 24-hour convention, rendered in business local time (UTC+7): 01:15Z is
+// 08:15 local.
+assert.equal(valueOf('Open'), '04/09/2026 08:15')
+assert.equal(valueOf('Close'), '04/09/2026 17:02')
 console.log('PASS figures: money, both currencies, dd/mm/yyyy 24-hour local times, and credit as a positive figure')
 
 // --- 3b. the registered-cash block is a readout, not a check ----------------
@@ -571,26 +575,28 @@ for (const length of [0,1,3899,3900,3901,7800]) {
 const OPEN = { ...CLOSED, closed_at: null, closing_counted_usd: null, closing_counted_khr: null }
 const openReport = telegram.formatShiftReport('Sok Meng Shop', OPEN, FIGURES, NOW)
 const openLines = openReport.split('\n')
-const openTo = openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}To${SEP}`))
-// UPDATED Sep 22 2026. This line used to render `formatBusinessDateTime(now)`
-// -- "reported up to now" -- and the owner's paste showed what that means on
-// a shift opened minutes ago: a To identical to the From, a window that reads
-// as zero minutes long. An open shift has NO end, so the line now carries the
-// state pair instead of a timestamp, and cannot be read as one.
-assert.equal(openTo, lang.labeled('to', lang.bi('Open', 'កំពុងបើក')), `an open shift must state its state on the To line, got: ${openTo}`)
-assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(openTo), 'no timestamp may appear on an open shift\'s To line')
-assert.notEqual(openTo, openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}From${SEP}`)), 'From and To must never render identically')
+const openClose = openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Close${SEP}`))
+const openOpen = openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Open${SEP}`))
+// UPDATED Sep 22 2026, and again Sep 23. The end of the window used to render
+// `formatBusinessDateTime(now)` -- "reported up to now" -- and the owner's
+// paste showed what that means on a shift opened minutes ago: an end
+// identical to the start, a window that reads as zero minutes long. An open
+// shift has NO close, so its Close row says N/A (the owner's Sep 23 sample:
+// "Close / បិទ: N/A") instead of a timestamp, and cannot be read as one.
+assert.equal(openClose, lang.labeled('close', 'N/A'), `an open shift has no close, so its Close row says N/A, got: ${openClose}`)
+assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(openClose), 'no timestamp may appear on an open shift\'s Close row')
+assert.equal(openOpen, lang.labeled('open', '04/09/2026 08:15'), 'an open shift still states when it opened')
 // The closed report still prints a real closing timestamp -- the change is
 // scoped to the open case.
-assert.ok(/\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(lineWith('To')), `a closed shift still ends on a timestamp: ${lineWith('To')}`)
-// UPDATED Sep 21 2026: "still open" used to be a tag appended to this very To
-// line; the sectioned layout states the shift's state ONCE, in the title, so
-// repeating it here would be the redundant fact the redesign removed. The
-// exact rendered title (English, Khmer and both) is pinned in
+assert.ok(/\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/.test(lineWith('Close')), `a closed shift still ends on a timestamp: ${lineWith('Close')}`)
+// UPDATED Sep 21 2026: "still open" used to be a tag appended to the end-of-
+// window line; the sectioned layout states the shift's state ONCE, in the
+// title, so repeating it here would be the redundant fact the redesign
+// removed. The exact rendered title (English, Khmer and both) is pinned in
 // scripts/test-telegram-shift-report-pure.cjs; this only checks that an open
-// shift's title says so and stays bilingual.
-assert.ok(!openTo.includes('still open'), 'the open state moved to the title -- it must not still be repeated on the To line')
-assert.ok(openLines[0].includes('Open'), 'an open shift must say so in the title')
+// shift's title says so, in the owner's short Khmer, and stays bilingual.
+assert.ok(!openClose.includes('still open'), 'the open state moved to the title -- it must not still be repeated on the Close row')
+assert.ok(openLines[0].includes(`: ${lang.label('open')} · `), `an open shift must say so in the title, got: ${openLines[0]}`)
 assert.ok(KHMER.test(openLines[0]), 'the title is not bilingual')
 // No closing count exists yet, so neither line may appear -- a "Difference" of
 // -$256.00 on every open till would read as an alarm.
