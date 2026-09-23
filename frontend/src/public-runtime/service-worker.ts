@@ -305,6 +305,22 @@ function isValidStaticResponse(request, response) {
   return true
 }
 
+// A same-origin 200 text/html answer passes every check above and can still
+// be a page that is not this app: a Cloudflare "Just a moment..." challenge
+// interstitial, a waiting-room queue. Stored as the shell, it answers every
+// later navigation, offline too, where it can never pass. So every writer of
+// the cached shell reads the body first and keeps only a document this app
+// can boot from. id="root" is the element src/index.tsx mounts into and
+// throws without ('Missing root element'), so every document that can run
+// this app carries it -- the dev server's included, which loads
+// /src/index.tsx rather than the built /assets/index-*.js, and this worker
+// registers there too. tests/swShellContent.test.ts holds frontend/index.html
+// to this check.
+async function isAppShellDocument(response) {
+  if (!isValidDocumentResponse(response)) return false
+  return /\sid=["']root["']/.test(await response.clone().text().catch(() => ''))
+}
+
 async function mapWithConcurrency(items, concurrency, worker) {
   let nextIndex = 0
   const results = new Array(items.length)
@@ -373,7 +389,7 @@ async function precacheAppShell() {
     const request = new Request(url, { cache: 'reload' })
     const response = await fetch(request)
     const valid = url === '/' || url === '/index.html'
-      ? isValidDocumentResponse(response)
+      ? await isAppShellDocument(response)
       : isValidStaticResponse(request, response)
     if (!valid) throw new Error(`Unusable shell response: ${url}`)
     await cache.put(request, response.clone())
@@ -909,16 +925,19 @@ async function appShellFallback(request, event) {
     // worse than the fallback below.
     if (fresh && fresh.type === 'opaqueredirect') return fresh
     if (isValidDocumentResponse(fresh)) {
-      await cache.put('/index.html', fresh.clone()).catch(() => {})
+      // Served either way -- it is what the origin answered -- but a
+      // challenge interstitial is not a shell, so only the app is kept.
+      if (await isAppShellDocument(fresh)) await cache.put('/index.html', fresh.clone()).catch(() => {})
       return fresh
     }
   }
   if (cached) {
     const revalidate = fetch('/index.html', { cache: 'no-store' })
       .then(async (response) => {
-        // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
-        // error overwrite a good cached shell -- only a real 200 updates it.
-        if (isValidDocumentResponse(response)) {
+        // Do not let a Cloudflare Access/login redirect, an app-owned HTTP
+        // error or a 200 challenge interstitial overwrite a good cached
+        // shell -- only the real app shell updates it.
+        if (await isAppShellDocument(response)) {
           await cache.put('/index.html', response.clone()).catch(() => {})
         }
       })
@@ -931,7 +950,7 @@ async function appShellFallback(request, event) {
 
 async function fetchAndCacheShell(request, cache) {
   const response = await fetch(request, { cache: 'no-store' })
-  if (isValidDocumentResponse(response)) {
+  if (await isAppShellDocument(response)) {
     await cache.put('/index.html', response.clone()).catch(() => {})
   }
   return response
@@ -1071,7 +1090,7 @@ async function recoverStaleShell(event) {
   const refresh = (async () => {
     const cache = await caches.open(APP_SHELL_CACHE)
     const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null)
-    if (isValidDocumentResponse(response)) {
+    if (await isAppShellDocument(response)) {
       await cache.put('/index.html', response.clone()).catch(() => {})
     }
     await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH })
