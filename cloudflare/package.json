@@ -14,6 +14,7 @@
     "test:import-image-match": "node scripts/test-import-image-match.cjs",
     "test:zip-reader": "node scripts/test-zip-reader.cjs",
     "test:plan-tier": "node scripts/test-plan-tier-pure.cjs && node scripts/test-wrangler-config-drift-pure.cjs && node scripts/test-queue-fallback-pure.cjs && node scripts/test-plan-tier-surfaces-pure.cjs",
+    "test:native": "node scripts/run-native-suite.cjs",
     "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --local",
     "migrate:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --remote",
     "migrate:import:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os-import --local",
