@@ -20286,3 +20286,59 @@ three sessions have now published a mechanism for this and withdrawn it.**
 The conclusion is stronger than either table. `grep` cannot count CRs here at all, because its answer depends on
 something that varies between sessions and nothing in the output reveals which behaviour you got. Neither row of
 that table should be ported anywhere.
+
+## Part 628 (23 Sep 2026, coordinator wrap-up) — checkpoint 3 pushed as 31 per-fix commits, deploy blocked by a bot-challenged OAuth refresh
+
+**Ask.** "Wrap up now ... use ai council and deadcode and debloat and error skills so nothing gets broken, corrupted,
+etc... organize and done cleanly." Earlier the same day: one commit per fix, never a batch; a paid POS sale must not be
+able to pick a non-completed status; every sale edit works in every status except cancelled; keep one Downloads copy.
+
+**What changed.** `origin/main` and `codex/supplier-settlement-20260918` advanced `5b7868bd..c96d7480`: 31 commits
+composed from the certified lanes (service-worker stale shell 4 + 2 verifier-hole commits, Telegram layout/status 16,
+no-ellipsis follow-up 9), every one carrying the Fable trailer, no squash. The status docs record the checkpoint as
+PUSHED, NOT DEPLOYED (progress.md, the active-request ledger, the shift-close release note, CLAUDE_HANDOFF.md).
+
+**Not composed, archived on origin for the next checkpoint** (each certified alone, none has had the full Worker
+sweep on the composed tree): `archive/lane-sales-20260923` 6ea2bfff (POS status loophole: `saleStatusResolution.ts` in
+both packages, `insufficient_payment_for_status` 400, `cancelled_sale_read_only` on customer edits),
+`archive/lane-stockin-20260923` ff1584fe (fast stock-in idempotency, 10 commits), `archive/lane-records-phase1-20260923`
+f97d505f and `archive/lane-records-phase2-20260923` 37b855c8 (records before/after; the last three commits of each still
+carry the Opus trailer and fc1aca02 bundles two fixes — split at cherry-pick).
+
+**Verified on `c96d7480` in the isolated deploy worktree** (tree clean, public trio restored, dry-run stamp clean):
+frontend typecheck 0 errors; `verify:i18n` OK, 5903 keys; `verify:public-runtime --check` Verified ×3; `test:utils`
+521/522 with the one red (`publicRuntimeCheck.test.ts`) green solo; `vite build` OK 33.79 s; `deploy.cjs --dry-run`
+paid and `--config wrangler.free.toml` exit 0, Total Upload 3948.32 KiB / gzip 858.39 KiB, revision `c96d748024c5`,
+frontend hash `36dcfbfbed0de256`; Worker `tsc --noEmit` 0 errors; 501-file `scripts/test-*.cjs` sweep, 1 contention red
+green solo. Independent composed verifier CERTIFIED `a0acfac6`; the two later SW commits (`26fd8751`, `c96d7480`) were
+verified composed as CERTIFIED WITH EXCEPTIONS — both fixes mutation-tested (fix removed → test red), all five SW suites
+green, blast radius two hunks in `appShellFallback` plus one constant, no Worker file touched.
+
+**What was found — deploy blocker.** wrangler's OAuth refresh (`dash.cloudflare.com/oauth2/token`) answers this machine's
+egress (`2a01:4f8:10a:3519:66a::1`, colo PRG, loc DE) with a bot-challenge 403 HTML page; `api.cloudflare.com` answers
+JSON normally. Six attempts across 22–23 Sep (last Ray ID `a3f6035e88a4d2ef-FRA`). The access token expired 14 Sep; the
+refresh last worked 22 Sep. Owner action: switch egress or run `wrangler login` (or set `CLOUDFLARE_API_TOKEN`) in their
+own shell, then the coordinator deploys `c96d7480` unchanged — no remote migration is part of this checkpoint (0185–0192
+stay unapplied; the code tolerates 0192's absence). Production is unchanged at checkpoint 2.
+
+**Open tickets carried forward (reference to re-verify, not fact).**
+1. SW: a recovery navigation with *no* cached shell still awaits an unbounded `fetchAndCacheShell` fetch (blank tab on
+   a stalled origin); a *poisoned* cached shell is handled before the recovery branch by the same unbounded path.
+   Reasoned from source, not measured.
+2. SW: a 200-HTML challenge interstitial passes `isValidDocumentResponse` and is cached as the shell (pre-existing).
+3. SW: a redirect that drops `__bos_reload`, and the 403-challenge case, still end on the dead cached shell (declared).
+4. SW: the timed-out recovery fetch is not aborted (deliberate — `{signal}` downgrades navigate mode); the iOS guard now
+   matches `fetch(request)` rather than `await fetch(request)`, so fire-and-forget would pass it.
+5. SW: `89cbd787` is red alone (bisect hazard); the takeover trigger was widened; `closeBrowserFixture` 1/13 vs the
+   `lastError` loop ×11 (debloat candidate). `service-worker.ts` is outside `tsconfig include`, so typecheck never sees it.
+6. Owner decision: `Receipt.tsx` still prints `Net total:` (lines ~252/287) while Telegram retired the label.
+7. Owner decision: `PATCH /sales/:id/status` still allows completed→awaiting_payment (payment-correction reopen) versus
+   "a paid sale is completed"; the sales lane closed the POS-entry loophole only.
+8. Sales lane edited 9 pure-test allowlists; 13 NotificationCenter copy entries; native `*-native.cjs` harness has no
+   lock/retry (silent 0-byte fails under contention); `performanceBudgets` zero headroom; `Products.tsx:4254` redundant
+   fallback; unused exports `AUDIT_LARGE_VALUE_CHARS` / `summarizeLargeAuditValue`; cancelled-sale money under label.
+9. Data: `purchase_price` diff ruling; receipt queue in-memory; `assertPosCheckoutOwner` admin recovery; `sales.updated_at`
+   mixed formats (writer not located); shift 20 amendment; migration 0192 unapplied.
+
+**Not done.** Deploy (blocked above). Worktrees `lane-d`, `lane-ellipsis`, `lane-sw` removed after this push; 26 Temp
+`bos-*` fixtures still to sweep; the shared checkout `business-os-v1` is untouched and remains the one Downloads copy.
