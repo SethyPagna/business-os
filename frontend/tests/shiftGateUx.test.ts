@@ -278,6 +278,8 @@ try {
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: { id: 4 } }) }
     if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
     if (name.includes('formatters')) return { fmtDateOnly: String }
+    // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
+    if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
       listShifts: async () => ({ shifts: [historyShift], scope: 'own' }), fetchShiftHistory: async () => ({ shift: historyResult, amendments: [] }),
       closeShiftById: () => new Promise((resolve) => { resolveHistoryClose = resolve }) }
@@ -340,6 +342,7 @@ try {
       if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, user: actor, notify: (...args: any[]) => notices.push(args) }) }
       if (name.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
       if (name.includes('formatters')) return { fmtDateOnly: String }
+      if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
       if (name.includes('shiftTransport')) return { ...actualTransport, pendingShiftMutation: () => null,
         listShifts: async () => ({ shifts: [], total: 0, page: 1, scope: 'own' }),
         fetchShiftHistory: async () => { detailReads++; return { shift: fixture, amendments: [] } },

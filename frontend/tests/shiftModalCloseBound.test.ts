@@ -112,6 +112,8 @@ function openCloseForm(source: string, row: Record<string, unknown> = openRow, l
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('AppContext')) return { useApp: () => ({ t: (key: string) => key, notify: () => {}, user: { id: 7 }, fmtUSD: String, fmtKHR: String }) }
     if (name.includes('utils/formatters')) return formatters
+    // The popup's search pause; nothing here searches (shiftHistorySearch.test.ts does).
+    if (name.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     if (name.includes('shared/Modal')) return { default: () => null }
     if (name.includes('PaginationControls')) return { default: () => null, DEFAULT_PAGE_SIZE: 20 }
     if (name.includes('DateEntryInput')) return { DateTimeEntryInput: DateMarker }

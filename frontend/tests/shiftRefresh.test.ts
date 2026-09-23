@@ -60,6 +60,9 @@ async function exercise(mutant = false) {
     if (id.includes('shiftTransport')) return transport
     if (id.includes('ShiftGate')) return { SHIFT_STATE_CHANGED_EVENT: 'business-os:shift-state-changed', SHIFT_BRANCH_CHANGED_EVENT: 'business-os:shift-branch-changed' }
     if (id.includes('constants')) return { BUSINESS_TIME_ZONE: 'Asia/Phnom_Penh' }
+    // The popup's search pause. Nothing here searches, so the value passes
+    // straight through (tests/shiftHistorySearch.test.ts drives the pause).
+    if (id.includes('useDebouncedValue')) return { useDebouncedValue: (value: unknown) => value }
     return { __esModule: true, default: id }
   }).default
   let tree: any, pagerNode: any
