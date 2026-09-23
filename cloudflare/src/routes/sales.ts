@@ -2778,6 +2778,21 @@ app.patch('/:id/customer', async (c) => {
   }>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
+  // S4-41: a cancelled sale is read-only. The owner's rule for every sale
+  // edit is "all status except cancelled", and this route was the one edit
+  // surface with NO status check at all -- every other one (amendments,
+  // added lines, status changes) already refuses a cancelled sale, so a
+  // cancelled sale's customer could still be reassigned from the detail
+  // modal while its items, money and delivery were all frozen. Reassigning
+  // the buyer on a cancelled sale also rewrites that customer's purchase
+  // history to include a sale that never happened.
+  if (String(sale.sale_status || 'completed') === 'cancelled') {
+    return c.json({
+      error: 'This sale was cancelled, so its customer cannot be changed. Un-cancel it first.',
+      code: 'cancelled_sale_read_only',
+    }, 400)
+  }
+
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
   } catch (error) {
