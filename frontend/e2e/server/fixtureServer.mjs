@@ -13,6 +13,9 @@
  *  3. Request COUNTING before first paint (perf-budget.spec.ts) has to see the
  *     same request stream a real browser makes, including the ones a route
  *     handler would have swallowed.
+ *  4. A print preview window (window.open + document.write). In Chromium any
+ *     request interception in the context stalls that window's font loads,
+ *     and receipt-print.spec.ts checks exactly those fonts.
  *
  * So Tier "app" serves the REAL built dist over HTTP and answers /api/** from
  * the committed fixtures. Nothing here talks to a database, a Worker, or any
@@ -32,6 +35,8 @@
  * Control surface (never present in production, only this file):
  *   GET  /__e2e/state          -> { requests }
  *   POST /__e2e/reset          -> clear the request log
+ *   POST /__e2e/settings?scope=<id> -> seed one context's settings (settingsScopes)
+ *   GET  /__e2e/settings?scope=<id> -> { settings, writes } of that context
  *
  * The "a new build was deployed" switch is deliberately NOT part of that
  * control surface. It is the per-request cookie `e2e_sw_generation`, so each
@@ -364,7 +369,41 @@ function readSessionUser(req) {
 function settingsFor(req) {
   const cookie = req.headers.cookie || ''
   const match = /(?:^|;\s*)e2e_mobile_section_nav=(pages|sections)/.exec(cookie)
-  return match ? { ...ADMIN_SETTINGS, ui_mobile_section_nav: match[1] } : ADMIN_SETTINGS
+  const settings = match ? { ...ADMIN_SETTINGS, ui_mobile_section_nav: match[1] } : ADMIN_SETTINGS
+  const scope = readSettingsScope(req)
+  return scope ? { ...settings, ...scope.settings } : settings
+}
+
+/**
+ * Settings a context saved, served back to that context only.
+ *
+ * receipt-print.spec.ts switches the print mode and then prints with what it
+ * saved, as D1 would serve it back (see item 4 at the top for why it cannot
+ * intercept the requests instead). A context opts in with the cookie
+ * `e2e_settings_scope=<id>` -- a cookie for the same reason as the two above
+ * -- seeds its starting values with POST /__e2e/settings?scope=<id>, and reads
+ * back every save the page made with GET /__e2e/settings?scope=<id>.
+ * /__e2e/reset leaves scopes alone: another project may be mid-test in one.
+ */
+const settingsScopes = new Map()
+// routes/settings.ts METADATA_KEYS: the body keys of a save that are not settings.
+const SETTINGS_METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at'])
+const SETTINGS_UPDATED_AT = '2026-09-14 00:00:00'
+
+function readSettingsScope(req) {
+  const match = /(?:^|;\s*)e2e_settings_scope=([\w-]+)/.exec(req.headers.cookie || '')
+  return match ? settingsScopes.get(match[1]) || null : null
+}
+
+/**
+ * The sales fixture -- or, for a context with the cookie `e2e_sales_today=1`,
+ * the same sales re-dated a minute apart ending now, for a spec that opens the
+ * Sales list (which starts on today) without intercepting requests.
+ */
+function salesFor(req) {
+  if (!/(?:^|;\s*)e2e_sales_today=1(?:;|$)/.test(req.headers.cookie || '')) return ADMIN_SALES
+  const now = Date.now()
+  return ADMIN_SALES.map((sale, index) => ({ ...sale, created_at: new Date(now - index * 60_000).toISOString() }))
 }
 
 function sessionPayload(user, req) {
@@ -717,13 +756,61 @@ function handleApi(pathname, query, req, res, body) {
   if (pathname === '/api/import-jobs/queue/status') {
     return sendJson(res, 200, { import: { waiting: 0, active: 0 }, media: { waiting: 0, active: 0 } })
   }
+  // routes/settings.ts GET /meta -> { updatedAt }: the version a save sends.
+  if (pathname === '/api/settings/meta') {
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    return sendJson(res, 200, { updatedAt: SETTINGS_UPDATED_AT })
+  }
   if (pathname === '/api/settings') {
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    if (req.method === 'POST') {
+      // routes/settings.ts POST / -> { updatedAt, keys }; a scoped context keeps what it saved.
+      const updates = Object.fromEntries(Object.entries(body || {}).filter(([key]) => !SETTINGS_METADATA_KEYS.has(key)))
+      const scope = readSettingsScope(req)
+      if (scope) {
+        scope.writes.push(body)
+        Object.assign(scope.settings, updates)
+      }
+      return sendJson(res, 200, { updatedAt: SETTINGS_UPDATED_AT, keys: Object.keys(updates) })
+    }
     return sendJson(res, 200, settingsFor(req))
   }
   if (pathname === '/api/sales' || pathname === '/api/sales/search') {
     if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
-    return sendJson(res, 200, ADMIN_SALES)
+    return sendJson(res, 200, salesFor(req))
+  }
+  // The Sales page's report calls, each answering its route's EMPTY state (the
+  // same rule as the shell's first-paint calls above): this store's sales are
+  // for the list and the receipt, and no spec reads these figures.
+  //   sales.ts GET /stats        -> the list's count and revenue header
+  //   sales.ts GET /stats-strip  -> the strip: totals, payment and status mix, returns
+  //   fees.ts  GET /report       -> expenses over the range
+  if (pathname === '/api/sales/stats' || pathname === '/api/sales/stats-strip' || pathname === '/api/fees/report') {
+    if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed' }, { Allow: 'GET' })
+    if (!sessionUser) return sendJson(res, 401, { error: 'Not authenticated', code: 'invalid_session' })
+    if (pathname === '/api/sales/stats') {
+      return sendJson(res, 200, { total_count: 0, revenue_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false })
+    }
+    if (pathname === '/api/fees/report') {
+      return sendJson(res, 200, {
+        startDate: String(query.get('from') || query.get('startDate') || '').trim(),
+        endDate: String(query.get('to') || query.get('endDate') || '').trim(),
+        totals: { count: 0, amount_usd: 0, amount_khr: 0 }, days: [], by_type: [], by_category: [],
+      })
+    }
+    const startDate = String(query.get('startDate') || '').slice(0, 10)
+    const endDate = String(query.get('endDate') || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return sendJson(res, 400, { error: 'startDate and endDate (YYYY-MM-DD) are required' })
+    }
+    // sales.ts LOCAL_TIME_RE
+    const time = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+    const timed = time.test(query.get('startTime') || '') && time.test(query.get('endTime') || '')
+    return sendJson(res, 200, {
+      startDate, endDate,
+      startTime: timed ? query.get('startTime') : null, endTime: timed ? query.get('endTime') : null,
+      totals: EMPTY_SALES_TOTALS, by_payment: [], by_status: [], returns: { count: 0, refund_usd: 0 },
+    })
   }
 
   // Anything the specs have not pinned. 404 with an explicit marker rather than
@@ -731,6 +818,17 @@ function handleApi(pathname, query, req, res, body) {
   // anyone noticing, and console-hygiene.spec.ts asserts on the log this
   // produces.
   return sendJson(res, 404, { error: 'No e2e fixture for this route', code: 'e2e_unmocked', path: pathname })
+}
+
+function readJsonBody(req, done) {
+  const chunks = []
+  req.on('data', (chunk) => chunks.push(chunk))
+  req.on('end', () => {
+    let parsed = null
+    const raw = Buffer.concat(chunks).toString('utf8')
+    if (raw) { try { parsed = JSON.parse(raw) } catch { parsed = null } }
+    done(parsed)
+  })
 }
 
 const server = createServer((req, res) => {
@@ -746,6 +844,18 @@ const server = createServer((req, res) => {
     requestLog = []
     return sendJson(res, 200, { requests: [] })
   }
+  if (pathname === '/__e2e/settings') {
+    const scope = url.searchParams.get('scope') || ''
+    if (!/^[\w-]+$/.test(scope)) return sendJson(res, 400, { error: 'scope is required' })
+    if (req.method === 'POST') {
+      readJsonBody(req, (seed) => {
+        settingsScopes.set(scope, { settings: { ...seed }, writes: [] })
+        sendJson(res, 200, settingsScopes.get(scope))
+      })
+      return undefined
+    }
+    return sendJson(res, 200, settingsScopes.get(scope) || null)
+  }
 
   if (pathname.startsWith('/api/')) {
     if (req.method === 'GET' || req.method === 'HEAD') {
@@ -755,14 +865,7 @@ const server = createServer((req, res) => {
     // route stays synchronous and cannot forget to drain the stream (an
     // undrained request body stalls keep-alive connections, which shows up
     // much later as a mystery timeout in an unrelated spec).
-    const chunks = []
-    req.on('data', (chunk) => chunks.push(chunk))
-    req.on('end', () => {
-      let parsed = null
-      const raw = Buffer.concat(chunks).toString('utf8')
-      if (raw) { try { parsed = JSON.parse(raw) } catch { parsed = null } }
-      handleApi(pathname, url.searchParams, req, res, parsed)
-    })
+    readJsonBody(req, (parsed) => handleApi(pathname, url.searchParams, req, res, parsed))
     return undefined
   }
 
