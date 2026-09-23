@@ -4385,7 +4385,10 @@ export default function POS() {
                 // under its own name with the reason: Not Paid once the tender
                 // already covers the sale (it would be recorded as paid), a
                 // paid status while the tender is short. Relabelling Not Paid
-                // as the status it resolves to listed "Completed" twice.
+                // as the status it resolves to listed "Completed" twice. Only
+                // the name fades; the reason stays in the warning colours at
+                // full strength (a whole-button fade left it near 1.5:1 on a
+                // phone), as the greyed warehouse pill's notice does.
                 const resolved = resolvePosSaleStatus(status)
                 const paidInFull = resolved !== status
                 const unavailable = paidInFull || (status !== 'awaiting_payment' && !posTenderAllowsPaidStatus)
@@ -4395,9 +4398,9 @@ export default function POS() {
                   disabled={loading || unavailable}
                   data-pos-status-option={status}
                   data-pos-status-records={resolved}
-                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{label}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{paidInFull
+                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:bg-gray-50 dark:disabled:bg-gray-900/40 disabled:cursor-not-allowed">
+                  <div className={`font-semibold text-sm ${unavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-gray-200'}`}>{label}</div>
+                  <div className={`text-xs mt-0.5 ${unavailable ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>{paidInFull
                     ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it cannot be recorded as Not Paid.')
                     : unavailable ? (t('insufficient_amount') || 'Amount paid is less than total') : desc}</div>
                 </button>

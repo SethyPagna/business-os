@@ -102,7 +102,13 @@ runTest('the status picker greys out the options the tender rules out, under the
   assert.match(option, /const unavailable = paidInFull \|\| \(status !== 'awaiting_payment' && !posTenderAllowsPaidStatus\)/)
   assert.match(option, /disabled=\{loading \|\| unavailable\}/, 'a ruled-out option cannot be tapped')
   assert.match(option, /disabled:cursor-not-allowed/)
-  assert.match(option, /<div className="font-semibold[^"]*">\{label\}<\/div>/, 'every option keeps its own name')
+  assert.match(option, /<div className=\{`font-semibold text-sm \$\{unavailable \? 'text-gray-400 dark:text-gray-500' : [^}]*\}`\}>\{label\}<\/div>/,
+    'every option keeps its own name, faded when ruled out')
+  // The reason is why the option stays visible: gray-400 under a whole-button
+  // opacity-50 fade works out to about 1.5:1 against the white sheet.
+  assert.doesNotMatch(option, /disabled:opacity-/, 'a whole-button fade takes the reason down with it')
+  assert.match(option, /\$\{unavailable \? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'\}/,
+    'the reason reads in the warning colours at full strength')
   assert.doesNotMatch(option, /getPosStatusLabel\(resolved/, 'relabelling Not Paid listed "Completed" twice')
   assert.match(option, /\{paidInFull\s*\?\s*\(t\('pos_status_paid_resolved_desc'\)/)
   assert.match(option, /: unavailable \? \(t\('insufficient_amount'\)/)
