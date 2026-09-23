@@ -529,22 +529,58 @@ export function bi(en: string, km: string): string {
 }
 
 /**
- * The first `max` characters of `text`, counted as CODE POINTS.
+ * The first `max` code points of `text`, cut only where a character ends.
  *
- * Every cap on text the bot sends goes through here: lib/telegram.ts's
- * cleanLine, and the command and the date a reply echoes back. `slice` counts
- * UTF-16 units, and an emoji -- any character past U+FFFF -- is two of them,
- * so a cut landing between the two left half a character behind: a lone
+ * Every cap on text the bot sends goes through here (lib/telegram.ts's
+ * cleanLine, and the command and the date a reply echoes back), and so does
+ * the cashier part of a shift ID (routes/shifts.ts shiftCodeBase), which is
+ * stored once and never rewritten.
+ *
+ * `slice` counts UTF-16 units, and an emoji -- any character past U+FFFF -- is
+ * two of them, so a cut there can leave half a character behind: a lone
  * surrogate, which has no UTF-8 form, so Telegram can only refuse the message
- * or print a broken glyph in its place. Counted this way a cut only ever falls
- * BETWEEN two characters. (A Khmer vowel sign is a code point of its own, so a
- * cut can still part one from its consonant -- only on text longer than its
- * cap, and what is left is still valid text.)
+ * or print a broken glyph in its place. Counting code points fixes that, but a
+ * code point is still not what a reader calls a character: a Khmer vowel sign
+ * or subscript (coeng), the halves of a flag and the parts of an emoji joined
+ * by U+200D are each code points of their own. "ស្រស់" cut after its fourth
+ * code point reads "ស្រស" -- a different word.
+ *
+ * So the budget stays in code points (every caller's length bound is
+ * unchanged) and the cut keeps whole grapheme clusters: the result never has
+ * more than `max` code points and never ends inside a character. A cluster
+ * that would cross the cap is dropped whole. Where Intl.Segmenter is missing
+ * the cut falls back to code points, which is still valid text.
  */
+let graphemeSegmenter: Intl.Segmenter | null | undefined
+
+function graphemes(): Intl.Segmenter | null {
+  if (graphemeSegmenter === undefined) {
+    graphemeSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+  }
+  return graphemeSegmenter
+}
+
+function codePoints(text: string): number {
+  let count = 0
+  for (const _ of text) count += 1
+  return count
+}
+
 export function firstCharacters(text: string, max: number): string {
   // Text of at most `max` UTF-16 units holds at most `max` code points, so an
-  // ordinary line never builds the array.
-  return text.length > max ? Array.from(text).slice(0, max).join('') : text
+  // ordinary line never segments.
+  if (text.length <= max) return text
+  const segmenter = graphemes()
+  if (!segmenter) return Array.from(text).slice(0, max).join('')
+  let kept = ''
+  let used = 0
+  for (const { segment } of segmenter.segment(text)) {
+    const size = codePoints(segment)
+    if (used + size > max) break
+    kept += segment
+    used += size
+  }
+  return kept
 }
 
 /**

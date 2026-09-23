@@ -71,6 +71,7 @@ async function main() {
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'), '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'), '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', user); await next() } }, '../lib/permissions': permissions,
     '../lib/audit': { audit: async () => { throw new Error('shift writes must use the atomic audit batch') } },
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
     // This fixture has no sales/fees/returns tables -- it is the permission
     // boundary under test, not the drawer arithmetic (that is

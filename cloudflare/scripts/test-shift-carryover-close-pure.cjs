@@ -128,6 +128,7 @@ function harness(sqlite) {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
     '../lib/shiftReconciliation': shiftReconciliation,
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async (_env, id) => { state.reports.push(id); return true } },
   })
   const app = route.default || route

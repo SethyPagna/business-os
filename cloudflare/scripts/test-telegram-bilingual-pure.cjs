@@ -492,7 +492,15 @@ assert.ok(emojiDate.message.includes(`"x${'😀'.repeat(29)}"`) && !LONE_SURROGA
 // The one helper both of them cut with.
 assert.equal(lang.firstCharacters(`x${'😀'.repeat(3)}`, 3), `x${'😀'.repeat(2)}`, 'the cap counts characters')
 assert.equal(lang.firstCharacters('Za', 3), 'Za', 'text under its cap is untouched')
-console.log('PASS character cut: a capped name and an echoed date never end on half an emoji')
+// The budget is code points but the cut keeps whole characters: a Khmer vowel
+// sign or subscript, a flag's two halves and the parts of a joined emoji each
+// count on their own and are never parted. Cut by code points, "ស្រស់" after
+// its fourth read "ស្រស" -- another word.
+assert.equal(lang.firstCharacters('ស្រស់ស្រស់', 4), 'ស្រ', 'a Khmer word loses whole characters, never its final sign')
+assert.equal(lang.firstCharacters('ស្រស់'.repeat(5), 24), `${'ស្រស់'.repeat(4)}ស្រ`)
+assert.equal(lang.firstCharacters(`a${'🇰🇭'.repeat(12)}`, 24), `a${'🇰🇭'.repeat(11)}`, 'no half flag')
+assert.equal(lang.firstCharacters('👨‍👩‍👧'.repeat(6), 24), '👨‍👩‍👧'.repeat(4), 'no emoji family cut at a joiner')
+console.log('PASS character cut: a capped name and an echoed date never end on half a character')
 
 // --- 5. the command reference -----------------------------------------------
 
