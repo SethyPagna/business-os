@@ -21,7 +21,10 @@ for(const [sale,settings,reason,tax] of [[basis,{tax_enabled:1,tax_rate:10},'rec
  const f=h.fixture({beforeBatch(db){if(race){race=false;db.prepare("UPDATE settings SET value='0' WHERE key='tax_enabled'").run()}}})
  f.raw.prepare("INSERT INTO settings(key,value) VALUES('tax_enabled','1'),('tax_rate','10')").run()
  const item=key=>({product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:key,pricing_source:'selling',pricing_quote:{gross_usd:9.5,product_discount_usd:0,manual_discount_usd:0,total_usd:9.5,total_khr:38000}})
- const created=await h.postSale(f.route,{...h.request('header-sale'),money_precision_version:1,tax_usd:.95,items:[item('original')]})
+ // S4-41: POST /sales refuses a Completed sale its tender does not cover. This
+ // sale adds $0.95 tax to the $9.50 line, so it is paid $10.45, not the base
+ // request's $9.50.
+ const created=await h.postSale(f.route,{...h.request('header-sale'),money_precision_version:1,tax_usd:.95,amount_paid_usd:10.45,items:[item('original')]})
  assert.equal(created.status,200,JSON.stringify(created.body))
  const sale=created.body.sale
  const send=async body=>{const response=await h.app.request(`/${sale.id}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)},{DB:f.route},h.executionCtx);return {status:response.status,body:await response.json()}}
