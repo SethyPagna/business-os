@@ -55,4 +55,5 @@ const fromRoutes = (specifier) => loadPure(resolveTs(path.resolve(SRC, 'routes',
 
 module.exports = {
   '../lib/businessDateWindow': fromRoutes('../lib/businessDateWindow'),
+  '../lib/portalPosts': fromRoutes('../lib/portalPosts'),
 }

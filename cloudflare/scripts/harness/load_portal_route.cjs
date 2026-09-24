@@ -1,6 +1,6 @@
 // Loads the REAL src/routes/portal.ts (transpiled, not reimplemented) for
 // the pure tests that only call its exported pure functions
-// (buildPortalConfig, normalizePortalPromoItems, ...). Route registration
+// (buildPortalConfig, ...). Route registration
 // runs at module load; no imported function is invoked until a handler
 // runs, and these tests never run a handler -- so every dependency that
 // would need a platform (D1, KV, R2, the Durable Object hub, the AI
@@ -8,7 +8,7 @@
 // calls (safeLinkUrl, actorSnapshot, ...) are loaded for real.
 //
 // Shared by test-portal-public-url-pure.cjs and
-// test-portal-promo-items-link-pure.cjs so the stub list exists once.
+// test-portal-posts-language-pure.cjs so the stub list exists once.
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')

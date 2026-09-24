@@ -28,6 +28,8 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
 import { businessToday } from '../lib/businessDateWindow'
+import type { PromotionRule } from '../lib/promotionRules'
+import { PORTAL_POSTS_SETTING_KEY, hasDiscountPost, portalPromoCards, publicPortalPosts, readPortalPosts } from '../lib/portalPosts'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -69,56 +71,6 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
       }
     })
     .filter((item) => item.question && item.answer)
-}
-
-// The editor's "Promotions and posts" cards (customer_portal_promo_items,
-// serialised by frontend portalEditorUtils.ts's serializePromoItems). Same
-// field set the storefront's CatalogProductsSection reads; a card links to
-// a product (linkProductId, opened in the product detail flyout) OR to a
-// URL, and BOTH of the card's URLs -- the link it navigates to and the image
-// it renders -- are sanitised ONCE here with the same allowlist the
-// announcement strip's link_url goes through (lib/safeLinkUrl.ts), so an
-// unsafe value stored before that guard existed can never reach a visitor.
-//
-// mediaUrl goes through the same allowlist as linkUrl rather than a looser
-// image-only rule: a real card image is either an uploaded /uploads/... path
-// or an https:// URL, which is exactly what the allowlist admits, and an
-// <img src> is not a harmless place for javascript:/data:/protocol-relative
-// values either (a data: document behind an onerror, a //evil.example beacon
-// that leaks every visitor's IP and referrer to a third party).
-//
-// Malformed JSON fails closed to no cards, like the FAQ above.
-export function normalizePortalPromoItems(value: unknown) {
-  let parsed: unknown = value
-  if (typeof value === 'string') {
-    try {
-      parsed = JSON.parse(value)
-    } catch (_) {
-      return []
-    }
-  }
-  if (!Array.isArray(parsed)) return []
-
-  return parsed
-    .slice(0, 50)
-    .map((item, index) => {
-      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      const text = (key: string) => String(row[key] || '').trim()
-      const linkProductId = Number.parseInt(String(row.linkProductId || ''), 10)
-      return {
-        id: text('id') || `promo-${index + 1}`,
-        eyebrow: text('eyebrow'),
-        title: text('title'),
-        subtitle: text('subtitle'),
-        body: text('body'),
-        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
-        ctaLabel: text('ctaLabel'),
-        linkUrl: normalizeSafeLinkUrl(row.linkUrl) || '',
-        linkProductId: Number.isFinite(linkProductId) && linkProductId > 0 ? linkProductId : null,
-        linkProductName: text('linkProductName'),
-      }
-    })
-    .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
 }
 
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
@@ -273,17 +225,18 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showFaq: normalizeBoolean(settings.customer_portal_show_faq, true),
     faqTitle: settings.customer_portal_faq_title || 'Frequently asked questions',
     faqItems: normalizePortalFaqItems(settings.customer_portal_faq_items),
-    // The editor's "Promotions and posts" cards. Same "editor saves it,
+    // The Website Editor's posts section. Same "editor saves it,
     // buildPortalConfig never sent it" gap as the toggles and contact
     // blocks below: PublicCatalogPage.tsx read displayConfig.promoItems /
     // promotionsTitle / promotionsIntro / showPromotions, and the live
     // /config never carried any of them, so the cards (and every product
     // link on them) only ever showed in the editor's own preview. An empty
-    // title lets the storefront use its localised "Featured offers".
+    // title lets the storefront use its localised "Featured offers". The
+    // posts themselves are added by withPublicPosts, the one place that has
+    // the promotion rules a Discount post needs.
     showPromotions: normalizeBoolean(settings.customer_portal_show_promotions, true),
     promotionsTitle: settings.customer_portal_promotions_title || '',
     promotionsIntro: settings.customer_portal_promotions_intro || '',
-    promoItems: normalizePortalPromoItems(settings.customer_portal_promo_items),
     showPrices: normalizeBoolean(settings.customer_portal_show_prices, true),
     showOutOfStockProducts: normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true),
     // Master switch for the In Stock/Low Stock/Out of Stock badge on each
@@ -819,11 +772,27 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
   return `portal-query-v1:${productsVersion}:${settingsVersion}`
 }
 
+// The Website Editor's Live posts on the public config (lib/portalPosts.ts):
+// `posts` is what the storefront renders; `promoItems` is the same list in
+// the v1 card shape for a storefront bundle cached before posts existed.
+// A Discount post needs the rule set the POS prices with: /bootstrap passes
+// the one its catalog already loaded, and /config reads it only when a
+// Discount post exists. Post and rule writes bump the settings and products
+// versions this response is cached under; a post reaching its start or end
+// day, or a Story its 24 hours, shows within the cache TTL.
+async function withPublicPosts<T extends object>(env: Env, settings: SettingsMap, config: T, activeRules?: PromotionRule[]) {
+  const nowMs = Date.now()
+  const stored = readPortalPosts(settings[PORTAL_POSTS_SETTING_KEY])
+  const rules = activeRules ?? (hasDiscountPost(stored) ? await loadActivePromotionRules(getDb(env), new Date(nowMs)) : [])
+  const posts = publicPortalPosts(stored, rules, nowMs)
+  return { ...config, posts, promoItems: portalPromoCards(posts) }
+}
+
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    return buildPortalConfig(settings, c.env)
+    return withPublicPosts(c.env, settings, buildPortalConfig(settings, c.env))
   }))
 })
 
@@ -831,12 +800,12 @@ app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    const config = buildPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
       buildPortalMeta(c.env, showOutOfStockProducts),
       buildPortalCatalog(c.env, showOutOfStockProducts),
     ])
+    const config = await withPublicPosts(c.env, settings, buildPortalConfig(settings, c.env), catalog.promotion_rules)
     return {
       config,
       meta,
