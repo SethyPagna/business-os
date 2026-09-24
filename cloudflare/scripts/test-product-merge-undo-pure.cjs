@@ -578,7 +578,9 @@ async function run() {
     assert.match(productsSrc, /const reparentedMovementIds = byTable\('inventory_movements'\)/)
     assert.match(snapshotSrc, /rfid_confirmed_qty FROM branch_stock WHERE product_id = @id/)
     assert.match(productsSrc, /const adjustmentMovementIds =/)
-    assert.match(productsSrc, /registerMergeFold\(foldDuplicateProductInto\)/)
+    // Redo runs the real fold, passing the Resolve grid's keeper choice (N1/N4)
+    // through to the fold's own slot (behaviour: test-product-resolve-keep-merge-native.cjs).
+    assert.match(productsSrc, /registerMergeFold\(\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice\) => \(\s*foldDuplicateProductInto\(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice\)/)
     assert.match(productsSrc, /buildAtomicMergeHistoryStatements\(user, reversal, atomicHistory\.operationId, auditDetails\)/)
     assert.match(productsSrc, /await finalizeAtomicMergeHistory\(env, atomicHistory\.operationId, reversal, db\)/)
     assert.match(appliersSrc, /VALUES\('products','product',@entityId,@label,@undoLabel,@redoLabel,0,'recorded'/)

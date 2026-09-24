@@ -1,38 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
-import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
-import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
+import ResolveModal, { type ResolveDraft } from '../shared/ResolveModal.tsx'
+import { contactMergeRequest, dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
+import type { ContactDuplicateCluster, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
+import { contactHistoryParts, createContactResolveAdapter } from './contactResolveAdapter.ts'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
 import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems } from '../shared/PaginationControls.tsx'
+import {
+  RESTORE_WORK_EVENT,
+  consumePendingRestore,
+  markRestoreHandled,
+  minimizeWork,
+  reparkDeniedRestore,
+  type MinimizedWorkEntry,
+} from '../../utils/minimizedWork.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-// This page's own tab ids (Contacts.tsx) differ from ContactTableKind
-// (contactDuplicates.ts / the API) only in the delivery-contacts case --
-// 'delivery_contacts' there vs 'delivery' here. TABLE_TO_TAB below is the
-// one place that mapping happens.
-type ContactTabId = 'customers' | 'suppliers' | 'delivery' | 'duplicates'
 
 interface DuplicatesTabProps {
   t: TranslateFn
   notify: NotifyFn
   active?: boolean
-  onResolve?: (tab: ContactTabId, name: string) => void
   includeSuppliers?: boolean
 }
 
-const TABLE_TO_TAB: Record<ContactTableKind, ContactTabId> = {
-  customers: 'customers',
-  suppliers: 'suppliers',
-  delivery_contacts: 'delivery',
-}
+// The group open in the Resolve grid, and the choices a restored chip brings back.
+type ResolveTarget = { table: ContactTableKind; cluster: ContactDuplicateCluster; draft?: ResolveDraft }
+const TABLE_KINDS: ReadonlySet<string> = new Set<ContactTableKind>(['customers', 'suppliers', 'delivery_contacts'])
 
 // Dismissals now persist server-side (routes/contacts.ts's POST
 // .../duplicates/dismiss, backed by migrations/0034 -- see
@@ -88,38 +89,26 @@ const SEVERITY_TEXT: Record<ContactDuplicateSeverity, string> = {
 }
 
 function ClusterCard({
-  cluster, t, table, dismissing, merging, selected, selectable, canResolveConflicts, canMergeDuplicates, onToggleSelect, onResolve, onDismiss, onReopen, onMergeInto,
+  cluster, t, dismissing, selected, selectable, canResolveConflicts, canMergeDuplicates, onToggleSelect, onResolve, onDismiss, onReopen,
 }: {
   cluster: ContactDuplicateCluster
   t: TranslateFn
-  table: ContactTableKind
   dismissing: boolean
-  merging: boolean
   selected: boolean
   selectable: boolean
   canResolveConflicts: boolean
   canMergeDuplicates: boolean
   onToggleSelect: () => void
-  onResolve: (name: string) => void
+  onResolve: () => void
   onDismiss: () => void
   onReopen: () => void
-  onMergeInto: (keeper: ContactDuplicateClusterEntry) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
-  // Every conflict action uses the shared review dialog. It shows the current
-  // and resulting state before committing instead of relying on a hidden
-  // second click, which was easy to miss and gave no account of what would
-  // happen to every candidate in a multi-record cluster.
-  const [pendingAction, setPendingAction] = useState<
-    | { kind: 'merge'; keeper: ContactDuplicateClusterEntry }
-    | { kind: 'dismiss' }
-    | { kind: 'reopen' }
-    | null
-  >(null)
-  const busy = dismissing || merging
-  const mergeTargets = pendingAction?.kind === 'merge'
-    ? cluster.contacts.filter((contact) => contact.id !== pendingAction.keeper.id)
-    : []
+  // Merging happens in the Resolve grid (one button per group, R12). Keeping a
+  // group separate and reopening it use the shared review dialog, which shows
+  // the state before and after instead of relying on a hidden second click.
+  const [pendingAction, setPendingAction] = useState<{ kind: 'dismiss' } | { kind: 'reopen' } | null>(null)
+  const busy = dismissing
 
   return (
     <div className={`rounded-xl border px-3 py-2.5 ${SEVERITY_STYLE[cluster.severity]} ${busy ? 'opacity-60' : ''}`}>
@@ -169,90 +158,55 @@ function ClusterCard({
         </div>
       </div>
       <div className="space-y-1">
-        {cluster.contacts.map((contact) => {
-          return (
-            <div key={contact.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-sm">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="font-medium text-gray-900 dark:text-white">{contact.name || `#${contact.id}`}</span>
-                {contact.phone ? <span className="text-xs text-gray-500 dark:text-gray-400">{contact.phone}</span> : null}
-                {contact.membershipNumber ? <span className="text-xs text-gray-400">{contact.membershipNumber}</span> : null}
-                {/* Linked-history at a glance -- these are exactly what "Keep
-                    this" MOVES onto the survivor on merge (routes/contacts.ts
-                    repoints them), and why a raw delete of a record isn't
-                    offered here: it would orphan them. Only shown when > 0 so
-                    a clean record stays uncluttered. */}
-                {contact.history ? (() => {
-                  const h = contact.history
-                  const chips: string[] = []
-                  if (h.salesCount > 0) chips.push(`${h.salesCount} ${t('sales') || 'Sales'}`)
-                  if (h.returnsCount > 0) chips.push(`${h.returnsCount} ${t('returns') || 'Returns'}`)
-                  if ((h.pointsBalance ?? 0) > 0) chips.push(`${h.pointsBalance} ${t('points') || 'points'}`)
-                  return chips.map((chip) => (
-                    <span key={chip} className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500 dark:bg-white/10 dark:text-gray-400">{chip}</span>
-                  ))
-                })() : null}
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1">
-                {canMergeDuplicates && cluster.contacts.length >= 2 ? (
-                  <button
-                    type="button"
-                    onClick={() => setPendingAction({ kind: 'merge', keeper: contact })}
-                    disabled={busy}
-                    title={t('merge_into_hint') || 'Keep this one, merge the other candidate(s) into it'}
-                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
-                  >
-                    <Merge className="h-3 w-3" />
-                    {t('keep_this_one') || 'Keep this'}
-                  </button>
-                ) : null}
-                {contact.name ? (
-                  <button
-                    type="button"
-                    onClick={() => onResolve(contact.name as string)}
-                    title={t('resolve_duplicate_hint') || `Open ${table} filtered to this name to edit by hand`}
-                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-[11px] font-medium text-blue-600 transition hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                  >
-                    <ArrowRightCircle className="h-3 w-3" />
-                    {t('resolve') || 'Resolve'}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          )
-        })}
+        {cluster.contacts.map((contact) => (
+          <div key={contact.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+            <span className="font-medium text-gray-900 dark:text-white">{contact.name || `#${contact.id}`}</span>
+            {contact.phone ? <span className="text-xs text-gray-500 dark:text-gray-400">{contact.phone}</span> : null}
+            {contact.membershipNumber ? <span className="text-xs text-gray-400">{contact.membershipNumber}</span> : null}
+            {/* Linked history at a glance: what Resolve moves onto the kept
+                record (routes/contacts.ts repoints it), and why a raw delete of
+                a record is not offered here: it would orphan it. Only counts
+                above zero show, so a clean record stays uncluttered. */}
+            {contactHistoryParts(contact.history, t).map((chip) => (
+              <span key={chip} className="rounded bg-gray-100 px-1 py-0.5 text-[10px] text-gray-500 dark:bg-white/10 dark:text-gray-400">{chip}</span>
+            ))}
+          </div>
+        ))}
       </div>
+      {canMergeDuplicates && cluster.contacts.length >= 2 ? (
+        <div className="mt-2 flex justify-end border-t border-black/5 pt-1.5 dark:border-white/10">
+          <button
+            type="button"
+            onClick={onResolve}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium leading-5 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+          >
+            <Merge className="h-3.5 w-3.5" />
+            {t('resolve') || 'Resolve'}
+          </button>
+        </div>
+      ) : null}
       {pendingAction ? (
         <ConfirmDialog
-          title={pendingAction.kind === 'merge'
-            ? (t('confirm_merge') || 'Confirm merge')
-            : pendingAction.kind === 'dismiss'
-              ? (t('confirm_keep') || 'Confirm keep separate')
-              : (t('confirm_reopen') || 'Confirm reopen')}
-          message={pendingAction.kind === 'merge'
-            ? (t('merge_review_message') || 'Review every candidate before merging.')
-            : pendingAction.kind === 'dismiss'
-              ? (t('keep_review_message') || 'These records will remain separate and leave the review queue.')
-              : (t('reopen_review_message') || 'This group will return to the review queue.')}
-          items={pendingAction.kind === 'merge'
+          title={pendingAction.kind === 'dismiss'
+            ? (t('confirm_keep') || 'Confirm keep separate')
+            : (t('confirm_reopen') || 'Confirm reopen')}
+          message={pendingAction.kind === 'dismiss'
+            ? (t('keep_review_message') || 'These records will remain separate and leave the review queue.')
+            : (t('reopen_review_message') || 'This group will return to the review queue.')}
+          items={pendingAction.kind === 'dismiss'
             ? [
-                { label: t('before') || 'Before', value: cluster.contacts.map((contact) => contact.name || `#${contact.id}`).join(' · ') },
-                { label: t('after') || 'After', value: `${pendingAction.keeper.name || `#${pendingAction.keeper.id}`} keeps the combined history` },
-                { label: t('merged_records') || 'Merged records', value: mergeTargets.map((contact) => contact.name || `#${contact.id}`).join(' · ') },
+                { label: t('before') || 'Before', value: t('needs_review') || 'Needs review' },
+                { label: t('after') || 'After', value: t('kept_separate') || 'Kept as separate records' },
               ]
-            : pendingAction.kind === 'dismiss'
-              ? [
-                  { label: t('before') || 'Before', value: t('needs_review') || 'Needs review' },
-                  { label: t('after') || 'After', value: t('kept_separate') || 'Kept as separate records' },
-                ]
-              : [
-                  { label: t('before') || 'Before', value: t('kept_separate') || 'Kept as separate records' },
-                  { label: t('after') || 'After', value: t('needs_review') || 'Needs review' },
-                ]}
-          confirmLabel={pendingAction.kind === 'merge' ? (t('merge') || 'Merge') : pendingAction.kind === 'dismiss' ? (t('keep') || 'Keep separate') : (t('reopen') || 'Reopen')}
+            : [
+                { label: t('before') || 'Before', value: t('kept_separate') || 'Kept as separate records' },
+                { label: t('after') || 'After', value: t('needs_review') || 'Needs review' },
+              ]}
+          confirmLabel={pendingAction.kind === 'dismiss' ? (t('keep') || 'Keep separate') : (t('reopen') || 'Reopen')}
           working={busy}
           onConfirm={() => {
-            if (pendingAction.kind === 'merge') onMergeInto(pendingAction.keeper)
-            else if (pendingAction.kind === 'dismiss') onDismiss()
+            if (pendingAction.kind === 'dismiss') onDismiss()
             else onReopen()
             setPendingAction(null)
           }}
@@ -264,13 +218,17 @@ function ClusterCard({
   )
 }
 
-export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
+export default function DuplicatesTab({ t, notify, active = true, includeSuppliers = true }: DuplicatesTabProps) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
   const canBulkContacts = can('contacts', 'bulk')
   const canBulkContactsRef = useRef(canBulkContacts)
   canBulkContactsRef.current = canBulkContacts
   const canMergeDuplicates = canBulkContacts && canResolveConflicts && can('contacts', 'merge')
+  const canMergeDuplicatesRef = useRef(canMergeDuplicates)
+  canMergeDuplicatesRef.current = canMergeDuplicates
+  const tRef = useRef(t)
+  tRef.current = t
   // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
   // the supplier duplicates scan isn't offered (its endpoint would 403
   // server-side anyway).
@@ -297,20 +255,29 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // decision); flipping it re-fetches with includeDismissed.
   const [showKept, setShowKept] = useState(false)
   // Keyed by clusterKey() -- which single cluster card is mid-dismiss or
-  // mid-merge, so only that one card shows a busy state instead of
+  // mid-reopen, so only that one card shows a busy state instead of
   // disabling the whole grid for one action.
   const [dismissingId, setDismissingId] = useState<string | null>(null)
-  const [mergingId, setMergingId] = useState<string | null>(null)
   // Multi-select for bulk actions -- keyed by clusterKey(), same identity
-  // dismissingId/mergingId already use. Cleared on table switch and after
-  // any bulk action completes (selections referencing a now-gone cluster
-  // are meaningless).
+  // dismissingId already uses. Cleared on table switch and after any bulk
+  // action completes (selections referencing a now-gone cluster are
+  // meaningless).
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  // The group open in the Resolve grid. wroteRef: a merge step committed, so
+  // the list is out of date even when a later step stopped.
+  const [resolving, setResolving] = useState<ResolveTarget | null>(null)
+  const wroteRef = useRef(false)
 
   useEffect(() => {
     if (!canBulkContacts) setSelectedKeys(new Set())
   }, [canBulkContacts])
+
+  // Losing the merge grant closes the grid; the adapter asks again right
+  // before it writes, for a grant lost between this render and the click.
+  useEffect(() => {
+    if (!canMergeDuplicates) setResolving(null)
+  }, [canMergeDuplicates])
 
   const load = async (targetTable: ContactTableKind, includeDismissed: boolean) => {
     setLoading(true)
@@ -387,31 +354,75 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     }
   }
 
-  // Merges every OTHER contact in the cluster into the chosen `keeper`,
-  // one mergeContacts() call per record (the API only takes one keep/merge
-  // pair at a time -- see contactDuplicates.ts) -- almost always exactly
-  // one call since most clusters have two contacts, but this also covers
-  // a rarer 3+ way cluster the same way. Stops and surfaces the error on
-  // the first failed merge rather than silently leaving some records
-  // merged and others not with no indication which.
-  const handleMergeInto = async (cluster: ContactDuplicateCluster, keeper: ContactDuplicateClusterEntry) => {
-    if (!canBulkContactsRef.current || !canMergeDuplicates) return
-    const others = cluster.contacts.filter((contact) => contact.id !== keeper.id)
-    if (!others.length) return
-    const id = clusterKey(table, cluster)
-    setMergingId(id)
-    try {
-      for (const other of others) {
-        await mergeContacts(table, keeper.id, other.id)
-      }
-      notify(t('duplicate_merged') || 'Merged -- the other record(s) were combined into this one')
-      removeCluster(id)
-    } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
-    } finally {
-      setMergingId(null)
-    }
+  // Resolve (R12): the group opens in the shared Resolve grid, one column per
+  // record, and the grid sends ONE merge request naming every field's value.
+  const openResolve = useCallback((target: ContactTableKind, cluster: ContactDuplicateCluster, draft?: ResolveDraft) => {
+    if (!canMergeDuplicatesRef.current) return
+    wroteRef.current = false
+    setResolving({ table: target, cluster, draft })
+  }, [])
+
+  const resolveAdapter = useMemo(() => (resolving ? createContactResolveAdapter({
+    table: resolving.table,
+    cluster: resolving.cluster,
+    t: (key) => tRef.current(key),
+    canMerge: () => canMergeDuplicatesRef.current,
+    onWritten: () => { wroteRef.current = true },
+  }) : null), [resolving])
+  const resolveName = resolving ? (resolving.cluster.contacts.find((contact) => contact.name?.trim())?.name ?? resolving.cluster.value) : ''
+  const resolveTitle = `${t('resolve') || 'Resolve'} — ${resolveName}`
+
+  const closeResolve = () => {
+    const wrote = wroteRef.current
+    wroteRef.current = false
+    setResolving(null)
+    if (wrote) void load(table, showKept)
   }
+
+  // Minimize parks the grid as a chip carrying the group and the choices made
+  // so far. Restoring reads the records again, so the grid never shows a
+  // parked copy of them.
+  const parkResolve = (draft: ResolveDraft) => {
+    if (!resolving) return
+    minimizeWork({
+      key: `contact_resolve:${clusterKey(resolving.table, resolving.cluster)}`,
+      kind: 'contact_resolve',
+      pageId: 'contacts',
+      anchor: 'hub:contacts:duplicates',
+      label: resolveTitle,
+      payload: { table: resolving.table, cluster: resolving.cluster, draft },
+      requiredPermission: { permissionKey: 'contacts', actionKey: 'merge' },
+    })
+    closeResolve()
+  }
+
+  const restoreResolve = useCallback((entry: MinimizedWorkEntry): boolean => {
+    const parked = entry.payload as Partial<ResolveTarget> | undefined
+    if (!parked?.table || !TABLE_KINDS.has(parked.table) || !Array.isArray(parked.cluster?.contacts)) return false
+    if (!canMergeDuplicatesRef.current || (parked.table === 'suppliers' && !includeSuppliers)) {
+      reparkDeniedRestore(entry)
+      notify(t('access_denied') || 'Access denied', 'warning')
+      return false
+    }
+    setSaleLinksActive(false)
+    setTable(parked.table)
+    openResolve(parked.table, parked.cluster, parked.draft)
+    return true
+  }, [includeSuppliers, notify, openResolve, t])
+
+  // A chip restored before this tab mounted waits as pending; one restored
+  // while it is mounted arrives as the event.
+  useEffect(() => {
+    const pending = consumePendingRestore('contact_resolve')
+    if (pending && restoreResolve(pending)) markRestoreHandled('contact_resolve')
+    const onRestore = (event: Event) => {
+      const detail = (event as CustomEvent).detail
+      if (detail?.kind !== 'contact_resolve' || !detail.entry) return
+      if (restoreResolve(detail.entry as MinimizedWorkEntry)) markRestoreHandled('contact_resolve')
+    }
+    window.addEventListener(RESTORE_WORK_EVENT, onRestore)
+    return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
+  }, [restoreResolve])
 
   const toggleSelected = (id: string) => {
     if (!canBulkContactsRef.current) return
@@ -460,12 +471,13 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // untouched: production holds a ten-row and a six-row supplier cluster minted
   // by a hidden writer, identical apart from their ids, and Bulk Merge refused
   // all sixteen rows. planBulkContactMerges() states the survivor rule (the one
-  // member with a phone, else the lowest id) instead of guessing, and the
-  // per-row "Keep this" flow on each card still overrides it by hand.
+  // member with a phone, else the lowest id) instead of guessing, and Resolve
+  // on each card still overrides it by hand, field by field.
   //
-  // A cluster's own losers merge in id order and STOP at the first failure, so
-  // a half-merged group is reported as one failure rather than being retried
-  // against a keeper that may no longer be the right one.
+  // Each group is ONE merge request, so it lands whole or not at all. A group
+  // past the six-record limit merges its first six now and stays listed for
+  // the next run; a group holding two membership numbers or two storefront
+  // accounts needs a person to choose, so it is counted and left for Resolve.
   const bulkMerge = async () => {
     if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
@@ -474,23 +486,33 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     const skipped = targets.length - plans.length
     setBulkBusy(true)
     let failed = 0
+    let needsResolve = 0
+    let moreLeft = 0
+    let staleList = false
     for (const plan of plans) {
       if (!canBulkContactsRef.current) break
-      const id = clusterKey(table, plan.cluster)
       try {
-        for (const loserId of plan.loserIds) {
-          await mergeContacts(table, plan.keeperId, loserId)
-        }
-        removeCluster(id)
-      } catch {
-        failed += 1
+        await mergeContacts(table, contactMergeRequest(plan.cluster, plan.keeperId, plan.loserIds))
+        if (plan.laterIds.length) moreLeft += 1
+        else removeCluster(clusterKey(table, plan.cluster))
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code
+        if (code === 'membership_choice_required' || code === 'portal_choice_required') needsResolve += 1
+        else failed += 1
+        if (code === 'contact_merge_conflict') staleList = true
       }
     }
     setBulkBusy(false)
     setSelectedKeys(new Set())
-    if (failed || skipped) {
+    // A partly merged group lists records that are gone now, and a refused one
+    // was read before somebody changed it: read the groups again, so the next
+    // run sends the records as they are.
+    if (moreLeft || staleList) void load(table, showKept)
+    if (failed || skipped || needsResolve || moreLeft) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
+      if (needsResolve) parts.push(replaceVars(t('bulk_merge_needs_resolve') || '{count} group(s) need Resolve to choose the membership number or storefront account', { count: needsResolve }))
+      if (moreLeft) parts.push(replaceVars(t('bulk_merge_more_left') || '{count} group(s) still have records to merge; run Merge selected again', { count: moreLeft }))
       // Only a degenerate cluster (nothing left to merge into) can land here
       // now; it is still counted out loud rather than dropped silently.
       if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_single') || '{count} group(s) had nothing left to merge', { count: skipped }))
@@ -568,7 +590,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
       {saleLinksActive ? <SaleLinkConflictsSection t={t} notify={notify} /> : (
       <>
       <p className="text-xs text-gray-400">
-        {replaceVars(t('duplicates_tab_hint') || 'Groups of {table} that share a phone number or an exact name -- most often from records entered before duplicate checking existed. This is a review list only; edit or merge the records from the {table} tab.', {
+        {replaceVars(t('duplicates_tab_hint') || 'Groups of {table} that share a phone number or an exact name, most often from records entered before duplicate checking existed. Press Resolve to merge a group\'s records into one.', {
           table: activeTableLabel.toLowerCase(),
         })}
       </p>
@@ -706,18 +728,15 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
                   key={id}
                   cluster={cluster}
                   t={t}
-                  table={table}
                   dismissing={dismissingId === id}
-                  merging={mergingId === id}
                   selected={canBulkContacts && selectedKeys.has(id)}
                   selectable={canBulkContacts && canResolveConflicts && !bulkBusy}
                   canResolveConflicts={canResolveConflicts}
                   canMergeDuplicates={canMergeDuplicates}
                   onToggleSelect={() => toggleSelected(id)}
-                  onResolve={(name) => onResolve?.(TABLE_TO_TAB[table], name)}
+                  onResolve={() => openResolve(table, cluster)}
                   onDismiss={() => void handleDismiss(cluster)}
                   onReopen={() => void handleReopen(cluster)}
-                  onMergeInto={(keeper) => void handleMergeInto(cluster, keeper)}
                 />
               )
             })}
@@ -738,6 +757,16 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
       )}
       </>
       )}
+      {resolving && resolveAdapter ? (
+        <ResolveModal
+          key={clusterKey(resolving.table, resolving.cluster)}
+          title={resolveTitle}
+          adapter={resolveAdapter}
+          initialDraft={resolving.draft}
+          onClose={closeResolve}
+          onMinimize={parkResolve}
+        />
+      ) : null}
     </div>
   )
 }

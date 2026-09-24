@@ -59,15 +59,16 @@ test('the production "j secrat" cluster of ten is planned, not skipped', () => {
   const [plan] = planBulkContactMerges([jSecrat])
   assert.ok(plan, 'a ten-member cluster must produce a plan -- the old two-only rule skipped it')
   assert.equal(plan.keeperId, 20, 'the oldest row survives when no member has a phone')
-  assert.deepEqual(plan.loserIds, [38, 39, 40, 41, 42, 43, 44, 45, 46], 'every other member merges into it, in id order')
-  assert.equal(plan.loserIds.length, 9, 'nine merge calls collapse ten rows')
+  assert.deepEqual(plan.loserIds, [38, 39, 40, 41, 42], 'the next five merge into it in one request, in id order')
+  assert.deepEqual(plan.laterIds, [43, 44, 45, 46], 'one request carries six records; the rest merge on the next run')
 })
 
 test('the production "lang" cluster of six is planned the same way', () => {
   const lang = cluster([23, 27, 29, 31, 34, 37].map((id) => entry(id, 'lang')))
   const [plan] = planBulkContactMerges([lang])
   assert.equal(plan.keeperId, 23)
-  assert.deepEqual(plan.loserIds, [27, 29, 31, 34, 37])
+  assert.deepEqual(plan.loserIds, [27, 29, 31, 34, 37], 'six records fit one request')
+  assert.deepEqual(plan.laterIds, [])
 })
 
 test('the one member with a phone survives, whatever its id', () => {
@@ -106,7 +107,12 @@ const duplicatesTab = readFileSync(new URL('../src/components/contacts/Duplicate
 test('DuplicatesTab drives Bulk Merge from the planner', () => {
   assert.match(duplicatesTab, /planBulkContactMerges\(targets\)/, 'bulk merge must plan every selected cluster')
   assert.doesNotMatch(duplicatesTab, /cluster\.contacts\.length === 2/, 'the two-only filter is gone')
-  assert.match(duplicatesTab, /for \(const loserId of plan\.loserIds\)/, 'every loser in a cluster is merged, not just one')
+  assert.match(
+    duplicatesTab,
+    /mergeContacts\(table, contactMergeRequest\(plan\.cluster, plan\.keeperId, plan\.loserIds\)\)/,
+    'every loser in a cluster is merged by one request, not just one',
+  )
+  assert.doesNotMatch(duplicatesTab, /for \(const loserId of plan\.loserIds\)/, 'no request per record')
 })
 
 // --- D2: no hidden writer may post a supplier contact again -----------------
