@@ -132,7 +132,7 @@ const fixtureSource = String.raw`
       ]
     },
     blockers: (data, draft) => (RECORDS.filter((record) => dispositionOf(draft, record.id) === 'include').length < 2 ? ['Pick at least two records to merge'] : []),
-    reloadWhen: (before, after) => RECORDS.some((record) => (dispositionOf(before, record.id) === 'remove') !== (dispositionOf(after, record.id) === 'remove')),
+    reloadWhen: (before, after) => (params.has('reloadSelection') && before.selection.name?.source !== after.selection.name?.source) || RECORDS.some((record) => (dispositionOf(before, record.id) === 'remove') !== (dispositionOf(after, record.id) === 'remove')),
     async review(data, draft, signal) {
       log.reviews += 1
       await pause(20)
@@ -257,6 +257,16 @@ async function assertResolveReachable(label: string): Promise<void> {
 }
 
 await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove + reason, stale re-read, confirm before/after + D1, progress, partial, retry, done, offline, minimize/restore, load failure, Khmer, 375/1280/landscape', async () => {
+  // Keeper choices need fresh stock and cost previews, just as dispositions do.
+  await open(375, 'lang=en&reloadSelection=1', gridReady)
+  const beforeSelection = await loadsSoFar()
+  await click(cell('brand|p2'))
+  await pause(120)
+  assert.equal(await loadsSoFar(), beforeSelection, 'ordinary picks do not reload')
+  await click(cell('name|p2'))
+  await until('selection-dependent preview reload', `__log.loads.length === ${beforeSelection + 1} && ${gridReady}`, 3000)
+  assert.deepEqual(await evaluate<any>('__log.loads.at(-1).selection'), { brand: { source: 'p2' }, name: { source: 'p2' } }, 'reload receives the new selection and preserves earlier edits')
+
   // ------------------------------------------------ first paint and loading
   await open(375, 'lang=en&holdLoad=1', '__ui && __ui.main()')
   const loading = await evaluate<any>(`(() => {

@@ -293,7 +293,9 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
   }
 
   const select = (key: string, choice: NonNullable<ResolveSelection[string]>) => {
-    setEdits((current) => ({ ...current, selection: { ...current.selection, [key]: choice } }))
+    const next: ResolveDraft = { ...edits, selection: { ...edits.selection, [key]: choice } }
+    setEdits(next)
+    if (adapterRef.current.reloadWhen?.(draft, mergeDraft(initial, next))) void load(false, next)
   }
 
   const dispose = (columnId: string, disposition: ResolveDisposition, reason?: string) => {
