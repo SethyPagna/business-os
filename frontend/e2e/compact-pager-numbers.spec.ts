@@ -6,6 +6,10 @@ import { compactPager, hydrationScript, language, markup, oldCompactLayout, page
 
 const require = createRequire(import.meta.url)
 const postcss = require('postcss'), tailwind = require('tailwindcss')
+// Same viewport meta as index.html. Without it an isMobile project (the main
+// config's android-chromium) lays the page out at Chromium's 980px default, so
+// every "320px" check silently measured a ~916px-wide fixture.
+const viewportMeta = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">'
 let css = ''
 test.beforeAll(async () => {
   const config = require('tailwindcss/loadConfig')(path.resolve('tailwind.config.ts'))
@@ -18,8 +22,9 @@ async function show(page: any, lang: string, current: number, width: number, sou
   await page.setViewportSize({ width, height: 900 })
   const pack = language(lang)
   const html = markup(compactPager({ page: current, totalItems: current === 13 ? 245 : current * 20, compactPageInput: input, t: (key: string) => pack[key] }, source))
-  await page.setContent(`<html><head><style>${css}</style></head><body class="lang-${lang}"><main style="width:calc(100% - 48px);margin:24px" data-fixture>${html}</main></body></html>`)
+  await page.setContent(`<html><head>${viewportMeta}<style>${css}</style></head><body class="lang-${lang}"><main style="width:calc(100% - 48px);margin:24px" data-fixture>${html}</main></body></html>`)
   await page.evaluate(() => document.fonts.ready)
+  expect(await page.evaluate(() => window.innerWidth), 'layout viewport must be the width under test').toBe(width)
 }
 
 async function clipped(page: any) {
