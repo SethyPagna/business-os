@@ -32,6 +32,11 @@ already the active isolated integration. N6 follows sequentially because their
 undo and language files overlap. This is a sequencing judgment, not unanimous
 agreement or evidence that N1–N4 was initially safe.
 
+Execution refinement: N6's seven stock-in-specific files and Report Center 0b's
+two Worker files can be prepared in isolated worktrees concurrently, without
+ownership of the shared undo/language files. Integration and certification still
+proceed N1–N4, then N6, then 0b. The parent owns shared conflict resolution.
+
 ## Chairman decisions
 
 1. Use `C:/Users/mrkl6/Projects`, with a visible Downloads/Projects junction.
@@ -93,7 +98,35 @@ revocation race. All seven focused frontend files pass; the real Hono branch
 stock endpoint preserves authorized zero and omits denied costs (76 checks in
 test-acquisition-cost-access.cjs). Broad integration gates remain pending.
 
+The frontend baseline at fd0a8a8 ran 549 files: 547 passed immediately and two
+service-worker upgrade fixtures could not resolve historical Git commits in the
+shallow checkout. After fetching the complete branch history from GitHub, both
+fixtures passed unchanged (swLateUpgrade and swStaleChunkRecovery). No assertion
+was weakened. Logs are under BusinessOS/Records/frontend-full-baseline-20260925.log
+and frontend-sw-history-recheck-20260925.log. This baseline precedes WIP integration.
+
 ## Confidence and limits
+
+Independent follow-up found and reproduced a historical contact receipt allowing
+an unrelated edited former cluster member to merge. Commit b653ce8 binds the
+issued continuation to the exact pending request and contact/account snapshots;
+the parent reviewed it and reran the 23 native test groups successfully. Lost
+responses replay the frozen continuation, not a fresh snapshot of changed data.
+
+The N1 product review also found lost-response retries, sequential pair means
+disagreeing with the group preview, and missing stale-state fencing. Its repair
+uses actor-bound operation receipts, frozen group economics and atomic state
+checks. Query counting exposed repeated full graph reads; a single group read
+now derives remaining subsets in memory. The existing pair kernel itself exceeds
+the Free-plan budget. Free support remains unfinished; the new resolver must
+present a translated blocker and refuse before writes. Paid-deployment checks
+include the maximum 12-member group and middleware headroom. Platform limits were
+checked against [Cloudflare D1 limits](https://developers.cloudflare.com/d1/platform/limits/).
+
+Report 0b review corrected the initial proposal to match frontend policy:
+Returns export requires Full access; Sales and Fees follow their existing allowed
+export tiers. Ordinary report viewing stays separate. A raw non-none tier check
+for every domain would have contradicted the existing Returns review restriction.
 
 High confidence in the file organization and sequence; feature readiness depends
 on completed tests and independent review, recorded in progress.md. Hidden recovery
