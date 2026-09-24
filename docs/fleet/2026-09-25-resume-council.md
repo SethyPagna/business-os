@@ -162,6 +162,19 @@ Returns export requires Full access; Sales and Fees follow their existing allowe
 export tiers. Ordinary report viewing stays separate. A raw non-none tier check
 for every domain would have contradicted the existing Returns review restriction.
 
+N6 independent review found and repaired three interaction defects beyond the
+initial stale metadata/retry bugs: bulk removal reused old row revisions and
+released its lock too early; a first explicit permission refusal trapped the
+editor; and the modal offered a discard action that could not actually discard
+an uncertain write. Candidate 097341e4 refreshes remaining rows, guards footer
+actions synchronously, distinguishes first refusals from later uncertain retries,
+and disables modal closing while pending. Fourteen production-handler groups
+include three negative controls. Eighteen Worker groups cover revisions, ABA,
+atomic races, receipts, correction/loss, permissions, audit and undo/redo.
+The parent integrated the complete branch, retained N1 undo changes, completed
+EN/KM messages, and passed seven frontend/six Worker files plus both typechecks
+and i18n. The exact retry handle is not durable across component unmounts.
+
 High confidence in the file organization and sequence; feature readiness depends
 on completed tests and independent review, recorded in progress.md. Hidden recovery
 content remains intentionally retained. The deployment's HTTP health is still

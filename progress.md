@@ -28,9 +28,21 @@ continuation restrictions and preview/write conflict fences. Independent checks
 on the integrated source pass 16 frontend files and five Worker files. The paid
 deployment is the target; the new resolver refuses before writes on Free, whose
 existing pair kernel exceeds the query budget. Full combined gates remain due.
-N6 is being repaired for metadata conflict fencing and frozen unknown-outcome
-retries. Report Center's explicit export-intent prerequisite is prepared in an
-isolated branch; ordinary report viewing must remain unaffected.
+N6 is integrated as `7286d930` from independently reviewed `097341e4`, with
+retained lot revisions, frozen unknown-outcome retries, fresh sequential removal
+and permission-refusal handling. EN/KM messages were completed in `d52c15de`.
+The integrated source passes seven frontend files, six Worker files, both
+typechecks and i18n. Retry state is component-local; navigation does not preserve
+the retry handle. Absolute quantities and required revisions still reject stale
+competing corrections. Mounted browser checks remain in progress.
+
+Report Center's explicit export-intent prerequisite is integrated as `9d93ada5`
+after independent review: 308 real route requests cover view/export authority,
+with Returns requiring Full. The bounded complete Sales export is now being
+implemented in isolated Worker/frontend branches: searched-cohort canonical
+totals, edit-sensitive authorized export tokens, complete-page validation and a
+shared preview/CSV/typed Excel/print result. Broader Report Center work remains
+open. Full combined certification is due after this slice is integrated.
 No new feature work in this section is deployed. Council decisions and the
 debloat blast-radius matrix: `docs/fleet/2026-09-25-resume-council.md`.
 
