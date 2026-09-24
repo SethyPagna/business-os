@@ -5184,6 +5184,8 @@
   "telegram_cat_status_desc": "Payment, delivery, completion, and cancellation changes",
   "telegram_cat_stock_in_desc": "Product, quantity, branch, reason, and received date",
   "telegram_cat_stock_out_desc": "Product, quantity, branch, and reason",
+  "telegram_reports_overview": "Reports overview",
+  "telegram_reports_overview_desc": "One minute after a shift closes: that day's overview for the shift's branch",
   "telegram_chat_id_label": "Telegram chat ID",
   "telegram_chat_id_placeholder": "Example: -1001234567890",
   "telegram_help_commands_and": "and",

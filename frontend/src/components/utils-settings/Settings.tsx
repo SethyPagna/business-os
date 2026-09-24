@@ -2148,6 +2148,9 @@ export default function Settings() {
                 ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
+                // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
+                // with the same unset-means-on default as the switches above.
+                ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch"],
               ].map(([key, label, description]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                   <div className="pr-3">
