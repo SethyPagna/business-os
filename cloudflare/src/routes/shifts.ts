@@ -257,10 +257,54 @@ function utcMs(value: string): number {
 function businessDateFor(iso: string): string {
   return new Date(utcMs(iso) + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000).toISOString().slice(0, 10)
 }
-function shiftCode(nowIso: string): string {
-  const local = new Date(new Date(nowIso).getTime() + 7 * 60 * 60 * 1000)
+/**
+ * ---- A shift's ID is its date, its minute and its cashier ----------------
+ *
+ * Owner, 23 Sep 2026: "ID សម្គាល់: S-20260922-0807-Za ... for ID make it
+ * format after time -cashier... no need other things." So the six random hex
+ * characters that followed the minute are gone and the cashier the row
+ * records (user_name, username first -- see displayName) takes their place:
+ * trimmed, whitespace runs joined by '-', at most 24 characters counted as
+ * code points so a Khmer or emoji name is never cut mid-character. A row with
+ * no cashier name at all is U<user id>.
+ *
+ * Only NEW rows get this form. A stored shift_code never changes: audit rows,
+ * amendment snapshots and Telegram messages already quote the old ones.
+ */
+const SHIFT_CODE_CASHIER_MAX = 24
+export function shiftCodeBase(nowIso: string, cashier: string | null, userId: number): string {
+  const local = new Date(utcMs(nowIso) + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000)
   const p = (n: number) => String(n).padStart(2, '0')
-  return `S-${local.getUTCFullYear()}${p(local.getUTCMonth() + 1)}${p(local.getUTCDate())}-${p(local.getUTCHours())}${p(local.getUTCMinutes())}-${crypto.randomUUID().slice(0, 6)}`
+  const name = Array.from((cashier ?? '').trim().replace(/\s+/g, '-')).slice(0, SHIFT_CODE_CASHIER_MAX).join('')
+  return `S-${local.getUTCFullYear()}${p(local.getUTCMonth() + 1)}${p(local.getUTCDate())}-${p(local.getUTCHours())}${p(local.getUTCMinutes())}-${name || `U${userId}`}`
+}
+/**
+ * shift_code is UNIQUE (migration 0116) and one cashier can start two rows in
+ * one minute: a second branch, or a reopen or replacement right after the
+ * first. The first keeps the plain ID and each later one takes the lowest free
+ * -2, -3, ... The test is exact membership, so a code that only LOOKS like a
+ * suffix -- cashier "za-2" beside cashier "za" -- is just another taken code.
+ */
+export function freeShiftCode(base: string, taken: readonly string[]): string {
+  const used = new Set(taken)
+  if (!used.has(base)) return base
+  let n = 2
+  while (used.has(`${base}-${n}`)) n += 1
+  return `${base}-${n}`
+}
+/** Both writers (a new shift and a continuation) take their ID here. LIKE only
+ * narrows the read: its ASCII case folding and a % or _ inside a cashier name
+ * can add candidates but never drop one, and freeShiftCode compares exactly.
+ * A peer that takes the same ID between this read and the write meets the
+ * UNIQUE index: on the same till the open answers already_registered, on the
+ * same parent the continuation answers its conflict. Only one account opening
+ * two tills in the same instant is left with the error, and its retry takes the
+ * next suffix. */
+async function nextShiftCode(db: D1Compat, nowIso: string, cashier: string | null, userId: number): Promise<string> {
+  const base = shiftCodeBase(nowIso, cashier, userId)
+  const taken = await db.prepare(`SELECT shift_code FROM shift_sessions
+    WHERE shift_code = @base OR shift_code LIKE @base || '-%'`).all<{ shift_code: string }>({ base })
+  return freeShiftCode(base, taken.map((row) => row.shift_code))
 }
 
 export function canManageShifts(user: SessionUser): boolean {
@@ -521,7 +565,10 @@ async function writeContinuation(db: D1Compat, user: SessionUser, parent: ShiftD
   afterCancellation: boolean; auditAction: 'shift.reopen' | 'shift.open_after_cancel'
   request?: ReturnType<typeof mutationRequest>
 }): Promise<{ changed: boolean; shift?: ShiftDbRow; conflict: boolean }> {
-  const nowIso = new Date().toISOString(); const actorName = displayName(user); const childCode = shiftCode(nowIso)
+  const nowIso = new Date().toISOString(); const actorName = displayName(user)
+  // The child is the parent's cashier's shift (the INSERT copies user_id and
+  // user_name from the parent), so its ID names that cashier, not the actor.
+  const childCode = await nextShiftCode(db, nowIso, parent.user_name, parent.user_id)
   const child = { shiftCode: childCode, parentId: parent.id, expectedRevision: parent.revision, reason: input.reason,
     actorId: user.id, actorName, openedAt: nowIso, floatUsd: input.floatUsd, floatKhr: input.floatKhr,
     storedFloatUsd: input.floatUsd ?? 0, storedFloatKhr: input.floatKhr ?? 0,
@@ -680,6 +727,20 @@ app.get('/', async (c) => {
   if (!validDate(from) || !validDate(to) || (from != null && to != null && from > to)) {
     return c.json({ error: 'Invalid shift business date range.' }, 400)
   }
+  // ---- SEARCH BY CASHIER OR ID (owner, 23 Sep 2026) ----------------------
+  //
+  // "also make sure when entering shift, i can search the cashier, or id."
+  // `q` matches a substring of the cashier name the row records or of the
+  // shift ID, ignoring case for ASCII letters (SQLite LIKE). The caller's %, _
+  // and \ are escaped, so they match themselves. The ID half takes the rows
+  // whose ID matches plus every continuation after them: the list shows a
+  // reopened shift as its last segment (see below), but the ID in its first
+  // Telegram report is the first segment's. Part of `filters`, so it composes
+  // with visibility, branch, user and dates, and the page count counts only
+  // what it lets through.
+  const q = (c.req.query('q') ?? '').trim()
+  if (Array.from(q).length > 80) return c.json({ error: 'Shift search must be 80 characters or fewer.' }, 400)
+  const search = q ? `%${q.replace(/[\\%_]/g, '\\$&')}%` : null
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit')) || 50))
   const paged = c.req.query('page') != null || c.req.query('page_size') != null
   const page = Number(c.req.query('page') ?? 1)
@@ -710,8 +771,13 @@ app.get('/', async (c) => {
       AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
-      AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)`
-  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit }
+      AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
+      AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
+        WITH RECURSIVE hit(id) AS (
+          SELECT segment.id FROM shift_sessions segment WHERE segment.shift_code LIKE @search ESCAPE '\\'
+          UNION SELECT later.id FROM shift_sessions later JOIN hit ON later.parent_shift_id = hit.id)
+        SELECT id FROM hit))`
+  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit, search }
   if (paged) {
     // One statement gives count, clamping and page rows the same SQLite read
     // snapshot. The LEFT JOIN retains metadata even for an empty match set.
@@ -812,9 +878,9 @@ app.post('/open', async (c) => {
     return c.json({ ...currentResponse(user, replacement.shift, policy, false),
       already_registered: false, replaced_cancelled_shift_id: existing.id }, 201)
   }
-  const nowIso = new Date().toISOString()
-  const row = { shiftCode: shiftCode(nowIso), scopeMode: policy.scope_mode, userId: user.id,
-    userName: displayName(user), branchId, branchName: branch?.name ?? null, openedAt: nowIso,
+  const nowIso = new Date().toISOString(); const userName = displayName(user)
+  const row = { shiftCode: await nextShiftCode(db, nowIso, userName, user.id), scopeMode: policy.scope_mode, userId: user.id,
+    userName, branchId, branchName: branch?.name ?? null, openedAt: nowIso,
     floatUsd, floatKhr, storedFloatUsd: floatUsd ?? 0, storedFloatKhr: floatKhr ?? 0,
     floatUsdRegistered: floatUsd == null ? 0 : 1, floatKhrRegistered: floatKhr == null ? 0 : 1,
     note: optionalText(body.opening_note), deviceName: c.req.header('X-Device-Name') || null }

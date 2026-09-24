@@ -11,6 +11,7 @@ import SearchInput from '../shared/SearchInput'
 import User2 from 'lucide-react/dist/esm/icons/user-round.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
+import { auditActionLabel, auditEntityLabel, type LabelFn } from '../../utils/auditVocabulary.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -29,6 +30,7 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
+import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
@@ -266,10 +268,10 @@ function flattenSummaryValue(value: unknown): string | null {
   return String(value)
 }
 
-function formatEntityName(log: AuditLogRow): string {
+function formatEntityName(log: AuditLogRow, label: LabelFn): string {
   const raw = String(log.table_name || log.entity || '').trim()
-  if (!raw) return 'System'
-  return raw.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
+  if (!raw) return label('system', 'System')
+  return auditEntityLabel(raw, label)
 }
 
 // N13: the reason the operator gave, pulled out of the recorded payload the
@@ -400,29 +402,12 @@ export default function AuditLog() {
   const isAdmin = isAdminControlUser(user)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
 
-  const actionLabels = useMemo<Record<string, string>>(() => ({
-    create: t('create') || 'Create',
-    update: t('edit') || 'Update',
-    delete: t('delete') || 'Delete',
-    sale: t('sale') || 'Sale',
-    login: t('login') || 'Login',
-    logout: t('logout') || 'Logout',
-    stock_add: t('stock_in') || 'Stock Add',
-    stock_remove: t('stock_out') || 'Stock Remove',
-    stock_adjust: t('adjust_stock') || 'Adjust',
-    stock_set: t('adjust_stock') || 'Set stock',
-    bulk_import: t('bulk_import') || 'Bulk Import',
-    image_import: t('image_import') || 'Image Import',
-    upload: t('upload_file') || 'Upload',
-    data_reset: t('data_reset') || 'Data Reset',
-    factory_reset: t('factory_reset') || 'Factory Reset',
-    transfer: t('stock_transfer') || 'Transfer',
-    reset_password: t('reset_password') || 'Reset Password',
-    repair: t('repair') || 'Repair',
-    return: t('returns') || 'Return',
-    backup_export: `${t('backup') || 'Backup'} ${t('export') || 'Export'}`,
-    backup_restore: `${t('backup') || 'Backup'} ${t('restore') || 'Restore'}`,
-  }), [t])
+  // (packKey, englishFallback) => translated -- the shape the shared audit
+  // vocabulary takes, and the same one the Records floats pass it.
+  const vocab = useCallback<LabelFn>((key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }, [t])
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const auditFallbacks = useMemo<Record<string, AuditFallback>>(() => ({
     all_time: { en: 'All time', km: 'គ្រប់ពេល' },
@@ -451,8 +436,12 @@ export default function AuditLog() {
   const actionLabel = useCallback((action: unknown): string => {
     if (!action) return HISTORY_EMPTY
     const key = String(action).toLowerCase()
-    return actionLabels[key] || key.replace(/_/g, ' ')
-  }, [actionLabels])
+    // The two composites are built from two pack words each, so they stay
+    // here rather than in the shared single-word map.
+    if (key === 'backup_export') return `${vocab('backup', 'Backup')} ${vocab('export', 'Export')}`
+    if (key === 'backup_restore') return `${vocab('backup', 'Backup')} ${vocab('restore', 'Restore')}`
+    return auditActionLabel(key, vocab)
+  }, [vocab])
 
   const actionColorClass = useCallback((action: unknown): string => {
     if (!action) return DEFAULT_ACTION_CLASS
@@ -635,7 +624,11 @@ export default function AuditLog() {
 
   const entityOptions = useMemo(() => {
     const seen = new Map<string, string>()
-    const labelFor = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
+    // The vocabulary itself comes from the SERVER (a DISTINCT over the whole
+    // table, not the current page), so every record type that has ever been
+    // written is selectable here; what this adds is the reader's own language
+    // for it, and a readable fallback for anything a newer route introduces.
+    const labelFor = (key: string) => auditEntityLabel(key, vocab)
     auditEntities.forEach((key) => {
       const normalized = String(key || '').toLowerCase()
       if (normalized) seen.set(normalized, labelFor(normalized))
@@ -646,7 +639,7 @@ export default function AuditLog() {
       seen.set(key, labelFor(key))
     })
     return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
-  }, [auditEntities, logs])
+  }, [auditEntities, logs, vocab])
 
   const filtered = useMemo(() => logs, [logs])
 
@@ -785,7 +778,7 @@ export default function AuditLog() {
       rows: rows.map((log) => ({
         entry: sessionEntryLabel(log),
         time: formatLogTime(log),
-        entity: formatEntityName(log),
+        entity: formatEntityName(log, vocab),
         user: historyExportField(log.user_name),
         action: actionLabel(log.action),
         device: auditDeviceLabel(log),
@@ -1128,8 +1121,8 @@ export default function AuditLog() {
                             <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
                           </td>
                           <td className="max-w-[160px] px-3 py-2">
-                            <div className="detail-scroll-text text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log)}>
-                              {formatEntityName(log)}
+                            <div className="detail-scroll-text text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log, vocab)}>
+                              {formatEntityName(log, vocab)}
                             </div>
                           </td>
                           <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{historyActor(log.user_name)}</td>
@@ -1290,7 +1283,7 @@ export default function AuditLog() {
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
-                          <span className="detail-scroll-text text-xs text-gray-500">{formatEntityName(log)}</span>
+                          <span className="detail-scroll-text text-xs text-gray-500">{formatEntityName(log, vocab)}</span>
                           <span className="shrink-0 text-xs text-gray-400">{sessionEntryLabel(log)}</span>
                         </div>
                         {readableSummary(log) ? (
@@ -1340,7 +1333,7 @@ export default function AuditLog() {
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(detailLog.action)}`}>
                     {actionLabel(detailLog.action)}
                   </span>
-                  <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog)}</span>
+                  <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog, vocab)}</span>
                 </div>
                 <div className="mt-1 text-xs font-semibold text-gray-400">{sessionEntryLabel(detailLog)}</div>
               </div>
@@ -1373,7 +1366,7 @@ export default function AuditLog() {
                   <div className="space-y-2">
                     <DetailRow label={t('user') || 'User'} value={historyActor(detailLog.user_name)} />
                     <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
-                    <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog)} />
+                    <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog, vocab)} />
                     <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={sessionEntryLabel(detailLog)} />
                     <DetailRow label={t('reason') || 'Reason'} value={historyField(auditReason(detailLog))} />
                     <DetailRow label={t('summary') || 'Summary'} value={historyField(readableSummary(detailLog))} />
@@ -1383,10 +1376,23 @@ export default function AuditLog() {
 
               {(() => {
                 const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value)
+                // The recorded context: the payload the route wrote alongside
+                // the pair (a rename's linked-sale counts, a profile save's
+                // mode, the operator's reason). It used to be reachable only
+                // through "View raw data", and for an opted-in save whose
+                // columns happened not to move, the float showed nothing at
+                // all. Same builder as the pair -- a details payload has no
+                // old side, so its rows come back as context rows.
+                const contextRows = buildAuditFieldDiff(null, detailLog.details)
                 const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
-                if (!hasRawData) return null
+                if (!hasRawData && !contextRows.length) return null
                 return (
                   <div className="space-y-3">
+                    {hasRawData && !fieldDiffRows.length ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
+                        {copy('no_field_changed', 'No field changed', 'គ្មានវាលណាមួយផ្លាស់ប្តូរទេ')}
+                      </div>
+                    ) : null}
                     {fieldDiffRows.length ? (
                       <div>
                         <div className="mb-1 flex items-center justify-between gap-2">
@@ -1404,22 +1410,18 @@ export default function AuditLog() {
                           </button>
                         </div>
                         <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                          {fieldDiffRows.map((row) => (
-                            <div key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-                              <span className="w-32 flex-shrink-0 font-medium text-gray-500 dark:text-gray-400">{row.label}</span>
-                              {row.changeType === 'added' ? (
-                                <span className="break-all text-green-600 dark:text-green-400">{row.after}</span>
-                              ) : row.changeType === 'removed' ? (
-                                <span className="break-all text-red-500 line-through dark:text-red-400">{row.before}</span>
-                              ) : (
-                                <span className="flex flex-wrap items-center gap-1 break-all">
-                                  <span className="text-red-500 line-through dark:text-red-400">{row.before}</span>
-                                  <span className="text-gray-400">&rarr;</span>
-                                  <span className="text-green-600 dark:text-green-400">{row.after}</span>
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                          {fieldDiffRows.map((row) => <AuditFieldDiffLine key={row.key} row={row} />)}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {contextRows.length ? (
+                      <div>
+                        <div className="mb-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                          {copy('recorded_context', 'Recorded context', 'ព័ត៌មានកត់ត្រាបន្ថែម')}
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                          {contextRows.map((row) => <AuditFieldDiffLine key={`context:${row.key}`} row={row} />)}
                         </div>
                       </div>
                     ) : null}

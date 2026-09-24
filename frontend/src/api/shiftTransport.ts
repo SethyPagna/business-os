@@ -574,6 +574,15 @@ export async function fetchShiftPolicy(): Promise<ShiftPolicy> {
   return policy
 }
 
+/**
+ * The longest shift search GET /api/shifts accepts (the Worker answers 400
+ * past it), so both shift search boxes stop typing there instead of sending a
+ * request that can only fail.
+ */
+export const SHIFT_SEARCH_MAX_LENGTH = 80
+/** One pause for both shift search boxes (Reports picker, history popup). */
+export const SHIFT_SEARCH_DEBOUNCE_MS = 250
+
 export async function listShifts(filters: {
   page?: number
   pageSize?: number
@@ -582,6 +591,12 @@ export async function listShifts(filters: {
   from?: string
   to?: string
   limit?: number
+  /**
+   * Cashier name or shift ID, matched by the Worker (case-insensitive
+   * substring of user_name or shift_code) BEFORE paging, so page totals are
+   * the totals of the search. Blank means no search and sends no `q`.
+   */
+  q?: string
 } = {}, options: { fresh?: boolean } = {}): Promise<ShiftListResult> {
   const query = queryString({
     branch_id: filters.branchId,
@@ -591,9 +606,12 @@ export async function listShifts(filters: {
     limit: filters.limit ?? 50,
     page: filters.page,
     page_size: filters.pageSize,
+    q: filters.q?.trim(),
   })
   // Explicit user/event refresh discards only this list read's cache/in-flight
   // ownership. Keep the normal actor-fenced transport and write invalidation.
+  // The search is part of the query string and therefore of the channel: two
+  // searches never share a cached page.
   const channel = `shifts:list:${query}`
   if (options.fresh) cacheInvalidate(channel)
   const result = await route<ShiftListResult>(channel, () => apiFetch('GET', `/api/shifts${query}`), null)

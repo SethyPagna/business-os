@@ -7,7 +7,10 @@ const h=harness.exports
 ;(async()=>{
  const f=h.fixture()
  h.setUser({...h.USER,permissions:'{"all":true}'})
- const created=await h.postSale(f.route,{...h.request('report-sale'),money_precision_version:1,items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:'report-line',pricing_source:'manual',selling_price_input_usd:10,manual_discount_type:'fixed',manual_discount_value:.0044,
+ // S4-41: POST /sales refuses a Completed sale its tender does not cover. The
+ // manual $10 line totals $10.00 after rounding, so it is paid $10.00, not the
+ // base request's $9.50.
+ const created=await h.postSale(f.route,{...h.request('report-sale'),money_precision_version:1,amount_paid_usd:10,items:[{product_id:10,quantity:1,branch_id:1,batch_id:500,client_line_key:'report-line',pricing_source:'manual',selling_price_input_usd:10,manual_discount_type:'fixed',manual_discount_value:.0044,
    pricing_quote:{gross_usd:10,product_discount_usd:0,manual_discount_usd:.0044,total_usd:9.9956,total_khr:39982.4}}]})
  assert.equal(created.status,200,JSON.stringify(created.body))
  f.raw.prepare("UPDATE sales SET created_at='2026-09-13 01:00:00',is_delivery=1,delivery_actual_cost_usd=2 WHERE id=?").run([created.body.id])

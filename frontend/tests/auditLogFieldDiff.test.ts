@@ -31,11 +31,24 @@ await runTest('buildAuditFieldDiff only returns fields that actually changed', (
   assert.equal(rows[0].changeType, 'changed')
 })
 
-await runTest('buildAuditFieldDiff marks a create (no before) as all-added fields', () => {
+// Sep 23 2026: this used to assert 'added' for every field. A row with no
+// old side has nothing to have been added TO -- and the same shape is what a
+// legacy details-only row has, where "added" was an outright false claim
+// (the owner's E4 report: a rename showing From/Rows/To as three additions).
+// Both read as context now; see the delete case below, which still reports
+// 'removed', for why this is not a blanket retreat from the vocabulary.
+await runTest('buildAuditFieldDiff reports a one-sided payload (a create, a legacy details row) as context', () => {
   const rows = buildAuditFieldDiff(null, JSON.stringify({ name: 'New Customer', gender: 'female' }))
   assert.equal(rows.length, 2)
-  assert.ok(rows.every((row) => row.changeType === 'added'))
+  assert.ok(rows.every((row) => row.changeType === 'context'))
+  assert.ok(rows.every((row) => row.before === null))
   assert.deepEqual(rows.map((row) => row.key).sort(), ['gender', 'name'])
+})
+
+await runTest('buildAuditFieldDiff still reports a key added on the new side of a real pair', () => {
+  const rows = buildAuditFieldDiff(JSON.stringify({ name: 'A' }), JSON.stringify({ name: 'A', notes: 'later' }))
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].changeType, 'added')
 })
 
 await runTest('buildAuditFieldDiff marks a delete (no after) as all-removed fields', () => {
@@ -52,12 +65,25 @@ await runTest('buildAuditFieldDiff ignores bookkeeping columns', () => {
   assert.equal(rows[0].key, 'name')
 })
 
-await runTest('buildAuditFieldDiff flattens nested objects and arrays into one readable line', () => {
+await runTest('buildAuditFieldDiff flattens ARRAYS into one readable line', () => {
   const before = JSON.stringify({ items: [{ name: 'Item A', qty: 1 }] })
   const after = JSON.stringify({ items: [{ name: 'Item A', qty: 2 }] })
   const rows = buildAuditFieldDiff(before, after)
   assert.equal(rows.length, 1)
   assert.equal(rows[0].after, 'Name: Item A, Qty: 2')
+  assert.equal(rows[0].depth, 0)
+})
+
+// An OBJECT is a set of fields, so it becomes rows; the depth/label contract
+// and the cap are pinned in auditDetailContext.test.ts beside the renderer.
+await runTest('buildAuditFieldDiff expands a nested object into its own rows', () => {
+  const rows = buildAuditFieldDiff(
+    JSON.stringify({ address: { city: 'Phnom Penh', street: 'St 271' } }),
+    JSON.stringify({ address: { city: 'Siem Reap', street: 'St 271' } }),
+  )
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].label, 'Address - City')
+  assert.equal(rows[0].depth, 1)
 })
 
 await runTest('buildAuditFieldDiff formats booleans as Yes/No', () => {

@@ -16,7 +16,15 @@ import { useLowStockConfig } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
-import { useState } from 'react'
+import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
+import { Suspense, useState } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+
+// Loaded when the float is opened. The field history is a rare read behind a
+// permission tier; imported statically it joins this page's startup closure
+// (tests/performanceBudgets.test.ts measures exactly that closure), so every
+// operator would pay to download a float most of them never open.
+const EntityRecordsFloat = lazyRetry(() => import('../shared/EntityRecordsFloat.tsx'), 'inventory-records-float')
 
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
@@ -91,7 +99,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // added this component's first hook below `if (!p) return null`, which was
   // unreachable from every current call site but a latent violation.
   const lowStockConfig = useLowStockConfig()
-  const { user } = useApp() as { user: any }
+  const { user, getPermissionTier } = useApp() as { user: any; getPermissionTier: (key: string) => string }
   const canViewCosts = canViewAcquisitionCosts(user)
   // Same four copyable product fields as the Products-side detail modal
   // (name, brand, supplier, barcode), same shared float. Declared with the
@@ -100,6 +108,13 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   // P10-6: the calculated-cost float. Declared with the other hooks, above
   // the early return.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
+  // The product's field history. Its rows come from the audit trail, which is
+  // read through the audit_log permission -- and at the 'view' tier that
+  // endpoint answers with the CALLER'S OWN entries only. A list scoped to one
+  // reader, presented as "this product's history", is a wrong answer, so the
+  // affordance appears only where the reader would get the whole trail.
+  const [fieldHistoryOpen, setFieldHistoryOpen] = useState(false)
+  const canReadFieldHistory = getPermissionTier('audit_log') === 'full'
   if (!p) return null
 
   const costPriceUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
@@ -201,6 +216,26 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 <span className="flex items-center gap-1.5">
                   <History className="h-3.5 w-3.5" />
                   {T('view_stock_history', 'View stock history (in, out, sales, returns, imports...)')}
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+              </button>
+            ) : null}
+            {/* Field history sits beside the stock history, because they are
+                the two halves of one question. "View stock history" answers
+                what MOVED; this answers what was EDITED -- the price, the
+                barcode, the category -- who did it and what it was before.
+                Until now a plain price edit left no trail any screen showed. */}
+            {canReadFieldHistory && Number((p as { id?: unknown }).id) > 0 ? (
+              <button
+                type="button"
+                data-product-field-history=""
+                onClick={() => setFieldHistoryOpen(true)}
+                className="mt-1 flex w-full items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 text-left text-xs text-gray-500 transition-colors hover:bg-white hover:text-gray-700 dark:bg-slate-800/60 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-200"
+              >
+                <span className="flex items-center gap-1.5">
+                  <ScrollText className="h-3.5 w-3.5" />
+                  {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
+                  <span className="leading-relaxed">{T('field_history', 'Field history')}</span>
                 </span>
                 <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
               </button>
@@ -402,6 +437,19 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
         fmtKHR={fmtKHR}
         t={(key, fallback) => T(key, fallback)}
       />
+    ) : null}
+    {fieldHistoryOpen ? (
+      <Suspense fallback={null}>
+        <EntityRecordsFloat
+          entity="product"
+          entityId={Number((p as { id?: unknown }).id) || 0}
+          subject={String(p.name || '')}
+          onClose={() => setFieldHistoryOpen(false)}
+          t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
+          fmtUSD={(value) => fmtUSD(Number(value))}
+          fmtKHR={(value) => fmtKHR(Number(value))}
+        />
+      </Suspense>
     ) : null}
     </>,
     document.body,

@@ -32,10 +32,11 @@
 //
 // HOW ROUTES GET IT FOR FREE
 // --------------------------
-// Two call sites build their lines inline as English strings
-// (routes/sales.ts's status change, routes/fees.ts's fee), and those files
-// belong to other lanes. So `localizeTelegramLine` works on the COMPOSED line:
-// it splits at the first ': ', looks the English label up, and rewrites it.
+// One call site still builds its lines inline as English strings
+// (routes/fees.ts's fee; routes/sales.ts's status change did until Sep 22
+// 2026), and that file belongs to another lane. So `localizeTelegramLine`
+// works on the COMPOSED line: it splits at the first ': ', looks the English
+// label up, and rewrites it.
 // A label it does not know passes through untouched, so nothing can break by
 // adding a line; the pure test pins that every label the routes actually emit
 // IS known.
@@ -110,13 +111,20 @@ type LabelEntry = {
 const LABELS = {
   // --- receipt summary (formatSaleTelegramLines) ---
   status: { en: 'Status', km: 'ស្ថានភាព', localizeValue: true },
+  // The status change's own row (formatSaleStatusTelegramLines), in the
+  // owner's Sep 23 2026 words: "· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ:
+  // Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់". `localizeValue` names both
+  // statuses the way the app does, as it does on the plain Status row.
+  statusUpdated: { en: 'Invoice Status Updated', km: 'ស្ថានភាពផ្លាស់ប្ដូរ', localizeValue: true },
   date: { en: 'Date', km: 'កាលបរិច្ឆេទ' },
   // SHORTENED Sep 22 2026 (owner: "i changed some khmer that is too long and
   // no need so long"). វិក្កយបត្រ IS the invoice; លេខ- ("number of") added a
   // word the reader does not need next to a value that is obviously a number.
-  // Same Khmer as `receipt` below on purpose: one noun, one spelling.
+  // Same Khmer as the `🧾 Invoice` heading on purpose: one noun, one
+  // spelling. (The status change's `Receipt` row, which also said
+  // វិក្កយបត្រ, moved into that heading on Sep 23 2026, and its label went
+  // with it.)
   inv: { en: 'INV', km: 'វិក្កយបត្រ' },
-  receipt: { en: 'Receipt', km: 'វិក្កយបត្រ' },
   cashier: { en: 'Cashier', km: 'អ្នកគិតប្រាក់', localizeValue: true },
   customer: { en: 'Customer', km: 'អតិថិជន' },
   tel: { en: 'Tel', km: 'ទូរស័ព្ទ' },
@@ -202,17 +210,30 @@ const LABELS = {
 
   // --- shift report (S4-7, redesigned Sep 6 2026 per the owner's "so long...
   // much more simpler so easy to understand at a glance" ruling) -----------
-  // The line set is now the SHORT one: shift id, from/to, shop, cashier, a header block
-  // of key totals (sales, profit, expenses, delivery fee, credit), invoice
-  // counts, registered opening vs closing cash (the owner's explicit ask -- "you
-  // didn't mention the registered cash dollar and khr in open vs end"), then
-  // expenses split into delivery cost / other expenses and one informational
-  // difference line. No arithmetic is spelled out
-  // and no line explains itself in a sentence -- see formatShiftReport.
-  // From/To/Cashier reuse the labels below rather than growing
-  // shift-specific twins.
+  // The line set is now the SHORT one: open and close times, shop, cashier,
+  // shift id, a header block of key totals (sales, profit, expenses, delivery
+  // fee, credit), invoice counts, registered opening vs closing cash (the
+  // owner's explicit ask -- "you didn't mention the registered cash dollar and
+  // khr in open vs end"), then expenses split into delivery cost / other
+  // expenses and one informational difference line. No arithmetic is spelled
+  // out and no line explains itself in a sentence -- see formatShiftReport.
+  // Cashier reuses the receipt summary's label rather than growing a
+  // shift-specific twin.
+  //
+  // Open and Close replaced From and To on Sep 23 2026 (the owner's sample
+  // reads "Open/បើក: 22/09/2026 08:07" and "Close / បិទ: N/A", and "also for
+  // open khmer just call បើក"). The owner's short Khmer, as km.json has it for
+  // `shift_registered_open` and `open` (បើក) and for `close` (បិទ); the shift
+  // screen's `shift_open_time` / `shift_close_time` add ម៉ោង ("time"), which
+  // the sample drops. `open` is ALSO an open shift's state in the report
+  // title -- the sample uses the same two words for both -- so the word is
+  // spelled once. `from`/`to` above stay for the transfer message.
+  open: { en: 'Open', km: 'បើក' },
+  close: { en: 'Close', km: 'បិទ' },
   shop: { en: 'Shop', km: 'ហាង' },
-  shift: { en: 'ID', km: 'លេខសម្គាល់' },
+  // SHORTENED Sep 23 2026 to the owner's "ID សម្គាល់": the លេខ- ("number
+  // of") prefix went, as it did from `inv` on Sep 22.
+  shift: { en: 'ID', km: 'សម្គាល់' },
   invoices: { en: 'Invoices', km: 'វិក្កយបត្រ' },
   // The owner said "deleted". Nothing in this system deletes a sale -- the
   // only two `DELETE FROM sales` sites in routes/sales.ts and routes/returns.ts
@@ -291,12 +312,22 @@ export type TelegramLabelKey = keyof typeof LABELS
 /** Exported for scripts/test-telegram-bilingual-pure.cjs (glossary check). */
 export const TELEGRAM_LABELS: Record<string, LabelEntry> = LABELS
 
-/** Message headings. Emoji stays in front of BOTH languages. */
+/**
+ * Message headings. Emoji stays in front of BOTH languages. A heading may be
+ * followed by the one record it is about -- `🛍️ Sale Invoice: 20260923-153527`
+ * -- and that value is kept exactly as it is (localizeTelegramHeading).
+ */
 const HEADINGS = {
-  '🛍️ Sale recorded': 'បានកត់ត្រាការលក់',
-  // SHORTENED Sep 22 2026 to the owner's own wording. បង្កាន់ដៃ (receipt) is
-  // already named by the `Receipt / វិក្កយបត្រ` line directly underneath.
-  '🧾 Receipt status updated': 'ស្ថានភាពបានផ្លាស់ប្ដូរ',
+  // The sale alert's title, which names the receipt since Sep 23 2026 (the
+  // owner's sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527").
+  // It replaced "Sale recorded / បានកត់ត្រាការលក់" and the INV row that
+  // carried the number under the status and date.
+  '🛍️ Sale Invoice': 'វិក្កយបត្រការលក់',
+  // The status change's title, which names the invoice since Sep 23 2026
+  // (the owner's sample: "🧾 Invoice / វិក្កយបត្រ: 20260922-110132"). It
+  // replaced "Receipt status updated / ស្ថានភាពបានផ្លាស់ប្ដូរ" and the Receipt
+  // row under it; the change itself is the `statusUpdated` row now.
+  '🧾 Invoice': 'វិក្កយបត្រ',
   '💸 Fee recorded': 'បានកត់ត្រាចំណាយ',
   '📥 Stock in': 'ស្តុកចូល',
   '📤 Stock out': 'ស្តុកចេញ',
@@ -306,6 +337,20 @@ const HEADINGS = {
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS
+// Looked up through a Map, like the labels below: a title line comes out of a
+// builder, and a plain object would also "know" `constructor` or `toString`.
+const HEADING_KM = new Map<string, string>(Object.entries(HEADINGS))
+
+/**
+ * `['🛍️ Sale Invoice', ': 20260923-153527']` when `text` is a heading -- on
+ * its own or followed by the one value it names -- and null for any other
+ * line.
+ */
+function headingParts(text: string): [head: string, rest: string] | null {
+  const split = text.indexOf(': ')
+  const head = split > 0 ? text.slice(0, split) : text
+  return HEADING_KM.has(head) ? [head, text.slice(head.length)] : null
+}
 
 // Enumerated words that appear INSIDE a value. Applied in one pass (longest
 // first) only to labels flagged `localizeValue`, so free-text values -- product
@@ -425,10 +470,14 @@ export function label(key: TelegramLabelKey): string {
  * without a parse mode -- postTelegram sends plain text, so indentation is the
  * only structure available and `*bold*` would print as asterisks.
  *
- * `·` is for a LABEL row; `•` stays the marker for the LIST rows (payment
- * methods, deliveries, expenses, cashiers) and a numbered `1.` opens an item.
- * Three shapes, three meanings, and none of them is a second way of writing
- * another.
+ * `·` is for a LABEL row, and since Sep 23 2026 for EVERY row inside a report
+ * section: the shift report's payment-method, delivery and expense lists
+ * (owner: "and for inside each section do bullet points ·"), and the cashier,
+ * receipt, expense and stock lists of the other reports, which took the same
+ * rule with their `=====` headers. `•` stays the marker for the LIST rows of
+ * the event messages (the products of a transfer or a return), and a numbered
+ * `1.` opens an item. Three shapes, three meanings, and none of them is a
+ * second way of writing another.
  */
 export const ROW_BULLET = '· '
 
@@ -480,6 +529,25 @@ export function bi(en: string, km: string): string {
 }
 
 /**
+ * The first `max` characters of `text`, counted as CODE POINTS.
+ *
+ * Every cap on text the bot sends goes through here: lib/telegram.ts's
+ * cleanLine, and the command and the date a reply echoes back. `slice` counts
+ * UTF-16 units, and an emoji -- any character past U+FFFF -- is two of them,
+ * so a cut landing between the two left half a character behind: a lone
+ * surrogate, which has no UTF-8 form, so Telegram can only refuse the message
+ * or print a broken glyph in its place. Counted this way a cut only ever falls
+ * BETWEEN two characters. (A Khmer vowel sign is a code point of its own, so a
+ * cut can still part one from its consonant -- only on text longer than its
+ * cap, and what is left is still valid text.)
+ */
+export function firstCharacters(text: string, max: number): string {
+  // Text of at most `max` UTF-16 units holds at most `max` code points, so an
+  // ordinary line never builds the array.
+  return text.length > max ? Array.from(text).slice(0, max).join('') : text
+}
+
+/**
  * Translate the enumerated words inside one value.
  *
  * The `en` mode runs the pass too, and must: a `{ en, km }` entry exists
@@ -499,7 +567,8 @@ export function localizeTelegramValue(value: string): string {
  * Make one composed line bilingual. `'Cashier: Za'` -> `'Cashier /
  * អ្នកគិតប្រាក់: Za'`. Lines with no known label -- item bullets, which carry
  * only a product name and arithmetic -- are returned unchanged, except for the
- * `+ N more item(s)` continuation, whose only words ARE a counter.
+ * `+ N more item(s)` continuation, whose only words ARE a counter. A TITLE
+ * line (a heading and the record it names) is rendered as that heading.
  */
 export function localizeTelegramLine(line: string): string {
   const text = String(line ?? '')
@@ -510,6 +579,12 @@ export function localizeTelegramLine(line: string): string {
   // function the /sales receipt list calls directly.
   const more = text.match(MORE_ITEMS_RE)
   if (more) return ROW_BULLET + moreItems(Number(more[1]))
+  // The sale alert and the status change open on their own title line,
+  // `🛍️ Sale Invoice: <receipt>` and `🧾 Invoice: <receipt>`, because only
+  // their builders know the receipt number the owner's Sep 23 2026 samples
+  // put in the title. It is a heading, not a label row: heading words, no
+  // bullet.
+  if (headingParts(text)) return localizeTelegramHeading(text)
   const split = text.indexOf(': ')
   if (split <= 0) return text
   const head = text.slice(0, split)
@@ -536,16 +611,22 @@ export function localizeTelegramLine(line: string): string {
   return row(pair(entry.en, entry.km), value)
 }
 
-/** Make a message heading bilingual, keeping its emoji in front. */
+/**
+ * Make a message heading bilingual, keeping its emoji in front. The record a
+ * heading names is a value and is kept as it is: `🛍️ Sale Invoice:
+ * 20260923-153527` -> `🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527`.
+ */
 export function localizeTelegramHeading(heading: string): string {
   const text = String(heading ?? '').trim()
-  const km = HEADINGS[text as keyof typeof HEADINGS]
+  const parts = headingParts(text)
+  if (!parts) return text
+  const [head, rest] = parts
+  const km = HEADING_KM.get(head) as string
   // The emoji belongs to the heading itself, so the Khmer-only rendering keeps
   // it and drops only the English words after it.
-  if (!km) return text
-  const emoji = text.match(/^(\S+)\s+(.*)$/)
-  if (currentLanguage === 'km' && emoji) return `${emoji[1]} ${km}`
-  return pair(text, km)
+  const emoji = head.match(/^(\S+)\s+(.*)$/)
+  if (currentLanguage === 'km' && emoji) return `${emoji[1]} ${km}${rest}`
+  return `${pair(head, km)}${rest}`
 }
 
 // ---------------------------------------------------------------------------
@@ -556,27 +637,62 @@ export function localizeTelegramHeading(heading: string): string {
 // hanging indent -- all of which survive Telegram's phone-width wrapping,
 // which `*bold*` would not (it would render as literal asterisks).
 
-// The ONE section rule every report draws, and the whole of what replaced the
-// explanatory sentences the owner asked us to delete ("no explanation just
-// arrange all reports more concise with breakdowns clearly"). A bare rule
-// reads as a break at phone width; a section heading would cost a line per
-// block and a blank line reads as an accident rather than a divider. Exported
-// so lib/telegram.ts draws the SAME rule -- two copies drift by one glyph.
+// The rule between WHOLE blocks: the shift reports one `/shift` answer joins,
+// and the command reference's heading, list and footer. It used to open every
+// report SECTION as well. Since Sep 23 2026 a section opens with its own name
+// between two edges instead (SHIFT_SECTION_EDGE and REPORT_SECTION_EDGE below;
+// owner: "for telegram reports, instead of plain line ------we can do
+// =====section name===== instead."), so a drawn rule now always means "a new
+// block starts here". A blank line would read as an accident rather than a
+// divider. Exported so lib/telegram.ts draws the SAME rule -- two copies drift
+// by one glyph.
 export const RULE = '━'.repeat(18)
 
 /**
  * The divider for an EVENT message -- the sale alert and the status change.
  *
- * Those two are not sectioned reports: they have no numbered headings, only
+ * Those two are not sectioned reports: they have no section headings, only
  * groups of rows (who/when, who rang it up, who bought it, what was bought,
  * what it came to), and the owner's Sep 22 2026 reference layout separates
  * those groups with a plain dashed row. A lighter weight than `RULE` says
- * "next group" rather than "next numbered section", and the SAME width keeps
+ * "next group" rather than "next block", and the SAME width keeps
  * every Business OS message the same shape in the chat. One constant per
  * family, never a literal at a call site -- two hand-typed rules drift by a
  * glyph or by a length and the feed starts looking accidental.
  */
 export const GROUP_RULE = '─'.repeat(18)
+
+/**
+ * The mark on either side of a SHIFT REPORT section's name:
+ * `-----Invoices / វិក្កយបត្រ-----`, one line, no number and no rule above it.
+ *
+ * Owner, Sep 23 2026: "for shift instead of line. do ---------Invoices /
+ * វិក្កយបត្រ-------- use dash not line. and for inside each section do bullet
+ * points ·". Plain hyphen-minus on purpose: the drawn `━` rule is exactly
+ * what the owner asked to replace.
+ *
+ * HOW MANY stand on each side is lib/telegram.ts's sectionHeader's job: five,
+ * or fewer when five would push the header onto a second row. The owner, the
+ * same day: "for the header marks, make sure the line stays in one line/row.
+ * this means you can use less header marks if it pushes to next row for the
+ * telegram message." So `---Cash count / ការរាប់សាច់ប្រាក់---` in both
+ * languages, and five a side for the shorter names.
+ */
+export const SHIFT_SECTION_EDGE = '-'
+
+/**
+ * The mark on either side of a section's name in every OTHER sectioned
+ * report -- the `/report` day summary (and the evening push, which sends the
+ * same text), `/sales`, `/fees`, `/stock` and `/inventory`:
+ * `=====Sales / ការលក់=====`, one line, no number and no rule above it.
+ *
+ * Owner, Sep 23 2026: "for telegram reports, instead of plain line ------we
+ * can do =====section name===== instead." The shift report keeps the dashed
+ * mark above, which the owner asked for separately. Both families take their
+ * count from sectionHeader -- five, or fewer when the row would wrap ("make
+ * sure the line stays in one line/row") -- so they differ only in the glyph.
+ */
+export const REPORT_SECTION_EDGE = '='
 
 type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
 
@@ -727,10 +843,11 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
     }
   }
 
+  const shown = firstCharacters(raw, 30)
   return {
     ok: false,
     message: [
-      `⚠️ ${bi(`I could not read the date "${raw.slice(0, 30)}".`, `មិនអាចអានកាលបរិច្ឆេទ "${raw.slice(0, 30)}" បានទេ។`)}`,
+      `⚠️ ${bi(`I could not read the date "${shown}".`, `មិនអាចអានកាលបរិច្ឆេទ "${shown}" បានទេ។`)}`,
       '',
       bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
       // `•`, not `▸`: the arrow is this bot's POINTER glyph -- "now send that

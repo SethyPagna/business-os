@@ -67,7 +67,12 @@ const addLine = evaluate(extract(fast, 'addLine'), {
   // A restored historical flag must NOT turn an ordinary price edit into a new product.
   createPriceVariant: true, canViewCosts: true, batchChoice: 'new', batchOptions: [], branchOptions: [],
   expiryDate: '', reason: '', conditionTag: '', createdProductIds: [],
-  setReceived: (updater: (rows: any[]) => any[]) => { queued = updater(queued) },
+  // addLine hands setReceived the NEXT array (it has to: the same value is
+  // written to the draft synchronously first), so accept both shapes exactly
+  // as the setAdjustForm stub above does.
+  received: [], persistSessionDraft: () => {},
+  createClientRequestId: (prefix: string) => `${prefix}_test`,
+  setReceived: (next: any) => { queued = typeof next === 'function' ? next(queued) : next },
   setEditingKey: () => {}, resetLine: () => {}, tr: (_key: string, fallback: string) => fallback,
   notify: (message: string) => { throw new Error(message) },
 })

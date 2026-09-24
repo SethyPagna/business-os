@@ -7,7 +7,7 @@ const { Miniflare } = require('miniflare')
 
 async function main() {
   let source = fs.readFileSync(path.join(__dirname, 'test-sale-bulk-update-pure.cjs'), 'utf8')
-    .replace("const actual = new Set([", "const actual = new Set(['saleCustomerAssignmentGuard',")
+    .replace("const actual = new Set(['saleStatusResolution',", "const actual = new Set(['saleCustomerAssignmentGuard',")
     .replace(/run\(\)\.catch[\s\S]*$/, '')
   const { sales, history, fixture, setUser, load } = new Function('require', '__dirname', source + '\nreturn {sales,history,fixture,load,setUser:value=>{user=value}};')(require, __dirname)
   const contacts = load('routes/contacts.ts').default

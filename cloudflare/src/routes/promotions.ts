@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
 import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
@@ -180,7 +180,11 @@ app.put('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
       starts_at=@starts_at, ends_at=@ends_at, is_active=@is_active, updated_at=CURRENT_TIMESTAMP
     WHERE id=@id
   `).run({ ...input, id })
-  await audit(c.env, user?.id ?? null, user?.username ?? null, 'update', 'promotion_rule', id, { title: input.title, rule_type: input.rule_type, scope_type: input.scope_type })
+  // `input` is the normalized value set this UPDATE wrote and `current` is
+  // the row it replaced, so its keys are the exact editable surface of a rule.
+  await audit(c.env, user?.id ?? null, user?.username ?? null, 'update', 'promotion_rule', id,
+    { title: input.title, rule_type: input.rule_type, scope_type: input.scope_type },
+    changedFields(current as Record<string, unknown>, input as Record<string, unknown>, { keys: Object.keys(input) }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'rule-update', id }))
   const updated = await db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get([id])
@@ -191,10 +195,13 @@ app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   const user = c.get('user')
   const id = Number(c.req.param('id'))
   const db = getDb(c.env)
-  const current = await db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get<{ title: string }>([id])
+  const current = await db.prepare('SELECT * FROM promotion_rules WHERE id = ?').get<Record<string, unknown>>([id])
   if (!current) return c.json({ error: 'Promotion rule not found' }, 404)
   await db.prepare('DELETE FROM promotion_rules WHERE id = ?').run([id])
-  await audit(c.env, user?.id ?? null, user?.username ?? null, 'delete', 'promotion_rule', id, { title: current.title })
+  // Same shape as a fee delete: the removed record IS the before image, so the
+  // Audit Log can show what the rule was instead of only its title.
+  await audit(c.env, user?.id ?? null, user?.username ?? null, 'delete', 'promotion_rule', id, { title: current.title },
+    changedFields(current as Record<string, unknown>, null))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'rule-delete', id }))
   return c.json({ deleted: true })
@@ -309,7 +316,8 @@ app.put('/:id', requireKey('products'), async (c) => {
     WHERE id=@id
   `).run({ ...input, id })
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'promotion', id, { title: input.title })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'promotion', id, { title: input.title },
+    changedFields(current as Record<string, unknown>, input as Record<string, unknown>, { keys: Object.keys(input) }))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
@@ -339,11 +347,12 @@ app.delete('/:id', requireKey('products'), async (c) => {
   const id = c.req.param('id')
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT * FROM promotions WHERE id = ?').get<{ title: string }>([id])
+  const current = await db.prepare('SELECT * FROM promotions WHERE id = ?').get<Record<string, unknown>>([id])
   if (!current) return c.json({ error: 'Promotion not found' }, 404)
 
   await db.prepare('DELETE FROM promotions WHERE id = ?').run([id])
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'promotion', id, { title: current.title })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'promotion', id, { title: current.title },
+    changedFields(current as Record<string, unknown>, null))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
   return c.json({ deleted: true })
 })

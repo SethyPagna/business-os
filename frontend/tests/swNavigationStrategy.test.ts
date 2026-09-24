@@ -46,16 +46,33 @@ function functionBody(source: string, startMarker: string, endMarker: string): s
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   runTest(`appShellFallback answers a cache hit without awaiting the network (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /const cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'must read the cache before touching the network')
+    assert.match(body, /(?:const|let) cached = await cache\.match\('\/index\.html'\) \|\| await cache\.match\('\/'\)/, 'must read the cache before touching the network')
     assert.match(body, /if \(cached\) \{/, 'must branch on a cache hit')
     const cacheHitBranch = body.slice(body.indexOf('if (cached) {'), body.indexOf('return cached') + 'return cached'.length)
     assert.doesNotMatch(cacheHitBranch, /await fetch/, 'a cache hit must not await the network -- that is exactly the round-trip lag this fix removes')
     assert.match(cacheHitBranch, /event\.waitUntil\(revalidate\)/, 'the network refresh must run in the background via waitUntil, not block the response')
   })
 
-  runTest(`only a real 200 response overwrites the cached shell (${label})`, () => {
+  runTest(`only the real app shell overwrites the cached shell (${label})`, () => {
     const body = functionBody(source, 'async function appShellFallback', 'async function cacheFirstStatic')
-    assert.match(body, /isValidDocumentResponse\(response\)/, 'a Cloudflare Access/login redirect or app error page must not overwrite a good cached shell')
+    assert.match(body, /await isAppShellDocument\(response\)/, 'a Cloudflare Access/login redirect, an app error page or a 200 challenge interstitial must not overwrite a good cached shell')
+  })
+
+  runTest(`every write of the cached shell goes through the one shell-content check (${label})`, () => {
+    // Part 628 ticket 2: a 200 challenge interstitial passes
+    // isValidDocumentResponse. One writer left on that check is enough to
+    // store it as the shell, so none may be: recovery, revalidation, cache
+    // miss and stale-asset refresh all write /index.html, and each write must
+    // sit directly behind the body check. A null guard in front of the check
+    // (x && ...) can only narrow what reaches it.
+    const writes = [...source.matchAll(/cache\.put\('\/index\.html'/g)]
+    assert.equal(writes.length, 4, 'recovery, revalidation, cache miss and stale-asset refresh -- a new writer needs the same gate')
+    for (const write of writes) {
+      const lead = source.slice(Math.max(0, write.index - 120), write.index)
+      assert.match(lead, /if \((?:\w+ && )?await isAppShellDocument\(\w+\)\)\s*\{?\s*await $/, `unguarded shell write: ...${lead.slice(-80)}`)
+    }
+    const install = functionBody(source, 'async function precacheAppShell', 'async function cacheNamesToRetain')
+    assert.match(install, /url === '\/' \|\| url === '\/index\.html'\s*\?\s*await isAppShellDocument\(response\)/, 'install admits / and /index.html through the same check')
   })
 
   runTest(`the navigation handler passes the request event through (${label})`, () => {
@@ -98,7 +115,7 @@ return isValidDocumentResponse`)() as (response: unknown) => boolean
       /cache\.add\(/,
       'cache.add() follows redirects and stores them -- the install path must fetch and check first',
     )
-    assert.match(install, /isValidDocumentResponse\(response\)/, 'the install path must apply the guard')
+    assert.match(install, /await isAppShellDocument\(response\)/, 'the install path must apply the guard')
 
     // The fix must also HEAL the devices already holding a poisoned entry:
     // they cannot reach the app to accept an update, so nothing else will.
@@ -108,6 +125,10 @@ return isValidDocumentResponse`)() as (response: unknown) => boolean
       /if \(cached && !isValidDocumentResponse\(cached\)\) \{[\s\S]{0,200}cache\.delete\('\/index\.html'\)[\s\S]{0,200}cache\.delete\('\/'\)/,
       'a cached shell that cannot answer a navigation must be dropped, not served again',
     )
+    // Part 628 ticket 1: and dropping it leaves a plain cache miss, so a
+    // recovery navigation still goes out as a navigation below -- not as the
+    // worker-context read of /index.html this branch used to return.
+    assert.match(body, /cache\.delete\('\/'\)[\s\S]{0,40}cached = undefined/, 'the dropped entry must fall through as a cache miss')
   })
   runTest(`a chunk the deploy deleted refreshes the cached shell before the response returns (${label})`, () => {
     const body = functionBody(source, 'async function cacheFirstStatic', 'function isStaleBuildAsset')
@@ -143,7 +164,7 @@ return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }
     const recover = functionBody(source, 'async function recoverStaleShell', "self.addEventListener('fetch'")
     assert.match(recover, /caches\.open\(APP_SHELL_CACHE\)/, 'the shell cache is what goes stale')
     assert.match(recover, /fetch\('\/index\.html', \{ cache: 'no-store' \}\)/, 'the fresh shell must bypass HTTP caches')
-    assert.match(recover, /isValidDocumentResponse\(response\)/, 'a redirect or error page must not replace the shell')
+    assert.match(recover, /await isAppShellDocument\(response\)/, 'a redirect, error page or challenge interstitial must not replace the shell')
     const release = functionBody(source, 'async function releaseNewBuildForRecovery', 'async function recoverStaleShell')
     assert.match(release, /self\.registration\.update\(\)/, 'the new worker must still be requested, not left to the periodic check')
     // Sep 23: update() re-fetches /sw.js. Awaiting it here held the 404 the

@@ -109,6 +109,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
+const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
@@ -259,6 +260,11 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
+  // the per-line receipt guard. REAL, not a stub: a body without a
+  // client_request_id must hand straight through to the kernel, and that is
+  // the property every fixture here depends on.
+  '../lib/stockMutationReceipt': stockMutationReceipt,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/sqlBinding': sqlBinding,
   '../lib/familyPagination': { paginateProductFamilies: async () => ({ items: [], total: 0, page: 1, pageCount: 0 }) },

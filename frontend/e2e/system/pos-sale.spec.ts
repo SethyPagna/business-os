@@ -111,8 +111,9 @@ test.describe('system: a real sale through the real Worker', () => {
     const stockBefore = await branchQuantity(page, PRODUCT.name)
     expect(stockBefore, 'the seeded product must have shop stock to sell').toBeGreaterThan(0)
 
-    // Hand over the money. POS.tsx:3110 refuses any paid status while
-    // totalPaid < totalUsd - 0.005, so a test that skips this step is not
+    // Hand over the money. POS.tsx's checkout gate (tenderAllowsPaidStatus)
+    // refuses any paid status unless the tender covers the total to within
+    // half a cent, so a test that skips this step is not
     // testing a sale, it is testing the guard -- measured: the first run of
     // this spec never reached POST /api/sales for exactly that reason, and the
     // worker log showed only the login. "Exact $" is the one-tap cash path.

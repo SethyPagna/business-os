@@ -13,6 +13,7 @@ import {
 } from './paymentMethodRegistry'
 import { resolveChangeExchangeRate } from './saleTotals'
 import { nativeChangeAmounts } from './moneyPrecision'
+import { paymentCoversSaleTotalUnits } from './saleStatusResolution'
 
 export const MAX_SETTLEMENT_TENDER_ROWS = 12
 
@@ -260,24 +261,27 @@ export function planSaleSettlement(input: {
   const amountPaidKhr = calculationUnitsValue(paidKhrUnits)
   const totalUsd = Number(input.totalUsd)
   if (!Number.isFinite(totalUsd) || totalUsd < 0) fail('The sale total is invalid.', 'invalid_payment_amount')
-  let rateUnits: bigint
-  let totalUsdUnits: bigint
+  // S4-41: the coverage comparison lives in lib/saleStatusResolution.ts and is
+  // CALLED here, not restated. It used to be inline, and the paid-status
+  // resolver needed the identical question answered ("does this tender cover
+  // the sale?") on three other surfaces; a second copy of an exact-integer
+  // cross-currency comparison is exactly the kind of near-duplicate that
+  // drifts by one riel and starts labelling debts as paid. Same formula, same
+  // V1-rates-stay-exact rule, one definition.
+  let covered: boolean
   try {
-    rateUnits = input.moneyPrecisionVersion === 1 ? 0n : financialCalculationUnits(rate)
-    totalUsdUnits = financialCalculationUnits(totalUsd)
+    covered = paymentCoversSaleTotalUnits({
+      paidUsdUnits,
+      paidKhrUnits,
+      totalUsd,
+      exchangeRate: rate,
+      moneyPrecisionVersion: input.moneyPrecisionVersion,
+    })
   } catch {
     fail('The sale total or current exchange rate is invalid.', 'invalid_payment_amount')
   }
   const paidCombinedUsd = amountPaidUsd + amountPaidKhr / rate
-  // V1 rates are decimal ratios, not money: never quantize the rate to four places.
-  const rateShape = decimalShape(rate)!
-  const rateNumerator = input.moneyPrecisionVersion === 1
-    ? BigInt(rateShape.coefficient) * 10n ** BigInt(Math.max(0,-rateShape.decimalScale)) : rateUnits
-  const rateDenominator = input.moneyPrecisionVersion === 1
-    ? 10n ** BigInt(Math.max(0,rateShape.decimalScale)) : 10_000n
-  const paidScaled = paidUsdUnits * rateNumerator + paidKhrUnits * rateDenominator
-  const totalScaled = totalUsdUnits * rateNumerator
-  if (paidScaled < totalScaled) {
+  if (!covered) {
     fail('The payment does not cover the sale balance.', 'insufficient_payment')
   }
   const overpayExactUsd = Math.max(0, paidCombinedUsd - totalUsd)

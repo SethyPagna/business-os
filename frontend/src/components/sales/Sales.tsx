@@ -64,6 +64,7 @@ import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type 
 import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 import {
   directMutationOutcomeIsUnknown,
@@ -80,6 +81,7 @@ import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMu
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
+import { PAID_SALE_STATUSES, statusChangeNeedsPayment } from '../../utils/saleStatusResolution.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 // A status settlement writes the sale, every paired KHR line snapshot, the
@@ -454,7 +456,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
-  const [bulkChangePrompt, setBulkChangePrompt] = useState<{ field: BulkSaleField; rows: BulkSaleChangeRow[]; sales: SaleRecord[]; sourceChoices: BulkSaleChoice[]; targetChoices: BulkSaleChoice[] } | null>(null)
+  const [bulkChangePrompt, setBulkChangePrompt] = useState<{ field: BulkSaleField; rows: BulkSaleChangeRow[]; sales: SaleRecord[]; sourceChoices: BulkSaleChoice[]; targetChoices: BulkSaleChoice[]; cancelledCount?: number } | null>(null)
   const [bulkFieldSaving, setBulkFieldSaving] = useState(false)
   const bulkTargetSearchVersionRef = useRef(0)
   const bulkTargetSearchTimerRef = useRef<number | null>(null)
@@ -1276,7 +1278,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales()
         return false
       }
-      notify(`Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
+      // S4-41: the Worker will not give a Not Paid sale that still owes money a
+      // paid status without a payment. The payment form always sends one, so this
+      // is an Undo or Redo (or its retry) asking for it: say why, in the shop's language.
+      notify(problem.code === 'insufficient_payment_for_status'
+        ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : `Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
       return false
     } finally {
       finishKeyedAction(statusActionRef, actionKey)
@@ -1676,6 +1683,13 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     () => visibleSales.filter((sale) => selectedIds.has(Number(sale.id))),
     [selectedIds, visibleSales],
   )
+  // Owner rule (23 Sep 2026): a sale's fields are editable in every status
+  // except cancelled. Group field changes (payment method, driver, customer)
+  // leave cancelled sales out; the Worker refuses a group that contains one
+  // (cancelled_sale_read_only). Status stays offered: it is how a sale is
+  // un-cancelled.
+  const fieldEditableSales = selectedSales.filter((sale) => String(sale.sale_status || 'completed') !== 'cancelled')
+  const selectedCancelledCount = selectedSales.length - fieldEditableSales.length
 
   useEffect(() => {
     if (!selectAllRef.current) return
@@ -2007,7 +2021,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
       return
     }
-    const frozenSales = selectedSales.map((sale) => ({ ...sale }))
+    const frozenSales = (field === 'status' ? selectedSales : fieldEditableSales).map((sale) => ({ ...sale }))
+    if (!frozenSales.length) return
     const sourceChoices = uniqueChoices(frozenSales.flatMap((sale) => choicesForSale(sale, field)))
     let targetChoices: BulkSaleChoice[] = sourceChoices
     try {
@@ -2036,9 +2051,18 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     setBulkChangePrompt({
       field,
       sales: frozenSales,
-      rows: frozenSales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`), currentKeys: choicesForSale(sale, field).map((choice) => choice.key) })),
+      rows: frozenSales.map((sale) => ({
+        id: Number(sale.id),
+        receipt: String(sale.receipt_number || `#${sale.id}`),
+        currentKeys: choicesForSale(sale, field).map((choice) => choice.key),
+        // S4-41: a Not Paid sale whose recorded payment does not cover it cannot
+        // become paid. The Worker refuses a group containing one, so the review
+        // names it and leaves it out instead (the same rule, shared file).
+        ...(field === 'status' ? { blockedTargetKeys: PAID_SALE_STATUSES.filter((status) => statusChangeNeedsPayment(sale.sale_status, status, sale)).map((status) => `value:${status}`) } : {}),
+      })),
       sourceChoices,
       targetChoices,
+      cancelledCount: selectedSales.length - frozenSales.length,
     })
   }
 
@@ -2185,18 +2209,30 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       for (const channel of ['inventory', 'products', 'returns']) window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel } }))
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.', 'បានកែប្រែការលក់ {changed}; មិនផ្លាស់ប្តូរ {unchanged}។').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
     } catch (error) {
-      notify(getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
+      // The Worker refuses an unpaid member before it writes anything or records
+      // the request id (a committed original would have been answered with its
+      // receipt instead), so the outcome is known and there is nothing to retry.
+      // The review saw that sale as paid, so this page's copy of it is stale:
+      // reload, and the next review names it.
+      const unpaid = (error as { code?: string } | null)?.code === 'insufficient_payment_for_status'
+      if (unpaid) {
+        savePendingBulkRequest(null)
+        void loadSales(true)
+      }
+      notify(unpaid
+        ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')
     }
   }
 
-  const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload) => {
-    if (!canBulkSales) return
-    if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return
-    if (!retryRequest && !matched.length) return
-    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return
+  const submitBulkFieldChange = async (field: Exclude<BulkSaleField, 'status'>, source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], frozenSales: SaleRecord[], retryRequest?: BulkSaleUpdatePayload): Promise<boolean> => {
+    if (!canBulkSales) return false
+    if (!(field === 'customer' ? canReassignSaleCustomer : canAmendSales)) return false
+    if (!retryRequest && !matched.length) return false
+    if (!beginSingleAction(bulkStatusInFlightRef, { blocked: bulkFieldSaving })) return false
     setBulkFieldSaving(true)
     try {
       const payload: BulkSaleUpdatePayload = retryRequest || {
@@ -2214,12 +2250,34 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
       notify(translateOr('sale_bulk_status_result', 'Updated {changed} sales; {unchanged} unchanged.').replace('{changed}', String(result.changedCount)).replace('{unchanged}', String(result.unchangedCount)), 'success')
+      return result.changedCount > 0
     } catch (error) {
-      notify(getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      // A group holding a cancelled sale is refused before anything is written
+      // (a committed original would have been answered with its receipt), so
+      // the retry body is dropped and the list reloaded to show the status.
+      const cancelled = saleCancelledRefusal(error)
+      if (cancelled) {
+        savePendingBulkFieldRequest(null)
+        void loadSales(true)
+      }
+      notify(cancelled ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+      return false
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkFieldSaving(false)
     }
+  }
+
+  // G3: change or clear ONE sale's driver from its detail. It is the group
+  // driver change with one sale, so it writes the same before/after record,
+  // passes the same permission checks and gets the same Undo.
+  const changeSaleDriver = async (sale: SaleRecord, target: { id: number; name: string } | null): Promise<boolean> => {
+    if (pendingBulkFieldRequest) {
+      notify(translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.'), 'error')
+      return false
+    }
+    const source = choiceForSale(sale, 'delivery_contact')
+    return submitBulkFieldChange('delivery_contact', source, linkedChoice(target?.id, target?.name, ''), [{ id: Number(sale.id), receipt: String(sale.receipt_number || sale.id), currentKeys: [source.key] }], [sale])
   }
 
   const customerRows = (result: unknown): Array<Record<string, unknown>> => {
@@ -2286,6 +2344,9 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     await Promise.all([loadSales(true), actionHistory.refreshServerItems()])
     window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
   }
+  // Shared by the group field change above and the one-sale customer change.
+  const saleCancelledRefusal = (error: unknown) => (error as { code?: string } | null)?.code === 'cancelled_sale_read_only'
+  const cancelledRefusalMessage = () => translateOr('sale_cancelled_read_only', 'A cancelled sale cannot be edited. Nothing was changed.', 'ការលក់ដែលបានបោះបង់មិនអាចកែប្រែបានទេ។ គ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។')
   const submitSaleCustomerChange = async (sale: SaleRecord, target: { id: number; name: string } | null, retryRequest?: BulkSaleUpdatePayload, name?: string) => {
     const nameOnly = name !== undefined || retryRequest?.action.kind === 'customer_name'
     if (!authReady || statusSecurityScope !== statusSecurityRef.current || customerModeRef.current === 'denied' || (!nameOnly && customerModeRef.current !== 'assignment') || saleCustomerOpenRef.current !== Number(sale.id)) return false
@@ -2338,7 +2399,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       if (!retryRequest && isKnownUncommittedSaleCustomerChangeError(error)) savePendingBulkFieldRequest(null)
       notify((error as { code?: string } | null)?.code === 'loyalty_reassignment_requires_reconciliation'
         ? translateOr('sale_customer_loyalty_blocked', 'This customer change affects loyalty points and needs reconciliation. The sale was not changed. Ask an administrator to review it.')
-        : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
+        : saleCancelledRefusal(error) ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
       return false
     } finally { finishSingleAction(bulkStatusInFlightRef); setBulkFieldSaving(false); setSaleCustomerSaving(false) }
   }
@@ -2643,9 +2704,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             {canChangeSaleStatus ? (
               <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('status') }} disabled={selectedSales.length > 25 || !!bulkStatusSaving || bulkFieldSaving}>{translateOr('status', 'Status')}</button>
             ) : null}
-            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('payment_method') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('payment_method', 'Payment method')}</button> : null}
-            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('delivery_contact') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('delivery_contact', 'Driver')}</button> : null}
-            {canReassignSaleCustomer ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('customer') }} disabled={selectedSales.length > 25 || bulkFieldSaving}>{translateOr('customer', 'Customer')}</button> : null}
+            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('payment_method') }} disabled={selectedSales.length > 25 || bulkFieldSaving || !fieldEditableSales.length}>{translateOr('payment_method', 'Payment method')}</button> : null}
+            {canAmendSales ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('delivery_contact') }} disabled={selectedSales.length > 25 || bulkFieldSaving || !fieldEditableSales.length}>{translateOr('delivery_contact', 'Driver')}</button> : null}
+            {canReassignSaleCustomer ? <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => { void openBulkChange('customer') }} disabled={selectedSales.length > 25 || bulkFieldSaving || !fieldEditableSales.length}>{translateOr('customer', 'Customer')}</button> : null}
+            {(canAmendSales || canReassignSaleCustomer) && selectedCancelledCount > 0 ? <InfoHint text={translateOr('sale_bulk_cancelled_skipped', '{n} cancelled sales cannot be edited and are left out.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(selectedCancelledCount))} label={translateOr('cancelled_sale', 'Cancelled sale', 'ការលក់ដែលបានបោះបង់')} /> : null}
             <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
               {translateOr('clear', 'Clear')}
             </button>
@@ -2738,6 +2800,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // can open the sale can see how it got that way (the Worker
             // gates it on read access), so it is passed unconditionally.
             onAmend={canAmendSales && saleAmendmentWindowAllows(settings?.sale_amendment_window_minutes, detailSale.created_at, isAdmin) ? handleAmendSale : undefined}
+            // Same grants as the group Driver change it reuses (sales:bulk + sales:amend).
+            onDriverChange={canBulkSales && canAmendSales ? (sale, target) => changeSaleDriver(sale as SaleRecord, target) : undefined}
             onLoadAmendments={loadSaleAmendments}
             onOpenRecords={(sale) => {
               setRecordsSale(sale as SaleRecord)
@@ -2921,16 +2985,19 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           rows={bulkChangePrompt.rows}
           sourceChoices={bulkChangePrompt.sourceChoices}
           targetChoices={bulkChangePrompt.targetChoices}
+          cancelledCount={bulkChangePrompt.cancelledCount}
           saving={bulkFieldSaving || !!bulkStatusSaving}
           translate={translateOr}
           onSearchTargets={bulkChangePrompt.field === 'customer' || bulkChangePrompt.field === 'delivery_contact' ? searchBulkLinkedTargets : undefined}
           onClose={() => { if (!bulkFieldSaving && !bulkStatusSaving) setBulkChangePrompt(null) }}
-          onConfirm={(source, target, matched) => {
+          onConfirm={(source, target, matched, blocked) => {
             const matchedIds = new Set(matched.map((row) => row.id))
             const matchedSales = bulkChangePrompt.sales.filter((sale) => matchedIds.has(Number(sale.id)))
             if (bulkChangePrompt.field === 'status') {
+              // A blocked sale is not sent at all: it would match the source and refuse the group.
+              const blockedIds = new Set(blocked.map((row) => row.id))
               setBulkChangePrompt(null)
-              void handleScopedBulkStatusUpdate(String(target.value || ''), null, false, false, matchedSales, String(source.value || 'completed'), bulkChangePrompt.sales)
+              void handleScopedBulkStatusUpdate(String(target.value || ''), null, false, false, matchedSales, String(source.value || 'completed'), bulkChangePrompt.sales.filter((sale) => !blockedIds.has(Number(sale.id))))
               return
             }
             void submitBulkFieldChange(bulkChangePrompt.field, source, target, matched, bulkChangePrompt.sales)

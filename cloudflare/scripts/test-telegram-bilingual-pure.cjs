@@ -2,8 +2,9 @@
 // no bot token, no live chat, no network. Four things it must prove:
 //
 //   1. Every line a message sends carries BOTH languages (every English label
-//      is followed by its Khmer), including the two routes that still build
-//      their lines inline (routes/sales.ts status, routes/fees.ts fee).
+//      is followed by its Khmer), including the one route that still builds
+//      its lines inline (routes/fees.ts fee; routes/sales.ts's status change
+//      did until Sep 22 2026).
 //   2. The Khmer in the Worker dictionary is the SAME Khmer the app uses --
 //      cross-checked against frontend/src/lang/km.json, so a second, divergent
 //      spelling of a retail term cannot be born on the server side. This
@@ -142,8 +143,34 @@ assert.equal(
   'a value containing " / " must survive a single-language rendering intact',
 )
 // The heading keeps its emoji in every mode; only the words change.
-assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ បានកត់ត្រាការលក់')
-assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale recorded')), '🛍️ Sale recorded')
+assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ វិក្កយបត្រការលក់')
+assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ Sale Invoice')
+// Since Sep 23 2026 the sale alert's heading names its receipt (the owner's
+// sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527"), and the
+// builder sends it as its first line. That line is a HEADING -- heading
+// words, no row bullet -- and the number after it is a value, never touched.
+for (const [mode, title] of [
+  ['both', '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527'],
+  ['en', '🛍️ Sale Invoice: 20260923-153527'],
+  ['km', '🛍️ វិក្កយបត្រការលក់: 20260923-153527'],
+]) {
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the title line`)
+  assert.equal(inMode(mode, () => lang.localizeTelegramHeading('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the same title as a heading`)
+}
+// The status change opens the same way since Sep 23 2026 (the owner's sample:
+// "🧾 Invoice / វិក្កយបត្រ: 20260922-110132").
+for (const [mode, title] of [
+  ['both', '🧾 Invoice / វិក្កយបត្រ: 20260922-110132'],
+  ['en', '🧾 Invoice: 20260922-110132'],
+  ['km', '🧾 វិក្កយបត្រ: 20260922-110132'],
+]) {
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🧾 Invoice: 20260922-110132')), title, `${mode}: the status change's title line`)
+}
+// The retired headings are no titles any more, and neither is a word every
+// plain object "has": the heading table is looked up as a Map.
+assert.equal(lang.localizeTelegramLine('🛍️ Sale recorded: 1'), '🛍️ Sale recorded: 1', 'the retired heading passes through untouched')
+assert.equal(lang.localizeTelegramLine('🧾 Receipt status updated'), '🧾 Receipt status updated', 'the retired status heading passes through untouched')
+assert.equal(lang.localizeTelegramLine('constructor: x'), 'constructor: x', 'a prototype key is not a heading')
 // Anything that is not one of the three values is the bilingual default: a
 // typo in a settings row must not blank the shop's reports.
 for (const junk of ['', null, undefined, 'klingon', 'EN-GB', 'both ']) {
@@ -277,8 +304,9 @@ console.log(`PASS rival spellings: ${everyWorkerKhmer.length} Worker Khmer strin
 
 // --- 3. every label the Worker actually emits is in the dictionary ----------
 // A source-shape check: scan lib/telegram.ts's builders AND the two routes
-// that compose lines inline for `Something: ` line prefixes, and require each
-// to be a known label. This is what stops a new line shipping English-only.
+// that have composed lines inline (routes/fees.ts still does) for
+// `Something: ` line prefixes, and require each to be a known label. This is
+// what stops a new line shipping English-only.
 const known = new Set(englishLabels)
 const LINE_LABEL = /[`'"]([A-Z][A-Za-z ]{1,24}): \$\{/g
 const scanned = []
@@ -362,6 +390,8 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   driver: { name: 'Dara', phone: '099 111 222' },
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
+assert.equal(saleLines[0], '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260903-100405', `the sale alert opens on its bilingual title:\n${saleLines.join('\n')}`)
+assert.ok(!saleLines.some((line) => line.startsWith('· INV')), 'the INV row moved into the title')
 // RENAMED Sep 22 2026. This line used to read
 // `Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់` -- a phrase the
 // app had already replaced everywhere the owner could see it except here.
@@ -413,7 +443,11 @@ const statusLines = assertAllBilingual(telegram.formatSaleStatusTelegramLines({
   receipt: '20260903-100405', fromStatus: 'awaiting_payment', toStatus: 'completed',
   customer: 'Sok Dara', reason: 'Customer cancelled', lostFeeUsd: 2, by: 'Sethy',
 }), 'sale status change')
-assert.ok(statusLines.includes('· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់'), statusLines.join('\n'))
+// Sep 23 2026: the receipt moved into the title and the Status row became
+// the owner's "Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ".
+assert.equal(statusLines[0], '🧾 Invoice / វិក្កយបត្រ: 20260903-100405', `the status change opens on its bilingual title:\n${statusLines.join('\n')}`)
+assert.equal(statusLines[1], '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់', statusLines.join('\n'))
+assert.ok(!statusLines.some((line) => /^· (Receipt|Status) /.test(line)), `the Receipt and Status rows are retired:\n${statusLines.join('\n')}`)
 // routes/fees.ts is the one route still composing lines inline.
 const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
@@ -432,6 +466,33 @@ assert.equal(lang.localizeTelegramLine('1. Rice 5kg 2 × $1.00 = $2.00'), '1. Ri
 assert.equal(lang.localizeTelegramLine(lang.GROUP_RULE), lang.GROUP_RULE, 'a divider is not a label row and gains no bullet')
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
+
+// A cap cuts BETWEEN two characters, never inside one (Sep 23 2026). `slice`
+// counts UTF-16 units and an emoji is two of them, so a cut between the two
+// left half a character: a lone surrogate, which has no UTF-8 form. Every
+// input below puts an emoji ACROSS its cap -- an odd number of units in front
+// of it -- which is exactly where a units-based cut splits one.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+// Positive control: the detector sees what a units-based cut leaves behind.
+assert.ok(LONE_SURROGATE.test(`x${'😀'.repeat(3)}`.slice(0, 4)) && !LONE_SURROGATE.test(`x${'😀'.repeat(3)}`), 'the detector must tell a split emoji from a whole one')
+// cleanLine, which every event line and every name passes through -- here the
+// sale alert's product name, capped at 100.
+const emojiName = `x${'😀'.repeat(120)}`
+const emojiSale = telegram.formatSaleTelegramLines({
+  receiptNumber: 'R-1', cashier: 'Za', exchangeRate: 4100,
+  items: [{ name: emojiName, quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
+  subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
+})
+assert.ok(emojiSale.includes(`1. ${Array.from(emojiName).slice(0, 100).join('')}`), `the product name keeps 100 whole characters:\n${emojiSale.join('\n')}`)
+assert.ok(!LONE_SURROGATE.test(emojiSale.join('\n')), 'no half emoji anywhere in the sale alert')
+// The date a refusal echoes back (30 characters).
+const emojiDate = lang.parseReportDate(`x${'😀'.repeat(40)}`, '2026-09-04')
+assert.equal(emojiDate.ok, false)
+assert.ok(emojiDate.message.includes(`"x${'😀'.repeat(29)}"`) && !LONE_SURROGATE.test(emojiDate.message), emojiDate.message)
+// The one helper both of them cut with.
+assert.equal(lang.firstCharacters(`x${'😀'.repeat(3)}`, 3), `x${'😀'.repeat(2)}`, 'the cap counts characters')
+assert.equal(lang.firstCharacters('Za', 3), 'Za', 'text under its cap is untouched')
+console.log('PASS character cut: a capped name and an echoed date never end on half an emoji')
 
 // --- 5. the command reference -----------------------------------------------
 
@@ -607,6 +668,11 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   await wired.handleTelegramWebhook(env, { message: { text: '/nonsense', chat: { id: -100111 } } })
   assert.ok(lastSent().startsWith('🤔') && lastSent().includes('/report'), 'an unknown command answers with the reference')
+  // The command it echoes is capped at 32 characters, and the cut never
+  // halves an emoji: `/` is one unit, so a units-based cut split the 16th.
+  await wired.handleTelegramWebhook(env, { message: { text: `/${'😀'.repeat(40)}`, chat: { id: -100111 } } })
+  assert.ok(lastSent().startsWith('🤔') && lastSent().includes(`/${'😀'.repeat(31)}.`) && !LONE_SURROGATE.test(lastSent()),
+    `an emoji command is echoed whole, 32 characters of it:\n${lastSent().split('\n')[0]}`)
 
   for (const command of ['/help', '/start']) {
     await wired.handleTelegramWebhook(env, { message: { text: command, chat: { id: -100111 } } })
@@ -622,8 +688,8 @@ const lastSent = () => sent[sent.length - 1].body.text
   // --- the two stock replies -------------------------------------------------
   // `/inventory` and `/stock` were the two replies the Sep 6 2026 redesign
   // never touched, and then the two the Sep 21 2026 sectioned-layout redesign
-  // left as a single un-numbered block while every other reply took on
-  // numbered, titled sections. `/inventory` used to put two figures on one
+  // left as a single un-sectioned block while every other reply took on
+  // titled sections. `/inventory` used to put two figures on one
   // line ("Low stock: N · Out of stock: N") and ended with a
   // `▸ /stock — the product list` pointer -- exactly the kind of line the
   // redesign deleted from the command reference and forbids there; both are
@@ -652,6 +718,17 @@ const lastSent = () => sent[sent.length - 1].body.text
     './shiftReconciliation': reconciliationFor(() => stockedDb, stubAnalytics),
   })
   const RULE = '━'.repeat(18)
+  // Sep 23 2026 (owner: "for telegram reports, instead of plain line ------we
+  // can do =====section name===== instead."): a section opens with its name
+  // between two `=====` edges, with no rule above it and no number in front,
+  // and every row inside it is a `·` row, the product list included. Five is
+  // the most a side, fewer only when five would push the title onto a second
+  // row (owner, the same day: "you can use less header marks if it pushes to
+  // next row for the telegram message"); these two replies' names are short
+  // enough for all five, so the edge is a literal here and the arrays below
+  // pin the text the chat gets.
+  const EDGE = '====='
+  const isSection = (row) => row.length > 2 * EDGE.length && row.startsWith(EDGE) && row.endsWith(EDGE)
   await stocked.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
   const inventoryReply = lastSent()
   await stocked.handleTelegramWebhook(env, { message: { text: '/stock', chat: { id: -100111 } } })
@@ -659,36 +736,34 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   assert.deepEqual(inventoryReply.split('\n'), [
     '🏷️ Inventory / ស្តុក',
-    RULE,
-    '1. Products / ផលិតផល',
+    '=====Products / ផលិតផល=====',
     '· Active products / ផលិតផលសកម្ម: 1,240',
     '· Units on hand / ឯកតាក្នុងស្តុក: 8,630',
-    RULE,
-    '2. Stock / ស្តុក',
+    '=====Stock / ស្តុក=====',
     '· Low stock / ស្តុកទាប: 12',
     '· Out of stock / អស់ស្តុក: 3',
-  ], `/inventory does not have the shared numbered-section shape:\n${inventoryReply}`)
+  ], `/inventory does not have the shared section shape:\n${inventoryReply}`)
   assert.deepEqual(stockReply.split('\n'), [
     '📦 Low stock / ស្តុកទាប',
-    RULE,
-    '1. Stock / ស្តុក',
+    '=====Stock / ស្តុក=====',
     '· Products / ផលិតផល: 2',
-    // Sep 23 2026: a bullet too wide for a phone continues on the hanging indent.
-    '• OUT / អស់ស្តុក — Coca-Cola 330ml',
+    // Sep 23 2026: a row too wide for a phone continues on the hanging indent.
+    '· OUT / អស់ស្តុក — Coca-Cola 330ml',
     `${lang.HANGING_INDENT}— 0 (⚠ 5)`,
-    '• LOW / ស្តុកទាប — Rice 5kg',
+    '· LOW / ស្តុកទាប — Rice 5kg',
     `${lang.HANGING_INDENT}— 3 (⚠ 5)`,
-  ], `/stock does not have the shared numbered-section shape:\n${stockReply}`)
+  ], `/stock does not have the shared section shape:\n${stockReply}`)
+  assert.equal(lang.REPORT_SECTION_EDGE, '=', 'a report section title is marked with `=`')
 
-  // RETIRED (Sep 22 2026): a bare RULE with no numbered header after it -- the
-  // shape both replies had until this pass, and the shape every other report
-  // stopped drawing on Sep 21 2026. Every RULE in a report line is now
-  // immediately followed by an "N. <title>" section header.
+  // RETIRED (Sep 23 2026): the drawn RULE and the `N.` number that opened a
+  // section, and the `•` list row. None of the three is left in either reply,
+  // and a header is never left bare: a `·` row always follows it.
   for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
     const rows = reply.split('\n')
+    assert.ok(!rows.includes(RULE) && !rows.some((row) => /^\d+\.\s/.test(row)) && !reply.includes('•'), `${command} still draws a rule, a numbered header or a • row:\n${reply}`)
     rows.forEach((row, index) => {
-      if (row !== RULE) return
-      assert.ok(/^\d+\.\s/.test(rows[index + 1] || ''), `${command} draws a bare divider with no numbered section after it:\n${reply}`)
+      if (!isSection(row)) return
+      assert.ok((rows[index + 1] || '').startsWith(lang.ROW_BULLET), `${command} leaves a section header bare:\n${reply}`)
     })
   }
   // And the two literally retired sentences stay retired.
@@ -705,7 +780,7 @@ const lastSent = () => sent[sent.length - 1].body.text
     const rows = reply.split('\n')
     let cursor = -1
     for (const key of keys) {
-      const at = rows.findIndex((row, index) => index > cursor && row === `${keys.indexOf(key) + 1}. ${lang.label(key)}`)
+      const at = rows.findIndex((row, index) => index > cursor && row === `${EDGE}${lang.label(key)}${EDGE}`)
       assert.ok(at > cursor, `"${key}" is out of order in the report:\n${reply}`)
       cursor = at
     }
@@ -718,8 +793,8 @@ const lastSent = () => sent[sent.length - 1].body.text
   // -- proving the loop checks ORDER and not just presence.
   {
     const rows = inventoryReply.split('\n')
-    const productsAt = rows.indexOf('1. Products / ផលិតផល')
-    const stockAt = rows.indexOf('2. Stock / ស្តុក')
+    const productsAt = rows.indexOf('=====Products / ផលិតផល=====')
+    const stockAt = rows.indexOf('=====Stock / ស្តុក=====')
     const swapped = [...rows];
     [swapped[productsAt], swapped[stockAt]] = [swapped[stockAt], swapped[productsAt]]
     const swappedText = swapped.join('\n')
@@ -734,13 +809,13 @@ const lastSent = () => sent[sent.length - 1].body.text
     const both = await stocked.telegramCommandReply(env, command, Date.now(), 'both')
     const en = await stocked.telegramCommandReply(env, command, Date.now(), 'en')
     const km = await stocked.telegramCommandReply(env, command, Date.now(), 'km')
-    const sectionCount = (text) => text.split('\n').filter((row) => /^\d+\.\s/.test(row)).length
+    const sectionCount = (text) => text.split('\n').filter(isSection).length
     assert.equal(sectionCount(both), hasSecondSection ? 2 : 1, `${command} both-mode section count:\n${both}`)
     assert.equal(sectionCount(en), sectionCount(both), `${command} en-mode dropped or added a section:\n${en}`)
     assert.equal(sectionCount(km), sectionCount(both), `${command} km-mode dropped or added a section:\n${km}`)
     assert.ok(!KHMER.test(en), `${command} en-mode still carries Khmer:\n${en}`)
-    assert.ok(en.split('\n').some((row) => /^\d+\.\s[A-Za-z]/.test(row)), `${command} en-mode section headers lost their number:\n${en}`)
-    assert.ok(km.split('\n').filter((row) => /^\d+\.\s/.test(row)).every((row) => !/[A-Za-z]/.test(row)), `${command} km-mode section header still carries English:\n${km}`)
+    assert.ok(en.split('\n').includes('=====Stock====='), `${command} en-mode lost its English section header:\n${en}`)
+    assert.ok(km.split('\n').includes('=====ស្តុក=====') && km.split('\n').filter(isSection).every((row) => !/[A-Za-z]/.test(row)), `${command} km-mode section header still carries English:\n${km}`)
     // Every figure in the both-mode reply also appears in the single-language
     // renderings -- the mode changes labels only, never a value.
     for (const figure of both.match(/\d[\d,]*(?:\.\d+)?/g) || []) {
@@ -748,14 +823,14 @@ const lastSent = () => sent[sent.length - 1].body.text
       assert.ok(km.includes(figure), `${command} km-mode lost the figure ${figure}:\n${km}`)
     }
   }
-  console.log('PASS stock replies: numbered sections, strict order with a positive control, all three language modes, retired wording stays out')
+  console.log('PASS stock replies: `=====` sections, strict order with a positive control, all three language modes, retired wording stays out')
 
   // ONE FIGURE PER LINE, the rule the redesign applied to the other five
-  // reports. A labelled line is `English / ខ្មែរ: value`; product bullets are
-  // a list, not a labelled figure, so they are not counted.
+  // reports. A labelled line is `English / ខ្មែរ: value`; the product rows are
+  // a list, not a labelled figure, and carry no `: `, so they are not counted.
   for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
     for (const line of reply.split('\n')) {
-      if (line.startsWith('•') || !line.includes(': ') || !line.slice(0, line.indexOf(': ')).includes(SEP)) continue
+      if (!line.includes(': ') || !line.slice(0, line.indexOf(': ')).includes(SEP)) continue
       const value = line.slice(line.indexOf(': ') + 2)
       const figures = value.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
       assert.equal(figures.length, 1, `${command} puts ${figures.length} figures on one line: "${line}"`)
@@ -764,21 +839,19 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   // UPDATED Sep 23 2026. A shop with nothing low used to say so through the
   // ABSENCE of the second block. That is not the owner's rule -- an empty
-  // section prints its numbered heading and N/A, never disappears -- and a
-  // /inventory reply that stopped after section 1 read as a message that had
+  // section prints its heading and N/A, never disappears -- and a /inventory
+  // reply that stopped after its first section read as a message that had
   // been cut off rather than as "nothing is low or out of stock". Dropping a
   // zero ROW inside a section is still right; dropping the section is not.
   await wired.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
   assert.deepEqual(lastSent().split('\n'), [
     '🏷️ Inventory / ស្តុក',
-    RULE,
-    '1. Products / ផលិតផល',
+    '=====Products / ផលិតផល=====',
     '· Active products / ផលិតផលសកម្ម: 0',
     '· Units on hand / ឯកតាក្នុងស្តុក: 0',
-    RULE,
-    '2. Stock / ស្តុក',
+    '=====Stock / ស្តុក=====',
     '· N/A',
-  ], `a shop with nothing low must still get a section 2:\n${lastSent()}`)
+  ], `a shop with nothing low must still get its Stock section:\n${lastSent()}`)
   console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
 
   const quiet = sent.length

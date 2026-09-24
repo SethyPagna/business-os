@@ -3,8 +3,8 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
-  parseReportDate, setTelegramLanguage, telegramCommandReference, telegramUnauthorizedReply,
+  bi, firstCharacters, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
 import {
@@ -48,8 +48,10 @@ const SETTING_KEYS = [
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
   return value == null || value === '' ? fallback : String(value).trim().toLowerCase() !== 'false'
 }
+// `max` counts characters, not UTF-16 units: a cut never halves an emoji
+// (firstCharacters in telegramLang.ts says why that matters).
 function cleanLine(value: unknown, max = 300): string {
-  return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
+  return firstCharacters(String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim(), max)
 }
 
 // Owner, 23 Sep 2026, over a 15-item sale alert: "for each new line in this
@@ -205,14 +207,20 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
 export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise<boolean> {
   const config = await getTelegramConfig(env)
   if (!config.enabled || !config.categories[event.type] || configurationProblem(config)) return false
-  const heading: Record<TelegramEventType, string> = { sales: '🛍️ Sale recorded', status: '🧾 Receipt status updated', fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
+  // No default for `sales` or `status`: those alerts' headings name their
+  // receipt number (owner's Sep 23 2026 samples, "🛍️ Sale Invoice /
+  // វិក្កយបត្រការលក់: 20260923-153527" and "🧾 Invoice / វិក្កយបត្រ:
+  // 20260922-110132"), which only formatSaleTelegramLines and
+  // formatSaleStatusTelegramLines know, so their first line IS the heading.
+  // A route's own heading still wins (a return).
+  const heading: Partial<Record<TelegramEventType, string>> = { fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
-  // the composed line (rather than in each builder) means the two routes that
-  // still assemble their lines inline -- routes/sales.ts's status change and
-  // routes/fees.ts's fee -- are covered without editing files other lanes own,
-  // and any line added later is covered the moment its label is in the table.
+  // the composed line (rather than in each builder) means the one route that
+  // still assembles its lines inline -- routes/fees.ts's fee -- is covered
+  // without editing a file another lane owns, and any line added later is
+  // covered the moment its label is in the table.
   await postTelegram(config, withLanguage(config.language, () => [
-    localizeTelegramHeading(event.heading || heading[event.type]),
+    localizeTelegramHeading(event.heading || heading[event.type] || ''),
     // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
     // indent back after cleaning. It continues the row above; it is not a
     // label row of its own to localize.
@@ -414,25 +422,63 @@ function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCo
 // for other telegram report enough spacing and separations that it feels easy
 // to read and clean, using dividers, numbered list, etc... title etc..."
 //
-// Every report is now: a TITLE line, then numbered, titled sections separated
-// by the one RULE this file draws. A section is `N. <bilingual title>` and
-// then one figure per line, or bullets when it is a list. Nothing else
-// changed: the figures, their sources and the zero-line rules are untouched.
+// Every report is: a TITLE line, then titled sections. Inside a section every
+// row opens with `·` -- one figure per line, or one list entry per line --
+// and only the items under a /sales receipt stay numbered.
+//
+// Sep 23 2026 the drawn rule and the `N.` number that opened each section
+// went. A section now opens with ONE line, its name between two edges and
+// nothing drawn above it: `=====Sales / ការលក់=====` in the day summary,
+// /sales, /fees, /stock and /inventory (REPORT_SECTION_EDGE; owner: "for
+// telegram reports, instead of plain line ------we can do =====section
+// name===== instead."), and `-----Invoices / វិក្កយបត្រ-----` in the shift
+// report (SHIFT_SECTION_EDGE; the owner's words are with formatShiftReport
+// below). Five marks a side is the most: sectionHeader takes fewer when five
+// would push the line onto a second row. RULE is left for what separates
+// WHOLE blocks: the shift reports a `/shift` answer joins, and the command
+// reference.
 
-/** `1. Invoices / វិក្កយបត្រ` -- the divider and the numbered section title. */
-const sectionTitle = (index: number, key: TelegramLabelKey): string[] => [RULE, `${index}. ${label(key)}`]
+/** The most marks a section header stands on either side of its name. */
+const SECTION_EDGE_MARKS = 5
 
-/** A section the shop has no rows for still prints, so the numbering and the
- *  shape of the message never move (the owner's reference shows every
- *  section, empty ones included).
+/**
+ * `=====Sales / ការលក់=====` -- a section's name between its marks, on one
+ * line, with nothing drawn above it. The mark names the family:
+ * REPORT_SECTION_EDGE or SHIFT_SECTION_EDGE.
+ *
+ * Five a side is the most, not a fixed count. Owner, Sep 23 2026: "for the
+ * header marks, make sure the line stays in one line/row. this means you can
+ * use less header marks if it pushes to next row for the telegram message."
+ * So a header takes the most marks, up to five a side, that keep it within
+ * one phone row -- TELEGRAM_ROW_WIDTH, counted with `.length` exactly as
+ * telegramRowLines counts a row -- and never fewer than one:
+ * `---Cash count / ការរាប់សាច់ប្រាក់---`. A name that fills the row on its
+ * own keeps one mark a side, because the marks are what make it a header:
+ * `=Latest receipts / វិក្កយបត្រចុងក្រោយ=` is 36 by that count before its
+ * marks, and `.length` counts every Khmer vowel sign and subscript as a
+ * character, so it takes 29 characters on screen.
+ *
+ * Exported for scripts/test-telegram-shift-report-pure.cjs.
+ */
+export const sectionHeader = (key: TelegramLabelKey, edge: string): string => {
+  const name = label(key)
+  const marks = edge.repeat(Math.max(1, Math.min(SECTION_EDGE_MARKS, Math.floor((TELEGRAM_ROW_WIDTH - name.length) / 2))))
+  return `${marks}${name}${marks}`
+}
+
+/** A section the shop has no rows for still prints, so the shape of the
+ *  message never moves (the owner's reference shows every section, empty
+ *  ones included).
  *
  *  `N/A` since Sep 22 2026 (owner: "show n/a"). The bare `—` it replaced read
  *  as a rendering accident -- a row whose value failed to print -- rather than
  *  as the fact that there is nothing to report. `N/A` is left untranslated on
  *  purpose: it is the same two letters in the Khmer half of every form in this
  *  app, and a Khmer paraphrase of "no data" would be longer than the rows it
- *  stands in for. */
-const EMPTY_SECTION = `${ROW_BULLET}N/A`
+ *  stands in for. The shift report's Close row says the same `N/A` while the
+ *  shift is still open (the owner's Sep 23 2026 sample: "Close / បិទ: N/A"). */
+const NOT_APPLICABLE = 'N/A'
+const EMPTY_SECTION = `${ROW_BULLET}${NOT_APPLICABLE}`
 
 /**
  * `· Total: 24 · Cancelled: 1 · Edited: 2` -- one compact row for counts of
@@ -460,11 +506,16 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
  * SAME SHAPE AS THE SHIFT REPORT, deliberately (owner, Sep 6 2026: "arrange
  * all reports more concise with breakdowns clearly", and Sep 21 2026: "same
  * for other telegram report ... using dividers, numbered list, etc... title
- * etc..."): a title line, then numbered titled sections -- Sales, Invoices,
- * Expenses, Stock, Cashiers -- one figure per line, a zero-value line simply
- * not printed, and not one explanatory sentence. Two people reading the
- * evening `/report` and tonight's shift message see the same section titles
- * carrying the same figures in the same order.
+ * etc..."): a title line, then titled sections -- Sales, Invoices, Expenses,
+ * Stock, Cashiers -- one figure per line, a zero-value line simply not
+ * printed, and not one explanatory sentence. Two people reading the evening
+ * `/report` and tonight's shift message see the same section titles carrying
+ * the same figures in the same order.
+ *
+ * Each section opens with `=====Sales / ការលក់=====` since Sep 23 2026
+ * (owner: "for telegram reports, instead of plain line ------we can do
+ * =====section name===== instead."): no rule above it and no number in
+ * front, and the cashier list is `·` rows like every figure.
  *
  * Credit is a POSITIVE "Credit $n" line, never a negative and never
  * subtracted from the totals above it: it is unpaid revenue that already
@@ -479,28 +530,24 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
 export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
-  // Sections are numbered as they APPEAR: a category the owner switched off
-  // takes its section out entirely rather than leaving a gap in the numbering.
-  let index = 0
-  // A section with no rows still prints its numbered heading and says N/A,
-  // the rule every other report already follows (the shift report and
-  // /fees). It used to return here, so a quiet day's /report stopped after
-  // section 2 and the reader had to work out whether the shop had no
-  // expenses or whether the message had been cut short. A category the
-  // owner switched OFF is still removed entirely -- that gate is the
-  // `if (showSales)`-style check at each call site, not this emptiness.
+  // A section with no rows still prints its heading and says N/A, the rule
+  // every other report already follows (the shift report and /fees). It used
+  // to return here, so a quiet day's /report stopped after its second section
+  // and the reader had to work out whether the shop had no expenses or
+  // whether the message had been cut short. A category the owner switched
+  // OFF is still removed entirely -- that gate is the `if (showSales)`-style
+  // check at each call site, not this emptiness.
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     // Switched OFF is not the same fact as empty, and only the call site
     // knows which one it has: a category the owner turned off leaves no
-    // heading and no number, while a category that is on and simply had
-    // nothing today says N/A under its heading.
+    // heading, while a category that is on and simply had nothing today says
+    // N/A under its heading.
     if (!enabled) return
-    index += 1
-    lines.push(...sectionTitle(index, key), ...(rows.length ? rows : [EMPTY_SECTION]))
+    lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
 
   // Expenses is computed first because the Sales section needs one figure out
-  // of it: the courier money. See the section-3 comment below.
+  // of it: the courier money. See the Expenses comment below.
   const showExpenses = categories?.fees !== false
   const expenses = expenseTotals({
     otherUsd: showExpenses ? stats.fees?.usd : 0,
@@ -509,7 +556,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
   })
 
-  // 1. Sales -- Revenue and Profit print even at $0.00: a day that took
+  // Sales -- Revenue and Profit print even at $0.00: a day that took
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
@@ -530,13 +577,13 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     if (stats.sales?.removalLossUsd) sales.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
     if (stats.sales?.refundUsd) sales.push(labeled('refunds', usd(stats.sales.refundUsd)))
     section('sales', sales)
-    // 2. Invoices -- the counts, on their own. They are the breakdown of the
+    // Invoices -- the counts, on their own. They are the breakdown of the
     // Revenue above (refunds subtracted, voids contributing nothing), never a
     // second total.
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
   }
 
-  // 3. Expenses -- the SAME sum the shift report prints, through the same
+  // Expenses -- the SAME sum the shift report prints, through the same
   // function: the fees of the day plus the courier money actually paid out.
   const expenseRows: string[] = []
   // The two component lines print only when the total really has two parts.
@@ -546,25 +593,25 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
   }
   if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  // OFF means gone -- no heading, no number and no `N/A` placeholder. It used
-  // to stay alive whenever Sales was on, so a shop that switched Expenses off
-  // was still sent `3. Expenses / ចំណាយ` with `· N/A` under it on every quiet
+  // OFF means gone -- no heading and no `N/A` placeholder. It used to stay
+  // alive whenever Sales was on, so a shop that switched Expenses off was
+  // still sent the Expenses heading with `· N/A` under it on every quiet
   // day: a section they had asked not to see, saying nothing. `N/A` is for a
   // section that is ON and had nothing today; that distinction is the whole
   // point of the `enabled` argument.
   section('expenses', expenseRows, showExpenses)
 
-  // 4. Stock
+  // Stock
   const stock: string[] = []
   if (categories?.stock_in !== false && (stats.stockIn?.count || stats.stockIn?.quantity)) stock.push(labeled('stockIn', `${counted(stats.stockIn?.count, 'movement(s)')} · ${counted(stats.stockIn?.quantity, 'unit(s)')}`))
   if (categories?.stock_out !== false && (stats.stockOut?.count || stats.stockOut?.quantity)) stock.push(labeled('stockOut', `${counted(stats.stockOut?.count, 'movement(s)')} · ${counted(stats.stockOut?.quantity, 'unit(s)')}`))
   section('stock', stock, categories?.stock_in !== false || categories?.stock_out !== false)
 
-  // 5. Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
+  // Cashiers -- name, receipts, money. The bilingual "receipt(s)" counter
   // is dropped here and only here: the section is a list of cashiers, so the
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
-  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`• ${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
+  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
   return lines.join('\n')
 }
 
@@ -595,17 +642,17 @@ async function salesReport(env: Env, date: string, language: TelegramLanguage): 
   const items = await db.prepare(`SELECT sale_id, product_name, quantity, applied_price_usd, applied_price_khr FROM sale_items WHERE sale_id IN (${ids.map(() => '?').join(',')}) ORDER BY id ASC`).all<{ sale_id: number; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number }>(ids)
   const bySale = new Map<number, typeof items>(); for (const item of items) bySale.set(item.sale_id, [...(bySale.get(item.sale_id) || []), item])
   // The same sectioned shape as every other report (Sep 21 2026): the money,
-  // the count, then the list -- each under its own numbered title.
+  // the count, then the list -- each under its own `=====` header.
   return withLanguage(language, () => {
     const lines = [
       reportTitle('🛍️', 'Sales', 'ការលក់', date),
-      ...sectionTitle(1, 'sales'), labeled('revenue', usd(stats.sales?.usd)),
-      ...sectionTitle(2, 'invoices'), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
-      ...sectionTitle(3, 'latestReceipts'),
+      sectionHeader('sales', REPORT_SECTION_EDGE), labeled('revenue', usd(stats.sales?.usd)),
+      sectionHeader('invoices', REPORT_SECTION_EDGE), countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]]),
+      sectionHeader('latestReceipts', REPORT_SECTION_EDGE),
     ]
     const nest = '   '
     for (const sale of sales) {
-      lines.push(...telegramRowLines(`• ${sale.receipt_number || `#${sale.id}`}`, [
+      lines.push(...telegramRowLines(`${ROW_BULLET}${sale.receipt_number || `#${sale.id}`}`, [
         `· ${money(sale.total_usd, sale.total_khr)}`,
         `· ${localizeTelegramValue(cleanLine(sale.cashier_name || 'No cashier'))}`,
       ]))
@@ -641,11 +688,11 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
   return withLanguage(language, () => {
     const lines = [
       reportTitle('💸', 'Expenses', 'ចំណាយ', date),
-      ...sectionTitle(1, 'expenses'), labeled('total', money(stats.fees?.usd, stats.fees?.khr)),
-      ...sectionTitle(2, 'eachExpense'),
+      sectionHeader('expenses', REPORT_SECTION_EDGE), labeled('total', money(stats.fees?.usd, stats.fees?.khr)),
+      sectionHeader('eachExpense', REPORT_SECTION_EDGE),
     ]
     if (!fees.length) lines.push(EMPTY_SECTION)
-    for (const fee of fees) lines.push(...telegramRowLines(`• ${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
+    for (const fee of fees) lines.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
     return lines.join('\n')
   })
 }
@@ -663,13 +710,13 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     // The Sep 21 2026 sectioned shape (owner: "same for other telegram
     // report ... using dividers, numbered list, etc... title etc..."), the
     // one this reply and /inventory were the two replies left out of when the
-    // rest of the reports took it on. One section -- there is only one thing
-    // here to number -- carrying the count row it already printed, then the
-    // capped list, unchanged.
-    const lines = [title, ...sectionTitle(1, 'stock'), labeled('products', rows.length)]
+    // rest of the reports took it on. One section carrying the count row it
+    // already printed, then the capped list, unchanged; its header and its
+    // `·` rows are the Sep 23 2026 ones every report shares.
+    const lines = [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length)]
     for (const row of rows) {
       const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(...telegramRowLines(`• ${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
+      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
     }
     return lines.join('\n')
   })
@@ -695,15 +742,16 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
   // nothing low simply has no second section, the same way every other report
   // drops a zero line.
   //
-  // Sep 22 2026: both sections are now numbered like every other report,
-  // reusing the SAME 'products'/'stock' section titles the day summary and
-  // /stock draw from -- no new label, no new divider.
+  // Sep 22 2026: both sections are titled like every other report, reusing
+  // the SAME 'products'/'stock' section titles the day summary and /stock
+  // draw from -- no new label. Since Sep 23 2026 each opens with its
+  // `=====` header, like theirs.
   const lowStock = Number(row?.low_stock || 0)
   const outOfStock = Number(row?.out_of_stock || 0)
   return withLanguage(language, () => {
     const lines = [
       reportTitle('🏷️', 'Inventory', 'ស្តុក'),
-      ...sectionTitle(1, 'products'),
+      sectionHeader('products', REPORT_SECTION_EDGE),
       labeled('activeProducts', Number(row?.products || 0).toLocaleString()),
       labeled('unitsOnHand', Number(row?.units || 0).toLocaleString()),
     ]
@@ -712,8 +760,8 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
     if (outOfStock) health.push(labeled('outOfStock', outOfStock))
     // Prints even when the shop has neither: "no low or out-of-stock
     // products" is the answer to the question /inventory was asked, and a
-    // missing section 2 reads as a truncated message instead.
-    lines.push(...sectionTitle(2, 'stock'), ...(health.length ? health : [EMPTY_SECTION]))
+    // missing Stock section reads as a truncated message instead.
+    lines.push(sectionHeader('stock', REPORT_SECTION_EDGE), ...(health.length ? health : [EMPTY_SECTION]))
     return lines.join('\n')
   })
 }
@@ -732,7 +780,7 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 // enough spacing and separations that it feels easy to read and clean, using
 // dividers, numbered list, etc... title etc...". So the message is now a
 // TITLE line carrying the shift's state, a short identity block, and SIX
-// numbered, titled sections:
+// titled sections, always in this order:
 //
 //   1. Invoices     total · cancelled · edited, one compact row
 //   2. Sales        revenue, the two discount cuts, profit, delivery fee,
@@ -752,9 +800,24 @@ async function inventorySummaryReport(env: Env, language: TelegramLanguage): Pro
 //   5. Delivery         reinstated by the Sep 21 reference
 //   6. Expenses     every expense as its own bullet, then the total
 //
-// Sections 4-6 print their title and a single "—" when the shift has no rows
-// for them: the owner's reference shows every section, so the shape of the
+// Sections 4-6 print their title and `· N/A` when the shift has no rows for
+// them: the owner's reference shows every section, so the shape of the
 // message never moves between one shift and the next.
+//
+// Sep 23 2026: the numbers and the drawn rules came off the sections. Each
+// one opens with a single dashed line, `-----Invoices / វិក្កយបត្រ-----`
+// (SHIFT_SECTION_EDGE), and EVERY row inside it is a `·` row -- the payment,
+// delivery and expense lists as well as the figures. The owner: "for shift
+// instead of line. do ---------Invoices / វិក្កយបត្រ-------- use dash not line.
+// and for inside each section do bullet points ·".
+//
+// The same day the TOP took the owner's sample: "🧑‍💼 Shift report /
+// របាយការណ៍វេន: Open / បើក · 22/09/2026", then "Open/បើក: 22/09/2026 08:07",
+// "Close / បិទ: N/A", "Shop / ហាង: Leang Cosmetics", "Cashier /
+// អ្នកគិតប្រាក់: Za", "ID សម្គាល់: S-20260922-0807-Za" -- and "also for open
+// khmer just call បើក". A colon after the title instead of a dash, the
+// shift's own two moments (Open, Close) in place of From and To, and the ID
+// last.
 //
 // Per-account vs shop-wide scope, and which sales the window covers, are
 // unchanged -- see lib/shiftReconciliation.ts and shiftFilters() below.
@@ -857,46 +920,53 @@ export type ShiftReportFigures = {
 }
 
 /**
- * The whole message, pure -- no D1, no clock beyond the `nowMs` an open shift
- * needs for its "to" bound. scripts/test-shift-report-pure.cjs drives it
- * directly, so the shape and the arithmetic are pinned without a database.
+ * The whole message, pure -- no D1 and no clock: `nowMs` is only
+ * formatBusinessDateTime's fallback for a stored time that does not parse.
+ * scripts/test-shift-report-pure.cjs drives it directly, so the shape and the
+ * arithmetic are pinned without a database.
  */
 export function formatShiftReport(shopName: string, shift: ShiftReportSession, figures: ShiftReportFigures, nowMs: number = Date.now()): string {
   const cancelled = !!shift.cancelled_at
-  const open = !shift.closed_at && !cancelled
-  // A later soft cancellation must not extend an already closed shift's
-  // financial window. The original close remains the operational end; only
-  // an open-cancelled row uses cancellation as its terminal bound.
-  const endedAt = shift.closed_at || shift.cancelled_at
   // The TITLE states the shift's state, the way the owner's reference does
-  // ("Shift Report - Open or Closed"). It used to be a tag on the To line;
-  // saying it twice is the repeated fact the redesign takes out.
-  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : open ? bi('Open', 'កំពុងបើក') : bi('Closed', 'បានបិទ')
+  // ("Shift Report - Open or Closed"), after a colon since Sep 23 2026. An
+  // open shift says `Open / បើក` ("also for open khmer just call បើក"): the
+  // same entry as the Open row below, so the word is spelled once. A closed
+  // shift follows suit since Sep 24 2026: `Closed / បិទ`, the Khmer of the
+  // Close row below, never the longer បានបិទ.
+  const state = cancelled ? bi('Cancelled', 'បានបោះបង់') : shift.closed_at ? bi('Closed', 'បិទ') : label('open')
   const lines = [
-    `🧑‍💼 ${label('shiftReport')} — ${state} · ${formatBusinessDay(shift.business_date)}`,
+    `🧑‍💼 ${label('shiftReport')}: ${state} · ${formatBusinessDay(shift.business_date)}`,
+    labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
+    // Close is the moment the shift was CLOSED and nothing else. A shift that
+    // is still open has none, so the row says `N/A` (the owner's sample)
+    // rather than a time: printing `now` here once rendered a close identical
+    // to the open on a shift opened minutes ago (the owner's Sep 22 2026
+    // paste), and on a long shift a closing time that never happened. A shift
+    // left running overnight is still the honest record (migration 0116
+    // refuses to close one on a timer) and still renders. A cancellation is
+    // not a close either: a shift cancelled while open keeps `N/A` here and
+    // states its cancellation time on its own row below, and a later soft
+    // cancellation leaves an already closed shift's close -- the end of its
+    // money window, see shiftFilters -- exactly where it was.
+    labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('shift', cleanLine(shift.shift_code, 40)),
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
-    labeled('from', formatBusinessDateTime(shift.opened_at, nowMs)),
-    // An OPEN shift has no end. It used to print `formatBusinessDateTime(now)`
-    // here, which on a shift opened minutes ago rendered `To:` identical to
-    // `From:` -- the owner's Sep 22 2026 paste shows exactly that, a window
-    // that reads as zero minutes long -- and on a long shift rendered a
-    // precise closing time that never happened. The honest value is the
-    // state itself, and it is the SAME pair the title already carries, so no
-    // new label and no new Khmer: `To / ទៅ: Open / កំពុងបើក`. A shift left
-    // running overnight is still the honest record (migration 0116 refuses to
-    // close one on a timer) and still renders.
-    labeled('to', open ? state : formatBusinessDateTime(endedAt, nowMs)),
+    // 80 characters (40 until Sep 23 2026): the owner's sample id carries the
+    // cashier's name after the time (S-20260922-0807-Za). The new ids keep up
+    // to 24 characters of that name and add `-2`, `-3` when the same cashier
+    // opens twice in one minute, and an id cut short is one nobody can search
+    // for. cleanLine counts characters, so a Khmer or emoji name is never cut
+    // in half either.
+    labeled('shift', cleanLine(shift.shift_code, 80)),
   ]
   if (cancelled) {
-    if (shift.closed_at) lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
+    lines.push(row(bi('Cancelled at', 'បោះបង់នៅ'), formatBusinessDateTime(shift.cancelled_at, nowMs)))
     lines.push(row(bi('Cancelled by', 'បោះបង់ដោយ'), cleanLine(shift.cancelled_by_user_name || 'Unknown', 60)))
     lines.push(row(bi('Reason', 'មូលហេតុ'), cleanLine(shift.cancel_reason || 'Not recorded', 500)))
   }
 
   // 1. Invoices -- total, and the two counts that qualify it.
-  lines.push(...sectionTitle(1, 'invoices'), countRow([
+  lines.push(sectionHeader('invoices', SHIFT_SECTION_EDGE), countRow([
     ['total', Number(figures.invoices) || 0],
     ['cancelled', Number(figures.cancelled) || 0],
     ['edited', Number(figures.edited) || 0],
@@ -922,7 +992,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // by it, exactly as Not Paid behaves.
   if (figures.removalLossUsd) sales.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
-  lines.push(...sectionTitle(2, 'sales'), ...sales)
+  lines.push(sectionHeader('sales', SHIFT_SECTION_EDGE), ...sales)
 
   // 3. Cash count -- the owner's specific gap: registered opening and closing
   // cash, both currencies. A factual readout, and an open shift (no count
@@ -984,21 +1054,21 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
       cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
     }
   }
-  lines.push(...sectionTitle(3, 'cashCount'), ...cash)
+  lines.push(sectionHeader('cashCount', SHIFT_SECTION_EDGE), ...cash)
 
   // 4. Payment methods and 5. Delivery -- both reinstated by the owner's
-  // Sep 21 2026 reference. Bullets, because they are lists: the name, how
-  // many, and the money.
-  lines.push(...sectionTitle(4, 'paymentMethods'))
+  // Sep 21 2026 reference. One row per method or courier: the name, how
+  // many, and the money, on the same `·` bullet as every other shift row.
+  lines.push(sectionHeader('paymentMethods', SHIFT_SECTION_EDGE))
   const paymentMethods = figures.paymentMethods || []
   lines.push(...(paymentMethods.length
-    ? paymentMethods.flatMap((row) => telegramRowLines(`• ${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
+    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
     : [EMPTY_SECTION]))
 
-  lines.push(...sectionTitle(5, 'delivery'))
+  lines.push(sectionHeader('delivery', SHIFT_SECTION_EDGE))
   const deliveries = figures.deliveries || []
   lines.push(...(deliveries.length
-    ? deliveries.flatMap((row) => telegramRowLines(`• ${cleanLine(row.name, 40)}`, [
+    ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}`, [
       `— ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
       // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
       // would claim the courier worked for free, so it is left off instead.
@@ -1006,25 +1076,25 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     ]))
     : [EMPTY_SECTION]))
 
-  // 6. Expenses -- every expense paid out of this drawer as its own bullet,
-  // then the ONE total. The total is expenseTotals(): the fees plus the
-  // courier money actually paid out, the same sum the day summary prints, so
-  // the courier payout is a bullet here rather than a figure with no row.
+  // 6. Expenses -- every expense paid out of this drawer as its own row, then
+  // the ONE total. The total is expenseTotals(): the fees plus the courier
+  // money actually paid out, the same sum the day summary prints, so the
+  // courier payout is a row here rather than a figure with no row.
   const expenses = expenseTotals({
     otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
     deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
   })
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`• ${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
+  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
   const details = figures.expenseDetails || []
   if (details.length) {
-    for (const detail of details) expenseRows.push(...telegramRowLines(`• ${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
+    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
   } else if (expenses.otherUsd || expenses.otherKhr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`• ${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
   }
-  lines.push(...sectionTitle(6, 'expenses'))
+  lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
     ? [...expenseRows, labeled('total', money(expenses.totalUsd, expenses.otherKhr))]
     : [EMPTY_SECTION]))
@@ -1255,7 +1325,7 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   if (command === '/help' || command === '/start') return withLanguage(language, telegramCommandReference)
   if (command === '/inventory') return inventorySummaryReport(env, language)
   if (command === '/stock' || command === '/lowstock') return inventoryReport(env, language)
-  if (!DATED_COMMANDS.has(command)) return withLanguage(language, () => unknownCommandReply(command.slice(0, 32)))
+  if (!DATED_COMMANDS.has(command)) return withLanguage(language, () => unknownCommandReply(firstCharacters(command, 32)))
 
   const parsed = withLanguage(language, () => parseReportDate(argument, businessToday(nowMs)))
   if (!parsed.ok) return parsed.message
@@ -1363,6 +1433,18 @@ function eventGroups(groups: string[][]): string[] {
     .flatMap((group, index) => (index ? [GROUP_RULE, ...group] : group))
 }
 
+/**
+ * An event message's TITLE line: its heading and the one record it is about,
+ * `🛍️ Sale Invoice: 20260923-153527` (owner's Sep 23 2026 sample). The
+ * heading words are localized like any heading (localizeTelegramLine), the
+ * number is a value and never is. With no number it is the bare heading --
+ * never a heading that ends on a colon.
+ */
+function eventTitle(words: string, record: unknown): string {
+  const value = cleanLine(record, 40)
+  return value ? `${words}: ${value}` : words
+}
+
 // dd/mm/yyyy HH:mm in the business day's zone (UTC+7) -- the app-wide display
 // convention (day-first since Sep 4 2026). D1's CURRENT_TIMESTAMP is
 // 'YYYY-MM-DD HH:MM:SS' UTC without a zone marker; client-sent created_at is
@@ -1442,7 +1524,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // Defaulted, because the Status row is unconditional since Sep 22 2026 and a
   // caller that omits the status must not produce `Status:` with nothing after
   // it. `completed` is the same reading the app's own normalizer gives a
-  // missing sale_status, and the heading already says a sale was recorded.
+  // missing sale_status, and the title already says this is a sale invoice.
   const status = String(sale.status || 'completed').replace(/_/g, ' ')
   // The pre-discount, pre-tax figure the customer was quoted. When there is
   // neither a discount nor a tax it IS the Net Total, and printing the same
@@ -1450,7 +1532,12 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // stop doing -- so on the ordinary sale it does not print at all.
   const grossTotalUsd = round2((Number(sale.subtotalUsd) || 0) + customerDelivery)
   const totalRepeatsNet = grossTotalUsd === round2(Number(sale.totalUsd) || 0)
-  return eventGroups([
+  // THE TITLE NAMES THE RECEIPT (owner's Sep 23 2026 sample: "🛍️ Sale Invoice
+  // / វិក្កយបត្រការលក់: 20260923-153527"). The number used to sit on an INV row
+  // under the status and date; it is the invoice the whole message is about,
+  // so it heads the message. sendTelegramEvent gives a sales event no heading
+  // of its own: this first line is the heading.
+  return [eventTitle('🛍️ Sale Invoice', sale.receiptNumber), ...eventGroups([
     // WHAT HAPPENED. Status leads, and it prints on EVERY sale now (owner's
     // Sep 22 2026 reference layout opens on it). It used to be dropped on a
     // completed sale as "the norm the heading already announces" -- but the
@@ -1459,10 +1546,10 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
     // status that appears only when something is unusual is a row whose
     // ABSENCE has to be interpreted. The value's wording comes from
     // telegramLang's status table, so it says "Not Paid / ប្រាក់ជំពាក់".
+    // Status and Date only since Sep 23 2026: the INV row moved into the title.
     [
       `Status: ${status}`,
       `Date: ${formatBusinessDateTime(sale.createdAt)}`,
-      `INV: ${sale.receiptNumber}`,
     ],
     // WHO RANG IT UP.
     [
@@ -1512,11 +1599,25 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
       paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
       change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
     ],
-  ])
+  ])]
 }
 
 /**
  * The receipt-status change -- `PATCH /api/sales/:id/status`'s alert.
+ *
+ * Laid out as the owner's Sep 23 2026 sample:
+ *
+ *   🧾 Invoice / វិក្កយបត្រ: 20260922-110132
+ *   · Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់
+ *   ──────────────────
+ *   · Customer / អតិថិជន: bong meta
+ *   · By / ដោយ: admin
+ *
+ * The title names the invoice, like the sale alert's (it replaced the
+ * "Receipt status updated" heading and the Receipt row under it), and the
+ * change is the one row above the rule. The rows the sample does not show --
+ * Reason, Stock skipped, Lost fee -- keep their order, after Customer and
+ * before By.
  *
  * It lived INLINE in routes/sales.ts until Sep 22 2026, and that is exactly
  * why the owner found `Status: awaiting payment → completed` on their phone
@@ -1552,11 +1653,8 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
   const lostFeeUsd = Number(change.lostFeeUsd) || 0
   const lostFeeKhr = Number(change.lostFeeKhr) || 0
   const customer = cleanLine(change.customer, 120)
-  return eventGroups([
-    [
-      `Receipt: ${cleanLine(change.receipt, 40)}`,
-      `Status: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`,
-    ],
+  return [eventTitle('🧾 Invoice', change.receipt), ...eventGroups([
+    [`Invoice Status Updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`],
     [
       customer ? `Customer: ${customer}` : '',
       change.reason ? `Reason: ${change.reason}` : '',
@@ -1576,7 +1674,7 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
       lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
       change.by ? `By: ${change.by}` : '',
     ],
-  ])
+  ])]
 }
 
 // Stock alerts carry the RESULTING on-hand figures (this branch, all

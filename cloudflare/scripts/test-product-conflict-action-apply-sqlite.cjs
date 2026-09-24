@@ -5,7 +5,7 @@ const user = { id: 900, username: 'reviewer' }
 
 function loadReviewApply(fixture) {
   return loadTs('lib/reviewApply.ts', {
-    './db': { getDb: () => fixture.db }, './audit': { audit: async () => {} },
+    './db': { getDb: () => fixture.db }, './audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './cache': { bumpVersion: async () => {} },
     './productWrites': {}, './branchWrites': {}, './canonicalBranchIdentity': {}, './permissions': fixture.permissions,
     './productImagePermission': {}, './auth': {}, './pendingActions': {}, '../index': {}, './productDelete': fixture.productDelete,

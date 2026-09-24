@@ -342,6 +342,9 @@ interface SaleDetailModalProps {
   // same hide-by-omission gate as every write callback above; the Worker
   // enforces the identical action server-side.
   onAmend?: (saleId: string | number, request: SaleAmendmentRequest & SaleMutationReview) => Promise<SaleMutationUiResult> | SaleMutationUiResult
+  // Change or clear the driver of a delivery sale (null clears). Omitted when
+  // the user lacks the grants; the Worker refuses a cancelled sale.
+  onDriverChange?: (sale: SaleDetail, target: { id: number; name: string } | null) => Promise<boolean>
   // The sale's audit trail. NOT gated on the write permission: anyone who can
   // open the sale can see how it got that way -- hiding the trail from the
   // people who reconcile the books would defeat the feature. Resolves to null
@@ -400,6 +403,7 @@ export default function SaleDetailModal({
   onReturn,
   onAddItems,
   onAmend,
+  onDriverChange,
   onLoadAmendments,
   onOpenRecords,
   t,
@@ -630,6 +634,10 @@ export default function SaleDetailModal({
   const [actualCostEditing, setActualCostEditing] = useState(false)
   const [actualCostText, setActualCostText] = useState('')
   const [deliveryAdding, setDeliveryAdding] = useState(false)
+  // G3: the driver of a delivery sale is changed or cleared with the same
+  // searchable picker the Add delivery form uses.
+  const [driverChanging, setDriverChanging] = useState(false)
+  const [driverSaving, setDriverSaving] = useState(false)
   const [deliverySearch, setDeliverySearch] = useState('')
   const [deliveryOptions, setDeliveryOptions] = useState<DeliveryContactOption[]>([])
   const [deliveryContact, setDeliveryContact] = useState<DeliveryContactOption | null>(null)
@@ -688,6 +696,7 @@ export default function SaleDetailModal({
     setAmendDiscountText('')
     setAmendDiscountType(null)
     setDeliveryAdding(false)
+    setDriverChanging(false)
     setDeliverySearch('')
     setDeliveryOptions([])
     setDeliveryContact(null)
@@ -699,7 +708,7 @@ export default function SaleDetailModal({
   }, [detailScope])
 
   useEffect(() => {
-    if (!deliveryAdding) return
+    if (!deliveryAdding && !driverChanging) return
     let cancelled = false
     const timer = window.setTimeout(() => {
       setDeliveryContactsLoading(true)
@@ -717,7 +726,7 @@ export default function SaleDetailModal({
         .finally(() => { if (!cancelled) setDeliveryContactsLoading(false) })
     }, 200)
     return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [deliveryAdding, deliverySearch, detailScope])
+  }, [deliveryAdding, driverChanging, deliverySearch, detailScope])
   const amendmentsLoaderRef = useRef(onLoadAmendments)
   amendmentsLoaderRef.current = onLoadAmendments
   const hasAmendmentsLoader = !!onLoadAmendments
@@ -1253,8 +1262,8 @@ export default function SaleDetailModal({
   const settlementDirty = sale?.sale_status === 'awaiting_payment'
     && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
     && !settlementRowsEqual(settlementRows, settlementBaselineRef.current)
-  const saleWriteBusy = statusSaving || addSaving || amendSaving || lineRecoveryBusy
-  const baseCloseGuard = useCloseGuard({ dirty: settlementDirty || addLines.length > 0 || amendLineId !== null || feeEditing || actualCostEditing || deliveryAdding || !!statusNotes.trim() }, () => { if (!saleWriteBusy) onClose() })
+  const saleWriteBusy = statusSaving || addSaving || amendSaving || lineRecoveryBusy || driverSaving
+  const baseCloseGuard = useCloseGuard({ dirty: settlementDirty || addLines.length > 0 || amendLineId !== null || feeEditing || actualCostEditing || deliveryAdding || driverChanging || !!statusNotes.trim() }, () => { if (!saleWriteBusy) onClose() })
   const closeGuard = { ...baseCloseGuard, requestClose: () => { if (!saleWriteBusy) baseCloseGuard.requestClose() } }
 
   useEffect(() => {
@@ -1359,6 +1368,53 @@ export default function SaleDetailModal({
   // refusal is unreachable rather than merely explained after the fact. Both
   // delivery money fields share it, because they share the route's guard.
   const canAmendDeliveryMoney = canAmendThisSale && !!toNumber(sale.is_delivery)
+  // Owner rule (23 Sep 2026): the driver is editable in every status except
+  // cancelled -- the same rule the Worker's driver change enforces.
+  const canChangeDriver = !!onDriverChange && !!toNumber(sale.is_delivery) && currentStatus !== 'cancelled'
+  const applyDriverChange = async (target: DeliveryContactOption | null): Promise<void> => {
+    if (!onDriverChange || driverSaving) return
+    setDriverSaving(true)
+    try {
+      if (await onDriverChange(sale, target ? { id: target.id, name: String(target.name || '') } : null)) {
+        setDriverChanging(false)
+        setDeliveryContact(null)
+      }
+    } finally { setDriverSaving(false) }
+  }
+  // One searchable driver picker for both Add delivery and Change driver.
+  const renderDriverPicker = (inputId: string) => (
+    <>
+      <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor={inputId}>
+        {translateOr('choose_delivery_driver', 'Choose a driver', 'ជ្រើសរើសអ្នកដឹកជញ្ជូន')}
+      </label>
+      <input
+        id={inputId}
+        type="search"
+        value={deliverySearch}
+        onChange={(event) => { setDeliverySearch(event.target.value); setDeliveryContact(null) }}
+        placeholder={translateOr('search_delivery_contacts', 'Search delivery contacts', 'ស្វែងរកអ្នកដឹកជញ្ជូន')}
+        className="input w-full text-sm"
+      />
+      {deliveryContactsLoading ? <div className="text-[11px] text-gray-400">{t('loading') || 'Loading…'}</div> : null}
+      {deliveryContactsError ? <div role="alert" className="text-[11px] font-medium text-red-600 dark:text-red-400">{deliveryContactsError}</div> : null}
+      {!deliveryContactsLoading && !deliveryContactsError ? (
+        <div className="max-h-36 space-y-1 overflow-y-auto">
+          {deliveryOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => { setDeliveryContact(option); setAmendMutationError('') }}
+              className={`flex w-full items-start justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs ${deliveryContact?.id === option.id ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
+            >
+              <span className="font-medium text-gray-800 dark:text-gray-100">{option.name || `#${option.id}`}</span>
+              <span className="text-gray-400">{option.phone || option.address || option.area || ''}</span>
+            </button>
+          ))}
+          {deliveryOptions.length === 0 ? <div className="text-[11px] text-gray-400">{t('no_data')}</div> : null}
+        </div>
+      ) : null}
+    </>
+  )
   // Driver info is DRIVER info. User, Sep 4 2026: "delivery only needs phone
   // and driver name...this is driver info, for customer name, phone and
   // address keep it same in customer section... make them compact".
@@ -1740,6 +1796,37 @@ export default function SaleDetailModal({
                     zero and the row did not render. */}
                 <DetailRow label={translateOr('driver', 'Driver', 'អ្នកដឹកជញ្ជូន')} value={deliveryDriverName} valueLink={deliveryDriverName ? <span className={deliveryPaidByStore ? 'line-through' : undefined}><EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverName} navigate={navigateTo}>{deliveryDriverName}</EntityLink></span> : undefined} />
                 <DetailRow label={translateOr('driver_phone', 'Driver phone', 'ទូរស័ព្ទអ្នកដឹក')} value={deliveryDriverPhone} valueLink={deliveryDriverPhone ? <EntityLink page="contacts" anchor="hub:contacts:delivery" search={deliveryDriverPhone} navigate={navigateTo}>{deliveryDriverPhone}</EntityLink> : undefined} />
+                {canChangeDriver ? (
+                  <div className="py-1.5" data-sale-driver-change="">
+                    <button
+                      type="button"
+                      disabled={driverSaving}
+                      className="rounded border border-blue-200 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:border-blue-800 dark:text-blue-300"
+                      onClick={() => {
+                        setDeliveryContact(null)
+                        setDeliverySearch('')
+                        setDriverChanging((open) => !open)
+                      }}
+                    >
+                      {driverChanging ? (t('cancel') || 'Cancel') : deliveryDriverName ? translateOr('change_driver', 'Change driver', 'ប្ដូរអ្នកដឹកជញ្ជូន') : translateOr('choose_delivery_driver', 'Choose a driver', 'ជ្រើសរើសអ្នកដឹកជញ្ជូន')}
+                    </button>
+                    {driverChanging ? (
+                      <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 dark:border-blue-900 dark:bg-blue-950/20">
+                        {renderDriverPicker('sale-change-driver-search')}
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={driverSaving || !deliveryContact || String(deliveryContact.id) === String(sale.delivery_contact_id ?? '')} onClick={() => { void applyDriverChange(deliveryContact) }} className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                            {translateOr('amend_apply', 'Apply', 'អនុវត្ត')}
+                          </button>
+                          {deliveryDriverName || sale.delivery_contact_id ? (
+                            <button type="button" disabled={driverSaving} onClick={() => { void applyDriverChange(null) }} className="rounded border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-50 dark:border-red-900 dark:text-red-300">
+                              {translateOr('remove_driver', 'Remove driver', 'ដកអ្នកដឹកជញ្ជូនចេញ')}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {!toNumber(sale.is_delivery) && canAmendThisSale ? (
                   <div className="py-1.5">
                     <button
@@ -1761,35 +1848,7 @@ export default function SaleDetailModal({
                     </button>
                     {deliveryAdding ? (
                       <div className="mt-2 space-y-2 rounded-lg border border-blue-100 bg-blue-50/50 p-2.5 dark:border-blue-900 dark:bg-blue-950/20">
-                        <label className="block text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-driver-search">
-                          {translateOr('choose_delivery_driver', 'Choose a driver', 'ជ្រើសរើសអ្នកដឹកជញ្ជូន')}
-                        </label>
-                        <input
-                          id="sale-add-delivery-driver-search"
-                          type="search"
-                          value={deliverySearch}
-                          onChange={(event) => { setDeliverySearch(event.target.value); setDeliveryContact(null) }}
-                          placeholder={translateOr('search_delivery_contacts', 'Search delivery contacts', 'ស្វែងរកអ្នកដឹកជញ្ជូន')}
-                          className="input w-full text-sm"
-                        />
-                        {deliveryContactsLoading ? <div className="text-[11px] text-gray-400">{t('loading') || 'Loading…'}</div> : null}
-                        {deliveryContactsError ? <div role="alert" className="text-[11px] font-medium text-red-600 dark:text-red-400">{deliveryContactsError}</div> : null}
-                        {!deliveryContactsLoading && !deliveryContactsError ? (
-                          <div className="max-h-36 space-y-1 overflow-y-auto">
-                            {deliveryOptions.map((option) => (
-                              <button
-                                key={option.id}
-                                type="button"
-                                onClick={() => { setDeliveryContact(option); setAmendMutationError('') }}
-                                className={`flex w-full items-start justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs ${deliveryContact?.id === option.id ? 'border-blue-500 bg-blue-100 dark:bg-blue-900/40' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}
-                              >
-                                <span className="font-medium text-gray-800 dark:text-gray-100">{option.name || `#${option.id}`}</span>
-                                <span className="text-gray-400">{option.phone || option.address || option.area || ''}</span>
-                              </button>
-                            ))}
-                            {deliveryOptions.length === 0 ? <div className="text-[11px] text-gray-400">{t('no_data')}</div> : null}
-                          </div>
-                        ) : null}
+                        {renderDriverPicker('sale-add-delivery-driver-search')}
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <label className="text-[11px] font-medium text-gray-600 dark:text-gray-300" htmlFor="sale-add-delivery-fee">
                             {translateOr('delivery_fee', 'Delivery fee', 'ថ្លៃដឹក')}
@@ -1868,7 +1927,17 @@ export default function SaleDetailModal({
               </DetailRowGroup>
             </SectionCard>
 
-            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
+            {/* S4-41: a cancelled sale is read-only. Every other edit on this
+                modal already refuses one (items, money, delivery, status);
+                the customer was the one surface with no status check at all,
+                on the client OR the Worker, so a cancelled sale could still
+                be re-pointed at a different buyer -- rewriting that
+                customer's purchase history to include a sale that never
+                happened. The button's write, POST /api/sales/bulk-update
+                (lib/saleBulkUpdate.ts), now refuses it too
+                (`cancelled_sale_read_only`); this hides the control that
+                would walk into that refusal. */}
+            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction && currentStatus !== 'cancelled' ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}

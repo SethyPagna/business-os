@@ -1,8 +1,9 @@
 // Pins the Telegram alert shapes the user specified (Part 581):
-//   sale  -> a receipt summary: Status / Date / INV / Cashier / Customer /
-//            Tel / "name qty × price (−discount) = total" per item /
-//            Delivery service / Total / Discount / Net Total / Paid /
-//            Delivery driver
+//   sale  -> a receipt summary under a title naming the receipt
+//            ("🛍️ Sale Invoice: <receipt>", Sep 23 2026): Status / Date /
+//            Cashier / Customer / Tel / Delivery driver / "name qty × price
+//            (−discount) = total" per item / Delivery service / Total /
+//            Discount / the amount under the sale's status / Paid / Change
 //   stock -> the change PLUS the resulting on-hand (branch · all branches)
 //   transfer -> From / To / one line per product with the resulting on-hand at
 //            both branches / Total moved (Part 582)
@@ -97,9 +98,12 @@ const lines = telegram.formatSaleTelegramLines({
 // event divider. Status now prints on EVERY sale, including a completed one.
 const GROUP = telegramLang.GROUP_RULE
 assert.deepEqual(lines, [
+  // Sep 23 2026, the owner's sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់:
+  // 20260923-153527", then Status and Date. The receipt number heads the
+  // message and the INV row it used to sit on is gone.
+  '🛍️ Sale Invoice: 20260903-100405',
   'Status: completed',
   'Date: 03/09/2026 10:04',
-  'INV: 20260903-100405',
   GROUP,
   'Cashier: Za',
   'Branch: Shop',
@@ -144,6 +148,8 @@ const walkIn = telegram.formatSaleTelegramLines({
 assert.ok(!walkIn.some((line, index) => line === GROUP && walkIn[index + 1] === GROUP), walkIn.join('\n'))
 assert.notEqual(walkIn[walkIn.length - 1], GROUP, 'no trailing divider')
 assert.notEqual(walkIn[0], GROUP, 'no leading divider')
+assert.equal(walkIn[0], '🛍️ Sale Invoice: WALK-IN', 'the title leads a walk-in too')
+assert.equal(walkIn[1], 'Status: completed', 'and the Status row follows it directly, with no divider between')
 assert.equal(walkIn.filter((line) => line === GROUP).length, 3, 'the customer group is gone with its divider')
 assert.ok(walkIn.includes('Status: completed'), 'the status row prints on an ordinary sale too')
 
@@ -156,7 +162,7 @@ const noStatus = telegram.formatSaleTelegramLines({
   items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
   subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
 })
-assert.equal(noStatus[0], 'Status: completed', `a missing status still names one: ${noStatus[0]}`)
+assert.equal(noStatus[1], 'Status: completed', `a missing status still names one: ${noStatus[1]}`)
 assert.ok(!noStatus.some((line) => /^[A-Za-z ]+:\s*$/.test(line)), `no row may ship an empty value:\n${noStatus.join('\n')}`)
 
 // A discounted item line is a real equation: gross unit price × quantity,
@@ -242,20 +248,30 @@ const cancelledFigures = {
 }
 const cancelledReport = telegram.formatShiftReport('Shop', cancelledShift, cancelledFigures, Date.parse('2026-09-04T12:00:00.000Z'))
 // SECTIONED Sep 21 2026: the state moved from a tag on the To line into the
-// report TITLE, the way the owner's reference layout states it.
-assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន — Cancelled / បានបោះបង់'), cancelledReport)
+// report TITLE, the way the owner's reference layout states it -- after a
+// colon since Sep 23 2026 (the owner's sample).
+assert.ok(cancelledReport.startsWith('🧑‍💼 Shift report / របាយការណ៍វេន: Cancelled / បានបោះបង់ · 04/09/2026\n'), cancelledReport)
 // BULLETED Sep 22 2026 ("we can do bullet points"): every LABEL row opens
 // with `· `, including the two ad-hoc cancellation rows, which are composed
 // from bi() rather than the label table and so are exactly the rows a
 // bullet rule can miss.
 assert.ok(cancelledReport.includes('· Cancelled by / បោះបង់ដោយ: Manager'), cancelledReport)
 assert.ok(cancelledReport.includes('· Reason / មូលហេតុ: Duplicate opening'), cancelledReport)
-assert.ok(cancelledReport.includes('1. Invoices / វិក្កយបត្រ\n· Total / សរុប: 3'), cancelledReport)
-for (const line of cancelledReport.split('\n')) {
-  if (!/: /.test(line) || line.startsWith('•') || /^\d+\. /.test(line)) continue
+// Sep 23 2026: a shift section opens with ONE dashed line, no rule and no
+// number ("use dash not line"), and nothing inside it is a `•` row any more.
+assert.ok(cancelledReport.includes('-----Invoices / វិក្កយបត្រ-----\n· Total / សរុប: 3'), cancelledReport)
+assert.ok(!cancelledReport.includes(telegramLang.RULE) && !/^\d+\. /m.test(cancelledReport) && !cancelledReport.includes('•'), cancelledReport)
+// The title (line 0) is not a row -- since Sep 23 2026 it carries a colon of
+// its own -- so the bullet rule is judged from line 1.
+for (const line of cancelledReport.split('\n').slice(1)) {
+  if (!/: /.test(line)) continue
   assert.ok(line.startsWith('· '), `every label row carries the bullet; this one does not: ${line}`)
 }
-assert.ok(cancelledReport.includes('04/09/2026 09:30'), cancelledReport)
+// Cancelled while OPEN: the shift was never closed, so its Close row says N/A
+// and the cancellation time has a row of its own (it rode on the To row until
+// the Sep 23 2026 layout retired From and To).
+assert.ok(cancelledReport.split('\n').includes('· Close / បិទ: N/A'), cancelledReport)
+assert.ok(cancelledReport.split('\n').includes('· Cancelled at / បោះបង់នៅ: 04/09/2026 09:30'), cancelledReport)
 assert.ok(!cancelledReport.includes('still open'), cancelledReport)
 assert.ok(!cancelledReport.includes('Counted /'), cancelledReport)
 assert.equal(telegram.shiftFilters(cancelledShift, Date.parse('2026-09-04T12:00:00.000Z')).createdTo, cancelledShift.cancelled_at)
@@ -272,13 +288,13 @@ const closedThenCancelled = {
 }
 const closedCancelledReport = telegram.formatShiftReport('Shop', closedThenCancelled, cancelledFigures, Date.parse('2026-09-05T12:00:00.000Z'))
 assert.equal(telegram.shiftFilters(closedThenCancelled, Date.parse('2026-09-05T12:00:00.000Z')).createdTo, closedThenCancelled.closed_at)
-assert.ok(closedCancelledReport.includes('To / ទៅ: 04/09/2026 17:02'), closedCancelledReport)
+assert.ok(closedCancelledReport.split('\n').includes('· Close / បិទ: 04/09/2026 17:02'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Cancelled at / បោះបង់នៅ: 05/09/2026 09:30'), closedCancelledReport)
 assert.ok(closedCancelledReport.includes('Closing cash / សាច់ប្រាក់បិទវេន: $75.00 · 100,000៛'), closedCancelledReport)
 assert.ok(!closedCancelledReport.includes('Counted cash / សាច់ប្រាក់បានរាប់:'), closedCancelledReport)
 // ... beside the OPENING count, which is the half the owner said was missing.
 assert.ok(closedCancelledReport.includes('Opening cash / សាច់ប្រាក់ដើមវេន: $50.00 · 100,000៛'), closedCancelledReport)
-assert.ok(closedCancelledReport.includes('1. Invoices / វិក្កយបត្រ\n· Total / សរុប: 3'), closedCancelledReport)
+assert.ok(closedCancelledReport.includes('-----Invoices / វិក្កយបត្រ-----\n· Total / សរុប: 3'), closedCancelledReport)
 const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
 assert.match(telegramSource, /WHERE business_date = @date\s+ORDER BY/, 'dated /shift history must retain cancelled shifts')
 
@@ -288,7 +304,7 @@ const credit = telegram.formatSaleTelegramLines({
   status: 'awaiting_payment', receiptNumber: 'R1', items: [{ name: 'A', quantity: 1, unitPriceUsd: 2, lineTotalUsd: 2 }],
   exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 1, deliveryPaidBy: 'shop', subtotalUsd: 2, discountUsd: 0, totalUsd: 2,
 }).filter(Boolean)
-assert.equal(credit[0], 'Status: awaiting payment')
+assert.deepEqual(credit.slice(0, 2), ['🛍️ Sale Invoice: R1', 'Status: awaiting payment'])
 assert.ok(credit.includes('Delivery service: $1.00 (shop paid)'))
 // REDESIGNED Sep 6 2026. An unsettled sale states the amount ONCE, under the
 // owner's word for it -- not as a Total, a Net Total and a "Paid: unpaid"
@@ -576,7 +592,7 @@ assert.equal(lossLines[lossAt], '· Loss / ខាតបង់: $30.00', lossRepo
 assert.equal(lossLines[lossAt].split(':').length, 2, lossLines[lossAt])
 // The canonical totals above are untouched by it. (The money line is labelled
 // `Revenue` since Sep 21 2026 -- `Sales` names the SECTION it sits in.)
-assert.ok(lossLines.includes('2. Sales / ការលក់'), lossReport)
+assert.ok(lossLines.includes('-----Sales / ការលក់-----'), lossReport)
 assert.ok(lossLines.includes('· Revenue / ចំណូល: $25.00'), lossReport)
 assert.ok(lossLines.includes('· Profit / ចំណេញ: $15.00'), lossReport)
 // A shift that took nothing prints $0.00 and NOTHING in riel. The owner's
@@ -624,4 +640,65 @@ assert.ok(/removalLossUsd: totals\.removal_loss_usd/.test(telegramSource), 'both
 assert.ok(/heading: string/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')) === false, 'heading is optional on TelegramEvent')
 assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
 
-console.log('test-telegram-messages-pure: ok')
+// ---- the sale alert as the shop receives it, in all three modes -----------
+// The owner's Sep 23 2026 sample for the top of a sale alert:
+//   🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527
+//   · Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់
+//   · Date / កាលបរិច្ឆេទ: 23/09/2026 15:35
+// Driven through the REAL sendTelegramEvent, because that is where the title
+// becomes a heading and where the shop's language mode is applied: the
+// builder's lines alone cannot show what the chat gets. NOTHING IS SENT --
+// fetch is replaced for the duration, the call captured, then restored.
+;(async () => {
+  const posted = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    assert.match(String(url), /^https:\/\/api\.telegram\.org\/bot/, 'the send path must be the Telegram API and nothing else')
+    posted.push(JSON.parse(init.body).text)
+    return { ok: true, status: 200, text: async () => '' }
+  }
+  let shopLanguage = 'both'
+  const settingsDb = {
+    getDb: () => ({ prepare: () => ({ all: async () => [
+      { key: 'telegram_chat_id', value: '-100999' },
+      { key: 'telegram_language', value: shopLanguage },
+    ] }) }),
+  }
+  const wired = loadReal('lib/telegram.ts', { './lowStockSettings': lowStockStub, './db': settingsDb, './businessDateWindow': businessDateWindow, './telegramLang': telegramLang, './salesAnalytics': salesAnalytics, './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './shiftReconciliation': shiftReconciliation })
+  const sendSale = async (mode, sale) => {
+    shopLanguage = mode
+    posted.length = 0
+    const sent = await wired.sendTelegramEvent({ TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one' }, { type: 'sales', lines: wired.formatSaleTelegramLines(sale) })
+    assert.equal(sent, true, `nothing was composed in ${mode} mode`)
+    assert.equal(posted.length, 1, `expected exactly one captured message in ${mode} mode`)
+    return posted[0].split('\n')
+  }
+  const ownerSale = {
+    status: 'awaiting_payment', createdAt: '2026-09-23T08:35:27.000Z', receiptNumber: '20260923-153527', cashier: 'Za', exchangeRate: 4100,
+    items: [{ name: 'A', quantity: 1, unitPriceUsd: 8, lineTotalUsd: 8 }], subtotalUsd: 8, discountUsd: 0, totalUsd: 8, totalKhr: 32800,
+  }
+  try {
+    for (const [mode, top] of [
+      ['both', ['🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527', '· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់', '· Date / កាលបរិច្ឆេទ: 23/09/2026 15:35', GROUP, '· Cashier / អ្នកគិតប្រាក់: Za']],
+      ['en', ['🛍️ Sale Invoice: 20260923-153527', '· Status: Not Paid', '· Date: 23/09/2026 15:35', GROUP, '· Cashier: Za']],
+      ['km', ['🛍️ វិក្កយបត្រការលក់: 20260923-153527', '· ស្ថានភាព: ប្រាក់ជំពាក់', '· កាលបរិច្ឆេទ: 23/09/2026 15:35', GROUP, '· អ្នកគិតប្រាក់: Za']],
+    ]) {
+      const message = await sendSale(mode, ownerSale)
+      assert.deepEqual(message.slice(0, 5), top, `${mode}:\n${message.join('\n')}`)
+      // ONE heading, and the number stated once: no "Sale recorded" line above
+      // the title and no INV row under it.
+      assert.equal(message.filter((line) => line.includes('20260923-153527')).length, 1, `${mode}: the receipt number prints once:\n${message.join('\n')}`)
+      assert.ok(!message.some((line) => /Sale recorded|បានកត់ត្រាការលក់|INV/.test(line)), `${mode}: a retired heading or row survives:\n${message.join('\n')}`)
+    }
+    // A route's own heading still wins over the title-less default: a return
+    // is sent as a `sales` event under '↩️ Return recorded'.
+    shopLanguage = 'both'
+    posted.length = 0
+    await wired.sendTelegramEvent({ TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one' }, { type: 'sales', heading: '↩️ Return recorded', lines: ['RET: RET-1'] })
+    assert.equal(posted[0].split('\n')[0], '↩️ Return recorded / បានកត់ត្រាការប្រគល់មកវិញ', posted[0])
+    console.log('PASS the sale alert opens on "🛍️ Sale Invoice: <receipt>" then Status and Date, in all three modes, through the real send path')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  console.log('test-telegram-messages-pure: ok')
+})().catch((error) => { console.error(error); process.exit(1) })

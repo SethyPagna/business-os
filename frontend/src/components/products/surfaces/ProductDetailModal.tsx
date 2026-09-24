@@ -22,7 +22,13 @@ import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
+import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
+// Loaded when the float is opened. The field history is a rare read behind a
+// permission tier; imported statically it joins this page's startup closure
+// (tests/performanceBudgets.test.ts measures exactly that closure), so every
+// operator would pay to download a float most of them never open.
+const EntityRecordsFloat = lazyRetry(() => import('../../shared/EntityRecordsFloat.tsx'), 'products-records-float')
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 // D3 (Part 422): the detail page's report sections (batch summary,
 // movements with running balance, sales breakdown, suppliers) -- its own
@@ -139,11 +145,20 @@ export default function ProductDetailModal({
   navigateTo,
   t,
 }: ProductDetailModalProps) {
-  const { user } = useApp() as { user: PermissionUser }
+  const { user, getPermissionTier } = useApp() as { user: PermissionUser; getPermissionTier: (key: string) => string }
   const canViewCosts = canViewAcquisitionCosts(user)
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
   // P10-6: the calculated-cost float.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
+  // The product's field history -- the same affordance Inventory's own detail
+  // modal now carries, because the two panes describe the same product and a
+  // capability on one of them only is a capability the operator cannot find.
+  // Its rows come from the audit trail, read through the audit_log permission,
+  // whose 'view' tier answers with the CALLER'S OWN entries only; a list
+  // scoped to one reader presented as "this product's history" is a wrong
+  // answer, so the affordance appears only at the tier that sees all of it.
+  const [fieldHistoryOpen, setFieldHistoryOpen] = useState(false)
+  const canReadFieldHistory = getPermissionTier('audit_log') === 'full'
   const T = (key: string, fallback: string) => {
     const translated = typeof t === 'function' ? t(key) : ''
     return translated && translated !== key ? translated : fallback
@@ -224,6 +239,21 @@ export default function ProductDetailModal({
   // the two mini-sections stack -- below the Status row and above the report
   // pills instead. Only one slot is ever visible (the other is display:none),
   // so both call the same onManageBatches with no conflict.
+  const fieldHistoryButton = canReadFieldHistory && Number(p.id) > 0 ? (
+    <button
+      type="button"
+      data-product-field-history=""
+      onClick={() => setFieldHistoryOpen(true)}
+      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700/40 dark:hover:text-gray-200"
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
+        <ScrollText className="h-3.5 w-3.5" />
+        {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
+        <span className="truncate leading-relaxed">{T('field_history', 'Field history')}</span>
+      </span>
+      <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+    </button>
+  ) : null
   const batchesButton = batchCount ? (
     <button
       type="button"
@@ -354,9 +384,10 @@ export default function ProductDetailModal({
 
                 {/* Desktop keeps all four related actions in this left-side
                     column, directly below Branch Stock. */}
-                {batchesButton || Number(p.id) > 0 ? (
+                {batchesButton || fieldHistoryButton || Number(p.id) > 0 ? (
                   <div className="hidden border-t border-gray-100 pt-2 dark:border-gray-700 sm:block">
                     {batchesButton}
+                    {fieldHistoryButton}
                     {Number(p.id) > 0 ? (
                       <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
                         <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
@@ -465,9 +496,10 @@ export default function ProductDetailModal({
                 right below it and above the report pills. The wide-screen copy
                 lives in the left mini-section (sm:block there / sm:hidden here),
                 so exactly one shows. */}
-            {batchesButton ? (
+            {batchesButton || fieldHistoryButton ? (
               <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:hidden">
                 {batchesButton}
+                {fieldHistoryButton}
               </div>
             ) : null}
 
@@ -538,6 +570,19 @@ export default function ProductDetailModal({
             brand={p.brand}
             onClose={() => setDescriptionDetailOpen(false)}
             t={t}
+          />
+        </Suspense>
+      ) : null}
+      {fieldHistoryOpen ? (
+        <Suspense fallback={null}>
+          <EntityRecordsFloat
+            entity="product"
+            entityId={Number(p.id) || 0}
+            subject={productName}
+            onClose={() => setFieldHistoryOpen(false)}
+            t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
+            fmtUSD={(value) => fmtUSD(Number(value))}
+            fmtKHR={(value) => fmtKHR(Number(value))}
           />
         </Suspense>
       ) : null}

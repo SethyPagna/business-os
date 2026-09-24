@@ -21,7 +21,7 @@ import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
-import { audit } from '../lib/audit'
+import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
@@ -1611,11 +1611,31 @@ app.post('/bulk-price-adjust', async (c) => {
           WHERE is_active = 1 AND (${fieldCondition(field)})`,
     params: { delta },
   }))
+  // This scope deliberately never materializes ids, so there is no per-row
+  // before/after to record and no undo. The honest before/after at this scope
+  // is the catalog total per adjusted field: one aggregate read on each side
+  // (an indexed-free scan of a single column, run once for a rare, explicitly
+  // confirmed admin action) turns "changed 4,120 products" into a figure an
+  // operator can actually check. rows_touched rides along as a field so it
+  // renders in the same table.
+  const totalsSql = `SELECT ${fields.map((field) => `ROUND(SUM(COALESCE(${field}, 0)), 2) AS "${field}"`).join(', ')} FROM products WHERE is_active = 1`
+  const totalsBefore = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
   const results = await db.batch(statements)
-  const changed = Math.max(0, ...results.map((r) => Number((r as { changes?: number }).changes) || 0))
+  // D1 reports a batch statement's row count in meta.changes, never at the
+  // top level, so the old read was always undefined -> 0: the response said
+  // "changed: 0" for every adjustment and the toast quietly fell back to the
+  // preview count. Same shape every other reader in this Worker uses.
+  const changed = Math.max(0, ...results.map((r) => Number(
+    (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
+  ) || 0))
+  const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
     scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
-  })
+  }, changedFields(
+    { ...totalsBefore, rows_touched: 0 },
+    { ...totalsAfter, rows_touched: changed },
+    { keys: [...fields, 'rows_touched'] },
+  ))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   await broadcast(c.env, 'products', { action: 'bulk-price-adjust' }).catch(() => {})
   return c.json({ success: true, changed })
@@ -1927,6 +1947,29 @@ app.post('/rename-brand', async (c) => {
   return c.json({ renamed: true, products: changed.products, batches: 0, brands: library.brands })
 })
 
+// The plain product field diff covers whatever columns the PUT actually
+// writes -- derived from cleanPayload(), the same function updateRow uses, so
+// it cannot drift when a new column is added to the editor (the first version
+// of this was a hand-written 16-name allowlist and the form already submitted
+// ~20 more: discounts, thresholds, expiry, special prices, tag_label,
+// custom_fields; changing five of them wrote no audit row at all).
+//
+// Only these are held back:
+//   - cost_price_usd / cost_price_khr: a manual cost override already writes
+//     its own 'cost_override' row with old_value/new_value inside the same
+//     guarded batch (lib/productWrites.ts) -- listing them again would put one
+//     change on two rows. purchase_price_* is NOT held back: nothing else
+//     records it, so excluding it would leave the same gap this lane closes.
+//   - derived restatements of a column already in the diff (the search/compact
+//     columns, the multi-value mirrors of category/brand, the cached group
+//     flag). cleanPayload already drops id/updated_at/client_request_id.
+// Secret-shaped column names are dropped by changedFields itself.
+const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
+  'cost_price_usd', 'cost_price_khr',
+  'name_key', 'name_normalized', 'unit_normalized', 'brand_compact',
+  'categories', 'brands', 'is_grouped_cached',
+])
+
 app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -2021,6 +2064,10 @@ app.put('/:id', async (c) => {
   }
   let renamedProductIds: number[] = []
   let renamedProductName: string | null = null
+  // Set by the two places that actually INSERT a 'rename'/'product_group' audit
+  // row, so the field diff below can drop `name` exactly when it would be a
+  // duplicate -- never merely because a name changed.
+  let wroteProductRenameAudit = false
   if (body.name !== undefined || body.barcode !== undefined) {
     const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id')
       .get<{ name: string; barcode: string | null }>({ id })
@@ -2144,6 +2191,7 @@ app.put('/:id', async (c) => {
       if (fromName && fromName.toLowerCase() !== nextName.toLowerCase()) {
         const carried = await applyRenameCarry(getDb(c.env), 'product_name', fromName, nextName, new Date().toISOString())
         await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id, { from: fromName, to: nextName, rows: carried.products })
+        wroteProductRenameAudit = true
       }
     }
     delete body.__rename_scope
@@ -2186,13 +2234,27 @@ app.put('/:id', async (c) => {
   // back out of the plan avoids a second SELECT for the common (non-fold)
   // case. Absent for a create/group-rename-only plan, in which case there is
   // no cost field to record anyway.
+  // A plain field edit (price, barcode, category, unit, description, image,
+  // active flag) wrote NOTHING to audit_logs before this -- the Audit Log had
+  // no record that a selling price had ever been changed, by whom, or from
+  // what. One row per edit, carrying only the columns that actually moved.
+  const productAuditColumns = Object.keys(cleanPayload(body, await tableColumns(c.env, 'products')))
+    .filter((column) => !PRODUCT_AUDIT_EXCLUDED_COLUMNS.has(column) && !isSecretShapedAuditKey(column))
+  const productBefore = productAuditColumns.length
+    ? await getDb(c.env)
+      .prepare(`SELECT ${productAuditColumns.map((column) => `"${column}"`).join(', ')} FROM products WHERE id = @id`)
+      .get<Record<string, unknown>>({ id })
+    : null
   try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
   const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
-  if (appliedGroupRename) await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
-    { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
+  if (appliedGroupRename) {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
+      { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
+    wroteProductRenameAudit = true
+  }
   // Real, latent gap this session found while wiring the image-only role's
   // gallery writes through this same handler: `image_gallery` is a virtual
   // key (see syncProductImageGallery's own comment) that updateRow's
@@ -2211,6 +2273,21 @@ app.put('/:id', async (c) => {
   // is not an error.
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
+  // `name` is held back only when a rename row was ACTUALLY written, tracked
+  // with the writes themselves. The first version keyed this off
+  // renamedProductName, which is set for ANY name change while the rename row
+  // fires only under __rename_scope === 'group' -- so a default-scope rename
+  // (the common case: rename this row only) was recorded nowhere at all.
+  // An edit that changed nothing audited (an image-gallery-only reorder, a
+  // resave of identical values) yields no diff and therefore no row.
+  const productFieldChange = changedFields(productBefore, item as Record<string, unknown>, {
+    keys: wroteProductRenameAudit
+      ? productAuditColumns.filter((column) => column !== 'name')
+      : productAuditColumns,
+  })
+  if (productFieldChange) {
+    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
+  }
   if (renamedProductName && renamedProductIds.length) {
     await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
   }

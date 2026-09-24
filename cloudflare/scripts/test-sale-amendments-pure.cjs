@@ -114,6 +114,7 @@ const saleBulkStatus = compile('saleBulkStatus.ts', {
   './actorSnapshot': {},
   './branchRoles': {},
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {}, buildSaleRecordEventsInsert: () => ({ sql: 'SELECT 1', params: {} }) },
+  './saleStatusResolution': compile('saleStatusResolution.ts', { './financialPrecision': financialPrecision }),
 })
 
 const {

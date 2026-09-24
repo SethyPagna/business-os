@@ -78,7 +78,7 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
   const never = () => { throw new Error('unrelated undo branch invoked') }
   const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
   const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
-    '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
+    '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
     './productDelete': productDelete,
@@ -100,7 +100,7 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
     '../lib/searchMatch': searchMatch,
     '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
-    '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
+    '../lib/audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })
   return { app: FakeHono.instance, controls, db: rawCompat, undo, productDelete }

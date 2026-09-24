@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -428,7 +428,7 @@ app.put('/users/:id', async (c) => {
 
   const db = getDb(c.env)
   const existing = await db.prepare(
-    'SELECT id, username, permissions, phone, email, deleted_at, is_active, updated_at FROM users WHERE id = @id',
+    'SELECT id, username, name, permissions, phone, email, role_id, deleted_at, is_active, updated_at FROM users WHERE id = @id',
   ).get<Record<string, unknown>>({ id })
   const existingSecurity = await getUserSecurityContext(c, id)
   if (!existing || !existingSecurity) return c.json({ success: false, error: 'User not found' }, 404)
@@ -486,7 +486,33 @@ app.put('/users/:id', async (c) => {
     if (Number(nextIsActive) === 0) {
       await revokeUserSessions(c.env, Number(id))
     }
-    await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', id)
+    // An account edit changes who can do what; recording only "user #4 was
+    // updated" makes the Audit Log unable to answer the one question it is
+    // there for. Record the account fields that actually moved -- never the
+    // password hash, session tokens or an avatar blob (changedFields drops
+    // those key shapes outright).
+    await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', id, null, changedFields(
+      {
+        username: existing.username,
+        name: existing.name,
+        phone: existing.phone,
+        email: existing.email,
+        role_id: existing.role_id,
+        is_active: Number(existing.is_active || 0),
+        deleted: existing.deleted_at ? 1 : 0,
+        permissions: parseJsonSafe(existing.permissions),
+      },
+      {
+        username,
+        name,
+        phone,
+        email,
+        role_id: body.role_id || null,
+        is_active: Number(nextIsActive || 0),
+        deleted: markDeleted ? 1 : 0,
+        permissions: nextPermissions,
+      },
+    ))
     if (usernameChanged && renameScope === 'carry') {
       await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
     }
@@ -518,7 +544,7 @@ app.put('/users/:id/profile', async (c) => {
 
   const db = getDb(c.env)
   const user = await db.prepare(
-    'SELECT id, username, name, password, phone, email, deleted_at, is_active, updated_at FROM users WHERE id = @id AND deleted_at IS NULL',
+    'SELECT id, username, name, password, phone, email, avatar_path, phone_verified, email_verified, deleted_at, is_active, updated_at FROM users WHERE id = @id AND deleted_at IS NULL',
   ).get<Record<string, unknown>>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
   try {
@@ -563,7 +589,31 @@ app.put('/users/:id/profile', async (c) => {
       updateProfileStatement,
       ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(targetId), username) : []),
     ])
-    await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'profile' })
+    // Every column this UPDATE writes is diffed, not just the four identity
+    // fields: an avatar change alone used to produce a row that said nothing
+    // changed. phone_lookup is left out as a derived restatement of phone;
+    // the two *_verified flags are in because the statement resets them.
+    const nextAvatarPath = updateProfileStatement.params.avatar
+    await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'profile' }, changedFields(
+      {
+        username: user.username,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        avatar_path: user.avatar_path,
+        phone_verified: Number(user.phone_verified || 0),
+        email_verified: Number(user.email_verified || 0),
+      },
+      {
+        username,
+        name,
+        phone,
+        email,
+        avatar_path: nextAvatarPath,
+        phone_verified: 0,
+        email_verified: email === null ? 0 : Number(user.email_verified || 0),
+      },
+    ))
     if (usernameChanged && renameScope === 'carry') {
       await Promise.all([bumpVersion(c.env, 'sales'), bumpVersion(c.env, 'returns')])
     }
@@ -679,6 +729,13 @@ app.put('/roles/:id', async (c) => {
     const permissions = JSON.stringify(body.permissions || {})
     const updatedAt = new Date().toISOString()
     const details = JSON.stringify({ name })
+    // A role IS its permission set, so the row has to carry the permissions
+    // that moved, not just the role's name. Built here (not after the batch)
+    // so the before/after is committed atomically with the UPDATE it describes.
+    const roleChange = auditChangeColumns(changedFields(
+      { name: existingRole.name, permissions: parseJsonSafe(existingRole.permissions) },
+      { name, permissions: parseJsonSafe(permissions) },
+    ))
     const results = await db.batch([{
       sql: `UPDATE roles
             SET name = @name, permissions = @permissions, updated_at = @updated_at
@@ -702,15 +759,15 @@ app.put('/roles/:id', async (c) => {
       // failure aborts this D1 batch and rolls the role update back.
       sql: `INSERT INTO audit_logs (
               user_id, user_name, action, entity, entity_id, details,
-              table_name, record_id, new_value, device_name, device_tz
+              table_name, record_id, old_value, new_value, device_name, device_tz
             )
             SELECT @user_id,
               COALESCE((SELECT NULLIF(trim(username), '') FROM users WHERE id = @user_id), @user_name),
-              'update', 'role', @id, @details, 'role', @id, @details,
+              'update', 'role', @id, @details, 'role', @id, @old_value, @new_value,
               (SELECT device_name FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
             WHERE changes() = 1`,
-      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details },
+      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChange },
     }])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)

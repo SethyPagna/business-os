@@ -47,7 +47,7 @@ async function workerBundle() {
       const fixtures = {
         auth: `export const requireAuth=async(c,next)=>{const raw=c.req.header('x-test-permissions');
           if(!raw)return c.json({error:'Unauthorized'},401);c.set('user',{id:7,username:'fixture',name:'Fixture',permissions:raw});return next()}`,
-        audit: 'export const audit=async()=>{}',
+        audit: 'export const audit=async()=>{};export const changedFields=()=>null;export const auditChangeColumns=()=>({old_value:null,new_value:null});export const isSecretShapedAuditKey=()=>false',
         cache: 'export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};',
         broadcastHub: 'export const broadcast=async()=>{}',
         telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendTelegramEvent=async()=>{};

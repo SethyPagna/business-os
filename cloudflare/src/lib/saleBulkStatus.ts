@@ -11,6 +11,7 @@ import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
+import { statusChangeNeedsPayment } from './saleStatusResolution';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -92,7 +93,15 @@ export type BulkStatusRequest = {
     skip_stock?: boolean;
 };
 export class SaleBulkError extends Error {
-    constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) { super(message); }
+    // `details` rides next to `error` in the route's JSON (a machine-readable
+    // code and the sales it names), for refusals a client acts on.
+    constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly details: Record<string, unknown> = {}) { super(message); }
+}
+// S4-41: a member moving from Not Paid to a paid status must already be paid
+// for (lib/saleStatusResolution.ts). The whole group is refused, like every
+// other per-sale refusal here, and the answer names each sale that owes money.
+function refuseUnpaid(unpaid: Row[], statusCode: 400 | 409 = 400): never {
+    throw new SaleBulkError(`Not fully paid: ${unpaid.map(s => String(s.receipt_number || s.id)).join(', ')}. Record the payment before marking a sale Completed or Awaiting Delivery. Nothing in the group was changed.`, statusCode, { code: 'insufficient_payment_for_status', sale_ids: unpaid.map(s => Number(s.id)) });
 }
 const fields = ['sale_status', 'notes', 'cancel_reason', 'cancel_note', 'cancelled_at', 'cancelled_by_name', 'status_before_cancel', 'cancel_fee_id'] as const;
 // reference_id is polymorphic: use a conservative read guard, never revision
@@ -310,8 +319,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         return JSON.parse(String(previous.receipt_json));
     }
     const ids = request.items.map(i => i.id);
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
-    const sourceMatchedIds: number[] = [];
+    // The money columns feed only the S4-41 check below; the revision guard
+    // every changed member carries makes the batch refuse if they move before
+    // it commits.
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
         if (!sale)
@@ -324,7 +336,11 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         if (sale.movement_fingerprint === null)
             throw new SaleBulkError(`A selected sale exceeds ${BULK_STATUS_MOVEMENT_LIMIT} stock movements and cannot join a bulk action.`, 400);
         sourceMatchedIds.push(expected.id);
+        if (statusChangeNeedsPayment(sale.sale_status || 'completed', request.target_status, sale))
+            unpaid.push(sale);
     }
+    if (unpaid.length)
+        refuseUnpaid(unpaid);
     const items = await rowsIn<Item>(db, sourceMatchedIds, m => `SELECT * FROM sale_items WHERE sale_id IN (${m}) ORDER BY id LIMIT 151`);
     if (items.length > 150)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
@@ -503,8 +519,23 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT)
         fail('Unsupported bulk snapshot.');
     const sign = direction === 'undo' ? -1 : 1, expected = direction === 'undo' ? 'undoable' : 'redoable', next = direction === 'undo' ? 'redoable' : 'undoable', stamp = new Date().toISOString();
+    // S4-41: undo and redo move statuses too. A redo can re-apply a group
+    // recorded before the payment check existed, and undoing a group reopen
+    // puts each sale back to a paid status; either is refused for a sale its
+    // recorded payment does not cover, the same as a new group (409, which the
+    // history route passes on). The member assertions below pin the money read
+    // here: any write to a sale since bumps its revision.
+    const moved = snapshot.members.filter(m => m.changed);
+    const money = await rowsIn<Row>(db, moved.map(m => m.id), marks => `SELECT id,receipt_number,total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,calculated_total_usd FROM sales WHERE id IN (${marks})`);
+    const unpaid = money.filter(sale => {
+        const member = moved.find(m => m.id === Number(sale.id))!;
+        const [from, to] = sign > 0 ? [member.before, member.after] : [member.after, member.before];
+        return statusChangeNeedsPayment(from.sale_status, to.sale_status, sale);
+    });
+    if (unpaid.length)
+        refuseUnpaid(unpaid, 409);
     const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
-    for (const m of snapshot.members.filter(member => member.changed))
+    for (const m of moved)
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
     for (const m of snapshot.members)
         statements.push(...memberStatements(m, sign, user, stamp));
@@ -512,12 +543,12 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     const recordEvents = statusRecordEvents(snapshot.members, String(op.id), nextGeneration, direction, user, stamp);
     if (recordEvents)
         statements.push(recordEvents.statement);
-    for (const m of snapshot.members.filter(member => member.changed))
+    for (const m of moved)
         statements.push({ sql: `UPDATE sale_bulk_members SET revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),movement_fingerprint=${saleMovementFingerprint('@id')} WHERE operation_id=@op AND sale_id=@id`, params: { op: op.id, id: m.id } });
     statements.push({ sql: 'UPDATE sale_bulk_operations SET generation=generation+1 WHERE id=@op', params: { op: op.id } });
     statements.push({ sql: 'UPDATE undo_snapshots SET status=@status,updated_at=@stamp WHERE id=@id', params: { id: op.snapshot_id, status: direction === 'undo' ? 'reversed' : 'applied', stamp } });
     statements.push({ sql: "UPDATE action_history SET status=@status,last_error=NULL,updated_at=@stamp,undo_payload=json_set(undo_payload,'$.generation',@generation),redo_payload=json_set(redo_payload,'$.generation',@generation) WHERE id=@id", params: { id: historyId, status: next, stamp, generation: Number(generation) + 1 } });
-    statements.push(auditStatement(user, String(op.id), `action_${direction}`, snapshot.members.filter(m => m.changed).length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
+    statements.push(auditStatement(user, String(op.id), `action_${direction}`, moved.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
         await db.batch(statements);

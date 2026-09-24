@@ -146,6 +146,10 @@ const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './mon
 const productBatchesMod = loadReal('lib/productBatches.ts', {
   './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod,
 })
+// Migration 0192: both kernels wrap their body in the per-line receipt guard,
+// so the REAL module must be in the override map -- autoStub would make
+// withStockMutationReceipt return undefined instead of the kernel Response.
+const stockMutationReceiptMod = loadReal('lib/stockMutationReceipt.ts')
 
 // audit() calls are recorded, not written to a real audit_logs row -- same
 // pattern as test-returns-batch-restock-pure.cjs, since what this test needs
@@ -175,6 +179,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/productIdentity': productIdentityMod,
   '../lib/movementCostSnapshot': movementCostSnapshotMod,
   '../lib/actorSnapshot': actorSnapshotMod,
+  '../lib/stockMutationReceipt': stockMutationReceiptMod,
   '../lib/moneyPrecision': moneyMod,
   '../lib/stockCondition': stockConditionMod,
 })
@@ -191,6 +196,7 @@ const batchesMod = loadReal('routes/batches.ts', {
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/stockReason': stockReasonMod,
   '../lib/actorSnapshot': actorSnapshotMod,
+  '../lib/stockMutationReceipt': stockMutationReceiptMod,
   '../lib/moneyPrecision': moneyMod,
 })
 

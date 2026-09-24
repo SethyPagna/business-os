@@ -57,6 +57,7 @@ import {
   createLatestReturnDetailRestoreRunner,
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
+  getReturnRecords as fetchReturnRecords,
   getReturnsReport,
   returnRangeParams,
 } from '../../api/returnsReadTransport.ts'
@@ -69,6 +70,7 @@ import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
+import { RETURN_RECORDS_ADAPTER } from '../../utils/entityRecords.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
 const EditReturnModal = lazyRetry(() => import('./EditReturnModal'), 'returns-edit-modal')
 const NewReturnModal = lazyRetry(() => import('./NewReturnModal'), 'returns-new-modal')
@@ -76,6 +78,7 @@ const NewSupplierReturnModal = lazyRetry(() => import('./NewSupplierReturnModal'
 const ReturnReasonManagerModal = lazyRetry(() => import('./ReturnReasonManagerModal'), 'returns-reason-manager-modal')
 const ReturnsBulkActionModal = lazyRetry(() => import('./ReturnsBulkActionModal'), 'returns-bulk-action-modal')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'returns-export-options')
+const RecordsFloat = lazyRetry(() => import('../shared/RecordsFloat'), 'returns-records-float')
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 type ReturnsListSurfaceProps = ComponentProps<typeof ReturnsListSurface>
@@ -392,6 +395,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     return created
   }, [])
   const [detailRet, setDetailRet] = useState<ReturnRow | null>(null)
+  // The return whose RECORDS float is open. Separate from detailRet so the
+  // detail stays on screen underneath, exactly like the sale's.
+  const [recordsRet, setRecordsRet] = useState<ReturnRow | null>(null)
   const [showCustomerForm, setShowCustomerForm] = useState(false)
   const [showSupplierForm, setShowSupplierForm] = useState(false)
   const [showReasonManager, setShowReasonManager] = useState(false)
@@ -1646,6 +1652,29 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             onClose={closeReturnDetail}
             onMinimize={() => minimizeReturnDetail(detailRet)}
             onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
+            onOpenRecords={() => setRecordsRet(detailRet)}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {/* The return's records. Same float, same change table and same closed
+          value states as the sale's -- one component, one place a Before/After
+          column can go wrong. It is a READ: reaching this page already
+          required returns:view, and the Worker gates GET /:id/records on the
+          same tier. */}
+      {recordsRet ? (
+        <Suspense fallback={null}>
+          <RecordsFloat
+            title={recordsRet.return_number
+              ? `${t('record_history') || 'Records'} · ${recordsRet.return_number}`
+              : (t('record_history') || 'Records')}
+            recordKey={`return:${recordsRet.id}`}
+            load={() => fetchReturnRecords(recordsRet.id as number | string)}
+            adapter={RETURN_RECORDS_ADAPTER}
+            onClose={() => setRecordsRet(null)}
+            t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
           />

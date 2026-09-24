@@ -120,7 +120,8 @@ import {
   type SaleRecordEventRow,
   type SaleRecordChange,
 } from '../lib/saleRecords'
-import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import { resolvePaidSaleStatus, statusChangeNeedsPayment, tenderAllowsPaidStatus } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -544,10 +545,19 @@ app.post('/', async (c) => {
   // Delivery" flows) -- previously ignored, so the sale was always recorded
   // (and stock always deducted) as 'completed' regardless of what the
   // cashier actually picked.
-  const saleStatus = body.sale_status ? String(body.sale_status) : 'completed'
-  if (!VALID_SALE_STATUSES.includes(saleStatus)) {
-    return c.json({ error: `Invalid sale_status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
+  // S4-41: `let`, because a fully-paid sale may not be recorded as
+  // `awaiting_payment` ("Not Paid"). The rewrite happens once the money is
+  // known, below computeSaleTotals -- see resolvePaidSaleStatus there.
+  let saleStatus = body.sale_status ? String(body.sale_status) : 'completed'
+  if (!CREATABLE_SALE_STATUSES.includes(saleStatus)) {
+    return c.json({ error: `Invalid sale_status. Must be one of: ${CREATABLE_SALE_STATUSES.join(', ')}` }, 400)
   }
+  // Computed from the REQUESTED status, deliberately, and it is the same
+  // value either way: the resolver only ever maps `awaiting_payment` to
+  // `completed`/`awaiting_delivery`, and all three are in
+  // STOCK_DEDUCTED_STATUSES, so the stock plan cannot change underneath it.
+  // test-sale-paid-status-resolution-pure.cjs pins that equality directly so
+  // a future status that does NOT deduct cannot join the resolver silently.
   const shouldDeductStock = STOCK_DEDUCTED_STATUSES.has(saleStatus)
 
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
@@ -983,6 +993,67 @@ app.post('/', async (c) => {
     rawAmountPaidUsd: body.amount_paid_usd,
     rawAmountPaidKhr: body.amount_paid_khr,
   })
+
+  // S4-41, the two halves of "paid means it is not Not-Paid", server side.
+  //
+  // NORMALISE, never reject. A sale whose tender covers the total must not be
+  // recorded as `awaiting_payment`; it becomes `awaiting_delivery` when it is
+  // a delivery and `completed` otherwise. This is silent on purpose: the sale
+  // has already been rung up and the customer has already paid, so refusing
+  // it would strand a real transaction behind a 4xx -- and an offline replay
+  // posting a body built by an older client must still land. The cashier sees
+  // the resolved status in the POS picker before submitting (POS.tsx runs the
+  // same resolver), so this is a backstop for stale clients, not the UI.
+  const requestedSaleStatus = saleStatus
+  saleStatus = resolvePaidSaleStatus({
+    requestedStatus: saleStatus,
+    paidUsd: amountPaidUsd,
+    paidKhr: amountPaidKhr,
+    totalUsd,
+    exchangeRate,
+    moneyPrecisionVersion: 1,
+    isDelivery,
+  })
+
+  // REJECT the mirror-image hole. The POS has always refused to record
+  // `completed` or `awaiting_delivery` on a tender short by more than half a
+  // cent, but that lived only in the client: the Worker accepted any
+  // combination, so a stale or scripted client could record an unpaid sale as
+  // Completed and the debt would vanish from the Not-Paid list. Frontend
+  // validation needs backend enforcement; this is that enforcement.
+  //
+  // The boundary is tenderAllowsPaidStatus, the SAME function the POS gate
+  // calls: covered within half a cent, exact integer units. Not the exact
+  // paymentCoversSaleTotal -- a shortfall under half a cent shows as $0.00 at
+  // two decimals (39,400 riel for $9.61 at 4,100), the deployed POS accepts
+  // it, and an offline sale queued on that boundary must land here rather
+  // than replay into a non-retryable 400 and be lost.
+  //
+  // Only these two statuses are gated. `awaiting_payment` is the credit sale
+  // and is meant to be short; return statuses are set by the Returns flow;
+  // `cancelled` is not a POS checkout. A $0 total is covered trivially.
+  if (saleStatus === 'completed' || saleStatus === 'awaiting_delivery') {
+    let coveredForStatus = false
+    try {
+      coveredForStatus = tenderAllowsPaidStatus({
+        paidUsd: amountPaidUsd,
+        paidKhr: amountPaidKhr,
+        totalUsd,
+        exchangeRate,
+        moneyPrecisionVersion: 1,
+      })
+    } catch {
+      coveredForStatus = false
+    }
+    if (!coveredForStatus) {
+      return c.json({
+        error: 'This sale is not fully paid, so it cannot be recorded as Completed or Awaiting Delivery. Record it as Not Paid instead.',
+        code: 'insufficient_payment_for_status',
+        sale_status: requestedSaleStatus,
+      }, 400)
+    }
+  }
+
   let nativeChange
   try {
     nativeChange = planNativeSaleChange({
@@ -1746,7 +1817,7 @@ app.post('/bulk-status', async (c) => {
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
-    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }
 })
 
@@ -1757,7 +1828,7 @@ app.post('/bulk-update', async (c) => {
     return c.json(result)
   } catch (error) {
     if (isLoyaltyAssignmentError(error)) return c.json({ error: LOYALTY_REASSIGNMENT_MESSAGE, code: LOYALTY_REASSIGNMENT_CODE }, 409)
-    return c.json({ error: (error as Error).message }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
+    return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }
 })
 
@@ -1984,6 +2055,31 @@ app.patch('/:id/status', async (c) => {
   // see lib/saleTransitions.ts.
   const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
   if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // S4-41, the forward half. A Not Paid sale may take a paid status
+  // (completed / awaiting_delivery) only when the payment already recorded on
+  // it covers its total; otherwise the paid status asserts money nobody paid
+  // and the debt drops out of every Not Paid list. A request that settles the
+  // payment itself takes the settlement branch below instead, which refuses a
+  // short tender with `insufficient_payment` -- so this check is for the
+  // direct path only. The money was read with the sale above, and the
+  // saleRevisionGuard below refuses the write if the sale changed since.
+  //
+  // The REVERSE move stays open on purpose: completed/awaiting_delivery ->
+  // awaiting_payment IS the shop's payment-correction reopen. It is the only
+  // thing that turns on `payment_correction_allowed` (saleAllowsPaymentCorrection
+  // above, and the same CASE in the list query), it writes its own audit
+  // action `sale_payment_correction_opened`, and SaleSettlementEditor's
+  // correction mode is reachable ONLY through it. Refusing it would leave a
+  // mis-keyed tender uncorrectable forever. A reopened sale keeps its tender,
+  // so putting a fully paid one back (the reopen's Undo) passes the check below.
+  if (!paymentFieldsSent && statusChangeNeedsPayment(oldStatus, saleStatus, sale)) {
+    return c.json({
+      error: 'This sale is not fully paid, so it cannot be marked Completed or Awaiting Delivery. Record the payment first.',
+      code: 'insufficient_payment_for_status',
+      sale_status: saleStatus,
+    }, 400)
+  }
 
   // S4-2: is this transition outside the stock ledger? Either the admin
   // asked for it now, or this sale was ALREADY marked stock-skipped by an
@@ -2629,8 +2725,12 @@ app.patch('/:id/status', async (c) => {
 app.patch('/:id/customer', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
-  // Same reasoning as PATCH /:id/status above -- only reachable from the
-  // 'sales'-gated Sales page (Sales.tsx's attachSaleCustomer caller).
+  // Same reasoning as PATCH /:id/status above. No screen calls this route
+  // any more: its one caller, Sales.tsx's attachSaleCustomer, was removed in
+  // 02a017d8, and the Sales page now changes a sale's customer through
+  // POST /bulk-update (lib/saleBulkUpdate.ts), which carries the cancelled-
+  // sale refusal. It stays for clients still running an older build; remove
+  // it once no deployed build can call it.
   if (getActionTier(user, 'sales', 'customer') !== 'full' || getActionTier(user, 'sales', 'customer_reassign') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
@@ -2701,6 +2801,21 @@ app.patch('/:id/customer', async (c) => {
     source_customer_is_anonymous: number | null
   }>([saleId])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
+
+  // S4-41: a cancelled sale is read-only. The owner's rule for every sale
+  // edit is "all status except cancelled", and this route was the one edit
+  // surface with NO status check at all -- every other one (amendments,
+  // added lines, status changes) already refuses a cancelled sale, so a
+  // cancelled sale's customer could still be reassigned from the detail
+  // modal while its items, money and delivery were all frozen. Reassigning
+  // the buyer on a cancelled sale also rewrites that customer's purchase
+  // history to include a sale that never happened.
+  if (String(sale.sale_status || 'completed') === 'cancelled') {
+    return c.json({
+      error: 'This sale was cancelled, so its customer cannot be changed. Un-cancel it first.',
+      code: 'cancelled_sale_read_only',
+    }, 400)
+  }
 
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))

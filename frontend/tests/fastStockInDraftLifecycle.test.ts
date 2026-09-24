@@ -34,7 +34,13 @@ assert.match(modal, /setProtectedFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.f
 assert.match(modal, /setProtectedUnitCost\]\s*=\s*useState\(draft\?\.unitCost \|\| ''\)/, 'receipt cost restores into protected draft state')
 assert.match(modal, /const freeGoods = Boolean\(costEntry\.value\('freeGoods', protectedFreeGoods, false\)\)/, 'restored declaration displays only through the permission-scoped entry')
 assert.match(modal, /pendingBatchRestoreRef = useRef<'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
-assert.equal((modal.match(/unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received/g) || []).length, 2, 'both debounced and synchronous drafts preserve protected receipt values, not the blank revoked display')
+// The synchronous writer takes its lines as a parameter now (it persists the
+// NEXT queue, in the same tick, before React renders it -- see
+// tests/stockLineRequestIdDurability.test.ts), so only the debounced effect
+// still names `received` directly. Both must still carry the PROTECTED values.
+assert.equal((modal.match(/unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines/g) || []).length, 2, 'both debounced and synchronous drafts preserve protected receipt values, not the blank revoked display')
+assert.match(modal, /batchChoice, lines: received, scannedBarcode/, 'the debounced autosave still snapshots the live queue')
+assert.match(modal, /const persistSessionDraft = \(lines: ReceivedLine\[\] = received\) =>/, 'the synchronous writer defaults to the live queue when no next queue is given')
 
 const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
 const createEnd = modal.indexOf('  const addLine', createStart)

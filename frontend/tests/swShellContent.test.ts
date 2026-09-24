@@ -7,7 +7,19 @@ import { chromium, expect } from '@playwright/test'
 const source = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const start = source.indexOf('function isValidDocumentResponse')
 const end = source.indexOf('async function mapWithConcurrency', start)
-const guards = new Function('self', `${source.slice(start, end)};return {isValidDocumentResponse,isValidStaticResponse}`)({ location: { origin: 'https://app.test' } })
+const guards = new Function('self', `${source.slice(start, end)};return {isValidDocumentResponse,isValidStaticResponse,isAppShellDocument}`)({ location: { origin: 'https://app.test' } })
+// The shell check reads the body, so these carry a readable clone the way a
+// real Response does, on top of the transport fields.
+const htmlResponse = (body: string, extra = {}) => ({
+  ok: true, type: 'basic', redirected: false, headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+  clone: () => new Response(body), ...extra,
+})
+// A Cloudflare managed-challenge page, trimmed: the shape that can come back
+// at 200 and passes every transport and content-type check.
+const CHALLENGE_INTERSTITIAL = '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title></head>'
+  + '<body class="no-js"><div class="main-wrapper" role="main"><div class="main-content">'
+  + '<span id="challenge-error-text">Enable JavaScript and cookies to continue</span></div></div>'
+  + '<script>(function(){window._cf_chl_opt={cType:"managed"}}())</script></body></html>'
 
 // Serialized into the page. An incumbent can terminate after postMessage but
 // before replying. Every probe must settle so expect.poll can try its successor.
@@ -53,6 +65,21 @@ test('HTML shell admission is independent of static transport admission', () => 
   assert.equal(guards.isValidStaticResponse(new Request('https://app.test/assets/a.js'), response('text/html')), false)
 })
 
+test('only a document this app can boot from is admitted as the cached shell', async () => {
+  // The pin: the document the build is made from, and the one the dev server
+  // serves, must pass the worker's own check -- or no install can succeed.
+  const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
+  assert.equal(await guards.isAppShellDocument(htmlResponse(indexHtml)), true, 'frontend/index.html must pass the shell check')
+  assert.equal(await guards.isAppShellDocument(htmlResponse('<body><div id="root"></div></body>')), true)
+  // Every one of these passes isValidDocumentResponse; none can boot the app.
+  assert.equal(guards.isValidDocumentResponse(htmlResponse(CHALLENGE_INTERSTITIAL)), true, 'control: the interstitial is valid transport-wise')
+  assert.equal(await guards.isAppShellDocument(htmlResponse(CHALLENGE_INTERSTITIAL)), false, 'a 200 challenge interstitial is not the shell')
+  assert.equal(await guards.isAppShellDocument(htmlResponse('<body><div data-id="root"></div></body>')), false, 'an attribute merely ending in id is not the mount point')
+  assert.equal(await guards.isAppShellDocument(htmlResponse('{"metadata":true}')), false)
+  assert.equal(await guards.isAppShellDocument(htmlResponse(indexHtml, { redirected: true })), false, 'the transport checks still come first')
+  assert.equal(await guards.isAppShellDocument(undefined), false)
+})
+
 // Discovered by test:utils, deliberately using a real browser and worker rather
 // than page routing (which bypasses the cache behavior this regression needs).
 test('native SW metadata poisoning negative control, upgrade, recovery and offline shell', { timeout: 60000 }, async () => {
@@ -70,9 +97,14 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
   // would no-op silently and surface 30 s later as a page.goto timeout on the
   // metadata navigation (replace-then-!includes is always true and proves nothing).
   assert.ok(normalizedSource.includes(guardNeedle), 'app-document guard needle must match sw.js so the legacy fixture really drops the guard')
+  // The legacy worker had no shell-content check either; without dropping it
+  // the fixture could not reproduce the JSON poisoning it exists to show.
+  const shellMarkerNeedle = `return /\\sid=["']root["']/.test(await response.clone().text().catch(() => ''));`
+  assert.ok(normalizedSource.includes(shellMarkerNeedle), 'shell-content needle must match sw.js so the legacy fixture really drops the check')
   const oldSource = normalizedSource
     .replace(', shellPolicy: SHELL_POLICY', '')
     .replace(/return isValidTransportResponse\(response\)[\s\S]*?=== 'text\/html';/, 'return isValidTransportResponse(response);')
+    .replace(shellMarkerNeedle, 'return true;')
     .replace(guardNeedle, '')
     .replace("const revalidate = fetch('/index.html',", 'const revalidate = fetch(request,')
   assert.notEqual(oldSource, normalizedSource)
@@ -81,7 +113,7 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
   let heldMetadata: http.ServerResponse | undefined
   let holdMetadata = true
   const metadata = JSON.stringify({ metadata: true, assets: [], eager: [], required: [] })
-  const html = '<!doctype html><title>shell</title><main id="app">REAL APP SHELL</main>'
+  const html = '<!doctype html><title>shell</title><div id="root"><main id="app">REAL APP SHELL</main></div>'
   const server = http.createServer((req, res) => {
     const path = new URL(req.url!, 'http://localhost').pathname
     res.setHeader('Cache-Control', 'no-store')
@@ -193,6 +225,60 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     await context.close()
   } finally {
     heldMetadata?.destroy()
+    await browser?.close()
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  }
+})
+
+// Part 628 ticket 2. The edge can answer the worker's background revalidation
+// of /index.html with a 200 challenge interstitial. That passes every
+// transport and content-type check, so it used to replace the cached shell,
+// and the next start -- offline, where no challenge can ever pass -- opened
+// the interstitial instead of the app.
+test('a 200 challenge interstitial never replaces the cached shell, so an offline start still boots', { timeout: 60000 }, async () => {
+  const shell = '<!doctype html><title>shell</title><div id="root"><main id="app">REAL APP SHELL</main></div>'
+  let challenge = false
+  let interstitialsServed = 0
+  const server = http.createServer((req, res) => {
+    const path = new URL(req.url!, 'http://localhost').pathname
+    res.setHeader('Cache-Control', 'no-store')
+    if (path === '/sw.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(source.replaceAll('__BUSINESS_OS_BUILD_HASH__', 'interstitial')); return }
+    if (path.endsWith('.json')) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ assets: [], eager: [], required: [] })); return }
+    if (path.endsWith('.png')) { res.setHeader('Content-Type', 'image/png'); res.end('icon'); return }
+    res.setHeader('Content-Type', 'text/html')
+    if (challenge) { interstitialsServed += 1; res.end(CHALLENGE_INTERSTITIAL); return }
+    res.end(shell)
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${(server.address() as any).port}`
+  let browser
+  try {
+    browser = await chromium.launch()
+    const context = await browser.newContext({ serviceWorkers: 'allow' })
+    const page = await context.newPage()
+    await page.goto(origin + '/sales')
+    await page.evaluate(async () => { await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready })
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller)
+    const cachedShell = () => page.evaluate(async () => (await (await caches.open('business-os-app-shell-interstitial')).match('/index.html'))?.text())
+    assert.equal(await cachedShell(), shell, 'control: install cached the real shell')
+    // Never waits on the DOM: a page that is not the app has no #app to find.
+    const opened = () => page.evaluate(() => document.querySelector('#app')?.textContent ?? `not the app: ${document.title}`)
+
+    challenge = true
+    await page.goto(origin + '/sales')
+    assert.equal(await opened(), 'REAL APP SHELL', 'a cache hit answers at once; the revalidation runs behind it')
+    await expect.poll(() => interstitialsServed, { message: 'the background revalidation must actually meet the interstitial' }).toBeGreaterThan(0)
+    // The unfixed worker overwrites the shell within milliseconds of the body
+    // arriving. Give it well over that before calling the cache untouched.
+    const settle = Date.now() + 1500
+    while (Date.now() < settle && await cachedShell() === shell) await new Promise(resolve => setTimeout(resolve, 100))
+    assert.equal(await cachedShell(), shell, 'the interstitial must never become the cached shell')
+
+    await context.setOffline(true)
+    await page.reload()
+    assert.equal(await opened(), 'REAL APP SHELL', 'an offline start must still open the app, not the interstitial')
+    await context.close()
+  } finally {
     await browser?.close()
     await new Promise<void>(resolve => server.close(() => resolve()))
   }

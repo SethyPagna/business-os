@@ -392,10 +392,10 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
   const [salesRows, returnRows, rewardRows] = await Promise.all([
     db.prepare(`
       SELECT customer_id,
-        COALESCE(SUM(CASE WHEN COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_usd, 0) ELSE 0 END), 0) AS sales_usd,
+        COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') <> 'awaiting_payment' AND COALESCE(loyalty_accrual, 1) = 1 THEN COALESCE(total_usd, 0) ELSE 0 END), 0) AS sales_usd,
         COALESCE(SUM(COALESCE(membership_points_redeemed, 0)), 0) AS redeemed
       FROM sales
-      WHERE customer_id IS NOT NULL AND COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment')
+      WHERE customer_id IS NOT NULL AND COALESCE(sale_status, 'completed') <> 'cancelled'
       GROUP BY customer_id
     `).all<{ customer_id: number; sales_usd: number; redeemed: number }>(),
     db.prepare(`

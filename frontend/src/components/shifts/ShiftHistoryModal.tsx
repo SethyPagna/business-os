@@ -4,8 +4,10 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import { useApp } from '../../AppContext.tsx'
 import { fmtDateOnly, fmtDateTime24 } from '../../utils/formatters.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Modal from '../shared/Modal.tsx'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
+import SearchInput from '../shared/SearchInput.tsx'
 import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT } from '../pos/ShiftGate.tsx'
 import ShiftSummary from './ShiftSummary.tsx'
@@ -21,6 +23,8 @@ import {
   parseShiftCount,
   pendingShiftMutation,
   reopenShift,
+  SHIFT_SEARCH_DEBOUNCE_MS,
+  SHIFT_SEARCH_MAX_LENGTH,
   shiftClosingCounts,
   shiftCountPairBlocker,
   shiftOpeningCounts,
@@ -223,11 +227,21 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
   const [saving, setSaving] = useState(false)
   const [pending, setPending] = useState(false)
   const actorScope = JSON.stringify([activeBranchId, userId, app.user?.id, app.user?.username, app.user?.role_code, app.user?.permissions, app.user?.role_permissions])
-  const [paging, setPaging] = useState({ scope: actorScope, page: 1, size: Math.min(200, Math.max(1, limit)) })
-  const page = paging.scope === actorScope ? paging.page : 1
+  // Owner, 23 Sep 2026: "when entering shift, i can search the cashier, or
+  // id." The search runs on the SERVER (q: cashier name or shift ID), since
+  // the list is paged there, after the same pause as the Reports shift
+  // picker. It is part of the page scope: a new search starts again at page
+  // 1, and the pager then pages the search.
+  const [search, setSearch] = useState('')
+  const query = useDebouncedValue(search, SHIFT_SEARCH_DEBOUNCE_MS).trim()
+  // Typed but not yet sent: the rows on hand answer the previous search.
+  const searchPending = search.trim() !== query
+  const pageScope = JSON.stringify([actorScope, query])
+  const [paging, setPaging] = useState({ scope: pageScope, page: 1, size: Math.min(200, Math.max(1, limit)) })
+  const page = paging.scope === pageScope ? paging.page : 1
   const pageSize = paging.size
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number | null }>({ page: 1, total: null })
-  const listScope = `${actorScope}:${page}:${pageSize}:${open}`
+  const listScope = `${pageScope}:${page}:${pageSize}:${open}`
   const scopeRef = useRef(listScope)
   const scopeGeneration = useRef({})
   const mutationRef = useRef<object | null>(null)
@@ -285,7 +299,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setLoading(true)
     setError('')
     try {
-      const result = await listShifts({ branchId: activeBranchId, userId, page, pageSize }, { fresh })
+      const result = await listShifts({ branchId: activeBranchId, userId, page, pageSize, q: query }, { fresh })
       if (requestId === listRequest.current && scopeRef.current === listScope) {
         setRows(orderShiftRows(result.shifts))
         setScope(result.scope)
@@ -296,7 +310,7 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     } finally {
       if (requestId === listRequest.current && scopeRef.current === listScope) setLoading(false)
     }
-  }, [activeBranchId, page, pageSize, t, userId, actorScope, listScope])
+  }, [activeBranchId, page, pageSize, query, t, userId, actorScope, listScope])
 
   useEffect(() => {
     if (!open) return
@@ -532,6 +546,9 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
     setOpen(false)
     setSelected(null)
     setAction(null)
+    // A search belongs to this visit: the next opening starts from every
+    // shift, never from a filter left in a box the operator has forgotten.
+    setSearch('')
   }
 
   return (
@@ -659,18 +676,29 @@ export default function ShiftHistoryModal({ branchId, userId, limit = DEFAULT_PA
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Pinned while the popup body scrolls (with the keyboard up, the
+                  list outgrows a phone's popup). A direct child of this column,
+                  so it sticks for the column's whole height. Full width: the
+                  Khmer placeholder needs the room. */}
+              <div className="sticky top-0 z-10 flex min-w-0 items-center gap-2 bg-white pb-1 dark:bg-gray-800">
+                <SearchInput id="shift-history-search" value={search} onChange={setSearch} maxLength={SHIFT_SEARCH_MAX_LENGTH}
+                  placeholder={t('shift_search_placeholder')} ariaLabel={t('shift_search_placeholder')} />
+              </div>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">{scope === 'all' ? t('shift_history_all') : t('shift_history_own')}</p>
                 <button type="button" onClick={() => void load(true)} className="btn-secondary min-h-11 shrink-0 px-3 text-xs" disabled={loading}><RotateCcw className="mr-1 inline h-3.5 w-3.5" />{t('refresh')}</button>
               </div>
-              {loading ? <p role="status" className="py-6 text-center text-sm text-gray-500">{t('shift_current_loading')}</p>
+              {/* While the pause runs the rows answer the previous search, so
+                  they are not offered: a tap would open a shift the box no
+                  longer asks for. */}
+              {loading || searchPending ? <p role="status" className="py-6 text-center text-sm text-gray-500">{search.trim() ? t('searching') : t('shift_current_loading')}</p>
                 : error ? <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>
-                : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{t('shift_history_empty')}</p>
+                : rows.length === 0 ? <p className="rounded-lg border border-dashed p-5 text-center text-sm text-gray-500">{query ? t('shift_search_no_match') : t('shift_history_empty')}</p>
                 : <div className="max-h-[min(65vh,38rem)] space-y-2 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]">{rows.map((shift) => <button key={shift.id} type="button" onClick={() => void openDetails(shift)} className="block w-full rounded-xl text-left outline-none ring-blue-500 transition hover:bg-blue-50 focus-visible:ring-2 dark:hover:bg-blue-950/20"><ShiftSummary shift={shift} /></button>)}</div>}
               <div className="min-h-11">
-              {!loading && !error && pageInfo.total != null ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
-                onPageChange={(next) => setPaging({ scope: actorScope, page: next, size: pageSize })}
-                onPageSizeChange={(size) => setPaging({ scope: actorScope, page: 1, size })} /> : null}
+              {!loading && !searchPending && !error && pageInfo.total != null ? <PaginationControls compact page={pageInfo.page} pageSize={pageSize} totalItems={pageInfo.total} t={t}
+                onPageChange={(next) => setPaging({ scope: pageScope, page: next, size: pageSize })}
+                onPageSizeChange={(size) => setPaging({ scope: pageScope, page: 1, size })} /> : null}
               </div>
             </div>
           )}

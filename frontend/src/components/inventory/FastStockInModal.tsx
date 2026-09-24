@@ -22,6 +22,8 @@ import { adjustStock, commitFastStockIn, type FastStockInCommitLine, type FastSt
 import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
@@ -81,6 +83,22 @@ interface ProductCandidate extends ProductRecord {
 
 interface ReceivedLine {
   key: string
+  // Migration 0192: the per-line dedup identity the Worker keys its receipt
+  // on. Minted ONCE, in the same tick the line is queued, and persisted
+  // synchronously with it -- never regenerated on retry, because that is
+  // exactly what makes a re-send after a lost response a duplicate stock
+  // movement. Kept stable across an edit too: a refused line has had its
+  // claim released server-side, so the same id retries cleanly, while a line
+  // that really did commit answers 409 idempotency_conflict instead of
+  // silently posting the delta twice.
+  requestId: string
+  // Set when the server answered with a 0192 guard refusal that this line can
+  // never come back from under its own id -- it was already recorded (the
+  // response was simply lost), or it wrote stock and died. Editing and
+  // re-sending would only earn another 409, and minting a fresh id would be
+  // the double-apply this whole guard exists to stop. The only honest way out
+  // is Remove, so the row hides Edit and says so.
+  needsRemoval?: boolean
   product: ProductCandidate
   productName: string
   quantity: number
@@ -112,6 +130,18 @@ interface ReceivedLine {
   createdProduct: boolean
   status: 'queued' | 'saving' | 'saved' | 'error'
   detail: string
+}
+
+// One line's committed outcome folded into the queue, as a NEW array, so the
+// same value can be written to the draft synchronously and handed to React --
+// a functional setState updater cannot be persisted, because its result does
+// not exist until React decides to render.
+function applyLineOutcome(
+  lines: ReceivedLine[],
+  key: string,
+  outcome: { status: ReceivedLine['status']; detail?: string; needsRemoval?: boolean },
+): ReceivedLine[] {
+  return lines.map((line) => (line.key === key ? { ...line, ...outcome } : line))
 }
 
 interface FastStockInModalProps {
@@ -275,8 +305,22 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const [createUnits, setCreateUnits] = useState<LookupOption[]>([])
   const [saving, setSaving] = useState(false)
   // A draft saved before the mode switch existed holds add lines that never
-  // recorded a mode; they stay adds rather than reading as 'changes'.
-  const [received, setReceived] = useState<ReceivedLine[]>(() => (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct) })))
+  // recorded a mode; they stay adds rather than reading as 'changes'. A draft
+  // saved before the per-line dedup id existed holds lines with no requestId,
+  // and those ids are minted HERE -- so they are also WRITTEN BACK here, in the
+  // same tick, rather than riding the 800ms autosave. A crash inside that
+  // window would otherwise reload the very same id-less draft, and the commit
+  // that followed would be unprotected all over again. Lazily, through a ref,
+  // so the ids are minted exactly once per mount.
+  const restoredLinesRef = useRef<ReceivedLine[] | null>(null)
+  if (restoredLinesRef.current === null) {
+    const restored = (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct), requestId: line.requestId || createClientRequestId('stockline') }))
+    restoredLinesRef.current = restored
+    if (draft?.lines?.some((line) => !line.requestId)) {
+      writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, { ...draft, lines: restored })
+    }
+  }
+  const [received, setReceived] = useState<ReceivedLine[]>(restoredLinesRef.current)
   const [editingKey, setEditingKey] = useState('')
   const duplicateRows = useMemo(() => received.map((line) => ({
     ...line,
@@ -484,11 +528,20 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     window.setTimeout(() => searchInputRef.current?.focus(), 0)
   }
 
-  const persistDraftBeforeProductCreate = () => {
+  // The SYNCHRONOUS draft write. The autosave effect above is debounced by
+  // 800ms, which is fine for keystrokes and wrong for facts: a queued line
+  // carries the dedup id its retry depends on, and a committed line carries
+  // the "saved" status that stops it being re-sent. A render crash (the POS
+  // defect: Chrome Translate mangling the DOM into a React removeChild
+  // error) or a killed tab between setState and the debounce loses both, and
+  // the operator retries a line the server already applied. So every
+  // state-changing FACT is written here first, in the same tick, and only
+  // then handed to React.
+  const persistSessionDraft = (lines: ReceivedLine[] = received) => {
     writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
       sessionId: sessionIdRef.current,
       mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
+      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines, scannedBarcode,
     })
   }
 
@@ -498,7 +551,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // Write synchronously before replacing the receiver UI with ProductForm.
     // Cancelling that form returns here with the in-memory state too; this
     // write additionally protects the session against a navigation/reload.
-    persistDraftBeforeProductCreate()
+    persistSessionDraft()
     setCreateBarcode(barcode)
   }
 
@@ -577,6 +630,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       : null
     const next: ReceivedLine = {
         key: editingKey || `${picked.id}-${Date.now()}`,
+        requestId: (editingKey ? received.find((line) => line.key === editingKey)?.requestId : '') || createClientRequestId('stockline'),
         product: picked,
         productName: lineName,
         quantity: qty,
@@ -599,9 +653,12 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         status: 'queued',
         detail: tr('ready_to_receive', 'Ready'),
     }
-    setReceived((prev) => editingKey
-      ? prev.map((line) => line.key === editingKey ? next : line)
-      : [next, ...prev])
+    const nextLines = editingKey
+      ? received.map((line) => line.key === editingKey ? next : line)
+      : [next, ...received]
+    // Synchronous first, React second -- see persistSessionDraft.
+    persistSessionDraft(nextLines)
+    setReceived(nextLines)
     setEditingKey('')
     resetLine()
   }
@@ -628,7 +685,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
 
   const removeLine = (key: string) => {
     if (saving) return
-    setReceived((prev) => prev.filter((line) => line.key !== key))
+    const nextLines = received.filter((line) => line.key !== key)
+    persistSessionDraft(nextLines)
+    setReceived(nextLines)
     if (editingKey === key) { setEditingKey(''); resetLine() }
   }
 
@@ -671,6 +730,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         // A chosen lot is drained by id; otherwise the oldest lots first.
         batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
         sessionId: sessionIdRef.current,
+        // Migration 0192: the per-line dedup identity, last so the pinned
+        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
+        // the receipt fields in their original order.
+        client_request_id: line.requestId,
       } }
     }
     if (line.mode === 'set') {
@@ -685,6 +748,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         freeGoods: line.freeGoods, paymentStatus,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
         sessionId: sessionIdRef.current,
+        // Migration 0192: the per-line dedup identity, last so the pinned
+        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
+        // the receipt fields in their original order.
+        client_request_id: line.requestId,
       } }
     }
     if (line.mode === 'add' && line.conditionTag) {
@@ -699,9 +766,14 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         freeGoods: line.freeGoods, paymentStatus,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
         sessionId: sessionIdRef.current,
+        // Migration 0192: the per-line dedup identity, last so the pinned
+        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
+        // the receipt fields in their original order.
+        client_request_id: line.requestId,
       } }
     }
     return { key: line.key, wire: 'receive', body: {
+      clientRequestId: line.requestId,
       productId: Number(line.product.id), branchId: Number(branchId), quantity: line.quantity,
       // Same two-line rule as ReceiveBatchModal: a chosen lot is topped up by
       // id and keeps its own received date; only 'new' derives a lot code
@@ -739,19 +811,32 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // stale client and a stale server both keep working against each other.
   const performCommitSequential = async (pending: ReceivedLine[]): Promise<number> => {
     let failed = 0
+    let lines = received
     for (const line of pending) {
-      setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saving' } : item))
+      // Transient, so it is NOT persisted: only the committed outcome below is
+      // a fact the retry must not lose.
+      lines = applyLineOutcome(lines, line.key, { status: 'saving' })
+      setReceived(lines)
       const request = buildLineRequest(line)
       try {
         const result = request.wire === 'adjust'
           ? await adjustStock(request.body) as { lotCode?: string | null } | null
           : await receiveBatchStock(request.body)
-        setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saved', detail: describeLineResult(line, result) } : item))
+        lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
         failed += 1
-        const message = error instanceof Error ? error.message : tr('error', 'Error')
-        setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'error', detail: message } : item))
+        // Migration 0192: a guard refusal gets its translated sentence and
+        // marks the line for removal; everything else keeps the server's own
+        // words, which the operator acts on ("only 2 available").
+        lines = applyLineOutcome(lines, line.key, {
+          status: 'error',
+          detail: stockFailureText(error, tr, tr('error', 'Error')),
+          needsRemoval: stockLineNeedsRemoval(error),
+        })
       }
+      // The committed outcome is durable BEFORE the render that shows it.
+      persistSessionDraft(lines)
+      setReceived(lines)
     }
     return failed
   }
@@ -774,23 +859,36 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('error', 'Error')
       failed = pending.length
-      setReceived((prev) => prev.map((item) => pending.some((line) => line.key === item.key) ? { ...item, status: 'error', detail: message } : item))
+      const lines = received.map((item) => (pending.some((line) => line.key === item.key)
+        ? { ...item, status: 'error' as const, detail: stockFailureText(error, tr, message) }
+        : item))
+      persistSessionDraft(lines)
+      setReceived(lines)
       batched = []
     }
     if (batched === null) {
       // The deployed Worker predates POST /api/inventory/fast-stock-in/commit.
       failed = await performCommitSequential(pending)
     } else if (batched.length > 0) {
+      let lines = received
       pending.forEach((line, index) => {
         const result = batched![index]
         if (result?.ok) {
-          setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) } : item))
+          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
         } else {
           failed += 1
-          const message = result?.error || tr('error', 'Error')
-          setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'error', detail: message } : item))
+          lines = applyLineOutcome(lines, line.key, {
+            detail: stockFailureText(result, tr, tr('error', 'Error')),
+            status: 'error',
+            needsRemoval: stockLineNeedsRemoval(result),
+          })
         }
       })
+      // Durable before the render. A crash here used to leave every line
+      // reading "queued" in the draft, so the retry re-sent work the server
+      // had already applied.
+      persistSessionDraft(lines)
+      setReceived(lines)
     }
     setSaving(false)
     setPendingCommit(null)
@@ -1146,8 +1244,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                           out -- never a dead-end ellipsis on the only
                           explanation a failed line gets. */}
                       <span className={`break-words text-[10px] ${line.status === 'error' ? 'text-red-500' : 'text-gray-400'}`}>{line.detail}</span>
-                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => editLine(line)} className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-700" aria-label={tr('edit', 'Edit')}><Pencil className="h-3.5 w-3.5" /></button> : null}
-                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => removeLine(line.key)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" aria-label={tr('remove', 'Remove')}><Trash2 className="h-3.5 w-3.5" /></button> : null}
+                      {line.status !== 'saved' && !line.needsRemoval ? <button type="button" disabled={saving} onClick={() => editLine(line)} className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-700" aria-label={tr('edit', 'Edit')}><Pencil className="h-3.5 w-3.5" /></button> : null}
+                      {/* Migration 0192: a line the server has already recorded can only be removed -- Edit is hidden above and Remove is emphasised here, because that is the signpost the message tells the operator to look for. */}
+                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => removeLine(line.key)} className={`rounded p-1 ${line.needsRemoval ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'text-gray-400'} hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20`} aria-label={tr('remove', 'Remove')}><Trash2 className="h-3.5 w-3.5" /></button> : null}
                     </span>
                   </div>
                 ))}

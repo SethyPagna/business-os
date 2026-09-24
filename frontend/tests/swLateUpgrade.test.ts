@@ -43,7 +43,8 @@ for (const poisonBeforeInstall of [false, true]) test(`native legacy migration (
   let missing = false
   let waitingBuild = false
   let posts = 0
-  const html = '<!doctype html><input id="draft"><main>APP</main>'
+  // The fixed worker only admits a document with the app's mount point as its shell.
+  const html = '<!doctype html><div id="root"><input id="draft"><main>APP</main></div>'
   const server = http.createServer((req, res) => {
     if (req.method !== 'GET') posts++
     const path = new URL(req.url!, 'http://localhost').pathname

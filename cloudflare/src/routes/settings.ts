@@ -1,12 +1,12 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { stripSensitiveSettings } from '../lib/settingsSensitive'
+import { stripSensitiveSettings, isSensitiveSettingKey } from '../lib/settingsSensitive'
 // Shared with routes/sales.ts, which folds a method into this list the moment
 // a sale uses one. Both sides use the same rules so an automatic registration
 // and this file's manual backfill can never disagree about what counts as
@@ -573,10 +573,12 @@ app.post('/payment-methods/backfill', async (c) => {
     `INSERT INTO settings (key, value, updated_at) VALUES ('pos_payment_methods', @value, CURRENT_TIMESTAMP)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
   ).run({ value: JSON.stringify(merged.methods) })
+  // Sibling of the rename below: the configured list before and after the
+  // backfill, in the columns the Audit Log's diff actually reads.
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', 'pos_payment_methods', {
     action: 'payment_methods_backfill',
     added: merged.added,
-  })
+  }, changedFields({ configured_methods: configured }, { configured_methods: merged.methods }))
   c.executionCtx.waitUntil(Promise.all([bumpVersion(c.env, 'settings'), bumpVersion(c.env, 'sales')]))
   return c.json({ methods: merged.methods, added: merged.added })
 })
@@ -702,6 +704,14 @@ app.post('/payment-methods/replace', async (c) => {
   const nextRaw = JSON.stringify(next)
   const sourceVariants = JSON.stringify(impact.sourceVariants)
   const identityVariants = JSON.stringify(impact.identityVariants)
+  // The configured-methods before/after already existed, but only nested in
+  // `details`, where the Audit Log's Field | Before | After renderer never
+  // looks. `details` keeps its exact shape for existing consumers; the same
+  // pair is also written to old_value/new_value.
+  const paymentMethodChange = auditChangeColumns(changedFields(
+    { payment_method: from, configured_methods: setting.methods },
+    { payment_method: to, configured_methods: next },
+  ))
   const auditDetails = {
     action: 'payment_method_replace',
     operationId,
@@ -723,17 +733,15 @@ app.post('/payment-methods/replace', async (c) => {
       params: { expectedRaw: setting.raw, expectedSaleRevisionSum, sourceVariants, identityVariants },
     },
     {
-      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value,device_name,device_tz,created_at)
+      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,old_value,new_value,device_name,device_tz,created_at)
             SELECT @userId,@userName,'replace','payment_method',@operationId,
               json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
                 '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
-              'payment_method',@operationId,
-              json_set(@details,'$.linkedSales',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s WHERE ${PAYMENT_METHOD_CANDIDATE_WHERE})` : '0'},
-                '$.linkedDetails',${scope === 'linked' ? `(SELECT COUNT(*) FROM sales s,json_each(CASE WHEN json_valid(s.payment_details) AND json_type(s.payment_details)='array' THEN s.payment_details ELSE '[]' END) detail WHERE trim(COALESCE(json_extract(detail.value,'$.method'),'')) IN (SELECT CAST(value AS TEXT) FROM json_each(@sourceVariants)))` : '0'}),
+              'payment_method',@operationId,@old_value,@new_value,
               (SELECT device_name FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id=@userId AND revoked_at IS NULL ORDER BY last_seen_at DESC,id DESC LIMIT 1),
               @stamp`,
-      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp },
+      params: { userId: user?.id ?? null, userName: actorSnapshot(user), operationId, details: JSON.stringify(auditDetails), sourceVariants, identityVariants, stamp, ...paymentMethodChange },
     },
     {
       sql: `INSERT INTO settings(key,value,updated_at) VALUES('pos_payment_methods',@value,@stamp)
@@ -1040,12 +1048,20 @@ app.post('/', async (c) => {
     }
   }
 
+  // The audit row used to say only WHICH keys were saved. Read the stored
+  // values once before the batch so the row can say what each key changed
+  // from and to; secret-bearing keys (settings' own isSensitiveSettingKey,
+  // widened by the audit module's secret-shaped-key test) record that they
+  // changed without recording either value.
+  const settingsBefore = await getSettingsValues(c.env, attemptedKeys)
+  const settingsAfter: Record<string, unknown> = {}
   const db = getDb(c.env)
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = attemptedKeys.map((key) => {
     const raw = body[key]
     const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw)
       : key === 'receipt_print_settings' ? sanitizeReceiptPrintSettingsValue(raw)
         : (typeof raw === 'string' ? raw : JSON.stringify(raw))
+    settingsAfter[key] = value
     return {
       sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
@@ -1079,7 +1095,11 @@ app.post('/', async (c) => {
   }
 
   const updatedAt = await getSettingsUpdatedAt(c.env)
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys })
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys },
+    changedFields(settingsBefore, settingsAfter, {
+      keys: attemptedKeys,
+      redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),
+    }))
   // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
   // config/catalog responses keyed on a version this route never bumped,
   // so every customer_portal_* save -- map embed included, the user's

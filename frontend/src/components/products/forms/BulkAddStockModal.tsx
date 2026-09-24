@@ -32,6 +32,7 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 import {
   applyRowOutcome,
   classifyStockAdjustFailure,
+  stockFailureText,
   countRows,
   createRow,
   hasUnsavedFailures,
@@ -82,6 +83,8 @@ type User = {
 type StockAction = 'add' | 'remove' | 'set'
 
 type AdjustStockPayload = {
+  /** Migration 0192: the per-line dedup identity (this modal reuses rowId). */
+  client_request_id?: string
   productId: number | string
   productName: string
   type: StockAction
@@ -337,8 +340,10 @@ export default function BulkAddStockModal({ productIds, products, branches, user
       // Row outcomes (utils/stockAdjustOutcome.ts): the first pass submits
       // every selected product, a retry submits ONLY the rows that failed.
       // rowsToSubmit() excludes anything already 'done', so no product can be
-      // adjusted twice by a retry -- /api/inventory/adjust is a one-row,
-      // non-idempotent write, so that exclusion is the guarantee.
+      // adjusted twice by a retry. Since migration 0192 the server enforces the
+      // same thing from its side, keyed on the rowId this modal sends as
+      // client_request_id -- which is what covers the case this exclusion never
+      // could: a response that was lost, so the row never reached 'done' at all.
       const startingRows = rows.length
         ? rows
         : selectedProducts.map((product) => createRow({
@@ -354,6 +359,12 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         setRows(working)
         try {
           const result = await runBulkStockMutation(() => getProductApi().adjustStock({
+            // Migration 0192: the per-line dedup identity. rowId is ALREADY the
+            // stable retry identity for this modal (createRow mints it once and
+            // rowsToSubmit re-submits the same row object), so it is the id the
+            // server should key its receipt on -- no second generator, and a
+            // retry after a lost response replays instead of adding twice.
+            client_request_id: row.rowId,
             productId: product.id,
             productName: product.name,
             type: action,
@@ -377,9 +388,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           // Never swallow the reason -- the operator needs to know WHICH
           // product refused and why (insufficient stock, and how much is
           // actually available) to fix it.
+          const failure = classifyStockAdjustFailure(error)
           working = applyRowOutcome(working, row.rowId, {
             status: 'failed',
-            failure: classifyStockAdjustFailure(error),
+            // The 0192 guard's four refusals are written by the guard, not by
+            // a business rule, so they are translated rather than shown in the
+            // server's English.
+            failure: { ...failure, message: stockFailureText(error, (key, fallback) => t(key) || fallback, failure.message) },
           })
         }
         setRows(working)

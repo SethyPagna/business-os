@@ -6,7 +6,13 @@ import AppSelect from '../shared/AppSelect.tsx'
 
 export type BulkSaleField = 'status' | 'payment_method' | 'delivery_contact' | 'customer'
 export type BulkSaleChoice = { key: string; label: string; id?: number | null; value?: string | null }
-export type BulkSaleChangeRow = { id: number; receipt: string; currentKeys: string[] }
+export type BulkSaleChangeRow = {
+  id: number
+  receipt: string
+  currentKeys: string[]
+  /** Targets this row may not take. It is left out of the change and named, rather than refusing the whole group. */
+  blockedTargetKeys?: string[]
+}
 type Translate = (key: string, english: string, khmer?: string) => string
 
 type Props = {
@@ -14,14 +20,16 @@ type Props = {
   rows: BulkSaleChangeRow[]
   sourceChoices: BulkSaleChoice[]
   targetChoices: BulkSaleChoice[]
+  /** Selected cancelled sales left out of this field change (a cancelled sale is read-only). */
+  cancelledCount?: number
   saving?: boolean
   translate: Translate
   onSearchTargets?: (query: string) => Promise<void>
   onClose: () => void
-  onConfirm: (source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[]) => void
+  onConfirm: (source: BulkSaleChoice, target: BulkSaleChoice, matched: BulkSaleChangeRow[], blocked: BulkSaleChangeRow[]) => void
 }
 
-export default function BulkSaleChangeModal({ field, rows, sourceChoices, targetChoices, saving = false, translate, onSearchTargets, onClose, onConfirm }: Props) {
+export default function BulkSaleChangeModal({ field, rows, sourceChoices, targetChoices, cancelledCount = 0, saving = false, translate, onSearchTargets, onClose, onConfirm }: Props) {
   const [sourceKey, setSourceKey] = useState(sourceChoices[0]?.key || '')
   const [targetKey, setTargetKey] = useState('')
   const [searching, setSearching] = useState(false)
@@ -37,6 +45,8 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
   const target = targetChoices.find((choice) => choice.key === targetKey)
   const matched = useMemo(() => rows.filter((row) => row.currentKeys.includes(sourceKey)), [rows, sourceKey])
   const skipped = rows.length - matched.length
+  const blocked = useMemo(() => matched.filter((row) => row.blockedTargetKeys?.includes(targetKey)), [matched, targetKey])
+  const eligible = useMemo(() => matched.filter((row) => !blocked.includes(row)), [matched, blocked])
   const linkedField = field === 'customer' || field === 'delivery_contact'
   const fieldLabel = field === 'status' ? translate('status', 'Status', 'ស្ថានភាព')
     : field === 'payment_method' ? translate('payment_method', 'Payment method', 'វិធីបង់ប្រាក់')
@@ -125,12 +135,19 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/30">
             <div className="font-semibold text-blue-800 dark:text-blue-200">{translate('bulk_matching_count', '{n} matching', 'ស្របគ្នា {n}').replace('{n}', String(matched.length))}</div>
             <div className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">{translate('bulk_skipped_count', '{n} selected with another source value will be skipped.', 'ជម្រើស {n} ដែលមានតម្លៃប្រភពផ្សេងនឹងត្រូវរំលង។').replace('{n}', String(skipped))}</div>
+            {cancelledCount > 0 ? <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{translate('sale_bulk_cancelled_skipped', '{n} cancelled sales cannot be edited and are left out.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(cancelledCount))}</div> : null}
+            {blocked.length ? (
+              <div role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                {translate('sale_bulk_status_unpaid_skipped', '{n} Not Paid sales are not fully paid and will be skipped. Record their payment on each sale first.', 'ការលក់ប្រាក់ជំពាក់ {n} មិនទាន់ទូទាត់គ្រប់ចំនួន ហើយនឹងមិនត្រូវបានកែប្រែទេ។ សូមកត់ត្រាការទូទាត់លើការលក់នីមួយៗជាមុនសិន។').replace('{n}', String(blocked.length))}
+                <span className="block font-semibold">{blocked.map((row) => row.receipt).join(', ')}</span>
+              </div>
+            ) : null}
           </div>
-          <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700">{matched.map((row) => <div key={row.id} className="border-b px-3 py-2 text-sm last:border-b-0 dark:border-gray-700">{row.receipt}</div>)}</div>
+          <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700">{eligible.map((row) => <div key={row.id} className="border-b px-3 py-2 text-sm last:border-b-0 dark:border-gray-700">{row.receipt}</div>)}</div>
         </div>
         <div className="flex justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <button type="button" className="btn-secondary text-sm" onClick={onClose} disabled={saving}>{translate('cancel', 'Cancel', 'បោះបង់')}</button>
-          <button type="button" className="btn-primary text-sm" disabled={saving || !source || !target || source.key === target.key || matched.length === 0} onClick={() => source && target && onConfirm(source, target, matched)}>{saving ? translate('saving', 'Saving...', 'កំពុងរក្សាទុក...') : translate('confirm', 'Confirm', 'បញ្ជាក់')}</button>
+          <button type="button" className="btn-primary text-sm" disabled={saving || !source || !target || source.key === target.key || eligible.length === 0} onClick={() => source && target && onConfirm(source, target, eligible, blocked)}>{saving ? translate('saving', 'Saving...', 'កំពុងរក្សាទុក...') : translate('confirm', 'Confirm', 'បញ្ជាក់')}</button>
         </div>
       </div>
     </div>, document.body,

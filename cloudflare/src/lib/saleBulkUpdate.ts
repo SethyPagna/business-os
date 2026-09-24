@@ -83,6 +83,25 @@ function fail(message: string, status: 400 | 403 | 409 = 409): never {
   throw new SaleBulkError(message, status)
 }
 
+// Owner rule (23 Sep 2026): a sale's customer, driver, payment and other
+// fields are editable in every status except cancelled. The whole group is
+// refused, like every other per-sale refusal here, and the answer names each
+// cancelled sale with the code the single-sale customer route already uses.
+const CANCELLED_SALE_READ_ONLY_CODE = 'cancelled_sale_read_only'
+function refuseCancelled(rows: Row[], status: 400 | 409 = 400): never {
+  throw new SaleBulkError(`Cancelled: ${rows.map((row) => String(row.receipt_number || row.id)).join(', ')}. A cancelled sale cannot be edited. Nothing in the group was changed.`, status, { code: CANCELLED_SALE_READ_ONLY_CODE, sale_ids: rows.map((row) => Number(row.id)) })
+}
+const isCancelled = (sale: Row) => String(sale.sale_status || 'completed') === 'cancelled'
+// The same rule inside the atomic write, so a sale cancelled after the read
+// cannot be edited either.
+function notCancelledGuard(ids: number[]): StockStatement {
+  return bulkAssertion("NOT EXISTS(SELECT 1 FROM sales WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(@ids)) AND COALESCE(sale_status,'completed')='cancelled')", { ids: JSON.stringify(ids) })
+}
+async function refuseIfCancelledNow(db: D1Compat, ids: number[]): Promise<void> {
+  const cancelled = await rowsIn<Row>(db, ids, (marks) => `SELECT id,receipt_number,sale_status FROM sales WHERE id IN (${marks})`)
+  if (cancelled.some(isCancelled)) refuseCancelled(cancelled.filter(isCancelled), 409)
+}
+
 function normalized(value: unknown): string {
   return String(value ?? '').trim().toLocaleLowerCase('en-US')
 }
@@ -378,6 +397,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
 
   const ids = request.items.map((item) => item.id)
   const sales = await rowsIn<Row>(db, ids, (marks) => `SELECT s.*,COALESCE(v.revision,0) AS write_revision,COALESCE(source_customer.is_anonymous,0) AS customer_is_anonymous,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id LEFT JOIN customers source_customer ON source_customer.id=s.customer_id WHERE s.id IN (${marks})`)
+  if (sales.some(isCancelled)) refuseCancelled(sales.filter(isCancelled))
   const sourceMatches = new Map<number, boolean>()
   const paymentDetails = new Map<number, Row[]>()
   for (const expected of request.items) {
@@ -440,7 +460,7 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
 
   const operationId = crypto.randomUUID()
   const members: BulkUpdateMember[] = []
-  const guards: StockStatement[] = []
+  const guards: StockStatement[] = [notCancelledGuard(ids)]
   if (expectedPaymentMethodsRaw !== null) {
     guards.push(bulkAssertion("EXISTS(SELECT 1 FROM settings WHERE key='pos_payment_methods' AND value=@expected)", { expected: expectedPaymentMethodsRaw }))
   }
@@ -621,7 +641,10 @@ export async function applySaleBulkUpdate(env: Env, user: SessionUser, raw: Row)
     const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
     if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json))
     if (assignmentPlan && /malformed JSON/i.test(String(error))) fail(LOYALTY_REASSIGNMENT_MESSAGE)
-    if (/constraint/i.test(String(error))) fail('A sale or linked record changed. Nothing in the group was applied.')
+    if (/constraint/i.test(String(error))) {
+      await refuseIfCancelledNow(db, ids)
+      fail('A sale or linked record changed. Nothing in the group was applied.')
+    }
     throw error
   }
 }
@@ -649,6 +672,8 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
       return { id: member.id, sourceId: source.customer_id == null ? null : Number(source.customer_id), targetId: target.customer_id == null ? null : Number(target.customer_id) }
     })) : null
   if (assignmentPlan) statements.push(assignmentPlan.pre)
+  const changedIds = snapshot.members.filter((member) => member.changed).map((member) => member.id)
+  statements.push(notCancelledGuard(changedIds))
   for (const member of snapshot.members.filter((candidate) => candidate.changed)) {
     statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: member.id }))
   }
@@ -684,7 +709,10 @@ export async function replaySaleBulkUpdate(env: Env, user: SessionUser, directio
     await db.batch(statements)
   } catch (error) {
     if (assignmentPlan && /malformed JSON/i.test(String(error))) fail(LOYALTY_REASSIGNMENT_MESSAGE)
-    if (/constraint/i.test(String(error))) fail('A sale, linked record, or this replay changed. Nothing in the group was applied.')
+    if (/constraint/i.test(String(error))) {
+      await refuseIfCancelledNow(db, changedIds)
+      fail('A sale, linked record, or this replay changed. Nothing in the group was applied.')
+    }
     throw error
   }
 }

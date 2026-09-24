@@ -2,6 +2,9 @@
 // update (S4-6), and it must name the STATUSES the way the app names them
 // (Sep 22 2026 -- the owner found "awaiting payment" still on their phone
 // long after the app had renamed that status to "Not Paid / ប្រាក់ជំពាក់").
+// Since Sep 23 2026 it is laid out as the owner's sample: a `🧾 Invoice`
+// title naming the receipt, the `Invoice Status Updated` row, a rule, then
+// Customer ... By (OWNER_SAMPLE below).
 //
 // The lines used to be composed INLINE in routes/sales.ts's
 // `app.patch('/:id/status', ...)` handler, and this test used to extract that
@@ -144,17 +147,32 @@ const build = (user, overrides = {}) => telegram.formatSaleStatusTelegramLines({
 
 // ---- the REAL bilingual pipeline actually carries the Khmer line ----------
 // Mirrors sendTelegramEvent's own composition (lib/telegram.ts) without
-// needing the DB-backed config lookup: heading + lines, each cleaned and
-// localized, blanks dropped.
+// needing the DB-backed config lookup: lines each cleaned and localized,
+// blanks dropped. A status event has no default heading since Sep 23 2026 --
+// its first line is its title, `🧾 Invoice: <receipt>` -- so the lines are
+// the whole message. (PASS 9 sends through the real path, which is what
+// proves no default heading comes back on top of the title.)
 function cleanLine(value, max = 400) {
   return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
 function composeMessage(lines) {
-  return [
-    telegramLang.localizeTelegramHeading('🧾 Receipt status updated'),
-    ...lines.map((line) => telegramLang.localizeTelegramLine(cleanLine(line))),
-  ].filter(Boolean).join('\n')
+  return lines.map((line) => telegramLang.localizeTelegramLine(cleanLine(line))).filter(Boolean).join('\n')
 }
+
+// The owner's Sep 23 2026 sample, verbatim: the message a shop in the
+// default bilingual mode must receive for this change.
+const OWNER_CHANGE = {
+  receipt: '20260922-110132', fromStatus: 'awaiting_payment', toStatus: 'completed',
+  customer: 'bong meta', by: 'admin',
+}
+const OWNER_SAMPLE = [
+  '🧾 Invoice / វិក្កយបត្រ: 20260922-110132',
+  '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់',
+  '──────────────────',
+  '· Customer / អតិថិជន: bong meta',
+  '· By / ដោយ: admin',
+].join('\n')
+assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'s rule is the rule every event message uses')
 
 {
   const text = composeMessage(build({ name: 'Za', username: 'za01' }))
@@ -170,38 +188,32 @@ function composeMessage(lines) {
 }
 
 // ---- the whole message, exactly as the shop receives it -------------------
-// The owner's Sep 22 2026 reference layout, and the defect it was reported
-// against: the status line used to read
+// The owner's Sep 23 2026 sample (OWNER_SAMPLE above), and the Sep 22 defect
+// it keeps fixed: the status line used to read
 // `Status: awaiting payment → completed` -- the raw database enum, in
 // English only, using a phrase the app retired months earlier.
 {
-  const text = composeMessage(telegram.formatSaleStatusTelegramLines({
-    receipt: '20260921-150355', fromStatus: 'awaiting_payment', toStatus: 'completed',
-    customer: 'Polyta Thay', by: 'admin',
-  }))
-  assert.equal(text, [
-    '🧾 Receipt status updated / ស្ថានភាពបានផ្លាស់ប្ដូរ',
-    '· Receipt / វិក្កយបត្រ: 20260921-150355',
-    '· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់',
-    telegramLang.GROUP_RULE,
-    '· Customer / អតិថិជន: Polyta Thay',
-    '· By / ដោយ: admin',
-  ].join('\n'), text)
-  // The negative control the whole change exists for.
+  const text = composeMessage(telegram.formatSaleStatusTelegramLines(OWNER_CHANGE))
+  assert.equal(text, OWNER_SAMPLE, text)
+  // The negative control the Sep 22 change exists for.
   assert.ok(!/awaiting.payment/i.test(text), 'the retired English phrase must be gone')
   assert.ok(!text.includes('កំពុងរង់ចាំការទូទាត់'), 'and the retired Khmer phrase with it')
-  console.log('PASS 7: the shipped status message matches the owner\'s reference layout, in both languages')
+  // And the Sep 23 layout's: the old heading and the Receipt row it replaced.
+  assert.ok(!/Receipt|ស្ថានភាពបានផ្លាស់ប្ដូរ/.test(text), `the retired heading and Receipt row must be gone:\n${text}`)
+  console.log('PASS 7: the shipped status message is the owner\'s Sep 23 sample, in both languages')
 }
 
 // Each optional fact adds exactly one row, in the second group, above `By`.
+// The rows the owner's sample does not show (Reason, Stock skipped, Lost fee)
+// keep their order between Customer and By.
 {
   const full = telegram.formatSaleStatusTelegramLines({
     receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', customer: 'Sok Dara',
     reason: 'Customer cancelled', skippedUnits: 3, lostFeeUsd: 2, lostFeeKhr: 0, by: 'admin',
   })
   assert.deepEqual(full, [
-    'Receipt: R-9',
-    'Status: completed → cancelled',
+    '🧾 Invoice: R-9',
+    'Invoice Status Updated: completed → cancelled',
     telegramLang.GROUP_RULE,
     'Customer: Sok Dara',
     'Reason: Customer cancelled',
@@ -220,10 +232,14 @@ function composeMessage(lines) {
   assert.ok(!full.join('\n').includes('ឯកតា') && !full.join('\n').includes('មិនប៉ះពាល់ស្តុក'),
     'the BUILDER emits English only -- the Khmer is added by the localizer, in the shop\'s mode')
   // A bare change -- no customer, no reason, no fee, no actor -- keeps its
-  // first group and drops the second, divider and all.
+  // title and first group and drops the second, divider and all.
   const bare = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled' })
-  assert.deepEqual(bare, ['Receipt: R-9', 'Status: completed → cancelled'], bare.join('\n'))
-  console.log('PASS 8: every optional row is its own line in plain English, and an empty group takes its divider with it')
+  assert.deepEqual(bare, ['🧾 Invoice: R-9', 'Invoice Status Updated: completed → cancelled'], bare.join('\n'))
+  // With no receipt at all the title is the bare heading, never one that
+  // ends on a colon.
+  const numberless = telegram.formatSaleStatusTelegramLines({ receipt: null, fromStatus: 'completed', toStatus: 'cancelled' })
+  assert.equal(numberless[0], '🧾 Invoice', numberless.join('\n'))
+  console.log('PASS 8: the title names the receipt, every optional row is its own line in plain English, and an empty group takes its divider with it')
 }
 
 // ---- 9. the three language modes, through the REAL send path --------------
@@ -266,30 +282,63 @@ function composeMessage(lines) {
     './saleTotals': saleTotals, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
     './shiftReconciliation': loadReal('lib/shiftReconciliation.ts', { './db': noDb, './salesAnalytics': salesAnalytics, './nativeSaleChange': nativeSaleChange, './paymentMethodRegistry': loadReal('lib/paymentMethodRegistry.ts') }),
   })
-  const sendIn = async (mode) => {
+  const sendIn = async (mode, change) => {
     shopLanguage = mode
     posted.length = 0
     const sent = await wired.sendTelegramEvent({ TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one' }, {
       type: 'status',
-      lines: wired.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', skippedUnits: 3, by: 'admin' }),
+      lines: wired.formatSaleStatusTelegramLines(change),
     })
     assert.equal(sent, true, `sendTelegramEvent did not compose anything in ${mode} mode`)
     assert.equal(posted.length, 1, `expected exactly one captured message in ${mode} mode`)
-    return posted[0].text.split('\n').find((line) => line.includes('skipped') || line.includes('មិនប៉ះពាល់ស្តុក'))
+    return posted[0].text
   }
+  const skippedLine = (text) => text.split('\n').find((line) => line.includes('skipped') || line.includes('មិនប៉ះពាល់ស្តុក'))
   try {
-    const both = await sendIn('both')
-    const en = await sendIn('en')
-    const km = await sendIn('km')
-    assert.equal(both, '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា', both)
-    assert.equal(en, '· Stock skipped: 3 unit(s)', en)
-    assert.equal(km, '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា', km)
+    // The owner's sample, sent the way the shop's default mode sends it: the
+    // title is the message's first line, with no heading above it.
+    assert.equal(await sendIn('both', OWNER_CHANGE), OWNER_SAMPLE)
+    const skippedChange = { receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled', skippedUnits: 3, by: 'admin' }
+    const both = await sendIn('both', skippedChange)
+    const en = await sendIn('en', skippedChange)
+    const km = await sendIn('km', skippedChange)
+    // The whole message in each mode: the same five lines, each in the shop's
+    // language, the title's emoji kept and the values never touched.
+    assert.equal(both, [
+      '🧾 Invoice / វិក្កយបត្រ: R-9',
+      '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Completed / បានបញ្ចប់ → Cancelled / បានបោះបង់',
+      '──────────────────',
+      '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា',
+      '· By / ដោយ: admin',
+    ].join('\n'), both)
+    assert.equal(en, [
+      '🧾 Invoice: R-9',
+      '· Invoice Status Updated: Completed → Cancelled',
+      '──────────────────',
+      '· Stock skipped: 3 unit(s)',
+      '· By: admin',
+    ].join('\n'), en)
+    assert.equal(km, [
+      '🧾 វិក្កយបត្រ: R-9',
+      '· ស្ថានភាពផ្លាស់ប្ដូរ: បានបញ្ចប់ → បានបោះបង់',
+      '──────────────────',
+      '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា',
+      '· ដោយ: admin',
+    ].join('\n'), km)
+    assert.equal(skippedLine(both), '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា')
+    assert.equal(skippedLine(en), '· Stock skipped: 3 unit(s)')
+    assert.equal(skippedLine(km), '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា')
     // THE REGRESSION, stated as its own assertion: an en-only shop must get no
     // Khmer on this line and a km-only shop no English. Both were false while
     // the builder paired the words itself.
-    assert.ok(!/[ក-៿]/.test(en), 'an English-only shop must not be sent Khmer on the skipped-stock note')
-    assert.ok(!/[A-Za-z]/.test(km.replace(/[·\s]/g, '')), 'a Khmer-only shop must not be sent English words on it')
-    console.log('PASS 9: the skipped-stock note renders en-only, km-only and bilingual through the real sendTelegramEvent path')
+    assert.ok(!/[ក-៿]/.test(skippedLine(en)), 'an English-only shop must not be sent Khmer on the skipped-stock note')
+    assert.ok(!/[A-Za-z]/.test(skippedLine(km).replace(/[·\s]/g, '')), 'a Khmer-only shop must not be sent English words on it')
+    // And across the whole message: no Khmer to an English-only shop, and no
+    // English label or status word to a Khmer-only one (R-9 and admin are
+    // values, which are never translated).
+    assert.ok(!/[ក-៿]/.test(en), `an English-only shop must not be sent Khmer:\n${en}`)
+    assert.ok(!/Invoice|Status|Updated|Stock|By|Completed|Cancelled|unit/.test(km), `a Khmer-only shop must not be sent English words:\n${km}`)
+    console.log('PASS 9: the whole status message, the owner\'s sample included, renders en-only, km-only and bilingual through the real sendTelegramEvent path')
   } finally {
     globalThis.fetch = realFetch
   }

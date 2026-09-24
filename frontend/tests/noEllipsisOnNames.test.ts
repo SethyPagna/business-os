@@ -646,7 +646,7 @@ const SCROLLED_VALUES: Array<[string, string]> = [
   ['components/shared/CategoryFilterOptions.tsx', 'child.label'],
   ['components/catalog/PortalFilterCombobox.tsx', 'row.label'],
   ['components/loyalty-points/LoyaltyPointsPage.tsx', 'customer.membership_number'],
-  ['components/utils-settings/AuditLog.tsx', 'formatEntityName(log)'],
+  ['components/utils-settings/AuditLog.tsx', 'formatEntityName(log, vocab)'],
   ['components/shared/ActionHistoryBar.tsx', 'item.label'],
   ['components/shared/MinimizedWorkTray.tsx', 'entry.label'],
 ]

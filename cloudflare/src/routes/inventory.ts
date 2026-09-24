@@ -24,6 +24,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
+import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1421,7 +1422,30 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // body only, no logic changed. The route registration right below is now a
 // three-line wrapper: parse the body, call this, done. Exported for that one
 // other caller; nothing else should import it (use POST /adjust).
+// Per-line idempotency (migration 0192). The kernel body is unchanged and
+// lives in runAdjustActionKernel below; this wrapper only claims the
+// client_request_id the caller sent, returns the ORIGINAL response when the
+// same id comes back, and releases the claim when the kernel refuses -- so a
+// retry after a lost response cannot post the delta twice. A body with no
+// client_request_id, or a database where 0192 is not applied yet, takes the
+// pre-0192 path byte for byte (lib/stockMutationReceipt.ts).
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+  return withStockMutationReceipt(
+    () => getDb(c.env),
+    c.get('user')?.id ?? null,
+    'adjust',
+    body,
+    (value, status) => c.json(value as never, status as never),
+    (markWritten) => runAdjustActionKernel(c, body, markWritten),
+  )
+}
+
+// `markWritten` is the receipt guard's write barrier (lib/stockMutationReceipt.ts).
+// It is called ONCE, immediately before the first statement in this kernel that
+// can move stock, and it is what tells a retry apart from a re-apply: every
+// refusal above that line released the claim and may be retried with the same
+// id, every failure below it is reported as partially applied instead.
+async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -1828,6 +1852,11 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     throw error
   }
+
+  // Everything above this line is reads, validation and (for an unlocked add)
+  // at most a sibling product row that a retry resolves to again by identity.
+  // Everything below it can move stock.
+  await markWritten()
 
   if (correctionLot && addMovementCost) {
     // A physical count correction is not a new purchase. Preserve lot price,

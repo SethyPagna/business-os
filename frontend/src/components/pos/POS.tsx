@@ -18,6 +18,7 @@
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { resolvePaidSaleStatus, tenderAllowsPaidStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -3053,6 +3054,32 @@ export default function POS() {
   const paidUsdNum   = moneyVersion === 1 ? newNativeTender?.paidUsd ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
   const paidKhrNum   = moneyVersion === 1 ? newNativeTender?.paidKhr ?? 0 : activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
+  // S4-41: the status this sale will ACTUALLY be recorded with, for a status
+  // the cashier is about to pick. The same kernel runs on the Worker's
+  // POST /sales, so the picker cannot promise one status and the ledger
+  // record another. Only `awaiting_payment` is ever rewritten, and only when
+  // the tender already covers the total.
+  const resolvePosSaleStatus = (requested: string): string => resolvePaidSaleStatus({
+    requestedStatus: requested,
+    paidUsd: paidUsdNum,
+    paidKhr: paidKhrNum,
+    totalUsd,
+    exchangeRate,
+    moneyPrecisionVersion: 1,
+    isDelivery: !!active.isDelivery,
+  })
+  // May this sale be recorded Completed or Awaiting Delivery on the current
+  // tender? tenderAllowsPaidStatus is the one creation boundary POST /sales
+  // also enforces (covered within half a cent, exact integer units); the
+  // checkout gate and the status picker both read this one answer. An
+  // unreadable amount or rate answers no.
+  const posTenderAllowsPaidStatus = (() => {
+    try {
+      return tenderAllowsPaidStatus({ paidUsd: paidUsdNum, paidKhr: paidKhrNum, totalUsd, exchangeRate, moneyPrecisionVersion: 1 })
+    } catch {
+      return false
+    }
+  })()
   const computedNativeChange = (() => {
     if (moneyVersion !== 1) return null
     if (active.checkoutRequestId) {
@@ -3211,10 +3238,17 @@ export default function POS() {
     // Y10: an awaiting-payment sale is exactly the "decide the payment
     // later on the Sales page" flow -- requiring the full amount (and with
     // it a payment method) up front defeated it. Paid statuses keep the
-    // gate.
-    if (saleStatus !== 'awaiting_payment' && totalPaid < totalUsd - 0.005) {
-      return notify(t('insufficient_amount'), 'error')
-    }
+    // gate: posTenderAllowsPaidStatus, the one creation boundary POST /sales
+    // also enforces, so a sale this gate lets through -- online or queued
+    // offline -- is never answered with a 400 by the Worker.
+    if (saleStatus !== 'awaiting_payment' && !posTenderAllowsPaidStatus) return notify(t('insufficient_amount'), 'error')
+    // S4-41: the cashier could tender the full amount and still pick
+    // "Not Paid", recording a settled sale as a debt. Resolve it here, with
+    // the same shared kernel the Worker runs on POST /sales, so the body
+    // that goes out already carries the status the sale will actually have.
+    // The picker below greys Not Paid out in that case, so nothing changes
+    // silently under the cashier.
+    const recordedSaleStatus = resolvePosSaleStatus(saleStatus)
     if (loading || checkoutInFlightRef.current) return
 
     const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchesById.has(Number(item.branch_id)))
@@ -3335,8 +3369,8 @@ export default function POS() {
       loyalty_accrual: loyaltyAccrual,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
-      payment_method:   saleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
-      payment_details: saleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
+      payment_method:   recordedSaleStatus === 'awaiting_payment' && !hasPaymentInput ? '' : paymentMethodSummary(activePaymentDetails),
+      payment_details: recordedSaleStatus === 'awaiting_payment' && !hasPaymentInput ? [] : newNativeTender.details,
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
@@ -3362,7 +3396,7 @@ export default function POS() {
       // P6: only sent when the cashier typed one -- absent stays NULL on
       // the sale so stats can tell "not recorded" from "cost 0".
       delivery_actual_cost_usd:  active.isDelivery && String(active.deliveryActualCostUsd || '').trim() !== '' ? (parseFloat(active.deliveryActualCostUsd) || 0) : undefined,
-      sale_status: saleStatus,
+      sale_status: recordedSaleStatus,
       client_time: device.clientTime,
       device_tz: device.deviceTz || '',
       device_name: device.deviceName || null,
@@ -4346,15 +4380,29 @@ export default function POS() {
                 ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
                 ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Not Paid - stock deducted'],
                 ['awaiting_delivery', getPosStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
-              ] as const).map(([status, label, desc]) => (
+              ] as const).map(([status, label, desc]) => {
+                // S4-41: an option the tender rules out stays visible, greyed,
+                // under its own name with the reason: Not Paid once the tender
+                // already covers the sale (it would be recorded as paid), a
+                // paid status while the tender is short. Relabelling Not Paid
+                // as the status it resolves to listed "Completed" twice.
+                const resolved = resolvePosSaleStatus(status)
+                const paidInFull = resolved !== status
+                const unavailable = paidInFull || (status !== 'awaiting_payment' && !posTenderAllowsPaidStatus)
+                return (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
-                  disabled={loading}
-                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50">
+                  disabled={loading || unavailable}
+                  data-pos-status-option={status}
+                  data-pos-status-records={resolved}
+                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{label}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{desc}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{paidInFull
+                    ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it cannot be recorded as Not Paid.')
+                    : unavailable ? (t('insufficient_amount') || 'Amount paid is less than total') : desc}</div>
                 </button>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>

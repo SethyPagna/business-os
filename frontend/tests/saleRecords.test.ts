@@ -202,13 +202,27 @@ test('list counts distinguish missing from zero and malformed payloads stay visi
 })
 
 test('the float renders a shared read-only surface and never exposes raw variables', () => {
-  const source = read('../src/components/sales/SaleRecordsFloat.tsx')
+  // The float itself is shared by sales, returns, products and contacts; these
+  // pins follow it there rather than being dropped with the copy it replaced.
+  const source = read('../src/components/shared/RecordsFloat.tsx')
   assert.match(source, /unsavedChanges="read-only"/)
-  assert.match(source, /SaleRecordChangeTable record=\{record\}/)
+  assert.match(source, /<RecordChangeTable record=\{record\}/)
   assert.match(source, /record\.provenance_unknown \|\| !record\.actor_username[\s\S]*label\('unknown', 'Unknown'\)/)
   assert.doesNotMatch(source, /\{record\.via\}<\/span>/)
   assert.doesNotMatch(source, /\{row\.field\}<\/td>/)
   assert.doesNotMatch(source, /record\.summary \|\| t\('historical_details_unavailable'\)/, 'legacy backend summaries must not bypass localization')
+})
+
+test('the sale float is an adapter over the shared float, not a second copy', () => {
+  const source = read('../src/components/sales/SaleRecordsFloat.tsx')
+  assert.match(source, /import RecordsFloat, \{ RecordChangeTable \} from '\.\.\/shared\/RecordsFloat\.tsx'/)
+  assert.match(source, /export const SALE_RECORDS_ADAPTER: RecordsAdapter/)
+  assert.match(source, /adapter=\{SALE_RECORDS_ADAPTER\}/)
+  // The sale keeps its own kind vocabulary and its own money/status formats;
+  // what it must NOT keep is a second float (a second Modal, a second filter,
+  // a second Field | Before | After table).
+  assert.doesNotMatch(source, /<Modal |<FilterMenu |<thead/, 'the sale must not re-implement the float chrome')
+  assert.match(source, /recordKey=\{`sale:\$\{sale\.id\}`\}/, 'the read is keyed on the record, not on the loader identity')
 })
 
 test('Records stays inside expanded sale details and uses the union endpoint', () => {

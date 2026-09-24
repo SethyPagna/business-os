@@ -9,7 +9,7 @@ const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', perm
 const cache = new Map()
 const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acquisitionCostAccess','actorSnapshot','movementBranchName',
   'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
-  'productBatches','batchCode','salesStatus','conflictControl','searchMatch','financialPrecision',
+  'productBatches','batchCode','salesStatus','saleStatusResolution','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
   'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',
   'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
@@ -40,7 +40,7 @@ function load(rel) {
     if (name.endsWith('/auth')) return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name.endsWith('/cache')) return { bumpVersion: async () => {}, bumpVersions: async () => {}, getVersionWithFallback: async () => 0, cachedJsonResponse: async (_e,_k,_t,fn) => fn() }
     if (name.endsWith('/broadcastHub')) return { broadcast: async () => {} }
-    if (name.endsWith('/audit')) return { audit: async () => {} }
+    if (name.endsWith('/audit')) return { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }
     if (name.endsWith('/telegram')) return { formatSaleTelegramLines: () => [], formatSaleStatusTelegramLines: () => [], sendTelegramEvent: async () => {}, telegramMoney: () => '' }
     if (name.endsWith('/undoAppliers')) return { recordSaleAddItemsUndoSnapshot: async () => null }
     if (name.startsWith('.')) {
@@ -404,6 +404,9 @@ async function run() {
   assert.equal(missingStatusKey.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 0)
 
   const directRace = fixture(); seed(directRace)
+  // S4-41: a direct Not Paid -> Completed move is refused while the recorded
+  // payment is short of the total, so the race runs on a sale paid in full.
+  directRace.sql.prepare(`UPDATE sales SET amount_paid_usd=5,payment_details='[{"method":"Legacy Cash","amount_usd":5,"amount_khr":0}]' WHERE id=1`).run()
   directRace.barrier(() => directRace.sql.prepare("UPDATE sales SET notes='concurrent' WHERE id=1").run())
   const directRaceResult = await directRace.call('/1/status', {
     sale_status: 'completed', expected_updated_at: 'sale-v1', client_request_id: 'direct-status-race',

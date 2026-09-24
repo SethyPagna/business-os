@@ -172,14 +172,25 @@ runTest('the bulk surface follows the same rule, row by row', () => {
 runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
   // The reference implementation this rule generalises: per-line status,
   // inline detail, saved lines skipped on the next Complete.
-  assert.match(fastStockIn, /status: 'error', detail: message/)
+  // Migration 0192: the detail now goes through stockFailureText (a guard
+  // refusal gets a translated sentence, everything else keeps the server's own
+  // words). The behaviour this pins -- per-line status with an inline reason --
+  // is unchanged.
+  assert.match(fastStockIn, /status: 'error',\s*\n?\s*detail: stockFailureText\(error, tr/)
+  assert.match(fastStockIn, /detail: stockFailureText\(result, tr/)
+  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(/)
   assert.match(fastStockIn, /received\.filter\(\(line\) => line\.status !== 'saved'\)/)
 })
 
 runTest('the outcome kernel is pure and documents the commit semantics', () => {
   assert.doesNotMatch(outcomeUtil, /from 'react'/, 'the reducer must stay testable without React')
   assert.doesNotMatch(outcomeUtil, /\bdocument\./, 'the reducer must not touch the DOM')
-  assert.match(outcomeUtil, /single-row, non-idempotent write/)
+  assert.match(outcomeUtil, /is a single-row write/)
+  assert.match(
+    outcomeUtil,
+    /migration 0192 it is ALSO server-side idempotent/,
+    "the kernel must not keep claiming the route has no dedup -- it has had one since 0192",
+  )
   // The server truth this depends on: /adjust commits exactly one product per
   // call, so "all-or-nothing across rows" does not apply -- each row is its
   // own transaction and its own outcome.

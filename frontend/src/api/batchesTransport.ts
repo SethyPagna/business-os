@@ -37,6 +37,8 @@ export type ProductBatchListResponse = {
 }
 
 export type ReceiveBatchPayload = {
+  /** Migration 0192: stable per-line id so a retry after a lost response replays instead of re-receiving. */
+  clientRequestId?: string | null
   productId: number
   branchId: number
   quantity: number
@@ -164,6 +166,9 @@ export function receiveBatchWireBody(payload: ReceiveBatchPayload): Record<strin
     payment_status: payload.paymentStatus || null,
     credit_due_date: payload.creditDueDate || null,
     session_id: payload.sessionId ?? null,
+    // Migration 0192: the per-line dedup identity. Absent for a caller that
+    // has none, which keeps the Worker's pre-0192 path.
+    client_request_id: payload.clientRequestId || null,
   }
 }
 

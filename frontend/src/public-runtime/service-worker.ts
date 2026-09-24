@@ -6,6 +6,16 @@
  * cannot be silently replaced by stale HTTP responses.
  */
 
+// tsconfig.sw.json typechecks this file against the WebWorker lib, whose self
+// is a plain WorkerGlobalScope: no registration, clients or skipWaiting, and
+// every event a bare Event. These are the scope a service worker actually runs
+// in, and Background Sync's event, which that lib does not declare. Type-only;
+// the emitted sw.js contains none of it.
+declare const self: ServiceWorkerGlobalScope
+declare global {
+  interface ServiceWorkerGlobalScopeEventMap { sync: ExtendableEvent & { readonly tag: string } }
+}
+
 const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__'
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`
 const APP_SHELL_CACHE = APP_SHELL_VERSION
@@ -144,13 +154,13 @@ function openBusinessDb() {
 
 function txDone(tx) {
   return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve()
+    tx.oncomplete = () => resolve(undefined)
     tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'))
     tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'))
   })
 }
 
-function requestResult(request) {
+function requestResult(request): Promise<any> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error || new Error('IndexedDB request failed'))
@@ -171,9 +181,7 @@ function stableStringify(value) {
 }
 
 async function sha256(value) {
-  const bytes = value instanceof Uint8Array
-    ? value
-    : new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
+  const bytes = new TextEncoder().encode(typeof value === 'string' ? value : stableStringify(value))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -305,6 +313,22 @@ function isValidStaticResponse(request, response) {
   return true
 }
 
+// A same-origin 200 text/html answer passes every check above and can still
+// be a page that is not this app: a Cloudflare "Just a moment..." challenge
+// interstitial, a waiting-room queue. Stored as the shell, it answers every
+// later navigation, offline too, where it can never pass. So every writer of
+// the cached shell reads the body first and keeps only a document this app
+// can boot from. id="root" is the element src/index.tsx mounts into and
+// throws without ('Missing root element'), so every document that can run
+// this app carries it -- the dev server's included, which loads
+// /src/index.tsx rather than the built /assets/index-*.js, and this worker
+// registers there too. tests/swShellContent.test.ts holds frontend/index.html
+// to this check.
+async function isAppShellDocument(response) {
+  if (!isValidDocumentResponse(response)) return false
+  return /\sid=["']root["']/.test(await response.clone().text().catch(() => ''))
+}
+
 async function mapWithConcurrency(items, concurrency, worker) {
   let nextIndex = 0
   const results = new Array(items.length)
@@ -346,7 +370,7 @@ async function cacheVerifiedStaticAsset(cache, url) {
 // after activate. Module-scoped because the two run in different event
 // handlers of the same worker instance; a fresh install always overwrites it
 // before activate can read it.
-let pendingDeferredAssets = []
+let pendingDeferredAssets: unknown[] = []
 
 async function precacheDeferredAssets() {
   const assets = pendingDeferredAssets
@@ -373,13 +397,13 @@ async function precacheAppShell() {
     const request = new Request(url, { cache: 'reload' })
     const response = await fetch(request)
     const valid = url === '/' || url === '/index.html'
-      ? isValidDocumentResponse(response)
+      ? await isAppShellDocument(response)
       : isValidStaticResponse(request, response)
     if (!valid) throw new Error(`Unusable shell response: ${url}`)
     await cache.put(request, response.clone())
   }))
   const shell = await cache.match('/index.html') || await cache.match('/')
-  if (!isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
+  if (!shell || !isValidDocumentResponse(shell)) throw new Error('Application shell could not be cached')
 
   // The worker is registered after the first page load, so those entry files
   // were fetched before this worker controlled the page. Discover the hashed
@@ -570,7 +594,7 @@ async function replayQueuedSale(db, row, base) {
 }
 
 async function syncOutbox() {
-  let db = null
+  let db
   try {
     db = await openBusinessDb()
     const base = String(await readSetting(db, 'sync_server_url') || self.location.origin || '').replace(/\/$/, '')
@@ -701,7 +725,9 @@ self.addEventListener('install', (event) => {
     await (await caches.open(APP_SHELL_CACHE)).delete(INCUMBENT_METADATA_URL)
     const incumbent = self.registration.active
     if (incumbent) {
-      const identity = await probeIncumbent(incumbent)
+      // Typed here, not on probeIncumbent: tests run that function's source
+      // as plain JavaScript.
+      const identity = await probeIncumbent(incumbent) as { version: string, legacy: boolean } | null
       if (identity && self.registration.active === incumbent && identity.version !== APP_SHELL_VERSION) {
         const cache = await caches.open(APP_SHELL_CACHE)
         await cache.put(INCUMBENT_METADATA_URL, new Response(JSON.stringify({
@@ -847,14 +873,18 @@ function isRecoveryNavigation(request) {
 // cached shell yet, e.g. the very first navigation this worker serves.
 async function appShellFallback(request, event) {
   const cache = await caches.open(APP_SHELL_CACHE)
-  const cached = await cache.match('/index.html') || await cache.match('/')
+  let cached = await cache.match('/index.html') || await cache.match('/')
   // A cached shell that cannot legally answer a navigation -- the redirected
   // response an older worker stored -- is dropped here rather than served.
   // Without this, a device already holding one never recovers on its own.
+  // What is left is a plain cache miss and is handled as one below. It used
+  // to answer with a worker-context read of /index.html instead, so a
+  // recovery navigation on such a device never reached the origin as a
+  // navigation -- the read this host answers with a bot challenge.
   if (cached && !isValidDocumentResponse(cached)) {
     await cache.delete('/index.html').catch(() => {})
     await cache.delete('/').catch(() => {})
-    return fetchAndCacheShell(new Request(new URL('/index.html', self.location.origin)), cache)
+    cached = undefined
   }
   // A recovery navigation says, in its own URL, that the build this worker is
   // serving is already proven broken. Answering it from APP_SHELL_CACHE hands
@@ -882,6 +912,16 @@ async function appShellFallback(request, event) {
     // than the stale shell this branch exists to avoid. On expiry the cached
     // shell answers, exactly as it does for a network error below.
     //
+    // Only when there IS a cached shell to answer with. There is none after
+    // App.tsx's page-chunk recovery (it deletes every shell cache before
+    // this reload) or once a poisoned entry is dropped above, and then the
+    // clock buys nothing: expiring it sent a second request through
+    // fetchAndCacheShell -- init object, so same-origin, so challenged --
+    // and threw away the navigation's own answer, so an origin slower than
+    // the budget showed the bot challenge instead of the app. With nothing
+    // to fall back to, wait for the navigation the way the browser itself
+    // would without this worker.
+    //
     // No AbortController: passing ANY init object (even { signal }) rebuilds
     // the Request and downgrades navigate mode to same-origin -- measured,
     // the origin sees sec-fetch-mode: same-origin -- which is the read this
@@ -889,36 +929,45 @@ async function appShellFallback(request, event) {
     // fetch is left to the browser, which drops it when this worker goes
     // idle; keeping the navigation a navigation is worth that much more than
     // reclaiming one socket.
+    const network = fetch(request).catch(() => null)
     let expireTimer
-    const expired = new Promise((resolve) => {
-      expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS)
-    })
-    const fresh = await Promise.race([fetch(request).catch(() => null), expired])
+    const fresh = cached
+      ? await Promise.race([network, new Promise<null>((resolve) => {
+        expireTimer = setTimeout(() => resolve(null), RECOVERY_NAVIGATION_FETCH_TIMEOUT_MS)
+      })])
+      : await network
     clearTimeout(expireTimer)
-    // A navigate-mode Request carries redirect: 'manual', so a host that
-    // answers this navigation with a 3xx (an HSTS or trailing-slash hop, an
-    // edge rule, a sign-in bounce) gives back an opaqueredirect: type
-    // 'opaqueredirect', status 0, ok false. isValidDocumentResponse refuses
-    // it, and refusing it here means falling through to the cached shell the
-    // page has just proven dead, with the guard's one reload already spent --
-    // the same incident by a different road. Hand the opaqueredirect to the
-    // browser instead (only a navigation may be answered with one) and let it
-    // walk the hop itself. If the redirect keeps __bos_reload the follow-up
-    // navigation re-enters this branch; if the host drops the query, the
-    // follow-up is an ordinary navigation served from cache, which is no
-    // worse than the fallback below.
-    if (fresh && fresh.type === 'opaqueredirect') return fresh
-    if (isValidDocumentResponse(fresh)) {
-      await cache.put('/index.html', fresh.clone()).catch(() => {})
+    // Whatever the origin answered is what this navigation gets, exactly as
+    // it would be with no worker at all; the cached shell answers only when
+    // nothing did (a network failure, the budget above). The page has just
+    // proven that shell dead and the guard has spent its one reload, so
+    // handing it back for an answer the origin DID give is the same incident
+    // by a different road. The answers that used to take that road:
+    //   - a 3xx. A navigate-mode Request carries redirect: 'manual', so a host
+    //     hop (HSTS, trailing slash, an edge rule, a sign-in bounce) arrives
+    //     as an opaqueredirect -- status 0, ok false. Only a navigation may be
+    //     answered with one, and the browser walks the hop itself. If the
+    //     redirect keeps __bos_reload the follow-up re-enters this branch; if
+    //     the host drops the query, the follow-up is an ordinary navigation
+    //     served from cache, no worse than before.
+    //   - the host's bot challenge (403 "Just a moment...", 503 on the legacy
+    //     JS challenge). Shown, it clears itself and reloads this same URL,
+    //     which comes back here with clearance.
+    //   - an origin error page. Reloading it retries this recovery; reloading
+    //     the dead shell cannot, because the guard will not reload again.
+    if (fresh) {
+      // Only the app itself is kept as the shell.
+      if (await isAppShellDocument(fresh)) await cache.put('/index.html', fresh.clone()).catch(() => {})
       return fresh
     }
   }
   if (cached) {
     const revalidate = fetch('/index.html', { cache: 'no-store' })
       .then(async (response) => {
-        // Do not let a Cloudflare Access/login redirect or an app-owned HTTP
-        // error overwrite a good cached shell -- only a real 200 updates it.
-        if (isValidDocumentResponse(response)) {
+        // Do not let a Cloudflare Access/login redirect, an app-owned HTTP
+        // error or a 200 challenge interstitial overwrite a good cached
+        // shell -- only the real app shell updates it.
+        if (await isAppShellDocument(response)) {
           await cache.put('/index.html', response.clone()).catch(() => {})
         }
       })
@@ -931,7 +980,7 @@ async function appShellFallback(request, event) {
 
 async function fetchAndCacheShell(request, cache) {
   const response = await fetch(request, { cache: 'no-store' })
-  if (isValidDocumentResponse(response)) {
+  if (await isAppShellDocument(response)) {
     await cache.put('/index.html', response.clone()).catch(() => {})
   }
   return response
@@ -1050,7 +1099,7 @@ async function releaseNewBuildForRecovery() {
     const finish = () => {
       clearTimeout(deadline)
       installing.removeEventListener('statechange', onStateChange)
-      resolve()
+      resolve(undefined)
     }
     const onStateChange = () => {
       if (installing.state === 'installed') release(installing)
@@ -1071,7 +1120,7 @@ async function recoverStaleShell(event) {
   const refresh = (async () => {
     const cache = await caches.open(APP_SHELL_CACHE)
     const response = await fetch('/index.html', { cache: 'no-store' }).catch(() => null)
-    if (isValidDocumentResponse(response)) {
+    if (response && await isAppShellDocument(response)) {
       await cache.put('/index.html', response.clone()).catch(() => {})
     }
     await broadcastSyncEvent('BUSINESS_OS_STALE_ASSET', { build: BUILD_HASH })

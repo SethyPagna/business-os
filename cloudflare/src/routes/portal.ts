@@ -1168,14 +1168,17 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
 
   for (const sale of sales) {
     const status = (sale.sale_status as string) || 'completed'
-    if (status === 'cancelled' || status === 'awaiting_payment') continue
+    if (status === 'cancelled') continue
+    // Points redeemed on a Not Paid sale are already spent: the discount is
+    // off what the customer owes. Only EARNING waits for the sale to be paid.
+    redeemed += toNumber(sale.membership_points_redeemed)
+    if (status === 'awaiting_payment') continue
     // loyalty_accrual = 0 (historical imports, POS opt-out -- migration 0061)
     // earns nothing, but points REDEEMED on such a sale still count as spent.
     // Absent column (caller didn't select it) keeps the accruing default.
     if (sale.loyalty_accrual === undefined || sale.loyalty_accrual === null || toNumber(sale.loyalty_accrual) === 1) {
       earned += calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
     }
-    redeemed += toNumber(sale.membership_points_redeemed)
   }
   for (const ret of returns) {
     if (((ret.status as string) || 'completed') === 'cancelled') continue

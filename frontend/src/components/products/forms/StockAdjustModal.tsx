@@ -13,6 +13,7 @@ import { useApp } from '../../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
 import { getProductsByIds, searchProducts } from '../../../api/productReadTransport.ts'
 import { adjustStock } from '../../../api/inventoryWriteTransport.ts'
+import { createClientRequestId } from '../../../api/requestIds.ts'
 import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
@@ -22,6 +23,7 @@ import {
   applyRowOutcome,
   browserStockStorage,
   classifyStockAdjustFailure,
+  stockFailureText,
   createRow,
   dropFailedStockAttempt,
   emitFailedAttemptsChanged,
@@ -557,6 +559,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       return
     }
     const adjustmentRequest = {
+      // Migration 0192: minted with the PARKED request. commitAdjust keeps
+      // pendingAdjust on failure, so re-confirming after a lost response
+      // replays the original receipt instead of adjusting stock twice.
+      client_request_id: createClientRequestId('stockadjust'),
       productId: product.id,
       productName: product.name,
       type: adjustForm.type,
@@ -696,7 +702,12 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       // The row keeps the exact request the operator built, the server's own
       // reason is pinned to it for inline display, and the attempt is
       // persisted so the Stock Change section lists it as unsaved.
-      const failure = classifyStockAdjustFailure(error)
+      const classified = classifyStockAdjustFailure(error)
+      // The 0192 guard's refusals (in-flight, partially applied, id conflict,
+      // unusable id) are the guard's own sentences, so they are translated here;
+      // every other failure keeps the server's verbatim text, which the operator
+      // acts on.
+      const failure = { ...classified, message: stockFailureText(error, tr, classified.message) }
       setRows((prev) => applyRowOutcome(prev, target.rowId, { status: 'failed', failure }))
       persistFailedAttempt(adjustmentRequest, target.rowId, failure)
       notify(failure.message, 'error')
