@@ -6,7 +6,7 @@ import ArrowRightCircle from 'lucide-react/dist/esm/icons/arrow-right-circle.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
-import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
+import { contactMergeRequest, dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
@@ -387,13 +387,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     }
   }
 
-  // Merges every OTHER contact in the cluster into the chosen `keeper`,
-  // one mergeContacts() call per record (the API only takes one keep/merge
-  // pair at a time -- see contactDuplicates.ts) -- almost always exactly
-  // one call since most clusters have two contacts, but this also covers
-  // a rarer 3+ way cluster the same way. Stops and surfaces the error on
-  // the first failed merge rather than silently leaving some records
-  // merged and others not with no indication which.
+  // Merges every OTHER contact in the cluster into the chosen `keeper` in
+  // ONE request: the whole group lands in one atomic batch or not at all.
   const handleMergeInto = async (cluster: ContactDuplicateCluster, keeper: ContactDuplicateClusterEntry) => {
     if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const others = cluster.contacts.filter((contact) => contact.id !== keeper.id)
@@ -401,9 +396,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     const id = clusterKey(table, cluster)
     setMergingId(id)
     try {
-      for (const other of others) {
-        await mergeContacts(table, keeper.id, other.id)
-      }
+      await mergeContacts(table, contactMergeRequest(cluster, keeper.id, others.map((contact) => contact.id)))
       notify(t('duplicate_merged') || 'Merged -- the other record(s) were combined into this one')
       removeCluster(id)
     } catch (e: unknown) {
@@ -463,9 +456,10 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   // member with a phone, else the lowest id) instead of guessing, and the
   // per-row "Keep this" flow on each card still overrides it by hand.
   //
-  // A cluster's own losers merge in id order and STOP at the first failure, so
-  // a half-merged group is reported as one failure rather than being retried
-  // against a keeper that may no longer be the right one.
+  // Each group is ONE merge request, so it lands whole or not at all. A group
+  // past the six-record limit merges its first six now and stays listed for
+  // the next run; a group holding two membership numbers or two storefront
+  // accounts needs a person to choose, so it is counted and left for Resolve.
   const bulkMerge = async () => {
     if (!canBulkContactsRef.current || !canMergeDuplicates) return
     const targets = clusters.filter((cluster) => selectedKeys.has(clusterKey(table, cluster)))
@@ -474,23 +468,33 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     const skipped = targets.length - plans.length
     setBulkBusy(true)
     let failed = 0
+    let needsResolve = 0
+    let moreLeft = 0
+    let staleList = false
     for (const plan of plans) {
       if (!canBulkContactsRef.current) break
-      const id = clusterKey(table, plan.cluster)
       try {
-        for (const loserId of plan.loserIds) {
-          await mergeContacts(table, plan.keeperId, loserId)
-        }
-        removeCluster(id)
-      } catch {
-        failed += 1
+        await mergeContacts(table, contactMergeRequest(plan.cluster, plan.keeperId, plan.loserIds))
+        if (plan.laterIds.length) moreLeft += 1
+        else removeCluster(clusterKey(table, plan.cluster))
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code
+        if (code === 'membership_choice_required' || code === 'portal_choice_required') needsResolve += 1
+        else failed += 1
+        if (code === 'contact_merge_conflict') staleList = true
       }
     }
     setBulkBusy(false)
     setSelectedKeys(new Set())
-    if (failed || skipped) {
+    // A partly merged group lists records that are gone now, and a refused one
+    // was read before somebody changed it: read the groups again, so the next
+    // run sends the records as they are.
+    if (moreLeft || staleList) void load(table, showKept)
+    if (failed || skipped || needsResolve || moreLeft) {
       const parts = []
       if (failed) parts.push(replaceVars(t('bulk_merge_partial_failure') || '{count} could not be merged', { count: failed }))
+      if (needsResolve) parts.push(replaceVars(t('bulk_merge_needs_resolve') || '{count} group(s) need Resolve to choose the membership number or storefront account', { count: needsResolve }))
+      if (moreLeft) parts.push(replaceVars(t('bulk_merge_more_left') || '{count} group(s) still have records to merge; run Merge selected again', { count: moreLeft }))
       // Only a degenerate cluster (nothing left to merge into) can land here
       // now; it is still counted out loud rather than dropped silently.
       if (skipped) parts.push(replaceVars(t('bulk_merge_skipped_single') || '{count} group(s) had nothing left to merge', { count: skipped }))

@@ -1,4 +1,5 @@
 import { apiFetch, route } from '../../api/http.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../../utils/syncProblemLifecycle.ts'
 
 // Frontend transport for the live/whole-table duplicate-detection endpoints
@@ -52,7 +53,8 @@ export type ContactDuplicateDecision = ContactDuplicateReview & { action: 'creat
 // customers-only.
 export type ContactDuplicateEntryHistory = { pointsBalance?: number; salesCount: number; returnsCount: number }
 
-export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null; history?: ContactDuplicateEntryHistory | null }
+// updated_at is the version a merge sends back as `expected` for the record.
+export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null; updated_at?: string | null; history?: ContactDuplicateEntryHistory | null }
 
 export type ContactDuplicateCluster = {
   type: 'phone' | 'name'
@@ -225,21 +227,139 @@ export async function undismissContactDuplicateCluster(
   )
 }
 
-// Merges `mergeId` into `keepId` (routes/contacts.ts's POST .../merge) --
-// every historical reference to mergeId is repointed at keepId, any field
-// left blank on the keeper is backfilled from the merged record, and the
-// merged row is then deleted. Resolves with the refreshed keeper record.
+// The records the Resolve grid shows, read fresh (GET {path}?ids=), so the
+// updated_at it sends back as `expected` is the one the reviewer saw. The
+// walk-in customer is never returned; a missing id reads as "cannot merge".
+export async function readContactRecords(
+  table: ContactTableKind,
+  ids: number[],
+  signal?: AbortSignal,
+): Promise<Array<Record<string, unknown>>> {
+  const wanted = new Set(ids.slice(0, 50))
+  if (!wanted.size) return []
+  const result = await apiFetch('GET', `${TABLE_ENDPOINT[table]}?ids=${[...wanted].join(',')}`, undefined, undefined, { signal })
+  return Array.isArray(result)
+    ? result.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === 'object' && wanted.has(Number(row.id)))
+    : []
+}
+
+// ---- Merge (routes/contacts.ts POST {path}/merge) -------------------------
+// One request merges up to six records into the kept one in one atomic batch,
+// with the reviewer's field choices, the membership number and storefront
+// account that stay, and the updated_at each record had when it was read (a
+// record changed since then is a 409 naming it). On the free plan a group too
+// large for one request's query budget merges part now and the answer carries
+// the request that merges the rest; mergeContacts follows those to the end, so
+// a caller makes ONE call per group, never one per record.
+
+export const CONTACT_MERGE_MAX_RECORDS = 6
+
+export type ContactMergeChoice = { source_id: number } | { custom: string | null }
+
+export type ContactMergeRequest = {
+  keepId: number
+  mergeIds: number[]
+  /** The reviewer ruled these are one contact: no shared name/phone re-check. */
+  manual?: boolean
+  /** A retry with the same id is answered from the first attempt's audit row. */
+  client_request_id: string
+  expected: Array<{ id: number; updated_at: string | null }>
+  choices?: Record<string, ContactMergeChoice>
+  membership_source_id?: number
+  portal_keep_contact_id?: number
+}
+
+export type ContactMergePortalAccount = { id: number; contact_id: number | null; membership_id: string | null; name: string | null }
+
+export type ContactMergeOutcome = {
+  /** The kept record as the server stored it. */
+  keeper: Record<string, unknown> | null
+  merged: Array<{ id: number; name: string | null }>
+  /** Storefront accounts left without a contact; they can still sign in. */
+  unlinkedAccounts: ContactMergePortalAccount[]
+  /** Membership numbers written into the kept record's notes. */
+  membershipToNotes: string[]
+  /** While records remain: the request that merges them. */
+  pending: ContactMergeRequest | null
+}
+
+// Refusals the caller answers itself (the Resolve grid reads the records
+// again; bulk merge counts them), so the global write banner is cleared.
+const HANDLED_MERGE_CODES = new Set(['contact_merge_conflict', 'membership_choice_required', 'portal_choice_required', 'anonymous_customer_immutable'])
+
+type ContactMergeResponse = {
+  keeper?: unknown
+  merged_ids?: unknown
+  after?: { merged_ids?: unknown; merged_names?: unknown; portal_accounts?: unknown; membership_to_notes?: unknown } | null
+  remaining_merge_ids?: unknown
+  continuation?: ContactMergeRequest | null
+}
+
+const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
+async function sendContactMerge(table: ContactTableKind, body: ContactMergeRequest): Promise<ContactMergeResponse> {
+  try {
+    return (await route(`contactDuplicates:${table}:merge`, () => apiFetch('POST', `${TABLE_ENDPOINT[table]}/merge`, body), null, true)) || {}
+  } catch (error) {
+    const problem = error as { code?: unknown; syncErrorId?: unknown; syncErrorChannel?: unknown } | null
+    if (typeof problem?.code === 'string' && HANDLED_MERGE_CODES.has(problem.code)) {
+      dispatchResolvedSyncError({ errorId: String(problem.syncErrorId ?? ''), channel: String(problem.syncErrorChannel ?? ''), code: problem.code })
+    }
+    throw error
+  }
+}
+
+function absorbMergeStep(outcome: ContactMergeOutcome, response: ContactMergeResponse): void {
+  if (response.keeper && typeof response.keeper === 'object') outcome.keeper = response.keeper as Record<string, unknown>
+  const after = response.after && typeof response.after === 'object' ? response.after : {}
+  const names = listOf(after.merged_names)
+  listOf(after.merged_ids ?? response.merged_ids).forEach((value, index) => {
+    const id = Number(value)
+    if (Number.isSafeInteger(id) && id > 0 && !outcome.merged.some((entry) => entry.id === id)) {
+      outcome.merged.push({ id, name: names[index] == null ? null : String(names[index]) })
+    }
+  })
+  for (const value of listOf(after.portal_accounts)) {
+    const account = value as Record<string, unknown> | null
+    const id = Number(account?.id)
+    if (!account || account.contact_id != null || !Number.isSafeInteger(id) || outcome.unlinkedAccounts.some((entry) => entry.id === id)) continue
+    outcome.unlinkedAccounts.push({ id, contact_id: null, membership_id: account.membership_id == null ? null : String(account.membership_id), name: account.name == null ? null : String(account.name) })
+  }
+  for (const value of listOf(after.membership_to_notes)) {
+    const number = String(value ?? '').trim()
+    if (number && !outcome.membershipToNotes.includes(number)) outcome.membershipToNotes.push(number)
+  }
+}
+
+const copyOutcome = (outcome: ContactMergeOutcome): ContactMergeOutcome => ({
+  ...outcome,
+  merged: [...outcome.merged],
+  unlinkedAccounts: [...outcome.unlinkedAccounts],
+  membershipToNotes: [...outcome.membershipToNotes],
+})
+
+/**
+ * Merges request.mergeIds into request.keepId. `onStep` reports the running
+ * outcome after every answered step; pass the last one back as `earlier` to
+ * resume from the step that failed, which the server then answers from its
+ * own audit row when that step had already committed.
+ */
 export async function mergeContacts(
   table: ContactTableKind,
-  keepId: number | string,
-  mergeId: number | string,
-): Promise<unknown> {
-  return route(
-    `contactDuplicates:${table}:merge`,
-    () => apiFetch('POST', `${TABLE_ENDPOINT[table]}/merge`, { keepId, mergeId }),
-    null,
-    true,
-  )
+  request: ContactMergeRequest,
+  onStep?: (progress: ContactMergeOutcome) => void,
+  earlier?: ContactMergeOutcome | null,
+): Promise<ContactMergeOutcome> {
+  const outcome = copyOutcome(earlier ?? { keeper: null, merged: [], unlinkedAccounts: [], membershipToNotes: [], pending: request })
+  // Every step merges at least one record, so a group ends within one step per record.
+  for (let step = 0; outcome.pending && step < CONTACT_MERGE_MAX_RECORDS; step += 1) {
+    const response = await sendContactMerge(table, outcome.pending)
+    absorbMergeStep(outcome, response)
+    outcome.pending = listOf(response.remaining_merge_ids).length && response.continuation ? response.continuation : null
+    onStep?.(copyOutcome(outcome))
+  }
+  if (outcome.pending) throw new Error('The merge stopped before every record was merged. Refresh the review and try again.')
+  return outcome
 }
 
 // ---- Bulk merge planning (pure) ----------------------------------------
@@ -254,12 +374,17 @@ export async function mergeContacts(
 //
 // So the plan is computed for a cluster of ANY size, by a rule that is stated
 // rather than guessed at, and it is pure so it can be tested without a server.
+// One merge request carries at most six records, so a bigger cluster merges
+// its first five others now and the rest on the next Bulk Merge (the cluster
+// is still listed until then).
 
 export type BulkContactMergePlan = {
   cluster: ContactDuplicateCluster
   keeperId: number
-  /** Merged into the keeper in this order, one mergeContacts() call each. */
+  /** Merged into the keeper by ONE mergeContacts() call, in id order. */
   loserIds: number[]
+  /** Past the six-record limit: left for the next run. */
+  laterIds: number[]
 }
 
 /**
@@ -286,13 +411,33 @@ export function planBulkContactMerges(clusters: ContactDuplicateCluster[]): Bulk
   for (const cluster of clusters || []) {
     const keeper = chooseBulkMergeKeeper(cluster?.contacts || [])
     if (!keeper) continue
+    const others = [...cluster.contacts].sort((a, b) => a.id - b.id).filter((contact) => contact.id !== keeper.id).map((contact) => contact.id)
     plans.push({
       cluster,
       keeperId: keeper.id,
-      loserIds: [...cluster.contacts].sort((a, b) => a.id - b.id).filter((contact) => contact.id !== keeper.id).map((contact) => contact.id),
+      loserIds: others.slice(0, CONTACT_MERGE_MAX_RECORDS - 1),
+      laterIds: others.slice(CONTACT_MERGE_MAX_RECORDS - 1),
     })
   }
   return plans
+}
+
+/**
+ * The request that merges `mergeIds` into `keeperId` as the list read them.
+ * Nobody chose field values here, so every field keeps the kept record's value
+ * (else the first non-blank one), and without `manual` the server re-checks
+ * that the records still share a name or phone. Two membership numbers or two
+ * storefront accounts need a person: the server answers
+ * membership_choice_required / portal_choice_required.
+ */
+export function contactMergeRequest(cluster: ContactDuplicateCluster, keeperId: number, mergeIds: number[]): ContactMergeRequest {
+  const versions = new Map(cluster.contacts.map((contact) => [contact.id, contact.updated_at ?? null]))
+  return {
+    keepId: keeperId,
+    mergeIds,
+    client_request_id: createClientRequestId('contact_merge'),
+    expected: [keeperId, ...mergeIds].map((id) => ({ id, updated_at: versions.get(id) ?? null })),
+  }
 }
 
 // ---- Sale-link conflicts (the Conflicts tab's fourth section) ----------

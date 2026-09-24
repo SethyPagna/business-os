@@ -970,6 +970,8 @@
   "bulk_edit_update_pricing_for_count": "Update pricing for {count} products",
   "bulk_import": "Bulk Import",
   "bulk_merge_partial_failure": "{count} could not be merged",
+  "bulk_merge_needs_resolve": "{count} group(s) need Resolve to choose the membership number or storefront account",
+  "bulk_merge_more_left": "{count} group(s) still have records to merge; run Merge selected again",
   "bulk_merge_skipped_single": "{count} group(s) had nothing left to merge",
   "bulk_merge_success": "Merged the selected duplicates",
   "bulk_out_of_stock": "Set Out of Stock",
