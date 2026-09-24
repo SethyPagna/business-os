@@ -424,6 +424,30 @@ async function main() {
     assert.deepEqual(rows(raw, 'SELECT id, delivery_contact_id FROM fees WHERE delivery_contact_id IS NOT NULL ORDER BY id'), [{ id: 90601, delivery_contact_id: 21 }, { id: 90602, delivery_contact_id: 21 }])
   })
 
+  await check('a completed receipt cannot authorize an unrequested former duplicate through a forged continuation', async () => {
+    const raw = fresh(CUSTOMER_SEED)
+    const first = await post('/api/customers/merge', gridBody(raw, {
+      mergeIds: [2], expected: expectedFor(raw, 'customers', [1, 2]), choices: {},
+      membership_source_id: 1, portal_keep_contact_id: 2,
+    }))
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(first.body.continuation, undefined, 'this operation finished; it issued no remaining work')
+    raw.exec("UPDATE customers SET name='Unrelated Stranger', phone='099 777 777', phone_normalized='099777777', updated_at='2026-09-25 08:00:00' WHERE id=3")
+    const body = {
+      keepId: 1, mergeIds: [3], client_request_id: 'fresh-unrelated',
+      expected: expectedFor(raw, 'customers', [1, 3]), choices: {},
+      membership_source_id: 1, portal_keep_contact_id: 1,
+    }
+    const before = dump(raw)
+    const control = await post('/api/customers/merge', body)
+    assert.equal(control.status, 409, 'CONTROL: these records are not current duplicates')
+    assert.equal(control.body.code, 'contact_merge_not_duplicates')
+    const forged = await post('/api/customers/merge', { ...body, client_request_id: 'r11-grid:r1' })
+    assert.equal(forged.status, 409, JSON.stringify(forged.body))
+    assert.equal(forged.body.code, 'contact_merge_not_duplicates')
+    assert.equal(dump(raw), before, 'the forged receipt must not mutate contacts, links or audit')
+  })
+
   // Six customers, every one with links in every table; the kept record and
   // record 5 have storefront accounts; five records hold different numbers.
   const SIX_SEED = [
@@ -522,7 +546,7 @@ async function main() {
     assert.deepEqual(rows(raw, "SELECT details FROM audit_logs WHERE action = 'merge' ORDER BY id").map((row) => JSON.parse(row.details).clientRequestId), ['r11-six', 'r11-six:r3', 'r11-six:r1'])
   })
 
-  await check('free plan: later steps are authorized by the first step\'s verified cluster, even once the kept record left it', async () => {
+  await check('free plan: later steps use the exact issued certificate, even once the kept record left its cluster', async () => {
     const raw = fresh(SIX_SEED)
     const body = { ...sixBody(raw), client_request_id: 'r11-typed', choices: { phone: { source_id: 2 }, name: { custom: 'Chan Dara' } } }
     const first = await post('/api/customers/merge', body, 'free')
@@ -544,6 +568,126 @@ async function main() {
       assert.ok(requests < 6)
     }
     assert.deepEqual(rows(raw, 'SELECT id FROM customers ORDER BY id').map((row) => row.id), [1, 9])
+  })
+
+  await check('continuations reject edited snapshots, even with fresh expected versions or an unchanged version token', async () => {
+    for (const [label, sql] of [
+      ['unrelated member', "UPDATE customers SET name='Unrelated', phone='099 777 777', phone_normalized='099777777', updated_at='2026-09-25 08:00:00' WHERE id=3"],
+      ['still-duplicate member', "UPDATE customers SET notes='Edited elsewhere', updated_at='2026-09-25 08:00:00' WHERE id=3"],
+      ['same-second member edit', "UPDATE customers SET notes='Edited without a version bump' WHERE id=3"],
+      ['keeper edit', "UPDATE customers SET notes='New keeper decision', updated_at='2026-09-25 08:00:00' WHERE id=1"],
+    ]) {
+      const raw = fresh(SIX_SEED)
+      const body = sixBody(raw)
+      const first = await post('/api/customers/merge', body, 'free')
+      assert.equal(first.status, 200)
+      const next = first.body.continuation
+      raw.exec(sql)
+      const before = dump(raw)
+      const forged = await post('/api/customers/merge', { ...next, expected: expectedFor(raw, 'customers', [1, ...next.mergeIds]) }, 'free')
+      assert.equal(forged.status, 409, `${label}: ${JSON.stringify(forged.body)}`)
+      assert.equal(forged.body.code, 'contact_merge_not_duplicates')
+      assert.equal(dump(raw), before, label)
+      // A lost-response retry returns its original certificate, never fresh
+      // snapshots that could launder the edit into an authorized operation.
+      const replay = await post('/api/customers/merge', body, 'free')
+      assert.equal(replay.status, 200)
+      assert.deepEqual(replay.body.continuation, next, label)
+      const stale = await post('/api/customers/merge', replay.body.continuation, 'free')
+      assert.equal(stale.status, 409, label)
+      assert.equal(dump(raw), before, label)
+    }
+  })
+
+  await check('issued continuation scope and decisions cannot be changed, including to a subset of current duplicates', async () => {
+    const raw = fresh(SIX_SEED)
+    const first = await post('/api/customers/merge', sixBody(raw), 'free')
+    assert.equal(first.status, 200)
+    const next = first.body.continuation
+    const before = dump(raw)
+    for (const patch of [
+      { mergeIds: next.mergeIds.slice(1), expected: expectedFor(raw, 'customers', [1, ...next.mergeIds.slice(1)]) },
+      { choices: { ...next.choices, name: { custom: 'Different decision' } } },
+      { membership_source_id: 3 },
+      { client_request_id: 'r11-six:r2' },
+    ]) {
+      const response = await post('/api/customers/merge', { ...next, ...patch }, 'free')
+      assert.equal(response.status, 409, JSON.stringify(response.body))
+      assert.equal(response.body.code, 'contact_merge_not_duplicates')
+      assert.equal(dump(raw), before)
+    }
+    // CONTROL: refusing modified requests must not consume valid pending work.
+    const valid = await post('/api/customers/merge', next, 'free')
+    assert.equal(valid.status, 200, JSON.stringify(valid.body))
+  })
+
+  await check('lost-reply replay binds the whole original request and cannot smuggle a fresh record or new choice', async () => {
+    const raw = fresh(SIX_SEED)
+    const body = sixBody(raw)
+    state.lost = true
+    const first = await post('/api/customers/merge', body, 'free')
+    assert.equal(first.status, 200)
+    raw.exec("INSERT INTO customers(id,name,is_anonymous,updated_at) VALUES (9,'Unrelated',0,'2026-09-09 10:00:00')")
+    const before = dump(raw)
+    for (const patch of [
+      { mergeIds: [2, 3, 4, 5, 9], expected: [...body.expected.filter((row) => row.id !== 6), ...expectedFor(raw, 'customers', [9])] },
+      { choices: { name: { custom: 'Revised retry' } } },
+      { membership_source_id: 2 },
+    ]) {
+      const forged = await post('/api/customers/merge', { ...body, ...patch }, 'free')
+      assert.equal(forged.status, 409, JSON.stringify(forged.body))
+      assert.equal(forged.body.code, 'contact_merge_conflict')
+      assert.equal(dump(raw), before)
+    }
+    const replay = await post('/api/customers/merge', body, 'free')
+    assert.equal(replay.status, 200)
+    assert.equal(replay.body.replayed, true)
+    assert.deepEqual(replay.body.continuation, first.body.continuation)
+    const continued = await post('/api/customers/merge', replay.body.continuation, 'free')
+    assert.equal(continued.status, 200, JSON.stringify(continued.body))
+    const replayStep = await post('/api/customers/merge', replay.body.continuation, 'free')
+    assert.equal(replayStep.status, 200)
+    assert.equal(replayStep.body.replayed, true)
+    assert.deepEqual(replayStep.body.continuation, continued.body.continuation)
+  })
+
+  await check('continuation rejects a changed storefront account snapshot without unlinking the new account', async () => {
+    const raw = fresh(SIX_SEED)
+    const first = await post('/api/customers/merge', sixBody(raw), 'free')
+    assert.equal(first.status, 200)
+    raw.exec("INSERT INTO portal_accounts(id,membership_id,name,phone,password_hash,contact_id) VALUES (79,'P-9','Chan','012900900','hash',3)")
+    const before = dump(raw)
+    const response = await post('/api/customers/merge', first.body.continuation, 'free')
+    assert.equal(response.status, 409)
+    assert.equal(response.body.code, 'contact_merge_conflict')
+    assert.equal(dump(raw), before)
+  })
+
+  await check('certificate write failure rolls back the first step and its audit and linked data', async () => {
+    const raw = fresh(SIX_SEED)
+    raw.exec("CREATE TEMP TRIGGER fail_certificate BEFORE UPDATE OF details ON audit_logs WHEN json_extract(NEW.details, '$.continuation') IS NOT NULL BEGIN SELECT RAISE(ABORT, 'contact_merge_guard'); END")
+    const before = dump(raw)
+    const response = await post('/api/customers/merge', sixBody(raw), 'free')
+    assert.equal(response.status, 409, JSON.stringify(response.body))
+    assert.equal(response.body.code, 'contact_merge_conflict')
+    assert.equal(dump(raw), before)
+  })
+
+  await check('server continuation ids remain usable for missing and maximum-length client ids', async () => {
+    for (const id of [undefined, 'x'.repeat(120)]) {
+      const raw = fresh(SIX_SEED)
+      const body = { ...sixBody(raw), client_request_id: id }
+      let result = await post('/api/customers/merge', body, 'free')
+      let count = 0
+      while (result.body.continuation) {
+        assert.equal(result.status, 200, JSON.stringify(result.body))
+        assert.ok(result.body.continuation.client_request_id.length <= 120)
+        result = await post('/api/customers/merge', result.body.continuation, 'free')
+        assert.ok(++count < 6)
+      }
+      assert.equal(result.status, 200, JSON.stringify(result.body))
+      assert.deepEqual(settled(raw).ids, [1])
+    }
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')

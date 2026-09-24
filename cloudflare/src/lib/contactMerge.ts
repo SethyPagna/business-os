@@ -8,7 +8,9 @@ export type ContactMergeStatement = {
 export type ContactMergeAudit = {
   operationId: string
   clientRequestId?: string | null
-  /** The system-detected cluster the route verified; a stepped merge's later steps are authorized by it. */
+  /** Normalized submitted operation, used only to recognize an exact retry. */
+  requestKey?: string
+  /** Historical evidence only; never authorizes subsequent work. */
   clusterIds?: number[]
   userId: number | null
   userName: string | null
@@ -43,6 +45,17 @@ export type ContactMergeInput = {
   hasCustomerReceivables: boolean
   hasSupplierInvoices: boolean
   audit: ContactMergeAudit
+  // Only stepContactMergePlan supplies these: an exact subset of the request
+  // already checked by the route, not the rest of a detected cluster.
+  remainingMembers?: Record<string, unknown>[]
+  remainingPortalAccounts?: ContactMergePortalAccount[]
+}
+
+export type ContactMergeContinuationState = {
+  request: ReturnType<typeof contactMergeContinuation>
+  keeper: Record<string, unknown>
+  members: Record<string, unknown>[]
+  portalAccounts: ContactMergePortalAccount[]
 }
 
 export type ContactMergeSnapshot = Record<string, unknown>
@@ -344,6 +357,14 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
   }
 
   const keptAccounts = accounts.map((account) => ({ ...account, contact_id: unlinkedPortalAccountIds.includes(Number(account.id)) ? null : keepId }))
+  const remaining = input.remainingMembers || []
+  const continuation: ContactMergeContinuationState | null = remaining.length ? {
+    request: contactMergeContinuation(finalKeeper, remaining, editableColumns, audit.clientRequestId || audit.operationId),
+    keeper: finalKeeper,
+    members: remaining,
+    portalAccounts: [...keptAccounts.filter((account) => account.contact_id !== null), ...(input.remainingPortalAccounts || [])]
+      .sort((a, b) => a.id - b.id),
+  } : null
   const before: ContactMergeSnapshot = {
     keeper: withoutVersion(keeper),
     members,
@@ -366,6 +387,7 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     details: JSON.stringify({
       operationId: audit.operationId,
       clientRequestId: audit.clientRequestId ?? null,
+      ...(audit.requestKey ? { requestKey: audit.requestKey } : {}),
       ...(audit.clusterIds?.length ? { clusterIds: audit.clusterIds } : {}),
       mergedIds,
       mergedNames: members.map((member) => member.name ?? null),
@@ -415,6 +437,17 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     ...moves,
     ...mergedIds.map((id) => ({ sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } })),
     ...keeperUpdate,
+    // Seal the exact pending operation in the SAME transaction, after the
+    // keeper update so CURRENT_TIMESTAMP is the database's actual version.
+    // Never rebuild this certificate from later live rows during a retry.
+    ...(continuation ? [{
+      sql: `UPDATE audit_logs SET details = json_set(details, '$.continuation',
+        json_set(@continuation, '$.keeper.updated_at', (SELECT updated_at FROM ${table} WHERE id = @keepId),
+          '$.request.expected[0].updated_at', (SELECT updated_at FROM ${table} WHERE id = @keepId)))
+        WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId
+          AND json_extract(details, '$.operationId') = @operationId`,
+      params: { continuation: JSON.stringify(continuation), keepId, entity, entityId: String(keepId), operationId: audit.operationId },
+    }] : []),
   ]
   assertPlanBounds(statements)
   return { statements, backfilled, finalKeeper, resolved, mergedIds, before, after }
@@ -450,6 +483,8 @@ export function stepContactMergePlan(
       members: ordered.slice(0, size),
       choices,
       portalAccounts: (input.portalAccounts || []).filter((account) => stepIds.has(Number(account.contact_id))),
+      remainingMembers: ordered.slice(size),
+      remainingPortalAccounts: (input.portalAccounts || []).filter((account) => !stepIds.has(Number(account.contact_id))),
     })
     step = { plan, remaining: ordered.slice(size) }
     if (plan.statements.length <= statementBudget) break
@@ -469,7 +504,7 @@ export function contactMergeContinuation(
   return {
     keepId,
     mergeIds: remaining.map((row) => Number(row.id)),
-    client_request_id: clientRequestId ? `${clientRequestId.replace(/:r\d+$/, '')}:r${remaining.length}` : null,
+    client_request_id: clientRequestId ? `${clientRequestId.replace(/:r\d+$/, '').slice(0, 116)}:r${remaining.length}` : null,
     expected: [keeper, ...remaining].map((row) => ({ id: Number(row.id), updated_at: row.updated_at ?? null })),
     choices: Object.fromEntries(editableColumns.filter((column) => column !== 'membership_number').map((column) => [column, { source_id: keepId }])),
     membership_source_id: keepId,

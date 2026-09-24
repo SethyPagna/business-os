@@ -264,7 +264,7 @@ async function main() {
     const handler = route.slice(start, end)
     // Owner ruling 24 Sep 2026; behaviour pinned by test-contact-merge-n-records-native.cjs T24-T24d.
     assert.match(handler, /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/)
-    assert.match(handler, /await verifyContactMergeCluster\(db, config, keepId, recordIds, request\.clientRequestId\)/)
+    assert.match(handler, /await verifyContactMergeCluster\(db, config, request, rows\)/)
     assert.match(handler, /contact_merge_not_duplicates/)
     assert.doesNotMatch(route, /request\.manual|body\.manual/, 'no request field can skip the cluster check')
     assert.match(route, /findDuplicateContactClusters\(db, config\.table, config\.optionMode\)\r?\n  const cluster = contactMergeCluster\(clusters, recordIds\)/)
