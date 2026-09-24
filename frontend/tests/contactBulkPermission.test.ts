@@ -75,7 +75,7 @@ assert.match(duplicates, /\{canBulkContacts && canResolveConflicts \? <button[^]
 assert.match(duplicates, /selectable=\{canBulkContacts && canResolveConflicts && !bulkBusy\}/, 'cluster cards cannot enter selection without bulk access')
 assert.match(duplicates, /canMergeDuplicates=\{canMergeDuplicates\}/, 'single-cluster merge uses the bulk-aware merge gate')
 const individualDismiss = duplicates.slice(duplicates.indexOf('const handleDismiss = async'), duplicates.indexOf('const handleReopen = async'))
-const individualReopen = duplicates.slice(duplicates.indexOf('const handleReopen = async'), duplicates.indexOf('const handleMergeInto = async'))
+const individualReopen = duplicates.slice(duplicates.indexOf('const handleReopen = async'), duplicates.indexOf('const openResolve ='))
 assert.doesNotMatch(individualDismiss, /canBulkContacts/, 'individual dismiss remains available')
 assert.doesNotMatch(individualReopen, /canBulkContacts/, 'individual reopen remains available')
 

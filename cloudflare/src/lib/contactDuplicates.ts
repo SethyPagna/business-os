@@ -443,7 +443,10 @@ export function contactDuplicateWriteGuardStatement(
   }
 }
 
-export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null }
+// updated_at is the optimistic-concurrency token the Resolve grid sends back
+// as `expected` on POST {path}/merge, so a record edited after the sweep is
+// refused as stale instead of being merged from an outdated view.
+export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null; updated_at: string | null }
 
 export type ContactDuplicateCluster = {
   type: 'phone' | 'name'
@@ -555,7 +558,7 @@ export async function findDuplicateContactClusters(
     }
   }
 
-  const toEntry = (row: ContactDuplicateCandidateRow): ContactDuplicateClusterEntry => ({ id: row.id, name: row.name, phone: row.phone, membershipNumber: row.membership_number || null })
+  const toEntry = (row: ContactDuplicateCandidateRow): ContactDuplicateClusterEntry => ({ id: row.id, name: row.name, phone: row.phone, membershipNumber: row.membership_number || null, updated_at: row.updated_at ?? null })
 
   const clusters: ContactDuplicateCluster[] = []
   for (const [phone, group] of byPhone) {
