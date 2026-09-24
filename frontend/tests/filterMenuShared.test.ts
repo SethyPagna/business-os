@@ -9,11 +9,11 @@
 // "All" row, and reporting its own active label as the word "All" in the
 // collapsed summary, is wrong. Fixed by isAllOptionId, which recognizes only
 // the marking convention every section builder in this codebase already uses
-// (id 'all', '' or ending '-all'). sectionIsActive is a second, independent
-// fix: a no-real-All section always has exactly one active entry (its current
-// value), so it must never read as "active" for the row highlight / the
-// panel's initial-open pick, or it would permanently outrank a section the
-// user actually changed.
+// (id 'all', '' or ending '-all'). sectionIsActive (row highlight + the
+// panel's initial-open pick) is unchanged by that rule, by owner rule "keep
+// existing behaviour": a section is active when it is off its default -- the
+// first option, All or not -- so Returns Scope = Supplier still highlights and
+// auto-opens, and a no-All section sitting on its default does not.
 //
 // DEFECT 2 (i18n): "Clear", "Search...", "No matches", "{n} selected" in
 // FilterMenu.tsx, the " (Default)" branch suffix in
@@ -119,8 +119,18 @@ const sortSection: FilterOptionLike[] = [
 runTest('DEFECT 1 case 1 (RED on old code): a section without a real All reports its active label, not All', () => {
   assert.equal(summarizeOptions(sortSection), 'Newest first')
 })
-runTest('DEFECT 1 case 1: sectionIsActive never reports a no-real-All section as active (must not steal auto-open from a section the user actually changed)', () => {
+runTest('sectionIsActive: a no-real-All section at its default (first option) is not active', () => {
   assert.equal(sectionIsActive(sortSection), false)
+})
+// Owner rule: keep existing behaviour -- a no-All section OFF its default is
+// active, e.g. Returns Scope = Supplier highlights and auto-opens as before.
+const returnsScopeSupplier: FilterOptionLike[] = [
+  { id: 'customer', label: 'Customer Returns', active: false },
+  { id: 'supplier', label: 'Supplier Returns', active: true },
+]
+runTest('sectionIsActive: a no-real-All section off its default is active (Returns Scope = Supplier)', () => {
+  assert.equal(sectionIsActive(returnsScopeSupplier), true)
+  assert.equal(summarizeOptions(returnsScopeSupplier), 'Supplier Returns')
 })
 
 // DEFECT 1, case 2: a section WITH a real All option -- every prior summary

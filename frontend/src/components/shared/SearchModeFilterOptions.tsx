@@ -12,12 +12,14 @@ import type { SearchMode } from './SearchModeToggle'
 // three separate copies of this.
 //
 // Deliberately a plain two-row SectionOptionList (AND / OR, one always
-// active) rather than an "All + choices" list -- FilterMenu's own
-// summarizeOptions() assumes the first option represents "no filter
-// active" (see FilterMenu.tsx), which doesn't apply here: there's no
-// "off" state, exactly one of AND/OR is always the current mode. `summary`/
-// `active` are supplied explicitly instead, same as the merged
-// Availability section does for the same reason.
+// active) rather than an "All + choices" list -- there is no "off" state,
+// exactly one of AND/OR is always the current mode. FilterMenu pins an All
+// row only for a real All id ('all', '' or '-all', see isAllOptionId), so
+// neither AND nor OR is rendered as one; for highlight/auto-open FilterMenu
+// treats a no-All list's FIRST option as its default and marks the section
+// active once any other option is chosen (sectionIsActive). `summary`/
+// `active` are still supplied explicitly here because this is a custom
+// render section, same as the merged Availability section.
 export interface BuildSearchModeFilterSectionParams {
   t?: (key: string) => string | undefined
   searchMode: SearchMode

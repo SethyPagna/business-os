@@ -161,19 +161,18 @@ function summarizeOptions(options: FilterOption[], t?: (key: string) => string):
 }
 
 // Row highlight + auto-open heuristic: independent of the summary TEXT above.
-// A section with no real All option always has exactly one active entry (its
-// current single-choice value), which would make summarizeOptions' old
-// `!== 'All'` check permanently true and force such a section to look
-// "active" and win the panel's initial-open pick over a section the user
-// actually changed. Positionally identical to the pre-fix isActive formula
-// for every section that DOES have a real All option, so existing highlight/
-// auto-open behaviour for those sections is unchanged.
+// A section is active when it is OFF ITS DEFAULT. The default is the first
+// option -- the All row when the section has one, otherwise the mandatory
+// single-choice list's own default value (Returns' Scope = Customer, a sort
+// pair's first direction). So Returns Scope = Supplier still highlights and
+// auto-opens exactly as it did before the All-row fix (owner rule: keep
+// existing behaviour); only the summary TEXT and the pinned-row rendering
+// distinguish a real All option from a plain default. This is the pre-fix
+// positional formula, for sections with and without an All option alike.
 function sectionIsActive(options: FilterOption[]): boolean {
-  const hasRealAllOption = options.length > 0 && isAllOptionId(options[0].id)
-  if (!hasRealAllOption) return false
-  const [allOption, ...restOptions] = options
+  const [defaultOption, ...restOptions] = options
   if (!restOptions.length) return false
-  if (allOption?.active || restOptions.every((option) => !option.active)) return false
+  if (defaultOption?.active || restOptions.every((option) => !option.active)) return false
   return true
 }
 
@@ -318,11 +317,10 @@ function FilterMenuSectionRow({
   const options = (section.options || []).filter(Boolean) as FilterOption[]
   const isCustomRender = typeof section.render === 'function'
   const summary = isCustomRender ? (section.summary ?? null) : summarizeOptions(options, t)
-  // sectionIsActive, not a `summary !== 'All'` text compare: a mandatory
-  // single-choice section (no real All option) always has exactly one active
-  // entry, so comparing against the translated All label would either always
-  // read active (wrong locale) or -- worse -- misreport when the localized
-  // All label happens to collide with a real option's own label.
+  // sectionIsActive (off-its-default, positional), not a `summary !== 'All'`
+  // text compare: the summary is now translated and, for a section with no
+  // real All option, is its active option's own label -- so a text compare
+  // would read every such section as active, even at its default.
   const isActive = isCustomRender ? !!section.active : sectionIsActive(options)
 
   return (
