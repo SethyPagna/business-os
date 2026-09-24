@@ -27,6 +27,7 @@ import { canonicalizePhone } from '../lib/phone'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
+import { businessToday } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1125,24 +1126,31 @@ app.post('/ai/chat', async (c) => {
 })
 
 
-// filtered by is_active and the optional starts_at/ends_at scheduling
-// window, same as the Express/Postgres version (backend/src/routes/
-// portal.ts) this was ported from -- the portal never has to trust a
-// client-side date check for what's allowed to show. No Postgres-specific
-// syntax in the original here, so this is a direct, unmodified port.
+// The public announcement strip: rows filtered by is_active and the optional
+// starts_at/ends_at scheduling window, as in the Express/Postgres version
+// (backend/src/routes/portal.ts) this was ported from -- the portal never has
+// to trust a client-side date check for what's allowed to show. The window is
+// taken on the Phnom Penh business day, not the UTC clock the port compared.
 app.get('/promotions', async (c) => {
   const db = getDb(c.env)
-  const nowIso = new Date().toISOString()
+  // "Show from" / "Show until" are DATES the owner types in the strip editor,
+  // stored as ISO strings (ManagePromotionsModal: the start as UTC midnight of
+  // the day, the end as 23:59:59 in the editing browser). Comparing those
+  // instants with the UTC clock started a strip at 07:00 Phnom Penh time and
+  // expired a date-only end at 07:00 on its last day. Compare the date as
+  // written -- what the editor shows when reopened -- with today's business
+  // date, so a strip runs from local midnight on its first day through the
+  // whole of its last day.
   const rows = await db.prepare(`
     SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color,
            p.link_product_id, pr.name AS link_product_name, pr.image_path AS link_product_image
     FROM promotions p
     LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product'
     WHERE p.is_active = 1
-      AND (p.starts_at IS NULL OR p.starts_at <= @now)
-      AND (p.ends_at IS NULL OR p.ends_at >= @now)
+      AND (COALESCE(p.starts_at, '') = '' OR substr(p.starts_at, 1, 10) <= @today)
+      AND (COALESCE(p.ends_at, '') = '' OR substr(p.ends_at, 1, 10) >= @today)
     ORDER BY p.sort_order ASC, p.id ASC
-  `).all({ now: nowIso })
+  `).all({ today: businessToday(Date.now()) })
   const items = (Array.isArray(rows) ? rows : []).map((row) => ({
     ...row,
     // Legacy rows may predate the admin write guard. Refuse an unsafe value
