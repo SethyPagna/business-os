@@ -8,6 +8,8 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import { useApp } from '../../AppContext.tsx'
 import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import {
@@ -118,6 +120,8 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Promotion | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const draggingIdRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
@@ -226,14 +230,38 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     }
   }
 
-  const handleDelete = async (promo: Promotion) => {
-    if (!window.confirm(copy('deletePromotionConfirm', 'Delete "{name}"? This can\'t be undone.').replace('{name}', promo.title))) return
+  // What a card opens when tapped: the product, the link, or nothing ('').
+  const linkTarget = (promo: Promotion) => (
+    promo.link_type === 'product'
+      ? productNameById.get(promo.link_product_id || 0) || copy('genericProductLabel', 'a product')
+      : promo.link_type === 'url' ? String(promo.link_url || '') : ''
+  )
+
+  // The delete confirmation shows the card being removed, not a bare yes/no
+  // (and replaces a native window.confirm, whose buttons cannot be translated).
+  const deleteReviewItems = (promo: Promotion): ConfirmReviewItem[] => [
+    { label: copy('title', 'Title'), value: promo.title },
+    ...(promo.subtitle ? [{ label: copy('subtitle', 'Subtitle'), value: promo.subtitle }] : []),
+    ...(promo.badge_text ? [{ label: copy('badgeText', 'Badge text'), value: promo.badge_text }] : []),
+    { label: copy('linksTo', 'Links to'), value: linkTarget(promo) || copy('noLink', 'No link') },
+    { label: copy('status', 'Status'), value: promo.is_active ? copy('active', 'Active') : copy('hiddenBadge', 'Hidden') },
+    ...(promo.starts_at ? [{ label: copy('showFromAria', 'Show from'), value: fmtDateOnly(promo.starts_at) }] : []),
+    ...(promo.ends_at ? [{ label: copy('showUntilAria', 'Show until'), value: fmtDateOnly(promo.ends_at) }] : []),
+  ]
+
+  const handleDelete = async () => {
+    const promo = pendingDelete
+    if (!promo || deleting) return
+    setDeleting(true)
     try {
       await deletePromotion(promo.id)
       notify(copy('promotionDeleted', 'Promotion deleted'), 'success')
+      if (aliveRef.current) setPendingDelete(null)
       await loadPromotions()
     } catch (error) {
       notify(getErrorMessage(error, copy('deletePromotionFailed', 'Failed to delete promotion')), 'error')
+    } finally {
+      if (aliveRef.current) setDeleting(false)
     }
   }
 
@@ -542,13 +570,9 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     ) : null}
                   </div>
                   <div className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
-                    {promo.subtitle || (
-                      promo.link_type === 'product'
-                        ? `${copy('linksTo', 'Links to')}: ${productNameById.get(promo.link_product_id || 0) || copy('genericProductLabel', 'a product')}`
-                        : promo.link_type === 'url'
-                          ? `${copy('linksTo', 'Links to')}: ${promo.link_url}`
-                          : copy('noLink', 'No link')
-                    )}
+                    {promo.subtitle || (linkTarget(promo)
+                      ? `${copy('linksTo', 'Links to')}: ${linkTarget(promo)}`
+                      : copy('noLink', 'No link'))}
                   </div>
                 </div>
                 <button
@@ -578,7 +602,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDelete(promo)}
+                  onClick={() => setPendingDelete(promo)}
                   title={copy('delete', 'Delete')}
                   aria-label={copy('deleteItemAria', 'Delete {name}').replace('{name}', promo.title)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
@@ -591,6 +615,22 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
           </div>
         )}
       </div>
+      {pendingDelete ? (
+        <ConfirmDialog
+          t={t}
+          layer="nested"
+          danger
+          title={copy('strip_delete_title', 'Delete promotion')}
+          message={copy('deletePromotionConfirm', 'Delete "{name}"? This can\'t be undone.').replace('{name}', pendingDelete.title)}
+          items={deleteReviewItems(pendingDelete)}
+          confirmLabel={copy('delete', 'Delete')}
+          cancelLabel={copy('cancel', 'Cancel')}
+          working={deleting}
+          workingLabel={copy('deleting', 'Deleting...')}
+          onConfirm={handleDelete}
+          onClose={() => { if (!deleting) setPendingDelete(null) }}
+        />
+      ) : null}
     </Modal>
   )
 }

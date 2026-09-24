@@ -59,7 +59,8 @@ const leaks: Array<[string, RegExp]> = [
   ['bare validation message', /return '[A-Z]/],
   ['bare select option label', /label: '[A-Z]/],
   ['bare English string', /'[A-Z][a-z]+(?: [A-Za-z]+)*[.!?…]?'/],
-  ['native confirm with English', /window\.confirm\(`/],
+  // A native confirm's OK/Cancel follow the browser, never the app language.
+  ['native confirm', /window\.confirm\(/],
   ['English template text', /`[A-Z][a-z]+ [^`]*\$\{/],
 ]
 for (const [label, pattern] of leaks) {
@@ -71,6 +72,13 @@ for (const [label, pattern] of leaks) {
 assert.match(source, /isSafeLinkUrl\(form\.link_url\)/, 'the link error stays backed by the shared URL allowlist')
 assert.match(source, /unsavedChanges=\{\{ dirty: editingId !== null \}\}/, 'closing with an open editor still guards the draft')
 assert.match(source, /\{copy\('cancel', 'Cancel'\)\}/, 'the edit form keeps its Cancel action')
+// Deleting a card asks through the shared ConfirmDialog, stacked above this
+// modal, and shows the card's own values rather than a bare yes/no.
+assert.match(source, /<ConfirmDialog[\s\S]*?layer="nested"[\s\S]*?danger[\s\S]*?items=\{deleteReviewItems\(pendingDelete\)\}/, 'the delete confirmation is the shared dialog with the card under review')
+for (const key of ['title', 'linksTo', 'status', 'showFromAria', 'showUntilAria']) {
+  assert.match(source.slice(source.indexOf('const deleteReviewItems')), new RegExp(`label: copy\\('${key}'`), `the delete review shows the card's ${key}`)
+}
+assert.match(source, /onClick=\{\(\) => setPendingDelete\(promo\)\}/, 'the row Delete button opens the review, it does not delete')
 for (const key of ['image', 'noImage', 'uploading', 'replaceImage', 'uploadImage']) {
   assert.match(source, new RegExp(`copy\\('${key}'`), `media control keeps copy('${key}', ...)`)
 }
