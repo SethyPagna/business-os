@@ -669,6 +669,28 @@ export default function PublicCatalogPage() {
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
 
+  // The public page is mounted through a newer route than CatalogPage's
+  // embedded preview. Keep the document-level scroll contract active for
+  // this route too: main.css uses this marker to release the app shell's
+  // fixed-height scroll lock and let the browser own the one vertical page
+  // scroller. Restore any previous value so leaving the public page cannot
+  // change the admin shell's scroll behavior.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
+    html.setAttribute('data-public-portal', 'true')
+    body.setAttribute('data-public-portal', 'true')
+    return () => {
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
+    }
+  }, [])
+
   // Drives the scroll-to-top/bottom buttons in CatalogPreviewSurface. This
   // used to be hardcoded to `false` here, which silently disabled the
   // feature on the real public portal (it only ever worked in the admin's

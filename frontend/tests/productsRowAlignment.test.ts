@@ -99,17 +99,16 @@ runTest('the category band sits on the IMAGE rail, one column left of the group 
   assert.strictEqual(categorySpan - groupSpan, 1, 'the category band must cover exactly one more column (the image column) than the group header')
 })
 
-runTest('the column percentages sum to 100%, so table-fixed has nothing to redistribute', () => {
-  // Measured in a browser against the built stylesheet: at 90% the two
-  // fixed leading columns rendered 51px/89px on a 1400px table having
-  // asked for 32px/56px, and the left rail moved with the window (149px
-  // at 1400, 98px at 820). At 100% they render exactly as asked and the
-  // rail is 98px at both widths.
+runTest('desktop columns fit the available width and overflow remains reachable', () => {
+  // Name and Details flex with the table while the four numeric columns stay
+  // compact. This keeps Stock/Qty in the default viewport at xl widths.
   const colgroup = surface.slice(surface.indexOf('<colgroup>'), surface.indexOf('</colgroup>'))
-  const percentages = [...colgroup.matchAll(/w-\[(\d+)%\]/g)].map((match) => Number(match[1]))
-  assert.strictEqual(percentages.length, 6, `expected 6 percentage columns beside the 2 fixed ones, found ${percentages.length}`)
-  const total = percentages.reduce((sum, value) => sum + value, 0)
-  assert.strictEqual(total, 100, `the percentage columns sum to ${total}% -- the missing ${100 - total}% gets spread across the fixed columns too, which is the indentation that keeps coming back`)
+  assert.match(colgroup, /<col \/>\s*<col style=\{\{ width: '10\.5rem' \}\} \/>/)
+  assert.strictEqual((colgroup.match(/<col style=\{\{ width: '[\d.]+rem' \}\} \/>/g) || []).length, 5)
+  assert.match(surface, /<div className="relative overflow-x-auto">/)
+  assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed/)
+  assert.match(surface, /card hidden min-w-0 max-w-full overflow-hidden xl:flex/)
+  assert.match(surface, /min-w-0 max-w-full space-y-2 xl:hidden/)
 })
 
 runTest('a product row uses the shared gutter for its name, so it lands on the same rail', () => {

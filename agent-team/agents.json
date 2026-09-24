@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "agents": [
+    {
+      "id": "feature-planner",
+      "codexName": "feature_planner",
+      "description": "Plans Business OS features, acceptance criteria, affected surfaces, risks, and verification before implementation.",
+      "access": "read-only",
+      "effort": "high",
+      "prompt": "prompts/feature-planner.md",
+      "claudeTools": ["Read", "Grep", "Glob"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "product-designer",
+      "codexName": "product_designer",
+      "description": "Reviews Business OS interaction design, responsive behavior, accessibility, and bilingual UI consistency.",
+      "access": "read-only",
+      "effort": "high",
+      "prompt": "prompts/product-designer.md",
+      "claudeTools": ["Read", "Grep", "Glob"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "business-os-architect",
+      "codexName": "business_os_architect",
+      "description": "Read-only architect for cross-layer Business OS changes involving React, Workers, D1, offline state, and production data.",
+      "access": "read-only",
+      "effort": "high",
+      "prompt": "prompts/business-os-architect.md",
+      "claudeTools": ["Read", "Grep", "Glob"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "security-reviewer",
+      "codexName": "security_reviewer",
+      "description": "Read-only security reviewer for Business OS routes, auth, permissions, uploads, offline storage, integrations, and data migrations.",
+      "access": "read-only",
+      "effort": "high",
+      "prompt": "prompts/security-reviewer.md",
+      "claudeTools": ["Read", "Grep", "Glob", "WebFetch", "WebSearch"],
+      "copilotTools": ["read", "search", "web"]
+    },
+    {
+      "id": "build-fixer",
+      "codexName": "build_fixer",
+      "description": "Reproduces and fixes TypeScript, Vite, Worker, and focused test failures without masking root causes.",
+      "access": "workspace-write",
+      "teamEligible": false,
+      "effort": "high",
+      "prompt": "prompts/build-fixer.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+      "copilotTools": ["read", "search", "edit", "execute"]
+    },
+    {
+      "id": "implementation-worker",
+      "codexName": "implementation_worker",
+      "description": "Implements one bounded Business OS slice in an isolated worktree with exact path ownership and focused verification.",
+      "access": "workspace-write",
+      "teamEligible": false,
+      "effort": "high",
+      "prompt": "prompts/implementation-worker.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+      "copilotTools": ["read", "search", "edit", "execute"]
+    },
+    {
+      "id": "playwright-tester",
+      "codexName": "playwright_tester",
+      "description": "Designs, runs, and debugs Playwright end-to-end tests when Playwright exists or its addition is explicitly requested.",
+      "access": "workspace-write",
+      "teamEligible": false,
+      "effort": "high",
+      "prompt": "prompts/playwright-tester.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+      "copilotTools": ["read", "search", "edit", "execute", "playwright/*"]
+    },
+    {
+      "id": "go-reviewer",
+      "codexName": "go_reviewer",
+      "description": "Reviews Go diffs for correctness, concurrency, API contracts, security, and test quality when Go code is present.",
+      "access": "read-only",
+      "teamEligible": false,
+      "effort": "high",
+      "prompt": "prompts/go-reviewer.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Bash"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "skill-miner",
+      "codexName": "skill_miner",
+      "description": "Finds repeated repository practices and proposes narrowly scoped reusable skills backed by Git evidence.",
+      "access": "read-only",
+      "teamEligible": false,
+      "effort": "medium",
+      "prompt": "prompts/skill-miner.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Bash"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "docs-researcher",
+      "codexName": "docs_researcher",
+      "description": "Read-only researcher for current framework and API documentation used by Business OS.",
+      "access": "read-only",
+      "effort": "medium",
+      "prompt": "prompts/docs-researcher.md",
+      "claudeTools": ["Read", "Grep", "Glob", "WebFetch", "WebSearch", "mcp__openaiDeveloperDocs__*"],
+      "copilotTools": ["read", "search", "web", "openaiDeveloperDocs/*"]
+    },
+    {
+      "id": "verifier",
+      "codexName": "verifier",
+      "description": "Read-only adversarial verifier that certifies integrated behavior and reports evidence without repairing failures.",
+      "access": "read-only",
+      "effort": "high",
+      "prompt": "prompts/verifier.md",
+      "claudeTools": ["Read", "Grep", "Glob"],
+      "copilotTools": ["read", "search"]
+    },
+    {
+      "id": "reconciler",
+      "codexName": "reconciler",
+      "description": "Integrates completed agent branches without losing behavior, then prepares a single candidate for independent verification.",
+      "access": "workspace-write",
+      "teamEligible": false,
+      "effort": "high",
+      "prompt": "prompts/reconciler.md",
+      "claudeTools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+      "copilotTools": ["read", "search", "edit", "execute"]
+    }
+  ]
+}

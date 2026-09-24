@@ -10,6 +10,7 @@ import { dismissContactDuplicateCluster, undismissContactDuplicateCluster, getCo
 import type { ContactDuplicateCluster, ContactDuplicateClusterEntry, ContactDuplicateSeverity, ContactTableKind } from './contactDuplicates'
 import SaleLinkConflictsSection from './SaleLinkConflictsSection'
 import { useApp } from '../../AppContext.tsx'
+import PaginationControls, { DEFAULT_PAGE_SIZE, paginateItems } from '../shared/PaginationControls.tsx'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -283,6 +284,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
   const [severityFilter, setSeverityFilter] = useState<ContactDuplicateSeverity | 'all'>('all')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   // Reveal already-kept (dismissed) clusters alongside the open queue so a
   // wrongly-kept conflict can be reopened and resolved -- "keep" is never a
   // one-way hide. Off by default (the queue leads with what still needs a
@@ -484,6 +487,12 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
     ].filter(Boolean).join(' ').toLowerCase()
     return haystack.includes(normalizedSearch)
   }), [clusters, normalizedSearch, severityFilter])
+  const pagedClusters = useMemo(
+    () => paginateItems(visibleClusters, page, pageSize),
+    [page, pageSize, visibleClusters],
+  )
+
+  useEffect(() => { setPage(1) }, [normalizedSearch, severityFilter, showKept, table])
 
   const counts = useMemo(() => {
     const result = { phone_conflict: 0, exact_match: 0, name_only: 0 }
@@ -620,8 +629,8 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
             ) : null}
             {canResolveConflicts ? <button
               type="button"
-              onClick={() => setSelectedKeys(new Set(visibleClusters.map((cluster) => clusterKey(table, cluster))))}
-              disabled={bulkBusy || !visibleClusters.length}
+              onClick={() => setSelectedKeys(new Set(pagedClusters.map((cluster) => clusterKey(table, cluster))))}
+              disabled={bulkBusy || !pagedClusters.length}
               className="ml-auto text-blue-600 hover:underline disabled:opacity-50 disabled:no-underline dark:text-blue-400"
             >
               {t('select_all') || 'Select all'}
@@ -665,7 +674,7 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
           ) : null}
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleClusters.map((cluster) => {
+            {pagedClusters.map((cluster) => {
               const id = clusterKey(table, cluster)
               return (
                 <ClusterCard
@@ -687,6 +696,18 @@ export default function DuplicatesTab({ t, notify, active = true, onResolve, inc
               )
             })}
           </div>
+          <PaginationControls
+            compact
+            rangeAsPageSize
+            page={page}
+            pageSize={pageSize}
+            totalItems={visibleClusters.length}
+            onPageChange={setPage}
+            onPageSizeChange={(next) => { setPageSize(next); setPage(1) }}
+            label={t('conflicts') || 'conflicts'}
+            t={t}
+            className="justify-center"
+          />
         </>
       )}
       </>

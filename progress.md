@@ -1,3 +1,64 @@
+## Evidence reconciliation and remaining-work status — September 10
+
+The production merge ledger is reconciled: the verified postflight records **166** applied product merges (history IDs 369–534, 166 audits, zero pending fingerprints) in addition to the **8** earlier proven merges, for **174 proven merges total**. Older register paragraphs that say “eight completed cases” describe the pre-cleanup checkpoint and are stale. The old cleanup preview reported 1,774 eligible and 19 quarantined groups, but that preview is not current evidence; a fresh authenticated preview is required before any further merge. No merge is running now.
+
+Contact cleanup remains read-only. Shared General **24969** is excluded and its legacy membership is cleared; protected customer **22305** is unchanged. The open customer cluster **[23907, 25000, 25001]** is blocked by distinct memberships. Supplier name-only groups **[20, 38–46]** and **[23, 33–37]** require profile/source confirmation; no supplier or customer candidate was merged. No delivery-contact duplicate cluster was found.
+
+Historical branch metadata repair is complete for proven targets. The four pre-hotfix zero-item incident receipts were repaired and verified; two separate older header-only sales (**16917**, **16827**) remain outside the recovery allowlist because their item/creation evidence is missing. Ambiguous historical drivers and legacy sale links remain unresolved rather than invented.
+
+Physical iOS/PWA, camera, printer, and uncertain-network transfer testing still cannot be certified from this workstation. Desktop signed-in Admin and public storefront smoke loaded after the latest releases; broad mobile/public/customer-portal visual polish remains queued, and offline work remains paused by owner request.
+
+## Not Paid terminology follow-up LIVE — September 10
+
+Fix-scoped commit **f0321c78** was pushed to `codex/sale-create-trigger-release-20260909` and deployed successfully at 100% as Worker version **a6c36168-baa9-4352-a4ec-ede19f378f31**. Build revision **f0321c78f49c**, build hash **df9ef64974d248fa**, built **2026-09-09T22:27:27.313Z**. No database migration or production data mutation was included.
+
+Sale-facing recovery and shift copy now consistently uses **Not Paid / ប្រាក់ជំពាក់**; the generic received-date empty state now uses **Received date / ថ្ងៃចូល**. Supplier-balance wording remains separate by design. The terminology test now covers the recovery/Records keys as well as the normal sales and report labels.
+
+Verification passed: focused glossary, Not Paid, Records rendering, semantic variable parity, i18n, the complete frontend chain (**347/347**), frontend typecheck, production build, Worker typecheck, and clean release-tree diff.
+
+Remaining open or paused work is unchanged: evidence-led historical duplicate/contact cleanup, unresolved driver/sale-link evidence, physical iOS/PWA/camera/printer smoke, broad compact UI/public/customer-portal polish, and offline work (paused by owner).
+
+## Concise delivery vocabulary fix LIVE — September 10
+
+Fix-scoped commit **a6c29922** was pushed to `codex/sale-create-trigger-release-20260909` and deployed successfully at 100% as Worker version **8619640f-0b70-49f1-8609-3dbba0191e8c**. Build revision **a6c299229a62**, build hash **f16b2c2c00d989e8**, built **2026-09-09T22:16:48.513Z**. No database migration or production data mutation was included.
+
+All direct delivery-fee wording in the Khmer pack now uses the owner-approved concise term **ថ្លៃដឹក**. Actual delivery cost remains **ថ្លៃដឹកដើម** and new actual delivery cost remains **ថ្លៃដឹកដើមថ្មី**. Cost price is **ថ្លៃដើម**, selling price is **តម្លៃលក់**, wholesale price is **តម្លៃបោះដុំ**, and received date is **ថ្ងៃចូល**. Transport/contact phrases that mean delivery service remain distinct. A focused glossary guard now prevents direct fee labels from drifting back to ថ្លៃដឹកជញ្ជូន. Internal fields (`batch_id`, `lot_code`, `credit`) were not renamed.
+
+Verification passed from five angles: focused Khmer glossary, Not Paid terminology, rendered sale Records, semantic variable parity, and the complete frontend chain (**347/347**), plus frontend typecheck, i18n verification, Worker typecheck, production build, and clean release-tree diff.
+
+Still open or paused: evidence-led historical duplicate/contact cleanup (review-only candidates remain; no blind merge), unresolved historical driver/sale-link evidence, physical iOS/PWA/camera/printer smoke, broader compact UI/public/customer-portal polish, and offline work (paused by owner).
+
+## Vocabulary consistency release LIVE — September 10
+
+Fix-scoped commit 06b9346a was pushed to codex/sale-create-trigger-release-20260909 and deployed successfully as Worker version 48d27bdf-8e41-484a-bea3-645a8fb2ab57. Build revision 06b9346a77b6, build hash 61f468e703d7973f, built 2026-09-09T22:01:31Z. No database migration or production data mutation was included.
+
+Visible terminology is now aligned: Received date / ថ្ងៃចូល for the stock-date concept, Receive session / វគ្គទទួលស្តុក for the multi-line workflow, Cost price / ថ្លៃដើម, Selling price / តម្លៃលក់, Wholesale price / តម្លៃបោះដុំ, Delivery fee / ថ្លៃដឹក, and Actual delivery cost / ថ្លៃដឹកដើម. The AppContext and sale-record fallbacks use the same labels, while internal fields batch_id, lot_code, and credit remain unchanged for compatibility.
+
+The owner-edited workbook substantive Khmer changes were already present in the release and are covered by the live pack. Four whitespace-only workbook edits remain intentionally held because the current JSX composition supplies those separators; applying them literally would join words in import/export messages.
+
+Verification passed from multiple angles: focused Khmer glossary, Not Paid terminology, received-date display, sale-record rendering, semantic variable parity, frontend typecheck, i18n verification, Worker typecheck, production build, and the complete frontend utility chain 347/347. The signed-in Admin UI and public storefront loaded after deployment. CLI runtime/version verification was blocked by a Cloudflare bot challenge, so no claim is made from that path.
+
+Still open or paused: evidence-led historical duplicate/contact cleanup (review-only candidates remain; no blind merge), unresolved historical driver/sale-link evidence, physical iOS/PWA/camera/printer smoke, broader compact UI/public/customer-portal polish, and offline work (paused by owner).
+## Received-date semantic parity + transfer provenance LIVE — September 10
+
+The exact tested runtime revision **1d8c5813d8a5** is live at 100% in Worker version **df6ab1ff-c60e-4699-85be-762e1fbc935c** (build hash **db2537ed4cefaeaa**, built 2026-09-09T18:21:46.748Z). The deployment contains separate fix-scoped commits: **0a0f2865** (preserve source received dates when transfers clone/allocate stock), **69f4eab8** (align English/Khmer received-date terminology across stock, transfer, merge, RFID, receipt, and sale surfaces), **1ccfa8ba** (render structured payment/delivery sale-record fields), **8dc64906** (cross-layer variable parity guard), and **1d8c5813** (sales-import fallback wording).
+
+Received-date display now derives from `received_at` first, decodes only date-derived legacy codes, and keeps genuine custom codes as codes. Transfer clones preserve the source `received_at` (or unknown), preventing a transfer timestamp from changing inventory history. Operator copy uses `Received date / ថ្ងៃចូល`; actual delivery cost uses `Actual delivery cost / ថ្លៃដឹកដើម`; sale Records now label payment, delivery, fee, and actual-cost changes with structured before/after values. Legacy CSV column names and the internal multi-line “Batch” session remain unchanged for compatibility and scope clarity.
+
+Verification: frontend utility chain **347/347**, frontend typecheck, `verify:i18n` (**5,682** keys / 585 files), production Vite build, Worker typecheck, semantic parity, batch-label, Khmer glossary, merge, transfer (6/6), Telegram bilingual/messages/shift (26 checks), receipt and sale-record suites all pass. Deployment completed successfully and no production data or migrations were changed.
+
+Still open or paused: broader UI/public/customer-portal polish, offline work, historical duplicate/contact cleanup, unresolved historical driver/sale-link evidence, and physical iOS/PWA/camera smoke. These remain tracked in the owner register; this release does not claim hardware or full visual certification.
+
+## Verification follow-up promotion LIVE — September 10
+
+After an adversarial re-check, release head **98eea9d6aa1e** was rebuilt and promoted to 100% as Worker version **a9d5e95b-d332-4648-982a-8dcd2e48339d** (build hash **8d83db0e06bd2064**, deployed 2026-09-09T16:08Z / 2026-09-10 local). The promotion carries the tested settlement/transfer runtime and the corrected stock-holding explanation in the status dialog. Settlement/payment/create/stock-holding/cancel/add-item/amendment/returns/lot-transfer/branch/revenue/Telegram checks passed again; the live sale `20260909-175106` still shows four item lines and `$265.00`.
+## Settlement retry and transfer guard release LIVE — September 10
+
+Production now runs the tested release revision **bf51f06fd4ad** (Worker build hash **5882f8919df051f8**) at 100% in Worker version **e5795fe6-cc55-4d56-b3ca-aefe19b0b0eb**, deployed 2026-09-09T15:59Z / 2026-09-10 local. The release is on the pushed branch `codex/sale-create-trigger-release-20260909` and is composed of fix-scoped commits `588decad`, `e930a75`, `542e4cd5`, `915be6c8`, `8ccd6127`, and `bf51f06f` (plus the included shift fixture contract `447962a9`).
+
+Settlement retries persist the exact frozen status/payment request before network I/O, preserve tender details on uncertain outcomes, clear pending state after confirmed success, and show localized check-sale/Records guidance. Awaiting-payment remains stock-holding, so settlement to completed moves no stock twice and amendments apply the same invariant. Transfer routes re-check canonical Shop/Warehouse identity before receipts, audits, or stock writes. Validation is green: frontend **346/346**, frontend typecheck/i18n/build, Worker typecheck, and the focused sale/payment/returns/delivery/records/revenue/transfer/shift/Telegram matrix.
+
+No production data was modified by this release. Physical iOS/PWA verification, public/customer portal polish, broader UI cleanup, historical duplicate cleanup and offline work remain open or paused as tracked below.
 ## Canonical sale-item currency snapshots fix LIVE — September 9
 
 Commit **46b49b6ebb18** is live at 100% in Worker version **7297259f-2bde-4e89-b526-a80f8fd0129f**, deployed from the clean pushed release branch `codex/sale-create-trigger-release-20260909` at approximately 2026-09-09T14:50Z. This fix closes the active negative-KHR-discount path: POS discounts rebase KHR from the USD base and exchange rate, while POST `/sales` canonicalizes applied/base/manual USD+KHR snapshots at the server boundary and preserves a KHR-only fallback for legacy lines. A stale line with $21 base, $18 applied, zero client KHR and a 4,000 rate now persists 84,000 base KHR, 72,000 applied KHR and 12,000 manual KHR.

@@ -20,6 +20,8 @@ const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/ca
 const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
+const catalogPaginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
+const paginationControlsSource = fs.readFileSync(new URL('../src/components/shared/PaginationControls.tsx', import.meta.url), 'utf8')
 const portalFilterSource = fs.readFileSync(new URL('../src/components/catalog/PortalFilterCombobox.tsx', import.meta.url), 'utf8')
 const productDetailFlyoutSource = fs.readFileSync(new URL('../src/components/catalog/ProductDetailFlyout.tsx', import.meta.url), 'utf8')
 const catalogImagesSource = fs.readFileSync(new URL('../src/components/catalog/catalogImages.tsx', import.meta.url), 'utf8')
@@ -322,7 +324,6 @@ runTest('portal editor work leaves product filter popovers viewport-portalled', 
 })
 
 runTest('public product discovery uses a sticky unified search, responsive brand index, and explicit paging controls', () => {
-  const paginationSource = fs.readFileSync(new URL('../src/components/catalog/catalogPagination.tsx', import.meta.url), 'utf8')
   assert.match(catalogProductsSectionSource, /sticky top-16[\s\S]*focus-within:border-blue-400/,
     'search should stay sticky and use the same blue discovery accent as filters')
   assert.match(catalogProductsSectionSource, /copy\('jumpToBrand', 'Jump to brand'\)/,
@@ -331,11 +332,37 @@ runTest('public product discovery uses a sticky unified search, responsive brand
     'the desktop alphabet rail must scroll within the sticky sidebar')
   assert.match(catalogProductsSectionSource, /overflow-x-auto[\s\S]*lg:hidden/,
     'small screens need a horizontally scrollable alphabet row')
-  assert.match(paginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
+  assert.match(catalogPaginationSource, /import PaginationControls from '\.\.\/shared\/PaginationControls'/,
     'storefront paging should use the same current Back/Next/page-size control as the rest of the app')
-  assert.match(paginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
-  assert.match(paginationSource, /editablePageSizeInput=\{false\}/,
+  assert.match(catalogPaginationSource, /pageSizeOptions=\{CATALOG_PAGE_SIZE_OPTIONS\}/)
+  assert.match(catalogPaginationSource, /editablePageSizeInput=\{false\}/,
     'items-per-page should stay bounded to the storefront API presets')
+})
+
+runTest('public catalog scrolls through the document and keeps pager controls in the storefront order', () => {
+  assert.match(publicCatalogPageSource, /document\.documentElement[\s\S]*setAttribute\('data-public-portal', 'true'\)/,
+    'the newer public route must activate the document scroll contract')
+  assert.match(publicCatalogPageSource, /previousHtmlMarker[\s\S]*removeAttribute\('data-public-portal'\)/,
+    'leaving the public route must restore document state')
+  assert.match(catalogPageSource, /previousHtmlMarker[\s\S]*previousBodyMarker[\s\S]*setAttribute\('data-public-portal', 'true'\)/,
+    'the legacy public-view route must also restore and own both document markers')
+  assert.match(catalogPreviewSurfaceSource, /publicView \? 'min-h-screen w-full overflow-visible'/,
+    'the public surface must not create a nested vertical scroller')
+  assert.doesNotMatch(catalogPreviewSurfaceSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'the content-height public root must not trap wheel/touch events in a second scroll owner')
+  assert.doesNotMatch(catalogPageSource, /publicView \? \{[^}]*overflowY:\s*'auto'/,
+    'legacy public-view wrappers must not trap wheel/touch events in a second scroll owner')
+  assert.match(catalogPaginationSource, /compactPager/)
+  const pagerBranchStart = paginationControlsSource.indexOf('if (compactPager)')
+  const pagerBranchEnd = paginationControlsSource.indexOf('if (compact && rangeAsPageSize)')
+  assert.ok(pagerBranchStart >= 0 && pagerBranchEnd > pagerBranchStart, 'the dedicated storefront pager branch must exist')
+  const pagerBranch = paginationControlsSource.slice(pagerBranchStart, pagerBranchEnd)
+  assert.ok(pagerBranch.indexOf('<PageSizeSelect') < pagerBranch.indexOf('aria-label={backLabel}'),
+    'the bounded page-size control must precede Back')
+  assert.ok(pagerBranch.indexOf('aria-label={backLabel}') < pagerBranch.indexOf('aria-label={pageLabel}'),
+    'Back must precede the page indicator')
+  assert.ok(pagerBranch.indexOf('aria-label={pageLabel}') < pagerBranch.indexOf('aria-label={nextLabel}'),
+    'the page indicator must precede Next')
 })
 
 runTest('public product details keep every prepared section visible when its data is empty', () => {

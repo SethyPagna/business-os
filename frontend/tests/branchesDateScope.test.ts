@@ -6,29 +6,31 @@ const source = fs.readFileSync(new URL('../src/components/branches/Branches.tsx'
 const hubSource = fs.readFileSync(new URL('../src/components/branches/BranchesHubPage.tsx', import.meta.url), 'utf8')
 const inventorySource = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 
-test('Branches exposes one compact standalone date range beside one Export action', () => {
+test('Branches exposes one compact standalone date range and one Export action', () => {
   assert.equal((source.match(/<StatsRangeRow/g) || []).length, 1)
   assert.doesNotMatch(source, /<DateTimeRangePicker/)
   assert.equal((source.match(/onClick=\{\(\) => \{ void openBranchExport\(\) \}\}/g) || []).length, 1)
-  assert.match(source, /showDateRange \? \([\s\S]*?<StatsRangeRow[\s\S]*?actions=\{<>[\s\S]*?branchExportButton[\s\S]*?<\/>\}/)
+  assert.match(source, /showDateRange \? \([\s\S]*?<StatsRangeRow/)
+  assert.match(source, /\{showDateRange \? branchExportButton : null\}/)
 })
 
-test('the hub owns one range and controls both Inventory stats and Branches', () => {
+test('the hub owns one range and controls Product stats, Branches and transfers', () => {
   assert.match(hubSource, /const \[sharedDateRange, setSharedDateRange\] = useState<DateTimeRange>/)
   assert.match(hubSource, /<InventorySection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
-  assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange=\{!canInventory\}/)
+  assert.match(hubSource, /<BranchesSection[\s\S]{0,300}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}[\s\S]{0,160}showDateRange/)
   assert.match(hubSource, /view="transfers"[\s\S]{0,180}dateRange=\{sharedDateRange\}[\s\S]{0,160}onDateRangeChange=\{setSharedDateRange\}/)
   assert.match(inventorySource, /const stripRange = dateRange \?\? localStripRange/)
   assert.match(inventorySource, /const handleStripRangeChange = onDateRangeChange \?\? setLocalStripRange/)
   assert.match(inventorySource, /range=\{stripRange\} onRangeChange=\{handleStripRangeChange\}/)
 })
 
-test('Branches restores branch-product Inventory and keeps Transfer history separate', () => {
-  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'inventory' \| 'transfers' \| 'rfid'/)
+test('Branches keeps branch Overview, product economics and Transfer history separate', () => {
+  assert.match(hubSource, /type BranchesHubSection = 'overview' \| 'products' \| 'transfers' \| 'rfid'/)
   assert.match(hubSource, /id: 'overview'.*'Overview'/)
-  assert.match(hubSource, /id: 'inventory'.*'Inventory'/)
+  assert.match(hubSource, /id: 'products'.*'Products'/)
   assert.match(hubSource, /id: 'transfers'.*trh\('transfer', 'Transfer'\)/)
-  assert.match(hubSource, /active === 'inventory'[\s\S]*view="branches"/)
+  assert.match(hubSource, /active === 'products'[\s\S]*hostSection="stats"/)
+  assert.doesNotMatch(hubSource, /active === 'products'[\s\S]{0,500}view="branches"/)
   assert.doesNotMatch(hubSource, /hostSection="movements"/)
   assert.match(hubSource, /focus === 'movements'\) navigateTo\('products'\)/)
   assert.ok((hubSource.match(/showSectionNavigation=\{false\}/g) || []).length >= 2)
@@ -48,10 +50,11 @@ test('the shared branch range scopes both transfer history and its export', () =
   assert.doesNotMatch(source, /transferStartDate|transferEndDate/)
 })
 
-test('embedded Branches removes its duplicate picker but keeps one adaptive Export', () => {
+test('embedded Branches removes its duplicate picker and keeps actions on one row', () => {
   assert.match(source, /\{!showDateRange \? <div className="flex min-w-0 items-stretch gap-1 overflow-x-auto pt-1">[\s\S]*?\{branchExportButton\}/)
   assert.equal((source.match(/const branchExportButton = \(/g) || []).length, 1)
-  assert.match(hubSource, /showDateRange=\{!canInventory\}/)
+  assert.ok((hubSource.match(/showDateRange/g) || []).length >= 2)
+  assert.match(source, /\{showDateRange \? <ActionHistoryBar[\s\S]{0,300}\{showDateRange \? branchExportButton : null\}/)
 })
 
 test('Export follows the visible branch section and transfer remains icon plus label', () => {
@@ -81,6 +84,7 @@ test('transfer rows use compact traceable references and restrained semantic col
   const tableEnd = source.indexOf('</table>', tableStart)
   const transferTable = source.slice(tableStart, tableEnd)
   assert.doesNotMatch(transferTable, /tr\('from_branch', 'From'\)|tr\('to_branch', 'To'\)/)
+  assert.ok((source.match(/<ArrowRight className="h-3 w-3 shrink-0 text-gray-400"/g) || []).length >= 2)
 })
 
 test('transfer pagination keeps the server total and page-size controls', () => {

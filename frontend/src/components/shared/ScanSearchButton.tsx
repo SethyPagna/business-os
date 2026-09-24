@@ -43,7 +43,6 @@ export default function ScanSearchButton({ onDetected, t, title, className = '',
   const label = title || t('scan_barcode') || 'Scan barcode'
 
   const handleDetected = useCallback((value: string) => {
-    setOpen(false)
     const trimmed = String(value || '').trim()
     if (trimmed) onDetected(trimmed)
   }, [onDetected])

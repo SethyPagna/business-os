@@ -317,8 +317,11 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const branchName = branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
     if (!window.confirm(tr(
       'confirm_complete_stock_session',
-      `Receive ${pending.length} product line(s), ${totalQuantity} total unit(s), into ${branchName}? This posts stock movements and creates or updates the related lots.`,
-    ))) return
+      'Receive {lines} product line(s), {units} total unit(s), into {branch}? This posts stock movements and creates or updates the related lots.',
+    )
+      .replace('{lines}', String(pending.length))
+      .replace('{units}', String(totalQuantity))
+      .replace('{branch}', branchName))) return
     setSaving(true)
     let failed = 0
     for (const line of pending) {
@@ -360,7 +363,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     setSaving(false)
     onDone()
     const saved = pending.length - failed
-    if (saved > 0) notify(tr('stock_session_completed', `Received ${saved} stock-in line(s) successfully.`))
+    if (saved > 0) notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(saved)))
     if (failed) { notify(tr('stock_session_partial', `${failed} line(s) could not be saved. Fix them and complete again.`), 'error'); return }
     clearWorkDraft(fastStockInDraftKey)
     onClose()
@@ -446,7 +449,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 setPicked(null)
                 setEditingKey('')
                 setScannedBarcode(barcode)
-              }} t={(key) => tr(key, key)} />
+              }} t={(key) => tr(key, key)} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} />
             </div>
             {scannedBarcode && scannedBarcode === query.trim() && searchCompleteFor === scannedBarcode && candidates.length === 0 ? (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -517,7 +520,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                       className={`rounded-lg border px-3 py-2 text-xs transition-colors ${paymentStatus === mode
                         ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
                         : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
-                      {mode === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'On credit')}
+                      {mode === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Paid')}
                     </button>
                   ))}
                   {paymentStatus === 'credit' ? (

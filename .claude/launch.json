@@ -82,6 +82,67 @@
       ],
       "port": 8899,
       "autoPort": false
+    },
+    {
+      "name": "cp4-worker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mrkl6/AppData/Local/Temp/claude/C--Users-mrkl6-Downloads-business-os-v1/7dd9ece0-4243-405d-82c1-04e41fa57608/scratchpad/lane-int4/cloudflare/node_modules/wrangler/bin/wrangler.js",
+        "dev",
+        "--local",
+        "-c",
+        "C:/Users/mrkl6/AppData/Local/Temp/claude/C--Users-mrkl6-Downloads-business-os-v1/7dd9ece0-4243-405d-82c1-04e41fa57608/scratchpad/lane-int4/cloudflare/wrangler.toml",
+        "--port",
+        "8797",
+        "--local-upstream",
+        "localhost:8797",
+        "--persist-to",
+        "C:/Users/mrkl6/AppData/Local/Temp/claude/C--Users-mrkl6-Downloads-business-os-v1/7dd9ece0-4243-405d-82c1-04e41fa57608/scratchpad/int4-state"
+      ],
+      "port": 8797,
+      "autoPort": false
+    },
+    {
+      "name": "a2-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:/Users/mrkl6/Downloads/bos-a2/frontend",
+        "--",
+        "--config",
+        "vite.lane.config.ts",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180,
+      "autoPort": false
+    },
+    {
+      "name": "a2-worker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mrkl6/Downloads/bos-a2/cloudflare/node_modules/wrangler/bin/wrangler.js",
+        "dev",
+        "--local",
+        "-c",
+        "C:/Users/mrkl6/Downloads/bos-a2/cloudflare/wrangler.toml",
+        "--port",
+        "8790"
+      ],
+      "port": 8790,
+      "autoPort": false
+    },
+    {
+      "name": "a2-worker-supervised",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "C:/Users/mrkl6/AppData/Local/Temp/claude/C--Users-mrkl6-Downloads-business-os-v1/5d63d8ce-9752-4d30-870a-4cd1a8a85208/scratchpad/a2-worker-supervisor.cjs"
+      ],
+      "port": 8790,
+      "autoPort": false
     }
   ]
 }

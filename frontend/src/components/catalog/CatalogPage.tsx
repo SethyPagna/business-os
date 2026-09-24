@@ -2024,16 +2024,22 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlMarker = html.getAttribute('data-public-portal')
+    const previousBodyMarker = body.getAttribute('data-public-portal')
     if (publicView) {
-      document.body.setAttribute('data-public-portal', 'true')
-      document.documentElement.setAttribute('data-public-portal', 'true')
+      body.setAttribute('data-public-portal', 'true')
+      html.setAttribute('data-public-portal', 'true')
     } else {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      body.removeAttribute('data-public-portal')
+      html.removeAttribute('data-public-portal')
     }
     return () => {
-      document.body.removeAttribute('data-public-portal')
-      document.documentElement.removeAttribute('data-public-portal')
+      if (previousHtmlMarker === null) html.removeAttribute('data-public-portal')
+      else html.setAttribute('data-public-portal', previousHtmlMarker)
+      if (previousBodyMarker === null) body.removeAttribute('data-public-portal')
+      else body.setAttribute('data-public-portal', previousBodyMarker)
     }
   }, [publicView])
 
@@ -3436,7 +3442,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       data-portal-root="true"
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
         background: portalBackground,
       }}
     >
@@ -3471,7 +3477,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           // must not declare a second scroll container.
           className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
-            ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+            ...(publicView ? { touchAction: 'pan-y pinch-zoom' } : {}),
             background: portalBackground,
           }}
         >

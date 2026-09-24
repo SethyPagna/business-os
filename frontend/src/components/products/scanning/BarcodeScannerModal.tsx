@@ -142,6 +142,7 @@ export default function BarcodeScannerModal({
   const photoInputRef = useRef<HTMLInputElement | null>(null)
   const startTokenRef = useRef(0)
   const startSequenceRef = useRef(0)
+  const detectionHandledRef = useRef(false)
   const lastScanAtRef = useRef(0)
   const [manualValue, setManualValue] = useState('')
   const [status, setStatus] = useState<ScannerStatus>('idle')
@@ -221,28 +222,52 @@ export default function BarcodeScannerModal({
     }
   }, [])
 
+  // Every successful scan is a terminal result for this modal. Keeping this
+  // in one guard matters because native BarcodeDetector, ZXing, photo decode,
+  // and manual entry all have different callback timing; without it a fast
+  // decoder can publish the same barcode twice and leave a parent with a
+  // closed camera plus a second stale result. The browser owns the permission
+  // decision, but the app owns this completion/cleanup contract.
+  const completeDetection = useCallback((value: unknown, expectedStartToken?: number): void => {
+    const nextValue = String(value || '').trim()
+    if (!nextValue || detectionHandledRef.current) return
+    if (expectedStartToken !== undefined && startTokenRef.current !== expectedStartToken) return
+    detectionHandledRef.current = true
+    setManualValue(nextValue)
+    cleanup()
+    try {
+      onDetected(nextValue)
+    } finally {
+      // Do not depend on every caller remembering to close. This is idempotent
+      // for callers that already set their own open state to false, and it
+      // guarantees photo/manual paths close exactly like live camera paths.
+      onClose()
+    }
+  }, [cleanup, onClose, onDetected])
+
   const scanFrame = useCallback(async (): Promise<void> => {
     const detector = detectorRef.current
     const video = videoRef.current
-    if (!detector || !video) return
+    const scanToken = startTokenRef.current
+    if (!detector || !video || !scanToken || detectionHandledRef.current) return
 
     try {
       const now = Date.now()
       if (video.readyState >= 2 && (now - lastScanAtRef.current) > 250) {
         lastScanAtRef.current = now
         const results = await detector.detect(video)
+        if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
         const raw = String(results?.[0]?.rawValue || '').trim()
         if (raw) {
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, scanToken)
           return
         }
       }
     } catch (_) {}
 
+    if (detectionHandledRef.current || startTokenRef.current !== scanToken) return
     frameRef.current = requestAnimationFrame(scanFrame)
-  }, [cleanup, onDetected])
+  }, [completeDetection])
 
   const startCamera = useCallback(async ({ preserveManualValue = false }: { preserveManualValue?: boolean } = {}): Promise<void> => {
     const startToken = ++startSequenceRef.current
@@ -272,6 +297,17 @@ export default function BarcodeScannerModal({
 
     const nextPermissionState = await readCameraPermissionState()
     setPermissionState(nextPermissionState)
+    const permissionWasDenied = nextPermissionState === 'denied'
+
+    // A browser-denied permission is not recoverable by repeatedly calling
+    // getUserMedia. Stop before the request so reopening/retrying the scanner
+    // cannot create a prompt loop; the user must change the site setting.
+    if (permissionWasDenied) {
+      cleanup()
+      setStatus('blocked')
+      setError(labels.cameraPermissionBlocked)
+      return
+    }
 
     try {
       const video = await waitForVideoElement(startToken)
@@ -327,9 +363,7 @@ export default function BarcodeScannerModal({
         (result) => {
           const raw = String(result?.getText?.() || '').trim()
           if (!raw) return
-          setManualValue(raw)
-          cleanup()
-          onDetected(raw)
+          completeDetection(raw, startToken)
         },
       )
       if (startTokenRef.current !== startToken) {
@@ -344,7 +378,11 @@ export default function BarcodeScannerModal({
       const scanErrorText = getScanErrorText(scanError)
       const documentBlocked = /camera is blocked by this browser view|permissions policy|camera is not allowed in this document/i.test(scanErrorText)
       const denied = /denied|permission|notallowed/i.test(scanErrorText)
-      const blocked = documentBlocked || (denied && nextPermissionState === 'denied')
+      // A known denied permission returned above before getUserMedia. If the
+      // request reaches this catch, keep a dismissed prompt distinguishable
+      // from that hard-denied state instead of comparing a value TypeScript
+      // has already narrowed away.
+      const blocked = documentBlocked || (denied && permissionWasDenied)
       const dismissed = denied && !blocked
       cleanup()
       setPermissionState(documentBlocked ? 'blocked' : (blocked ? 'denied' : nextPermissionState))
@@ -366,6 +404,7 @@ export default function BarcodeScannerModal({
     labels.scanFailed,
     labels.scanPermissionDenied,
     labels.scanUnsupported,
+    completeDetection,
     scanFrame,
     tr,
     waitForVideoElement,
@@ -402,6 +441,7 @@ export default function BarcodeScannerModal({
   }, [cleanup, labels.cameraDocumentBlocked, labels.scanUnsupported])
 
   const closeScanner = useCallback((): void => {
+    detectionHandledRef.current = true
     cleanup()
     onClose()
   }, [cleanup, onClose])
@@ -422,8 +462,7 @@ export default function BarcodeScannerModal({
       const value = await scanBarcodeFromImageFile(file)
       const nextValue = String(value || '').trim()
       if (!nextValue) throw new Error(labels.scanPhotoFailed)
-      setManualValue(nextValue)
-      onDetected(nextValue)
+      completeDetection(nextValue)
     } catch (scanError) {
       setStatus('manual')
       setError(scanError instanceof Error ? scanError.message : labels.scanPhotoFailed)
@@ -431,12 +470,14 @@ export default function BarcodeScannerModal({
       if (event?.target) event.target.value = ''
       setPhotoBusy(false)
     }
-  }, [labels.scanPhotoFailed, onDetected])
+  }, [completeDetection, labels.scanPhotoFailed])
 
   useEffect(() => {
     if (!open) return undefined
+    detectionHandledRef.current = false
     prepareScanner()
     return () => {
+      detectionHandledRef.current = true
       cleanup()
       setStatus('idle')
       setError('')
@@ -543,7 +584,7 @@ export default function BarcodeScannerModal({
             }
 
   return (
-    <Modal title={title} onClose={closeScanner} size="lg">
+    <Modal title={title} onClose={closeScanner} size="lg" layer="nested">
       <div className="space-y-3">
         {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
             bigger guide box relative to the frame -- the old fixed ratio
@@ -650,8 +691,7 @@ export default function BarcodeScannerModal({
               onClick={() => {
                 const nextValue = String(manualValue || '').trim()
                 if (!nextValue) return
-                cleanup()
-                onDetected(nextValue)
+                completeDetection(nextValue)
               }}
             >
               {labels.useValue}

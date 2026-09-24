@@ -1687,7 +1687,15 @@ app.get('/', async (c) => {
     const saleIds = sales.map((s) => s.id)
 
     const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category
+      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
+        COALESCE((
+          SELECT SUM(ri.quantity)
+          FROM return_items ri
+          JOIN returns item_return ON item_return.id = ri.return_id
+          WHERE ri.sale_item_id = si.id
+            AND COALESCE(item_return.status, 'completed') != 'cancelled'
+            AND COALESCE(item_return.return_scope, 'customer') = 'customer'
+        ), 0) AS returned_quantity
       FROM sale_items si
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id

@@ -64,7 +64,12 @@ export default function CatalogPaginationControls({
       onPageSizeChange={onPageSizeChange}
       pageSizeOptions={CATALOG_PAGE_SIZE_OPTIONS}
       label={label}
-      t={t}
+      t={(key) => {
+        if (key === 'back') return t?.('back') || 'Back'
+        if (key === 'next') return t?.('next') || 'Next'
+        return t?.(key)
+      }}
+      compactPager
       editablePageSizeInput={false}
       className={`rounded-2xl bg-white/92 dark:bg-neutral-900/90 ${className}`}
     />

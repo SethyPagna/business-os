@@ -41,6 +41,7 @@ const expectedConsumers = [
   'src/components/contacts/ApInvoicesSection.tsx',
   'src/components/contacts/ArInvoicesSection.tsx',
   'src/components/contacts/ContactImportConflictsModal.tsx',
+  'src/components/contacts/DuplicatesTab.tsx',
   'src/components/contacts/SaleLinkConflictsSection.tsx',
   'src/components/contacts/shared.tsx',
   'src/components/contacts/StockInInvoicesSection.tsx',

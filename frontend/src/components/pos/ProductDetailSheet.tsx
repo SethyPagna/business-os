@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
@@ -99,7 +100,7 @@ const BATCH_CHOICES_PAGE_SIZE = 6
 // one, otherwise the shared "Batch n: mm/dd/yyyy" default (batchLabel.ts),
 // falling back further to a bare id so the pill is never blank.
 function formatBatchLabel(batch: ProductBatch, posCopy: PosCopy): string {
-  return batchDisplayLabel(batch, posCopy('Batch', 'បាច់'))
+  return batchDisplayLabel(batch, posCopy('Received date', 'ថ្ងៃចូល'))
 }
 
 interface BranchOption {
@@ -277,6 +278,7 @@ export default function ProductDetailSheet({
   // lots. The two must not render the same way -- see the fetch below.
   const [batchesError, setBatchesError] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
+  const [batchChoicesOpen, setBatchChoicesOpen] = useState(false)
   // 11.9: open damaged lots for the resolved row/branch -- the Damage
   // source option shown beside the sellable lots. A failed fetch shows no
   // option (absence is safe; damaged stock is an offer, not a gate).
@@ -289,6 +291,7 @@ export default function ProductDetailSheet({
     setBranchPage(0)
     setBarcodePage(0)
     setSelectedBatchId(null)
+    setBatchChoicesOpen(false)
     setBatchPage(0)
   }, [product?.id])
 
@@ -457,6 +460,7 @@ export default function ProductDetailSheet({
     setSelectedBatchId(null)
     setSelectedDamagedLotId(null)
     setBatchPage(0)
+    setBatchChoicesOpen(false)
   }, [resolvedProduct?.id, resolvedBranchId])
 
   const batchPageCount = Math.max(1, Math.ceil(batches.length / BATCH_CHOICES_PAGE_SIZE))
@@ -678,7 +682,7 @@ export default function ProductDetailSheet({
                       above for why this couldn't just reuse the flat-only gate. */}
                   {batchSelectionRequired ? (
                     <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-900/40">
-                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('3. Batch', '3. បាច់')}</div>
+                      <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('3. Received date', '3. ថ្ងៃចូល')}</div>
                       {batchesLoading ? (
                         <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
                       ) : batchesError ? (
@@ -687,7 +691,16 @@ export default function ProductDetailSheet({
                         <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                       ) : (
                         <>
-                          <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                            onClick={() => setBatchChoicesOpen((open) => !open)}
+                            aria-expanded={batchChoicesOpen}
+                          >
+                            <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose received date', 'ជ្រើសរើសថ្ងៃចូល')}</span>
+                            <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                             {pagedBatches.map((batch) => {
                               const batchOut = Number(batch.quantity || 0) <= 0
                               return (
@@ -695,7 +708,7 @@ export default function ProductDetailSheet({
                                   key={batch.id}
                                   type="button"
                                   className={pillClass(batch.id === selectedBatchId, batchOut)}
-                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                                  onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
                                 >
                                   <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                                   {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
@@ -705,6 +718,7 @@ export default function ProductDetailSheet({
                             })}
                           </div>
                           <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                          </> : null}
                         </>
                       )}
                     </div>
@@ -726,7 +740,7 @@ export default function ProductDetailSheet({
                   ) : null}
                   <div className="flex flex-wrap gap-1.5">
                     <button className="btn-primary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'selling')}>
-                      {batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
+                      {batchSelectionRequired && !selectedBatch ? posCopy('Pick a received-stock record first', 'ជ្រើសរើសកំណត់ត្រាស្តុកចូលជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}`}
                     </button>
                     {asNumber(effectiveVariant.special_price_usd) > 0 || asNumber(effectiveVariant.special_price_khr) > 0 ? (
                       <button
@@ -770,7 +784,7 @@ export default function ProductDetailSheet({
             {batchSelectionRequired ? (
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  {posCopy('Pick a lot / batch', 'ជ្រើសរើសបាច់')}
+                  {posCopy('Pick received stock', 'ជ្រើសរើសស្តុកចូល')}
                 </div>
                 {batchesLoading ? (
                   <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'កំពុងផ្ទុកបាច់…')}</div>
@@ -780,7 +794,16 @@ export default function ProductDetailSheet({
                   <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'គ្មានបាច់នៅសាខានេះទេ')}</div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs font-semibold text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+                      onClick={() => setBatchChoicesOpen((open) => !open)}
+                      aria-expanded={batchChoicesOpen}
+                    >
+                      <span className="min-w-0 truncate">{selectedBatch ? formatBatchLabel(selectedBatch, posCopy) : posCopy('Choose received date', 'ជ្រើសរើសថ្ងៃចូល')}</span>
+                      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${batchChoicesOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {batchChoicesOpen ? <><div className="mt-1.5 flex flex-wrap gap-1.5">
                       {pagedBatches.map((batch) => {
                         const batchOut = Number(batch.quantity || 0) <= 0
                         return (
@@ -788,7 +811,7 @@ export default function ProductDetailSheet({
                             key={batch.id}
                             type="button"
                             className={pillClass(batch.id === selectedBatchId, batchOut)}
-                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null) }}
+                            onClick={() => { setSelectedBatchId(batch.id); setSelectedDamagedLotId(null); setBatchChoicesOpen(false) }}
                           >
                             <span className="font-mono">{formatBatchLabel(batch, posCopy)}</span>
                             {batch.expiry_date ? <span className="ml-1 text-[10px] font-normal opacity-75">{posCopy('exp', 'ផុត')} {batch.expiry_date}</span> : null}
@@ -798,6 +821,7 @@ export default function ProductDetailSheet({
                       })}
                     </div>
                     <PillPager page={clampedBatchPage} pageCount={batchPageCount} onPageChange={setBatchPage} posCopy={posCopy} />
+                    </> : null}
                   </>
                 )}
               </div>
@@ -819,7 +843,7 @@ export default function ProductDetailSheet({
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'ជ្រើសរើសបាច់ជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a received-stock record first', 'ជ្រើសរើសកំណត់ត្រាស្តុកចូលជាមុនសិន') : `${posCopy('Selling', 'តម្លៃលក់')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>
               {promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>

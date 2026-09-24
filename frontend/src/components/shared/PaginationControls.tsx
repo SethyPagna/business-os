@@ -51,6 +51,10 @@ export interface PaginationControlsProps {
   // `compact`; leaving it off keeps the existing three-column compact layout,
   // so callers that don't set it are unaffected.
   rangeAsPageSize?: boolean
+  // Public storefront variant: keep the bounded page-size selector visible,
+  // but put it before Back so the compact control follows the reference order
+  // `[page size] [Back] [page / total] [Next]`.
+  compactPager?: boolean
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -88,6 +92,7 @@ export default function PaginationControls({
   editablePageInput = true,
   editablePageSizeInput = true,
   rangeAsPageSize = false,
+  compactPager = false,
 }: PaginationControlsProps) {
   const parsedPageSize = Number(pageSize || DEFAULT_PAGE_SIZE)
   const safePageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : DEFAULT_PAGE_SIZE
@@ -144,6 +149,68 @@ export default function PaginationControls({
   }
 
   if (total <= 0) return null
+
+  if (compactPager) {
+    const arrowButtonClass = 'inline-flex h-8 shrink-0 items-center gap-0.5 px-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:bg-transparent disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white dark:disabled:text-slate-600'
+    return (
+      <div className={`inline-flex max-w-full items-center overflow-hidden rounded-full border border-slate-300 bg-white pr-1 text-xs font-semibold text-slate-800 shadow-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 ${className}`}>
+        {onPageSizeChange ? (
+          <PageSizeSelect
+            value={safePageSize}
+            options={pageSizeOptions}
+            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+            ariaLabel={perPageLabel}
+            allowCustom={editablePageSizeInput}
+            className="min-w-0 shrink-0"
+            buttonContent={safePageSize}
+            buttonClassName="h-8 min-w-[3.25rem] rounded-none rounded-l-full border-0 border-r border-slate-200 bg-slate-100 px-2 text-xs font-semibold text-slate-800 shadow-none hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            menuClassName="min-w-[9rem]"
+            optionClassName="text-xs"
+          />
+        ) : null}
+        <button
+          type="button"
+          className={arrowButtonClass}
+          disabled={safePage <= 1}
+          onClick={() => onPageChange?.(safePage - 1)}
+          aria-label={backLabel}
+        >
+          <ChevronLeft className="h-4 w-4" strokeWidth={2.5} />
+          <span className="hidden sm:inline">{backLabel}</span>
+        </button>
+        <div className="inline-flex min-w-0 shrink items-center gap-1 px-1">
+          {editablePageInput ? (
+            <>
+              <span className="sr-only">{pageLabel}</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label={pageLabel}
+                className="h-7 w-9 border-0 bg-transparent px-0 text-center text-xs font-semibold text-slate-800 outline-none dark:text-slate-100"
+                value={pageDraft}
+                onChange={(event) => setPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                onBlur={(event) => commitPageDraft(event.currentTarget.value)}
+                onKeyDown={handlePageInputKeyDown}
+              />
+            </>
+          ) : (
+            <span className="px-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">{safePage}</span>
+          )}
+          <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-500 dark:text-slate-400">/ {totalPages}</span>
+        </div>
+        <button
+          type="button"
+          className={arrowButtonClass}
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange?.(safePage + 1)}
+          aria-label={nextLabel}
+        >
+          <span className="hidden sm:inline">{nextLabel}</span>
+          <ChevronRight className="h-4 w-4" strokeWidth={2.5} />
+        </button>
+      </div>
+    )
+  }
 
   if (compact && rangeAsPageSize) {
     // The user's "‹ page (1-20) / total ›" form. Everything lives on one line

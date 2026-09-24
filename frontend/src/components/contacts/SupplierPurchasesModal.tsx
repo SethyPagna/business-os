@@ -108,7 +108,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                 [`${tr('purchase_batches', 'Batches')} / ${tr('products', 'Products')}`, `${totals.batches ?? 0} / ${totals.products ?? 0}`],
                 [tr('units_received', 'Units received'), qty(totals.units_received)],
                 [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
-                [tr('credit_open', 'On credit'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
+                [tr('credit_open', 'Not Paid'), `${money(totals.credit_open_usd)} (${totals.credit_batches ?? 0})`],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                   <div className="text-[11px] text-gray-400">{label}</div>
@@ -129,7 +129,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                   <thead className="sticky top-0 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                     <tr>
                       <th className="px-3 py-2">{tr('product', 'Product')}</th>
-                      <th className="px-3 py-2">{tr('batch', 'Batch')}</th>
+                      <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
                       <th className="px-3 py-2">{tr('received_date', 'Received')}</th>
                       <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
                       <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
@@ -149,7 +149,7 @@ export default function SupplierPurchasesModal({ supplierId, supplierName, fetch
                         <td className="px-3 py-2">
                           {batch.payment_status === 'credit' ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                              {tr('on_credit', 'On credit')}{batch.credit_due_date ? ` · ${fmtDateOnly(batch.credit_due_date)}` : ''}
+                              {tr('on_credit', 'Not Paid')}{batch.credit_due_date ? ` · ${fmtDateOnly(batch.credit_due_date)}` : ''}
                             </span>
                           ) : batch.payment_status === 'paid' ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">{tr('paid', 'Paid')}</span>

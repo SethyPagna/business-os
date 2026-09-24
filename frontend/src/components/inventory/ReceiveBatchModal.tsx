@@ -189,7 +189,7 @@ export default function ReceiveBatchModal({
     if (!parsedBranchId) { notify(tr('choose_branch', 'Choose a branch'), 'error'); return }
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) { notify(tr('quantity_must_be_positive', 'Quantity must be a positive number'), 'error'); return }
     if (paymentStatus === 'credit' && !creditDueDate) {
-      notify(tr('credit_needs_due_date', 'A credit purchase needs its due date — the admin reminder is built on it.'), 'error')
+      notify(tr('credit_needs_due_date', 'A Not Paid purchase needs its due date — the admin reminder is built on it.'), 'error')
       return
     }
     const branchName = branchSelectOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
@@ -293,7 +293,7 @@ export default function ReceiveBatchModal({
                 original create-or-match-by-date behavior; picking a lot
                 tops up that exact one. */}
             <div className="block sm:col-span-2">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Batch')}</span>
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Received date')}</span>
               {batchLoading ? (
                 <div className="text-[11px] text-gray-400">{t('loading') || 'Loading...'}</div>
               ) : (
@@ -312,7 +312,7 @@ export default function ReceiveBatchModal({
                       className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                       onClick={() => setBatchChoice(Number(batch.id))}
                     >
-                      {batchDisplayLabel(batch, tr('batch', 'Batch'))} ({batch.quantity})
+                      {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
                     </button>
                   ))}
                 </div>
@@ -389,7 +389,7 @@ export default function ReceiveBatchModal({
             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment_to_supplier', 'Payment to supplier')}</span>
             <div className="flex items-center gap-2">
               <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-xs font-medium dark:border-gray-600">
-                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'On credit')]] as const).map(([value, label], index) => (
+                {([['', tr('payment_unset', '—')], ['paid', tr('paid', 'Paid')], ['credit', tr('on_credit', 'Not Paid')]] as const).map(([value, label], index) => (
                   <button
                     key={value || 'unset'}
                     type="button"

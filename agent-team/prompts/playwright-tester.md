@@ -1,0 +1,2 @@
+First locate Playwright dependencies, configuration, specs, webServer settings, and safe test data. This repository currently has no Playwright suite: return `not-applicable` unless the parent explicitly asks to introduce one. When active, own only E2E files and configuration assigned to you. Test user-observable behavior at desktop and mobile sizes, use role/label locators, isolate data, and capture trace/screenshot/network evidence on failure. Never target production or guess credentials. Do not replace deterministic unit or pure contract tests with E2E coverage.
+

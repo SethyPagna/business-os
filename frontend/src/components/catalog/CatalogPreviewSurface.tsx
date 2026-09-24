@@ -265,7 +265,7 @@ export default function CatalogPreviewSurface({
       // scroller handle scrolling.
       className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
       style={{
-        ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
+        ...(publicView ? { touchAction: 'pan-y pinch-zoom', WebkitOverflowScrolling: 'touch' } : {}),
         background: portalBackground,
       }}
     >

@@ -12,7 +12,7 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesPeriodSeries, netSaleExpr, previousPeriodFilters, recognizedExpr } from '../lib/salesAnalytics'
 import { getFamilyStockStats } from '../lib/familyStockStats'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTodayRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -163,12 +163,11 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 function dateRange(query: Record<string, string>) {
-  // An empty dashboard range means all recorded history. The UI no longer
-  // silently presets Today; explicit picker values still use the same local
-  // business-day SQL below.
   const today = businessToday()
+  const defaultStart = new Date(`${today}T00:00:00.000Z`)
+  defaultStart.setUTCDate(defaultStart.getUTCDate() - 6)
   return {
-    startDate: String(query.startDate || '2000-01-01').slice(0, 10),
+    startDate: String(query.startDate || defaultStart.toISOString().slice(0, 10)).slice(0, 10),
     endDate: String(query.endDate || today).slice(0, 10),
     granularity: ['week', 'month'].includes(String(query.granularity || 'day')) ? String(query.granularity) : 'day',
   }
@@ -217,8 +216,23 @@ function emptyAnalytics() {
   }
 }
 
-async function dashboardSummary(env: Env) {
+async function dashboardSummary(env: Env, query: Record<string, string>) {
   const db = getDb(env)
+  const { startDate, endDate } = dateRange(query)
+  const branchId = query.branchId || null
+  const params = branchId ? { startDate, endDate, branchId } : { startDate, endDate }
+  const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
+  // Every summary card follows the same selected range. Inventory cards are
+  // the current on-hand state of products that participated in that range;
+  // this keeps their stock meaning intact while making the product scope
+  // agree with sales, charts and top-product analytics.
+  const productInRangeClause = `EXISTS (
+    SELECT 1 FROM sale_items dashboard_si
+    JOIN sales dashboard_s ON dashboard_s.id = dashboard_si.sale_id
+    WHERE dashboard_si.product_id = p.id
+      AND ${localDateRangeClause('dashboard_s.created_at')}
+      AND ${recognizedExpr('dashboard_s.')}${saleBranchClause('dashboard_s')}
+  )`
   // Family-aware counts (see familyStockStats.ts) so this dashboard tile
   // agrees with the family-grouped pagination total on Products/Inventory
   // -- previously a flat COUNT(*)/SUM() here counted every variant row (and
@@ -228,57 +242,58 @@ async function dashboardSummary(env: Env) {
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'
-    `).get({}),
+      WHERE ${localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+    `).get(params),
     db.prepare(`
       SELECT COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
-      WHERE COALESCE(sale_status, 'completed') <> 'cancelled'
-    `).get({}),
+      WHERE ${localDateRangeClause('created_at')} AND COALESCE(sale_status, 'completed') <> 'cancelled'${saleBranchClause('sales')}
+    `).get(params),
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_refund_usd), 0) AS total_usd
       FROM returns
-      WHERE ${localTodayRangeClause('created_at')} AND COALESCE(status, 'completed') <> 'cancelled'
-    `).get({}),
+      WHERE ${localDateRangeClause('created_at')} AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
+    `).get(params),
     getFamilyStockStats({
       db,
       joinSql: '',
-      whereSql: 'WHERE p.is_active = 1',
-      params: {},
+      whereSql: `WHERE p.is_active = 1 AND ${productInRangeClause}`,
+      params,
       qtyExpr: 'COALESCE(p.stock_quantity, 0)',
     }),
     db.prepare(`
       SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products
-      WHERE is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
+      FROM products p
+      WHERE p.is_active = 1 AND ${productInRangeClause} AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)
       ORDER BY stock_quantity ASC, lower(name) ASC
       LIMIT 10
-    `).all({}),
+    `).all(params),
     db.prepare(`
       SELECT id, name, category, unit, stock_quantity, low_stock_threshold, out_of_stock_threshold
-      FROM products
-      WHERE is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
+      FROM products p
+      WHERE p.is_active = 1 AND ${productInRangeClause} AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)
       ORDER BY stock_quantity ASC, lower(name) ASC
       LIMIT 10
-    `).all({}),
+    `).all(params),
     db.prepare(`
       SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-      FROM products
-      WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      FROM products p
+      WHERE p.is_active = 1 AND ${productInRangeClause} AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
       ORDER BY date(expiry_date) ASC
       LIMIT 10
-    `).all({}),
+    `).all(params),
     db.prepare(`
       SELECT COUNT(*) AS count
-      FROM products
-      WHERE is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
-    `).get({}),
+      FROM products p
+      WHERE p.is_active = 1 AND ${productInRangeClause} AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+    `).get(params),
     db.prepare(`
       SELECT id, receipt_number, created_at, sale_status, branch_name, customer_name, cashier_name, total_usd, total_khr, items
       FROM sales
+      WHERE ${localDateRangeClause('created_at')}${saleBranchClause('sales')}
       ORDER BY created_at DESC, id DESC
       LIMIT 10
-    `).all({}),
+    `).all(params),
   ])
 
   return {
@@ -447,7 +462,7 @@ async function dashboardAnalytics(env: Env, query: Record<string, string>) {
 app.get('/dashboard', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
-  return c.json(await dashboardSummary(c.env))
+  return c.json(await dashboardSummary(c.env, c.req.query()))
 })
 app.get('/analytics', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -458,7 +473,7 @@ app.get('/dashboard/startup', async (c) => {
   const denied = denyUnless(c, 'dashboard')
   if (denied) return denied
   const [summary, analytics] = await Promise.all([
-    dashboardSummary(c.env),
+    dashboardSummary(c.env, c.req.query()),
     dashboardAnalytics(c.env, c.req.query()),
   ])
   return c.json({ summary, analytics })

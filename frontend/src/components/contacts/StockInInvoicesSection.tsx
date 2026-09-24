@@ -245,7 +245,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     if (line.payment_status === 'credit') {
       return (
         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-          {tr('on_credit', 'On credit')}{line.credit_due_date ? ` · ${fmtDateOnly(line.credit_due_date)}` : ''}
+          {tr('on_credit', 'Not Paid')}{line.credit_due_date ? ` · ${fmtDateOnly(line.credit_due_date)}` : ''}
         </span>
       )
     }
@@ -326,7 +326,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
               [`${tr('stock_in_invoices_count', 'Invoices')} / ${tr('invoice_lines', 'Lines')}`, `${totals.invoices ?? 0} / ${totals.lines ?? 0}`],
               [tr('units_received', 'Units received'), qty(totals.units_received)],
               [tr('purchase_cost', 'Purchase cost'), money(totals.cost_usd)],
-              [tr('credit_open', 'On credit'), String(totals.credit_lines ?? 0)],
+              [tr('credit_open', 'Not Paid'), String(totals.credit_lines ?? 0)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-gray-200 px-3 py-1.5 dark:border-gray-700">
                 <div className="text-[11px] text-gray-400">{label}</div>
@@ -369,7 +369,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                       <span className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">{supplierLabel(group)}</span>
                       {branchNames ? <span className="text-[11px] text-gray-400">{branchNames}</span> : null}
                       {group.credit_lines > 0 ? (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('on_credit', 'On credit')}: {group.credit_lines}</span>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">{tr('on_credit', 'Not Paid')}: {group.credit_lines}</span>
                       ) : null}
                       <span className="text-xs text-gray-500">{group.line_count} {tr('invoice_lines', 'Lines').toLowerCase()}</span>
                       <span className="text-xs text-gray-500">{qty(group.units_received)} {tr('units', 'Units').toLowerCase()}</span>
@@ -389,7 +389,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
                                   <tr>
                                     <th className="px-3 py-2">{tr('product', 'Product')}</th>
                                     <th className="px-3 py-2">{tr('barcode', 'Barcode')}</th>
-                                    <th className="px-3 py-2">{tr('batch', 'Batch')}</th>
+                                    <th className="px-3 py-2">{tr('batch', 'Received date')}</th>
                                     <th className="px-3 py-2 text-right">{tr('quantity_received', 'Qty received')}</th>
                                     <th className="px-3 py-2">{tr('unit', 'Unit')}</th>
                                     <th className="px-3 py-2 text-right">{tr('unit_cost_usd', 'Unit cost (USD)')}</th>
