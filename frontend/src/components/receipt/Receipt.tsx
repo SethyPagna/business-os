@@ -351,7 +351,6 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const compactPrintRef = useRef<HTMLDivElement | null>(null)
   const appliedConfig = useMemo(() => buildAppliedReceiptConfig({ settings }), [settings])
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
-  const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
   // Two independent controls, kept side by side rather than one replacing
   // the other. highContrastBold is the older per-print switch: it darkens and
