@@ -2832,6 +2832,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         notify(copy('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
       }
+      // saveSettings does not throw on a failed write: it shows its own error
+      // and answers { success: false }. Everything below marks the draft as
+      // saved (posts and their order included), so a failed write stops here
+      // and the edits stay unsaved for another try.
+      if (result?.success === false) return
       setDraft('customer_portal_logo_image', sanitizedLogoImage)
       setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
       setDraft('customer_portal_cover_image', sanitizedCoverImage)
