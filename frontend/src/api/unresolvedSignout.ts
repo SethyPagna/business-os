@@ -11,6 +11,10 @@ export type SignoutIntent = {
 let volatileIntent: SignoutIntent | null = null
 let acknowledgedToken: string | null = null
 let status = 'signout-unresolved'
+// True only once THIS runtime began a sign-out. Unreadable storage keeps the
+// fence closed either way, but a visitor who never signed out must see the
+// storage-blocked recovery (with Reload), not sign-out wording.
+let signoutBegunHere = false
 
 function changed(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SIGNOUT_INTENT_EVENT))
@@ -43,7 +47,7 @@ export function signoutError(): Error {
 }
 export function assertNoUnresolvedSignout(): void { if (isSignoutBlocked()) throw signoutError() }
 export function signoutStatus(): string {
-  if (readSignoutIntent()?.token === 'unreadable') return 'signout-storage-unavailable'
+  if (readSignoutIntent()?.token === 'unreadable') return signoutBegunHere ? 'signout-storage-unavailable' : 'storage-unavailable'
   if (status === 'signout-storage-unavailable') return status
   return readSignoutIntent()?.phase === 'confirmed' ? 'signout-confirmed' : status
 }
@@ -59,6 +63,7 @@ export function beginUnresolvedSignout(user: { id?: unknown; organization_id?: u
     || (organizationId !== null && (!Number.isSafeInteger(organizationId) || organizationId <= 0))) throw signoutError()
   const intent: SignoutIntent = { version: 1, token: crypto.randomUUID(), authority: origin, actor_id: actorId, organization_id: organizationId, phase: 'pending' }
   volatileIntent = intent
+  signoutBegunHere = true
   status = 'signout-checking'
   try {
     window.localStorage.setItem(SIGNOUT_INTENT_KEY, JSON.stringify(intent))

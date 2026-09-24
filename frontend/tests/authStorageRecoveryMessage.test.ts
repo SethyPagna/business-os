@@ -25,6 +25,11 @@ const messageFor = new Function('status', `const signingOut = status.startsWith(
 const message = messageFor(scope.actorCookieMutationPendingStatus())
 assert.match(message, /Enable cookies and site data/)
 assert.match(messageFor(scope.actorSessionQuarantineStatus()), /Enable cookies and site data/, 'actual displayed sign-out storage status must provide actionable recovery')
+// A visitor who never signed out stays fenced (unreadable storage cannot prove
+// no sign-out is pending) but gets storage recovery, not sign-out wording: the
+// overlay treats every `signout-*` status as a sign-out and hides Reload.
+assert.equal(scope.isActorSessionQuarantined(), true)
+assert.equal(scope.actorSessionQuarantineStatus(), 'storage-unavailable', 'no sign-out began here: no sign-out wording, Reload stays offered')
 assert.match(message, /[ក-៿]/)
 assert.doesNotMatch(message, /another tab/)
 assert.match(messageFor('authentication-pending'), /another tab/)
