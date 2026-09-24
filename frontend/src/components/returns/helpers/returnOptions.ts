@@ -9,6 +9,9 @@
 // sale the customer pays for. Neither nets against the other, so there is no
 // difference to preview, owe, or settle.
 
+import { BUSINESS_TIME_ZONE } from '../../../constants.ts'
+import { fmtDayFirst } from '../../../utils/formatters.ts'
+
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
 // P4-3. Owner: "if restock as damaged etc... Don't we have the remove tag
@@ -78,9 +81,9 @@ export function formatBatchDate(value: string | null | undefined): string {
   if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`
   const parsed = new Date(text)
   if (Number.isNaN(parsed.getTime())) return text
-  const mm = String(parsed.getMonth() + 1).padStart(2, '0')
-  const dd = String(parsed.getDate()).padStart(2, '0')
-  return `${dd}/${mm}/${parsed.getFullYear()}`
+  // A non-ISO but parseable value is an instant: read its day in the
+  // business timezone (Phnom Penh), not the device zone.
+  return fmtDayFirst(parsed, { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
 }
 
 // One line per lot for the replacement batch picker -- lot code, expiry

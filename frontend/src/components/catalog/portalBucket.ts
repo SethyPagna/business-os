@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 
 // The "bucket" is a customer-facing shortlist on the public portal --
 // NOT a cart, no payment, no order submitted anywhere. A visitor taps
@@ -268,7 +269,9 @@ export function formatPortalBucketText(items: PortalBucketItem[], businessName =
 export function downloadPortalBucketFile(text: string, businessName = 'my-list'): void {
   if (typeof document === 'undefined') return
   const safeName = String(businessName || 'my-list').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'my-list'
-  const stamp = new Date().toISOString().slice(0, 10)
+  // Business-day filename stamp, same Phnom Penh day as the fmtDateTime24
+  // line inside the file (toISOString() is UTC and reads yesterday before 07:00).
+  const stamp = todayStr()
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

@@ -1835,7 +1835,9 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     translateOr,
   ])
 
-  const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  // Business-day stamp (Phnom Penh), not the UTC date: between 00:00 and
+  // 06:59 local time toISOString() still reads yesterday.
+  const exportStamp = useMemo(() => todayStr(), [])
 
   const displayAnalytics = useMemo(() => analytics ? {
     ...analytics,

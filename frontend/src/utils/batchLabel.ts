@@ -11,6 +11,9 @@
 // stored number (plus the stored received-at timestamp) into display text,
 // it never invents or recomputes a number on its own.
 
+import { BUSINESS_TIME_ZONE } from '../constants.ts'
+import { fmtDayFirst } from './formatters.ts'
+
 export type BatchLike = {
   id: number | string
   lot_code?: string | null
@@ -29,7 +32,8 @@ export function formatBatchReceivedDate(receivedAt: string | null | undefined): 
   // A received DATE is a calendar value, not an instant. Parsing YYYY-MM-DD
   // through Date would reinterpret it at midnight UTC and show the previous
   // day west of UTC. Keep date-only values literal and validate them in UTC;
-  // timestamp values below retain the existing local-time display behaviour.
+  // timestamp values below are instants and read in the business timezone
+  // (Phnom Penh), never the device zone, so every device names the same day.
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
   if (dateOnly) {
     const yyyy = Number(dateOnly[1])
@@ -42,10 +46,7 @@ export function formatBatchReceivedDate(receivedAt: string | null | undefined): 
   const isoish = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
   const date = new Date(isoish)
   if (Number.isNaN(date.getTime())) return null
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  const yyyy = date.getFullYear()
-  return `${dd}/${mm}/${yyyy}`
+  return fmtDayFirst(date, { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
 }
 
 // "n: dd/mm/yyyy" -- the decided default label (word "Batch" prefix is
