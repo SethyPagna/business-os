@@ -14,8 +14,9 @@
 //     the changed cells and says so in one banner;
 //   - the confirm shows before -> after for every changed field (an empty
 //     before reads as Empty), lists every required row -- one the server
-//     answered included (council D1) -- the warnings and the undo note, and
-//     Back returns to the grid;
+//     answered included (council D1), and only once when its answer also
+//     changes a value -- the warnings and the undo note, and Back returns
+//     to the grid;
 //   - applying locks the X, reports progress, stops at a partial result or a
 //     dropped connection with Continue re-sending the same frozen token, and
 //     done shows the server's after values with the undo hint and no footer;
@@ -51,7 +52,7 @@ const fixtureSource = String.raw`
   document.body.className = lang === 'km' ? 'lang-km' : ''
   if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 
-  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, holdApply: false, failApply: 0 }
+  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, requiredChanges: false, holdApply: false, failApply: 0 }
   const log = window.__log = { loads: [], reviews: 0, applies: [], applied: [], minimized: null, closed: 0 }
   const waiters = { load: [], apply: [] }
   const gate = (name) => new Promise((resolve) => waiters[name].push(resolve))
@@ -144,7 +145,7 @@ const fixtureSource = String.raw`
       }
       if (ctl.failReview > 0) { ctl.failReview -= 1; throw new Error('Preview refused') }
       const changes = ctl.noChanges ? [] : adapter.rows(data, draft)
-        .filter((row) => row.kind === 'choice' && row.final.text !== row.cells.p1.text)
+        .filter((row) => (row.kind === 'choice' || (ctl.requiredChanges && row.kind === 'required')) && row.final.text !== row.cells.p1.text)
         .map((row) => ({ label: row.label, before: row.cells.p1.text, after: row.final.text }))
         .concat([{ label: 'Barcode', before: '', after: '8850000000011' }])
       const merged = RECORDS.filter((record) => dispositionOf(draft, record.id) === 'include').length
@@ -470,6 +471,17 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   assert.deepEqual(quiet, { items: ['Stock-in session', 'Membership'], said: true }, 'nothing changing is said, and the required answers are still listed')
   await click(`__ui.button(__ui.confirm(), 'Back')`)
   await until('back (1280)', '!__ui.confirm()')
+  await evaluate('__ctl.noChanges = false; __ctl.requiredChanges = true')
+  await click('__ui.primary()')
+  await until('confirm with required changes', '__ui.confirm()')
+  const once = await evaluate<any>(`[...__ui.confirm().querySelectorAll('dl > div')].map((row) => [__ui.text(row.querySelector('dt')), __ui.text(row.querySelector('dd'))])`)
+  assert.deepEqual(once, [
+    ['Stock-in session', 'Before:—Empty→After:Finalize stock-in #12 and merge'],
+    ['Membership', 'Before:Gold · 0101→After:Keep Gold membership'],
+    ['Barcode', 'Before:—Empty→After:8850000000011'],
+  ], 'a required answer that changes a value is listed once, with its before and after')
+  await click(`__ui.button(__ui.confirm(), 'Back')`)
+  await until('back again (1280)', '!__ui.confirm()')
   await assertResolveReachable('1280 en dark')
 
   // --------------------------------------------------------- load failure

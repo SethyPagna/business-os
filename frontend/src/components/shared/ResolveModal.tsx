@@ -344,8 +344,11 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
         </span>
       ),
     })),
-    // Council D1: a required answer is listed even when the server supplied it.
-    ...rows.filter((row) => row.kind === 'required').map((row) => ({ label: row.label, value: row.final.text || tr('resolve_choose', 'Choose one') })),
+    // Council D1: a required answer is listed even when the server supplied it
+    // -- once: an answer that changes a value is already above, before and after.
+    ...rows
+      .filter((row) => row.kind === 'required' && !review.changes.some((change) => change.label === row.label))
+      .map((row) => ({ label: row.label, value: row.final.text || tr('resolve_choose', 'Choose one') })),
   ] : []
 
   const working = phase === 'loading' || phase === 'reviewing' || phase === 'applying'
