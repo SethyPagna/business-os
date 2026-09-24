@@ -73,6 +73,26 @@ admin/file/import code in the public preload closure. The i18n audit reports 994
 possibly unreferenced keys as candidates, not proof; none were deleted on that
 basis. Build-generated line-ending-only files were restored to the same HEAD.
 
+## Branch export follow-up map (council F2)
+
+The branch stock export converts an omitted acquisition cost into numeric zero.
+The actual openBranchExport callback feeds ExportOptionsDialog and its CSV,
+XLSX and print projections. Worker branches.ts already applies
+acquisitionCostResponses, which removes acquisition fields from paged/unpaged
+stock data for users without product_cost_view. The fix must omit hidden columns,
+retain an authorized known zero, preserve missing authorized values as blank,
+and invalidate in-flight/dialog exports if actor or cost visibility changes.
+Transfer exports contain no acquisition columns and keep their ordinary behavior.
+No offline queue, write, audit, undo or i18n key changes are required. Pinned
+neighbors are branchExportPermissions, branchesDateScope, branchesSelectAllI18n,
+permissionActions, exportOptions, and the Worker acquisition-cost middleware test.
+
+The new real-callback test failed before the fix because hidden cost columns were
+present. It now passes ten hidden/visible/missing/zero/value scenarios and a cost
+revocation race. All seven focused frontend files pass; the real Hono branch
+stock endpoint preserves authorized zero and omits denied costs (76 checks in
+test-acquisition-cost-access.cjs). Broad integration gates remain pending.
+
 ## Confidence and limits
 
 High confidence in the file organization and sequence; feature readiness depends
