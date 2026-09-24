@@ -1736,10 +1736,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) && reportError) {
         setPortalError('')
       }
-      await withLoaderTimeout(() => loadPortal(), 'Customer portal', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS)
+      await withLoaderTimeout(() => loadPortal(), 'Website Editor', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS)
     } catch (error) {
       if (!aliveRef.current || !isTrackedRequestCurrent(portalBootstrapRequestRef, requestId) || !reportError) return
-      setPortalError(getCatalogErrorMessage(error, 'Failed to load customer portal'))
+      setPortalError(getCatalogErrorMessage(error, 'Failed to load the website'))
     } finally {
       if (aliveRef.current && isTrackedRequestCurrent(portalBootstrapRequestRef, requestId)) {
         setLoading(false)
@@ -1763,7 +1763,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const meta = bootstrapResult?.meta || null
       const catalogPage = bootstrapResult?.catalog || null
       const portalProducts = catalogPage?.items || bootstrapResult?.products || null
-      if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load customer portal')
+      if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load the website')
 
       const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
       const nextMeta = {
@@ -1816,7 +1816,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const meta = bootstrapResult?.meta || null
     const catalogPage = bootstrapResult?.catalog || null
     const portalProducts = catalogPage?.items || bootstrapResult?.products || null
-    if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load customer portal')
+    if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load the website')
 
     const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
     const nextMeta = {
@@ -2631,7 +2631,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   async function savePortalDraft() {
     try {
       if (hasActiveMediaUpload) {
-        notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the portal.'), 'error')
+        notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the website.'), 'error')
         return
       }
       const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/')
@@ -2645,7 +2645,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         && !editorDraft.customer_portal_show_faq
         && !editorDraft.customer_portal_ai_enabled
       ) {
-        notify(copy('portalVisibilityRequired', 'Enable at least one customer section before saving the portal.'), 'error')
+        notify(copy('portalVisibilityRequired', 'Enable at least one customer section before saving the website.'), 'error')
         return
       }
 
@@ -2666,7 +2666,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         return
       }
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {
-        notify(copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The portal will render it as an interactive map card.'), 'error')
+        notify(copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.'), 'error')
         return
       }
       let sanitizedTranslations = '{}'
@@ -2829,7 +2829,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       )
       const result = await saveSettings(savePayload, { baselineSettings }) as LegacyCatalogRecord
       if (result?.conflict) {
-        notify(copy('portalSettingsConflict', 'Portal settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
+        notify(copy('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
       }
       setDraft('customer_portal_logo_image', sanitizedLogoImage)
@@ -2861,7 +2861,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       return
     }
     if (!aiProviders.length && canEdit) {
-      notify(copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the portal assistant.'), 'error')
+      notify(copy('assistantNoProvider', 'Choose and test an AI provider in Library before enabling the website assistant.'), 'error')
       return
     }
     if (!assistantQuestion.trim() && !Object.values(assistantProfile).some(Boolean)) {
@@ -3264,7 +3264,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     return (
       <div>
         <Suspense fallback={(
-          <SectionShell title={copy('loadingPortal', 'Loading customer portal...')}>
+          <SectionShell title={copy('loadingPortal', 'Loading website...')}>
             <div className="text-sm text-slate-500">{copy('loading', 'Loading...')}</div>
           </SectionShell>
         )}>
@@ -3357,7 +3357,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   function renderSecondaryTabFallback(tab: string | null) {
     const label = portalTabs.find((item) => item.key === tab)?.label
-      || copy('loadingPortal', 'Loading customer portal...')
+      || copy('loadingPortal', 'Loading website...')
     return (
       <section
         data-portal-secondary-loading="true"
@@ -3481,8 +3481,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
     return (
       <Suspense fallback={(
-        <SectionShell title={copy('studioTitle', 'Portal Editor')}>
-          <div className="text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>
+        <SectionShell title={copy('studioTitle', 'Website Editor')}>
+          <div className="text-sm text-slate-500">{copy('loadingPortal', 'Loading website...')}</div>
         </SectionShell>
       )}>
         <CatalogEditorSurface contextValue={editorContextValue} />
@@ -3508,7 +3508,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     >
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
-            {copy('loadingPortal', 'Loading customer portal...')}
+            {copy('loadingPortal', 'Loading website...')}
           </div>
         </div>
       </div>
@@ -3544,7 +3544,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         >
           <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
             <div className="rounded-[32px] border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
-              {copy('loadingPortal', 'Loading customer portal...')}
+              {copy('loadingPortal', 'Loading website...')}
             </div>
           </div>
         </div>

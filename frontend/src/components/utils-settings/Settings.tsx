@@ -367,7 +367,7 @@ function useCopy(_language: string, t: TranslateFn): CopyFn {
 function getSettingsNavLabel(item: NavItem, t: TranslateFn): string {
   if (item.id === 'catalog') {
     const label = t('customer_portal')
-    return label && label !== 'customer_portal' ? label : 'Customer Portal'
+    return label && label !== 'customer_portal' ? label : 'Website Editor'
   }
   if (item.id === 'loyalty_points') {
     const label = t('loyalty_points')
@@ -1181,7 +1181,7 @@ export default function Settings() {
             {field('business_address', t('address'), 'text', '123 Main St')}
             {field('business_email', t('email'), 'email', 'info@biz.com')}
             {field('tax_id', t('tax_id'), 'text', 'TAX-000')}
-            {field('business_website', t('business_website') || 'Public portal / website', 'url', 'https://yourshop.example.com')}
+            {field('business_website', t('business_website') || 'Public website', 'url', 'https://yourshop.example.com')}
           </div>
 
           {/* The admin "tab icon" (favicon / PWA icon) section was removed:
@@ -1992,7 +1992,7 @@ export default function Settings() {
                 ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Not Yet Paid supplier purchase alerts', 'notification_supplier_credit_alerts_desc', 'Not Yet Paid supplier purchases coming due or overdue'],
                 ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
-                ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Other customer portal notices (pending Share & Reward submissions always appear, regardless of this setting)'],
+                ['notifications_portal_enabled', 'notification_portal_alerts', 'Website alerts', 'notification_portal_alerts_desc', 'Other website notices (pending Share & Reward submissions always appear, regardless of this setting)'],
                 ['notifications_system_enabled', 'notification_system_alerts', 'System alerts', 'notification_system_alerts_desc', 'Only actionable system reminders'],
               ].map(([key, labelKey, fallbackLabel, descKey, fallbackDesc]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">

@@ -103,10 +103,8 @@ let portalTransportPromise: Promise<PortalTransportModule> | null = null
 
 const COPY: Record<'en' | 'km', LocaleCopy> = {
   en: {
-    pageTitle: 'Loyalty Points',
-    pageSubtitle: 'Manage point earning rules, redemption values, and customer point visibility separately from the public portal layout.',
     policyTitle: 'Loyalty Points',
-    policyHint: 'These rules affect POS membership discounts, customer portal balances, and point deductions after refunds.',
+    policyHint: 'These rules affect POS membership discounts, website point balances, and point deductions after refunds.',
     customerTitle: 'Customer point lookup',
     customerHint: 'Look up a membership number to review balance, history totals, and how the current rules apply.',
     save: 'Save point rules',
@@ -167,10 +165,8 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     addPointsSuccess: 'Points added to the customer.',
   },
   km: {
-    pageTitle: 'ពិន្ទុសមាជិក',
-    pageSubtitle: 'កំណត់ច្បាប់ពិន្ទុ ការប្តូរពិន្ទុ និងការបង្ហាញសម្រាប់អតិថិជន ដោយឡែកពីការរចនាទំព័រ Customer Portal។',
     policyTitle: 'ពិន្ទុស្មោះត្រង់',
-    policyHint: 'ការកំណត់ទាំងនេះប៉ះពាល់ដល់ POS ការបញ្ចុះតម្លៃសមាជិក Customer Portal និងការកាត់ពិន្ទុពេលមាន Refund។',
+    policyHint: 'ការកំណត់ទាំងនេះប៉ះពាល់ដល់ POS ការបញ្ចុះតម្លៃសមាជិក សមតុល្យពិន្ទុលើគេហទំព័រ និងការកាត់ពិន្ទុពេលមាន Refund។',
     customerTitle: 'ស្វែងរកពិន្ទុអតិថិជន',
     customerHint: 'បញ្ចូលលេខសមាជិក ដើម្បីពិនិត្យសមតុល្យ ប្រវត្តិ និងរបៀបគណនាពិន្ទុតាមច្បាប់បច្ចុប្បន្ន។',
     save: 'រក្សាទុកច្បាប់ពិន្ទុ',
@@ -615,7 +611,7 @@ export default function LoyaltyPointsPage() {
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('policyTitle', 'Point policy')}</h2>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('policyHint', 'These rules affect POS membership discounts, customer portal balances, and point deductions after refunds.')}</p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('policyHint', 'These rules affect POS membership discounts, website point balances, and point deductions after refunds.')}</p>
                   </div>
                 </div>
                 <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-2 text-xs sm:text-sm" disabled={saving} onClick={handleSave}>

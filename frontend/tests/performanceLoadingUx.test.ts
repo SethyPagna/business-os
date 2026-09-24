@@ -2161,7 +2161,7 @@ assert.match(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\(\) => loadPortal\(\), 'Customer portal', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => loadPortal\(\), 'Website Editor', CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS\)/,
   'catalog portal bootstrap should timeout slow portal bootstraps',
 )
 assert.match(

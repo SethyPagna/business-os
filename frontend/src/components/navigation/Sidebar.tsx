@@ -145,7 +145,7 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
 function getFallbackLabel(itemId: string, language: string): string {
   void language
   if (itemId === 'server') return 'Sync Server'
-  if (itemId === 'catalog') return 'Customer Portal'
+  if (itemId === 'catalog') return 'Website Editor'
   if (itemId === 'loyalty_points') return 'Loyalty Points'
   return ''
 }
