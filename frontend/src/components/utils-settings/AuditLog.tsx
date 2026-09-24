@@ -32,6 +32,7 @@ import {
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 // N13: the Audit Log answers the same "who did this, and why" as the stock
 // ledgers, so it renders through the one shared history row model instead of
@@ -177,6 +178,7 @@ function formatDateTime(raw: unknown): string {
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
+      timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {
     return fallback
@@ -195,6 +197,7 @@ function formatCompactDateTime(raw: unknown): string {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
+      timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {
     return String(raw || HISTORY_EMPTY)
