@@ -18,7 +18,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
-import { adjustStock, commitFastStockIn, type FastStockInCommitLine, type FastStockInCommitLineResult } from '../../api/inventoryWriteTransport.ts'
+import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLine, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
 import StockConditionTagRow from './StockConditionTagRow'
 import { searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
@@ -219,8 +219,13 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
   })
 }
 
-export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate = 4100 }: FastStockInModalProps) {
-  const { user } = useApp() as { user: any }
+export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate: exchangeRateOverride }: FastStockInModalProps) {
+  // The rate and symbols come from Settings through the app context, like
+  // every other price surface; every host (Inventory, Stock Change, the
+  // stock-in session "add more", a minimized restore) gets them unasked.
+  const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
+  const { user, usdSymbol, khrSymbol } = app
+  const exchangeRate = exchangeRateOverride ?? app.exchangeRate
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   // This modal only receives the fallback-aware tr(); DateEntryInput wants a
@@ -853,13 +858,48 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // itself -- network/5xx -- fails every still-saving line with that one
     // message rather than retrying the old N-request loop, which would just
     // fail the same way N times.
+    //
+    // The Worker attempts only its plan's per-request line cap and defers
+    // the rest; commitFastStockIn re-sends only those. Each round is folded
+    // in and made durable here BEFORE the next round goes out, so a crash
+    // between rounds cannot lose a committed line's "saved" and re-send it.
+    // A line still deferred when the loop stops (a real failure elsewhere)
+    // was never attempted: it goes back to queued, not to an error.
     let batched: FastStockInCommitLineResult[] | null = null
+    let lines = received
+    const unsettled = new Set(pending.map((line) => line.key))
+    const foldRound = (settled: FastStockInCommitSettled) => {
+      for (const { index, result } of settled) {
+        const line = pending[index]
+        unsettled.delete(line.key)
+        if (result?.ok) {
+          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
+        } else if (isDeferredStockInResult(result)) {
+          failed += 1
+          lines = applyLineOutcome(lines, line.key, { status: 'queued', detail: '' })
+        } else {
+          failed += 1
+          lines = applyLineOutcome(lines, line.key, {
+            detail: stockFailureText(result, tr, tr('error', 'Error')),
+            status: 'error',
+            needsRemoval: stockLineNeedsRemoval(result),
+          })
+        }
+      }
+      // Durable before the render. A crash here used to leave every line
+      // reading "queued" in the draft, so the retry re-sent work the server
+      // had already applied.
+      persistSessionDraft(lines)
+      setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
+    }
     try {
-      batched = await commitFastStockIn(pending.map(buildLineRequest))
+      batched = await commitFastStockIn(pending.map(buildLineRequest), foldRound)
     } catch (error) {
       const message = error instanceof Error ? error.message : tr('error', 'Error')
-      failed = pending.length
-      const lines = received.map((item) => (pending.some((line) => line.key === item.key)
+      // Only lines no round has answered yet: a line already folded in as
+      // saved must keep "saved", or the retry would re-send applied stock.
+      failed += unsettled.size
+      lines = lines.map((item) => (unsettled.has(item.key)
         ? { ...item, status: 'error' as const, detail: stockFailureText(error, tr, message) }
         : item))
       persistSessionDraft(lines)
@@ -869,26 +909,6 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (batched === null) {
       // The deployed Worker predates POST /api/inventory/fast-stock-in/commit.
       failed = await performCommitSequential(pending)
-    } else if (batched.length > 0) {
-      let lines = received
-      pending.forEach((line, index) => {
-        const result = batched![index]
-        if (result?.ok) {
-          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
-        } else {
-          failed += 1
-          lines = applyLineOutcome(lines, line.key, {
-            detail: stockFailureText(result, tr, tr('error', 'Error')),
-            status: 'error',
-            needsRemoval: stockLineNeedsRemoval(result),
-          })
-        }
-      })
-      // Durable before the render. A crash here used to leave every line
-      // reading "queued" in the draft, so the retry re-sent work the server
-      // had already applied.
-      persistSessionDraft(lines)
-      setReceived(lines)
     }
     setSaving(false)
     setPendingCommit(null)
@@ -925,7 +945,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       { label: tr('set', 'Set'), value: modeCount(pendingCommit, 'set') },
     ]),
     { label: tr('total_units', 'Total units'), value: pendingCommit.reduce((total, line) => total + line.quantity, 0) },
-    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `$${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
+    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `${usdSymbol}${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
     // Receipt fields describe adds (and sets, which may add); a pure
     // remove session has none to review.
     ...(pendingCommit.some((line) => line.mode !== 'remove') ? [
@@ -981,8 +1001,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           onSave={(payload) => createProductForScannedBarcode((payload || {}) as Record<string, unknown>)}
           onClose={() => setCreateBarcode('')}
           t={(key: string) => tr(key, key)}
-          usdSymbol="$"
-          khrSymbol="៛"
+          usdSymbol={usdSymbol}
+          khrSymbol={khrSymbol}
           exchangeRate={exchangeRate}
         />
       </Suspense>
@@ -1129,7 +1149,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                 }} /></label>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
                 <div className="flex min-w-0 items-end gap-1.5">
-                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: ${(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
+                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: {usdSymbol}{(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
                 </div>
                 {/* N14-D: $0.00 is a claim the operator makes, never a default.
                     Its own row under the inputs: inside the cost cell it made that
@@ -1227,7 +1247,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 <span>{tr('fast_stockin_received', 'Received this session')} ({successCount})</span>
-                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: ${sessionCostTotal.toFixed(2)}</span> : null}
+                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: {usdSymbol}{sessionCostTotal.toFixed(2)}</span> : null}
               </div>
               <div className="max-h-40 space-y-1 overflow-y-auto">
                 {received.map((line) => (
@@ -1262,7 +1282,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             out of reach behind a long queue. */}
         <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · $${sessionCostTotal.toFixed(2)}` : ''}
+            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · ${usdSymbol}${sessionCostTotal.toFixed(2)}` : ''}
           </span>
           <button type="button" tabIndex={-1}
             title={tr('add_next_hint', 'Add & next queues this line; nothing is written until Complete.')}
@@ -1318,7 +1338,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           } as never}
           choices={selectedGroupChoices as never[]}
           t={(key: string) => tr(key, key)}
-          fmtUSD={(value: number) => `$${Number(value || 0).toFixed(2)}`}
+          fmtUSD={(value: number) => `${usdSymbol}${Number(value || 0).toFixed(2)}`}
           // Stock-in receives into either canonical branch.
           intent="stock"
           activeBranchId={branchId || defaultBranchId || null}

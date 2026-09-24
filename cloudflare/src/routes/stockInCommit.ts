@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, isActionBlocked } from '../lib/permissions'
+import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
 import { runAdjustAction, type InventoryContext } from './inventory'
 import { runReceiveBatchAction, type ReceiveBody } from './batches'
@@ -36,6 +37,17 @@ import { runReceiveBatchAction, type ReceiveBody } from './batches'
 // The win here is entirely the collapsed HTTP hop count: 1 request instead
 // of N, same D1 traffic per line as before.
 //
+// D1 CEILING. That per-line traffic is 16-24 D1 calls (lib/planTier.ts's
+// stockInLinesPerRequest has the measured table), and one invocation may
+// issue only 50 queries on the Free plan and 1000 on Paid. An uncapped
+// session therefore failed at two or three lines on Free and at about forty
+// on Paid -- and a line that ran out of queries half way could have written
+// stock and still report an error, which a manual retry then applied twice
+// wherever migration 0192's per-line receipts are not in place. So one
+// request attempts at most stockInLinesPerRequest lines; the rest are
+// answered 'deferred' without being touched, and the client re-sends only
+// those (frontend/src/api/inventoryWriteTransport.ts commitFastStockIn).
+//
 // Quota: bumpVersion()/audit() inside each reused kernel already call
 // consumeQuota('kv_write', 1) once per line (lib/cache.ts), exactly as the
 // N separate requests did before. This route does not call consumeQuota
@@ -48,6 +60,12 @@ app.use('*', acquisitionCostResponses)
 export type StockInCommitLine =
   | { key?: string; wire: 'adjust'; body: Record<string, unknown> }
   | { key?: string; wire: 'receive'; body: ReceiveBody }
+
+// A line this request did not attempt. Stable, so a client can tell "never
+// touched, send it again" from a real refusal; the English sentence is what a
+// client that predates the code shows, and it tells the operator what to do.
+const STOCK_IN_DEFERRED_CODE = 'deferred'
+const STOCK_IN_DEFERRED_ERROR = 'Not saved yet: this request reached its line limit. Complete again to save this line.'
 
 export interface StockInCommitLineResult {
   ok: boolean
@@ -99,14 +117,21 @@ async function runLine(c: InventoryContext, line: StockInCommitLine): Promise<St
 // going after a caught error. `results` always has one entry per input line,
 // in the same order, so the caller can map status back onto its own list by
 // index without depending on `key`.
+// Lines past the plan's stockInLinesPerRequest are answered 'deferred' in
+// that same one-entry-per-line shape and are NEVER attempted: no permission
+// check, no read, no write. Only a prefix is attempted, so what the client
+// re-sends is the untouched tail, still in its original order.
 // Exported separately from the route registration so scripts/test-fast-stock-in-commit-pure.cjs
 // can call it directly with a fake Context, the same way runAdjustAction and
 // runReceiveBatchAction are tested -- no real Hono app.request() round trip
 // needed to exercise the ordering/permission/kernel-parity behaviour.
 export async function runStockInCommit(c: InventoryContext, lines: StockInCommitLine[]): Promise<StockInCommitLineResult[]> {
+  const cap = getPlanLimits(c.env).stockInLinesPerRequest
   const results: StockInCommitLineResult[] = []
-  for (const line of lines) {
-    results.push(await runLine(c, line))
+  for (const [index, line] of lines.entries()) {
+    results.push(index < cap
+      ? await runLine(c, line)
+      : { ok: false, key: line?.key, error: STOCK_IN_DEFERRED_ERROR, code: STOCK_IN_DEFERRED_CODE })
   }
   return results
 }
