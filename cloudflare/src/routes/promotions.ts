@@ -208,7 +208,9 @@ app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
 })
 
 // ---------------------------------------------------------------------------
-// Legacy announcement-strip endpoints (each keeps the products gate).
+// Legacy announcement-strip endpoints (each keeps the products gate). Every
+// write bumps the 'promotions' cache version, which keys the cached public
+// strip (GET /api/portal/promotions).
 
 const LINK_TYPES = new Set(['none', 'product', 'url'])
 
@@ -284,6 +286,7 @@ app.post('/', requireKey('products'), async (c) => {
   `).run(input)
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', 'promotion', insert.lastInsertRowid, { title: input.title })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'create', id: insert.lastInsertRowid }))
   const created = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([insert.lastInsertRowid])
   return c.json(created)
@@ -318,6 +321,7 @@ app.put('/:id', requireKey('products'), async (c) => {
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'promotion', id, { title: input.title },
     changedFields(current as Record<string, unknown>, input as Record<string, unknown>, { keys: Object.keys(input) }))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
@@ -337,6 +341,7 @@ app.put('/reorder/all', requireKey('products'), async (c) => {
   })))
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reorder', 'promotion', null, { order })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'reorder' }))
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)
@@ -353,6 +358,7 @@ app.delete('/:id', requireKey('products'), async (c) => {
   await db.prepare('DELETE FROM promotions WHERE id = ?').run([id])
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'promotion', id, { title: current.title },
     changedFields(current as Record<string, unknown>, null))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'promotions'))
   c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
   return c.json({ deleted: true })
 })

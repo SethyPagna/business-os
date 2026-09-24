@@ -18,6 +18,7 @@ const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
 const Module = require('module')
+const { Hono } = require('hono')
 const { openDb } = require('./d1compat.cjs')
 const { loadAll } = require('./load_migrations.cjs')
 
@@ -110,6 +111,9 @@ function createWorker() {
     return moduleObj.exports
   }
   const load = (relPath) => loadFile(resolveTs(path.join(SRC, relPath)))
+  // A route module mounted at its production prefix (index.ts), so c.req.path
+  // and every cache key are the ones the deployed Worker sees.
+  const mount = (prefix, relPath) => new Hono().route(prefix, load(relPath).default)
 
   // One HTTP call into a route module's Hono app, with every waitUntil task
   // settled before the response is handed back (cache writes, audit rows,
@@ -139,10 +143,23 @@ function createWorker() {
     broadcasts,
     stats,
     load,
+    mount,
     override,
     call,
     setUser(next) { user = next },
   }
 }
 
-module.exports = { createWorker }
+// Runs `fn` with the clock frozen at `iso`: both `Date.now()` and a no-argument
+// `new Date()` answer that instant, so code on either spelling sees it.
+const RealDate = Date
+function atInstant(iso, fn) {
+  const fixed = RealDate.parse(iso)
+  global.Date = class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [fixed])) }
+    static now() { return fixed }
+  }
+  return Promise.resolve().then(fn).finally(() => { global.Date = RealDate })
+}
+
+module.exports = { createWorker, atInstant }

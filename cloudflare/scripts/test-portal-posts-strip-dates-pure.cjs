@@ -14,20 +14,10 @@
 //
 // Run (from cloudflare/): node scripts/test-portal-posts-strip-dates-pure.cjs
 const assert = require('assert')
-const { createWorker } = require('./harness/real_worker_routes.cjs')
-
-const RealDate = Date
-function atInstant(iso, fn) {
-  const fixed = RealDate.parse(iso)
-  global.Date = class extends RealDate {
-    constructor(...args) { super(...(args.length ? args : [fixed])) }
-    static now() { return fixed }
-  }
-  return Promise.resolve().then(fn).finally(() => { global.Date = RealDate })
-}
+const { createWorker, atInstant } = require('./harness/real_worker_routes.cjs')
 
 const worker = createWorker()
-const portal = worker.load('routes/portal.ts').default
+const portal = worker.mount('/api/portal', 'routes/portal.ts')
 
 const insert = worker.rawDb.db.prepare(`
   INSERT INTO promotions (title, is_active, sort_order, starts_at, ends_at)
@@ -48,7 +38,7 @@ strips.forEach(([title, active, startsAt, endsAt], index) => insert.run(title, a
 
 async function visibleAt(iso) {
   return atInstant(iso, async () => {
-    const res = await worker.call(portal, 'GET', '/promotions')
+    const res = await worker.call(portal, 'GET', '/api/portal/promotions')
     assert.strictEqual(res.status, 200)
     return res.body.items.map((item) => item.title)
   })

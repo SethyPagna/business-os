@@ -790,11 +790,11 @@ const PORTAL_SEARCH_CACHE_PARAMS = [
 
 // Consume Hono's SAME parsed first-value query object as the producer. Keep
 // alias precedence, empty values and duplicate branch-list values unchanged.
-// Only these five public GET producers ignore unknown query parameters.
+// Only these six public GET producers ignore unknown query parameters.
 export function portalCacheRequest(request: Request, query: Record<string, string>, routePath: string): Request {
   const url = new URL(request.url)
   const search = routePath === '/api/portal/catalog/products/search'
-  if (!search && !['/api/portal/config', '/api/portal/bootstrap', '/api/portal/catalog/meta', '/api/portal/catalog/products'].includes(routePath)) return request
+  if (!search && !['/api/portal/config', '/api/portal/bootstrap', '/api/portal/catalog/meta', '/api/portal/catalog/products', '/api/portal/promotions'].includes(routePath)) return request
   // Hono decodes encoded literal path characters before matching routes.
   url.pathname = routePath
   url.search = ''
@@ -1132,7 +1132,6 @@ app.post('/ai/chat', async (c) => {
 // to trust a client-side date check for what's allowed to show. The window is
 // taken on the Phnom Penh business day, not the UTC clock the port compared.
 app.get('/promotions', async (c) => {
-  const db = getDb(c.env)
   // "Show from" / "Show until" are DATES the owner types in the strip editor,
   // stored as ISO strings (ManagePromotionsModal: the start as UTC midnight of
   // the day, the end as 23:59:59 in the editing browser). Comparing those
@@ -1141,23 +1140,35 @@ app.get('/promotions', async (c) => {
   // written -- what the editor shows when reopened -- with today's business
   // date, so a strip runs from local midnight on its first day through the
   // whole of its last day.
-  const rows = await db.prepare(`
-    SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color,
-           p.link_product_id, pr.name AS link_product_name, pr.image_path AS link_product_image
-    FROM promotions p
-    LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product'
-    WHERE p.is_active = 1
-      AND (COALESCE(p.starts_at, '') = '' OR substr(p.starts_at, 1, 10) <= @today)
-      AND (COALESCE(p.ends_at, '') = '' OR substr(p.ends_at, 1, 10) >= @today)
-    ORDER BY p.sort_order ASC, p.id ASC
-  `).all({ today: businessToday(Date.now()) })
-  const items = (Array.isArray(rows) ? rows : []).map((row) => ({
-    ...row,
-    // Legacy rows may predate the admin write guard. Refuse an unsafe value
-    // again at the public boundary so it never reaches a visitor as a target.
-    link_url: normalizeSafeLinkUrl((row as Record<string, unknown>).link_url),
+  const today = businessToday(Date.now())
+  // Cached like /config. Every strip write bumps 'promotions'
+  // (routes/promotions.ts); the strip shows the linked product's name and
+  // image, which move with 'products'; and the business date is in the key so
+  // the date window turns over at Phnom Penh midnight, not up to a TTL later.
+  const [productsVersion, stripVersion] = await Promise.all([
+    getVersionWithFallback(c.env, 'products'),
+    getVersionWithFallback(c.env, 'promotions'),
+  ])
+  const version = `portal-strip-v1:${productsVersion}:${stripVersion}:${today}`
+  return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+    const rows = await getDb(c.env).prepare(`
+      SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color,
+             p.link_product_id, pr.name AS link_product_name, pr.image_path AS link_product_image
+      FROM promotions p
+      LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product'
+      WHERE p.is_active = 1
+        AND (COALESCE(p.starts_at, '') = '' OR substr(p.starts_at, 1, 10) <= @today)
+        AND (COALESCE(p.ends_at, '') = '' OR substr(p.ends_at, 1, 10) >= @today)
+      ORDER BY p.sort_order ASC, p.id ASC
+    `).all({ today })
+    const items = (Array.isArray(rows) ? rows : []).map((row) => ({
+      ...row,
+      // Legacy rows may predate the admin write guard. Refuse an unsafe value
+      // again at the public boundary so it never reaches a visitor as a target.
+      link_url: normalizeSafeLinkUrl((row as Record<string, unknown>).link_url),
+    }))
+    return { items }
   }))
-  return c.json({ items })
 })
 
 // ---- Customer membership lookup + share-submission workflow ----
