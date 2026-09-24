@@ -1,86 +1,78 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-// The Announcement Strip editor deliberately keeps its operator-facing copy
-// in English. This source check protects the complete label/message contract
-// without claiming that these strings route through the portal language packs.
-// The media-picker labels are the exception: they already use the shared
-// portalEditor copy helper and must keep doing so.
+// The Announcement Strip editor reads every user-visible string from the
+// language packs (owner, 24 Sep 2026: both packs, no English placeholder in
+// km). Until then it deliberately kept its copy in English and this file
+// pinned that; it now pins the opposite: no English literal left in the UI,
+// and every key it reads resolves in both packs with real Khmer.
 
-const source = fs.readFileSync(
-  new URL('../src/components/catalog/ManagePromotionsModal.tsx', import.meta.url),
-  'utf8',
-)
+const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8')
+const source = read('../src/components/catalog/ManagePromotionsModal.tsx')
+const en = JSON.parse(read('../src/lang/en.json'))
+const km = JSON.parse(read('../src/lang/km.json'))
 
-const requiredPatterns: Array<[string, RegExp]> = [
-  ['modal title', /<Modal title="Announcement Strip"/],
-  ['editor explanation', /Small, quick banner cards that scroll horizontally at the very top of the public catalog page/],
-  ['new-promotion action', />\s*New promotion\s*</],
-  ['new/edit heading', /editingId === 'new' \? 'New promotion' : 'Edit promotion'/],
-  ['title label', />Title \*</],
-  ['subtitle label', />Subtitle</],
-  ['badge-text label', />Badge text</],
-  ['badge-color label', />Badge color</],
-  ['link target label', />Links to</],
-  ['product label', />Product \*</],
-  ['show-from label', />Show from \(optional\)</],
-  ['show-until label', />Show until \(optional\)</],
-  ['portal visibility label', />Visible on the portal now</],
-  ['empty state', />No promotions yet\.</],
-  ['empty-state action hint', /Click "New promotion" above to add your first banner\./],
-  ['drag accessible name', /aria-label="Drag to reorder"/],
-]
+// Same flattening as AppContext's flattenTranslationTree: leaf key, last
+// visited wins. That is what t(key) actually returns at runtime.
+type Pack = Record<string, string>
+function flatten(node: unknown, target: Pack = {}): Pack {
+  if (!node || typeof node !== 'object') return target
+  for (const [key, value] of Object.entries(node)) {
+    if (value == null || Array.isArray(value)) continue
+    if (typeof value === 'object') flatten(value, target)
+    else target[key] = String(value)
+  }
+  return target
+}
+const enPack = flatten(en)
+const kmPack = flatten(km)
+const KHMER = /\p{Script=Khmer}/u
 
-for (const [label, pattern] of requiredPatterns) {
-  assert.match(source, pattern, `ManagePromotionsModal must retain its English ${label}`)
+// 1. Every copy('key', 'fallback') call resolves in both packs; the Khmer
+//    value is Khmer, and the fallback (shown before the packs load) says
+//    what the English pack says.
+const calls = [...source.matchAll(/\bcopy\('([A-Za-z0-9_]+)', ('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")\)/g)]
+  .map((match) => ({ key: match[1], fallback: match[2].slice(1, -1).replace(/\\'/g, "'") }))
+const presets = [...source.matchAll(/\{ key: '(color_[a-z]+)', label: '([^']+)', value: '#[0-9a-f]{6}' \}/g)]
+  .map((match) => ({ key: match[1], fallback: match[2] }))
+assert.ok(calls.length >= 40, `expected the modal to read its copy through copy(), found ${calls.length} calls`)
+assert.equal(presets.length, 7, 'every badge colour swatch has a translated name')
+for (const { key, fallback } of [...calls, ...presets]) {
+  assert.ok(enPack[key], `en.json must carry '${key}'`)
+  assert.ok(kmPack[key], `km.json must carry '${key}'`)
+  assert.match(kmPack[key], KHMER, `km '${key}' must be Khmer, found ${JSON.stringify(kmPack[key])}`)
+  assert.equal(fallback, enPack[key], `copy('${key}') fallback must match the English pack`)
 }
 
-const requiredNeedles: Array<[string, string]> = [
-  ['show-from accessible name', 'ariaLabel="Show from"'],
-  ['show-until accessible name', 'ariaLabel="Show until"'],
-  ['linked-target summary', '`Links to: ${'],
-  ['empty linked-target summary', ": 'No link'"],
-  ['product-picker placeholder', "label: 'Select a product…'"],
-  ['title placeholder', 'placeholder="Summer Sale"'],
-  ['subtitle placeholder', 'placeholder="20% off all skincare this week"'],
-  ['badge placeholder', 'placeholder="SALE"'],
-  ['link placeholder', 'placeholder="/catalog?category=Skincare or https://…"'],
-  ['load failure', "getErrorMessage(error, 'Failed to load promotions')"],
-  ['image upload rejection', "|| 'Image upload failed')"],
-  ['image failure', "getErrorMessage(error, 'Image upload failed')"],
-  ['required title validation', "return 'Title is required'"],
-  ['required linked product validation', "return 'Choose a product to link to'"],
-  ['required link validation', "return 'Enter a link URL'"],
-  ['safe-link validation', "return 'Enter a link URL that starts with http:// or https://'"],
-  ['date-order validation', "return 'End date must be after start date'"],
-  ['created notice', "notify('Promotion created', 'success')"],
-  ['updated notice', "notify('Promotion updated', 'success')"],
-  ['save failure', "getErrorMessage(error, 'Failed to save promotion')"],
-  ['delete confirmation', 'window.confirm(`Delete "${promo.title}"? This can\'t be undone.`)'],
-  ['deleted notice', "notify('Promotion deleted', 'success')"],
-  ['delete failure', "getErrorMessage(error, 'Failed to delete promotion')"],
-  ['visibility failure', "getErrorMessage(error, 'Failed to update promotion')"],
-  ['reorder failure', "getErrorMessage(error, 'Failed to save new order')"],
-  ['save progress label', "'Saving…' : 'Save promotion'"],
-  ['visibility state labels', "'Active' : 'Hidden'"],
-  ['edit tooltip', 'title="Edit"'],
-  ['delete tooltip', 'title="Delete"'],
-  ['edit accessible name', 'aria-label={`Edit ${promo.title}`}'],
-  ['delete accessible name', 'aria-label={`Delete ${promo.title}`}'],
-  ['edit visible label', 'sm:inline">Edit</span>'],
-  ['delete visible label', 'sm:inline">Delete</span>'],
+// 2. With every copy(...) call, the swatch table (checked above) and every
+//    comment removed, no English text is left anywhere a user can see or
+//    hear it.
+const stripped = source
+  .replace(/\bcopy\((?:'[^']*'|[a-z.]+), (?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[a-z.]+)\)/g, 'COPY')
+  .replace(/\{ key: 'color_[a-z]+', label: '[^']+', value: '#[0-9a-f]{6}' \}/g, 'SWATCH')
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  .replace(/(^|\s)\/\/.*$/gm, '$1')
+const leaks: Array<[string, RegExp]> = [
+  ['JSX text', />\s*[A-Za-z][A-Za-z ,.'"!?()-]*\s*</],
+  ['string title/placeholder/aria attribute', /\b(?:title|placeholder|aria-label|ariaLabel)="[^"]*[A-Za-z][^"]*"/],
+  ['bare notify message', /notify\('/],
+  ['bare validation message', /return '[A-Z]/],
+  ['bare select option label', /label: '[A-Z]/],
+  ['bare English string', /'[A-Z][a-z]+(?: [A-Za-z]+)*[.!?…]?'/],
+  ['native confirm with English', /window\.confirm\(`/],
+  ['English template text', /`[A-Z][a-z]+ [^`]*\$\{/],
 ]
-
-for (const [label, needle] of requiredNeedles) {
-  assert.ok(source.includes(needle), `ManagePromotionsModal must retain its English ${label}`)
+for (const [label, pattern] of leaks) {
+  const hit = stripped.match(pattern)
+  assert.ok(!hit, `ManagePromotionsModal still shows English (${label}): ${hit?.[0]}`)
 }
 
+// 3. Behaviour the i18n pass must not have lost.
+assert.match(source, /isSafeLinkUrl\(form\.link_url\)/, 'the link error stays backed by the shared URL allowlist')
+assert.match(source, /unsavedChanges=\{\{ dirty: editingId !== null \}\}/, 'closing with an open editor still guards the draft')
+assert.match(source, /\{copy\('cancel', 'Cancel'\)\}/, 'the edit form keeps its Cancel action')
 for (const key of ['image', 'noImage', 'uploading', 'replaceImage', 'uploadImage']) {
-  assert.match(source, new RegExp(`copy\\('${key}'`), `media control must keep using copy('${key}', ...)`)
+  assert.match(source, new RegExp(`copy\\('${key}'`), `media control keeps copy('${key}', ...)`)
 }
 
-assert.match(source, /isSafeLinkUrl\(form\.link_url\)/, 'the English URL error must remain backed by the shared URL allowlist')
-assert.match(source, /unsavedChanges=\{\{ dirty: editingId !== null \}\}/, 'closing the English editor must still guard a draft')
-assert.match(source, />\s*Cancel\s*<\/button>/, 'the edit form keeps its English Cancel action')
-
-console.log('PASS announcementStripI18n: deliberate English editor copy and translated media controls remain complete')
+console.log(`PASS announcementStripI18n: ${calls.length + presets.length} strings read from both packs, no English literal left`)
