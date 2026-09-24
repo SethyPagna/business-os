@@ -250,16 +250,16 @@ export default function SalesListReport(p: ReportViewProps) {
       {completed ? <section aria-label={tr('rpt_export_preview', 'Export preview')} className="mb-3 rounded border p-2">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-sm">{tr('rpt_export_preview', 'Export preview')} · {countLabel(completed.rowCount, REPORT_NOUNS.sale, tr)}</span>
-          <Button size="sm" onClick={exporter.csv}>{tr('export_csv', 'Export CSV')}</Button>
-          <Button size="sm" onClick={() => { void exporter.excel() }}>{tr('rpt_export_excel', 'Export Excel')}</Button>
-          <Button size="sm" onClick={exporter.print}>{tr('print', 'Print')}</Button>
-          <Button size="sm" variant="secondary" onClick={exporter.close}>{tr('close', 'Close')}</Button>
+          <Button size="sm" className="min-h-11 min-w-11" onClick={exporter.csv}>{tr('export_csv', 'Export CSV')}</Button>
+          <Button size="sm" className="min-h-11 min-w-11" onClick={() => { void exporter.excel() }}>{tr('rpt_export_excel', 'Export Excel')}</Button>
+          <Button size="sm" className="min-h-11 min-w-11" onClick={exporter.print}>{tr('print', 'Print')}</Button>
+          <Button size="sm" className="min-h-11 min-w-11" variant="secondary" onClick={exporter.close}>{tr('close', 'Close')}</Button>
         </div>
         <p className="mb-2 text-xs">{completed.subtitle} · {tr('rpt_export_money_note', 'Excel amounts are in USD. Preview and print use the selected currency.')}</p>
         <p className="mb-2 text-xs">{completed.metadata.join(' · ')}</p>
         <ReportTable surfaceKey={`reports-sales-export-${options.basis}`} columns={completed.columns} rows={completed.rows.slice(0, previewLimit)}
           rowKey={r => String(r.id)} style="excel" fmtMoney={completed.fmtMoney} labels={labels} totalsRow={completed.totals} maxHeight="calc(50 * var(--app-vh))"
-          footer={completed.rowCount > previewLimit ? <Button size="sm" variant="secondary" onClick={() => setPreviewLimit(n => n + 250)}>{tr('load_more', 'Load more')} ({fmtInt(Math.min(previewLimit, completed.rowCount))}/{fmtInt(completed.rowCount)})</Button> : null} />
+          footer={completed.rowCount > previewLimit ? <Button size="sm" className="min-h-11 min-w-11" variant="secondary" onClick={() => setPreviewLimit(n => n + 250)}>{tr('load_more', 'Load more')} ({fmtInt(Math.min(previewLimit, completed.rowCount))}/{fmtInt(completed.rowCount)})</Button> : null} />
       </section> : null}
       <ReportTable
         surfaceKey={`reports-sales-${options.basis}`}
