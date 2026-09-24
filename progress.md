@@ -42,6 +42,7 @@ Nothing below is deployed. Deploying and any remote migration still need the own
   2. `npm run migrate:remote`: applies 0192, 0193 and 0194. First re-read the live d1_migrations tail; the highest applied must still be 0184, with 0185-0191 parked. 0192 still lacks its council record; the owner's deploy instruction of 24 Sep is the go.
   3. `npm run deploy`
   4. Check /health, then record the Worker version id here.
+- **Final check (1bec57dee):** build passes; Playwright 145 passed, 0 failed (desktop and android Chromium); test:utils reds are the known four (reportsDetailFloatClose, also red on main, and the three sw* tests that need Playwright build 1243); Worker 517/517 (bfa464f06). 1bec57dee: a strip card saved without an order keeps its place.
 - **Production repair to verify after the deploy:** the General customer 24969 legacy membership LC-04971 (Settings repair exists); check whether it has already been applied.
 
 ## Shift close fixed; checkpoint 80f379ff deployed (Worker ce056cc0) — September 21
