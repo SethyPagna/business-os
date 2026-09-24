@@ -101,7 +101,7 @@ runTest('changed receipt cost retains the original product instead of offering a
   assert.match(modalSource, /createPriceVariant: false/, 'legacy draft shape stays compatible without requesting a new product')
   assert.match(modalSource, /sessionId: sessionIdRef\.current/, 'variant receipts remain in the same stock-in session')
   assert.match(modalSource, /const sessionCostTotal = received\.reduce/, 'the shipment exposes its total recorded cost')
-  assert.match(modalSource, /Total cost'\)}: \$\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
+  assert.match(modalSource, /Total cost'\)}: \{usdSymbol\}\{sessionCostTotal\.toFixed\(2\)\}/, 'session cost stays visible above the received rows')
 })
 
 runTest('known zero catalog cost is prefetched and the two read surfaces agree on missing', () => {
@@ -266,6 +266,63 @@ runTest('committing asks through ConfirmDialog, and placeholders are filled', ()
   // A failure keeps the modal and the draft, and the reason stays readable.
   assert.match(modalSource, /break-words text-\[10px\]/, 'a long server reason wraps rather than being squeezed out')
 })
+
+// Every money figure the modal prints uses the Settings currency symbol
+// (owner, 24 Sep 2026: the currency settings must actually apply). Rendered,
+// not grepped: the modal is bundled with the app context, the portal and the
+// draft store stubbed, restoring one queued 3 x 2.5 line under a custom "US$".
+{
+  const { build } = await import('esbuild')
+  const React = (await import('react')).default
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  const { createRequire } = await import('node:module')
+  const { fileURLToPath } = await import('node:url')
+  const stubs: Record<string, string> = {
+    context: 'export const useApp = () => globalThis.__fastStockInTestContext;',
+    portal: 'export const createPortal = (node) => node;',
+    drafts: `export const readWorkDraft = () => ({ data: globalThis.__fastStockInTestDraft });
+      export const scopedWorkDraftKey = (key) => key;
+      export const scheduleWorkDraftWrite = () => {}; export const clearWorkDraft = () => {};
+      export const flushPendingWorkDraft = () => {}; export const writeWorkDraft = () => {};`,
+  }
+  const bundle = await build({
+    entryPoints: [fileURLToPath(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url))],
+    bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent',
+    external: ['react', 'react-dom/server'],
+    plugins: [{ name: 'fast-stock-in-currency', setup(builder) {
+      // Only the modal's own imports: siblings bundled with it (never rendered
+      // here) take other exports from the real modules.
+      const own = (path: string) => (args: { importer: string }) => (/FastStockInModal\.tsx$/.test(args.importer) ? { path, namespace: 'fsi-stub' } : undefined)
+      builder.onResolve({ filter: /(?:^|\/)AppContext(?:\.tsx)?$/ }, own('context'))
+      builder.onResolve({ filter: /^react-dom$/ }, own('portal'))
+      builder.onResolve({ filter: /utils\/workDrafts(?:\.ts)?$/ }, own('drafts'))
+      builder.onLoad({ filter: /.*/, namespace: 'fsi-stub' }, (args) => ({ contents: stubs[args.path], loader: 'js' }))
+    } }],
+  })
+  const bundled = { exports: {} as { default: (props: Record<string, unknown>) => unknown } }
+  new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), bundled, bundled.exports)
+  Object.assign(globalThis, {
+    __fastStockInTestContext: { user: { permissions: { product_cost_view: true, product_cost_edit: true } }, exchangeRate: 4250, usdSymbol: 'US$', khrSymbol: 'KHR' },
+    __fastStockInTestDraft: { lines: [{
+      key: 'l1', requestId: 'r1', product: { id: 1, name: 'Soap', barcode: '' }, productName: 'Soap', quantity: 3, unitCost: '2.5',
+      freeGoods: false, createPriceVariant: false, expiryDate: '', batchChoice: 'new', batchLabel: 'New', mode: 'add', reason: '', conditionTag: '', createdProduct: false, status: 'queued',
+    }] },
+  })
+  // The portal target is only named, never touched, by the stubbed createPortal.
+  const hadDocument = 'document' in globalThis
+  if (!hadDocument) Object.assign(globalThis, { document: { body: null } })
+  const markup = renderToStaticMarkup(React.createElement(bundled.exports.default as never, {
+    branchOptions: [{ value: '1', label: 'Main' }], defaultBranchId: '1',
+    tr: (_key: string, fallback?: string) => fallback ?? _key, notify: () => {}, onClose: () => {}, onDone: () => {},
+  }))
+  if (!hadDocument) delete (globalThis as { document?: unknown }).document
+
+  runTest('the session cost total and the queue footer print the Settings currency symbol, never a hard-coded $', () => {
+    assert.match(markup, /Total cost: US\$7\.50/, 'the session total above the queued rows')
+    assert.match(markup, / · US\$7\.50/, 'the queue summary beside Complete')
+    assert.doesNotMatch(markup, /(?<!US)\$7\.50/, 'no money figure falls back to a literal $')
+  })
+}
 
 // The exit guard MUST be the last statement in this file. It previously sat
 // at line 152 with three runTest() calls after it, so a failure in any of

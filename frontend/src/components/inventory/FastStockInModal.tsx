@@ -1247,7 +1247,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 <span>{tr('fast_stockin_received', 'Received this session')} ({successCount})</span>
-                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: ${sessionCostTotal.toFixed(2)}</span> : null}
+                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: {usdSymbol}{sessionCostTotal.toFixed(2)}</span> : null}
               </div>
               <div className="max-h-40 space-y-1 overflow-y-auto">
                 {received.map((line) => (
@@ -1282,7 +1282,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             out of reach behind a long queue. */}
         <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
           <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · $${sessionCostTotal.toFixed(2)}` : ''}
+            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · ${usdSymbol}${sessionCostTotal.toFixed(2)}` : ''}
           </span>
           <button type="button" tabIndex={-1}
             title={tr('add_next_hint', 'Add & next queues this line; nothing is written until Complete.')}
@@ -1338,7 +1338,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           } as never}
           choices={selectedGroupChoices as never[]}
           t={(key: string) => tr(key, key)}
-          fmtUSD={(value: number) => `$${Number(value || 0).toFixed(2)}`}
+          fmtUSD={(value: number) => `${usdSymbol}${Number(value || 0).toFixed(2)}`}
           // Stock-in receives into either canonical branch.
           intent="stock"
           activeBranchId={branchId || defaultBranchId || null}
