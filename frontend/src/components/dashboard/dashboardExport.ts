@@ -4,6 +4,8 @@ import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
 import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
+import { fmtDayFirst } from '../../utils/formatters.ts'
+import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 
 type MetricMap = Record<string, number | undefined>
 type Row = Record<string, unknown>
@@ -168,6 +170,15 @@ function buildDashboardFormulaRows(ctx: DashboardExportContext): Row[] {
 }
 
 function buildDashboardManifestEntries(ctx: DashboardExportContext): Row[] {
+  // Business time (Asia/Phnom_Penh), not the raw UTC instant -- this cell is
+  // a plain manifest string a person reads directly, unlike the exportedAt
+  // instant handed to buildStandaloneReportHtml below (which runs it through
+  // fmtTime itself), so the conversion has to happen here.
+  const generatedAt = fmtDayFirst(new Date(), {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23', timeZone: BUSINESS_TIME_ZONE,
+  })
   return [
     { metric: 'Range Preset', value: ctx.periodShort },
     { metric: 'Date Range', value: ctx.rangeLabel },
@@ -178,7 +189,7 @@ function buildDashboardManifestEntries(ctx: DashboardExportContext): Row[] {
     { metric: 'Visible Branches', value: ctx.analytics?.byBranch?.length || 0 },
     { metric: 'Low Stock Items', value: ctx.lowStockCount },
     { metric: 'Out Of Stock Items', value: ctx.outOfStockCount },
-    { metric: 'Generated At', value: new Date().toISOString() },
+    { metric: 'Generated At', value: generatedAt },
   ]
 }
 

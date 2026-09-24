@@ -8,6 +8,7 @@ import {
   saveRememberedColumns,
   type ExportColumn,
 } from '../../utils/exportOptions.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 
 // H1 + X5 (Part 401): ONE export dialog for every page -- a column chooser
 // (defaults pre-checked, the chosen set remembered per surface) and the
@@ -79,7 +80,10 @@ export default function ExportOptionsDialog({
     setBusy(true)
     try {
       const projected = projectExportRows(rows, columns, selected)
-      const stamp = new Date().toISOString().slice(0, 10)
+      // Business-day stamp, not the raw UTC date -- an export taken between
+      // 00:00 and 06:59 Phnom Penh time is still UTC "yesterday", so slicing
+      // toISOString() here named every file and print subtitle a day early.
+      const stamp = todayStr()
       const filename = `${fileBaseName}-${stamp}`
       if (format === 'csv') {
         const { downloadCSV } = await import('../../utils/csv.ts')
