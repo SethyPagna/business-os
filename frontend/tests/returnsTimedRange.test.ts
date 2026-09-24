@@ -25,7 +25,7 @@ new Function('exports', 'require', 'module', compile(read('api/returnsReadTransp
     apiFetch: async (_method: string, path: string) => { paths.push(path); return [] },
   }
   if (id === './query.ts') return require('../src/api/query.ts')
-  if (id.includes('reportModel')) return require('../src/components/sales/reports/reportModel.ts')
+  if (id.includes('businessTimeBounds')) return require('../src/utils/businessTimeBounds.ts')
   throw new Error(id)
 }, transport)
 await transport.exports.getReturns(exact)

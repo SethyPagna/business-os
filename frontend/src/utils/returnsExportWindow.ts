@@ -1,4 +1,4 @@
-import { reportUtcBound } from '../components/sales/reports/reportModel.ts'
+import { reportUtcBound } from './businessTimeBounds.ts'
 
 export type ReturnsStatementRange = {
   startDate: string

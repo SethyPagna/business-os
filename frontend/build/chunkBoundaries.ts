@@ -6,6 +6,16 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // actor scope, while authentication reads storage constants at module load.
   ['/src/constants.ts', 'app-constants'],
   ['/src/api/actorReadScope.ts', 'actor-read-scope'],
+  // The sign-out fence and its owner helper are static imports of both
+  // actorReadScope.ts and http.ts, so they load on every boot anyway (the
+  // storefront included). Their own 'auth-intent' chunk only added one
+  // request before first paint; they import nothing that imports them back.
+  ['/src/api/unresolvedSignout.ts', 'actor-read-scope'],
+  ['/src/api/offlineQueueOwnership.ts', 'actor-read-scope'],
+  // Dependency-free business-time bound shared by fees/returns transports and
+  // Reports. Unpinned, Rollup hoisted it (with all of reportModel.ts) into the
+  // 'returns-read-api' manual chunk, which the storefront then had to fetch.
+  ['/src/utils/businessTimeBounds.ts', 'shared-formatters'],
   ['/src/utils/permissions.ts', 'permissions-core'],
   ['/src/utils/workDrafts.ts', 'work-drafts'],
   ['/src/utils/dirtyWork.ts', 'work-drafts'],

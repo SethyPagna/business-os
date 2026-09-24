@@ -1,6 +1,6 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { reportUtcBound } from '../components/sales/reports/reportModel.ts'
+import { reportUtcBound } from '../utils/businessTimeBounds.ts'
 
 /** Reports-compatible continuous entry-time interval; full days keep the
  * existing Cambodia created-at calendar-date filters. */

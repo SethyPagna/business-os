@@ -2,7 +2,7 @@ import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
-import { reportUtcBound } from '../components/sales/reports/reportModel.ts'
+import { reportUtcBound } from '../utils/businessTimeBounds.ts'
 
 // Frontend transport for the Fees page (cloudflare/src/routes/fees.ts).
 // No local/offline mirror -- same reasoning as notesTransport.ts: a failed

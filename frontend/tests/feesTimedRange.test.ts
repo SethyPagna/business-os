@@ -34,7 +34,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, { compil
   }
   if (id === './query.ts') return require('../src/api/query.ts')
   if (id.includes('moneyPrecision')) return require('../src/utils/moneyPrecision.ts')
-  if (id.includes('reportModel')) return require('../src/components/sales/reports/reportModel.ts')
+  if (id.includes('businessTimeBounds')) return require('../src/utils/businessTimeBounds.ts')
   if (id.includes('syncProblemLifecycle')) return {}
   throw new Error(id)
 }, module)

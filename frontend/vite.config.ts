@@ -642,9 +642,9 @@ function manualChunks(id: string): string | undefined {
       return 'api-http-core'
     }
     if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
-    // Shared by HTTP and actor fences; never pull the broad method registry
-    // back into these lower-level chunks.
-    if (normalized.endsWith('/src/api/unresolvedSignout.ts') || normalized.endsWith('/src/api/offlineQueueOwnership.ts')) return 'auth-intent'
+    // unresolvedSignout.ts / offlineQueueOwnership.ts (the sign-out fence
+    // shared by HTTP and actor scope) are pinned to 'actor-read-scope' in
+    // build/chunkBoundaries.ts, never to the broad method registry.
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'

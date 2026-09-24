@@ -17,6 +17,12 @@ const chunkFor = output.manualChunks as (id: string) => string | undefined
 const boundaries: Array<[string, string]> = [
   ['constants.ts', 'app-constants'],
   ['api/actorReadScope.ts', 'actor-read-scope'],
+  // Storefront request budget (perf-budget.spec.ts): the sign-out fence rides
+  // with actor scope instead of costing its own boot-path request, and the
+  // business-time bound rides with the always-loaded formatters.
+  ['api/unresolvedSignout.ts', 'actor-read-scope'],
+  ['api/offlineQueueOwnership.ts', 'actor-read-scope'],
+  ['utils/businessTimeBounds.ts', 'shared-formatters'],
   ['utils/permissions.ts', 'permissions-core'],
   ['utils/workDrafts.ts', 'work-drafts'],
   ['utils/dirtyWork.ts', 'work-drafts'],
@@ -111,6 +117,15 @@ for (const relative of [
   const closure = sourceClosure(relative)
   assert.equal(closure.has(path.join(frontend, 'src/AppContext.tsx')), false, `${relative} must not import admin startup`)
   assert.equal([...closure].some(file => /(?:PublicCatalogPage|CatalogPage|BackgroundImportTracker)\.tsx$/.test(file)), false)
+}
+// API transports ride the boot path (feesTransport is bundled into
+// app-api-methods). Importing the Reports model from one of them hoists the
+// whole model into a manual API chunk that the storefront then fetches before
+// first paint -- the regression that took the landing count from 50 to 52.
+for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', 'utils/returnsExportWindow.ts']) {
+  const closure = sourceClosure(relative)
+  assert.equal(closure.has(path.join(frontend, 'src/components/sales/reports/reportModel.ts')), false, `${relative} must not import the Reports model`)
+  assert.equal(closure.has(path.join(frontend, 'src/utils/businessTimeBounds.ts')), true, `${relative} uses the shared business-time bound`)
 }
 console.log('PASS neutral chunk policy, real config ordering, and source dependency boundaries')
 
