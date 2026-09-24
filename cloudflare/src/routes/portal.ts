@@ -2119,8 +2119,8 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   let total = paged.total
 
   // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
-  // runFuzzyFallbackMatch header comment and products.ts's/inventory.ts's
-  // identical block. This is the one search path that reaches real
+  // runFuzzyFallbackMatch header comment (the storefront is its only caller;
+  // products.ts/inventory.ts dropped it for FTS5). This is the one search path that reaches real
   // customers, so it's the one place typo tolerance matters most. Only
   // runs when the strict SQL-folded search found literally nothing for a
   // real query -- the common case never pays this extra pair of queries.

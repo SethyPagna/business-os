@@ -608,9 +608,9 @@ export function compactHaystackSql(expr: string, alreadyNormalized = false): str
 // This was planned since the fuzzy-search rollout (part 66) but never
 // actually wired into any route -- routes/products.ts imported
 // fuzzyTextMatches and never called it, a real "looks-wired-but-isn't" gap
-// (Track A's exact bug class), found and fixed this session. Every
-// server-paginated search route (products.ts, inventory.ts, portal.ts)
-// now calls this the same way: only when the strict SQL-folded search
+// (Track A's exact bug class). products.ts and inventory.ts later dropped it
+// for FTS5 prefix+trigram matching (see the note above); portal.ts, the
+// storefront search, is the one caller left, and calls it only when the strict SQL-folded search
 // finds literally zero rows for a non-empty query, against a bounded
 // candidate list the caller has already narrowed by every *other* filter
 // (branch/stock/category/etc, still via SQL) -- so the common case (a

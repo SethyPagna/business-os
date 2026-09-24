@@ -49,11 +49,6 @@ export const DELIVERY_FEE_PAYER = {
   STORE: 'store',
 } as const
 
-export const STOCK = {
-  DEFAULT_LOW_THRESHOLD: 10,
-  DEFAULT_OUT_OF_STOCK_THRESHOLD: 0,
-} as const
-
 export const SYNC = {
   REQUEST_TIMEOUT_MS: 12_000,
   READ_LOCAL_FALLBACK_MS: 350,
@@ -61,45 +56,6 @@ export const SYNC = {
   WS_RECONNECT_DELAY_MS: 5_000,
   EVENT_DEBOUNCE_MS: 150,
 } as const
-
-export const WRITE_CHANNELS = new Set([
-  'products:create',
-  'products:update',
-  'products:delete',
-  'products:adjustStock',
-  'products:bulkImport',
-  'categories:create',
-  'categories:update',
-  'categories:delete',
-  'units:create',
-  'units:update',
-  'units:delete',
-  'branches:create',
-  'branches:update',
-  'branches:delete',
-  'branches:transfer',
-  'sales:create',
-  'users:create',
-  'users:update',
-  'users:resetPassword',
-  'roles:create',
-  'roles:update',
-  'roles:delete',
-  'customers:create',
-  'customers:update',
-  'customers:delete',
-  'customers:bulkImport',
-  'suppliers:create',
-  'suppliers:update',
-  'suppliers:delete',
-  'suppliers:bulkImport',
-  'deliveryContacts:create',
-  'deliveryContacts:update',
-  'deliveryContacts:delete',
-  'settings:set',
-  'data:reset',
-  'data:factoryReset',
-] as const)
 
 export const LAYOUT = {
   POS_BREAKPOINT: 'md',
@@ -177,21 +133,3 @@ export function createEmptyOrder(number: number): PosOrder {
   }
 }
 
-const NETWORK_ERROR_SUBSTRINGS = [
-  'Failed to fetch',
-  'Load failed',
-  'NetworkError',
-  'ERR_CONNECTION_REFUSED',
-  'ERR_NAME_NOT_RESOLVED',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'ENOTFOUND',
-  'connect ENOENT',
-  'fetch failed',
-  'Request timed out',
-] as const
-
-export function isNetworkError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String((err as { message?: unknown } | null)?.message || '')
-  return NETWORK_ERROR_SUBSTRINGS.some((substring) => msg.includes(substring))
-}

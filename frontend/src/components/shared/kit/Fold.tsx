@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 
 // Same cast Modal.tsx/UnsavedChangesPrompt.tsx use -- Fold is a kit
-// component adopted only inside the admin app (see KitGallery.tsx), which
+// component adopted only inside the admin app, which
 // always sits under AppProvider.
 const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
