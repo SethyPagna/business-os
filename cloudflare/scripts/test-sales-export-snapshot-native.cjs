@@ -208,6 +208,12 @@ async function main() {
     assert.notEqual(next.export_token, first.export_token)
     assert.equal((await h.get(frozen(first, { q: 'tiny', verifyOnly: '1' }))).status, 409)
   })
+  await check('explicit cancelled cohort counts selected cancelled receipts without unrelated void activity', async h => {
+    const cancelled = (await h.get({ status: 'cancelled' })).body
+    assert.equal(cancelled.row_count, 1); assert.equal(cancelled.rows[0].id, 3)
+    assert.equal(cancelled.totals.cancelled_tx_count, 1); assert.equal(cancelled.totals.revenue_usd, 0)
+    assert.equal((await h.get({ status: 'cancelled', q: 'Alice' })).body.totals.cancelled_tx_count, 0)
+  })
   console.log(`${checks} native sales export groups passed`)
 }
 module.exports = { fixture }

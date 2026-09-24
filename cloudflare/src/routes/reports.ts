@@ -307,12 +307,13 @@ export function salesExportCohort(snapshot: SalesReportSnapshot, search: string)
     || ['receipt_number', 'customer', 'customer_phone', 'cashier', 'branch', 'payment_method']
       .some((key) => String(row[key] || '').toLowerCase().includes(search)))
   const ids = new Set(selected.map((row) => Number(row.id)))
+  const voidIds = new Set(selected.filter((row) => row.status === 'cancelled').map((row) => Number(row.id)))
   const sales = snapshot.sales.filter((row) => ids.has(Number(row.id)))
   const items = snapshot.items.filter((row) => ids.has(Number(row.sale_id)))
   const returns = snapshot.returns.filter((row) => ids.has(Number(row.sale_id)))
   const returnIds = new Set(returns.map((row) => Number(row.id)))
   const returnItems = snapshot.returnItems.filter((row) => returnIds.has(Number(row.return_id)))
-  return { sales, items, returns, returnItems, voidSales: [], deliveryFees: [],
+  return { sales, items, returns, returnItems, voidSales: sales.filter((row) => voidIds.has(Number(row.id))), deliveryFees: [],
     precision_mode: [...sales, ...returns].some((row) => Number(row.money_precision_version) !== 1) ? 'exact_recorded' : 'canonical_v1',
     row_count: sales.length + items.length + returns.length + returnItems.length }
 }
