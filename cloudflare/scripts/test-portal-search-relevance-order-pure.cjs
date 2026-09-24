@@ -108,6 +108,8 @@ const { normalizeSearchText } = searchMatch
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
 const portalRoute = loadReal('routes/portal.ts', {
+  // Real platform-free imports of portal.ts, shared by every loader.
+  ...require('./harness/portal_route_pure_deps.cjs'),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   '../lib/requestBodyGuard': loadReal('lib/requestBodyGuard.ts'),
