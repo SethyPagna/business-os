@@ -4,7 +4,11 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
-import { revertStockMovement } from '../../api/inventoryWriteTransport.ts'
+import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
+import {
+  buildStockInLineEditBody, isStockInLineEditable, newStockInLineEditRequestId, stockInLineDraft, stockInLineEditErrorText,
+  type StockInLineEditDraft,
+} from '../../utils/stockInLineEdit.ts'
 import { updateBatch } from '../../api/batchesTransport.ts'
 import { fmtClock24, fmtDate, fmtDateTime24 } from '../../utils/formatters.ts'
 import { groupByBusinessDay } from '../../utils/businessDayGroups.ts'
@@ -24,7 +28,7 @@ import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { useApp } from '../../AppContext'
-import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
 
@@ -54,6 +58,8 @@ type Row = {
   // stock-in session endpoint and therefore never recorded the answer.
   created_product?: number | null
   session_command_kind?: string | null
+  // N6: how many edit rows the Worker folded into this line (0 = as saved).
+  edit_count?: number | null
 }
 type Session = {
   key: string; rows: Row[]; supplier: SupplierChoice; receivedDate: string; branchId: string
@@ -119,6 +125,12 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const tr = useCallback((key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }, [t])
   const { fmtKHR, user } = useApp() as { fmtKHR: (value: unknown) => string; user: any }
   const canViewCosts = canViewAcquisitionCosts(user)
+  // The Worker refuses a cost from anyone without cost-entry permission, so
+  // the field is only offered to those who have it.
+  const canEditCosts = canViewCosts && canEditAcquisitionCosts(user)
+  // N6: the line being edited. The request id is fixed for one edit attempt
+  // (a retry after a lost response is answered from the stored operation).
+  const [lineEdit, setLineEdit] = useState<{ row: Row; draft: StockInLineEditDraft; requestId: string } | null>(null)
   // P10-6: the calculated-cost float, opened from the "Catalog cost price" value below.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
   const [sessions, setSessions] = useState<Session[]>([])
@@ -200,12 +212,15 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       const rows = payload.rows
       const cost = sessionCost(rows)
       const session = {
-        ...summary, rows, costUsd: cost.costUsd, linesWithoutCost: cost.linesWithoutCost,
+        // The lines are the Worker's current (edit-folded) figures; the header
+        // total follows them so a just-edited line and the header agree.
+        ...summary, rows, quantity: rows.reduce((sum, row) => sum + Math.abs(Number(row.quantity) || 0), 0),
+        costUsd: cost.costUsd, linesWithoutCost: cost.linesWithoutCost,
         paymentStatus: paymentState(rows), creditDueDate: rows.find((row) => row.batch_credit_due_date)?.batch_credit_due_date || '',
         hasSharedBatch: rows.some((row) => Number(row.batch_receipt_session_count) > 1),
         hasMixedHeader: summary.hasMixedHeader,
       } satisfies Session
-      setSelected(session); setSelectedLine(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
+      setSelected(session); setSelectedLine(null); setLineEdit(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
       setEditPayment(session.paymentStatus === 'credit' ? 'credit' : 'paid'); setEditCreditDueDate(session.creditDueDate)
     } catch (error) {
       notify(error instanceof Error ? error.message : tr('load_failed', 'Could not load stock-in session'), 'error')
@@ -242,13 +257,45 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { setBusy(false) }
   }
+  // N6: a line edited after it was saved is no longer just its receipt row, so
+  // the ledger revert would take back the ORIGINAL quantity (the Worker
+  // refuses it). Removing such a line is an edit to 0 -- a correction, never a
+  // loss -- through the same guarded writer.
+  const removeLine = (row: Row) => Number(row.edit_count) > 0 && row.id != null
+    ? editStockInLine(row.id, { client_request_id: newStockInLineEditRequestId(), quantity: 0, expected_quantity: Math.abs(Number(row.quantity) || 0), expected_batch_id: row.batch_id ?? null })
+    : revertStockMovement(row.id as number)
   const removeRow = async (row: Row) => {
     if (row.id == null) return
     if (busy || !window.confirm(tr('confirm_remove_stock_line', `Remove ${row.product_name} from this session? This posts a reversing stock movement.`))) return
     setBusy(true)
-    try { await revertStockMovement(row.id); notify(tr('movement_reverted', 'Stock line removed')); setSelected(null); await load(); onChanged() }
-    catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
+    try { await removeLine(row); notify(tr('movement_reverted', 'Stock line removed')); setSelected(null); await load(); onChanged() }
+    catch (error) { notify(Number(row.edit_count) > 0 ? stockInLineEditErrorText(error, tr) : error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { setBusy(false) }
+  }
+  const startLineEdit = (row: Row) => {
+    if (!isStockInLineEditable(row)) return
+    setSelectedLine(null)
+    setLineEdit({ row, draft: stockInLineDraft(row), requestId: newStockInLineEditRequestId() })
+  }
+  const patchLineDraft = (patch: Partial<StockInLineEditDraft>) => setLineEdit((current) => current ? { ...current, draft: { ...current.draft, ...patch } } : current)
+  const saveLineEdit = async () => {
+    if (!lineEdit || !selected || busy || lineEdit.row.id == null) return
+    const built = buildStockInLineEditBody(lineEdit.row, lineEdit.draft, lineEdit.requestId, canEditCosts)
+    if (!built.ok) { notify(tr(built.errorKey, built.fallback), 'error'); return }
+    if (!built.changed) { setLineEdit(null); return }
+    setBusy(true)
+    try {
+      await editStockInLine(lineEdit.row.id, built.body)
+      notify(tr('stock_in_line_updated', 'Stock-in line updated'))
+      const summary = selected
+      setLineEdit(null)
+      await load(); onChanged()
+      setBusy(false)
+      await open(summary)
+    } catch (error) {
+      // The same request id is kept: a retry of this attempt can never apply twice.
+      notify(stockInLineEditErrorText(error, tr), 'error')
+    } finally { setBusy(false) }
   }
   // Only lines with a movement can be reversed; a product created at 0 left
   // no stock to take back and stays as history.
@@ -258,7 +305,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     if (!selected || busy || !revertibleRows.length || !window.confirm(tr('confirm_remove_stock_session', `Remove this ${revertibleRows.length}-line stock-in session? Each line will be reversed; history is preserved.`))) return
     setBusy(true)
     try {
-      for (const row of revertibleRows) if (row.id != null) await revertStockMovement(row.id)
+      for (const row of revertibleRows) if (row.id != null) await removeLine(row)
       notify(tr('stock_session_removed', 'Stock-in session removed'))
       setSelected(null); await load(); onChanged()
     } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
@@ -341,19 +388,33 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
             t={tr}
           />
         ) : null}
+        {/* N6: edit one saved line. Compact: two columns on a phone, one row of
+            four on desktop; the Worker decides what the lot allows. */}
+        {lineEdit ? <div data-testid="stock-in-line-editor" className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/55 p-2.5 text-xs dark:border-blue-900/60 dark:bg-blue-950/20">
+          <div className="flex min-w-0 items-center gap-2"><Pencil className="h-3.5 w-3.5 shrink-0 text-blue-600" /><span className="min-w-0 break-words font-semibold text-gray-900 dark:text-white">{lineEdit.row.product_name}</span></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" inputMode="decimal" min={0} step="any" aria-label={tr('quantity', 'Quantity')} value={lineEdit.draft.quantity} onChange={(event) => patchLineDraft({ quantity: event.target.value })} /></label>
+            {canEditCosts ? <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost', 'Unit cost')} (USD)</span><input className="input h-9 w-full text-sm" type="number" inputMode="decimal" min={0} step="any" aria-label={tr('unit_cost', 'Unit cost')} value={lineEdit.draft.unitCostUsd} onChange={(event) => patchLineDraft({ unitCostUsd: event.target.value })} /></label> : null}
+            <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={lineEdit.draft.receivedDate} onChange={(iso) => patchLineDraft({ receivedDate: iso })} /></label>
+            <div className="min-w-0"><SupplierPickerField value={{ supplierId: lineEdit.draft.supplierId, supplierName: lineEdit.draft.supplierName }} onChange={(choice) => patchLineDraft({ supplierId: choice.supplierId ?? null, supplierName: choice.supplierName || '' })} tr={(key, fallback = key) => tr(key, fallback)} idPrefix="stock-in-line-edit" /></div>
+            <label className="col-span-2 min-w-0 sm:col-span-4"><span className="mb-1 block text-[11px] text-gray-500">{tr('reason', 'Reason')}</span><input className="input h-9 w-full text-sm" maxLength={512} aria-label={tr('reason', 'Reason')} value={lineEdit.draft.reason} placeholder={tr('stock_in_line_edit_reason_placeholder', 'Optional, e.g. typo on the invoice')} onChange={(event) => patchLineDraft({ reason: event.target.value })} /></label>
+          </div>
+          <div className="text-[11px] text-gray-500 dark:text-gray-400">{tr('stock_in_line_edit_hint', 'Lowering the quantity is recorded as a correction, not a loss. Units already sold cannot be taken back.')}</div>
+          <div className="compact-action-row"><button type="button" disabled={busy} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveLineEdit()}>{tr('save', 'Save')}</button><button type="button" disabled={busy} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setLineEdit(null)}>{tr('cancel', 'Cancel')}</button></div>
+        </div> : null}
         <div className="desktop-dense-only dense-data-shell">
           {/* N26: the Product column takes every pixel the fixed columns do
               not need, and the name WRAPS inside it -- "did not show the
               products full name, got cut by elipses". The barcode sits under
               the name instead of competing with it for width. */}
           <div className="scroll-x"><table className="dense-data-table min-w-[720px]">
-            <colgroup><col /><col className="w-[7rem]" /><col className="w-[22%]" /><col className="w-[6rem]" />{canViewCosts ? <col className="w-[7rem]" /> : null}<col className="w-10" /></colgroup>
+            <colgroup><col /><col className="w-[7rem]" /><col className="w-[22%]" /><col className="w-[6rem]" />{canViewCosts ? <col className="w-[7rem]" /> : null}<col className="w-16" /></colgroup>
             <thead><tr><th data-tone="blue"><span className="inline-flex items-center gap-1">{tr('product', 'Product')}<InfoHint label={tr('product', 'Product')} text={tr('stock_session_origin_hint', 'New means this session created the product; Existing means it received into a product already in the catalogue. Receipts recorded outside an Add-products session carry no marker.')} /></span></th><th>{tr('batch', 'Received date')}</th><th>{tr('reason', 'Reason')}</th><th data-tone="emerald" className="text-right">{tr('quantity', 'Quantity')}</th>{canViewCosts ? <th data-tone="amber" className="text-right">{tr('cost_price', 'Cost price')}</th> : null}<th aria-label={tr('actions', 'Actions')} /></tr></thead>
             <tbody>{selected.rows.map((row) => {
               const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) >= 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
               const originTag = productOriginTag(row, tr)
               return <tr key={lineKey(row)} className={selectedLine === row ? 'bg-blue-50/70 dark:bg-blue-950/20' : ''}>
-                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0 whitespace-normal"><span className="flex min-w-0 flex-wrap items-center gap-1"><span className="break-words font-semibold">{row.product_name}</span>{originTag ? <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all dense-id text-gray-400">{row.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}</span>{[row.unit, row.tag_label].filter(Boolean).length ? <span className="block break-words text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span> : null}</span></button></td>
+                <td><button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-start gap-2 text-left hover:text-blue-700 dark:hover:text-blue-300"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-8 w-8 rounded object-cover" /> : <ProductImagePlaceholder compact className="h-8 w-8 rounded" />}</span><span className="min-w-0 whitespace-normal"><span className="flex min-w-0 flex-wrap items-center gap-1"><span className="break-words font-semibold">{row.product_name}</span>{originTag ? <span className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}{Number(row.edit_count) > 0 ? <span className="shrink-0 rounded bg-blue-50 px-1 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">{tr('stock_in_line_edited', 'Edited')}</span> : null}</span><span className="block break-all dense-id text-gray-400">{row.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}</span>{[row.unit, row.tag_label].filter(Boolean).length ? <span className="block break-words text-[10px] text-gray-400">{[row.unit, row.tag_label].filter(Boolean).join(' · ')}</span> : null}</span></button></td>
                 {/* The column header says Received date, so the cell shows the
                     received-date LABEL -- the same `batchDisplayLabel` this
                     session's own detail panel below and the Stock Changes
@@ -366,7 +427,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
                 <td><span className="detail-scroll-text text-gray-500">{row.reason || '—'}</span></td>
                 <td className="text-right font-bold tabular-nums text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</td>
                 {canViewCosts ? <td className="text-right tabular-nums">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)}`}</td> : null}
-                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button>}</td>
+                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <span className="inline-flex items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy} onClick={() => startLineEdit(row)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-3.5 w-3.5" /></button> : null}<button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button></span>}</td>
               </tr>
             })}</tbody>
           </table></div>
@@ -375,9 +436,9 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           const unitCost = row.total_cost_usd != null && Number(row.total_cost_usd) >= 0 ? Number(row.total_cost_usd) / Math.max(1, Math.abs(Number(row.quantity) || 0)) : row.unit_cost_usd
           const originTag = productOriginTag(row, tr)
           return <div key={lineKey(row)} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine === row ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
-            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block detail-scroll-text text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
+            <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}{Number(row.edit_count) > 0 ? <span className="ml-1 inline-block rounded bg-blue-50 px-1 py-0.5 align-middle text-[10px] font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">{tr('stock_in_line_edited', 'Edited')}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block detail-scroll-text text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
             <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b>{canViewCosts ? <span className="block text-[11px] text-gray-400">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span> : null}</span>
-            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button>}
+            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <span className="flex shrink-0 items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy} onClick={() => startLineEdit(row)} className="rounded-lg p-2 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-4 w-4" /></button> : null}<button type="button" disabled={busy} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button></span>}
           </div>
         })}</div>
         <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveHeader()}>{tr('save', 'Save')}</button><button type="button" disabled={busy} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => setEditing(true)}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => { setAddMore(selected); setSelected(null) }}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => void removeSession()}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>

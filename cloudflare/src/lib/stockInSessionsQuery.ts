@@ -18,6 +18,54 @@ export const STOCK_RECEIPT_MOVEMENT_TYPES = ['add', 'stock_in'] as const
 
 export const STOCK_RECEIPT_TYPE_SQL = `m.movement_type IN (${STOCK_RECEIPT_MOVEMENT_TYPES.map((type) => `'${type}'`).join(', ')})`
 
+// N6 (owner, 23 Sep: "Stock-in sessions editable (today only add or
+// delete)"). An edit of a received line (lib/stockInLineEdit.ts) never
+// rewrites the line's own receipt movement -- the ledger stays append-only.
+// It posts DELTA movements stamped `stock-in-edit:<root movement id>:<operation>:<generation>`,
+// and every generation (forward, undo, redo) carries the same root prefix, so
+// the line's current state is the root row folded with every row under its
+// prefix:
+//   quantity   = |root.quantity| + SUM(edit.quantity)          (signed deltas)
+//   total cost = root.total + SUM(edit.total_cost_usd)          (signed deltas;
+//                NULL while neither the root nor any edit recorded a cost)
+//   lot        = the lot of the LAST positive-quantity edit row, else the root's
+// The prefix constants live here (not in the writer) because this module is
+// the one every receipt reader already imports, and it must stay import-light.
+export const STOCK_IN_EDIT_REFERENCE_PREFIX = 'stock-in-edit:'
+
+/** `stock-in-edit:<root>:<operation>:<generation>` -- every row of one generation. */
+export function stockInEditReference(rootMovementId: number, operationId: string, generation: number): string {
+  return `${STOCK_IN_EDIT_REFERENCE_PREFIX}${rootMovementId}:${operationId}:${generation}`
+}
+
+/**
+ * Index range covering every edit row of ONE root: ':' (0x3A) and ';' (0x3B)
+ * are adjacent, so `[lo, hi)` is exactly the `stock-in-edit:<root>:` prefix,
+ * served by idx 0104 (reference_id, movement_type, id).
+ */
+export function stockInEditRange(rootMovementId: number): { lo: string; hi: string } {
+  return { lo: `${STOCK_IN_EDIT_REFERENCE_PREFIX}${rootMovementId}:`, hi: `${STOCK_IN_EDIT_REFERENCE_PREFIX}${rootMovementId};` }
+}
+
+export function isStockInEditReference(referenceId: unknown): boolean {
+  return String(referenceId ?? '').startsWith(STOCK_IN_EDIT_REFERENCE_PREFIX)
+}
+
+// One grouped pass over the edit rows only (a range on the reference index;
+// integer session references sort below every text value). substr from 15 =
+// just after the 14-character prefix.
+const STOCK_IN_EDIT_FOLD_SQL = `(
+      SELECT CAST(substr(x.reference_id, 15, instr(substr(x.reference_id, 15), ':') - 1) AS INTEGER) AS root_id,
+             SUM(x.quantity) AS net_qty,
+             SUM(x.total_cost_usd) AS net_cost,
+             COUNT(x.total_cost_usd) AS cost_rows,
+             MAX(CASE WHEN x.quantity > 0 THEN x.id END) AS last_in_id,
+             COUNT(*) AS edit_rows
+      FROM inventory_movements x
+      WHERE x.reference_id >= '${STOCK_IN_EDIT_REFERENCE_PREFIX}' AND x.reference_id < 'stock-in-edit;'
+      GROUP BY 1
+    )`
+
 export const STOCK_IN_SESSION_KEY_SQL = `CASE
   WHEN m.reference_id IS NOT NULL AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'
     THEN 'session:' || CAST(m.reference_id AS TEXT)
@@ -73,29 +121,44 @@ const zeroLineHeaderSql = (field: string) => `(SELECT json_extract(je.value, '$.
               FROM json_each(o.request_json, '$.items') je
               WHERE json_extract(je.value, '$.line_id') = sm.line_id LIMIT 1)`
 
+// The line's current total (see the fold above). NULL only while neither the
+// root nor any edit row recorded a cost -- an unknown cost is never shown as $0.
+const LINE_TOTAL_SQL = `CASE WHEN m.total_cost_usd IS NULL AND COALESCE(e.cost_rows, 0) = 0 THEN NULL
+             ELSE ROUND(COALESCE(m.total_cost_usd, 0) + COALESCE(e.net_cost, 0), 4) END`
+
 function sessionLineRowsSql(where: { movement: string; zero: string }): string {
   return `
     SELECT ${STOCK_IN_SESSION_KEY_SQL} AS session_key,
            m.id AS id,
            (SELECT sm.line_id FROM stock_session_members sm WHERE sm.movement_id = m.id) AS session_line_id,
            m.product_id, m.product_name, ${PRODUCT_COLUMNS_SQL},
-           m.branch_id, m.branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
-           m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
+           m.branch_id, m.branch_name, m.movement_type,
+           -- N6: a line edited after it was saved reads its CURRENT state (see
+           -- STOCK_IN_EDIT_REFERENCE_PREFIX above); an unedited line is unchanged.
+           ABS(COALESCE(m.quantity, 0)) + COALESCE(e.net_qty, 0) AS quantity,
+           CASE WHEN COALESCE(e.edit_rows, 0) > 0 THEN cb.unit_cost_usd ELSE m.unit_cost_usd END AS unit_cost_usd,
+           m.unit_cost_khr,
+           ${LINE_TOTAL_SQL} AS total_cost_usd, m.total_cost_khr,
            -- "Missing" means the row recorded NO cost at all (NULL). A cost of
            -- 0.00 is a recorded fact -- a free/sample line -- and counting it
            -- as missing made the receipt claim a cost it does not know
            -- (a7ff72f7). Keep the test on NULL, never on > 0.
-           CASE WHEN m.total_cost_usd IS NOT NULL THEN 0 ELSE 1 END AS cost_missing,
-           m.reason, m.reference_id, m.user_id, ${movementActorNameSql('m')} AS user_name, m.created_at, m.batch_id,
-           b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
-           b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
-           b.payment_status AS batch_payment_status, b.credit_due_date AS batch_credit_due_date,
-           b.unit_cost_usd AS batch_unit_cost_usd, b.received_cost_usd AS batch_received_cost_usd,
-           b.expiry_date AS batch_expiry_date, b.updated_at AS batch_updated_at,
-           b.received_at AS received_at, b.supplier_id AS supplier_id, b.supplier_name AS supplier_name,
-           b.payment_status AS payment_status, b.credit_due_date AS credit_due_date,
-           COALESCE(CAST(b.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(b.supplier_name, ''))) AS supplier_state,
-           COALESCE(b.payment_status, '') AS payment_state,
+           CASE WHEN (${LINE_TOTAL_SQL}) IS NOT NULL THEN 0 ELSE 1 END AS cost_missing,
+           m.reason, m.reference_id, m.user_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
+           -- The lot and its header fields are the line's CURRENT lot (cb); the
+           -- session KEY above stays on the root lot (b), so an edit can never
+           -- move a line into a different session.
+           cb.id AS batch_id,
+           cb.lot_code AS batch_lot_code, cb.received_at AS batch_received_at,
+           cb.supplier_id AS batch_supplier_id, cb.supplier_name AS batch_supplier_name,
+           cb.payment_status AS batch_payment_status, cb.credit_due_date AS batch_credit_due_date,
+           cb.unit_cost_usd AS batch_unit_cost_usd, cb.received_cost_usd AS batch_received_cost_usd,
+           cb.expiry_date AS batch_expiry_date, cb.updated_at AS batch_updated_at,
+           cb.received_at AS received_at, cb.supplier_id AS supplier_id, cb.supplier_name AS supplier_name,
+           cb.payment_status AS payment_status, cb.credit_due_date AS credit_due_date,
+           COALESCE(CAST(cb.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(cb.supplier_name, ''))) AS supplier_state,
+           COALESCE(cb.payment_status, '') AS payment_state,
+           COALESCE(e.edit_rows, 0) AS edit_count,
            -- N14: did this line CREATE the product, or receive into one that
            -- already existed? The session commit records it durably per line
            -- (stock_session_members.product_created / command_kind, migration
@@ -111,8 +174,14 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            (SELECT sm.command_kind FROM stock_session_members sm WHERE sm.movement_id = m.id) AS session_command_kind
     FROM inventory_movements m
     JOIN product_batches b ON b.id = m.batch_id
+    LEFT JOIN ${STOCK_IN_EDIT_FOLD_SQL} e ON e.root_id = m.id
+    LEFT JOIN inventory_movements li ON li.id = e.last_in_id
+    JOIN product_batches cb ON cb.id = COALESCE(li.batch_id, m.batch_id)
     LEFT JOIN products p ON p.id = m.product_id
     WHERE ${STOCK_RECEIPT_TYPE_SQL} AND ${where.movement}
+      -- An edit's own receipt-typed delta row belongs to its root line, never
+      -- to a session of its own.
+      AND (m.reference_id IS NULL OR CAST(m.reference_id AS TEXT) NOT LIKE '${STOCK_IN_EDIT_REFERENCE_PREFIX}%')
     UNION ALL
     SELECT 'session:' || CAST(o.rowid AS TEXT) AS session_key,
            NULL AS id, sm.line_id AS session_line_id, sm.product_id, p.name AS product_name, ${PRODUCT_COLUMNS_SQL},
@@ -134,6 +203,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
                 ELSE COALESCE(CAST(${zeroLineHeaderSql('supplier_id')} AS TEXT), '') || ':' || lower(trim(COALESCE(${zeroLineHeaderSql('supplier_name')}, '')))
            END AS supplier_state,
            NULL AS payment_state,
+           0 AS edit_count,
            sm.product_created AS created_product, sm.command_kind AS session_command_kind
     FROM stock_session_members sm
     JOIN stock_session_operations o ON o.id = sm.operation_id
@@ -233,7 +303,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
            s.reason, s.reference_id, s.user_name, s.created_at, s.batch_id,
            s.batch_lot_code, s.batch_received_at, s.batch_supplier_id, s.batch_supplier_name,
            s.batch_payment_status, s.batch_credit_due_date, s.batch_unit_cost_usd, s.batch_received_cost_usd,
-           s.batch_expiry_date, s.batch_updated_at, s.created_product, s.session_command_kind
+           s.batch_expiry_date, s.batch_updated_at, s.created_product, s.session_command_kind, s.edit_count
     FROM (${sessionLineRowsSql(where)}) s
     ORDER BY s.created_at ASC, s.id ASC, s.session_line_id ASC
     LIMIT 2001`
