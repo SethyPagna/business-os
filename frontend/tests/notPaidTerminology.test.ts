@@ -37,7 +37,6 @@ const saleUnpaidKeys = [
   'rpt_hint_pending_profit',
   'shift_report_hint',
   'shift_credit_hint',
-  'sale_incident_recovery_status_awaiting_payment',
   'sale_not_paid_stock_recovery_status',
   'sale_not_paid_stock_recovery_desc',
   'sale_not_paid_stock_recovery_success',
@@ -215,7 +214,6 @@ assert.match(pos, /awaiting_payment: 'Not Paid'/, 'the POS status fallback uses 
 for (const [file, source] of [
   ['dashboardSaleStatus.ts', dashboardStatus],
   ['POS.tsx', pos],
-  ['SaleIncidentRecovery.tsx', read('../src/components/utils-settings/SaleIncidentRecovery.tsx')],
   ['SaleNotPaidStockRecovery.tsx', read('../src/components/utils-settings/SaleNotPaidStockRecovery.tsx')],
 ] as const) {
   assert.doesNotMatch(source, /'Awaiting [Pp]ayment'/, `${file} still ships a retired Awaiting Payment fallback`)
