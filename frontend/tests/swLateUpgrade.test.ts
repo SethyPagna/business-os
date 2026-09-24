@@ -3,7 +3,7 @@ import test from 'node:test'
 import fs from 'node:fs'
 import http from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { chromium, expect } from '@playwright/test'
+import { chromium, expect, type Browser, type BrowserContext } from '@playwright/test'
 import { buildSync } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
@@ -61,8 +61,19 @@ for (const poisonBeforeInstall of [false, true]) test(`native legacy migration (
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as any).port}`
-  const browser = await chromium.launch()
-  const context = await browser.newContext({ serviceWorkers: 'allow' })
+  // If the launch throws (e.g. no Chromium here), close the listening server
+  // and rethrow the launch error; left open, it keeps this file -- and the
+  // whole test chain -- waiting forever instead of failing.
+  let browser: Browser | undefined
+  let context: BrowserContext
+  try {
+    browser = await chromium.launch()
+    context = await browser.newContext({ serviceWorkers: 'allow' })
+  } catch (error) {
+    await browser?.close().catch(() => {})
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    throw error
+  }
   try {
     const draft = await context.newPage()
     await draft.goto(origin)

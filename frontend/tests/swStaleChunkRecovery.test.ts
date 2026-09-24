@@ -51,7 +51,7 @@ import test from 'node:test'
 import fs from 'node:fs'
 import http from 'node:http'
 import { execFileSync } from 'node:child_process'
-import { chromium, type Page } from '@playwright/test'
+import { chromium, type Browser, type Page } from '@playwright/test'
 import { buildSync } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 
@@ -294,14 +294,32 @@ function createFixture(workerSource: string, options: FixtureOptions = {}) {
   }
 }
 
+/**
+ * Open the browser for a fixture whose server is ALREADY listening. If the
+ * launch (or context/page creation) throws -- e.g. no Chromium on this
+ * machine -- close what opened and the server, then rethrow the launch error:
+ * a listening server left behind keeps this file, and the whole test chain,
+ * waiting forever instead of failing.
+ */
+async function openBrowser(closeFixture: () => Promise<void>) {
+  let browser: Browser | undefined
+  try {
+    browser = await chromium.launch()
+    const context = await browser.newContext({ serviceWorkers: 'allow' })
+    return { browser, context, page: await context.newPage() }
+  } catch (error) {
+    await browser?.close().catch(() => {})
+    await closeFixture()
+    throw error
+  }
+}
+
 async function runScenario(workerSource: string, deploy: boolean, options: FixtureOptions = {}): Promise<Outcome> {
   const fixture = createFixture(workerSource, { challengeWorkerShellReads: true, ...options })
   const { server } = fixture
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch()
-  const context = await browser.newContext({ serviceWorkers: 'allow' })
-  const page = await context.newPage()
+  const { browser, context, page } = await openBrowser(fixture.close)
   let recoveryReloads = 0
   const recoveryTokens = new Set<string>()
   let recoveryCommittedAt: number | null = null
@@ -499,9 +517,7 @@ async function probeStaleAsset(workerSource: string): Promise<StaleAssetProbe> {
   const { server } = fixture
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-  const browser = await chromium.launch()
-  const context = await browser.newContext({ serviceWorkers: 'allow' })
-  const page = await context.newPage()
+  const { browser, context, page } = await openBrowser(fixture.close)
   try {
     await page.goto(origin)
     await page.evaluate(async () => {
