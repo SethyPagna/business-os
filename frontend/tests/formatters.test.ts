@@ -84,7 +84,9 @@ await runTest('timezone labels say Phnom Penh, never Bangkok (user, Aug 30 2026)
   assert.equal(fmtTimezoneLabel(null), '')
   // Every surface that prints a captured zone routes through the label.
   const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
-  assert.match(auditLog, /fmtTimezoneLabel\(log\?\.device_tz\)/)
+  // TZ-1: the audit label names the zone the time is SHOWN in (the business
+  // zone), still routed through the label so it can never read Bangkok.
+  assert.match(auditLog, /fmtTimezoneLabel\(BUSINESS_TIME_ZONE\)/)
   const saleDetail = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
   // S4-24 (user, Sep 4 2026): the sale detail stopped showing a Timezone row
   // at all -- it reads like a receipt now, and no receipt prints one. The rule

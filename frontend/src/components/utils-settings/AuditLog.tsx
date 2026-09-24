@@ -220,13 +220,13 @@ function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
   return 'Web session'
 }
 
-function auditTimezoneLabel(log: AuditLogRow | null | undefined): string {
-  // fmtTimezoneLabel: Asia/Bangkok renders as Asia/Phnom_Penh (same UTC+7).
-  const captured = fmtTimezoneLabel(log?.device_tz)
-  if (captured) return captured
-  const rawTime = String(log?.client_time || log?.created_at || '')
-  if (/[+-]00(?::?00)?$/.test(rawTime) || rawTime.endsWith('Z')) return 'UTC'
-  return 'Server time'
+// The zone label printed beside each audit time names the zone that time is
+// SHOWN in. formatDateTime/formatCompactDateTime convert every stamp to the
+// business zone, so the label is the business zone for every row -- never the
+// device zone the entry was captured on (device_tz), "UTC" or "Server time",
+// which described the raw input and contradicted the converted clock beside it.
+function auditTimezoneLabel(_log?: AuditLogRow | null): string {
+  return fmtTimezoneLabel(BUSINESS_TIME_ZONE)
 }
 
 function getLogEpoch(log: AuditLogRow | null | undefined): number {
