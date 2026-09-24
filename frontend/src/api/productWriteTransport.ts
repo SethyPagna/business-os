@@ -410,9 +410,19 @@ export function dismissProductDuplicateCluster(type: 'leadingzero' | 'barcode' |
 // the keeper's prices. Callers open the confirm dialog with these numbers, so
 // the operator answers with the facts in view. Plain apiFetch -- it writes
 // nothing and is safe to repeat.
-export function getMergePreview(keepId: number | string, mergeId: number | string): Promise<unknown> {
-  const query = `keepId=${encodeURIComponent(String(keepId))}&mergeId=${encodeURIComponent(String(mergeId))}`
-  return apiFetch('GET', `/api/products/possible-duplicates/merge-preview?${query}`)
+// `keep` is the Resolve grid's Keep merge (owner N1/N3, 23 Sep 2026): a pair
+// the system listed together is never blocked for a name or barcode
+// difference, and the answer adds the kept product's stock per branch and,
+// with `groupIds`, the cost the merge rule gives the whole group.
+export function getMergePreview(
+  keepId: number | string,
+  mergeId: number | string,
+  options: { keep?: boolean; groupIds?: Array<number | string>; signal?: AbortSignal } = {},
+): Promise<unknown> {
+  let query = `keepId=${encodeURIComponent(String(keepId))}&mergeId=${encodeURIComponent(String(mergeId))}`
+  if (options.keep) query += '&keep=1'
+  if (options.keep && options.groupIds?.length) query += `&groupIds=${options.groupIds.map((id) => encodeURIComponent(String(id))).join(',')}`
+  return apiFetch('GET', `/api/products/possible-duplicates/merge-preview?${query}`, undefined, undefined, options.signal ? { signal: options.signal } : undefined)
 }
 
 // `stock` is the operator's answer for the discarded row's remaining stock:
@@ -425,10 +435,20 @@ export function mergePossiblySameProducts(
   keepId: number | string,
   mergeId: number | string,
   stock?: 'merge' | 'write_off',
+  // The Resolve grid's Keep merge: the kept product's name and barcode stay,
+  // and a chosen cost (sent only by a user with the cost edit permission; the
+  // Worker refuses it otherwise) replaces the averaged one.
+  keep?: { cost_price_usd?: number; cost_price_khr?: number | null },
 ): Promise<unknown> {
+  const body: Record<string, unknown> = stock ? { keepId, mergeId, stock } : { keepId, mergeId }
+  if (keep) {
+    body.keep = true
+    if (keep.cost_price_usd !== undefined) body.cost_price_usd = keep.cost_price_usd
+    if (keep.cost_price_khr != null) body.cost_price_khr = keep.cost_price_khr
+  }
   return route(
     'products:mergePossiblySame',
-    () => apiFetch('POST', '/api/products/possible-duplicates/merge', stock ? { keepId, mergeId, stock } : { keepId, mergeId }),
+    () => apiFetch('POST', '/api/products/possible-duplicates/merge', body),
     null,
     true,
   )

@@ -1,8 +1,7 @@
-import ProductNameRail from '../shared/ProductNameRail'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
@@ -27,8 +26,11 @@ import {
 } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { normalizeProductGroupName } from '../../utils/productGrouping.ts'
-import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import Modal from '../shared/Modal'
+import ResolveModal from '../shared/ResolveModal.tsx'
+import { useCopyFloat } from '../shared/CopyFloat.tsx'
+import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
+import { createProductResolveAdapter } from './productResolveAdapter.ts'
 import { SelectedConflictGroupReviewModal } from './SelectedConflictMergeReviewModal.tsx'
 import {
   createSelectedConflictRequestCoordinator,
@@ -117,7 +119,7 @@ function selectedConflictErrorMessage(t: TranslateFn, error: unknown, fallbackKe
 }
 
 function ClusterCard({
-  cluster, t, dismissing, merging, selected, selectable, isExact, canRemoveProduct, removalReasons, onToggleSelect, onRemovalChange, onDismiss, onApplyDecisions, onEdit,
+  cluster, t, dismissing, merging, selected, selectable, isExact, canRemoveProduct, removalReasons, onToggleSelect, onRemovalChange, onDismiss, onApplyDecisions, onEdit, onPreview,
 }: {
   cluster: Cluster
   t: TranslateFn
@@ -135,9 +137,28 @@ function ClusterCard({
   onDismiss: () => void
   onApplyDecisions: (keeper: ClusterProduct, removals: ClusterProduct[]) => void
   onEdit: (product: ClusterProduct) => void
+  // N2: a tap on the product opens its preview (Products' detail view).
+  onPreview?: (product: ClusterProduct) => void
 }) {
   const [key, fallback] = SEVERITY_LABEL_KEY[cluster.severity]
   const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
+  const copyTranslate = useMemo(() => (copyKey: string, copyFallback?: string) => t(copyKey) || copyFallback || copyKey, [t])
+  const copyFloat = useCopyFloat(copyTranslate)
+  // Inside the name <button> only the copy MARKER goes on the span (no second
+  // role/tab stop inside a button), the same as ResolveGrid.tsx copyMarker.
+  const copyMarker = (value: string) => {
+    const props = copyFloat(value)
+    return { 'data-copy-value': props['data-copy-value'], 'data-copy-success': props['data-copy-success'], title: props.title }
+  }
+  // A tap opens the preview; a double-click (pointer) or a hold (touch) on the
+  // name opens the shared copy float with the full name instead, so the tap
+  // waits out the double-click window exactly like a Products row does.
+  const openPreview = (event: ReactMouseEvent<HTMLButtonElement>, product: ClusterProduct) => {
+    if (!onPreview) return
+    const copyTarget = (event.target as Element | null)?.closest?.(COPY_SELECTOR)
+    if (copyTarget) deferCopySurfaceAction(copyTarget, () => onPreview(product))
+    else onPreview(product)
+  }
   // Decide-all-then-apply (user, Aug 30: "only allow changes after all in
   // one conflict is fully decided, remove, keep, resolve"): every product
   // in the group takes an explicit Keep/Remove decision; Apply arms only
@@ -212,24 +233,44 @@ function ClusterCard({
           const decision = decisions[product.id]
           const removeIndependently = Object.prototype.hasOwnProperty.call(removalReasons, product.id)
           return (
-            <div key={product.id} className="rounded-lg border border-black/5 p-1.5 dark:border-white/10">
-              <div className="flex items-center gap-2 text-sm">
+            <div key={product.id} data-conflict-row={product.id} className="rounded-lg border border-black/5 p-1.5 dark:border-white/10">
+              {/* N2 (owner, 23 Sep 2026), every width: the name takes its own
+                  full row and wraps, never an ellipsis; barcode, Cost: and
+                  Selling: share one row; the stock row carries Keep / Merge /
+                  Resolve. A tap opens the product preview; a hold shows the
+                  full name in the copy float. */}
+              <button
+                type="button"
+                data-conflict-name
+                onClick={(event) => openPreview(event, product)}
+                disabled={!onPreview}
+                aria-label={`${t('product_preview_open') || 'Open product preview'}: ${product.name || `#${product.id}`}`}
+                className="flex w-full min-w-0 items-start gap-2 rounded-md text-left text-sm transition hover:bg-black/5 disabled:cursor-default disabled:hover:bg-transparent dark:hover:bg-white/5"
+              >
                 <ProductImg src={product.image_path || ''} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
-                <div className="min-w-0 flex-1">
-                  <div className="min-w-0 font-medium text-gray-900 dark:text-white"><ProductNameRail name={String((product.name || `#${product.id}`) ?? '')} /></div>
-                  <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-gray-500 dark:text-gray-400">
-                    {cluster.type !== 'barcode' && product.barcode ? <span>{product.barcode}</span> : null}
-                    {canViewCosts ? <span>{t('cost_price') || 'Cost price'}: {money(product.cost_price_usd)}</span> : null}
-                    <span>{t('selling_price') || 'Selling price'}: {money(product.selling_price_usd)}</span>
-                    <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
-                    {(product.branch_stock || []).map((line) => (
-                      <span key={line.branch_id} className="rounded bg-black/5 px-1 dark:bg-white/10">
-                        {line.branch_name || `#${line.branch_id}`} {line.quantity}
-                      </span>
-                    ))}
-                  </div>
+                <span className="min-w-0 flex-1 whitespace-normal break-words font-medium text-gray-900 [overflow-wrap:anywhere] dark:text-white" {...copyMarker(product.name || `#${product.id}`)}>
+                  {product.name || `#${product.id}`}
+                </span>
+              </button>
+              {/* .scroll-x-clean is a block scroller (it sets display:block), so the
+                  one-row items sit in their own inline-flex line inside it. */}
+              <div data-conflict-meta className="scroll-x-clean mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                <div className="inline-flex items-center gap-x-2">
+                  {product.barcode ? <span {...copyFloat(product.barcode)}>{product.barcode}</span> : null}
+                  {canViewCosts ? <span>{t('cost') || 'Cost'}: {money(product.cost_price_usd)}</span> : null}
+                  <span>{t('selling') || 'Selling'}: {money(product.selling_price_usd)}</span>
                 </div>
-                <div className="flex flex-shrink-0 items-center gap-1">
+              </div>
+              <div data-conflict-stock className="mt-1 flex items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                  <span>{Number(product.stock_quantity) || 0} {t('pcs') || 'pcs'}</span>
+                  {(product.branch_stock || []).map((line) => (
+                    <span key={line.branch_id} className="rounded bg-black/5 px-1 dark:bg-white/10">
+                      {line.branch_name || `#${line.branch_id}`} {line.quantity}
+                    </span>
+                  ))}
+                </div>
+                <div data-conflict-actions className="flex flex-shrink-0 items-center gap-1">
                   <button
                     type="button"
                     onClick={() => decide(product.id, 'keep')}
@@ -306,16 +347,20 @@ function ClusterCard({
   )
 }
 
-export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMergeLeadingZero, reviewProductIds, onReviewProductIdsConsumed }: {
+export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMergeLeadingZero, reviewProductIds, onReviewProductIdsConsumed, onPreviewProduct }: {
   t: TranslateFn
   notify: NotifyFn
   canRemoveProduct: boolean
   onMergeLeadingZero?: () => void
+  /** N2: open the product preview for a conflict row. */
+  onPreviewProduct?: (productId: number) => void
   reviewProductIds?: readonly [number, number] | null
   onReviewProductIdsConsumed?: () => void
 }) {
   const [clusters, setClusters] = useState<Cluster[]>([])
-  const { user } = useApp() as { user: PermissionUser }
+  const { user, can } = useApp() as { user: PermissionUser; can?: (permissionKey: string, actionKey: string) => boolean }
+  const canMergeRef = useRef(true)
+  canMergeRef.current = can ? can('products', 'merge_duplicates') : true
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   const [loading, setLoading] = useState(false)
@@ -402,42 +447,31 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     }
   }
 
-  // The one shared "keep this, what happens to the other's stock?" flow, used
-  // by every surface that resolves a twin (see useMergeStockChoice).
-  const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
-
-  // Apply the group's explicit decisions (ONE keeper + the rows marked
-  // Remove); one pair per call, stopping on the first failure so nothing
-  // half-merges silently. Undecided rows (in an odd partial state) are
-  // never touched -- but the card only arms Apply when every row is
-  // decided, so normally removals covers the whole rest of the group.
-  //
-  // Marking a row Remove used to fold its stock onto the keeper anyway: the
-  // word said one thing and the write did the other. Each removal that still
-  // holds stock now asks -- merge the quantities across, or write them off --
-  // before anything is written, one question per row, since two rows in one
-  // group can hold different stock and deserve different answers. Cancelling
-  // stops the whole Apply where it stands rather than continuing down the list.
-  const handleApplyDecisions = async (cluster: Cluster, keeper: ClusterProduct, removals: ClusterProduct[]) => {
+  // Apply opens the ONE conflict resolver (owner ruling 24 Sep 2026; asks
+  // N1/N3/N4 of 23 Sep) on the card's decisions: the product marked Keep stays
+  // (its name and barcode included), every row marked Merge folds into it, and
+  // the confirm shows before and after for every conflict type -- a name or
+  // barcode difference is never a "failed" or "different" dead end. What
+  // happens to each merged product's stock (Carry or Write off) is answered in
+  // the grid, per product, before anything is written.
+  const [resolving, setResolving] = useState<{ cluster: Cluster; keeperId: number } | null>(null)
+  const handleApplyDecisions = (cluster: Cluster, keeper: ClusterProduct, removals: ClusterProduct[]) => {
     if (!removals.length) return
-    const id = clusterKey(cluster)
-    setMergingId(id)
-    try {
-      let merged = 0
-      for (const other of removals) {
-        const outcome = await mergeWithChoice(keeper, other)
-        if (outcome === 'cancelled') break
-        merged += 1
-      }
-      if (!merged) return
-      notify(t('product_duplicate_merged') || 'Merged -- stock, received-date records and images were carried onto the kept product')
-      if (merged === removals.length) removeCluster(id)
-      else void load()
-    } catch (e: unknown) {
-      notify(e instanceof Error ? e.message : (t('merge_duplicate_failed') || 'Could not merge these records'), 'error')
-    } finally {
-      setMergingId(null)
-    }
+    setResolving({ cluster: { ...cluster, products: [keeper, ...removals] }, keeperId: keeper.id })
+  }
+  const resolveAdapter = useMemo(() => (resolving ? createProductResolveAdapter({
+    cluster: resolving.cluster,
+    keeperId: resolving.keeperId,
+    t: (key) => t(key),
+    canViewCosts,
+    canEditCosts,
+    canMerge: () => canMergeRef.current,
+    onWritten: () => setMergingId(clusterKey(resolving.cluster)),
+  }) : null), [resolving, t, canViewCosts, canEditCosts])
+  const closeResolve = () => {
+    setResolving(null)
+    setMergingId(null)
+    void load()
   }
 
   // In-place Resolve (user, Aug 30: "should not bring you to other
@@ -924,6 +958,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
                   onDismiss={() => void handleDismiss(cluster)}
                   onApplyDecisions={(keeper, removals) => void handleApplyDecisions(cluster, keeper, removals)}
                   onEdit={openEdit}
+                  onPreview={onPreviewProduct ? (product) => onPreviewProduct(product.id) : undefined}
                 />
               )
             })}
@@ -963,10 +998,14 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
         </Modal>
       ) : null}
 
-      {/* The stock merge/remove decision. Rendered here so it floats above the
-          review grid; the Apply and bulk flows AWAIT it (the shared
-          ConfirmDialog, never window.confirm). */}
-      {mergeStockChoiceDialog}
+      {resolving && resolveAdapter ? (
+        <ResolveModal
+          title={`${t('resolve') || 'Resolve'} — ${resolving.cluster.products.find((product) => product.id === resolving.keeperId)?.name || `#${resolving.keeperId}`}`}
+          adapter={resolveAdapter}
+          onClose={closeResolve}
+          onApplied={() => { notify(t('product_duplicate_merged') || 'Merged -- stock, received-date records and images were carried onto the kept product') }}
+        />
+      ) : null}
       {groupReviewPages.length ? (
         <SelectedConflictGroupReviewModal
           pages={groupReviewPages}
@@ -994,3 +1033,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     </div>
   )
 }
+
+// The conflict card on its own, for the layout browser test
+// (tests/productConflictRowLayout.test.ts): N2 is a layout promise.
+export { ClusterCard as ProductConflictClusterCard }

@@ -70,7 +70,6 @@ const EXPECTED_NAMES: Record<string, string[]> = {
  'components/inventory/InventoryProductsSurface.tsx':['group.label','product.name','group.label','product.name'],
  'components/products/ProductsImageOnlyView.tsx':['product.name'],
  'components/branches/Branches.tsx':['product.name','group.name'],
- 'components/products/ProductDuplicatesTab.tsx':['product.name'],
  'components/products/CreateProductsSessionModal.tsx':['group.name'],
  'components/branches/TransferModal.tsx':['group.name','selectedProduct.name','product.name','group.name'],
  // The per-product received-date rows (scoped Set / explicit lots) name each product first.
@@ -87,7 +86,6 @@ const ADOPTED: Array<[string, number]> = [
  ['components/inventory/InventoryProductsSurface.tsx',4],
  ['components/products/ProductsImageOnlyView.tsx',1],
  ['components/branches/Branches.tsx',2],
- ['components/products/ProductDuplicatesTab.tsx',1],
  ['components/products/CreateProductsSessionModal.tsx',1],
  ['components/branches/TransferModal.tsx',4],
  ['components/products/forms/BulkAddStockModal.tsx',2],
@@ -104,6 +102,18 @@ runTest('adopted product names use the shared two-line component, not a local cl
   }
   assert.doesNotMatch(source,/::-webkit-scrollbar/,`${file}: scrollbar CSS stays shared`)
  }
+})
+// N2 (owner, 23 Sep 2026): on the Duplicates tab the name takes its own full
+// row with NO ellipsis, so it is not the two-line rail: it wraps in full, a tap
+// opens the product preview and a hold shows the full name in the copy float
+// (layout behaviour: tests/productConflictRowLayout.test.ts).
+runTest('Duplicates conflict rows show the whole name, never clamped',()=>{
+ const source=read('components/products/ProductDuplicatesTab.tsx')
+ assert.doesNotMatch(source,/<ProductNameRail\b/)
+ const nameSpan=source.slice(source.indexOf('data-conflict-name'),source.indexOf('</button>',source.indexOf('data-conflict-name')))
+ assert.match(nameSpan,/whitespace-normal break-words/)
+ assert.doesNotMatch(nameSpan,/line-clamp-|\btruncate\b|scroll-x-clean/)
+ assert.match(nameSpan,/copyMarker\(product\.name/)
 })
 runTest('Products preserves copy wrappers, links and row gestures',()=>{
  const source=read('components/products/Products.tsx')
