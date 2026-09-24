@@ -29,6 +29,7 @@ row here with its state; progress.md and the session log (Parts 630-631) carry t
 | 24 Sep: Stock-lot corrections (Set Quantity on the selected lot or the branch total); a downward Set counts as a loss unless tagged (restock-if-damaged or related tags) | **Merged, not deployed** (bfa464f06; migration 0193) | owner 24 Sep; branch codex/existing-stock-lot-corrections-20260912 |
 | 24 Sep: Read-only production D1 snapshot tool | **Done, not run**: 61c48f158 (PII masked by default); running it needs the owner's go | owner 24 Sep |
 | 24 Sep: Clean up GitHub branches | **Partly done**: manifest 826864374, 29 reviewed branches copied to archive/superseded-20260924/; deleting the 595 listed names must run from the owner's machine (the cloud session gets 403 on delete) | owner 24 Sep |
+| 24 Sep: Deploy the cloud handoff branch | **Authorized, pending**: needs a session with Cloudflare access (steps in progress.md) | owner 24 Sep |
 
 ---
 ## September 16 Program 10 checkpoint A LIVE

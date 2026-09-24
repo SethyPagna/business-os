@@ -43,6 +43,7 @@ Nothing below is deployed. Deploying and any remote migration still need the own
   3. `npm run deploy`
   4. Check /health, then record the Worker version id here.
 - **Final check (1bec57dee):** build passes; Playwright 145 passed, 0 failed (desktop and android Chromium); test:utils reds are the known four (reportsDetailFloatClose, also red on main, and the three sw* tests that need Playwright build 1243); Worker 517/517 (bfa464f06). 1bec57dee: a strip card saved without an order keeps its place.
+- **Deploy status (24 Sep, end of session):** NOT deployed. The owner authorized the deploy and connected Cloudflare, but this cloud session loaded before the connector (no Cloudflare tools, no CLOUDFLARE_API_TOKEN, no .wrangler-auth.local). Next session: deploy `claude/cloud-handoff-20260924-0unu3f` @ 2ce80455c or later with the steps above (re-read the d1_migrations tail first; expect 0184 as the highest applied, then apply 0192, 0193, 0194), then record the Worker version id here.
 - **Production repair to verify after the deploy:** the General customer 24969 legacy membership LC-04971 (Settings repair exists); check whether it has already been applied.
 
 ## Shift close fixed; checkpoint 80f379ff deployed (Worker ce056cc0) — September 21

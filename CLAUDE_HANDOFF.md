@@ -44,6 +44,7 @@ Nothing below is deployed. Deploying and any remote migration still need the own
   2. `npm run migrate:remote`: applies 0192, 0193 and 0194. First re-read the live d1_migrations tail; the highest applied must still be 0184, with 0185-0191 parked. 0192 still lacks its council record; the owner's deploy instruction of 24 Sep is the go.
   3. `npm run deploy`
   4. Check /health, then record the Worker version id here.
+- **Deploy status (24 Sep, end of session):** NOT deployed. The owner authorized the deploy and connected Cloudflare, but this cloud session loaded before the connector (no Cloudflare tools, no CLOUDFLARE_API_TOKEN, no .wrangler-auth.local). Next session: deploy `claude/cloud-handoff-20260924-0unu3f` @ 2ce80455c or later with the steps above (re-read the d1_migrations tail first; expect 0184 as the highest applied, then apply 0192, 0193, 0194), then record the Worker version id here.
 - **Production repair to verify after the deploy:** the General customer 24969 legacy membership LC-04971 (Settings repair exists); check whether it has already been applied.
 
 
