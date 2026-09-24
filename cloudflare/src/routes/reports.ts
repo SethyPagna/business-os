@@ -509,11 +509,24 @@ app.get('/grouped', async (c) => {
 // Bounded record pages for the existing Sales/Returns/Expenses report tabs.
 // Snapshot IDs exclude newly inserted/backdated records; they do not freeze
 // updates to existing rows. Caller must restart paging when filters change.
+// Ordinary reads remain available to report tabs. A full-walk export caller
+// must explicitly send intent=export; this prerequisite does not convert the
+// existing clients' loaded-row exports into protected full-walk exports.
 for (const kind of ['sales', 'returns', 'expenses'] as const) {
   app.get(`/business-summary/${kind}`, async (c) => {
     const user = c.get('user')
+    const intents = c.req.queries('intent')
+    if (intents && (intents.length !== 1 || intents[0] !== 'export')) {
+      return c.json({ error: 'intent must be export when provided' }, 400)
+    }
     const allowed = kind === 'sales' ? canReadSales(user) : kind === 'returns' ? canReadReturns(user) : canReadFees(user)
     if (!allowed) return c.json({ error: 'Forbidden' }, 403)
+    if (intents) {
+      const tier = getActionTier(user, kind === 'expenses' ? 'fees' : kind, 'export')
+      // Match permissionActions.ts: Returns review blocks export, whereas
+      // Sales view and Fees review permit it unless explicitly switched off.
+      if (kind === 'returns' ? tier !== 'full' : tier === 'none') return c.json({ error: 'Forbidden' }, 403)
+    }
     const query = c.req.query(); const db = getDb(c.env); const isAdmin = isAdminControlUser(user)
     let f: SalesFilters
     try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
