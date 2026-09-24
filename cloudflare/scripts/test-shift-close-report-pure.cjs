@@ -167,7 +167,9 @@ const app = shiftsRoute.default || shiftsRoute
 // The stub is only meaningful if the route imports the real thing by that
 // name. A test that stubs a symbol the source never calls proves nothing.
 const routeSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'shifts.ts'), 'utf8')
-ok(/import \{ sendTelegramShiftReport \} from '\.\.\/lib\/telegram'/.test(routeSrc),
+// (T10 added scheduleTelegramShiftOverview to the same import; the overview's
+// route behaviour is pinned in test-shift-lifecycle-pure.cjs.)
+ok(/import \{[^}]*\bsendTelegramShiftReport\b[^}]*\} from '\.\.\/lib\/telegram'/.test(routeSrc),
   'the route imports the real sendTelegramShiftReport -- the stub replaces something that is actually called')
 ok(!/fetch\(/.test(routeSrc), 'and the route itself opens no network connection of its own')
 

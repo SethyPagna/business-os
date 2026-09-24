@@ -49,6 +49,11 @@ const NAMED_COMPANIONS = {
   // migration chain and drives runAdjustAction / runReceiveBatchAction
   // through a repeat, a control and the no-table fallback.
   192: 'test-stock-mutation-receipt-pure.cjs',
+  // 0194 creates telegram_scheduled_sends, the one-send-per-shift record for
+  // T10's Reports overview. Its companion applies the real migration and
+  // drives schedule / queue delivery / drain through duplicates, races,
+  // retries, reopen + reclose and the toggle.
+  194: 'test-telegram-shift-overview-pure.cjs',
 }
 
 function listMigrationNumbers() {

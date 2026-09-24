@@ -4,7 +4,7 @@ import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
-import { sendTelegramShiftReport } from '../lib/telegram'
+import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
@@ -947,6 +947,24 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   return { changed, shift: await readShiftById(db, shift.id) }
 }
 
+/**
+ * T10: the Reports overview, one minute after a close that WROTE. Called from
+ * the two close routes after their changed-row check (so a close that lost
+ * its revision race schedules nothing), and from an amendment only when it
+ * closes a shift that was open. Off the response path, and it
+ * can never turn a committed close into a failed request -- not even when
+ * the scheduler itself is unavailable. The one-send guarantee and the Free /
+ * Paid mechanics live in lib/telegram.ts beside scheduleTelegramShiftOverview.
+ */
+function scheduleOverviewAfterClose(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, shiftId: number): void {
+  try {
+    const scheduled = scheduleTelegramShiftOverview(c.env, shiftId)
+    try { c.executionCtx.waitUntil(scheduled) } catch { void scheduled }
+  } catch (error) {
+    console.error('[shifts] Reports overview could not be scheduled', error)
+  }
+}
+
 app.post('/close', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
   const denied = shiftPermissionError(c, user); if (denied) return denied
@@ -975,6 +993,7 @@ app.post('/close', async (c) => {
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
+    scheduleOverviewAfterClose(c, shift.id)
     return c.json({ shift: result.shift ? await reconciledShift(c.env, user, result.shift) : null, already_closed: false, is_open: false }, 200)
   }
   return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
@@ -1015,6 +1034,7 @@ app.post('/:id/close', async (c) => {
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
+  scheduleOverviewAfterClose(c, shift.id)
   return c.json({ shift: await reconciledShift(c.env, user, result.shift), already_closed: false, is_open: false }, 200)
 })
 
@@ -1206,6 +1226,9 @@ app.patch('/:id', async (c) => {
   if (!saved || saved.revision !== after.revision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, saved.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
+  // An amendment that CLOSES an open shift is a close; one that edits an
+  // already closed shift is not, and schedules no second overview.
+  if (!before.closed_at && saved.closed_at) scheduleOverviewAfterClose(c, saved.id)
   return c.json({ shift: await presentShift(db, user, saved) }, 200)
 })
 

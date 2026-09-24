@@ -34,15 +34,24 @@ type TelegramConfig = {
   categories: Record<TelegramEventType, boolean>
   /** Settings → Telegram → language: 'both' (default), 'en' or 'km'. */
   language: TelegramLanguage
+  /**
+   * T10: the Reports overview pushed one minute after a shift closes. Its own
+   * switch, not a category: it is a scheduled report, not an event alert.
+   * Unset means ON, because the shift report it follows has no switch of its
+   * own and is on whenever automation is (the owner's "default ON only if the
+   * shift report is on"); `enabled` above still gates both.
+   */
+  shiftOverview: boolean
 }
 type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string } }
 type TelegramUpdate = { message?: TelegramMessage }
 
-// sql-bound-params: bounded by construction -- this fixed eight-key enum is
+// sql-bound-params: bounded by construction -- this fixed nine-key enum is
 // owned by this module and never grows from request or database input.
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
+  'telegram_shift_overview_enabled',
 ] as const
 
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
@@ -162,6 +171,7 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     chatId: chatIds[0] || '', chatIds,
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     language: normalizeTelegramLanguage(values.telegram_language),
+    shiftOverview: isEnabled(values.telegram_shift_overview_enabled, true),
     // Everything is live after the first setup; individual category switches
     // remain available when a less noisy chat is preferred.
     categories: {
@@ -1290,6 +1300,299 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
     console.error('[telegram] shift report could not be sent', error)
     return false
   }
+}
+
+// ---- T10: the Reports overview, one minute after a shift closes -----------
+// Owner, 23 Sep 2026: "One minute after a shift closes, the Reports overview
+// is sent to Telegram too" -- with a Free-plan path, a Paid path with
+// automatic fallback, and ONE send per shift.
+//
+// WHAT IS SENT. The Reports hub's Overview for the closed shift's BUSINESS DAY
+// and BRANCH (every cashier on that branch, the whole day), i.e. what
+// GET /api/reports/overview?startDate=D&endDate=D&branchId=B answers. Every
+// sales figure is the kernel's (getSalesTotals, getSalesGroupedTotals by
+// payment method -- the same calls that route makes); nothing is re-derived.
+// "Expenses" is expenseTotals(), the one sum the shift report and the day
+// summary print under that word.
+//
+// HOW IT IS SCHEDULED (the same on both plans; the plan is not the axis).
+//   1. The close commits. Then a `telegram_scheduled_sends` row (migration
+//      0194) is written with a UNIQUE key and due_at = now + 60 s. This is
+//      the idempotency record, and it exists before anything is sent.
+//   2. Queue path: a message on BACKUP_QUEUE with { delaySeconds: 60 }.
+//      Both wrangler.toml (Paid) and wrangler.free.toml (Free) bind that
+//      producer and its consumer -- Queues work on Free -- so no new queue has
+//      to be created before a deploy. One message is three queue operations,
+//      against Free's 10,000 a day.
+//   3. Fallback, used when the binding is absent or `send` throws: the row
+//      stays `dispatch='fallback'` and is drained by the next /api request
+//      after it falls due (index.ts, at most once per 20 s per isolate, off
+//      the response path) or by the 6-hourly cron. NOT ctx.waitUntil with a
+//      60 s sleep: waitUntil work is cut 30 s after the response on both
+//      plans, so the sleep would be killed before it sent -- a timer that
+//      looks like a mechanism and is not one. A pending row the queue never
+//      delivers is picked up the same way five minutes after it fell due.
+//
+// EXACTLY ONE SEND. A send happens only after the conditional UPDATE that
+// moves the row pending -> sending changes one row. A duplicate queue
+// delivery, the drain racing the queue, and a retried close all hit that one
+// UPDATE, and only one of them wins it. A shift SEGMENT closes once (the close
+// UPDATE requires closed_at IS NULL); a reopen writes a NEW segment row with
+// its own id, so reopen + close again is a new key and sends again, exactly
+// as the shift report is pushed again on every close. Delivery is at most
+// once: a claim whose Worker dies mid-send is never retried (see 0194).
+
+export const SHIFT_OVERVIEW_DELAY_SECONDS = 60
+export const SHIFT_OVERVIEW_QUEUE_KIND = 'telegram-shift-overview'
+export type ShiftOverviewQueueMessage = { kind: typeof SHIFT_OVERVIEW_QUEUE_KIND; key: string }
+export function isShiftOverviewQueueMessage(body: unknown): body is ShiftOverviewQueueMessage {
+  const value = body as { kind?: unknown; key?: unknown } | null
+  return !!value && typeof value === 'object' && value.kind === SHIFT_OVERVIEW_QUEUE_KIND && typeof value.key === 'string'
+}
+/** One key per closed shift segment: its id and the revision the close wrote. */
+export const shiftOverviewKey = (shiftId: number, revision: number): string => `shift-overview:${shiftId}:r${revision}`
+
+/** A failed Telegram call is retried this many times in all, a minute apart. */
+const SHIFT_OVERVIEW_MAX_ATTEMPTS = 3
+/** A queued row the queue has not delivered this long after it fell due is drained. */
+const SHIFT_OVERVIEW_QUEUE_GRACE_MS = 5 * 60_000
+/** A claim this old never reported back: its Worker died mid-send. */
+const SHIFT_OVERVIEW_STALE_CLAIM_MS = 10 * 60_000
+
+// Memoises only a POSITIVE probe, as lib/stockMutationReceipt.ts does: the
+// migration may land after the Worker, and a miss costs one sqlite_master read.
+let scheduledSendsReady = false
+export function __resetScheduledSendsProbeForTests(): void { scheduledSendsReady = false }
+async function scheduledSendsAvailable(env: Env): Promise<boolean> {
+  if (scheduledSendsReady) return true
+  try {
+    const row = await getDb(env).prepare("SELECT COUNT(*) AS ready FROM sqlite_master WHERE type='table' AND name='telegram_scheduled_sends'").get<{ ready: number }>()
+    scheduledSendsReady = Number(row?.ready ?? 0) > 0
+  } catch { /* a failed read is not evidence the table is missing */ }
+  return scheduledSendsReady
+}
+
+/** The overview's filters: the shift's business day, on the shift's branch. */
+export function shiftOverviewFilters(shift: { business_date: string; branch_id: number | null }): SalesFilters {
+  return { startDate: shift.business_date, endDate: shift.business_date, branchId: shift.branch_id ?? null }
+}
+
+export type ShiftOverviewFigures = {
+  revenueUsd: number; profitUsd: number; grossSalesUsd: number; itemDiscountUsd: number; invoiceDiscountUsd: number
+  deliveryFeeUsd: number; creditUsd: number; refundUsd: number
+  invoices: number; cancelled: number
+  paymentMethods: Array<{ method: string; count: number; usd: number }>
+  otherExpenseUsd: number; otherExpenseKhr: number; deliveryCostUsd: number; deliveryCostRecorded: number
+  returns: { count: number; refundUsd: number; refundKhr: number }
+}
+
+/**
+ * The overview message. Pure, exported for
+ * scripts/test-telegram-shift-overview-pure.cjs.
+ *
+ * Same shape as every other report since T4/T7/T8: a title line with the day,
+ * the rows that say whose shift and where, then `=====Name=====` sections of
+ * `·` rows, long rows on the hanging indent. `categories` is the owner's
+ * per-category switch set, applied the way formatDaySummary applies it.
+ */
+export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
+  const lines = [
+    `📈 ${label('reportsOverview')}: ${formatBusinessDay(shift.business_date)}`,
+    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('branch', shift.branch_id == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(shift.branch_name || `#${shift.branch_id}`, 60)),
+    // Who closed which shift, and when: the message is sent BECAUSE of it.
+    labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
+    labeled('shift', cleanLine(shift.shift_code, 80)),
+    // The shift's window, as the shift report prints it. The figures below
+    // are the whole business day on this branch -- the Overview's scope --
+    // and these two rows say which close sent them.
+    labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
+    labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
+  ]
+  const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
+    if (enabled) lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
+  }
+  const showSales = categories?.sales !== false
+  const showExpenses = categories?.fees !== false
+
+  const sales = [labeled('revenue', usd(figures.revenueUsd))]
+  if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
+  if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
+  if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
+  sales.push(labeled('profit', usd(figures.profitUsd)))
+  if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
+  if (figures.creditUsd) sales.push(labeled('credit', usd(figures.creditUsd)))
+  if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
+  section('sales', sales, showSales)
+  section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
+  section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
+
+  const expenses = expenseTotals({
+    otherUsd: showExpenses ? figures.otherExpenseUsd : 0, otherKhr: showExpenses ? figures.otherExpenseKhr : 0,
+    deliveryCostUsd: showSales ? figures.deliveryCostUsd : 0, deliveryCostRecorded: showSales ? figures.deliveryCostRecorded : 0,
+  })
+  const expenseRows: string[] = []
+  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
+    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
+  }
+  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
+  section('expenses', expenseRows, showExpenses)
+
+  // Returns by the day the RETURN was taken -- the Overview's returns block.
+  // Its refund is not the Refunds row above (that one follows the SALE's
+  // day), which is why it is its own section and never subtracted.
+  const returned = figures.returns
+  section('returns', returned.count ? [labeled('total', `${returned.count} · ${money(returned.refundUsd, returned.refundKhr)}`)] : [])
+  return lines.join('\n')
+}
+
+const OVERVIEW_SHIFT_COLUMNS = `id, revision, ${SHIFT_COLUMNS}`
+type OverviewShift = ShiftReportSession & { id: number; revision: number }
+
+/** The Overview's figures for one day and branch, off the same kernel calls. */
+export async function shiftOverviewFigures(env: Env, shift: { business_date: string; branch_id: number | null }, otherLabel = 'Other'): Promise<ShiftOverviewFigures> {
+  const filters = shiftOverviewFilters(shift)
+  const params: Record<string, unknown> = { startDate: filters.startDate, endDate: filters.endDate }
+  // routes/reports.ts reportRecordRange's date-only branch, per table; the
+  // pure test compares the two clause for clause.
+  const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
+  if (filters.branchId != null) params.branchId = filters.branchId
+  const db = getDb(env)
+  const [totals, payments, fees, returned] = await Promise.all([
+    getSalesTotals(env, filters),
+    getSalesGroupedTotals(env, filters, 'payment_method'),
+    db.prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees
+      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`).get<{ usd: number; khr: number }>(params),
+    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS khr FROM returns
+      WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
+        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
+  ])
+  return {
+    revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
+    itemDiscountUsd: totals.item_discount_usd, invoiceDiscountUsd: totals.discount_usd,
+    deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.pending_revenue_usd, refundUsd: totals.refund_usd,
+    invoices: totals.tx_count, cancelled: totals.cancelled_tx_count,
+    paymentMethods: foldRows(
+      payments.map((row) => ({ method: row.label || row.key || 'Unknown', count: row.tx_count, usd: row.revenue_usd })),
+      8,
+      (rest) => ({
+        method: otherLabel,
+        count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+        usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+      }),
+    ),
+    otherExpenseUsd: Number(fees?.usd) || 0, otherExpenseKhr: Number(fees?.khr) || 0,
+    deliveryCostUsd: totals.delivery_actual_cost_usd, deliveryCostRecorded: totals.delivery_actual_cost_count,
+    returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
+  }
+}
+
+export type ShiftOverviewScheduleResult = 'queued' | 'fallback' | 'duplicate' | 'off' | 'not-closed' | 'unavailable'
+
+/**
+ * Called from the shift close routes once the close has COMMITTED. Never
+ * throws: a close must not fail because of a Telegram schedule.
+ */
+export async function scheduleTelegramShiftOverview(env: Env, shiftId: number, nowMs: number = Date.now()): Promise<ShiftOverviewScheduleResult> {
+  try {
+    const config = await getTelegramConfig(env)
+    if (!config.enabled || !config.shiftOverview || configurationProblem(config)) return 'off'
+    if (!(await scheduledSendsAvailable(env))) return 'unavailable'
+    const db = getDb(env)
+    const shift = await db.prepare('SELECT id, revision, closed_at, cancelled_at FROM shift_sessions WHERE id = @id').get<{ id: number; revision: number; closed_at: string | null; cancelled_at: string | null }>({ id: shiftId })
+    if (!shift || !shift.closed_at || shift.cancelled_at) return 'not-closed'
+    const key = shiftOverviewKey(shift.id, shift.revision)
+    const inserted = await db.prepare(`INSERT OR IGNORE INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at)
+      VALUES (@key, 'shift_overview', @shiftId, @dueAt, @now)`).run({
+      key, shiftId: shift.id, dueAt: new Date(nowMs + SHIFT_OVERVIEW_DELAY_SECONDS * 1000).toISOString(), now: new Date(nowMs).toISOString(),
+    })
+    if (!inserted.changes) return 'duplicate'
+    if (env.BACKUP_QUEUE) {
+      try {
+        const message: ShiftOverviewQueueMessage = { kind: SHIFT_OVERVIEW_QUEUE_KIND, key }
+        await env.BACKUP_QUEUE.send(message, { delaySeconds: SHIFT_OVERVIEW_DELAY_SECONDS })
+        await db.prepare("UPDATE telegram_scheduled_sends SET dispatch = 'queue' WHERE send_key = @key").run({ key })
+        return 'queued'
+      } catch (error) {
+        console.error('[telegram] overview queue send failed; the request/cron drain will send it', error)
+      }
+    }
+    return 'fallback'
+  } catch (error) {
+    console.error('[telegram] shift overview could not be scheduled', error)
+    return 'unavailable'
+  }
+}
+
+export type ShiftOverviewDeliveryResult = 'sent' | 'skipped' | 'taken' | 'not-due' | 'retry' | 'failed'
+
+/**
+ * Send one scheduled overview, at most once. Every path in -- the queue
+ * consumer, the request drain, the cron drain -- comes through the claim.
+ */
+export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs: number = Date.now()): Promise<ShiftOverviewDeliveryResult> {
+  const db = getDb(env)
+  const now = new Date(nowMs).toISOString()
+  const claimed = await db.prepare(`UPDATE telegram_scheduled_sends SET status = 'sending', claimed_at = @now, attempts = attempts + 1
+    WHERE send_key = @key AND status = 'pending' AND due_at <= @now`).run({ key, now })
+  if (!claimed.changes) {
+    const row = await db.prepare('SELECT status FROM telegram_scheduled_sends WHERE send_key = @key').get<{ status: string }>({ key })
+    return row?.status === 'pending' ? 'not-due' : 'taken'
+  }
+  const settle = (status: string, error: string | null, extra = '') => db.prepare(
+    `UPDATE telegram_scheduled_sends SET status = @status, last_error = @error${extra} WHERE send_key = @key AND status = 'sending'`,
+  ).run({ key, status, error, now, retryAt: new Date(nowMs + SHIFT_OVERVIEW_DELAY_SECONDS * 1000).toISOString() })
+  let attempts = SHIFT_OVERVIEW_MAX_ATTEMPTS
+  try {
+    const row = await db.prepare('SELECT shift_id, attempts FROM telegram_scheduled_sends WHERE send_key = @key').get<{ shift_id: number; attempts: number }>({ key })
+    attempts = Number(row?.attempts) || attempts
+    const config = await getTelegramConfig(env)
+    // Re-read at send time: a switch turned off during the minute wins.
+    if (!row || !config.enabled || !config.shiftOverview || configurationProblem(config)) { await settle('skipped', null); return 'skipped' }
+    const shift = await db.prepare(`SELECT ${OVERVIEW_SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<OverviewShift>({ id: row.shift_id })
+    // Cancelled during the minute: its close is no longer a fact to report.
+    if (!shift || !shift.closed_at || shift.cancelled_at) { await settle('skipped', null); return 'skipped' }
+    // The fold label is the only text the DATA read produces; composed first,
+    // synchronously, as shiftFigures does.
+    const otherLabel = withLanguage(config.language, () => label('other'))
+    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
+    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)))
+    await settle('sent', null, ', sent_at = @now')
+    return 'sent'
+  } catch (error) {
+    const message = firstCharacters(String((error as Error)?.message || error), 300)
+    console.error('[telegram] shift overview could not be sent', message)
+    if (attempts < SHIFT_OVERVIEW_MAX_ATTEMPTS) {
+      // Back to pending a minute on, and to the drain: the queue message
+      // that brought it here is acknowledged either way.
+      await settle('pending', message, ", due_at = @retryAt, dispatch = 'fallback'").catch(() => undefined)
+      return 'retry'
+    }
+    await settle('failed', message).catch(() => undefined)
+    return 'failed'
+  }
+}
+
+/**
+ * The fallback: send what has fallen due and the queue is not carrying. Run
+ * by the request drain and the cron. Bounded, and a no-op without 0194.
+ */
+export async function drainDueTelegramShiftOverviews(env: Env, nowMs: number = Date.now(), options: { limit?: number; sweepStale?: boolean } = {}): Promise<number> {
+  if (!(await scheduledSendsAvailable(env))) return 0
+  const db = getDb(env)
+  const now = new Date(nowMs).toISOString()
+  const limit = options.limit ?? 3
+  // The cron only: the request drain stays a single indexed read.
+  if (options.sweepStale) {
+    await db.prepare(`UPDATE telegram_scheduled_sends SET status = 'failed', last_error = 'abandoned mid-send; not retried (at most once)'
+      WHERE status = 'sending' AND claimed_at < @stale`).run({ stale: new Date(nowMs - SHIFT_OVERVIEW_STALE_CLAIM_MS).toISOString() })
+  }
+  const due = await db.prepare(`SELECT send_key FROM telegram_scheduled_sends
+    WHERE status = 'pending' AND due_at <= @now AND (dispatch = 'fallback' OR due_at <= @queueGrace)
+    ORDER BY due_at LIMIT @limit`).all<{ send_key: string }>({ now, queueGrace: new Date(nowMs - SHIFT_OVERVIEW_QUEUE_GRACE_MS).toISOString(), limit })
+  let sent = 0
+  for (const row of due) if ((await deliverTelegramShiftOverview(env, row.send_key, nowMs)) === 'sent') sent += 1
+  return sent
 }
 
 // ---- Command dispatch (S4-9) ----------------------------------------------

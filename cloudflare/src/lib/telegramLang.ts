@@ -306,6 +306,13 @@ const LABELS = {
   grossSales: { en: 'Gross sales', km: 'ការលក់សរុប' },                // km.json gross_sales
   // The fold row when a breakdown has more rows than one phone screen holds.
   other: { en: 'Other', km: 'ផ្សេងទៀត' },                           // km.json other
+
+  // --- the Reports overview after a shift closes (T10, owner 23 Sep 2026) --
+  // The title is the pack's own key, added for this message and for its
+  // Settings switch, so the chat and the switch that controls it say the
+  // same words.
+  reportsOverview: { en: 'Reports overview', km: 'ទិដ្ឋភាពរួមរបាយការណ៍' }, // km.json telegram_reports_overview
+  returns: { en: 'Returns', km: 'ការប្រគល់មកវិញ' },                  // km.json returns
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS

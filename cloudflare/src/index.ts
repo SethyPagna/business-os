@@ -41,6 +41,7 @@ import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
 import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
+import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
 import { driveSyncScheduleDue } from './lib/googleDrive'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
@@ -441,6 +442,26 @@ app.use('/api/*', async (c, next) => {
   return next()
 })
 
+// T10 fallback drain (lib/telegram.ts, "HOW IT IS SCHEDULED"): a shift
+// overview whose queue send was unavailable is sent by the next API request
+// after it falls due. After the response, off its path, and at most once per
+// 20 s per isolate, so it costs one indexed read at that rate and nothing on
+// the request itself. The 6-hourly cron is the backstop for a quiet shop.
+const SHIFT_OVERVIEW_DRAIN_INTERVAL_MS = 20_000
+let lastShiftOverviewDrainMs = 0
+app.use('/api/*', async (c, next) => {
+  await next()
+  const now = Date.now()
+  if (now - lastShiftOverviewDrainMs < SHIFT_OVERVIEW_DRAIN_INTERVAL_MS) return
+  lastShiftOverviewDrainMs = now
+  // Everything inside the async body, so no failure of the drain -- not even
+  // a synchronous one -- can reach the response that has already been built.
+  const drain = (async () => {
+    try { await drainDueTelegramShiftOverviews(c.env, now) } catch (error) { console.error('[telegram] overview drain failed', error) }
+  })()
+  try { c.executionCtx.waitUntil(drain) } catch { void drain }
+})
+
 app.get('/health', (c) => c.json({ status: 'ok', version: 'cloudflare-portal-bootstrap-20260728', time: new Date().toISOString() }))
 
 // Proxies straight into the BroadcastHub Durable Object -- one shared fan-out
@@ -538,7 +559,29 @@ export default {
     } else if (batch.queue === 'business-os-media') {
       await handleMediaQueue(batch as MessageBatch<{ assetKey: string; kind: 'optimize-video' | 'optimize-image' }>, env)
     } else if (batch.queue === 'business-os-backup-assets') {
-      await handleBackupQueue(batch as MessageBatch<
+      // T10's delayed shift overview rides the backup queue (bound on both
+      // plans, so no new queue has to exist before a deploy). Its messages
+      // are taken out here; everything else goes to handleBackupQueue as
+      // before, which reads nothing off the batch but `messages`. A message
+      // is acknowledged whatever the outcome: the send row in D1 is the
+      // record, and a retry is the drain's job, never a second delivery.
+      const overviews = batch.messages.filter((message) => isShiftOverviewQueueMessage(message.body))
+      for (const message of overviews) {
+        try {
+          const outcome = await deliverTelegramShiftOverview(env, (message.body as { key: string }).key)
+          if (outcome === 'not-due') message.retry({ delaySeconds: 30 })
+          else message.ack()
+        } catch (error) {
+          console.error('[telegram] overview queue delivery failed; the drain will pick it up', error)
+          message.ack()
+        }
+      }
+      if (overviews.length === batch.messages.length) return
+      // No overview in the batch: the batch goes through untouched.
+      const backupBatch = overviews.length
+        ? { queue: batch.queue, messages: batch.messages.filter((message) => !isShiftOverviewQueueMessage(message.body)) } as unknown as MessageBatch<unknown>
+        : batch
+      await handleBackupQueue(backupBatch as MessageBatch<
         | { kind: 'backup-continue'; backupName: string; nextIndex: number }
         | { kind: 'drive-sync'; jobId: string }
         | { kind: 'drive-restore-stage'; jobId: string }
@@ -574,6 +617,10 @@ export default {
           console.error(`[scheduled] ${label} failed`, (error as Error)?.message || error)
         }
       }
+      // T10: the backstop for a shift overview nothing else has sent. Ahead
+      // of the backup because it is a few indexed statements and the backup
+      // is the step that runs out of budget.
+      await runStep('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true }))
       await runStep('backup', () => maybeRunScheduledBackup(env))
       await runStep('drive-sync', async () => {
         const schedule = await driveSyncScheduleDue(env)

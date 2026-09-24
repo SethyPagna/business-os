@@ -99,7 +99,7 @@ function restoreRows(db, table, rows) {
 async function main() {
   const sqlite = database()
   let user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
-  const sent = []; const waited = []
+  const sent = []; const waited = []; const overviews = []
   const dbModule = { getDb: () => d1(sqlite) }
   const businessDateWindow = loadReal('lib/businessDateWindow.ts')
   const financialPrecision = loadReal('lib/financialPrecision.ts')
@@ -139,7 +139,11 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/audit': { audit: async () => { throw new Error('lifecycle audit must be in the D1 batch') } },
     '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
-    '../lib/telegram': { sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true } },
+    '../lib/telegram': {
+      sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true },
+      // T10: the Reports overview a minute after a close (lib/telegram.ts).
+      scheduleTelegramShiftOverview: async (_env, shiftId) => { overviews.push(shiftId); return 'queued' },
+    },
   })
   const app = route.default || route
   const call = (method, url, body) => app.fetch(new Request(`http://test${url}`, {
@@ -182,6 +186,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.equal(closedRoot.capabilities.can_reopen, true)
   assert.equal(sent.filter((id) => id === rootShift.id).length, 2,
     'root has one opening and one winning close notification')
+  assert.deepEqual(overviews, [rootShift.id], 'T10: only the winning concurrent close schedules the Reports overview; an open schedules none')
   const parentBeforeReopen = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(rootShift.id)
 
   const ordinarySameDay = await call('POST', '/open', { branch_id: 1, opening_float_usd: 99, opening_float_khr: 99 })
@@ -272,6 +277,10 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   })
   assert.equal(childClose.status, 200)
   const closedChild = (await childClose.json()).shift
+  // Reopen + close again is a NEW segment with its own id, and it gets its own
+  // overview -- the rule the shift report itself follows. The reopen and the
+  // amendment of the still-open child scheduled nothing.
+  assert.deepEqual(overviews, [rootShift.id, child.id], 'T10: reopen + reclose schedules one more overview, for the new segment')
   sent.length = 0
   user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: '{}' }
   const reopenBody = { expected_revision: closedChild.revision, reason: 'Second count', opening_float_usd: '', opening_float_khr: 5000 }
@@ -345,6 +354,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   const beforeCancel = sqlite.prepare('SELECT * FROM shift_sessions WHERE id=?').get(grandchild.id)
   sent.length = 0
   const waitsBeforeCancelRace = waited.length
+  const overviewsBeforeCancelRace = overviews.length
   const cancelBody = { expected_revision: grandchild.revision, reason: 'Opening was registered against the wrong drawer' }
   const [cancelA, cancelB] = await Promise.all([
     call('POST', `/${grandchild.id}/cancel`, cancelBody),
@@ -373,6 +383,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     'retrying a completed cancellation is rejected')
   assert.deepEqual(sent, [grandchild.id], 'retrying a completed cancellation does not schedule Telegram again')
   assert.equal(waited.length, waitsBeforeCancelRace + 1, 'retrying a completed cancellation registers no background work')
+  assert.equal(overviews.length, overviewsBeforeCancelRace, 'T10: a cancellation schedules no Reports overview')
   assert.throws(() => sqlite.prepare('UPDATE shift_sessions SET cancel_reason=? WHERE id=?').run('rewrite', grandchild.id), /immutable/)
 
   user = { id: 7, name: 'Owner', username: 'owner', permissions: JSON.stringify({ pos: true }) }
@@ -544,6 +555,10 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   assert.equal(legacyRow.parent_shift_id, null)
   assert.equal(legacyRow.cancelled_at, null, 'pre-0123 scoped rows restore as unchanged roots with nullable new metadata')
   assert.equal(waited.every((promise) => typeof promise.then === 'function'), true)
+  assert.equal(new Set(overviews).size, overviews.length, 'T10: no shift segment is ever scheduled twice')
+  for (const id of overviews) {
+    assert.ok(sqlite.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(id).closed_at, `T10: shift ${id} was scheduled only because it closed`)
+  }
   console.log('OK shift lifecycle: linked reopen/cancel, permissions, intervals, atomic audit, backup restore and Telegram scheduling')
 }
 
