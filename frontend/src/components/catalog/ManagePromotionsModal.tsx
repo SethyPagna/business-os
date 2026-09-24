@@ -5,6 +5,8 @@ import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
@@ -334,7 +336,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     <Modal title={copy('announcementStrip', 'Announcement strip')} onClose={onClose} size="lg" unsavedChanges={{ dirty: editingId !== null }}>
       <div className="flex flex-col gap-4 overflow-y-auto p-5">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          {copy('announcementStripIntro', 'Small, quick banner cards that scroll horizontally at the very top of the website — for short sale/announcement callouts. This is separate from the larger "Promotions and posts" cards further down the Website Editor, which suit longer campaign posts with full descriptions. Drag cards below to reorder them; the order here is the order customers see.')}
+          {copy('announcementStripIntro', 'Small, quick banner cards that scroll horizontally at the very top of the website — for short sale/announcement callouts. This is separate from the larger "Promotions and posts" cards further down the Website Editor, which suit longer campaign posts with full descriptions. Drag a card or use its arrows to reorder; the order here is the order customers see.')}
         </p>
 
         {!isEditing && (
@@ -565,7 +567,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
         ) : (
           <div className={`flex flex-col gap-2 transition-opacity ${orderSaving ? 'opacity-70' : ''}`} aria-busy={orderSaving}>
             {orderSaving ? <span role="status" className="sr-only">{copy('saving', 'Saving...')}</span> : null}
-            {promotions.map((promo) => (
+            {promotions.map((promo, index) => (
               <div
                 key={promo.id}
                 draggable={!orderSaving}
@@ -584,7 +586,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     of the few pixels left beside five fixed controls; from
                     `sm:` up it is one row again. */}
                 <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label={copy('dragToReorder', 'Drag to reorder')} />
+                  <GripVertical className="hidden h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400 sm:block" aria-label={copy('dragToReorder', 'Drag to reorder')} />
                   {promo.image_path ? (
                     <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg border border-gray-100 object-cover dark:border-gray-800" />
                   ) : (
@@ -612,6 +614,31 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center justify-end gap-3">
+                  {/* Dragging needs a mouse; a finger or a keyboard moves a
+                      card one place with these. On a phone they sit at the
+                      start of the actions line, where the grip would be. */}
+                  <div className="mr-auto flex items-center gap-1 sm:mr-0">
+                    <button
+                      type="button"
+                      onClick={() => void saveOrder(moveCard(promotions, index, index - 1))}
+                      disabled={index === 0}
+                      title={copy('moveUp', 'Up')}
+                      aria-label={copy('moveItemUpAria', 'Move {name} up').replace('{name}', promo.title)}
+                      className="rounded-lg border border-gray-300 p-1.5 text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveOrder(moveCard(promotions, index, index + 1))}
+                      disabled={index === promotions.length - 1}
+                      title={copy('moveDown', 'Down')}
+                      aria-label={copy('moveItemDownAria', 'Move {name} down').replace('{name}', promo.title)}
+                      className="rounded-lg border border-gray-300 p-1.5 text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={() => handleToggleActive(promo)}

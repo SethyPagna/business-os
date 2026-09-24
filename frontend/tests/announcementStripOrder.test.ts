@@ -10,9 +10,11 @@
 //   1. the Worker premise -- PUT /api/promotions/reorder/all answers with the
 //      rows in stored order (sort_order, then id), typed as Promotion[];
 //   2. the one path that saves an order puts that answer on screen, reloads
-//      on a failure or an unusable answer, and takes one move at a time;
+//      on a failure or an unusable answer, and takes one move at a time --
+//      a drop, and the Up/Down buttons that move a card by touch or
+//      keyboard (dragging needs a mouse), all go through it;
 //   3. moveCard, run for real: the dragged card takes the target's slot, in
-//      both directions and to either end;
+//      both directions and to either end, and Up/Down swap neighbours;
 //   4. every write that sends a card sends its place too, and endOfStrip,
 //      run for real, puts a new card after every stored card.
 //
@@ -59,6 +61,12 @@ const handleDrop = declaration('handleDrop')
 assert.match(handleDrop, /void saveOrder\(moveCard\(promotions, fromIndex, toIndex\)\)/, 'a drop goes through saveOrder')
 assert.doesNotMatch(handleDrop, /setPromotions\(/, 'a drop never sets the list on its own')
 
+// Up/Down: a finger or a keyboard moves a card one place, same path.
+assert.match(source, /\{promotions\.map\(\(promo, index\) => \(/, 'each card knows its place in the list on screen')
+assert.match(source, /onClick=\{\(\) => void saveOrder\(moveCard\(promotions, index, index - 1\)\)\}\s*\n\s*disabled=\{index === 0\}/, 'Up moves a card one place towards the front; the first card has no Up')
+assert.match(source, /onClick=\{\(\) => void saveOrder\(moveCard\(promotions, index, index \+ 1\)\)\}\s*\n\s*disabled=\{index === promotions\.length - 1\}/, 'Down moves a card one place towards the end; the last card has no Down')
+assert.equal((source.match(/\bsaveOrder\(/g) || []).length, 3, 'every move -- a drop, Up, Down -- goes through saveOrder')
+
 // A plain module-level function of the component, compiled from its source
 // and returned so it can be run on real data.
 function moduleFunction<T>(name: string): T {
@@ -79,6 +87,8 @@ assert.equal(ids(moveCard(cards, 0, 2)), '2,3,1,4', 'dragged down, the card take
 assert.equal(ids(moveCard(cards, 3, 1)), '1,4,2,3', 'dragged up, the card takes the target slot')
 assert.equal(ids(moveCard(cards, 0, 3)), '2,3,4,1', 'a card can reach the end')
 assert.equal(ids(moveCard(cards, 3, 0)), '4,1,2,3', 'a card can reach the front')
+assert.equal(ids(moveCard(cards, 1, 0)), '2,1,3,4', 'Up swaps a card with the one before it')
+assert.equal(ids(moveCard(cards, 1, 2)), '1,3,2,4', 'Down swaps a card with the one after it')
 assert.equal(ids(cards), '1,2,3,4', 'moveCard never mutates the list on screen')
 
 // 4. Every write that sends a card also sends its place. The Worker stores

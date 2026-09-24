@@ -34,8 +34,14 @@ assert.equal(count(first, /<div\b/g), count(first, /<\/div>/g), 'the first line 
 assert.ok(first.includes('{promo.title}'), 'the title sits on the first line')
 const actions = row.slice(actionLine)
 assert.equal(count(actions, /<\/div>/g) - count(actions, /<div\b/g), 1, 'the actions line is the last thing on the card')
-for (const action of ['handleToggleActive(promo)', 'startEdit(promo)', 'setPendingDelete(promo)']) {
+for (const action of ['moveCard(promotions, index, index - 1)', 'moveCard(promotions, index, index + 1)', 'handleToggleActive(promo)', 'startEdit(promo)', 'setPendingDelete(promo)']) {
   assert.ok(actions.includes(action), `${action} sits on the actions line`)
 }
+// Dragging needs a mouse, so the grip only shows where it works; on a phone
+// the Up/Down buttons open the actions line instead.
+const grip = first.match(/<GripVertical className="([^"]*)"/)?.[1] || ''
+assert.match(grip, /(?:^|\s)hidden(?:\s|$)/, 'no drag grip on a phone')
+assert.match(grip, /(?:^|\s)sm:block(?:\s|$)/, 'the drag grip is back from sm: up')
+assert.match(actions, /<div className="mr-auto flex items-center gap-1 sm:mr-0">\s*\n\s*<button[\s\S]*?index - 1/, 'on a phone Up/Down start the actions line, apart from the rest')
 
 console.log('PASS websiteEditorLayout: strip cards give the title its own line on a phone')
