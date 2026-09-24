@@ -591,7 +591,11 @@ async function main() {
   await check('GET merge-preview returns the identity object the client gates on', () => {
     const at = routeSrc.indexOf("app.get('/possible-duplicates/merge-preview'")
     assert.ok(at > 0)
-    const block = routeSrc.slice(at, at + 3000)
+    // The whole handler, up to the merge route after it (the Resolve grid's
+    // keep=1 reads made the handler longer than a fixed window).
+    const end = routeSrc.indexOf("app.post('/possible-duplicates/merge'", at)
+    assert.ok(end > at)
+    const block = routeSrc.slice(at, end)
     assert.ok(/readMergeIdentityDiff\(db, keepId, mergeId\)/.test(block), 'the preview must READ it')
     assert.ok(/\n\s*identity,/.test(block), 'and RETURN it -- reading it and dropping it is the bug')
     assert.ok(/mergeBlockedByReversibleStockSession/.test(block), 'the reviewer must learn about a blocking session before choosing')

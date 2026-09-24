@@ -22,11 +22,12 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
+import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition } from '../lib/undoAppliers'
+import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -3160,6 +3161,12 @@ export async function foldDuplicateProductInto(
     reviewedCatalogBefore?: MergeReversal['keeperCatalogBefore']
     groupCompletionStatements?: (reversal: MergeReversal) => AtomicMergeStatement[]
   },
+  // N1/N3 (owner, 23 Sep 2026): the Resolve grid's Keep merge. The kept
+  // product's identity (name and barcode) stays, a name or barcode difference
+  // is not a refusal (the route has already verified the pair is one current
+  // system-detected cluster), and a permitted reviewer's chosen cost replaces
+  // the averaged one. Stored in the reversal so a redo repeats it exactly.
+  keeperChoice?: ProductMergeKeeperChoice,
 ): Promise<{
   batchesMoved: number
   batchesFolded: number
@@ -3264,7 +3271,7 @@ export async function foldDuplicateProductInto(
     && reviewedPlan.keeper_id === canonicalId
     && reviewedPlan.member_ids.includes(dup.id)
     && reviewedPlan.fold_members.some((member) => member.member_id === dup.id && member.operation_id === atomicHistory?.operationId)
-  if (!canonicalBefore || !dupPricing || (!reviewedAuthorityValid && !productsShareExactIdentity(canonicalBefore, dupPricing))) {
+  if (!canonicalBefore || !dupPricing || (!reviewedAuthorityValid && !keeperChoice?.follows && !productsShareExactIdentity(canonicalBefore, dupPricing))) {
     throw new Error('merge_identity_conflict')
   }
   if (atomicHistory?.bulkClusterPlan) {
@@ -3298,9 +3305,23 @@ export async function foldDuplicateProductInto(
   // merge resolved max(0, 0) and a folded-away duplicate's wholesale price was
   // deactivated with its row. Nothing threw; the number simply left the
   // catalogue. The dead pair is written by nothing here on purpose.
-  const mergedEconomics = atomicHistory?.bulkClusterPlan
+  const foldEconomics = atomicHistory?.bulkClusterPlan
     ? resolveProductMergeClusterPlanEconomics(atomicHistory.bulkClusterPlan)
     : economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
+  // N4: the cost the reviewer chose in the grid (the route checked the cost
+  // edit permission) replaces the averaged cost; KHR follows the chosen record,
+  // else the average's own KHR.
+  const chosenCost = keeperChoice?.cost
+  const mergedEconomics = chosenCost
+    ? {
+      ...foldEconomics,
+      merged: {
+        ...foldEconomics.merged,
+        cost_price_usd: chosenCost.cost_price_usd,
+        ...(chosenCost.cost_price_khr != null ? { cost_price_khr: chosenCost.cost_price_khr } : {}),
+      },
+    }
+    : foldEconomics
   if (mergedEconomics.issues.length) throw new Error(`merge_numeric_invalid:${productMergeNumericError(mergedEconomics.issues)}`)
   // Cost is no longer identity (Sep 4 2026), so folding a duplicate must also
   // reconcile the two costs rather than silently keeping the keeper's: the
@@ -3314,7 +3335,9 @@ export async function foldDuplicateProductInto(
   const mergedPricing = mergedEconomics.merged
   const mergedCost = mergedEconomics.merged
   const costOutliers: MergedCostOutlier[] = []
-  const canonicalBarcode = reviewedAuthorityValid ? reviewedPlan.selected.barcode.value : canonicalProductBarcode([canonicalBefore, dupPricing])
+  const canonicalBarcode = keeperChoice?.follows
+    ? keeperFollowsBarcode(canonicalBefore, dupPricing)
+    : reviewedAuthorityValid ? reviewedPlan.selected.barcode.value : canonicalProductBarcode([canonicalBefore, dupPricing])
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -3752,6 +3775,10 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     promotionRulesRescoped: promotionRulesBefore.map((rule) => rule.id),
     childrenReparented: reparentedChildProductIds.length,
     reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
+    // N1: the merged record's barcode the kept product does not carry stays
+    // on the merged (deactivated) record and is named here.
+    ...(keeperChoice?.follows ? { keeperFollows: true, absorbedBarcodes: absorbedBarcodes(canonicalBarcode, dupPricing) } : {}),
+    ...(chosenCost ? { costChosen: chosenCost } : {}),
     ...(atomicHistory?.auditContext || {}),
   }
   const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
@@ -3762,6 +3789,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
     dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
+    ...(keeperChoice ? { keeperChoice } : {}),
     ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
       selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
@@ -3900,7 +3928,11 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
 // re-run this exact production merge on REDO, without the lib importing this
 // route module (which would be a lib->route dependency and an import cycle,
 // since this file imports MergeReversal from there). See lib/undoAppliers.ts.
-registerMergeFold(foldDuplicateProductInto)
+// Redo repeats the original decisions: stock disposition, economics and the
+// Resolve grid's keeper choice (N1/N4), passed through to the fold's own slot.
+registerMergeFold((env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, keeperChoice) => (
+  foldDuplicateProductInto(env, db, user, canonical, dup, branchNameById, mergeContext, stockDisposition, economicsOverride, undefined, keeperChoice)
+))
 
 type DuplicatePreviewStockRow = { branch_id: number; quantity: number }
 type DuplicatePreviewCatalog = {
@@ -8183,6 +8215,34 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
   ])
   const numericIssue = mergeNumericRefusal(identity)
+  // keep=1: the Resolve grid's Keep merge (N1/N3). A name or barcode
+  // difference is not a block when the pair is one current system-detected
+  // cluster; a pair the system did not list together is. The grid also reads
+  // the kept product's own stock per branch (its Before) and, with groupIds,
+  // the cost the rule gives the whole group (its default Final cost).
+  const keepMode = ['1', 'true'].includes(String(c.req.query('keep') || ''))
+  let inCluster = false
+  let keeperStock: MergeStockImpact | null = null
+  let groupCost: { cost_price_usd: number; cost_price_khr: number } | null = null
+  if (keepMode) {
+    const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
+      .filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, 12)
+    const [clusters, keeperImpact, groupRows] = await Promise.all([
+      findPossiblySameProductClusters(db),
+      readMergeStockImpact(db, keepId, branchNameById),
+      (() => {
+        const { sql, params } = buildInClause('g', groupIds)
+        return db.prepare(`SELECT id, ${MERGE_COST_FIELDS.join(', ')} FROM products WHERE id IN (${sql}) AND is_active = 1`).all<Record<string, unknown>>(params)
+      })(),
+    ])
+    inCluster = Boolean(productIdsInOneCluster(clusters, [keepId, mergeId]))
+    keeperStock = keeperImpact
+    const economics = resolveProductMergeEconomics(groupRows)
+    groupCost = {
+      cost_price_usd: Number(economics.merged.cost_price_usd ?? 0) || 0,
+      cost_price_khr: Number(economics.merged.cost_price_khr ?? 0) || 0,
+    }
+  }
   return c.json({
     success: true,
     keepId,
@@ -8192,9 +8252,12 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     pricing,
     // The gate the client has always read and the server has never sent.
     identity,
+    ...(keepMode ? { cluster: inCluster, keeperStock, groupCost } : {}),
     // Read-only warnings, so the reviewer learns BEFORE choosing a keeper that
     // this pair cannot be merged yet, instead of after pressing Apply.
-    blocked: !identity.same
+    blocked: keepMode && !inCluster
+      ? { code: 'product_merge_not_duplicates' }
+      : !identity.same && !keepMode
       ? { code: 'incompatible_product_identity' }
       : numericIssue
         ? { code: 'invalid_merge_numeric', field: numericIssue.field, rowId: numericIssue.rowId }
@@ -8209,7 +8272,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
   // The operator's answer for the discarded row's stock. Anything other than
@@ -8219,6 +8282,26 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (!Number.isSafeInteger(keepId) || keepId <= 0 || !Number.isSafeInteger(mergeId) || mergeId <= 0 || keepId === mergeId) {
     return c.json({ error: 'keepId and mergeId (two different ids) are required' }, 400)
   }
+  // keep:true is the Resolve grid's Keep merge (owner N1/N3/N4, 23 Sep 2026):
+  // the kept product's name and barcode stay, a name or barcode difference is
+  // never a refusal, and a chosen cost replaces the averaged one. Only for a
+  // pair the system itself listed together (checked below), and a chosen cost
+  // needs the cost edit permission (product_cost_edit), the same grant the
+  // product form's cost field enforces.
+  const keepMode = body.keep === true
+  let chosenCost: ProductMergeKeeperChoice['cost'] | undefined
+  if (body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
+    if (!keepMode) return c.json({ success: false, code: 'invalid_merge_cost', error: 'A chosen cost is only accepted by the Resolve merge.' }, 400)
+    if (!canEditAcquisitionCosts(user)) {
+      return c.json({ success: false, code: 'cost_permission_required', error: 'Changing the cost needs the cost edit permission.' }, 403)
+    }
+    const usd = Number(body.cost_price_usd)
+    const khr = body.cost_price_khr == null ? null : Number(body.cost_price_khr)
+    if (body.cost_price_usd === null || body.cost_price_usd === '' || !Number.isFinite(usd) || usd < 0 || (khr !== null && (!Number.isFinite(khr) || khr < 0))) {
+      return c.json({ success: false, code: 'invalid_merge_cost', error: 'The cost must be a number of zero or more.' }, 400)
+    }
+    chosenCost = { cost_price_usd: roundMoney4(usd), ...(khr !== null ? { cost_price_khr: roundMoney4(khr) } : {}) }
+  }
   const db = getDb(c.env)
   const [keeper, dup] = await Promise.all([
     db.prepare('SELECT id, name, image_path, is_active, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
@@ -8227,11 +8310,19 @@ app.post('/possible-duplicates/merge', async (c) => {
       .get<{ id: number; name: string | null; image_path: string | null; is_active: number; is_group: number }>({ id: mergeId }),
   ])
   if (!keeper || !dup) return c.json({ error: 'Both products must exist' }, 404)
-  if (!keeper.is_active || !dup.is_active) return c.json({ error: 'Both products must be active — one of them was already merged or deleted' }, 409)
+  if (!keeper.is_active || !dup.is_active) return c.json({ code: 'product_merge_inactive', error: 'Both products must be active — one of them was already merged or deleted' }, 409)
   if (keeper.is_group || dup.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
+
+  if (keepMode && !productIdsInOneCluster(await findPossiblySameProductClusters(db), [keeper.id, dup.id])) {
+    return c.json({
+      success: false,
+      code: 'product_merge_not_duplicates',
+      error: 'These products are not a current duplicate group. Refresh the Duplicates list and try again.',
+    }, 409)
+  }
 
   // THE GUARD. The row being discarded still holds stock and the caller did not
   // say what to do with it -> refuse, describe what is there, and write nothing.
@@ -8240,7 +8331,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   // unstocked row needs no answer and proceeds as before.
   const stockImpact = await readMergeStockImpact(db, dup.id, branchNameById)
   const identity = await readMergeIdentityDiff(db, keeper.id, dup.id)
-  if (!identity.same) {
+  if (!identity.same && !keepMode) {
     return c.json({
       success: false,
       code: 'incompatible_product_identity',
@@ -8292,10 +8383,11 @@ app.post('/possible-duplicates/merge', async (c) => {
       { id: keeper.id, name: keeper.name },
       { id: dup.id, name: dup.name, image_path: dup.image_path },
       branchNameById,
-      'possible-duplicates review merge',
+      keepMode ? 'resolve grid keep merge' : 'possible-duplicates review merge',
       stockChoice ?? 'merge',
       undefined,
       { operationId: crypto.randomUUID() },
+      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}) } : undefined,
     )
   } catch (error) {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
@@ -8311,12 +8403,29 @@ app.post('/possible-duplicates/merge', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   const { reversal: _reversal, reparentedSaleItemIds: _si, reparentedMovementIds: _mi, ...publicStats } = stats
+  // The Resolve grid shows the server's After: the kept product as stored now
+  // (cost fields are projected away for a user without cost view).
+  let after: Record<string, unknown> | null = null
+  if (keepMode) {
+    const [row, merged, stockAfter] = await Promise.all([
+      db.prepare('SELECT id, name, barcode, selling_price_usd, cost_price_usd, cost_price_khr FROM products WHERE id = @id').get<Record<string, unknown>>({ id: keeper.id }),
+      db.prepare('SELECT barcode FROM products WHERE id = @id').get<{ barcode: string | null }>({ id: dup.id }),
+      readMergeStockImpact(db, keeper.id, branchNameById),
+    ])
+    after = row ? {
+      ...row,
+      stock_quantity: stockAfter.totalQuantity,
+      branch_stock: stockAfter.branches,
+      absorbed_barcodes: absorbedBarcodes(row.barcode, merged),
+    } : null
+  }
   return c.json({
     success: true,
     keptId: keeper.id,
     mergedId: dup.id,
     stockDisposition: stockChoice ?? 'merge',
     stockImpact,
+    ...(keepMode ? { keeper: after } : {}),
     ...publicStats,
   })
 })
