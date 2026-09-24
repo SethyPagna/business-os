@@ -3,6 +3,7 @@ import Filter from 'lucide-react/dist/esm/icons/filter.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useMemo, useState, type ReactNode } from 'react'
+import { useApp } from '../../AppContext.tsx'
 import LazyPortalMenu from './LazyPortalMenu'
 
 type CloseMenu = () => void
@@ -116,19 +117,64 @@ function optionLabelText(option: FilterOption | undefined): string {
   return 'All'
 }
 
+// Whether an option is a REAL "All" choice, using the marking convention
+// every FilterMenu caller already uses (grepped across every section that
+// builds one: products/helpers/productMenuHelpers.ts, AvailabilityFilterOptions,
+// CategoryFilterOptions, periodFilterOptions, CustomersTab/SuppliersTab/
+// DeliveryTab/AuditLog scope sections, ...): id is the bare string 'all' or
+// '' (empty-string sentinel some pickers use), or ends in an '-all' suffix
+// (e.g. 'cat-all', 'gender-all', 'period-all'). A section that has none of
+// these (Returns' Scope, sort/group-by pairs, the AND/OR search mode,
+// FilesPage's rows-per-page) is a mandatory single-choice list with no
+// "show everything" option at all -- its first option is just its default
+// choice, not an All row, and must not be treated as one.
+function isAllOptionId(id: FilterOption['id']): boolean {
+  if (id === 'all' || id === '') return true
+  return typeof id === 'string' && id.endsWith('-all')
+}
+
 // Each section collapses to a single "Label: summary ▾" row by default
 // (matching a standard multiselect combobox) and expands in place to reveal
 // the search box + pill list -- rather than showing every section's full
 // pill wall open at all times, which made the panel tall and hard to scan
 // once a page had more than two or three filter dimensions.
-function summarizeOptions(options: FilterOption[]): string {
-  const [allOption, ...restOptions] = options
-  if (!restOptions.length) return 'All'
-  if (allOption?.active || restOptions.every((option) => !option.active)) return 'All'
+function summarizeOptions(options: FilterOption[], t?: (key: string) => string): string {
+  const T = (key: string, fallback: string): string => {
+    const value = t?.(key)
+    return value && value !== key ? value : fallback
+  }
+  const allLabel = T('all', 'All')
+  const hasRealAllOption = options.length > 0 && isAllOptionId(options[0].id)
+  const allOption = hasRealAllOption ? options[0] : undefined
+  const restOptions = hasRealAllOption ? options.slice(1) : options
+  if (!restOptions.length) return allOption ? allLabel : optionLabelText(options[0])
+  if (allOption?.active || restOptions.every((option) => !option.active)) {
+    // No real All option: every mandatory single-choice list always has
+    // exactly one active entry (that IS the current value), so fall back to
+    // its label instead of a misleading "All" that no click here produces.
+    return allOption ? allLabel : optionLabelText(restOptions[0])
+  }
   const activeOptions = restOptions.filter((option) => option.active)
-  if (!activeOptions.length) return 'All'
+  if (!activeOptions.length) return allOption ? allLabel : optionLabelText(restOptions[0])
   if (activeOptions.length === 1) return optionLabelText(activeOptions[0])
-  return `${activeOptions.length} selected`
+  return T('filter_selected_count', '{count} selected').replace('{count}', String(activeOptions.length))
+}
+
+// Row highlight + auto-open heuristic: independent of the summary TEXT above.
+// A section with no real All option always has exactly one active entry (its
+// current single-choice value), which would make summarizeOptions' old
+// `!== 'All'` check permanently true and force such a section to look
+// "active" and win the panel's initial-open pick over a section the user
+// actually changed. Positionally identical to the pre-fix isActive formula
+// for every section that DOES have a real All option, so existing highlight/
+// auto-open behaviour for those sections is unchanged.
+function sectionIsActive(options: FilterOption[]): boolean {
+  const hasRealAllOption = options.length > 0 && isAllOptionId(options[0].id)
+  if (!hasRealAllOption) return false
+  const [allOption, ...restOptions] = options
+  if (!restOptions.length) return false
+  if (allOption?.active || restOptions.every((option) => !option.active)) return false
+  return true
 }
 
 // Every section renders as a single column, one option per row -- a
@@ -163,9 +209,21 @@ export function SectionOptionList({
   options: FilterOption[]
   searchable?: boolean
 }) {
+  const { t } = useApp() as { t?: (key: string) => string }
+  const T = (key: string, fallback: string): string => {
+    const value = t?.(key)
+    return value && value !== key ? value : fallback
+  }
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
-  const [allOption, ...restOptions] = options
+  // Only a REAL All option (see isAllOptionId) is pulled out and pinned as
+  // the sticky dark row below -- a mandatory single-choice section (Returns'
+  // Scope, sort/group-by pairs, the AND/OR search mode, FilesPage's
+  // rows-per-page) has none, so every one of its options renders as an
+  // ordinary row like any other peer choice instead of losing its first entry.
+  const hasRealAllOption = options.length > 0 && isAllOptionId(options[0].id)
+  const allOption = hasRealAllOption ? options[0] : undefined
+  const restOptions = hasRealAllOption ? options.slice(1) : options
   const matchingOptions = useMemo(
     () => restOptions.filter((option) => optionMatchesQuery(option, normalizedQuery)),
     [restOptions, normalizedQuery],
@@ -207,7 +265,7 @@ export function SectionOptionList({
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search..."
+            placeholder={`${T('search', 'Search')}...`}
             className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs text-slate-700 outline-none transition focus:border-primary-300 focus:ring-2 focus:ring-primary-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-primary-500/50 dark:focus:ring-primary-500/15"
           />
         </label>
@@ -230,7 +288,7 @@ export function SectionOptionList({
         ) : null}
         {matchingOptions.map((option) => renderOptionRow(option, ''))}
         {!matchingOptions.length ? (
-          <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">No matches</div>
+          <div className="px-2.5 py-3 text-center text-[11px] text-slate-400">{T('noMatches', 'No matches')}</div>
         ) : null}
       </div>
     </div>
@@ -256,10 +314,16 @@ function FilterMenuSectionRow({
   open: boolean
   onToggle: () => void
 }) {
+  const { t } = useApp() as { t?: (key: string) => string }
   const options = (section.options || []).filter(Boolean) as FilterOption[]
   const isCustomRender = typeof section.render === 'function'
-  const summary = isCustomRender ? (section.summary ?? null) : summarizeOptions(options)
-  const isActive = isCustomRender ? !!section.active : summary !== 'All'
+  const summary = isCustomRender ? (section.summary ?? null) : summarizeOptions(options, t)
+  // sectionIsActive, not a `summary !== 'All'` text compare: a mandatory
+  // single-choice section (no real All option) always has exactly one active
+  // entry, so comparing against the translated All label would either always
+  // read active (wrong locale) or -- worse -- misreport when the localized
+  // All label happens to collide with a real option's own label.
+  const isActive = isCustomRender ? !!section.active : sectionIsActive(options)
 
   return (
     <div
@@ -320,11 +384,16 @@ function FilterMenuPanel({
   onClear: (() => void) | null
   closeMenu: CloseMenu
 }) {
+  const { t } = useApp() as { t?: (key: string) => string }
+  const T = (key: string, fallback: string): string => {
+    const value = t?.(key)
+    return value && value !== key ? value : fallback
+  }
   const [openSectionId, setOpenSectionId] = useState<string | number | null>(() => {
     const activeSection = sections.find((section) => (
       typeof section.render === 'function'
         ? !!section.active
-        : summarizeOptions((section.options || []).filter(Boolean) as FilterOption[]) !== 'All'
+        : sectionIsActive((section.options || []).filter(Boolean) as FilterOption[])
     ))
     return (activeSection ?? sections[0])?.id ?? null
   })
@@ -342,7 +411,7 @@ function FilterMenuPanel({
                 closeMenu()
               }}
             >
-              Clear
+              {T('clear', 'Clear')}
             </button>
           ) : null}
           <button
