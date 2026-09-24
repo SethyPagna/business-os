@@ -27,8 +27,11 @@ for (const canEditCosts of [false, true]) {
   const correction = build({ ...line, mode: 'set' })
   assert.equal(correction.body.type, 'set')
   assert.equal(correction.body.quantity, 0, 'zero set remains a valid stock correction')
-  assert.equal(Object.hasOwn(correction.body, 'unitCostUsd'), canEditCosts, 'no-edit corrections omit cost even if a stale draft contains one')
-  if (canEditCosts) assert.equal(correction.body.unitCostUsd, 88)
+  // A scoped Set is a count correction on an existing lot (owner, 24 Sep): it
+  // keeps that lot's cost, so it never writes one -- with or without cost edit.
+  assert.equal(Object.hasOwn(correction.body, 'unitCostUsd'), false, 'a scoped Set never writes acquisition cost, even from a stale draft')
+  assert.equal(correction.body.setScope, 'lot', 'the selected received date is the default scope')
+  assert.equal(correction.body.batchId, 4, 'the Set names its existing received date')
 }
 
 // Cost redaction must remove the UI element, not render a numeric fallback.

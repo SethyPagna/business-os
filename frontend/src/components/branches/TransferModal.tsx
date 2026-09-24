@@ -50,7 +50,30 @@ const TRANSFER_BULK_CHUNK_SIZE = 200
 const TRANSFER_SEARCH_DEBOUNCE_MS = 200
 const TRANSFER_STOCK_PAGE_SIZE = 50
 
-type PendingTransferItem = { productId: string | number; quantity: number }
+type PendingTransferItem = { productId: string | number; quantity: number; batchId?: number }
+
+/**
+ * The received dates a transfer may draw from: active, dated, positive stock
+ * at the source branch. Transfer, like Remove, only offers lots with stock.
+ */
+export function positiveTransferLots(batches: ProductBatch[]): ProductBatch[] {
+  return (batches || []).filter((batch) => Number.isInteger(Number(batch.id)) && Number(batch.id) > 0
+    && Number(batch.is_active) === 1 && Number.isFinite(Number(batch.quantity)) && Number(batch.quantity) > 0 && !!batch.received_at)
+}
+
+/**
+ * One checked row's explicit lot line. Throws (never guesses) when no lot is
+ * chosen or the quantity exceeds what that lot or the branch holds; the
+ * Worker enforces the same bound (409 selected_lot_unavailable).
+ */
+export function selectedTransferLot(product: TransferProduct, batches: ProductBatch[], batchId: number | undefined, quantity: number): PendingTransferItem {
+  const batch = positiveTransferLots(batches).find((row) => Number(row.id) === Number(batchId))
+  if (!batch) throw new Error('transfer_pick_batch_first')
+  const limit = Math.min(Number(product.branch_quantity), Number(batch.quantity))
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(limit) || quantity > limit) throw new Error('transfer_invalid_quantity')
+  return { productId: product.id, quantity, batchId: Number(batch.id) }
+}
+
 type PendingTransfer = {
   /** 'selected' = the checked rows. 'entire_branch' = every in-stock row. */
   scope: 'selected' | 'entire_branch'
@@ -237,7 +260,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * 2.1 Form inputs and branch-scoped product cache.
    */
   const draftKey = transferDraftKey('branch_transfer')
-  const [initialDraft] = useState(() => readTransferDraft<{ fromBranch: string; toBranch: string; search: string; reason: string; selectedQuantities: Record<string, string>; showAllProducts: boolean; showSelectedOnly: boolean }>('branch_transfer', user?.id))
+  const [initialDraft] = useState(() => readTransferDraft<{ fromBranch: string; toBranch: string; search: string; reason: string; selectedQuantities: Record<string, string>; selectedLots?: Record<string, number>; showAllProducts: boolean; showSelectedOnly: boolean }>('branch_transfer', user?.id))
   const [fromBranch, setFromBranch] = useState(initialDraft?.fromBranch || '')
   const [toBranch, setToBranch] = useState(initialDraft?.toBranch || '')
   const [search, setSearch] = useState(initialDraft?.search || '')
@@ -298,6 +321,36 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>(initialDraft?.selectedQuantities || {})
+  // Explicit received date per checked row (no FIFO default), and the lots
+  // with stock loaded for it at the CURRENT source branch.
+  const [selectedLots, setSelectedLots] = useState<Record<string, number>>(initialDraft?.selectedLots || {})
+  const [rowLots, setRowLots] = useState<Record<string, { branch: string; batches: ProductBatch[]; error?: string }>>({})
+  const lotBranchRef = useRef(fromBranch)
+  lotBranchRef.current = fromBranch
+  const selectedLotProducts = Object.keys(selectedQuantities).sort().join(',')
+  useEffect(() => {
+    let cancelled = false
+    const branch = fromBranch
+    if (!branch) return undefined
+    const ids = Object.keys(selectedQuantities).filter((id) => !rowLots[id] || rowLots[id].error || rowLots[id].branch !== branch)
+    let next = 0
+    void Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+      while (!cancelled && next < ids.length) {
+        const id = ids[next++]
+        try {
+          const result = await withLoaderTimeout<{ batches: ProductBatch[] }>(() => getProductBatches(Number(id), Number(branch), true), 'Transfer received dates', TRANSFER_STOCK_LOAD_TIMEOUT_MS)
+          if (cancelled || lotBranchRef.current !== branch) return
+          setRowLots((current) => ({ ...current, [id]: { branch, batches: positiveTransferLots(result?.batches || []) } }))
+        } catch (error) {
+          if (cancelled || lotBranchRef.current !== branch) return
+          setRowLots((current) => ({ ...current, [id]: { branch, batches: [], error: getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data') } }))
+        }
+      }
+    }))
+    return () => { cancelled = true }
+    // rowLots is read as a cache; re-key only on the selection and the source.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromBranch, selectedLotProducts])
   // Multi mode: view filter that narrows the (whole-catalog) list to just
   // the checked rows, so the picked set can be reviewed/adjusted in one
   // screen instead of hunting scattered highlighted rows through thousands.
@@ -319,12 +372,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const draftFinishedRef = useRef(false)
   const draftGuardRef = useRef({ dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk })
   draftGuardRef.current = { dirty: transferDirty, pending: !!savedRun, busy: saving || savingBulk }
-  const draftState = { fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly }
+  const draftState = { fromBranch, toBranch, search, reason, selectedQuantities, selectedLots, showAllProducts, showSelectedOnly }
   const draftLifecycleRef = useRef({ draftKey, actorId: user?.id, dirty: transferDirty, form: draftState })
   draftLifecycleRef.current = { draftKey, actorId: user?.id, dirty: transferDirty, form: draftState }
   useEffect(() => {
     if (transferDirty && !draftFinishedRef.current) writeTransferDraft('branch_transfer', user?.id, draftKey, draftState)
-  }, [draftKey, user?.id, fromBranch, toBranch, search, reason, selectedQuantities, showAllProducts, showSelectedOnly, transferDirty])
+  }, [draftKey, user?.id, fromBranch, toBranch, search, reason, selectedQuantities, selectedLots, showAllProducts, showSelectedOnly, transferDirty])
   useEffect(() => {
     markRestoreHandled('branch_transfer')
     const preserve = () => {
@@ -700,6 +753,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   useEffect(() => {
     if (previousSourceRef.current === fromBranch) return
     previousSourceRef.current = fromBranch
+    setSelectedLots({})
+    setRowLots({})
     setSelectedQuantities({})
     setShowSelectedOnly(false)
     setShowAllProducts(false)
@@ -789,6 +844,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     && filteredMulti.every((product) => String(product.id) in selectedQuantities)
 
   const toggleProductSelected = (product: TransferProduct) => {
+    setSelectedLots((current) => { const next = { ...current }; delete next[String(product.id)]; return next })
     setSelectedQuantities((current) => {
       const id = String(product.id)
       const next = { ...current }
@@ -814,6 +870,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * server's per-request limit.
    */
   const toggleSelectAllShown = () => {
+    setSelectedLots((current) => { const next = { ...current }; filteredMulti.forEach((product) => { delete next[String(product.id)] }); return next })
     setSelectedQuantities((current) => {
       if (allFilteredSelected) {
         // Only clear the rows currently visible under the active search --
@@ -1051,7 +1108,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (!requireTransferReason()) return
 
     const productsById = new Map(multiProducts.map((product) => [String(product.id), product]))
-    const items: Array<{ productId: string | number; quantity: number }> = []
+    const items: PendingTransferItem[] = []
     for (const [productId, rawQuantity] of selectedEntries) {
       const product = productsById.get(productId)
       const qty = Number(rawQuantity)
@@ -1064,7 +1121,22 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         notify(`${product?.name || productId}: ${message} ${product?.unit || ''}`.trim(), 'error')
         return
       }
-      items.push({ productId, quantity: qty })
+      // Each checked row names its received date explicitly; lots loaded
+      // under another source branch never count.
+      const loaded = rowLots[productId]
+      if (!loaded || loaded.error || loaded.branch !== fromBranch) {
+        notify(`${product.name || productId}: ${t('transfer_pick_batch_first') || 'Choose a received date first'}`, 'error')
+        return
+      }
+      try {
+        items.push(selectedTransferLot(product, loaded.batches, selectedLots[productId], qty))
+      } catch (error) {
+        const lot = loaded.batches.find((row) => Number(row.id) === Number(selectedLots[productId]))
+        notify(`${product.name || productId}: ${error instanceof Error && error.message === 'transfer_invalid_quantity'
+          ? (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(Math.min(Number(product.branch_quantity), Number(lot?.quantity || 0))))
+          : (t('transfer_pick_batch_first') || 'Choose a received date first')}`, 'error')
+        return
+      }
     }
 
     setPendingTransfer(buildPendingTransfer('selected', items))
@@ -1107,7 +1179,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
           requests.push({ bulk: true, body: {
             fromBranchId: Number.parseInt(fromBranch, 10), toBranchId: Number.parseInt(toBranch, 10),
-            reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE), userId: user?.id, userName: user?.name,
+            // A checked row carries its explicit received date; Transfer
+            // entire branch moves every lot, so it has none to name.
+            reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE)
+              .map(({ productId, quantity, batchId }) => (batchId ? { productId, quantity, batchId } : { productId, quantity })),
+            userId: user?.id, userName: user?.name,
           } })
         }
         run = prepareTransferRun(user?.id, requests)
@@ -1555,6 +1631,10 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                     const id = String(product.id)
                     const checked = id in selectedQuantities
                     const rowQuantity = selectedQuantities[id] ?? ''
+                    const loadedLots = rowLots[id]
+                    const lotsReady = loadedLots?.branch === fromBranch
+                    const lots = lotsReady ? loadedLots.batches : []
+                    const chosenLot = lots.find((lot) => Number(lot.id) === Number(selectedLots[id]))
                     return (
                       <div
                         key={product.id}
@@ -1574,11 +1654,31 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                           {t('available') || 'Available'}: {product.branch_quantity} {product.unit}
                         </span>
                         {checked ? (
+                          <AppSelect
+                            id={`transfer-lot-${id}`}
+                            className="min-w-0 flex-1 sm:max-w-[13rem]"
+                            buttonClassName="h-8 w-full text-xs"
+                            ariaLabel={`${t('transfer_pick_batch') || 'Received date'} ${product.name || ''}`}
+                            value={chosenLot?.id ?? ''}
+                            disabled={!lotsReady || !!loadedLots?.error}
+                            options={[
+                              { value: '', label: !lotsReady ? (t('loading') || 'Loading...') : loadedLots?.error || !lots.length ? (t('no_batches_with_stock') || 'No received dates with stock') : (t('transfer_pick_batch_first') || 'Choose a received date') },
+                              ...lots.map((lot) => ({ value: lot.id, label: `${batchDisplayLabel(lot, t('batch') || 'Received date')} · ${lot.quantity}` })),
+                            ]}
+                            onChange={(value) => {
+                              const lot = lots.find((entry) => String(entry.id) === String(value))
+                              setSelectedLots((current) => ({ ...current, [id]: lot ? Number(lot.id) : 0 }))
+                              setProductQuantity(product.id, lot ? String(Math.min(Number(product.branch_quantity), Number(lot.quantity))) : '')
+                            }}
+                          />
+                        ) : null}
+                        {checked ? (
                           <input
                             type="number"
                             className="input w-20 shrink-0 px-2 py-1 text-sm"
                             min="0.01"
-                            max={product.branch_quantity}
+                            max={chosenLot ? Math.min(Number(product.branch_quantity), Number(chosenLot.quantity)) : 0}
+                            disabled={!chosenLot}
                             step="any"
                             value={rowQuantity}
                             onChange={(event) => setProductQuantity(product.id, event.target.value)}

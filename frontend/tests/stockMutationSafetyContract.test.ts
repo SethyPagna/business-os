@@ -57,7 +57,10 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
   const requestAt = transfer.indexOf('prepareTransferRun(user?.id', validationAt)
   assert.ok(validationAt > 0 && requestAt > validationAt, 'the aggregate-aware limit must reject before the single transfer request')
   assert.match(transfer, /batchId: selectedBatchId/)
-  assert.doesNotMatch(transfer, /transfer_pick_batch_first/)
+  // The SINGLE transfer keeps Automatic (FIFO) below; each checked row of the
+  // multi transfer names its received date (ported from the reviewed
+  // codex/existing-stock-lot-corrections-20260912 contract).
+  assert.match(transfer, /transfer_pick_batch_first/, 'live multi-transfer must refuse a missing explicit lot')
   assert.doesNotMatch(transfer, /disabled=\{hasBatchLots && !selectedBatchId\}/)
   assert.match(transfer, /Automatic \(FIFO\)/)
   assert.match(transfer, /confirm_transfer_details/)

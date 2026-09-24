@@ -73,7 +73,8 @@ const EXPECTED_NAMES: Record<string, string[]> = {
  'components/products/ProductDuplicatesTab.tsx':['product.name'],
  'components/products/CreateProductsSessionModal.tsx':['group.name'],
  'components/branches/TransferModal.tsx':['group.name','selectedProduct.name','product.name','group.name'],
- 'components/products/forms/BulkAddStockModal.tsx':['row.request.productName'],
+ // The per-product received-date rows (scoped Set / explicit lots) name each product first.
+ 'components/products/forms/BulkAddStockModal.tsx':['product.name || productId','row.request.productName'],
 }
 const ADOPTED: Array<[string, number]> = [
  ['components/products/surfaces/ProductDetailModal.tsx',1],
@@ -89,7 +90,7 @@ const ADOPTED: Array<[string, number]> = [
  ['components/products/ProductDuplicatesTab.tsx',1],
  ['components/products/CreateProductsSessionModal.tsx',1],
  ['components/branches/TransferModal.tsx',4],
- ['components/products/forms/BulkAddStockModal.tsx',1],
+ ['components/products/forms/BulkAddStockModal.tsx',2],
 ]
 runTest('adopted product names use the shared two-line component, not a local clamp',()=>{
  for(const [file,count] of ADOPTED){

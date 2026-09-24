@@ -332,6 +332,8 @@ type BulkAddStockResult = {
   failedIds?: EntityId[]
   quantity?: number | string
   updatedIds?: EntityId[]
+  action?: 'add' | 'remove' | 'set'
+  serverActionHistoryIds?: number[]
 }
 
 type ProductLightboxState = {
@@ -5437,23 +5439,29 @@ function ProductsFullEditor() {
             branches={branchOptions}
             user={user}
             onClose={() => setBulkAddModal(null)}
-            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0 }: BulkAddStockResult) => {
+            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0, action = 'add', serverActionHistoryIds = [] }: BulkAddStockResult) => {
               const numericQuantity = Number(quantity || 0)
               const successfulIds = normalizePositiveProductIds(updatedIds)
               const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
               setBulkAddModal(null)
               setSelectedIds(new Set(normalizePositiveProductIds(failedIds)))
-              if (done > 0 && restoredSnapshots.length && numericQuantity > 0) {
+              // A scoped Set is undone ONLY through its Worker history rows.
+              if (serverActionHistoryIds.length) await actionHistory.refreshServerItems()
+              // The client closure below re-ADDS on redo, so it is only ever
+              // correct for an add; a bulk remove or set pushing it would
+              // redo as an add of the same quantity.
+              if (action === 'add' && !serverActionHistoryIds.length && done > 0 && restoredSnapshots.length && numericQuantity > 0) {
                 actionHistory.pushAction({
                   label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
                   undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo bulk add stock'),
                   redo: () => addStockToProducts(successfulIds, numericQuantity, branchId, 'Redo bulk add stock'),
                 })
               }
+              const verb = action === 'remove' ? 'Removed stock from' : action === 'set' ? 'Set stock for' : 'Added stock to'
               notify(
                 failed
-                  ? `Added stock to ${done} product(s), ${failed} failed`
-                  : `Added stock to ${done} product${done === 1 ? '' : 's'}`,
+                  ? `${verb} ${done} product(s), ${failed} failed`
+                  : `${verb} ${done} product${done === 1 ? '' : 's'}`,
                 failed ? 'warning' : 'success',
               )
               // The modal's own mutation loop never refreshes the page

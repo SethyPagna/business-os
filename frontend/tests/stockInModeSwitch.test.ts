@@ -114,21 +114,24 @@ runTest('the write honours the mode through the one adjust kernel; add keeps its
   // reused by both the batched commit endpoint and the sequential fallback.
   // remove: the chosen lot or the oldest lots; no receipt fields
   assert.match(modalSource, /if \(line\.mode === 'remove'\) \{\s*return \{ key: line\.key, wire: 'adjust', body: \{\s*productId: Number\(line\.product\.id\), type: 'remove', quantity: line\.quantity,[^]*?batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)
-  // set: the branch total; receipt fields ride along because a set that
-  // raises stock is an add server-side
-  assert.match(modalSource, /if \(line\.mode === 'set'\) \{\s*return \{ key: line\.key, wire: 'adjust', body: \{\s*productId: Number\(line\.product\.id\), type: 'set', quantity: line\.quantity,[^]*?supplierId: supplier\.supplierId, supplierName: supplier\.supplierName\.trim\(\) \|\| null,[^]*?sessionId: sessionIdRef\.current,/)
+  // set: SCOPED (owner, 24 Sep) -- the selected received date by default or
+  // the branch total, on a named existing lot; a count correction, so no
+  // receipt fields ride along (the lot keeps its own cost).
+  assert.match(modalSource, /if \(line\.mode === 'set'\) \{\s*return \{ key: line\.key, wire: 'adjust', body: \{\s*productId: Number\(line\.product\.id\), type: 'set', quantity: line\.quantity,[^]*?setScope: line\.setScope \|\| 'lot',\s*batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,[^]*?sessionId: sessionIdRef\.current,/)
+  const setBody = modalSource.slice(modalSource.indexOf("if (line.mode === 'set') {"), modalSource.indexOf("if (line.mode === 'add' && line.conditionTag)"))
+  assert.doesNotMatch(setBody, /supplierId|unitCostUsd|paymentStatus|receivedDate/, 'a scoped Set carries no receipt facts')
   // add is unchanged: still exactly one call site to the transport itself
   // (the 404-fallback sequential loop); the batched endpoint is the primary path.
   assert.equal((modalSource.match(/await receiveBatchStock\(/g) || []).length, 1)
   // the gate guards adds as the line is queued -- and only adds; a remove
   // has no supplier or cost to gate, a set's direction is decided server-side
   assert.match(modalSource, /if \(mode === 'add'\) \{\s*if \(!canEditCosts\) \{[^\n]*return \}\s*const receiptGate = stockReceiptGateCode\(\{/)
-  // a remove never asks for a cost
-  const creditCondition = modalSource.match(/if \((canEditCosts && mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate\.trim\(\))\)/)?.[1]
+  // only an add is a receipt: a remove and a scoped Set never ask for a due date
+  const creditCondition = modalSource.match(/if \((canEditCosts && mode === 'add' && paymentStatus === 'credit' && !creditDueDate\.trim\(\))\)/)?.[1]
   assert.ok(creditCondition, 'credit validation is limited to editable receipt fields')
   const requiresDueDate = new Function('canEditCosts', 'mode', 'paymentStatus', 'creditDueDate', `return (${creditCondition})`)
   for (const mode of ['add', 'remove', 'set']) {
-    assert.equal(requiresDueDate(true, mode, 'credit', ''), mode !== 'remove', `${mode}: authorized receipt credit requires a due date`)
+    assert.equal(requiresDueDate(true, mode, 'credit', ''), mode === 'add', `${mode}: authorized receipt credit requires a due date`)
     assert.equal(requiresDueDate(false, mode, 'credit', ''), false, `${mode}: hidden receipt inputs cannot block no-edit corrections`)
     assert.equal(requiresDueDate(true, mode, 'paid', ''), false, `${mode}: paid stock does not need a due date`)
     assert.equal(requiresDueDate(true, mode, 'credit', '2026-09-20'), false, `${mode}: an entered due date is accepted`)

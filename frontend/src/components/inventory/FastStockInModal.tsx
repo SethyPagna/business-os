@@ -31,7 +31,7 @@ import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
-import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, scopedSetPreview, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import StockReasonField from '../shared/StockReasonField.tsx'
 import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
@@ -114,6 +114,11 @@ interface ReceivedLine {
   // live batchChoice no longer describes a line once the next one starts.
   batchChoice: 'new' | number
   batchLabel: string
+  // Scoped Set (owner, 24 Sep): the selected received date (default) or the
+  // branch total, absorbed by that received date, plus the lot figure the
+  // line was previewed against -- the Worker refuses 409 if it moved since.
+  setScope?: StockSetScope
+  expectedLotQuantity?: number
   // N27: frozen with the line -- the switch may move on to the next line.
   mode: StockMode
   // P3-L2: the operator's reason, frozen with the line and written to its
@@ -301,6 +306,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   // ReceiveBatchModal: a lot id can go stale between sessions (merged,
   // emptied, deactivated) and 'new' is always a safe default.
   const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
+  // Selected received date is the default Set scope (owner, 24 Sep).
+  const [setScope, setSetScope] = useState<StockSetScope>('lot')
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
   const [pendingCommit, setPendingCommit] = useState<ReceivedLine[] | null>(null)
@@ -582,6 +589,20 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     notify(tr('product_created_continue_stockin', 'Product created. Continue adding it to this stock-in session.'))
   }
 
+  // Remove and Set name an EXISTING received date -- no FIFO or New default.
+  // Remove offers only lots with stock; Set offers every lot at the branch.
+  const lotChoices = mode === 'remove' ? batchOptions.filter((batch) => Number(batch.quantity) > 0) : batchOptions
+  const chosenOption = typeof batchChoice === 'number' ? lotChoices.find((batch) => Number(batch.id) === batchChoice) || null : null
+  const pickedBranchKnown = Array.isArray(picked?.branch_stock)
+  const fastSetPreview = mode === 'set' && chosenOption && (setScope === 'lot' || pickedBranchKnown)
+    ? scopedSetPreview({
+        scope: setScope, targetQuantity: Number(quantity), lotQuantity: chosenOption.quantity,
+        branchQuantity: pickedBranchKnown ? adjustBranchQuantity(picked?.branch_stock, branchId, 0) : 0,
+      })
+    : null
+  // Loss rule (24 Sep): only a Set that LOWERS the received date may be tagged.
+  const fastSetLowers = Boolean(fastSetPreview?.valid && fastSetPreview.delta < 0)
+
   const addLine = () => {
     if (saving) return
     const rawQuantity = quantity.trim()
@@ -603,8 +624,16 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     // An empty box must not queue "set to 0" by accident -- `Number('')` is 0 --
     // and a branch cannot hold less than nothing.
     if (mode === 'set' && (!rawQuantity || qty < 0)) { notify(tr('fast_stockin_set_qty', 'Quantity must be 0 or more'), 'error'); return }
-    // A remove has no receipt: no payment, no supplier, no cost to check.
-    if (canEditCosts && mode !== 'remove' && paymentStatus === 'credit' && !creditDueDate.trim()) {
+    if (mode !== 'add' && !chosenOption) { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
+    if (mode === 'remove' && chosenOption && qty > Number(chosenOption.quantity)) {
+      notify(`Cannot remove ${qty} - only ${chosenOption.quantity} available in the selected received date`, 'error'); return
+    }
+    if (mode === 'set' && fastSetPreview && !fastSetPreview.valid) {
+      notify(tr('stock_set_lot_negative', 'The selected received date does not have enough stock for this branch total.'), 'error'); return
+    }
+    // Only an add is a receipt: a remove and a scoped Set (a count
+    // correction on an existing lot) have no payment, supplier or cost.
+    if (canEditCosts && mode === 'add' && paymentStatus === 'credit' && !creditDueDate.trim()) {
       notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
       return
     }
@@ -627,9 +656,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       }
     }
     const lineName = String(picked.name || `#${picked.id}`)
-    // A set targets the branch total, not a lot; the server posts the
-    // difference itself.
-    const effectiveBatchChoice: 'new' | number = mode === 'set' ? 'new' : batchChoice
+    // Every mode names its lot now: Add a lot or New, Remove and Set an
+    // existing one (a Set's scope says whether the target is that lot or the
+    // branch total it absorbs).
+    const effectiveBatchChoice: 'new' | number = batchChoice
     const chosenLot = typeof effectiveBatchChoice === 'number'
       ? batchOptions.find((batch) => Number(batch.id) === effectiveBatchChoice)
       : null
@@ -639,21 +669,18 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         product: picked,
         productName: lineName,
         quantity: qty,
-        unitCost: mode === 'remove' ? '' : unitCost,
-        freeGoods: mode === 'remove' ? false : freeGoods,
+        unitCost: mode !== 'add' ? '' : unitCost,
+        freeGoods: mode !== 'add' ? false : freeGoods,
         createPriceVariant: false,
-        expiryDate: mode === 'remove' ? '' : expiryDate,
+        expiryDate: mode !== 'add' ? '' : expiryDate,
         batchChoice: effectiveBatchChoice,
         batchLabel: chosenLot
-          ? batchDisplayLabel(chosenLot, tr('batch', 'Received date'))
-          : mode === 'remove'
-            ? tr('fast_stock_auto_lot', 'Oldest received dates first')
-            : mode === 'set'
-              ? (branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'Branch'))
-              : tr('new_batch', '+ New received date'),
+          ? `${batchDisplayLabel(chosenLot, tr('batch', 'Received date'))}${mode === 'set' && setScope === 'branch' ? ` · ${tr('stock_set_scope_branch', 'Branch total')}` : ''}`
+          : tr('new_batch', '+ New received date'),
+        ...(mode === 'set' && chosenLot ? { setScope, expectedLotQuantity: Number(chosenLot.quantity) || 0 } : {}),
         mode,
         reason: reason.trim(),
-        conditionTag: mode === 'set' ? '' : conditionTag,
+        conditionTag: mode === 'set' && !fastSetLowers ? '' : conditionTag,
         createdProduct: createdProductIds.includes(String(picked.id)),
         status: 'queued',
         detail: tr('ready_to_receive', 'Ready'),
@@ -710,7 +737,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       return
     }
     if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    if (canEditCosts && pending.some((line) => line.mode !== 'remove') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return }
+    if (canEditCosts && pending.some((line) => line.mode === 'add') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return }
     setPendingCommit(pending)
   }
 
@@ -745,13 +772,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       return { key: line.key, wire: 'adjust', body: {
         productId: Number(line.product.id), type: 'set', quantity: line.quantity,
         reason: stockLineReason(line, tr), branchId: Number(branchId),
-        // Receipt fields ride along: a set that RAISES stock is an add
-        // server-side and is gated like one; a set that lowers it ignores them.
-        receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
-        supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-        ...(canEditCosts ? { unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null } : {}),
-        freeGoods: line.freeGoods, paymentStatus,
-        creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
+        // Scoped Set: a count correction on the chosen EXISTING received date
+        // (lib/stockLotAdjustment.ts) -- no receipt fields, the lot keeps its
+        // own cost, and a downward Set is a loss unless tagged.
+        setScope: line.setScope || 'lot',
+        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
+        expectedLotQuantity: line.expectedLotQuantity,
+        conditionTag: line.conditionTag || undefined,
         sessionId: sessionIdRef.current,
         // Migration 0192: the per-line dedup identity, last so the pinned
         // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
@@ -935,7 +962,8 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   const pendingAllAdd = pendingCommit ? modeCount(pendingCommit, 'add') === pendingCommit.length : true
   // The shipment fields (date, supplier, payment) belong to receipts; with the
   // switch on remove and nothing else queued they have nothing to describe.
-  const receiptFieldsRelevant = mode !== 'remove' || received.some((line) => line.mode !== 'remove')
+  // Only an add is a receipt; a scoped Set is a count correction.
+  const receiptFieldsRelevant = mode === 'add' || received.some((line) => line.mode === 'add')
   const commitReviewItems: ConfirmReviewItem[] = pendingCommit ? [
     { label: tr('branch', 'Branch'), value: commitBranchName },
     { label: tr('lines', 'Lines'), value: pendingCommit.length },
@@ -945,10 +973,10 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
       { label: tr('set', 'Set'), value: modeCount(pendingCommit, 'set') },
     ]),
     { label: tr('total_units', 'Total units'), value: pendingCommit.reduce((total, line) => total + line.quantity, 0) },
-    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `${usdSymbol}${pendingCommit.reduce((total, line) => total + (line.mode === 'remove' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
+    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `${usdSymbol}${pendingCommit.reduce((total, line) => total + (line.mode !== 'add' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
     // Receipt fields describe adds (and sets, which may add); a pure
     // remove session has none to review.
-    ...(pendingCommit.some((line) => line.mode !== 'remove') ? [
+    ...(pendingCommit.some((line) => line.mode === 'add') ? [
     { label: tr('received_date', 'Received date'), value: receivedDate.trim() || tr('today', 'Today') },
     { label: tr('supplier', 'Supplier'), value: supplier.supplierName.trim() || '—' },
     { label: tr('payment', 'Payment'), value: paymentStatus === 'credit'
@@ -957,7 +985,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     ] : []),
   ] : []
   const sessionCostTotal = received.reduce((total, line) => (
-    total + (line.mode === 'remove' ? 0 : Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitCost) || 0))
+    total + (line.mode !== 'add' ? 0 : Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitCost) || 0))
   ), 0)
   const closeState: FastStockInCloseState = {
     mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
@@ -1088,22 +1116,31 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   derives the lot code from the shipment date, an existing chip
                   tops up that exact lot. Chosen before the numbers. */}
               {mode === 'set' ? (
-                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                  {tr('fast_stock_set_hint', 'Set makes the branch total exactly this quantity. The difference posts as an add (supplier and cost required) or a remove.')}
+                <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label={tr('stock_set_scope', 'Set quantity for')}>
+                  {([['lot', tr('stock_set_scope_lot', 'Selected received date')], ['branch', tr('stock_set_scope_branch', 'Branch total')]] as [StockSetScope, string][]).map(([scope, label]) => (
+                    <button key={scope} type="button" aria-pressed={setScope === scope}
+                      className={`min-h-8 min-w-0 rounded-lg border-2 px-2 text-[11px] font-medium ${setScope === scope ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                      onClick={() => setSetScope(scope)}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              ) : (
+              ) : null}
+              {(
                 <div className="mt-2">
-                  <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('batch', 'Received date')}</span>
+                  <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('selected_received_date', 'Selected received date') : tr('batch', 'Received date')}</span>
                   {batchLoading ? (
                     <div className="text-[11px] text-gray-400">{tr('loading', 'Loading...')}</div>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
-                      <button type="button"
+                      {/* New is an Add-only choice; Remove and Set name an existing lot. */}
+                      {mode === 'add' ? <button type="button"
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                         onClick={() => setBatchChoice('new')}>
-                        {mode === 'remove' ? tr('fast_stock_auto_lot', 'Oldest received dates first') : tr('new_batch', '+ New received date')}
-                      </button>
-                      {batchOptions.map((batch) => (
+                        {tr('new_batch', '+ New received date')}
+                      </button> : null}
+                      {!lotChoices.length && mode !== 'add' ? <span className="text-[11px] text-gray-400">{mode === 'remove' ? tr('no_batches_with_stock', 'No received dates with stock in this branch') : tr('no_batches_for_branch', 'No received dates for this branch')}</span> : null}
+                      {lotChoices.map((batch) => (
                         <button key={batch.id} type="button"
                           className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
                           onClick={() => setBatchChoice(Number(batch.id))}>
@@ -1119,16 +1156,19 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                       ? `${tr('batch_code_preview', 'Received date code')}: ${dateToBatchCode(receivedDate) || '--'}`
                       : tr('existing_lot_keeps_date', 'Tops up the selected received date — that date stays.')}
                   </span> : null}
+                  {fastSetPreview ? <span className={`mt-1 block text-[11px] tabular-nums ${fastSetPreview.valid ? 'text-gray-400' : 'text-rose-600 dark:text-rose-300'}`}>
+                    {tr('lot_quantity', 'Received-date quantity')}: {fastSetPreview.beforeLotQuantity} → {fastSetPreview.afterLotQuantity} (Δ {fastSetPreview.delta >= 0 ? '+' : ''}{fastSetPreview.delta})
+                  </span> : null}
                 </div>
               )}
               {/* P3-L6: keep-or-destroy (remove) and sellable-or-tagged
-                  (add) as ONE compact row on every screen size. Not offered
-                  for 'set' -- see StockConditionTagRow and the route's own
-                  refusal. */}
-              {mode !== 'set' ? (
+                  (add) as ONE compact row on every screen size. A Set gets
+                  the remove row only once its preview LOWERS the lot (loss
+                  rule, 24 Sep); the route refuses a tag on any other Set. */}
+              {mode !== 'set' || fastSetLowers ? (
                 <div className="mt-2">
                   <StockConditionTagRow
-                    mode={mode === 'remove' ? 'remove' : 'add'}
+                    mode={mode === 'add' ? 'add' : 'remove'}
                     value={conditionTag}
                     onChange={setConditionTag}
                     tr={tr}
@@ -1136,9 +1176,9 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
                   />
                 </div>
               ) : null}
-              <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode === 'remove' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_8.5rem_8rem_1fr]'}`}>
+              <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode !== 'add' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_8.5rem_8rem_1fr]'}`}>
                 <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
-                {mode !== 'remove' && (canViewCosts || canEditCosts) ? <>
+                {mode === 'add' && (canViewCosts || canEditCosts) ? <>
                 <label className="block"><span className="mb-1 block whitespace-nowrap text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.0001" className="input text-sm" required disabled={!canEditCosts || freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
                   const next = event.target.value
                   setUnitCost(next)
