@@ -18,7 +18,8 @@ import {
  *  - The grid never shows more cards than the chosen page size, at any instant
  *    -- not merely once it has settled.
  *  - A RETURNING shopper (a stored 20/50/100 choice plus a cached bootstrap cut
- *    at the store's own size) sees their own page size honoured.
+ *    at the store's own size) sees their own page size honoured, although the
+ *    pager no longer offers a size chooser (P10-20, 2026-09-17).
  *  - The page counts are exact: 137 fixture products means 7 pages at 20, 3 at
  *    50, 2 at 100, and every product name is unique so one row is one card.
  *
@@ -94,12 +95,13 @@ async function seedReturningShopper(context: BrowserContext, bootstrap: Record<s
 }
 
 test.describe('storefront pager', () => {
-  test('reads [size] [Back] [page / total] [Next], in that order', async ({ page }) => {
+  test('reads [Back] [page / total] [Next], in that order', async ({ page }) => {
     // CATCHES: the control order regressing back to the admin layout (a
-    // "Showing 1-50 of 137" summary on the left, the size selector pushed to
-    // the right of Next) -- the 2026-09-14 owner instruction is specifically
-    // about ORDER, so the assertion walks the rendered children left to right
-    // rather than merely checking each control exists somewhere.
+    // "Showing 1-50 of 137" summary on the left, a size selector beside Next)
+    // or the per-page chooser coming back -- P10-20 (owner, 2026-09-17: "no
+    // need to show rows per page options") removed it from every layout. The
+    // assertion walks the rendered children left to right rather than merely
+    // checking each control exists somewhere.
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
     await page.getByRole('button', { name: 'Products', exact: true }).click()
@@ -110,11 +112,11 @@ test.describe('storefront pager', () => {
       const label = node.getAttribute('aria-label')
       return label || node.textContent?.trim() || node.nodeName.toLowerCase()
     }))
-    expect(order, 'pager control order').toEqual(['Per page', 'Back', 'Page', 'Next'])
+    expect(order, 'pager control order').toEqual(['Back', 'Page', 'Next'])
 
-    // The size selector prints digits only (the words live in its accessible
-    // name), and the count beside the page box is the total page count.
-    await expect(pager.getByRole('button', { name: 'Per page' })).toHaveText('50')
+    // No size chooser anywhere in the row; the count beside the page box is the
+    // total page count at the store's default size of 50.
+    await expect(pager.getByRole('button', { name: 'Per page' })).toHaveCount(0)
     await expect(pager.locator('input[aria-label="Page"]')).toHaveValue('1')
     await expect(pager).toContainText('/ 3')
 
@@ -124,22 +126,20 @@ test.describe('storefront pager', () => {
     expectNoRuntimeErrors(health)
   })
 
-  test('a chosen page size survives a reload', async ({ page, context }) => {
-    // CATCHES: the choice being kept in React state only, or written under a
-    // different key than the one catalogPagination.tsx reads. Both produce a
-    // pager that looks right until the shopper comes back, which is exactly the
-    // failure mode a same-session assertion cannot see -- so this reloads.
+  test('a stored page size is still honoured across a reload', async ({ page, context }) => {
+    // CATCHES: dropping the chooser (P10-20) also dropping the stored choice,
+    // or the storefront reading a different key than the one catalogPagination
+    // wrote. Shoppers who picked 20 before the chooser went keep it, so the
+    // stored value is seeded and a reload must still land on 20.
+    await seedViewerPageSize(context, STOREFRONT_ORIGIN, 20)
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
     await page.getByRole('button', { name: 'Products', exact: true }).click()
-    await expect(page.locator(storefrontCards)).toHaveCount(50)
 
     const pager = page.locator(PAGER).first()
-    await pager.getByRole('button', { name: 'Per page' }).click()
-    await page.getByRole('option', { name: '20', exact: true }).click()
-
     await expect(page.locator(storefrontCards)).toHaveCount(20)
     await expect(pager).toContainText('/ 7')
+    await expect(pager.getByRole('button', { name: 'Per page' })).toHaveCount(0)
 
     // The exact key, not "some key": a rename would silently orphan every
     // existing shopper's stored choice.
@@ -149,7 +149,7 @@ test.describe('storefront pager', () => {
     await page.reload({ waitUntil: 'load' })
     await page.getByRole('button', { name: 'Products', exact: true }).click()
     await expect(page.locator(storefrontCards)).toHaveCount(20)
-    await expect(page.locator(PAGER).first().getByRole('button', { name: 'Per page' })).toHaveText('20')
+    await expect(page.locator(PAGER).first()).toContainText('/ 7')
 
     expectNoRuntimeErrors(health)
   })
