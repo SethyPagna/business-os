@@ -820,14 +820,19 @@ app.post('/', async (c) => {
   // stale/replayed request must not be trusted -- recompute the same
   // earned/deducted/redeemed/rewarded balance portal.ts's summarizePoints
   // uses, scoped to this customer, right before spending it.
-  const exchangeRate = Number(body.exchange_rate) || 4100
+  // A new sale books the rate the till quoted it with; a caller that sends
+  // none gets today's Settings rate (a new record), and only an unset setting
+  // falls to the 4100 schema default (migrations/0001_init.sql).
   // Part 534: KHR change converts at its own configured rate. Read the
   // SETTING (not a client field) so the stored change_khr matches what the
   // POS displayed from the same setting.
-  const changeRateRow = await db.prepare(
-    `SELECT value FROM settings WHERE key = 'change_exchange_rate'`,
-  ).get<{ value: string }>()
-  const changeExchangeRateSetting = changeRateRow?.value
+  const rateSettingRows = await db.prepare(
+    `SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate')`,
+  ).all<{ key: string; value: string }>()
+  const rateSettings = Object.fromEntries(rateSettingRows.map((row) => [row.key, row.value]))
+  const exchangeRate = Number(body.exchange_rate) > 0 ? Number(body.exchange_rate)
+    : Number(rateSettings.exchange_rate) > 0 ? Number(rateSettings.exchange_rate) : 4100
+  const changeExchangeRateSetting = rateSettings.change_exchange_rate
   let customer: { id: number; name: string | null; membership_number: string | null; is_anonymous: number } | null = null
   if (body.customer_id) {
     customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get([body.customer_id]) || null
@@ -898,8 +903,11 @@ app.post('/', async (c) => {
         throw new SaleMoneyContractError('money_precision_pricing_intent_required')
       // Original raw catalogue fields remain in the source CAS. The snapshot
       // explicitly captures the fresh selling-cent policy at its input boundary.
+      // A NULL catalogue price (the column is nullable) is 0, exactly as the POS
+      // quotes it (posCore.ts), so a manual-priced line is not refused as
+      // invalid_decimal before the evaluator applies selling_price_input_usd.
       const capturedProduct={...capturePricingProduct(product),
-        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),
+        selling_price_usd:sellingPriceCeilCent(Number(product.selling_price_usd ?? 0)),
         wholesale_price_usd:product.wholesale_price_usd == null ? null : sellingPriceCeilCent(Number(product.wholesale_price_usd))}
       return {line_key:item.client_line_key,source:item.pricing_source,product:capturedProduct,
         ...(item.display_price_mode===undefined?{}:{display_price_mode:item.display_price_mode}),
@@ -2272,16 +2280,24 @@ app.patch('/:id/status', async (c) => {
       return c.json({ error: 'Settle payment separately from notes or stock overrides.' }, 400)
     }
     const settingRows = await db.prepare(`
-      SELECT key,value FROM settings WHERE key IN ('exchange_rate','change_exchange_rate','pos_payment_methods')
+      SELECT key,value FROM settings WHERE key IN ('change_exchange_rate','pos_payment_methods')
     `).all<{ key: string; value: string }>()
     const settingMap = Object.fromEntries(settingRows.map((row) => [row.key, row.value]))
     const recordedMoney=hasRecordedSaleMoneyPrecision(sale as Parameters<typeof hasRecordedSaleMoneyPrecision>[0])
-    const latestRate = recordedMoney ? Number(sale.exchange_rate) : Number(settingMap.exchange_rate || 4100)
+    // Owner rule (24 Sep 2026): a sale keeps the exchange rate it was booked
+    // with, legacy (precision v0) or not. Settling records a payment against
+    // that rate and never re-rates the sale; the live Settings rate is for new
+    // records only. A sale with no usable rate of its own is refused rather
+    // than handed one.
+    const latestRate = sale.exchange_rate == null ? NaN : Number(sale.exchange_rate)
+    if (!Number.isFinite(latestRate) || latestRate <= 0) {
+      return c.json({ error: 'money_precision_invalid_rate', code: 'money_precision_invalid_rate' }, 409)
+    }
     const reviewedRate = Number(body.expected_exchange_rate)
     if (!Number.isFinite(reviewedRate) || reviewedRate <= 0) {
       return c.json({ error: 'expected_exchange_rate is required to confirm the reviewed settlement.', code: 'expected_exchange_rate_required', current_exchange_rate: latestRate }, 400)
     }
-    if (!Number.isFinite(latestRate) || latestRate <= 0 || (recordedMoney ? reviewedRate !== latestRate : Math.abs(reviewedRate - latestRate) > 0.0000001)) {
+    if (reviewedRate !== latestRate) {
       return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
     }
     let settlementPlan
@@ -2304,12 +2320,7 @@ app.patch('/:id/status', async (c) => {
     }
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
-    const lineMoneyRows = await db.prepare(`
-      SELECT id,applied_price_usd,total_usd,product_discount_usd,
-             base_price_usd,manual_discount_usd
-      FROM sale_items WHERE sale_id=@id ORDER BY id
-    `).all<Record<string, unknown>>({ id: Number(id) })
-    const after = buildSaleSettlementAfterState(before, sale, lineMoneyRows, saleStatus, settlementPlan)
+    const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan)
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2355,11 +2366,9 @@ app.patch('/:id/status', async (c) => {
     statements.unshift(
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       saleMutationGuard(`
-        COALESCE((SELECT value FROM settings WHERE key='exchange_rate'),'')=@exchangeRate
-        AND COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
+        COALESCE((SELECT value FROM settings WHERE key='change_exchange_rate'),'')=@changeRate
         AND COALESCE((SELECT value FROM settings WHERE key='pos_payment_methods'),'')=@paymentMethods
       `, {
-        exchangeRate: settingMap.exchange_rate ?? '',
         changeRate: settingMap.change_exchange_rate ?? '',
         paymentMethods: settingMap.pos_payment_methods ?? '',
       }),
@@ -3220,7 +3229,7 @@ app.post('/:id/items', async (c) => {
       if (!raw.client_line_key || !['selling','wholesale','manual'].includes(raw.pricing_source || ''))
         throw new SaleMoneyContractError('money_precision_pricing_intent_required')
       return {line_key:raw.client_line_key,source:raw.pricing_source!,product:{...capturePricingProduct(product),
-        selling_price_usd:sellingPriceCeilCent(product.selling_price_usd),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
+        selling_price_usd:sellingPriceCeilCent(Number(product.selling_price_usd ?? 0)),wholesale_price_usd:product.wholesale_price_usd==null?null:sellingPriceCeilCent(Number(product.wholesale_price_usd))},
         selling_price_input_usd:raw.selling_price_input_usd??null,
         ...(raw.display_price_mode===undefined?{}:{display_price_mode:raw.display_price_mode}),
         manual:{type:raw.manual_discount_type==null?'none':raw.manual_discount_type as 'fixed'|'percent',

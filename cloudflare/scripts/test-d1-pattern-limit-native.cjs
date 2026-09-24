@@ -261,7 +261,7 @@ async function verifyRealSettlementRoute(migration) {
       db.prepare("UPDATE sales SET sale_status='awaiting_payment',amount_paid_usd=0,amount_paid_khr=0,payment_method=NULL,payment_details='[]',subtotal_usd=54,total_usd=54 WHERE id=1"),
       db.prepare('UPDATE sale_items SET quantity=2,applied_price_usd=27,total_usd=54,base_price_usd=30,manual_discount_usd=3 WHERE sale_id=1'),
     ])
-    const screenshot = await call({client_request_id:'native-screenshot-54',sale_status:'completed',expected_updated_at:applied.body.updated_at,expected_exchange_rate:4200,payment_details:[{method:'ABA Bank',amount_usd:54,amount_khr:0}]})
+    const screenshot = await call({client_request_id:'native-screenshot-54',sale_status:'completed',expected_updated_at:applied.body.updated_at,expected_exchange_rate:4100,payment_details:[{method:'ABA Bank',amount_usd:54,amount_khr:0}]})
     assert.equal(screenshot.status,200,JSON.stringify(screenshot))
     assert.equal(screenshot.body.amount_paid_usd,54)
     assert.deepEqual(await db.prepare('SELECT quantity,applied_price_usd,total_usd,base_price_usd,manual_discount_usd FROM sale_items WHERE sale_id=1').first(),{quantity:2,applied_price_usd:27,total_usd:54,base_price_usd:30,manual_discount_usd:3})
@@ -274,11 +274,14 @@ async function verifyRealSettlementRoute(migration) {
     assert.equal((await db.prepare('SELECT amount_paid_usd FROM sales WHERE id=1').first()).amount_paid_usd,54)
     const reopen = await call({client_request_id:'native-reopen-payment',sale_status:'awaiting_payment'})
     assert.equal(reopen.status,200,JSON.stringify(reopen))
-    const corrected = await call({client_request_id:'native-correct-payment',sale_status:'completed',replace_existing_payment:true,expected_exchange_rate:4200,payment_details:[{method:'ABA Bank',amount_usd:20,amount_khr:142800}]})
+    // Settlement reviews the sale's own booked 4100 (owner rule, 24 Sep 2026:
+    // older sales keep their own rate), so $34 in riel is 34 x 4100.
+    const corrected = await call({client_request_id:'native-correct-payment',sale_status:'completed',replace_existing_payment:true,expected_exchange_rate:4100,payment_details:[{method:'ABA Bank',amount_usd:20,amount_khr:139400}]})
     assert.equal(corrected.status,200,JSON.stringify(corrected))
     assert.equal(corrected.body.paymentCorrection,true)
     assert.equal(corrected.body.amount_paid_usd,20)
-    assert.equal(corrected.body.amount_paid_khr,142800)
+    assert.equal(corrected.body.amount_paid_khr,139400)
+    assert.equal((await db.prepare('SELECT exchange_rate FROM sales WHERE id=1').first()).exchange_rate,4100)
     console.log('PASS native settlement undo/redo, plain status reopen, mixed USD/KHR correction and immutable replay events')
     const invoke = async (route,url,method,body) => {
       let batchError

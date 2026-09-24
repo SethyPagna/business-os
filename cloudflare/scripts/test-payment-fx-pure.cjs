@@ -117,7 +117,10 @@ function request(key = 'settle-request-1') {
     sale_status: 'completed',
     expected_updated_at: 'sale-v1',
     client_request_id: key,
-    expected_exchange_rate: 4200,
+    // The sale's own booked 4100, not the live 4200 setting: owner rule
+    // (24 Sep 2026), older sales keep their own exchange rate. This file
+    // pinned the opposite (settling re-rated a legacy sale at 4200) until then.
+    expected_exchange_rate: 4100,
     payment_details: [
       { method: 'Legacy Cash', amount_usd: 1.2346, amount_khr: 0 },
       { method: 'aba bank', amount_usd: 1, amount_khr: 0 },
@@ -201,7 +204,7 @@ async function run() {
   const stockBefore = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
   const applied = await f.call('/1/status', request())
   assert.equal(applied.status, 200, JSON.stringify(applied))
-  assert.equal(applied.body.exchange_rate, 4200)
+  assert.equal(applied.body.exchange_rate, 4100)
   assert.equal(applied.body.payment_method, 'Legacy Cash + ABA Bank')
   assert.deepEqual(JSON.parse(applied.body.payment_details), [
     { method: 'Legacy Cash', amount_usd: 1.2346, amount_khr: 0 },
@@ -212,26 +215,33 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 0)
   const sale = f.sql.prepare('SELECT * FROM sales WHERE id=1').get()
   const line = f.sql.prepare('SELECT * FROM sale_items WHERE id=1').get()
-  assert.deepEqual([sale.subtotal_khr,sale.total_khr,line.applied_price_khr,line.total_khr],[21000,21000,21000,21000])
-  assert.equal(sale.discount_khr, 0)
-  assert.equal(line.base_price_khr, 21000)
-  assert.equal(line.manual_discount_khr, 0)
+  // Settling records a payment and never re-rates the sale: the booked rate
+  // and every riel column, NULLs included, stay exactly as they were.
+  assert.equal(sale.exchange_rate, 4100)
+  assert.deepEqual([sale.subtotal_khr,sale.total_khr,line.applied_price_khr,line.total_khr],[20500,20500,20500,20500])
+  assert.equal(sale.discount_khr, null)
+  assert.equal(line.base_price_khr, null)
+  assert.equal(line.manual_discount_khr, null)
   assert.match(sale.search_normalized, /aba bank/)
   assert.deepEqual([sale.change_is_actual,sale.change_exchange_rate],[0,null])
-  const fractional = settlementAction.buildSaleSettlementAfterState(
-    {},
+  const bookedBefore = {
+    exchange_rate: 4000, subtotal_khr: 4938, discount_khr: 0.4, tax_khr: 0.8, total_khr: 4938.4,
+    delivery_fee_khr: null, membership_discount_khr: 0,
+    lines: [{ id: 1, applied_price_khr: 4938, total_khr: 4938.4, product_discount_khr: 0.4, base_price_khr: 4938, manual_discount_khr: 0.4 }],
+  }
+  const preserved = settlementAction.buildSaleSettlementAfterState(
+    bookedBefore,
     { subtotal_usd: 1.2345, discount_usd: 0.0001, tax_usd: 0.0002, total_usd: 1.2346,
       delivery_fee_usd: 0, membership_discount_usd: 0, receipt_number: 'S-FX' },
-    [{ id: 1, applied_price_usd: 1.2345, total_usd: 1.2346, product_discount_usd: 0.0001,
-      base_price_usd: 1.2345, manual_discount_usd: 0.0001 }],
     'completed', { ...request(), ...applied.body, exchangeRate: 4200, paymentMethod: 'ABA Bank',
       paymentDetailsJson: '[]', paymentCurrency: 'USD', amountPaidUsd: 2, amountPaidKhr: 0,
       changeUsd: 0, changeKhr: 0, changeExchangeRate: 4000 },
   )
   assert.deepEqual(
-    [fractional.subtotal_khr,fractional.discount_khr,fractional.tax_khr,fractional.total_khr,
-      fractional.lines[0].applied_price_khr,fractional.lines[0].total_khr],
-    [5184.9,0.42,0.84,5185.32,5184.9,5185.32],
+    [preserved.exchange_rate,preserved.subtotal_khr,preserved.discount_khr,preserved.tax_khr,preserved.total_khr,
+      preserved.delivery_fee_khr,preserved.membership_discount_khr,preserved.lines],
+    [4000,4938,0.4,0.8,4938.4,null,0,bookedBefore.lines],
+    'a plan rate other than the booked one must not reach the stored money',
   )
   assert.equal(lineAddition.rebaseSaleLineKhrSnapshot([{ id: 1, total_usd: 1.2345 }], 4200)[0].total_khr, 5184.9)
   assert.equal(amendments.planDeliveryFeeChange({ saleId: 1, sale: { delivery_fee_usd: 1 }, newFeeUsd: 2.01, exchangeRate: 4200.1234 }).statements[0].params.fee_khr, 8442.248)
@@ -249,7 +259,7 @@ async function run() {
   assert.deepEqual(JSON.parse(settlementAudit.details).record_event, {
     source_kind: 'sale_settlement', source_id: recordEvents[0].source_id, generation: 0, sale_id: 1,
   })
-  console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, uses latest rate once, and moves no stock')
+  console.log('PASS settlement canonicalizes active methods, preserves inactive legacy tender, keeps the booked rate and riel, and moves no stock')
 
   // The production failure was reported on a sale with several item rows,
   // no delivery/customer block, and an awaiting-payment -> completed write.
@@ -276,7 +286,7 @@ async function run() {
     sale_status: 'completed',
     expected_updated_at: 'multi-line-v1',
     client_request_id: 'multi-line-settlement-1',
-    expected_exchange_rate: 4200,
+    expected_exchange_rate: 4100,
     payment_details: [{ method: 'ABA Bank', amount_usd: 265, amount_khr: 0 }],
   })
   assert.equal(multiApplied.status, 200, JSON.stringify(multiApplied))
@@ -295,13 +305,21 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_mutation_receipts').get().n, 1)
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM sale_record_events').get().n, 1)
   assert.equal((await f.call('/1/status', { ...request(), payment_details: [...request().payment_details, { method: 'ABA Bank', amount_usd: 1 }] })).status, 409)
+  // A Settings change after the sale is irrelevant to it: settling still
+  // succeeds at the booked 4100. A reviewed rate other than the booked one
+  // (the live 4300 here) is refused with the sale's own rate, writing nothing.
   const rateChanged = fixture(); seed(rateChanged)
   rateChanged.sql.prepare("UPDATE settings SET value='4300' WHERE key='exchange_rate'").run()
-  const staleRate = await rateChanged.call('/1/status', request('settle-request-2'))
+  const beforeStale = rateChanged.sql.prepare('SELECT * FROM sales WHERE id=1').get()
+  const staleRate = await rateChanged.call('/1/status', { ...request('settle-request-2'), expected_exchange_rate: 4300 })
   assert.equal(staleRate.status, 409)
   assert.equal(staleRate.body.code, 'exchange_rate_changed')
-  assert.equal(staleRate.body.current.exchange_rate, 4300)
-  console.log('PASS exact retry returns first 4200 outcome; altered request and stale reviewed rate are rejected')
+  assert.equal(staleRate.body.current.exchange_rate, 4100)
+  assert.deepEqual(rateChanged.sql.prepare('SELECT * FROM sales WHERE id=1').get(), beforeStale)
+  const afterSettingChange = await rateChanged.call('/1/status', request('settle-request-3'))
+  assert.equal(afterSettingChange.status, 200, JSON.stringify(afterSettingChange))
+  assert.equal(rateChanged.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4100)
+  console.log('PASS exact retry returns first outcome; altered request and a reviewed rate other than the booked one are rejected; a Settings change does not re-rate')
 
   const receipt = f.sql.prepare('SELECT * FROM sale_mutation_receipts').get()
   await settlementAction.replaySaleSettlementAction(f.env, user, 'undo', applied.body.actionHistoryId, 0, { operation_id: receipt.id })
@@ -313,7 +331,7 @@ async function run() {
   assert.equal(undoneLine.base_price_khr, null)
   assert.equal(undoneLine.manual_discount_khr, null)
   await settlementAction.replaySaleSettlementAction(f.env, user, 'redo', applied.body.actionHistoryId, 1, { operation_id: receipt.id })
-  assert.equal(f.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4200)
+  assert.equal(f.sql.prepare('SELECT exchange_rate FROM sales WHERE id=1').get().exchange_rate, 4100)
   assert.deepEqual(Object.values(f.sql.prepare('SELECT change_is_actual,change_exchange_rate FROM sales WHERE id=1').get()), [0,null])
   assert.equal(f.sql.prepare('SELECT value FROM settings WHERE key=\'exchange_rate\'').get().value, '4300')
   recordEvents = f.sql.prepare('SELECT generation,kind,via,changes_json FROM sale_record_events ORDER BY generation').all()
@@ -323,13 +341,13 @@ async function run() {
   assert.deepEqual(JSON.parse(recordEvents[1].changes_json)[0], {
     field: 'payment_method', before: { state: 'known_value', value: 'Legacy Cash + ABA Bank' }, after: { state: 'known_value', value: 'Legacy Cash' },
   })
-  console.log('PASS undo restores exact nullable 4100 snapshot and redo restores captured 4200 without current settings recomputation')
+  console.log('PASS undo restores exact nullable 4100 snapshot and redo keeps the booked 4100 without current settings recomputation')
 
   const correction = fixture(); seed(correction)
   const deniedCorrection = await correction.call('/1/status', {
     sale_status: 'completed',
     expected_updated_at: 'sale-v1',
-    expected_exchange_rate: 4200,
+    expected_exchange_rate: 4100,
     client_request_id: 'payment-correction-without-reopen',
     replace_existing_payment: true,
     payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
@@ -360,7 +378,7 @@ async function run() {
   const corrected = await correction.call('/1/status', {
     sale_status: 'completed',
     expected_updated_at: reopenedRevision,
-    expected_exchange_rate: 4200,
+    expected_exchange_rate: 4100,
     client_request_id: 'payment-correction-after-reopen',
     replace_existing_payment: true,
     payment_details: [{ method: 'ABA Bank', amount_usd: 5, amount_khr: 0 }],
