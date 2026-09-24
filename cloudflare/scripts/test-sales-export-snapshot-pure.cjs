@@ -1,0 +1,43 @@
+// Pure cohort/shaping/gating assertions over one captured native fixture.
+const assert = require('node:assert/strict')
+const path = require('node:path')
+const { fixture } = require('./test-sales-export-snapshot-native.cjs')
+;(async () => {
+  const h = fixture()
+  try {
+    const analytics = h.load(path.resolve(__dirname, '../src/lib/salesAnalytics.ts'))
+    const reports = h.load(path.resolve(__dirname, '../src/routes/reports.ts'))
+    const snapshot = await analytics.readSalesReportSnapshot({}, {})
+    const before = JSON.stringify(snapshot)
+    const rows = analytics.businessSummarySalesRowsFromSnapshot(snapshot)
+    assert.deepEqual(rows, await analytics.getBusinessSummarySalesRows({}, {}), 'existing wrapper delegates without changing values')
+    assert.ok(analytics.reportMoneyDiagnostic(rows[0]))
+    assert.equal(Object.keys(rows[0]).includes('money_contributing_rows'), false, 'diagnostic begins nonenumerable')
+    for (const [search, ids] of [['alice', [1]], ['r2', [2]], ['0456', [2]], ['other', [4]], ['shop', [1, 2]], ['cash', [1, 2]], ['missing', []]]) {
+      const cohort = reports.salesExportCohort(snapshot, search)
+      assert.deepEqual(cohort.sales.map(row => row.id), ids)
+      const idSet = new Set(ids), returnIds = new Set(cohort.returns.map(row => row.id))
+      assert.ok(cohort.items.every(row => idSet.has(row.sale_id)))
+      assert.ok(cohort.returns.every(row => idSet.has(row.sale_id)))
+      assert.ok(cohort.returnItems.every(row => returnIds.has(row.return_id)))
+      assert.deepEqual(cohort.voidSales, []); assert.deepEqual(cohort.deliveryFees, [])
+      assert.equal(cohort.row_count, cohort.sales.length + cohort.items.length + cohort.returns.length + cohort.returnItems.length)
+    }
+    assert.equal(JSON.stringify(snapshot), before, 'cohort filtering never mutates the verified source')
+    const cohort = reports.salesExportCohort(snapshot, 'alice')
+    const total = analytics.salesTotalsFromSnapshot(cohort)
+    const sourceRow = analytics.businessSummarySalesRowsFromSnapshot(cohort)[0]
+    const admin = reports.gateTotals(total, true, true)
+    const costViewer = reports.gateTotals(total, false, true)
+    const employee = reports.gateTotals(total, false, false)
+    assert.equal(admin.money_contributing_rows, 4)
+    assert.equal(costViewer.money_contributing_rows, 4)
+    assert.equal(costViewer.cost_usd, 50)
+    assert.equal(Object.hasOwn(costViewer, 'delivery_actual_cost_usd'), false)
+    assert.equal(Object.hasOwn(employee, 'cost_usd'), false)
+    assert.equal(Object.hasOwn(employee, 'money_contributing_rows'), false)
+    assert.equal(reports.gateBusinessSummarySaleRow(sourceRow, true).money_contributing_rows, 4)
+    assert.equal(Object.hasOwn(reports.gateBusinessSummarySaleRow(sourceRow, false), 'money_contributing_rows'), false)
+    console.log('PASS shared row wrapper, six-field search cohort, immutable snapshots and diagnostic-preserving authorization gates')
+  } finally { h.sql.close() }
+})().catch(error => { console.error(error); process.exitCode = 1 })
