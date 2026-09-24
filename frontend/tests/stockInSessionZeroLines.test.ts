@@ -66,7 +66,11 @@ runTest('a receipt line may have no movement id, and only lines with one are eve
   // the revert transport is called only behind a null guard
   assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(busy \|\| !window\.confirm\(/)
   assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null\) : \[\]/)
-  assert.match(sectionSource, /for \(const row of revertibleRows\) if \(row\.id != null\) await removeLine\(row\)/)
+  // Bulk removal retains movement identities but refreshes their lot revisions
+  // after each write; the actual-handler test covers zero/mixed/shared-lot rows.
+  assert.match(sectionSource, /for \(const original of revertibleRows\) if \(original\.id != null\)/)
+  assert.match(sectionSource, /reviewedRowsRef\.current\.find\(\(candidate\) => candidate\.id === original\.id\)/)
+  assert.match(sectionSource, /if \(!row \|\| row\.id == null\) continue/)
   // N6: removeLine reverts an unedited line's movement and sends an edited
   // line to 0 through the edit writer; either way it acts only on a movement id.
   assert.match(sectionSource, /const removeLine = \(row: Row\) => Number\(row\.edit_count\) > 0 && row\.id != null\s*\? editStockInLine\([^]*?: revertStockMovement\(row\.id as number\)/)

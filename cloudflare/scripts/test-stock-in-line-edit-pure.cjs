@@ -87,7 +87,14 @@ async function receive(f, { requestId, quantity, cost = 2, date = '2026-09-05', 
 
 let requestCounter = 0
 const edit = (f, movementId, body, headers) => send(f, 'POST', `/api/inventory/stock-in-lines/${movementId}/edit`,
-  { client_request_id: body.client_request_id || `edit-request-${++requestCounter}`, ...body }, headers)
+  { client_request_id: body.client_request_id || `edit-request-${++requestCounter}`, expected_batch_revision: lineRevision(f, movementId), ...body }, headers)
+
+// Existing transition fixtures open a fresh review for each edit. Tests of
+// stale requests and retries pass the captured revision explicitly instead.
+function lineRevision(f, movementId) {
+  if (!f.sql.prepare('SELECT id FROM inventory_movements WHERE id=?').get(movementId)) return 0
+  return sessionLines(f, movementId).find((row) => row.id === movementId)?.batch_revision ?? 0
+}
 
 function lot(f, id) {
   const row = f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(id)
@@ -100,6 +107,11 @@ function totals(f) {
     product: f.sql.prepare('SELECT stock_quantity q FROM products WHERE id=1').get().q,
     lots: f.sql.prepare('SELECT COALESCE(SUM(quantity),0) q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id=bbs.batch_id WHERE pb.variant_product_id=1 AND bbs.branch_id=1').get().q,
   }
+}
+function writeSnapshot(f) {
+  return JSON.stringify(['products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'inventory_movements',
+    'stock_session_revisions', 'stock_lot_adjustment_operations', 'action_history', 'audit_logs'].map((table) =>
+    f.sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()))
 }
 function loss(f) {
   const rows = f.sql.prepare(`SELECT ${losses.REMOVAL_LOSS_SELECT} ${losses.REMOVAL_LOSS_FROM} WHERE ${losses.removalLossMovementWhere('m')}`).all()
@@ -131,11 +143,112 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('metadata-only edits invalidate the reviewed lot revision without changing quantity or batch id', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'revision-metadata-01', quantity: 10 })
+    const revision = f.sql.prepare("SELECT revision FROM stock_session_revisions WHERE entity_type='batch' AND entity_key=?").get(String(batchId)).revision
+    f.sql.prepare("UPDATE product_batches SET supplier_name='Changed supplier' WHERE id=?").run(batchId)
+    const result = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: revision })
+    assert.equal(result.status, 409, JSON.stringify(result.json))
+    assert.equal(result.json.code, 'stale_line')
+    assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })
+    assert.equal(editRows(f, movementId).length, 0)
+  })
+
+  await check('cost/date/payment/expiry edits and ABA preserve quantity but invalidate the review and write nothing', async () => {
+    for (const change of [
+      "unit_cost_usd=3", "received_at='2026-09-04'", "payment_status='credit',credit_due_date='2026-10-01'", "expiry_date='2027-01-01'",
+      "supplier_name='Temporary supplier'",
+    ]) {
+      const f = fresh()
+      const { movementId, batchId } = await receive(f, { requestId: 'revision-fields-001', quantity: 10 })
+      const line = sessionLines(f, movementId)[0]
+      assert.equal(line.batch_revision, lineRevision(f, movementId), 'the same line SELECT exposes the lot revision')
+      const body = { quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: line.batch_revision }
+      f.sql.prepare(`UPDATE product_batches SET ${change} WHERE id=?`).run(batchId)
+      if (change.startsWith('supplier_name')) f.sql.prepare("UPDATE product_batches SET supplier_name='Fixture Supplier' WHERE id=?").run(batchId)
+      assert.ok(lineRevision(f, movementId) > line.batch_revision, 'including change then restore with the same timestamp')
+      const before = writeSnapshot(f)
+      const response = await edit(f, movementId, body)
+      assert.equal(response.status, 409, `${change}: ${JSON.stringify(response.json)}`)
+      assert.equal(response.json.code, 'stale_line')
+      assert.equal(writeSnapshot(f), before)
+    }
+  })
+
+  await check('a metadata race immediately before ordinaryBusinessBatch fails the retained revision guard atomically', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'revision-race-0001', quantity: 10 })
+    const revision = lineRevision(f, movementId)
+    let raced
+    f.beforeCommit((sql) => {
+      // Payment was not in the old lot-state guard, so this discriminates the
+      // retained revision from merely rechecking the existing field snapshot.
+      sql.prepare("UPDATE product_batches SET payment_status='credit',credit_due_date='2026-10-01' WHERE id=?").run(batchId)
+      raced = writeSnapshot(f)
+    })
+    const response = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: revision })
+    assert.equal(response.status, 409, JSON.stringify(response.json))
+    assert.equal(response.json.code, 'stale_state')
+    assert.equal(writeSnapshot(f), raced, 'only the external change remains, never a partial edit/history/receipt')
+  })
+
+  await check('strict revision parsing refuses omitted/coerced/unsafe versions and supports initial revision zero', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'revision-parse-001', quantity: 10 })
+    const before = writeSnapshot(f)
+    for (const value of [undefined, null, '', '1', -1, 1.5, Number.MAX_SAFE_INTEGER + 1, true, NaN, Infinity]) {
+      const response = await send(f, 'POST', `/api/inventory/stock-in-lines/${movementId}/edit`, {
+        client_request_id: 'revision-invalid-001', quantity: 12, expected_batch_revision: value,
+      })
+      assert.equal(response.status, 400, String(value))
+      assert.equal(response.json.code, 'invalid_batch_revision', String(value))
+      assert.equal(writeSnapshot(f), before)
+    }
+    f.sql.prepare("DELETE FROM stock_session_revisions WHERE entity_type='batch' AND entity_key=?").run(String(batchId))
+    assert.equal(lineRevision(f, movementId), 0)
+    const valid = await edit(f, movementId, { quantity: 12, expected_batch_revision: 0 })
+    assert.equal(valid.status, 200, JSON.stringify(valid.json))
+  })
+
+  await check('a lost acknowledgement replays with its old revision, but a changed revision/body under that id is refused', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'revision-replay-01', quantity: 10 })
+    const body = { client_request_id: 'revision-edit-replay-01', quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) }
+    f.loseNextCommitAcknowledgement()
+    const first = await edit(f, movementId, body)
+    assert.equal(first.status, 200, JSON.stringify(first.json))
+    assert.equal(first.json.replayed, true)
+    assert.ok(lineRevision(f, movementId) > body.expected_batch_revision)
+    const snapshot = writeSnapshot(f)
+    const retry = await edit(f, movementId, body)
+    assert.equal(retry.status, 200)
+    assert.equal(retry.json.replayed, true)
+    assert.equal(writeSnapshot(f), snapshot)
+    const changed = await edit(f, movementId, { ...body, expected_batch_revision: lineRevision(f, movementId) })
+    assert.equal(changed.status, 409)
+    assert.equal(changed.json.code, 'idempotency_conflict')
+    assert.equal(writeSnapshot(f), snapshot)
+    const receipt = f.sql.prepare('SELECT request_json,request_digest FROM stock_lot_adjustment_operations WHERE request_id=?').get(body.client_request_id)
+    assert.equal(JSON.parse(receipt.request_json).expectedBatchRevision, body.expected_batch_revision)
+    assert.equal(receipt.request_digest, require('node:crypto').createHash('sha256').update(receipt.request_json).digest('hex'))
+    // The next actual operation uses the fresh revision, including removal.
+    const removed = await edit(f, movementId, { quantity: 0, expected_quantity: 12, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) })
+    assert.equal(removed.status, 200, JSON.stringify(removed.json))
+    assert.deepEqual(totals(f), { branch: 0, product: 0, lots: 0 })
+  })
+
+  await check('quantity parser accepts decimal and upper-bound values and rejects out-of-range or non-numeric values', async () => {
+    const parse = load('lib/stockInLineEdit.ts').parseStockInLineEditRequest
+    for (const quantity of [0, 1.25, 1_000_000_000]) assert.equal(parse(1, { quantity, expected_batch_revision: 0 }).quantity, quantity)
+    for (const quantity of [-1, 1_000_000_001, NaN, Infinity, '', '1']) assert.throws(() => parse(1, { quantity, expected_batch_revision: 0 }), /Quantity/)
+  })
+
   await check('increase: lot, branch, product and lot cost move by exactly +d; the movement is a receipt; replay does not double-apply; undo and redo are exact', async () => {
     const f = fresh()
     const { movementId, batchId } = await receive(f, { requestId: 'session-inc-0001', quantity: 10 })
     assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })
-    const body = { client_request_id: 'edit-inc-000001', quantity: 12, expected_quantity: 10, expected_batch_id: batchId }
+    const body = { client_request_id: 'edit-inc-000001', quantity: 12, expected_quantity: 10, expected_batch_id: batchId, expected_batch_revision: lineRevision(f, movementId) }
     const res = await edit(f, movementId, body)
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(totals(f), { branch: 12, product: 12, lots: 12 })

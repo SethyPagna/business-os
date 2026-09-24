@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import {
-  STOCK_IN_LINE_EDIT_ERRORS, STOCK_IN_LINE_REASON_MAX, buildStockInLineEditBody, isStockInLineEditable,
+  STOCK_IN_LINE_EDIT_ERRORS, STOCK_IN_LINE_REASON_MAX, STOCK_IN_LINE_MAX_QUANTITY, buildStockInLineEditBody, isStockInLineEditable,
   newStockInLineEditRequestId, stockInLineDraft, stockInLineEditErrorText, stockInLineUnitCost,
 } from '../src/utils/stockInLineEdit.ts'
 
@@ -20,7 +20,7 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const row = {
-  id: 41, quantity: 10, batch_id: 7, batch_received_at: '2026-09-05', batch_supplier_id: null,
+  id: 41, quantity: 10, batch_id: 7, batch_revision: 4, batch_received_at: '2026-09-05', batch_supplier_id: null,
   batch_supplier_name: 'Fixture Supplier', batch_unit_cost_usd: 2, unit_cost_usd: 2, total_cost_usd: 20,
 }
 const tr = (_key: string, fallback: string) => fallback
@@ -30,7 +30,7 @@ runTest('an untouched draft builds an unchanged body that still pins the line it
   assert.equal(built.ok, true)
   if (!built.ok) return
   assert.equal(built.changed, false)
-  assert.deepEqual(built.body, { client_request_id: 'sil-request-0001', quantity: 10, expected_quantity: 10, expected_batch_id: 7 })
+  assert.deepEqual(built.body, { client_request_id: 'sil-request-0001', quantity: 10, expected_quantity: 10, expected_batch_id: 7, expected_batch_revision: 4 })
 })
 
 runTest('only the changed fields are sent; a cost is never sent without cost-entry permission', () => {
@@ -39,7 +39,7 @@ runTest('only the changed fields are sent; a cost is never sent without cost-ent
   assert.ok(withCost.ok && withCost.changed)
   if (!withCost.ok) return
   assert.deepEqual(withCost.body, {
-    client_request_id: 'sil-request-0002', quantity: 12, expected_quantity: 10, expected_batch_id: 7,
+    client_request_id: 'sil-request-0002', quantity: 12, expected_quantity: 10, expected_batch_id: 7, expected_batch_revision: 4,
     unit_cost_usd: 3, received_date: '2026-09-07', supplier_id: null, supplier_name: 'Other',
   })
   const noCost = buildStockInLineEditBody(row, draft, 'sil-request-0003', false)
@@ -49,12 +49,17 @@ runTest('only the changed fields are sent; a cost is never sent without cost-ent
 
 runTest('validation matches the Worker parser: quantity >= 0, cost >= 0, reason <= 512', () => {
   const base = stockInLineDraft(row)
-  assert.deepEqual(buildStockInLineEditBody(row, { ...base, quantity: '-1' }, 'sil-request-0004', true), { ok: false, errorKey: 'stock_in_line_error_quantity', fallback: 'Enter a quantity of 0 or more.' })
+  assert.deepEqual(buildStockInLineEditBody(row, { ...base, quantity: '-1' }, 'sil-request-0004', true), { ok: false, errorKey: 'stock_in_line_error_quantity', fallback: 'Enter a quantity between 0 and 1,000,000,000.' })
   assert.equal(buildStockInLineEditBody(row, { ...base, quantity: '' }, 'sil-request-0004', true).ok, false)
   assert.equal(buildStockInLineEditBody(row, { ...base, unitCostUsd: '-2' }, 'sil-request-0004', true).ok, false)
   assert.equal(buildStockInLineEditBody(row, { ...base, reason: 'x'.repeat(513) }, 'sil-request-0004', true).ok, false)
   const zero = buildStockInLineEditBody(row, { ...base, quantity: '0' }, 'sil-request-0004', true)
   assert.ok(zero.ok && zero.changed, 'quantity 0 is how an edited line is removed')
+  assert.equal(STOCK_IN_LINE_MAX_QUANTITY, 1_000_000_000)
+  for (const quantity of ['1.25', '1000000000']) assert.equal(buildStockInLineEditBody(row, { ...base, quantity }, 'sil-request-0004', true).ok, true)
+  for (const quantity of ['1000000001', 'NaN', 'Infinity']) assert.equal(buildStockInLineEditBody(row, { ...base, quantity }, 'sil-request-0004', true).ok, false)
+  for (const batch_revision of [undefined, null, -1, 0.1, Number.MAX_SAFE_INTEGER + 1]) assert.equal(buildStockInLineEditBody({ ...row, batch_revision }, base, 'sil-request-0004', true).ok, false)
+  assert.equal(buildStockInLineEditBody({ ...row, batch_revision: 0 }, base, 'sil-request-0004', true).ok, true)
   const worker = fs.readFileSync(new URL('../../cloudflare/src/lib/stockInLineEdit.ts', import.meta.url), 'utf8')
   assert.match(worker, /quantity < 0 \|\| quantity > MAX_QUANTITY/)
   assert.match(worker, /body\.unit_cost_usd < 0/)
@@ -93,8 +98,10 @@ runTest('the session surface offers Edit on each received line, in the compact l
   assert.match(source, /idPrefix="stock-in-line-edit"/)
   assert.match(source, /\{canEditCosts \? <label[^]*?unit_cost/, 'the cost field is offered only with cost-entry permission')
   assert.match(source, /Number\(row\.edit_count\) > 0 && row\.id != null\s*\? editStockInLine\(/, 'an edited line is removed as an edit to 0, not a ledger revert')
-  assert.match(source, /await editStockInLine\(lineEdit\.row\.id, built\.body\)/)
-  assert.match(source, /className="compact-action-row"><button type="button" disabled=\{busy\} className="btn-primary h-8/)
+  assert.match(source, /editStockInLine\(attempt\.movementId, attempt\.body\)/)
+  assert.match(source, /<fieldset disabled=\{busy \|\| Boolean\(pendingAttempt\)\}/)
+  assert.match(source, /max=\{STOCK_IN_LINE_MAX_QUANTITY\}/)
+  assert.match(source, /onClose=\{closeSession\}/)
 })
 
 runTest('both language packs carry every key the edit surface uses', () => {

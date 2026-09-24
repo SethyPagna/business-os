@@ -11,6 +11,7 @@ export type StockInLineEditRow = {
   id: number | null
   quantity: number
   batch_id?: number | null
+  batch_revision?: number | null
   batch_received_at?: string | null
   batch_supplier_id?: number | null
   batch_supplier_name?: string | null
@@ -33,6 +34,7 @@ export type StockInLineEditBody = {
   quantity: number
   expected_quantity: number
   expected_batch_id: number | null
+  expected_batch_revision: number
   unit_cost_usd?: number
   received_date?: string
   supplier_id?: number | null
@@ -41,6 +43,7 @@ export type StockInLineEditBody = {
 }
 
 export const STOCK_IN_LINE_REASON_MAX = 512
+export const STOCK_IN_LINE_MAX_QUANTITY = 1_000_000_000
 
 /** A line can be edited when it received stock into a lot (a created-at-0 line has neither). */
 export function isStockInLineEditable(row: Pick<StockInLineEditRow, 'id' | 'batch_id'>): boolean {
@@ -93,7 +96,10 @@ export function buildStockInLineEditBody(
   canEditCost: boolean,
 ): StockInLineEditBuild {
   const quantity = parseNumber(draft.quantity)
-  if (quantity == null || quantity < 0) return { ok: false, errorKey: 'stock_in_line_error_quantity', fallback: 'Enter a quantity of 0 or more.' }
+  if (quantity == null || quantity < 0 || quantity > STOCK_IN_LINE_MAX_QUANTITY) return { ok: false, errorKey: 'stock_in_line_error_quantity', fallback: 'Enter a quantity between 0 and 1,000,000,000.' }
+  if (typeof row.batch_revision !== 'number' || !Number.isSafeInteger(row.batch_revision) || row.batch_revision < 0) {
+    return { ok: false, errorKey: 'stock_in_line_error_stale', fallback: 'This line changed on another device. Reopen the session and try again.' }
+  }
   const before = stockInLineDraft(row)
   const expectedQuantity = Math.abs(Number(row.quantity) || 0)
   const body: StockInLineEditBody = {
@@ -101,6 +107,7 @@ export function buildStockInLineEditBody(
     quantity,
     expected_quantity: expectedQuantity,
     expected_batch_id: row.batch_id == null ? null : Number(row.batch_id),
+    expected_batch_revision: row.batch_revision,
   }
   let changed = quantity !== expectedQuantity
   if (canEditCost && draft.unitCostUsd.trim() !== before.unitCostUsd.trim()) {
@@ -160,4 +167,43 @@ export function newStockInLineEditRequestId(): string {
     ? crypto.randomUUID().replace(/-/g, '')
     : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
   return `sil-${random}`.slice(0, 120)
+}
+
+export type StockInLineEditAttempt = Readonly<{
+  actorId: number
+  movementId: number
+  body: Readonly<StockInLineEditBody>
+}>
+
+/** Capture the write, not the mutable form that created it. */
+export function freezeStockInLineEditAttempt(actorId: number, movementId: number, body: StockInLineEditBody): StockInLineEditAttempt {
+  return Object.freeze({ actorId, movementId, body: Object.freeze({ ...body }) })
+}
+
+/** Only explicit noncommitting route refusals release an attempt. A generic
+ * 409, idempotency conflict, malformed response, timeout or 5xx stays pending. */
+export function isKnownStockInLineEditRefusal(error: unknown, hadUnknownOutcome = false): boolean {
+  const detail = error && typeof error === 'object' ? error as Record<string, unknown> : {}
+  if (detail.outcome === 'unknown') return false
+  // Permission is checked before receipt lookup. On a retry it cannot tell
+  // us whether an earlier unknown request committed under the old permission.
+  if (Number(detail.status) === 403) {
+    return !hadUnknownOutcome && ['permission_denied', 'product_cost_edit_required'].includes(String(detail.code || ''))
+  }
+  if (![400, 404, 409].includes(Number(detail.status))) return false
+  return new Set([
+    'invalid_request', 'invalid_quantity', 'invalid_unit_cost', 'invalid_received_date', 'invalid_batch_revision',
+    'invalid_client_request_id', 'reason_too_long', 'stale_line', 'stale_state', 'line_not_editable', 'session_undone',
+    'product_not_found', 'batch_mismatch', 'supplier_not_found', 'supplier_mismatch', 'supplier_required', 'free_goods_required',
+    'shared_lot', 'move_consumed', 'below_consumed', 'branch_below_zero', 'target_unresolved', 'target_other_supplier',
+  ]).has(String(detail.code || ''))
+}
+
+export function isStockInLineEditAcknowledged(response: unknown, attempt: StockInLineEditAttempt): boolean {
+  if (!response || typeof response !== 'object') return false
+  const value = response as Record<string, unknown>
+  if (value.success !== true || value.movementId !== attempt.movementId) return false
+  if (value.unchanged === true) return true
+  const after = value.after as Record<string, unknown> | null
+  return typeof value.operation_id === 'string' && value.operation_id.length > 0 && after?.quantity === attempt.body.quantity
 }

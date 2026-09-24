@@ -100,6 +100,7 @@ export type StockInLineEditRequest = {
   reason: string | null
   expectedQuantity: number | null
   expectedBatchId: number | null
+  expectedBatchRevision: number
 }
 
 /** One lot the edit writes, as absolute values (the guard pins them). */
@@ -200,7 +201,7 @@ async function operationsAvailable(db: D1Compat): Promise<boolean> {
 export function parseStockInLineEditRequest(movementId: number, body: Row): StockInLineEditRequest {
   if (!Number.isSafeInteger(movementId) || movementId <= 0) refuse(400, 'A valid stock-in line is required.', 'invalid_request')
   const quantity = typeof body.quantity === 'number' ? body.quantity : NaN
-  if (!Number.isFinite(quantity) || quantity < 0 || quantity > MAX_QUANTITY) refuse(400, 'Quantity must be zero or more.', 'invalid_quantity')
+  if (!Number.isFinite(quantity) || quantity < 0 || quantity > MAX_QUANTITY) refuse(400, 'Quantity must be between 0 and 1,000,000,000.', 'invalid_quantity')
   const unitCostProvided = Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd') && body.unit_cost_usd !== undefined
   let unitCostUsd: number | null = null
   if (unitCostProvided) {
@@ -226,9 +227,13 @@ export function parseStockInLineEditRequest(movementId: number, body: Row): Stoc
   if (stockReasonTooLong(reason)) refuse(400, `Reason is too long (max ${STOCK_REASON_MAX_LENGTH} characters).`, 'reason_too_long')
   const expectedQuantity = body.expected_quantity == null ? null : num(body.expected_quantity)
   const expectedBatchId = body.expected_batch_id == null ? null : num(body.expected_batch_id)
+  const expectedBatchRevision = body.expected_batch_revision
+  if (typeof expectedBatchRevision !== 'number' || !Number.isSafeInteger(expectedBatchRevision) || expectedBatchRevision < 0) {
+    refuse(400, 'A nonnegative integer expected_batch_revision is required.', 'invalid_batch_revision')
+  }
   return {
     kind: 'stock_in_line_edit', movementId, quantity, unitCostUsd, unitCostProvided, freeGoods: body.free_goods === true, receivedDate,
-    supplierProvided, supplierId, supplierName, reason, expectedQuantity, expectedBatchId,
+    supplierProvided, supplierId, supplierName, reason, expectedQuantity, expectedBatchId, expectedBatchRevision,
   }
 }
 
@@ -434,7 +439,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
         COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@product AND branch_id=@branch),0) AS branch_qty,
         EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch) AS branch_exists`)
       .get<Row>({ product: productId, branch: branchId }),
-    db.prepare('SELECT * FROM product_batches WHERE id=@id').get<LotRow>({ id: sourceId }),
+    db.prepare(`SELECT b.*, COALESCE((SELECT revision FROM stock_session_revisions
+      WHERE entity_type='batch' AND entity_key=CAST(b.id AS TEXT)),0) AS batch_revision
+      FROM product_batches b WHERE b.id=@id`).get<LotRow & { batch_revision: number }>({ id: sourceId }),
     db.prepare('SELECT id,batch_key,received_at,unit_cost_usd FROM product_batches WHERE variant_product_id=@product').all<ReceiptLotCandidate>({ product: productId }),
     db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@product ORDER BY id DESC LIMIT 1').get<Row>({ product: productId }).catch(() => null),
     // Other live receipts into the line's current lot (any line but this one).
@@ -446,6 +453,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   ])
   if (!facts?.product_name) refuse(404, 'Product not found.', 'product_not_found')
   if (!sourceLot || Number(sourceLot.variant_product_id) !== productId) refuse(409, 'The received date of this line no longer belongs to its product.', 'batch_mismatch')
+  if (sourceLot.batch_revision !== request.expectedBatchRevision) {
+    refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
+  }
   const sourceStock = await db.prepare(`SELECT COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@lot AND branch_id=@branch),0) AS qty,
       EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@lot AND branch_id=@branch) AS present,
       COALESCE((SELECT SUM(quantity) FROM branch_batch_stock WHERE batch_id=@lot AND branch_id<>@branch),0) AS elsewhere`)
@@ -628,6 +638,12 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   }
   const created = targetCreated ? after.lots[1] : null
   const statements: Statement[] = [
+    // 0124 retains a revision on EVERY lot mutation, including same-second
+    // changes and changes restored to their old values. Pin the review, not
+    // just the newer snapshot we happened to read while planning this write.
+    guard(`COALESCE((SELECT revision FROM stock_session_revisions
+      WHERE entity_type='batch' AND entity_key=@batchKey),0)=@revision`,
+    { batchKey: String(sourceId), revision: request.expectedBatchRevision }),
     ...stateGuard(before, targetCreated),
     { sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams },

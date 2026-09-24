@@ -154,6 +154,8 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            cb.payment_status AS batch_payment_status, cb.credit_due_date AS batch_credit_due_date,
            cb.unit_cost_usd AS batch_unit_cost_usd, cb.received_cost_usd AS batch_received_cost_usd,
            cb.expiry_date AS batch_expiry_date, cb.updated_at AS batch_updated_at,
+           COALESCE((SELECT revision FROM stock_session_revisions
+             WHERE entity_type='batch' AND entity_key=CAST(cb.id AS TEXT)),0) AS batch_revision,
            cb.received_at AS received_at, cb.supplier_id AS supplier_id, cb.supplier_name AS supplier_name,
            cb.payment_status AS payment_status, cb.credit_due_date AS credit_due_date,
            COALESCE(CAST(cb.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(cb.supplier_name, ''))) AS supplier_state,
@@ -195,6 +197,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            NULL AS batch_payment_status, NULL AS batch_credit_due_date,
            sm.unit_cost_usd AS batch_unit_cost_usd, NULL AS batch_received_cost_usd,
            ${zeroLineHeaderSql('expiry_date')} AS batch_expiry_date, o.created_at AS batch_updated_at,
+           NULL AS batch_revision,
            ${zeroLineHeaderSql('received_date')} AS received_at,
            ${zeroLineHeaderSql('supplier_id')} AS supplier_id, ${zeroLineHeaderSql('supplier_name')} AS supplier_name,
            NULL AS payment_status, NULL AS credit_due_date,
@@ -303,7 +306,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
            s.reason, s.reference_id, s.user_name, s.created_at, s.batch_id,
            s.batch_lot_code, s.batch_received_at, s.batch_supplier_id, s.batch_supplier_name,
            s.batch_payment_status, s.batch_credit_due_date, s.batch_unit_cost_usd, s.batch_received_cost_usd,
-           s.batch_expiry_date, s.batch_updated_at, s.created_product, s.session_command_kind, s.edit_count
+           s.batch_expiry_date, s.batch_updated_at, s.batch_revision, s.created_product, s.session_command_kind, s.edit_count
     FROM (${sessionLineRowsSql(where)}) s
     ORDER BY s.created_at ASC, s.id ASC, s.session_line_id ASC
     LIMIT 2001`
