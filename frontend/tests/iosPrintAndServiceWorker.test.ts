@@ -153,7 +153,7 @@ check('a missing window selects the iframe print path', () => {
     'the iframe path re-measures the roll length inside the actual print document, right before print()')
   assert.match(body, /buildPrintablePreviewDocument\(layout, options\)/, 'the iframe gets the SAME document, stylesheet included')
   const exportBody = functionBody(exportOptions, 'export function openPrintExport', '\n}')
-  assert.match(exportBody, /printHtmlInHiddenFrame\(buildPrintDocument\(\{ \.\.\.input, autoPrint: false \}\)\)/,
+  assert.match(exportBody, /printHtmlInHiddenFrame\(buildPrintDocument\(\{ \.\.\.input, autoPrint: false \}\), \{ canPrint \}\)/,
     'the frame prints the document itself, so it must not also self-print')
 })
 
@@ -161,7 +161,7 @@ check('the iframe path waits for assets, prints, and cleans up everywhere', () =
   assert.match(printSurface, /fonts\?\.ready/, 'fonts must have settled before printing')
   assert.match(printSurface, /frameDocument\.images/, 'and so must the images')
   assert.match(printSurface, /execCommand\?\.\('print', false, undefined\)/, 'Safari and Chromium print a frame through execCommand')
-  assert.match(printSurface, /if \(!printed\) frameWindow\.print\(\)/, 'Firefox (execCommand false) through print(), never both')
+  assert.match(printSurface, /if \(!printed\) \{\s*if \(!permitted\(\)\) return false\s*frameWindow\.print\(\)/, 'Firefox falls back once, after the live export-authority guard')
   assert.match(printSurface, /addEventListener\?\.\('afterprint', remove, \{ once: true \}\)/)
   assert.match(printSurface, /setTimeout\(remove, PRINT_FRAME_CLEANUP_MS\)/, 'iOS may never fire afterprint')
   // MEMORY: one frame at a time, and every exit path clears it.
@@ -189,6 +189,7 @@ const printed: string[] = []
 const created: StubFrame[] = []
 let execCommandPrints = false
 let execCommandCalls = 0
+let frameFontsReady: Promise<void> = Promise.resolve()
 
 function makeFrame(): StubFrame {
   const frame: StubFrame = {
@@ -210,7 +211,7 @@ function makeFrame(): StubFrame {
       write: (html: string) => { frame.written = html },
       close: () => {},
       images: [],
-      fonts: { ready: Promise.resolve() },
+      fonts: { ready: frameFontsReady },
       execCommand: () => { execCommandCalls += 1; return execCommandPrints },
     },
   }
@@ -237,6 +238,32 @@ Object.defineProperty(globalThis, 'navigator', {
 }
 
 const surface = await import('../src/utils/printSurface.ts')
+
+await checkAsync('export authority is checked after font/preprint waits and fails closed', async () => {
+  for (const throwing of [false, true]) {
+    let releaseFonts!: () => void
+    frameFontsReady = new Promise<void>(resolve => { releaseFonts = resolve })
+    let allowed = true
+    const beforeCommands = execCommandCalls
+    const beforePrints = printed.length
+    const pending = surface.printHtmlInHiddenFrame('<html>protected report</html>', {
+      beforePrint: async () => { await Promise.resolve(); allowed = false },
+      canPrint: () => { if (throwing) throw new Error('revoked'); return allowed },
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(execCommandCalls, beforeCommands, 'no print command before font readiness')
+    releaseFonts()
+    assert.equal(await pending, false)
+    assert.equal(execCommandCalls, beforeCommands, 'revoked/throwing guard never dispatches execCommand')
+    assert.equal(printed.length, beforePrints, 'revoked/throwing guard never dispatches print')
+    assert.equal(created.at(-1)!.removed, true, 'protected frame is removed')
+  }
+  frameFontsReady = Promise.resolve()
+  const before = printed.length
+  assert.equal(await surface.printHtmlInHiddenFrame('<html>permitted report</html>', { canPrint: () => true }), true)
+  assert.equal(printed.length, before + 1, 'positive control: current authority prints exactly once')
+  created.at(-1)!.afterPrint?.()
+})
 
 check('an installed app gets null instead of a window, and never calls open', () => {
   standalone = true
