@@ -484,6 +484,23 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback
 }
 
+// Owner rule (24 Sep 2026): older sales keep their own exchange rate; only a
+// NEW record takes today's Settings rate. 4100 is the sales/returns column
+// default in migrations/0001_init.sql (`exchange_rate REAL DEFAULT 4100`) and
+// the fallback every other Worker rate reader already uses.
+const SCHEMA_DEFAULT_EXCHANGE_RATE = 4100
+
+function positiveRate(value: unknown): number | null {
+  if (value == null || value === '') return null
+  const rate = Number(value)
+  return Number.isFinite(rate) && rate > 0 ? rate : null
+}
+
+async function liveExchangeRate(db: ReturnType<typeof getDb>): Promise<number> {
+  const row = await db.prepare(`SELECT value FROM settings WHERE key='exchange_rate'`).get<{ value: string }>()
+  return positiveRate(row?.value) ?? SCHEMA_DEFAULT_EXCHANGE_RATE
+}
+
 type ReturnRow = Record<string, unknown> & {
   id: number
   sale_id: number | null
@@ -1458,6 +1475,14 @@ app.post('/', async (c) => {
       }
     }
   }
+  // One rate for the return row and its replacement sale. A return against a
+  // sale belongs to that sale and books the sale's own rate, never the body's
+  // or today's setting (schema default when the old sale has none). A return
+  // with no original sale is a new record: the reviewed body rate, else the
+  // live setting.
+  const returnExchangeRate = saleMeta
+    ? positiveRate(saleMeta.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE
+    : positiveRate(body.exchange_rate) ?? await liveExchangeRate(db)
   // P4-3: validate every 'damaged' line's tag/disposition BEFORE any write
   // statement is built -- nothing below this point has executed yet, so a
   // 400 here leaves no partial state.
@@ -1642,7 +1667,7 @@ app.post('/', async (c) => {
   if (replacementLines.length) {
     replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
-    const exchangeRate = toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100)
+    const exchangeRate = returnExchangeRate
     replacementTotals = computeSaleTotals({
       subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
       deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate,
@@ -1859,7 +1884,7 @@ app.post('/', async (c) => {
       total_refund_usd: totalRefundUsd, total_refund_khr: totalRefundKhr,
       exchange_rate: customerReturnV1Plan
         ? Number(customerReturnV1Plan.authority.sale.exchange_rate)
-        : toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100),
+        : returnExchangeRate,
       money_precision_version: isMoneyV1 ? 1 : 0,
       calculated_refund_usd: customerReturnV1Plan?.quote.calculated_refund_usd ?? null,
       rounding_adjustment_usd: customerReturnV1Plan?.quote.rounding_adjustment_usd ?? 0,
@@ -1872,7 +1897,7 @@ app.post('/', async (c) => {
 
   if (replacementLines.length && replacementTotals && replacementReceiptNumber) {
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
-    const exchangeRate = toNumber(body.exchange_rate || saleMeta?.exchange_rate, 4100)
+    const exchangeRate = returnExchangeRate
     const originalReceipt = body.receipt_number || saleMeta?.receipt_number || null
     const note = `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`
     const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
@@ -2349,7 +2374,9 @@ app.post('/supplier', async (c) => {
     return_scope: SUPPLIER_SCOPE,
     reason: body.reason,
     notes: body.notes || null,
-    exchange_rate: body.exchange_rate || 4100,
+    // A supplier return is a new record: the rate it was made with, else the
+    // live setting at the time of the return.
+    exchange_rate: positiveRate(body.exchange_rate) ?? await liveExchangeRate(db),
     supplier_id: body.supplier_id || null,
     supplier_name: body.supplier_name || null,
     settlement,
