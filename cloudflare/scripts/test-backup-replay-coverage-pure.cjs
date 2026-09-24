@@ -117,6 +117,11 @@ console.log('PASS: historical finance and durable reversal backup coverage')
   const restored=new Database(':memory:')
   const migrations=path.join(__dirname,'../migrations')
   for(const file of fs.readdirSync(migrations).filter(file=>file.endsWith('.sql')).sort()) restored.exec(fs.readFileSync(path.join(migrations,file),'utf8'))
+  // 0185/0186/0188 are HELD (parked out of the applied chain, ops/scripts/
+  // migration/held/README.md) -- applied explicitly so the 0188 member-
+  // retirement guard this file asserts below is still exercised.
+  const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
+  for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) restored.exec(fs.readFileSync(path.join(heldDir,file),'utf8'))
   restored.exec(`INSERT INTO system_flags(key,value) VALUES('maintenance','{"mode":"restore"}')`)
   for(const {table,rows} of bundle) for(const row of rows) {
     const columns=Object.keys(row)

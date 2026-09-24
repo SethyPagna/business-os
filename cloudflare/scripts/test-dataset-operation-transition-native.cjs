@@ -22,6 +22,9 @@ async function main(){
  return Response.json({result,batches});}catch(error){return Response.json({error:error.message,batches},{status:409})}
  }};`},bundle:true,write:false,format:'esm',platform:'browser',target:'es2022'})
  const source=new SQLite(':memory:'),dir=path.join(root,'migrations')
+ // 0185/0186/0188/0190/0191 are HELD (parked out of the applied chain,
+ // ops/scripts/migration/held/README.md), read from heldDir instead.
+ const heldDir=path.join(root,'..','ops','scripts','migration','held')
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort())source.exec(fs.readFileSync(path.join(dir,file),'utf8'))
  const schema=source.prepare("SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN(SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all();source.close()
  const mf=new Miniflare({modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
@@ -29,7 +32,7 @@ async function main(){
   const db=await mf.getD1Database('DB')
   for(let i=0;i<schema.length;i+=25)await db.batch(schema.slice(i,i+25).map(r=>db.prepare(r.sql)))
   for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql','0190_dataset_operation_journal.sql','0191_dataset_operation_generation_transition.sql']){
-   const sql=fs.readFileSync(path.join(dir,file),'utf8');assert.equal(sql.includes('\r'),false);await db.batch(split(sql).map(sql=>db.prepare(sql)))
+   const sql=fs.readFileSync(path.join(heldDir,file),'utf8');assert.equal(sql.includes('\r'),false);await db.batch(split(sql).map(sql=>db.prepare(sql)))
   }
   await db.prepare("INSERT INTO roles(id,name,code,permissions)VALUES(1,'Admin','admin','{}')").run()
   const call=async body=>{const r=await mf.dispatchFetch('http://local.test',{method:'POST',body:JSON.stringify(body)});return {status:r.status,...await r.json()}}

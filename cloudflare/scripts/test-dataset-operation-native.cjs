@@ -5,6 +5,9 @@ const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 const root = path.resolve(__dirname, '..')
+// 0185/0186/0188/0190/0191 are HELD (parked out of the applied chain,
+// ops/scripts/migration/held/README.md), read from heldDir instead.
+const heldDir = path.join(root, '..', 'ops', 'scripts', 'migration', 'held')
 async function main() {
   const bundle = await build({ stdin: { resolveDir: root, loader: 'ts', contents: `
     import {beginDatasetOperation,executeDatasetChunk} from './src/lib/datasetOperationStore.ts';
@@ -49,7 +52,7 @@ async function main() {
         for(const {sql} of definitions) await db.prepare(sql).run()
       } finally { migrated.close() }
       for(const name of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']) {
-        for(const sql of split(fs.readFileSync(path.join(root,'migrations',name),'utf8')))await db.prepare(sql).run()
+        for(const sql of split(fs.readFileSync(path.join(heldDir,name),'utf8')))await db.prepare(sql).run()
       }
       await db.prepare("INSERT INTO roles(id,name,code,permissions)VALUES(1,'Administrator','admin','{}') ON CONFLICT(id) DO UPDATE SET code='admin',permissions='{}'").run()
     } else {
@@ -57,10 +60,10 @@ async function main() {
       await db.prepare("INSERT INTO system_flags(key,value)VALUES('business_dataset_generation',?)").bind(JSON.stringify({generation:crypto.randomUUID()})).run()
     }
     await db.prepare('CREATE TABLE effects(actor_id INTEGER NOT NULL,amount REAL NOT NULL)').run()
-    const migration = fs.readFileSync(path.join(root, 'migrations/0190_dataset_operation_journal.sql'), 'utf8')
+    const migration = fs.readFileSync(path.join(heldDir, '0190_dataset_operation_journal.sql'), 'utf8')
     assert.equal(migration.includes('\r'), false, 'trigger SQL must be LF-only')
     for (const sql of split(migration)) await db.prepare(sql).run()
-    const transitionMigration=path.join(root,'migrations/0191_dataset_operation_generation_transition.sql')
+    const transitionMigration=path.join(heldDir,'0191_dataset_operation_generation_transition.sql')
     if(fs.existsSync(transitionMigration))for (const sql of split(fs.readFileSync(transitionMigration,'utf8')))await db.prepare(sql).run()
     const call = async payload => {
       const response = await mf.dispatchFetch('http://local.test', { method: 'POST', body: JSON.stringify(payload) })

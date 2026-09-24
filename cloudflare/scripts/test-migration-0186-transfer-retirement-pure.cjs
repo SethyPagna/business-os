@@ -14,11 +14,16 @@ const store=load('transferRunStore',{'./permissions':load('permissions')})
 const db=new Database(':memory:')
 db.pragma('foreign_keys=ON')
 const dir=path.join(__dirname,'../migrations')
-for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0186_').sort()) db.exec(fs.readFileSync(path.join(dir,file),'utf8'))
+// 0185/0186 are HELD (parked out of the applied chain, ops/scripts/migration/
+// held/README.md); the cutoff loop still reads 0001-0184 from
+// cloudflare/migrations, then 0185 is applied explicitly from held/.
+const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
+for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort()) db.exec(fs.readFileSync(path.join(dir,file),'utf8'))
+db.exec(fs.readFileSync(path.join(heldDir,'0185_transfer_runs.sql'),'utf8'))
 db.exec("INSERT INTO products(id,name,cost_price_usd) VALUES(900001,'unchanged',3.123456)")
 // Legacy pre-generation run stays frozen, never reassigned to a new generation.
 db.exec("INSERT INTO transfer_runs(id,actor_id,organization_id,request_id,request_digest,request_json,scope) VALUES('legacy',7,4,'legacy-parent','old','{}','branches')")
-const sql=fs.readFileSync(path.join(dir,'0186_transfer_run_retirement.sql'),'utf8')
+const sql=fs.readFileSync(path.join(heldDir,'0186_transfer_run_retirement.sql'),'utf8')
 assert.equal(sql.includes('\r'),false)
 db.exec(sql)
 assert.equal(db.prepare("SELECT dataset_generation FROM transfer_runs WHERE id='legacy'").get().dataset_generation,'')

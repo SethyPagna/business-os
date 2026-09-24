@@ -5,6 +5,10 @@ const ts = require('typescript')
 const Database = require('better-sqlite3')
 const crypto = require('node:crypto')
 const directory = path.join(__dirname, '../migrations')
+// 0185/0186 are HELD (parked out of the applied chain, ops/scripts/migration/
+// held/README.md) -- the cutoff loop below still reads 0001-0184 from
+// cloudflare/migrations; only the two held files themselves move.
+const heldDirectory = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', 'held')
 const name = '0185_transfer_runs.sql'
 const db = new Database(':memory:')
 db.pragma('foreign_keys = ON')
@@ -57,10 +61,10 @@ const before = {
   receipts: db.prepare('SELECT * FROM transfer_operation_receipts').all(),
   history: db.prepare('SELECT * FROM action_history').all(),
 }
-const migration = fs.readFileSync(path.join(directory, name), 'utf8')
+const migration = fs.readFileSync(path.join(heldDirectory, name), 'utf8')
 assert.equal(migration.includes('\r'), false, 'append-only trigger SQL must be LF-only')
 db.exec(migration)
-db.exec(fs.readFileSync(path.join(directory, '0186_transfer_run_retirement.sql'), 'utf8'))
+db.exec(fs.readFileSync(path.join(heldDirectory, '0186_transfer_run_retirement.sql'), 'utf8'))
 owner.datasetGeneration = JSON.parse(db.prepare("SELECT value FROM system_flags WHERE key='business_dataset_generation'").get().value).generation
 assert.deepEqual(db.prepare('SELECT * FROM products WHERE id=900001').get(), before.product)
 assert.deepEqual(db.prepare('SELECT * FROM transfer_operation_receipts').all(), before.receipts)

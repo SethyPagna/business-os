@@ -44,6 +44,9 @@ export default {async fetch(request,env) {
 async function main() {
  console.log('ENGINES',JSON.stringify({node:process.version,workerd:require('workerd/package.json').version,miniflare:require('miniflare/package.json').version,wrangler:require('wrangler/package.json').version}))
  const dir=path.join(__dirname,'../migrations'),sqlite=new Database(':memory:')
+ // 0185/0186 are HELD (parked out of the applied chain, ops/scripts/migration/
+ // held/README.md), applied explicitly below from heldDir.
+ const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort()) sqlite.exec(fs.readFileSync(path.join(dir,file),'utf8'))
  const schema=sqlite.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN (SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all()
  sqlite.close()
@@ -51,7 +54,7 @@ async function main() {
  try {
   const db=await mf.getD1Database('DB')
   for(let i=0;i<schema.length;i+=25) await db.batch(schema.slice(i,i+25).map(r=>db.prepare(r.sql)))
-  for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql']) await db.batch(split(fs.readFileSync(path.join(dir,file),'utf8')).map(sql=>db.prepare(sql)))
+  for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql']) await db.batch(split(fs.readFileSync(path.join(heldDir,file),'utf8')).map(sql=>db.prepare(sql)))
   async function invoke(input){const response=await mf.dispatchFetch('http://local-retirement.test/',{method:'POST',body:JSON.stringify(input)});assert.equal(response.status,200,await response.clone().text());return response.json()}
   const setup=await invoke({mode:'setup'});assert.equal(setup.error,null)
   const receipt=await db.prepare('SELECT * FROM transfer_operation_receipts').first()
