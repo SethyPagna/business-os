@@ -98,6 +98,7 @@ function scenario() {
     '../lib/db': { getDb: () => d1(sqlite) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
     '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null },
   })

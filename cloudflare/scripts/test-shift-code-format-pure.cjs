@@ -9,8 +9,9 @@
 // never rewritten. This file pins:
 //
 //   1. shiftCodeBase -- the owner's own example, whitespace, the 24-code-point
-//      cap (Khmer and emoji whole), the U<id> fallback, the business-day
-//      rollover, and a bare D1 timestamp read on a non-UTC host;
+//      cap (whole characters: a Khmer sign, a flag, an emoji), the U<id>
+//      fallback, the business-day rollover, and a bare D1 timestamp read on a
+//      non-UTC host;
 //   2. freeShiftCode -- base free, -2, -3, the lowest gap, and codes that only
 //      LOOK like suffixes (cashier "Za-2", a case variant, LIKE wildcards);
 //   3. the real route over real SQLite with its clock frozen to one instant:
@@ -118,6 +119,7 @@ function scenario() {
     '../lib/db': { getDb: () => d1(sqlite, hooks) },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); await next() } },
     '../lib/permissions': loadReal('lib/permissions.ts'),
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
     // No sales tables here: the ID is under test, not the drawer arithmetic.
     '../lib/shiftReconciliation': { loadShiftReconciliation: async () => null, loadShiftFigures: async () => null },
@@ -190,6 +192,12 @@ async function main() {
   const emojiName = shiftCodeBase('2026-09-22T01:07:00Z', '😀'.repeat(30), 7).slice('S-20260922-0807-'.length)
   assert.equal(emojiName, '😀'.repeat(24), 'the cap counts code points, so 24 emoji survive, not 12')
   assert.ok(emojiName.isWellFormed(), 'no character is cut in half (no lone surrogate)')
+  // The ID is stored once and never rewritten, so a cut by code points would
+  // freeze another word into it: "ស្រស់" cut after its fourth reads "ស្រស".
+  assert.equal(shiftCodeBase('2026-09-22T01:07:00Z', 'ស្រស់'.repeat(5), 7), `S-20260922-0807-${'ស្រស់'.repeat(4)}ស្រ`,
+    'a long Khmer name drops a whole last character, never its final sign')
+  assert.equal(shiftCodeBase('2026-09-22T01:07:00Z', `a${'🇰🇭'.repeat(12)}`, 7), `S-20260922-0807-a${'🇰🇭'.repeat(11)}`,
+    'a flag is never cut in half')
 
   // ---- 2. the free suffix -------------------------------------------------
   const base = 'S-20260922-0807-Za'

@@ -174,15 +174,39 @@ for (const [label, patch, code] of [
 }
 console.log('PASS invalid config/method/amount, partial reduction, underpayment and bounds reject before writes')
 
-assert.throws(() => planSaleSettlement({
-  configuredMethodsRaw: '["Cash"]',
-  paymentDetailsRaw: [{ method: 'Cash', amount_khr: 19_999_999 }],
-  existingPaidUsd: 0,
-  existingPaidKhr: 0,
-  totalUsd: 1,
-  exchangeRate: 20_000_000,
-}), (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
-console.log('PASS exact rational coverage rejects even one riel short at a very large exchange rate')
+// Settlement uses the one definition of paid: covered to within half a US cent
+// (PAID_STATUS_SHORTFALL_TOLERANCE_UNITS), in exact integer units. At a very
+// large rate half a cent is 100,000 riel, so the edge is exact: 19,900,000
+// riel for $1 is short by exactly $0.005 and settles; one riel less is past
+// the band and is refused. (Before the single definition this case asserted
+// that 19,999,999 riel -- $0.00000005 short -- was refused, the exact rule
+// that let the POS record a tender Completed which settlement then refused.)
+const bigRate = { configuredMethodsRaw: '["Cash"]', existingPaidUsd: 0, existingPaidKhr: 0, totalUsd: 1, exchangeRate: 20_000_000 }
+assert.equal(planSaleSettlement({ ...bigRate, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 19_900_000 }] }).amountPaidKhr, 19_900_000)
+assert.throws(() => planSaleSettlement({ ...bigRate, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 19_899_999 }] }),
+  (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
+console.log('PASS exact rational coverage: half a cent short settles, one riel past the band is refused at a very large exchange rate')
+
+// The owner's tender: 39,400 riel for a $9.61 sale at 4,100 is one riel short
+// of 39,401. The POS records it Completed, so settling a Not Paid sale with the
+// same tender must succeed too (it answered insufficient_payment before).
+const ownerSettle = { configuredMethodsRaw: '["Cash"]', existingPaidUsd: 0, existingPaidKhr: 0, totalUsd: 9.61, exchangeRate: 4100, moneyPrecisionVersion: 1 }
+for (const version of [1, 0]) {
+  const settled = planSaleSettlement({ ...ownerSettle, moneyPrecisionVersion: version, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 39400 }] })
+  assert.equal(settled.amountPaidKhr, 39400, `owner tender settles (v${version})`)
+  assert.equal(settled.changeUsd, 0, 'a tender inside the band gives no change')
+  assert.equal(settled.changeKhr, 0, 'a tender inside the band gives no change')
+}
+// Exact payment settles.
+assert.equal(planSaleSettlement({ ...ownerSettle, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 39401 }] }).amountPaidKhr, 39401)
+// 50 units ($0.0050) short on $10 at 4,100 is 20.5 riel: 40,980 riel is 20
+// riel short (inside) and settles; 40,979 riel is 21 riel ($0.00512) short and
+// is refused.
+const tenAt4100 = { ...ownerSettle, totalUsd: 10 }
+assert.equal(planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40980 }] }).amountPaidKhr, 40980)
+assert.throws(() => planSaleSettlement({ ...tenAt4100, paymentDetailsRaw: [{ method: 'Cash', amount_khr: 40979 }] }),
+  (error) => error instanceof SettlementValidationError && error.code === 'insufficient_payment')
+console.log('PASS settlement accepts the owner tender and the band edge, refuses one step past it')
 
 const renamed = renameSalePaymentMethod(
   'Cash + Fcb',

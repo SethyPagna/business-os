@@ -1,3 +1,5 @@
+import { saleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
+
 export type SettlementPaymentInput = {
   method?: string | null
   amount_usd?: number | string | null
@@ -151,6 +153,33 @@ export function settlementTotals(rows: readonly SettlementRow[], exchangeRate: n
   }
 }
 
+/**
+ * What the settlement rows still leave owed on the sale: the kernel's one
+ * definition of paid (covered within half a cent, exact integer units) read
+ * as an amount, on the same money basis the Worker's settlement uses. The
+ * completion gate, the pay-in-full prefill and the editor's Outstanding row
+ * all read this, so none of them can call short a tender the Worker's
+ * settlement accepts. Money that cannot be read owes the whole total.
+ */
+export function settlementOutstandingUsd(rows: readonly SettlementRow[], sale: {
+  totalUsd: number
+  exchangeRate: number
+  moneyPrecisionVersion: 0 | 1
+}): number {
+  const totals = settlementTotals(rows, sale.exchangeRate)
+  try {
+    return saleOutstandingUsd({
+      paidUsd: totals.amountPaidUsd,
+      paidKhr: totals.amountPaidKhr,
+      totalUsd: sale.totalUsd,
+      exchangeRate: sale.exchangeRate,
+      moneyPrecisionVersion: sale.moneyPrecisionVersion,
+    })
+  } catch {
+    return Math.max(0, Number(sale.totalUsd) || 0)
+  }
+}
+
 export function initialSettlementRows(input: {
   paymentDetails: unknown
   paymentMethod?: unknown
@@ -158,6 +187,7 @@ export function initialSettlementRows(input: {
   amountPaidKhr?: unknown
   totalUsd: number
   exchangeRate: number
+  moneyPrecisionVersion: 0 | 1
   configuredMethods: readonly string[]
 }): SettlementRow[] {
   const details = parseSettlementDetails(input.paymentDetails)
@@ -172,8 +202,10 @@ export function initialSettlementRows(input: {
     usd: amount(detail.amount_usd) > 0 ? String(amount(detail.amount_usd)) : '',
     khr: amount(detail.amount_khr) > 0 ? String(roundLegacyKhr(amount(detail.amount_khr))) : '',
   }))
-  const paid = settlementTotals(rows, input.exchangeRate).paidEquivalentUsd
-  const outstandingUsd = Math.ceil(Math.max(0, input.totalUsd - paid) * 100 - Number.EPSILON) / 100
+  // A tender inside the half-cent band owes nothing, so it gets no "$0.01"
+  // row; a real shortfall is prefilled rounded UP to a whole cent.
+  const owed = settlementOutstandingUsd(rows, input)
+  const outstandingUsd = Math.ceil(owed * 100 - Number.EPSILON) / 100
   if (outstandingUsd > 0 || rows.length === 0) {
     rows.push({
       id: 'settlement-new',

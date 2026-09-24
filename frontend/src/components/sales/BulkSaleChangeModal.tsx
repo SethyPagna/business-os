@@ -135,10 +135,10 @@ export default function BulkSaleChangeModal({ field, rows, sourceChoices, target
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-800 dark:bg-blue-950/30">
             <div className="font-semibold text-blue-800 dark:text-blue-200">{translate('bulk_matching_count', '{n} matching', 'ស្របគ្នា {n}').replace('{n}', String(matched.length))}</div>
             <div className="mt-1 text-xs text-blue-700/80 dark:text-blue-300/80">{translate('bulk_skipped_count', '{n} selected with another source value will be skipped.', 'ជម្រើស {n} ដែលមានតម្លៃប្រភពផ្សេងនឹងត្រូវរំលង។').replace('{n}', String(skipped))}</div>
-            {cancelledCount > 0 ? <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{translate('sale_bulk_cancelled_skipped', '{n} cancelled sales cannot be edited and are left out.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(cancelledCount))}</div> : null}
+            {cancelledCount > 0 ? <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">{translate('sale_bulk_cancelled_skipped', '{n} cancelled sale(s) left out: a cancelled sale cannot be edited.', 'ការលក់ដែលបានបោះបង់ {n} មិនអាចកែប្រែបានទេ ហើយត្រូវបានទុកចោល។').replace('{n}', String(cancelledCount))}</div> : null}
             {blocked.length ? (
               <div role="status" className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                {translate('sale_bulk_status_unpaid_skipped', '{n} Not Paid sales are not fully paid and will be skipped. Record their payment on each sale first.', 'ការលក់ប្រាក់ជំពាក់ {n} មិនទាន់ទូទាត់គ្រប់ចំនួន ហើយនឹងមិនត្រូវបានកែប្រែទេ។ សូមកត់ត្រាការទូទាត់លើការលក់នីមួយៗជាមុនសិន។').replace('{n}', String(blocked.length))}
+                {translate('sale_bulk_status_unpaid_skipped', '{n} Not Paid sale(s) left out: not fully paid. Record the payment on each sale first.', 'ការលក់ប្រាក់ជំពាក់ {n} មិនទាន់ទូទាត់គ្រប់ចំនួន ហើយនឹងមិនត្រូវបានកែប្រែទេ។ សូមកត់ត្រាការទូទាត់លើការលក់នីមួយៗជាមុនសិន។').replace('{n}', String(blocked.length))}
                 <span className="block font-semibold">{blocked.map((row) => row.receipt).join(', ')}</span>
               </div>
             ) : null}

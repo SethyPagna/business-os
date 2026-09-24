@@ -121,6 +121,7 @@ function harness(sqlite, routeSource = source) {
       loadShiftReconciliation: async () => ({ marker: 'reconciliation' }),
       loadShiftFigures: async () => ({ marker: 'figures' }),
     },
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async () => true },
   })
   const app = route.default || route

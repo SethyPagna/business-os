@@ -121,7 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { resolvePaidSaleStatus, statusChangeNeedsPayment, tenderAllowsPaidStatus } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -1022,12 +1022,12 @@ app.post('/', async (c) => {
   // Completed and the debt would vanish from the Not-Paid list. Frontend
   // validation needs backend enforcement; this is that enforcement.
   //
-  // The boundary is tenderAllowsPaidStatus, the SAME function the POS gate
-  // calls: covered within half a cent, exact integer units. Not the exact
-  // paymentCoversSaleTotal -- a shortfall under half a cent shows as $0.00 at
-  // two decimals (39,400 riel for $9.61 at 4,100), the deployed POS accepts
-  // it, and an offline sale queued on that boundary must land here rather
-  // than replay into a non-retryable 400 and be lost.
+  // The boundary is paymentCoversSaleTotal, the SAME function the POS gate,
+  // the resolver above and every balance-due figure call: covered within half
+  // a cent, exact integer units. A shortfall under half a cent shows as $0.00
+  // and riel has no coin to close it (39,400 riel for $9.61 at 4,100 is a full
+  // payment), the deployed POS accepts it, and an offline sale queued on that
+  // boundary must land here rather than replay into a non-retryable 400.
   //
   // Only these two statuses are gated. `awaiting_payment` is the credit sale
   // and is meant to be short; return statuses are set by the Returns flow;
@@ -1035,7 +1035,7 @@ app.post('/', async (c) => {
   if (saleStatus === 'completed' || saleStatus === 'awaiting_delivery') {
     let coveredForStatus = false
     try {
-      coveredForStatus = tenderAllowsPaidStatus({
+      coveredForStatus = paymentCoversSaleTotal({
         paidUsd: amountPaidUsd,
         paidKhr: amountPaidKhr,
         totalUsd,
@@ -3405,7 +3405,7 @@ app.post('/:id/items', async (c) => {
     subtotalUsd: moneyAfter.subtotal_usd,
     totalUsd: moneyAfter.total_usd,
     totalKhr: moneyAfter.total_khr,
-    outstandingUsd: round2(Math.max(0, moneyAfter.total_usd - (Number(sale.amount_paid_usd) || 0) - (Number(sale.amount_paid_khr) || 0) / exchangeRate)),
+    outstandingUsd: outstandingAfterLineChangeUsd(sale, moneyAfter.total_usd, exchangeRate),
     exchangeRate,
     undoActionId: null,
     actionHistoryId: null,
@@ -5199,10 +5199,24 @@ async function auditAmendment(
   ]))
 }
 
+/**
+ * What a sale still owes once a line change moved its total: the kernel's one
+ * definition of paid (zero when the recorded tender covers the new total to
+ * within half a cent, otherwise the exact shortfall), on the sale's own money
+ * basis, in cents. Money that cannot be read owes the whole total.
+ */
+function outstandingAfterLineChangeUsd(sale: RecordedSaleMoney, totalUsd: number, exchangeRate: number): number {
+  try {
+    return round2(recordedSaleOutstandingUsd({ ...sale, total_usd: totalUsd, exchange_rate: exchangeRate }))
+  } catch {
+    return round2(Math.max(0, Number(totalUsd) || 0))
+  }
+}
+
 function buildAmendmentResponsePayload(
   input: {
     saleId: number
-    sale: { amount_paid_usd?: unknown; amount_paid_khr?: unknown; receipt_number?: unknown }
+    sale: RecordedSaleMoney & { receipt_number?: unknown }
     money: { totalUsd: number; totalKhr: number; subtotalUsd: number }
     exchangeRate: number
     stockMoved: boolean
@@ -5221,7 +5235,7 @@ function buildAmendmentResponsePayload(
     subtotalUsd: input.money.subtotalUsd,
     totalUsd: input.money.totalUsd,
     totalKhr: input.money.totalKhr,
-    outstandingUsd: round2(Math.max(0, input.money.totalUsd - (Number(input.sale.amount_paid_usd) || 0) - (Number(input.sale.amount_paid_khr) || 0) / input.exchangeRate)),
+    outstandingUsd: outstandingAfterLineChangeUsd(input.sale, input.money.totalUsd, input.exchangeRate),
     stockMoved: input.stockMoved,
     unitsMoved: input.unitsMoved,
     stockSkipped: input.stockSkipped,

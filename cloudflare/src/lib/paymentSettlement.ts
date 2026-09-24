@@ -267,7 +267,8 @@ export function planSaleSettlement(input: {
   // the sale?") on three other surfaces; a second copy of an exact-integer
   // cross-currency comparison is exactly the kind of near-duplicate that
   // drifts by one riel and starts labelling debts as paid. Same formula, same
-  // V1-rates-stay-exact rule, one definition.
+  // V1-rates-stay-exact rule, one definition -- including its half-cent band,
+  // so a tender the POS may record as Completed also settles a Not Paid sale.
   let covered: boolean
   try {
     covered = paymentCoversSaleTotalUnits({

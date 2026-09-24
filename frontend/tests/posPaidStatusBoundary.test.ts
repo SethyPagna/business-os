@@ -1,13 +1,16 @@
-// One boundary for "may this sale be BORN with a paid status" (Completed /
-// Awaiting Delivery), asked by BOTH the POS checkout gate and the Worker's
-// POST /sales: tenderAllowsPaidStatus in saleStatusResolution.ts (covered
-// within half a cent, exact integer units).
+// One definition of paid, asked by the POS checkout gate, its status picker
+// and its change / short panel, and by the Worker's POST /sales:
+// paymentCoversSaleTotal in saleStatusResolution.ts (covered within half a
+// cent, exact integer units) -- the same answer the Not-Paid resolver,
+// statusChangeNeedsPayment, settlement and every balance-due figure give.
 //
-// The defect this pins: the POS gate was a float comparison
+// The defects this pins: the POS gate was a float comparison
 // (`totalPaid < totalUsd - 0.005`) while the Worker used the EXACT coverage
-// formula. 39,400 riel for a $9.61 sale at 4,100 (one riel short) passed the
-// POS and was answered 400 by the Worker -- and a sale queued offline on that
-// tender replayed into a non-retryable 400 and was lost.
+// formula, so 39,400 riel for a $9.61 sale at 4,100 (one riel short) passed
+// the POS and was answered 400 by the Worker. The first fix gave CREATION a
+// half-cent band and left everything else exact: the same tender was then
+// recorded Completed yet could also be recorded Not Paid, and the tender
+// panel called it "$0.00 short". Now the band is the only coverage answer.
 //
 // The status picker reads the same answer: an option the tender rules out
 // stays visible, greyed, under its own name with the reason -- Not Paid once
@@ -16,15 +19,19 @@
 // listed "Completed" twice (and the system spec's /^Completed/ click matched
 // two buttons).
 //
-// DISCRIMINATING. On the pre-fix tree the POS gate does not call
-// tenderAllowsPaidStatus (and still compares the float `totalPaid`), the
-// Worker gate calls paymentCoversSaleTotal, and the picker relabels instead of
-// disabling: every source assertion below is red there. The behavioural half
-// runs the owner's tender through the same kernel both gates now import.
+// DISCRIMINATING. On the float tree the POS gate compares `totalPaid` and the
+// picker relabels instead of disabling; on the creation-only-band tree
+// (1734ecd5) the gates call tenderAllowsPaidStatus, the tender panel keys on
+// the float `changeUsd >= 0`, and the owner's tender leaves all three options
+// open because the exact resolver still calls it short: the source and
+// behaviour assertions below are red on each. The behavioural half runs the
+// owner's tender through the same kernel both gates import.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { paymentCoversSaleTotal, resolvePaidSaleStatus, tenderAllowsPaidStatus } from '../src/utils/saleStatusResolution.ts'
+import * as kernel from '../src/utils/saleStatusResolution.ts'
+
+const { paymentCoversSaleTotal, resolvePaidSaleStatus, saleOutstandingUsd } = kernel
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -44,10 +51,10 @@ const worker = read('../../cloudflare/src/routes/sales.ts')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
-/** The one POS answer to "may this sale be recorded with a paid status". */
+/** The one POS answer to "does this tender pay for the sale". */
 function posAnswer(): string {
-  const start = pos.indexOf('const posTenderAllowsPaidStatus = (() => {')
-  assert.ok(start > 0, 'the POS computes the paid-status answer once')
+  const start = pos.indexOf('const posTenderCovers = (() => {')
+  assert.ok(start > 0, 'the POS computes the coverage answer once')
   const end = pos.indexOf('})()', start)
   assert.ok(end > start)
   return pos.slice(start, end)
@@ -83,26 +90,42 @@ function workerGate(): string {
 
 const ownerTender = { paidUsd: 0, paidKhr: 39400, totalUsd: 9.61, exchangeRate: 4100, moneyPrecisionVersion: 1 }
 
-runTest('the POS asks tenderAllowsPaidStatus once, with the resolver\'s own inputs', () => {
+runTest('the POS asks paymentCoversSaleTotal once, with the resolver\'s own inputs', () => {
   const answer = posAnswer()
-  assert.match(answer, /tenderAllowsPaidStatus\(\{ paidUsd: paidUsdNum, paidKhr: paidKhrNum, totalUsd, exchangeRate, moneyPrecisionVersion: 1 \}\)/,
+  assert.match(answer, /paymentCoversSaleTotal\(\{ paidUsd: paidUsdNum, paidKhr: paidKhrNum, totalUsd, exchangeRate, moneyPrecisionVersion: 1 \}\)/,
     'the answer must use the same tender, total and rate the status resolver sees')
   assert.match(answer, /catch\s*\{\s*return false\s*\}/, 'an unreadable rate must answer no, not throw out of the render')
-  assert.equal(pos.match(/tenderAllowsPaidStatus\(/g)?.length, 1, 'the gate and the picker share one answer, not two copies of the call')
-  assert.match(pos, /import \{[^}]*\btenderAllowsPaidStatus\b[^}]*\} from '\.\.\/\.\.\/utils\/saleStatusResolution\.ts'/)
+  assert.equal(pos.match(/paymentCoversSaleTotal\(/g)?.length, 1, 'the gate, the picker and the panel share one answer, not copies of the call')
+  assert.match(pos, /import \{[^}]*\bpaymentCoversSaleTotal\b[^}]*\} from '\.\.\/\.\.\/utils\/saleStatusResolution\.ts'/)
+  assert.doesNotMatch(pos, /tenderAllowsPaidStatus/, 'the creation-only coverage function is gone')
 })
 
 runTest('the checkout gate refuses a paid status on that answer', () => {
-  assert.match(posGate(), /^if \(saleStatus !== 'awaiting_payment' && !posTenderAllowsPaidStatus\) return notify\(t\('insufficient_amount'\), 'error'\)/)
+  assert.match(posGate(), /^if \(saleStatus !== 'awaiting_payment' && !posTenderCovers\) return notify\(t\('insufficient_amount'\), 'error'\)/)
+})
+
+runTest('the tender panel shows short only when the tender does not cover the sale', () => {
+  // Keyed on the float change it called the owner's full riel payment
+  // "$0.00 short" in red.
+  assert.match(pos, /\$\{posTenderCovers \? 'bg-green-50 dark:bg-green-900\/20' : 'bg-red-50 dark:bg-red-900\/20'\}/)
+  assert.match(pos, /\{posTenderCovers \? \(/)
+  assert.doesNotMatch(pos, /changeUsd >= 0 \?/, 'the float change must not decide short versus paid')
+  assert.match(pos, /fmtUSD\(Math\.max\(0, changeUsd\)\)/, 'a tender inside the band has no change, never a negative one')
 })
 
 runTest('the status picker greys out the options the tender rules out, under their own names', () => {
   const option = pickerOption()
   assert.match(option, /const paidInFull = resolved !== status/)
-  assert.match(option, /const unavailable = paidInFull \|\| \(status !== 'awaiting_payment' && !posTenderAllowsPaidStatus\)/)
+  assert.match(option, /const unavailable = paidInFull \|\| \(status !== 'awaiting_payment' && !posTenderCovers\)/)
   assert.match(option, /disabled=\{loading \|\| unavailable\}/, 'a ruled-out option cannot be tapped')
   assert.match(option, /disabled:cursor-not-allowed/)
-  assert.match(option, /<div className="font-semibold[^"]*">\{label\}<\/div>/, 'every option keeps its own name')
+  assert.match(option, /<div className=\{`font-semibold text-sm \$\{unavailable \? 'text-gray-400 dark:text-gray-500' : [^}]*\}`\}>\{label\}<\/div>/,
+    'every option keeps its own name, faded when ruled out')
+  // The reason is why the option stays visible: gray-400 under a whole-button
+  // opacity-50 fade works out to about 1.5:1 against the white sheet.
+  assert.doesNotMatch(option, /disabled:opacity-/, 'a whole-button fade takes the reason down with it')
+  assert.match(option, /\$\{unavailable \? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'\}/,
+    'the reason reads in the warning colours at full strength')
   assert.doesNotMatch(option, /getPosStatusLabel\(resolved/, 'relabelling Not Paid listed "Completed" twice')
   assert.match(option, /\{paidInFull\s*\?\s*\(t\('pos_status_paid_resolved_desc'\)/)
   assert.match(option, /: unavailable \? \(t\('insufficient_amount'\)/)
@@ -122,13 +145,18 @@ runTest('which options each tender leaves open', () => {
   const statuses = ['completed', 'awaiting_payment', 'awaiting_delivery'] as const
   const open = (tender: typeof ownerTender) => statuses.filter((status) => {
     const paidInFull = resolvePaidSaleStatus({ ...tender, requestedStatus: status, isDelivery: false }) !== status
-    return !(paidInFull || (status !== 'awaiting_payment' && !tenderAllowsPaidStatus(tender)))
+    return !(paidInFull || (status !== 'awaiting_payment' && !paymentCoversSaleTotal(tender)))
   })
   assert.deepEqual(open({ ...ownerTender, paidKhr: 0 }), ['awaiting_payment'], 'no tender: only Not Paid')
   assert.deepEqual(open({ ...ownerTender, paidKhr: 39401 }), ['completed', 'awaiting_delivery'], 'paid in full: Not Paid is greyed')
-  // One riel short: inside the creation band, and exact coverage still calls
-  // it short, so the cashier may record it either way.
-  assert.deepEqual(open(ownerTender), ['completed', 'awaiting_payment', 'awaiting_delivery'])
+  // One riel short is a full payment: Not Paid is greyed as "already paid in
+  // full", exactly as for 39,401. (On the creation-only band it left all three
+  // open, so the same money could be recorded paid or unpaid.)
+  assert.deepEqual(open(ownerTender), ['completed', 'awaiting_delivery'])
+  // One unit past the band ($0.0051 short on $10) is a debt: only Not Paid.
+  assert.deepEqual(open({ paidUsd: 9.9949, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1 }), ['awaiting_payment'])
+  // Exactly half a cent short is still paid.
+  assert.deepEqual(open({ paidUsd: 9.995, paidKhr: 0, totalUsd: 10, exchangeRate: 4100, moneyPrecisionVersion: 1 }), ['completed', 'awaiting_delivery'])
 })
 
 runTest('the float half-cent comparison is gone from the POS', () => {
@@ -137,16 +165,17 @@ runTest('the float half-cent comparison is gone from the POS', () => {
 
 runTest('the Worker POST /sales gate asks the same function', () => {
   const gate = workerGate()
-  assert.match(gate, /tenderAllowsPaidStatus\(\{/, 'POST /sales must use the shared creation boundary')
-  assert.doesNotMatch(gate, /paymentCoversSaleTotal\(/, 'the exact formula refuses tenders the POS accepts')
+  assert.match(gate, /paymentCoversSaleTotal\(\{/, 'POST /sales must use the one definition of paid')
+  assert.doesNotMatch(worker, /tenderAllowsPaidStatus/, 'the creation-only coverage function is gone')
   assert.match(gate, /catch\s*\{\s*coveredForStatus = false\s*\}/, 'a bad rate still refuses')
 })
 
-runTest('the owner\'s tender (39,400 riel for $9.61 at 4,100) passes the shared boundary', () => {
-  assert.equal(tenderAllowsPaidStatus(ownerTender), true)
-  // ...while exact coverage still calls it short, so the Not-Paid resolver and
-  // settlement keep their exact answers.
-  assert.equal(paymentCoversSaleTotal(ownerTender), false)
+runTest('the owner\'s tender (39,400 riel for $9.61 at 4,100) is paid everywhere', () => {
+  assert.equal(paymentCoversSaleTotal(ownerTender), true)
+  assert.equal(saleOutstandingUsd(ownerTender), 0, 'nothing is still owed')
+  assert.equal(resolvePaidSaleStatus({ ...ownerTender, requestedStatus: 'awaiting_payment', isDelivery: false }), 'completed')
+  assert.equal(resolvePaidSaleStatus({ ...ownerTender, requestedStatus: 'awaiting_payment', isDelivery: true }), 'awaiting_delivery')
+  assert.equal('tenderAllowsPaidStatus' in kernel, false, 'one coverage function, not a creation-only second one')
 })
 
 if (failed > 0) {

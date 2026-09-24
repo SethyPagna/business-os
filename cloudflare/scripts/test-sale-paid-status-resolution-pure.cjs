@@ -36,9 +36,13 @@
 // before the forward guard (it answered 200 and wrote the paid status); the
 // two PATCH controls pass on both and go red under a guard that refuses every
 // Not Paid -> Completed move instead of the uncovered ones. The one-riel-short
-// Completed case is red on the exact-formula gate (400) and pins the shared
-// half-cent creation band; the $0.00525 and zero-tender refusals go red under
-// a band that is too wide.
+// Completed case is red on the exact-formula gate (400); the $0.00525 and
+// zero-tender refusals go red under a band that is too wide. The ONE
+// DEFINITION OF PAID cases (the owner's tender asked as Not Paid, restored to
+// Completed by PATCH without a payment, or settled by PATCH) are red on the
+// creation-only band (1734ecd5): it recorded that tender Not Paid, refused the
+// restore with insufficient_payment_for_status and the settlement with
+// insufficient_payment, because only creation had the band.
 const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
@@ -218,8 +222,10 @@ async function patchStatus(db, id, body) {
   // THE HALF-CENT BAND. The POS has always let a paid status through when the
   // tender is short by no more than half a cent (it reads $0.00 at two
   // decimals), and both it and this route now ask the same
-  // tenderAllowsPaidStatus. The route used the EXACT formula before, so the
-  // first case below was a 400 -- and, queued offline, a lost sale.
+  // paymentCoversSaleTotal -- the one definition of paid that the Not-Paid
+  // resolver, the status route and settlement ask too. The route used the
+  // EXACT formula before, so the first case below was a 400 -- and, queued
+  // offline, a lost sale.
   // A $9.61 line at 4,100 costs 39,401 riel; the cashier hands over 39,400.
   function rielRequest(clientRequestId, { priceUsd, priceKhr, rate, paidKhr, status }) {
     const body = h.request(clientRequestId)
@@ -256,6 +262,32 @@ async function patchStatus(db, id, body) {
     assert.equal(created.status, 400, JSON.stringify(created.body))
     assert.equal(created.body.code, 'insufficient_payment_for_status')
     assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, 'nothing may be written')
+  })
+
+  // The same tender asked as Not Paid is a paid sale too: the band is not a
+  // creation-only allowance. The creation-only band recorded it
+  // awaiting_payment, so the same money could land paid or unpaid.
+  await runTest('the owner tender asked as Not Paid is recorded Completed', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.61, 39401)
+    const created = await h.postSale(f.route, rielRequest('band-owner-notpaid', {
+      priceUsd: 9.61, priceKhr: 39401, rate: 4100, paidKhr: 39400, status: 'awaiting_payment',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+  })
+
+  await runTest('the owner tender asked as Not Paid on a delivery is recorded Awaiting Delivery', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.61, 39401)
+    const created = await h.postSale(f.route, {
+      ...rielRequest('band-owner-notpaid-delivery', {
+        priceUsd: 9.61, priceKhr: 39401, rate: 4100, paidKhr: 39400, status: 'awaiting_payment',
+      }),
+      is_delivery: 1, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer',
+    })
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    assert.equal(saleRow(f).sale_status, 'awaiting_delivery')
   })
 
   await runTest('Completed with zero tender (A7) is still refused under the band', async () => {
@@ -401,6 +433,45 @@ async function patchStatus(db, id, body) {
     assert.equal(settled.status, 200, JSON.stringify(settled.body))
     assert.equal(saleRow(f).sale_status, 'completed')
     assert.equal(Number(saleRow(f).amount_paid_usd), 9.5)
+  })
+
+  // The same two PATCH paths for the owner's tender. The creation-only band
+  // recorded it Completed, then refused to put it back after a reopen
+  // (statusChangeNeedsPayment was exact) and refused to settle a Not Paid
+  // $9.61 sale with it (settlement was exact).
+  await runTest('PATCH: a reopened sale paid by the owner tender goes back to Completed without a payment', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.61, 39401)
+    const created = await h.postSale(f.route, rielRequest('patch-band-reopen', {
+      priceUsd: 9.61, priceKhr: 39401, rate: 4100, paidKhr: 39400, status: 'completed',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const reopened = await patchAsAdmin(f, { sale_status: 'awaiting_payment', client_request_id: 'patch-band-reopen-1' })
+    assert.equal(reopened.status, 200, JSON.stringify(reopened.body))
+    const restored = await patchAsAdmin(f, { sale_status: 'completed', client_request_id: 'patch-band-reopen-2' })
+    assert.equal(restored.status, 200, JSON.stringify(restored.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+    assert.equal(Number(saleRow(f).amount_paid_khr), 39400)
+  })
+
+  await runTest('PATCH: settling a Not Paid $9.61 sale with 39,400 riel completes it', async () => {
+    const f = h.fixture()
+    setPrice(f, 9.61, 39401)
+    f.raw.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\"]')").run()
+    const created = await h.postSale(f.route, rielRequest('patch-band-settle', {
+      priceUsd: 9.61, priceKhr: 39401, rate: 4100, paidKhr: 0, status: 'awaiting_payment',
+    }))
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    assert.equal(saleRow(f).sale_status, 'awaiting_payment')
+    const settled = await patchAsAdmin(f, {
+      sale_status: 'completed',
+      client_request_id: 'patch-band-settle-1',
+      expected_exchange_rate: 4100,
+      payment_details: [{ method: 'Cash', amount_usd: 0, amount_khr: 39400 }],
+    })
+    assert.equal(settled.status, 200, JSON.stringify(settled.body))
+    assert.equal(saleRow(f).sale_status, 'completed')
+    assert.equal(Number(saleRow(f).amount_paid_khr), 39400)
   })
   if (failed > 0) {
     console.error(`${failed} test(s) failed`)

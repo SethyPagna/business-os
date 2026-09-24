@@ -138,6 +138,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     '../lib/permissions': permissions,
     '../lib/shiftReconciliation': shiftReconciliation,
     '../lib/audit': { audit: async () => { throw new Error('lifecycle audit must be in the D1 batch') } },
+    '../lib/telegramLang': loadReal('lib/telegramLang.ts'),
     '../lib/telegram': { sendTelegramShiftReport: async (_env, shiftId) => { sent.push(shiftId); return true } },
   })
   const app = route.default || route

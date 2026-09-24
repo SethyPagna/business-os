@@ -124,8 +124,12 @@ function renderModal(cancelledCount: number): string {
 }
 
 await runTest('the review states how many cancelled sales were left out, and only when some were', () => {
-  assert.match(renderModal(2), /2 cancelled sales cannot be edited and are left out\./)
-  assert.doesNotMatch(renderModal(0), /cancelled sales cannot be edited/)
+  assert.match(renderModal(2), /2 cancelled sale\(s\) left out: a cancelled sale cannot be edited\./)
+  // The pack's count convention is "(s)": "1 cancelled sales ... are left out"
+  // read wrong on the commonest selection, a single cancelled sale.
+  assert.match(renderModal(1), /1 cancelled sale\(s\) left out/)
+  assert.doesNotMatch(renderModal(1), /1 cancelled sales/)
+  assert.doesNotMatch(renderModal(0), /cancelled sale\(s\) left out/)
 })
 
 await runTest('both packs carry the new keys and the inline fallbacks match them', () => {

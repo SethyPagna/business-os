@@ -98,13 +98,17 @@ const statuses = (f) => f.sql.prepare('SELECT id,sale_status FROM sales ORDER BY
     assert.equal(h.snapshot(f), before)
   })
 
-  await runTest('every uncovered sale is named, including one short by a single riel', async () => {
+  // Paid means covered to within half a US cent (the one definition in
+  // saleStatusResolution.ts). This case used to name a sale ONE riel short
+  // ($0.00024); that tender is paid now -- the POS records it Completed -- so
+  // the uncovered row is 21 riel ($0.0051) short, one step past the band.
+  await runTest('every uncovered sale is named, including one short by just over half a cent', async () => {
     const f = h.fixture(); h.seed(f, 3)
     setMoney(f, 1, { total: 10, paidUsd: 4 })       // partly paid is not paid
-    setMoney(f, 2, { total: 10, paidKhr: 40999 })   // one riel short at 4100
+    setMoney(f, 2, { total: 10, paidKhr: 40979 })   // 21 riel short at 4100
     setMoney(f, 3, { total: 10, paidUsd: 5, paidKhr: 20500 }) // mixed, exactly covered
     const before = h.snapshot(f)
-    const refused = await f.call(h.sales, '/bulk-status', h.request(f, 'completed', 'bulk-short-by-a-riel'))
+    const refused = await f.call(h.sales, '/bulk-status', h.request(f, 'completed', 'bulk-short-past-the-band'))
     assert.equal(refused.status, 400, JSON.stringify(refused))
     assert.equal(refused.body.code, 'insufficient_payment_for_status')
     assert.deepEqual(refused.body.sale_ids, [1, 2])
@@ -112,15 +116,18 @@ const statuses = (f) => f.sql.prepare('SELECT id,sale_status FROM sales ORDER BY
   })
 
   // CONTROL: covered Not Paid sales (for example ones reopened for a payment
-  // correction) still move as a group.
+  // correction) still move as a group -- including the owner's tender, 39,400
+  // riel for $9.61 at 4,100, one riel short and inside the half-cent band
+  // (refused by the exact rule before the one definition of paid).
   await runTest('a group of Not Paid sales whose payment covers them still completes', async () => {
-    const f = h.fixture(); h.seed(f, 2)
+    const f = h.fixture(); h.seed(f, 3)
     setMoney(f, 1, { total: 10, paidUsd: 10 })
     setMoney(f, 2, { total: 10, paidKhr: 41000 })
+    setMoney(f, 3, { total: 9.61, paidKhr: 39400 })
     const applied = await f.call(h.sales, '/bulk-status', h.request(f, 'completed', 'bulk-covered-completed'))
     assert.equal(applied.status, 200, JSON.stringify(applied))
-    assert.equal(applied.body.changedCount, 2)
-    assert.deepEqual(statuses(f), ['1:completed', '2:completed'])
+    assert.equal(applied.body.changedCount, 3)
+    assert.deepEqual(statuses(f), ['1:completed', '2:completed', '3:completed'])
   })
 
   // CONTROL: only the paid statuses are gated. Cancelling a Not Paid sale

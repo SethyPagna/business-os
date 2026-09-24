@@ -5,6 +5,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { sendTelegramShiftReport } from '../lib/telegram'
+import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
@@ -264,9 +265,10 @@ function businessDateFor(iso: string): string {
  * format after time -cashier... no need other things." So the six random hex
  * characters that followed the minute are gone and the cashier the row
  * records (user_name, username first -- see displayName) takes their place:
- * trimmed, whitespace runs joined by '-', at most 24 characters counted as
- * code points so a Khmer or emoji name is never cut mid-character. A row with
- * no cashier name at all is U<user id>.
+ * trimmed, whitespace runs joined by '-', at most 24 code points, cut only
+ * where a character ends (firstCharacters, the cut every Telegram cap uses)
+ * so a Khmer sign, a flag or an emoji is never parted. A row with no cashier
+ * name at all is U<user id>.
  *
  * Only NEW rows get this form. A stored shift_code never changes: audit rows,
  * amendment snapshots and Telegram messages already quote the old ones.
@@ -275,7 +277,7 @@ const SHIFT_CODE_CASHIER_MAX = 24
 export function shiftCodeBase(nowIso: string, cashier: string | null, userId: number): string {
   const local = new Date(utcMs(nowIso) + BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000)
   const p = (n: number) => String(n).padStart(2, '0')
-  const name = Array.from((cashier ?? '').trim().replace(/\s+/g, '-')).slice(0, SHIFT_CODE_CASHIER_MAX).join('')
+  const name = firstCharacters((cashier ?? '').trim().replace(/\s+/g, '-'), SHIFT_CODE_CASHIER_MAX)
   return `S-${local.getUTCFullYear()}${p(local.getUTCMonth() + 1)}${p(local.getUTCDate())}-${p(local.getUTCHours())}${p(local.getUTCMinutes())}-${name || `U${userId}`}`
 }
 /**

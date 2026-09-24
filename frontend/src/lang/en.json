@@ -6038,7 +6038,7 @@
   "bulk_to": "To",
   "bulk_matching_count": "{n} matching",
   "bulk_skipped_count": "{n} selected with another source value will be skipped.",
-  "sale_bulk_status_unpaid_skipped": "{n} Not Paid sales are not fully paid and will be skipped. Record their payment on each sale first.",
+  "sale_bulk_status_unpaid_skipped": "{n} Not Paid sale(s) left out: not fully paid. Record the payment on each sale first.",
   "bulk_cancel_review_hint": "Review every sale before cancelling.",
   "choose": "Choose",
   "ready": "Ready",
@@ -6698,7 +6698,7 @@
   "stock_tagged_restore_done": "Restored to sellable stock",
   "stock_session_payment_scope_hint": "Requested payment terms only. An existing lot keeps its recorded terms, including when receipts share the same received date.",
   "stock_session_review_payment_hint": "Product creation submitted for review does not record payment terms here.",
-  "sale_bulk_cancelled_skipped": "{n} cancelled sales cannot be edited and are left out.",
+  "sale_bulk_cancelled_skipped": "{n} cancelled sale(s) left out: a cancelled sale cannot be edited.",
   "sale_cancelled_read_only": "A cancelled sale cannot be edited. Nothing was changed.",
   "change_driver": "Change driver",
   "remove_driver": "Remove driver"

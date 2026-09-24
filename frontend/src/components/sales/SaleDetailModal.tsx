@@ -26,6 +26,7 @@ import {
   type SaleAmendmentRow,
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
+import { recordedSaleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
 import { saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
@@ -70,8 +71,8 @@ import {
   initialSettlementRows,
   recordedSettlementIssue,
   settlementRowsEqual,
+  settlementOutstandingUsd,
   settlementRowsIssue,
-  settlementTotals,
   type SettlementRow,
 } from './saleSettlement.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -448,7 +449,8 @@ export default function SaleDetailModal({
   const settlementSnapshot = (selectedSale: SaleDetail | null | undefined) => {
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
-    const exchangeRateValue = Number(saleUsesSavedExchangeRate(selectedSale) ? selectedSale?.exchange_rate : rawSettings.exchange_rate)
+    const savedRate = saleUsesSavedExchangeRate(selectedSale)
+    const exchangeRateValue = Number(savedRate ? selectedSale?.exchange_rate : rawSettings.exchange_rate)
     const exchangeRate = Number.isFinite(exchangeRateValue) && exchangeRateValue > 0 ? exchangeRateValue : 4100
     const rows = initialSettlementRows({
       paymentDetails: selectedSale?.payment_details,
@@ -457,6 +459,7 @@ export default function SaleDetailModal({
       amountPaidKhr: selectedSale?.amount_paid_khr,
       totalUsd: toNumber(selectedSale?.total_usd || selectedSale?.total),
       exchangeRate,
+      moneyPrecisionVersion: savedRate ? 1 : 0,
       configuredMethods,
     })
     return {
@@ -1491,10 +1494,19 @@ export default function SaleDetailModal({
     catch { return null }
   })()
   const projectedTotalUsd = addHeaderQuote?.total_usd ?? null
-  // Same shape as outstandingUsd above -- one definition of "still owed"
-  // on this screen, so the projection cannot disagree with the figure it is
-  // projecting from.
-  const projectedOutstandingUsd = projectedTotalUsd == null ? null : Math.max(0, Math.round((projectedTotalUsd - totals.paidTotalUsd) * 100) / 100)
+  // Same definition as outstandingUsd above (the kernel's one definition of
+  // paid, on the sale's own money basis and booked rate), so the projection
+  // cannot disagree with the figure it is projecting from. Cents, as the
+  // Worker's add-items response reports it.
+  const projectedOutstandingUsd = (() => {
+    if (projectedTotalUsd == null) return null
+    try {
+      const owed = recordedSaleOutstandingUsd({ ...sale, total_usd: projectedTotalUsd, exchange_rate: totals.exchangeRate })
+      return Math.round(owed * 100 + Number.EPSILON) / 100
+    } catch {
+      return Math.max(0, projectedTotalUsd)
+    }
+  })()
   // Every status accepted by POST /:id/items now holds stock (including
   // awaiting_payment); only the sticky migration flag keeps a sale outside
   // the stock ledger. A branchless stock_skipped sale is therefore valid,
@@ -1586,8 +1598,9 @@ export default function SaleDetailModal({
         setPayError(translateOr('payment_amount_required', 'Enter the amount received.', 'បញ្ចូលចំនួនទឹកប្រាក់ដែលបានទទួល។'))
         return
       }
-      const reviewedTotals = settlementTotals(settlementRows, settlementSession.exchangeRate)
-      if (Math.round(reviewedTotals.paidEquivalentUsd * 10000) < Math.round(totalUsd * 10000)) {
+      // The one definition of paid, on the basis the Worker's settlement uses:
+      // a tender inside the half-cent band completes the sale here and there.
+      if (settlementOutstandingUsd(settlementRows, { totalUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
         setPayError(translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.', 'ត្រូវទូទាត់គ្រប់ចំនួនសរុប មុនបញ្ចប់ការលក់។'))
         return
       }
@@ -2862,6 +2875,7 @@ export default function SaleDetailModal({
                   configuredMethods={settlementSession.configuredMethods}
                   exchangeRate={settlementSession.exchangeRate}
                   totalUsd={totalUsd}
+                  moneyPrecisionVersion={usesSavedExchangeRate ? 1 : 0}
                   saving={statusSaving || !paymentConfigReady}
                   error={payError}
                   recordedIssue={settlementSession.recordedIssue}

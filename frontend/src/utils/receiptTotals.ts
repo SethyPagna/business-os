@@ -47,6 +47,7 @@ import {
 
 import { addMoney4, divideMoney4, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
 import { savedSaleRounding } from './saleMoneyV1.ts'
+import { recordedSaleOutstandingUsd } from './saleStatusResolution.ts'
 
 export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
   id?: number | string | null
@@ -192,7 +193,25 @@ export function receiptTotalsFigures(
   const paidTotalUsd = version1
     ? addMoney4(paidUsd, exchangeRate > 0 ? divideMoney4(paidKhr, exchangeRate) : 0)
     : round2(paidUsd + (exchangeRate > 0 ? paidKhr / exchangeRate : 0))
-  const outstandingUsd = Math.max(0, version1 ? subtractMoney4(totalUsd, paidTotalUsd) : round2(totalUsd - paidTotalUsd))
+  // Still owed is the kernel's one definition of paid read as an amount: zero
+  // when the tender covers the total to within half a cent (39,400 riel for a
+  // $9.61 sale at 4,100 is paid, never "$0.00 due"), otherwise the exact
+  // shortfall -- on the same money basis the status rules use. Money the
+  // kernel cannot read owes the whole total.
+  let outstandingUsd: number
+  try {
+    const owed = recordedSaleOutstandingUsd({
+      total_usd: totalUsd,
+      amount_paid_usd: paidUsd,
+      amount_paid_khr: paidKhr,
+      exchange_rate: exchangeRate,
+      money_precision_version: sale.money_precision_version,
+      calculated_total_usd: sale.calculated_total_usd,
+    })
+    outstandingUsd = version1 ? owed : round2(owed)
+  } catch {
+    outstandingUsd = Math.max(0, totalUsd)
+  }
 
   return {
     moneyPrecisionVersion: version1 ? 1 : 0,

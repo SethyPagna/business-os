@@ -18,7 +18,7 @@
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
-import { resolvePaidSaleStatus, tenderAllowsPaidStatus } from '../../utils/saleStatusResolution.ts'
+import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
@@ -3068,14 +3068,14 @@ export default function POS() {
     moneyPrecisionVersion: 1,
     isDelivery: !!active.isDelivery,
   })
-  // May this sale be recorded Completed or Awaiting Delivery on the current
-  // tender? tenderAllowsPaidStatus is the one creation boundary POST /sales
-  // also enforces (covered within half a cent, exact integer units); the
-  // checkout gate and the status picker both read this one answer. An
-  // unreadable amount or rate answers no.
-  const posTenderAllowsPaidStatus = (() => {
+  // Does the current tender cover the sale? paymentCoversSaleTotal is the one
+  // definition of paid (covered within half a cent, exact integer units) that
+  // POST /sales, the resolver above and every balance-due figure also use; the
+  // checkout gate, the status picker and the change / short panel all read
+  // this one answer. An unreadable amount or rate answers no.
+  const posTenderCovers = (() => {
     try {
-      return tenderAllowsPaidStatus({ paidUsd: paidUsdNum, paidKhr: paidKhrNum, totalUsd, exchangeRate, moneyPrecisionVersion: 1 })
+      return paymentCoversSaleTotal({ paidUsd: paidUsdNum, paidKhr: paidKhrNum, totalUsd, exchangeRate, moneyPrecisionVersion: 1 })
     } catch {
       return false
     }
@@ -3238,10 +3238,10 @@ export default function POS() {
     // Y10: an awaiting-payment sale is exactly the "decide the payment
     // later on the Sales page" flow -- requiring the full amount (and with
     // it a payment method) up front defeated it. Paid statuses keep the
-    // gate: posTenderAllowsPaidStatus, the one creation boundary POST /sales
-    // also enforces, so a sale this gate lets through -- online or queued
+    // gate: posTenderCovers, the one definition of paid POST /sales also
+    // enforces, so a sale this gate lets through -- online or queued
     // offline -- is never answered with a 400 by the Worker.
-    if (saleStatus !== 'awaiting_payment' && !posTenderAllowsPaidStatus) return notify(t('insufficient_amount'), 'error')
+    if (saleStatus !== 'awaiting_payment' && !posTenderCovers) return notify(t('insufficient_amount'), 'error')
     // S4-41: the cashier could tender the full amount and still pick
     // "Not Paid", recording a settled sale as a debt. Resolve it here, with
     // the same shared kernel the Worker runs on POST /sales, so the body
@@ -4266,8 +4266,11 @@ export default function POS() {
                   <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('khr', totalKhr)}>Exact {khrSymbol}</button>
                 </div>
                 {(paidUsdNum > 0 || paidKhrNum > 0) && (
-                  <div className={`mt-1.5 p-2 rounded-lg text-xs ${changeUsd >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-                    {changeUsd >= 0 ? (
+                  <div className={`mt-1.5 p-2 rounded-lg text-xs ${posTenderCovers ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                    {/* Short only when the tender does not cover the sale: a
+                        tender inside the half-cent band is a full payment
+                        with no change, never "$0.00 short". */}
+                    {posTenderCovers ? (
                       // Y12: record the ACTUAL change handed back, per currency
                       // -- prefilled/placeholdered from the computed change, but
                       // editable because change is often given in a different
@@ -4281,7 +4284,7 @@ export default function POS() {
                             onClick={() => patchActive({ changeGivenUsd: changeUsd > 0 ? changeUsd.toFixed(2) : '', changeGivenKhr: '', changeIsActual: false })}
                             title={t('use_computed_change_hint') || 'Fill USD with the full computed change'}
                           >
-                            {t('use_computed') || 'Use computed'}: {fmtUSD(changeUsd)}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
+                            {t('use_computed') || 'Use computed'}: {fmtUSD(Math.max(0, changeUsd))}{changeKhr > 1 ? ` / ${fmtKHR(changeKhr)}` : ''}
                           </button>
                         </div>
                         {/* Physical-cash change: rounded DOWN to 100៛ (the shop
@@ -4385,19 +4388,22 @@ export default function POS() {
                 // under its own name with the reason: Not Paid once the tender
                 // already covers the sale (it would be recorded as paid), a
                 // paid status while the tender is short. Relabelling Not Paid
-                // as the status it resolves to listed "Completed" twice.
+                // as the status it resolves to listed "Completed" twice. Only
+                // the name fades; the reason stays in the warning colours at
+                // full strength (a whole-button fade left it near 1.5:1 on a
+                // phone), as the greyed warehouse pill's notice does.
                 const resolved = resolvePosSaleStatus(status)
                 const paidInFull = resolved !== status
-                const unavailable = paidInFull || (status !== 'awaiting_payment' && !posTenderAllowsPaidStatus)
+                const unavailable = paidInFull || (status !== 'awaiting_payment' && !posTenderCovers)
                 return (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
                   disabled={loading || unavailable}
                   data-pos-status-option={status}
                   data-pos-status-records={resolved}
-                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  <div className="font-semibold text-sm text-gray-800 dark:text-gray-200">{label}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{paidInFull
+                  className="w-full p-3 rounded-xl border-2 border-gray-200 dark:border-gray-600 enabled:hover:border-blue-400 dark:enabled:hover:border-blue-500 enabled:hover:bg-blue-50 dark:enabled:hover:bg-blue-900/20 text-left transition-colors disabled:bg-gray-50 dark:disabled:bg-gray-900/40 disabled:cursor-not-allowed">
+                  <div className={`font-semibold text-sm ${unavailable ? 'text-gray-400 dark:text-gray-500' : 'text-gray-800 dark:text-gray-200'}`}>{label}</div>
+                  <div className={`text-xs mt-0.5 ${unavailable ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>{paidInFull
                     ? (t('pos_status_paid_resolved_desc') || 'This sale is already paid in full, so it cannot be recorded as Not Paid.')
                     : unavailable ? (t('insufficient_amount') || 'Amount paid is less than total') : desc}</div>
                 </button>
