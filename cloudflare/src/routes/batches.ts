@@ -514,95 +514,44 @@ app.patch('/:id/branches/:branchId', async (c) => {
   const user = c.get('user')
   const batchId = Number(c.req.param('id'))
   const branchId = Number(c.req.param('branchId'))
-  const body = await c.req.json<{ quantity?: number }>().catch(() => ({} as { quantity?: number }))
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const quantity = Number(body.quantity)
   if (!Number.isFinite(quantity) || quantity < 0) return c.json({ error: 'quantity must be a non-negative number' }, 400)
 
   const batch = await db.prepare('SELECT id, variant_product_id AS productId FROM product_batches WHERE id = ?').get<{ id: number; productId: number }>([batchId])
   if (!batch) return c.json({ error: 'Received date not found' }, 404)
-  const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([batch.productId])
 
-  // A direct SET (a stock-take correction, not a delta) -- read the
-  // previous quantity first so the aggregate (branch_stock/
-  // stock_quantity) can be adjusted by the same delta this batch's own
-  // figure is about to move by, keeping the two ledgers in agreement the
-  // same way receiveBatchStock/removeStockFromBatch do for their own
-  // add/remove paths. Without this, correcting a batch's quantity here
-  // moved the batch ledger but silently left the aggregate stale -- the
-  // same class of gap fixed on the receive side above.
-  const existingRow = await db.prepare(
-    'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
-  ).get<{ quantity: number }>({ batchId, branchId })
-  const previousQuantity = Number(existingRow?.quantity) || 0
-  const delta = quantity - previousQuantity
-
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
-  if (quantity > 0) {
-    // Positive stock must always be reachable from POS/FIFO reads, all of
-    // which intentionally exclude inactive lots. Reactivation belongs in the
-    // same atomic batch as the quantity and aggregate corrections: whichever
-    // transaction wins against a concurrent deactivation leaves a valid
-    // state (positive => active; inactive => zero).
-    statements.push({
-      sql: `UPDATE product_batches
-            SET is_active = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE id = @batchId`,
-      params: { batchId },
-    })
-  }
-  statements.push({
-      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)
-            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = @quantity, updated_at = datetime('now')`,
-      params: { batchId, branchId, quantity },
+  // A direct SET of one lot at one branch (a stock-take correction) is the
+  // lot-scope Set, and there is exactly ONE writer for it: lib/
+  // stockLotAdjustment.ts, shared with POST /api/inventory/adjust. It keeps
+  // this route's Part-77 decisions (the lot figure is authoritative; the
+  // branch aggregate floors at zero; positive stock reactivates the lot) and
+  // adds what this route never had: one atomic batch under the maintenance
+  // guard, the owner's loss rule (a downward correction is a 'remove' at the
+  // lot's cost), a per-request idempotency id and exact undo/redo.
+  const reasonText = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Quantity correction (received date #${batchId})`
+  const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+  const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
+  const result = await applyStockLotSet(db, user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
+    productId: batch.productId, branchId, batchId, quantity, setScope: 'lot', reason: reasonText, conditionTag: null,
+    // The lot figure the editor showed: a count that moved since refuses 409.
+    ...(typeof body.expectedLotQuantity === 'number' && Number.isFinite(body.expectedLotQuantity) && body.expectedLotQuantity >= 0
+      ? { expectedLotQuantity: body.expectedLotQuantity } : {}),
   })
-  if (delta !== 0) {
-    // The branch_stock floor is DELIBERATE here (Part-77 clamp audit,
-    // reviewed and kept): this is a stock-take CORRECTION -- the tool an
-    // operator uses precisely when the ledgers have drifted -- and aborting
-    // because the aggregate is lower than the batch delta would make the
-    // repair itself impossible on the data that most needs it. The batch
-    // figure being SET is authoritative; the aggregate floors at zero.
-    statements.push({
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, MAX(0, @delta))
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity + @delta)`,
-      params: { productId: batch.productId, branchId, delta },
-    })
-    // Re-derive rather than clamp a delta: when the branch_stock update above
-    // DID floor, a +/-delta on stock_quantity would bake the discrepancy into
-    // the product total too -- summing the actual per-branch rows keeps the
-    // denormalized total honest no matter what the floor did.
-    statements.push({
-      sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
-      params: { productId: batch.productId },
-    })
-  }
-  await db.batch(statements)
+  if (result.status !== 200) return c.json(result.body as never, result.status as never)
 
-  if (delta !== 0) {
-    await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-      VALUES (@productId, @productName, @branchId, 'set', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
-    `).run({
-      productId: batch.productId,
-      productName: product?.name || null,
-      branchId,
-      quantity: Math.abs(delta),
-      reason: `Quantity correction (received date #${batchId})`,
-      userId: user?.id ?? null,
-      userName: actorSnapshot(user),
-      batchId,
-    })
+  if (Number(result.body.quantity) > 0 && !result.body.replayed) {
+    c.executionCtx.waitUntil(Promise.all([
+      audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, {
+        branch_id: branchId, quantity, previous_quantity: (result.body.before as { lotQuantity?: number } | undefined)?.lotQuantity ?? null,
+        operation_id: result.body.operation_id ?? null,
+      }),
+      bumpVersion(c.env, 'products'),
+      broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
+      broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
+    ]))
   }
-
-  // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
-  // into the same waitUntil the bumpVersion/broadcast calls already used.
-  c.executionCtx.waitUntil(Promise.all([
-    audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity }),
-    bumpVersion(c.env, 'products'),
-    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
-    broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
-  ]))
-  return c.json({ success: true })
+  return c.json(result.body)
 })
 
 // DELETE /api/batches/:id -- soft delete (is_active = 0). Never a hard

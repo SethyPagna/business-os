@@ -110,6 +110,27 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
 }).default
 
+// PATCH /:id/branches/:branchId is the lot-scope Set, whose ONE writer is
+// lib/stockLotAdjustment.ts, loaded by the route on first use. REAL, so the
+// reactivation this file pins is proven on the writer that actually runs; the
+// hook stays installed because the route resolves it at request time.
+const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
+  './db': { getDb: () => routeFixture.db },
+  './permissions': { getActionTier: () => 'full' },
+  './actorSnapshot': { actorSnapshot: () => 'Tester' },
+  './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
+  './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
+  './damagedLotActions': { planHoldAsTagged: () => { throw new Error('not used') } },
+  './stockReason': loadReal('lib/stockReason.ts'),
+  '../durable-objects/broadcastHub': { broadcast: async () => {} },
+  './cache': { bumpVersion: async () => {} },
+})
+const baseModuleLoad = Module._load
+Module._load = function stockLotAdjustmentHook(request, parent, isMain) {
+  if (request === '../lib/stockLotAdjustment') return stockLotAdjustment
+  return baseModuleLoad.call(this, request, parent, isMain)
+}
+
 const fakeExecutionCtx = { waitUntil: (promise) => { promise?.catch?.(() => {}) } }
 async function request(method, url, body) {
   const response = await batchRoute.request(url, {

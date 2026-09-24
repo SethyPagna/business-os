@@ -8,7 +8,7 @@ import { runDataIntegrityCheck } from '../lib/dataIntegrity'
 import { listObjects, deleteObject, deleteObjectsBulk } from '../lib/r2'
 import { cleanOrphanImportStaging } from '../lib/importRetention'
 import { sanitizeMediaList } from '../lib/media'
-import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES } from '../lib/coreDataInvariants'
+import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, bumpVersions } from '../lib/cache'
@@ -347,7 +347,7 @@ app.post('/reset-data', async (c) => {
         imageKeysToDelete = sanitizeMediaList(rawPaths).map((p) => p.replace(/^\/+/, ''))
       }
 
-      const deletes = tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` }))
+      const deletes = (await presentResetTables(db, tablesToClear)).map((table) => ({ sql: `DELETE FROM "${table}"` }))
       await db.batch(guardSaleRecordReset(deletes))
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
@@ -1198,7 +1198,7 @@ app.post('/factory-reset', async (c) => {
   try {
     const droppedCustomTables = await dropAllCustomTables(c.env)
 
-    await db.batch(guardSaleRecordReset(FACTORY_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` }))))
+    await db.batch(guardSaleRecordReset((await presentResetTables(db, FACTORY_RESET_TABLES)).map((table) => ({ sql: `DELETE FROM "${table}"` }))))
     // The two bulk import-staging tables live on the separate import-staging DB
     // (see lib/db.ts); FACTORY_RESET_TABLES' DELETE of import_job_rows hits only
     // the main DB's empty shell, so clear the real staging on its own DB. No-op

@@ -186,6 +186,9 @@ export const BACKUP_TABLES = [
   'import_stock_action_guards',
   'google_drive_sync_entries',
   'action_history',
+  // Scoped Set operations (0193) reference action_history and hold the exact
+  // lot/branch snapshots their undo/redo replays; restore them after history.
+  'stock_lot_adjustment_operations',
   'transfer_operation_receipts',
   'transfer_operation_members',
   'undo_snapshots',
@@ -1154,6 +1157,7 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
   'products', 'product_batches', 'branch_stock', 'branch_batch_stock', 'damaged_stock_lots',
   'sales', 'sale_items', 'sale_item_batch_allocations', 'returns', 'return_items',
   'return_item_batch_allocations', 'fees', 'fee_operation_receipts', 'inventory_movements', 'action_history',
+  'stock_lot_adjustment_operations',
   'undo_snapshots', 'sale_amendments', 'sale_write_revisions', 'sale_bulk_operations', 'sale_bulk_members',
   'sale_mutation_receipts', 'sale_mutation_members',
   'sale_incident_recovery_receipts', 'sale_incident_recovery_members',

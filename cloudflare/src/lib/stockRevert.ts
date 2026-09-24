@@ -175,6 +175,18 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       error: 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.',
     }
   }
+  // A scoped Set (lib/stockLotAdjustment.ts) and the counter-movement of its
+  // undo are replayed ONLY through its own history generation, which guards
+  // the exact lot/branch preimage. A ledger revert here would move stock
+  // outside that generation and leave its undo/redo reversing the wrong state.
+  // Prefix literal kept in sync with STOCK_SET_REFERENCE_PREFIX.
+  const setReference = String(m.reference_id ?? '')
+  const setParent = setReference.startsWith('revert:')
+    ? await db.prepare('SELECT reference_id FROM inventory_movements WHERE id = @id').get<{ reference_id: string | null }>({ id: Number(setReference.slice(7)) || 0 })
+    : null
+  if (setReference.startsWith('stock-set:') || String(setParent?.reference_id ?? '').startsWith('stock-set:')) {
+    return { ok: false, status: 409, error: 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.' }
+  }
   const plan = planMovementRevert(m)
   if (!plan.revertible) {
     return {

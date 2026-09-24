@@ -210,6 +210,10 @@ async function req(method, url, body) {
 function exec(sql) { rawDbHandle.exec(sql) }
 function row(sql) { return rawDbHandle.prepare(sql).get() }
 function count(table) { return row(`SELECT COUNT(*) AS n FROM "${table}"`).n }
+// 0193 (stock_lot_adjustment_operations) ships ahead of the production chain
+// this file models; the reset skips it while absent (MIGRATION_GATED_RESET_TABLES).
+function tableExists(table) { return Boolean(row(`SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='${table}'`)) }
+const presentProductsResetTables = () => PRODUCTS_RESET_TABLES.filter(tableExists)
 
 function seed() {
   // Wipe every table this test touches so each check() starts clean,
@@ -324,13 +328,13 @@ async function check(name, fn) {
 async function main() {
   await check('mode=products deletes every table in PRODUCTS_RESET_TABLES', async () => {
     seed()
-    for (const table of PRODUCTS_RESET_TABLES) assert.ok(count(table) > 0, `sanity: ${table} should be seeded before the reset`)
+    for (const table of presentProductsResetTables()) assert.ok(count(table) > 0, `sanity: ${table} should be seeded before the reset`)
 
     const { status, json } = await req('POST', '/reset-data', { mode: 'products' })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
 
-    for (const table of PRODUCTS_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty after mode='products'`)
+    for (const table of presentProductsResetTables()) assert.strictEqual(count(table), 0, `${table} should be empty after mode='products'`)
     assert.ok(count('stock_session_revisions') > 0, 'reset retains ABA revision tombstones')
   })
 
@@ -510,7 +514,7 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
 
-    for (const table of PRODUCTS_RESET_TABLES) assert.strictEqual(count(table), 0, `${table} should be empty`)
+    for (const table of presentProductsResetTables()) assert.strictEqual(count(table), 0, `${table} should be empty`)
     assert.strictEqual(count('inventory_movements'), 0)
     assert.strictEqual(count('sales'), 0)
     assert.strictEqual(count('returns'), 0)
@@ -639,6 +643,22 @@ async function main() {
     assert.strictEqual(count('return_mutation_receipts'), 0)
     assert.strictEqual(count('return_create_receipts'), 0)
     assert.strictEqual(count('system_flags'), 0, 'the short-lived reset guard cannot survive the atomic batch')
+  })
+
+  // 0193 gate, both halves: without the table the reset above already
+  // succeeded (production chain); once 0193 is applied its operation rows are
+  // cleared with the products they snapshot.
+  await check('mode=products clears scoped Set operations once 0193 is applied', async () => {
+    assert.ok(PRODUCTS_RESET_TABLES.includes('stock_lot_adjustment_operations'))
+    assert.ok(!tableExists('stock_lot_adjustment_operations'), 'the production chain modelled here has no 0193')
+    exec(fs.readFileSync(path.join(migrationsDir, '0193_stock_lot_adjustment_operations.sql'), 'utf8'))
+    seed()
+    exec(`INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
+      VALUES('reset-set-op',1,'reset-set-request','{}','digest','{}','{}','{}','{}')`)
+    const { status, json } = await req('POST', '/reset-data', { mode: 'products' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(count('stock_lot_adjustment_operations'), 0)
+    exec('DROP TABLE stock_lot_adjustment_operations')
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

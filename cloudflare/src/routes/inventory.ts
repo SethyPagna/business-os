@@ -54,7 +54,7 @@ import {
 } from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { planTransferOperation } from '../lib/transferOperation'
+import { planTransferOperation, TransferConflictError } from '../lib/transferOperation'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -1522,6 +1522,47 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
 
   if (!productId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (!['add', 'remove', 'set'].includes(type)) return c.json({ error: 'Invalid stock action' }, 400)
+  // An explicit setScope opts into the ONE lot-level Set writer
+  // (lib/stockLotAdjustment.ts): selected received date or branch total, with
+  // exact undo/redo and the owner's loss rule. A body without setScope keeps
+  // the historical branch-total conversion below for old clients.
+  if (type === 'set' && body.setScope !== undefined) {
+    if (unlockPricing || body.pricing != null || body.unitCostUsd != null || body.supplierId != null || body.supplierName != null) {
+      return c.json({ error: 'A quantity-only correction cannot enter or change receipt prices.', code: 'correction_cost_input' }, 400)
+    }
+    const expected = (key: string): number | undefined | null => {
+      const value = body[key]
+      if (value === undefined || value === null) return undefined
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+    }
+    const expectedLotQuantity = expected('expectedLotQuantity')
+    const expectedBranchQuantity = expected('expectedBranchQuantity')
+    if (expectedLotQuantity === null || expectedBranchQuantity === null) return c.json({ error: 'Invalid expected stock quantity.' }, 400)
+    const branchId = requestedBranchId || await defaultBranchId(c.env)
+    if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
+    const requestIdText = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+    // Loaded on first use, like undoAppliers.ts loads it: only a scoped Set
+    // needs it, and every other /adjust stays byte-identical.
+    const { applyStockLotSet } = await import('../lib/stockLotAdjustment')
+    const result = await applyStockLotSet(getDb(c.env), user, /^[A-Za-z0-9_-]{8,120}$/.test(requestIdText) ? requestIdText : null, {
+      productId, branchId, batchId: Number(body.batchId), quantity,
+      setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
+      ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
+      ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
+    }, markWritten)
+    if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
+      c.executionCtx.waitUntil(Promise.all([
+        audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
+          type: 'set', setScope: body.setScope, quantity, reason, branchId, batchId: Number(body.batchId), conditionTag,
+          operationId: result.body.operation_id ?? null, before: result.body.before, after: result.body.after,
+        }),
+        broadcast(c.env, 'products', { action: 'update', id: productId }),
+        broadcast(c.env, 'inventory', { action: 'adjust', id: productId }),
+        bumpVersion(c.env, 'products'),
+      ]))
+    }
+    return c.json(result.body as never, result.status as never)
+  }
   // A tag names where UNITS went (held as broken/expired/...) or what was
   // received. A 'set' is a target figure whose direction is only decided
   // below, against live stock -- "set to 12, keep as damaged" does not say
@@ -2374,6 +2415,12 @@ app.post('/transfer', async (c) => {
   // PWA build or a queued offline replay is not 400ed mid-release.
   const reason = String(body.reason ?? '').trim() || String(body.note ?? '').trim() || null
   const clientRequestId = normalizeTransferRequestId(body.client_request_id)
+  // Optional selected received date. Absent keeps FIFO across lots exactly as
+  // before; present, the planner takes every unit from that one lot or refuses.
+  const batchId = body.batchId == null || body.batchId === '' ? null : Number(body.batchId)
+  if (batchId !== null && (!Number.isSafeInteger(batchId) || batchId <= 0)) {
+    return c.json({ error: 'An existing received date must be selected.', code: 'invalid_batch_id' }, 400)
+  }
 
   if (!productId || !fromBranchId || !toBranchId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (fromBranchId === toBranchId) return c.json({ error: 'Source and destination cannot be the same' }, 400)
@@ -2396,7 +2443,9 @@ app.post('/transfer', async (c) => {
 
   const db = getDb(c.env)
   if (!await operationWritesReady(db)) return c.json({ error: 'An app upgrade is in progress. Please try again shortly.', code: 'release_upgrade_in_progress' }, 503)
-  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason })
+  // The legacy canonical body is kept byte-for-byte when no lot was selected,
+  // so a pending FIFO retry keeps its original identity.
+  const requestJson = JSON.stringify({ version: 1, kind: 'inventory-transfer', productId, fromBranchId, toBranchId, quantity, reason, ...(batchId === null ? {} : { batchId }) })
   const requestDigest = await transferRequestDigest(requestJson)
   const previousReceipt = await findTransferReceipt(db, user.id, clientRequestId)
   if (previousReceipt) {
@@ -2444,14 +2493,19 @@ app.post('/transfer', async (c) => {
   // Its immutable metadata also drives Telegram after commit: a second FIFO
   // read here could describe a different allocation than the committed plan.
   const responsePayload = { success: true, fromBranchId, toBranchId, quantity, replayed: false }
-  const { statements, allocationSummaries } = await planTransferOperation(db, {
-    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
-    fromBranchId, toBranchId, reason,
-    lines: [{ productId, destProductId: productId, quantity }], response: responsePayload,
-  })
+  let allocationSummaries: Awaited<ReturnType<typeof planTransferOperation>>['allocationSummaries']
   try {
+    // Planned inside the try: a selected received date that can no longer
+    // cover the quantity is a TransferConflictError (409), not a 500.
+    const { statements, allocationSummaries: planned } = await planTransferOperation(db, {
+      user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'inventory',
+      fromBranchId, toBranchId, reason,
+      lines: [{ productId, destProductId: productId, quantity, batchId }], response: responsePayload,
+    })
+    allocationSummaries = planned
     await ordinaryBusinessBatch(db, statements)
   } catch (error) {
+    if (error instanceof TransferConflictError) return c.json({ error: error.message, code: 'stock_conflict' }, 409)
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {

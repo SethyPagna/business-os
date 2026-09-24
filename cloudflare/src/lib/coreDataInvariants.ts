@@ -435,6 +435,8 @@ export const FACTORY_RESET_TABLES = [
   'stock_session_members',
   'stock_session_operations',
   'stock_session_guards',
+  // Scoped Set operations (0193) reference action_history; clear them first.
+  'stock_lot_adjustment_operations',
   'return_bulk_members',
   'return_bulk_operations',
   'return_write_revisions',
@@ -531,6 +533,8 @@ export const PRODUCTS_RESET_TABLES = [
   'stock_session_members',
   'stock_session_operations',
   'stock_session_guards',
+  // Scoped Set operations snapshot product/lot identities (0193).
+  'stock_lot_adjustment_operations',
   'product_images',
   'rfid_tags',
   'branch_batch_stock',
@@ -538,6 +542,28 @@ export const PRODUCTS_RESET_TABLES = [
   'branch_stock',
   'products',
 ]
+
+/**
+ * Reset-list tables whose migration may legitimately not be applied yet where
+ * this Worker runs (the repo ships migrations ahead of the applied chain).
+ * `DELETE FROM` a missing table aborts the whole reset batch, so these are
+ * dropped from the list when absent -- there is nothing in them to clear.
+ * Every other reset table stays mandatory: a missing one is a real defect.
+ */
+export const MIGRATION_GATED_RESET_TABLES: readonly string[] = ['stock_lot_adjustment_operations']
+
+export async function presentResetTables(
+  db: { prepare(sql: string): { all<T>(params?: Record<string, unknown>): Promise<T[]> } },
+  tables: readonly string[],
+): Promise<string[]> {
+  const gated = tables.filter((table) => MIGRATION_GATED_RESET_TABLES.includes(table))
+  if (!gated.length) return [...tables]
+  const rows = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN (SELECT value FROM json_each(@names))",
+  ).all<{ name: string }>({ names: JSON.stringify(gated) })
+  const present = new Set(rows.map((row) => row.name))
+  return tables.filter((table) => !MIGRATION_GATED_RESET_TABLES.includes(table) || present.has(table))
+}
 
 // custom_tables rows describe dynamically-created tables that a "custom tables"
 // feature used to create via `CREATE TABLE "ct_<name>" (...)` DDL per row. That

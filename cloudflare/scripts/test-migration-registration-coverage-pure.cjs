@@ -49,6 +49,11 @@ const NAMED_COMPANIONS = {
   // migration chain and drives runAdjustAction / runReceiveBatchAction
   // through a repeat, a control and the no-table fallback.
   192: 'test-stock-mutation-receipt-pure.cjs',
+  // 0193 creates stock_lot_adjustment_operations, the undo/idempotency record
+  // of the scoped Set. Its companion applies the real chain, proves the
+  // migration schema-only on populated rows, and drives the Set, its
+  // undo/redo, the loss rule, the no-0193 fallback and a backup round-trip.
+  193: 'test-stock-lot-adjustment-pure.cjs',
   // 0194 creates telegram_scheduled_sends, the one-send-per-shift record for
   // T10's Reports overview. Its companion applies the real migration and
   // drives schedule / queue delivery / drain through duplicates, races,
