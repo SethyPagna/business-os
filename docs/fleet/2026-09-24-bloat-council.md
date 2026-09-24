@@ -25,9 +25,12 @@ Raw ts-prune output is a flag, not proof:
 - **Kept:** `components/utils-settings/index.ts`, which is pinned by `utilsSettingsBarrel.test.ts`.
 
 ## Open, in order
-1. **Wire, don't delete:** `SaleIncidentRecovery.tsx` / `utils/saleIncidentRecovery.ts`. The backend
-   is complete (`cloudflare/src/routes/system.ts` ~860-1069) and tested, but the screen is never
-   mounted in `ResetData.tsx`. Check its permissions before wiring.
+1. **Correction (history checked): do NOT wire** `SaleIncidentRecovery.tsx` / `utils/saleIncidentRecovery.ts`.
+   The council proposed wiring them, but `e64c9d44e` (9 Sep) deliberately replaced them in `ResetData.tsx`
+   with `SaleNotPaidStockRecovery`. They are one-off tooling for the 9 Sep sale incident, with dated
+   routes `/sale-incident-recovery-20260909[-v2]` in `cloudflare/src/routes/system.ts`. They are legacy
+   candidates, removable only with the owner's OK. Keep the `sale_incident_recovery_*` tables and receipts
+   as audit evidence (migrations are append-only).
 2. **Remove together with their pinned tests:**
    - `CurrentShiftSummary.tsx`, read by `shiftManagement.test.ts:49`;
    - `PageSizeSelect.tsx`, whose source `paginationRangeControl.test.ts` reads;
