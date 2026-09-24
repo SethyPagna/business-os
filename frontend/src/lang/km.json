@@ -2108,6 +2108,7 @@
   "filter_low_stock": "ស្តុកទាប",
   "filter_media_type": "តម្រងតាមប្រភេទមេឌៀ",
   "filter_out_of_stock": "អស់ស្តុក",
+  "filter_selected_count": "បានជ្រើស {count}",
   "filters": "តម្រង",
   "filters_active": "ត្រង ({n})",
   "find": "ស្វែងរក",

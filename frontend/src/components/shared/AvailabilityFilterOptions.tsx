@@ -66,7 +66,7 @@ export function buildAvailabilityFilterSection({
     { id: 'all', label: T('all', 'All'), active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
     ...branches.map((branch) => ({
       id: branch.id ?? String(branch.name),
-      label: `${String(branch.name)}${branch.is_default ? ' (Default)' : ''}`,
+      label: branch.is_default ? `${String(branch.name)} (${T('default', 'Default')})` : String(branch.name),
       active: isMultiActive(branchFilter, String(branch.id)),
       onClick: () => setBranchFilter(String(branch.id)),
     })),

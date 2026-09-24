@@ -2108,6 +2108,7 @@
   "filter_low_stock": "Low Stock",
   "filter_media_type": "Filter by media type",
   "filter_out_of_stock": "Out of Stock",
+  "filter_selected_count": "{count} selected",
   "filters": "Filters",
   "filters_active": "Filters ({n})",
   "find": "Find",
