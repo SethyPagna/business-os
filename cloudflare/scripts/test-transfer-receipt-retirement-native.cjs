@@ -24,6 +24,9 @@ export default {async fetch(request,env){
 async function main(){
  console.log('ENGINES',JSON.stringify({node:process.version,workerd:require('workerd/package.json').version,miniflare:require('miniflare/package.json').version,wrangler:require('wrangler/package.json').version}))
  const dir=path.join(__dirname,'../migrations'),sqlite=new Database(':memory:')
+ // 0185/0186/0188 are HELD (parked out of the applied chain, ops/scripts/
+ // migration/held/README.md), applied explicitly below from heldDir.
+ const heldDir=path.join(__dirname,'..','..','ops','scripts','migration','held')
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.sql')&&f<'0185_').sort())sqlite.exec(fs.readFileSync(path.join(dir,file),'utf8'))
  const schema=sqlite.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN (SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all();sqlite.close()
  const mf=new Miniflare({modules:[{type:'ESModule',path:'entry.js',contents:worker},{type:'ESModule',path:'kernel.js',contents:compile('transferReceiptRetirement.ts')},...['db','permissions','importMaintenanceFence'].map(n=>({type:'ESModule',path:n+'.js',contents:compile(n+'.ts')}))],compatibilityDate:'2026-08-01',d1Databases:['DB'],log:new Log(LogLevel.ERROR)})
@@ -31,7 +34,7 @@ async function main(){
   const db=await mf.getD1Database('DB')
   for(let i=0;i<schema.length;i+=25)await db.batch(schema.slice(i,i+25).map(r=>db.prepare(r.sql)))
   for(const file of ['0185_transfer_runs.sql','0186_transfer_run_retirement.sql','0188_transfer_receipt_retirement.sql']){
-   const sql=fs.readFileSync(path.join(dir,file),'utf8');assert.equal(sql.includes('\r'),false);await db.batch(split(sql).map(s=>db.prepare(s)))
+   const sql=fs.readFileSync(path.join(heldDir,file),'utf8');assert.equal(sql.includes('\r'),false);await db.batch(split(sql).map(s=>db.prepare(s)))
   }
   const token=crypto.randomUUID()
   await db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").bind(JSON.stringify({mode:'restore',token,backupKey:'immutable-fixture'})).run()

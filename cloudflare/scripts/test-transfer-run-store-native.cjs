@@ -76,6 +76,9 @@ async function main() {
   // backfills. The proposed 0185 SQL itself is parsed/applied to actual D1 below.
   const sqlite = new Database(':memory:')
   const dir = path.join(__dirname, '../migrations')
+  // 0185/0186 are HELD (parked out of the applied chain, ops/scripts/
+  // migration/held/README.md), applied explicitly below from heldDir.
+  const heldDir = path.join(__dirname, '..', '..', 'ops', 'scripts', 'migration', 'held')
   for (const file of fs.readdirSync(dir).filter(file=>file.endsWith('.sql')&&file<'0185_').sort()) sqlite.exec(fs.readFileSync(path.join(dir,file),'utf8'))
   const schema = sqlite.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT IN (SELECT name FROM pragma_table_list WHERE type='shadow') ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END,rowid").all()
   sqlite.close()
@@ -89,9 +92,9 @@ async function main() {
   try {
     const db = await mf.getD1Database('DB')
     for (let i=0;i<schema.length;i+=25) await db.batch(schema.slice(i,i+25).map(row=>db.prepare(row.sql)))
-    const migration = fs.readFileSync(path.join(dir,'0185_transfer_runs.sql'),'utf8')
+    const migration = fs.readFileSync(path.join(heldDir,'0185_transfer_runs.sql'),'utf8')
     await db.batch(split(migration).map(sql=>db.prepare(sql)))
-    await db.batch(split(fs.readFileSync(path.join(dir,'0186_transfer_run_retirement.sql'),'utf8')).map(sql=>db.prepare(sql)))
+    await db.batch(split(fs.readFileSync(path.join(heldDir,'0186_transfer_run_retirement.sql'),'utf8')).map(sql=>db.prepare(sql)))
     await db.prepare('CREATE TABLE native_stock(key TEXT PRIMARY KEY,quantity REAL,cost REAL)').run()
     async function fetchCase(mode,phase='first') {
       const response = await mf.dispatchFetch('http://native-transfer.test/',{method:'POST',body:JSON.stringify({mode,phase})})
