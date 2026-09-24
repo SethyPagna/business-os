@@ -267,7 +267,7 @@ async function main() {
     assert.match(handler, /await verifyContactMergeCluster\(db, config, keepId, recordIds, request\.clientRequestId\)/)
     assert.match(handler, /contact_merge_not_duplicates/)
     assert.doesNotMatch(route, /request\.manual|body\.manual/, 'no request field can skip the cluster check')
-    assert.match(route, /findDuplicateContactClusters\(db, config\.table, config\.optionMode\)\n  const cluster = contactMergeCluster\(clusters, recordIds\)/)
+    assert.match(route, /findDuplicateContactClusters\(db, config\.table, config\.optionMode\)\r?\n  const cluster = contactMergeCluster\(clusters, recordIds\)/)
     assert.match(handler, /await db\.batch\(plan\.statements\)/)
     assert.match(handler, /contact_merge_status_unknown/)
     assert.doesNotMatch(handler, /await audit\(/)
