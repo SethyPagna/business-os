@@ -407,8 +407,8 @@ function CatalogEditorSurfaceContent() {
         </div>
       </div>
       <SectionShell
-        title={copy('studioTitle', 'Portal Editor')}
-        subtitle={copy('studioHint', 'Edit the customer-facing portal here. The public page remains read-only.')}
+        title={copy('studioTitle', 'Website Editor')}
+        subtitle={copy('studioHint', 'Edit the customer-facing website here. The public page remains read-only.')}
       >
         <div className="space-y-5 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.border-slate-300]:border-slate-700 dark:[&_.bg-white]:bg-slate-950/80 dark:[&_.bg-slate-50]:bg-slate-900/60 dark:[&_.bg-slate-100]:bg-slate-800 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500 dark:[&_.input]:border-slate-700 dark:[&_.input]:bg-slate-950 dark:[&_.input]:text-slate-100 dark:[&_.input]:placeholder:text-slate-500 dark:[&_video]:bg-slate-950">
           <div id="portal-section-display" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'display' ? '' : 'hidden'}`}>
@@ -564,7 +564,7 @@ function CatalogEditorSurfaceContent() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-1.5">
                     <div className="text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</div>
-                    <InfoHint label={copy('recommendedProducts', 'Recommended products')} text={copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the public portal.')} />
+                    <InfoHint label={copy('recommendedProducts', 'Recommended products')} text={copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the website.')} />
                   </div>
                   <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
                 </div>
@@ -812,7 +812,7 @@ function CatalogEditorSurfaceContent() {
                             chooseLabel={copy('openFiles', 'Files')}
                             clearLabel={copy('clearImage', 'Clear')}
                             previewLabel={copy('openGallery', 'Open image gallery')}
-                            hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+                            hint={copy('portalImageUploadHint', 'Upload stores a short file path, so website settings stay clean.')}
                             cancelLabel={copy('cancelUpload', 'Cancel upload')}
                             uploadingLabel={copy('uploading', 'Uploading...')}
                             uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
@@ -837,7 +837,7 @@ function CatalogEditorSurfaceContent() {
           </div>
 
           <div id="portal-section-about" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'about' ? '' : 'hidden'}`}>
-            <div className="mb-2 text-sm font-semibold text-slate-900">{copy('portalTheme', 'Portal theme')}</div>
+            <div className="mb-2 text-sm font-semibold text-slate-900">{copy('portalTheme', 'Website theme')}</div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label htmlFor="portal-hero-gradient-start" className="block text-sm font-medium text-slate-700">{copy('heroGradientStart', 'Header color 1')}</label>
@@ -1199,8 +1199,8 @@ function CatalogEditorSurfaceContent() {
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <label htmlFor="portal-public-url" className="text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public customer URL')}</label>
-                  <InfoHint label={copy('publicUrlLabel', 'Public customer URL')} text={copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the customer portal outside the admin link.')} />
+                  <label htmlFor="portal-public-url" className="text-sm font-medium text-slate-700">{copy('publicUrlLabel', 'Public website URL')}</label>
+                  <InfoHint label={copy('publicUrlLabel', 'Public website URL')} text={copy('publicUrlHint', 'Use a different public domain or Funnel URL here when you publish the website outside the admin link.')} />
                 </div>
                 <input
                   id="portal-public-url"
@@ -1221,7 +1221,7 @@ function CatalogEditorSurfaceContent() {
             <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel
                 title={copy('translationOverrides', 'Dynamic content translations')}
-                hint={copy('translationOverridesHint', 'Optional JSON for About, FAQ, assistant, submission, social labels, and product description translations. Business name, short tagline, and portal intro stay original.')}
+                hint={copy('translationOverridesHint', 'Optional JSON for About, FAQ, assistant, submission, social labels, and product description translations. Business name, short tagline, and website intro stay original.')}
               />
               <textarea
                 id="portal-translations-json"
@@ -1361,17 +1361,17 @@ function CatalogEditorSurfaceContent() {
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="portal-intro" className="block text-sm font-medium text-slate-700">{copy('portalIntro', 'Portal intro')}</label>
+                  <label htmlFor="portal-intro" className="block text-sm font-medium text-slate-700">{copy('portalIntro', 'Website intro')}</label>
                   <textarea id="portal-intro" name="customer_portal_intro" autoComplete="off" className="input resize-none" rows={3} value={editorDraft.customer_portal_intro || ''} onChange={(event) => setDraft('customer_portal_intro', event.target.value)} />
                 </div>
                 <div>
-                  <label htmlFor="portal-language" className="block text-sm font-medium text-slate-700">{copy('language', 'Portal language')}</label>
+                  <label htmlFor="portal-language" className="block text-sm font-medium text-slate-700">{copy('websiteLanguage', 'Website language')}</label>
                   <AppSelect
                     id="portal-language"
                     name="customer_portal_language"
                     value={editorDraft.customer_portal_language || 'auto'}
                     onChange={(nextValue) => setDraft('customer_portal_language', nextValue)}
-                    ariaLabel={copy('language', 'Portal language')}
+                    ariaLabel={copy('websiteLanguage', 'Website language')}
                     className="mt-1 w-full"
                     buttonClassName="h-10 w-full"
                     menuClassName="min-w-[12rem]"
@@ -1504,7 +1504,7 @@ function CatalogEditorSurfaceContent() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-slate-900">{copy('mapEmbed', 'Google map embed URL')}<InfoHint label={copy('mapEmbed', 'Google map embed URL')} text={copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The portal will render it as an interactive map card.')} /></div>
+                <div className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-slate-900">{copy('mapEmbed', 'Google map embed URL')}<InfoHint label={copy('mapEmbed', 'Google map embed URL')} text={copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.')} /></div>
                 <label htmlFor="portal-google-map-embed" className="sr-only">{copy('mapEmbed', 'Google map embed URL')}</label>
                 <textarea
                   id="portal-google-map-embed"
@@ -1544,7 +1544,7 @@ function CatalogEditorSurfaceContent() {
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
               previewLabel={copy('openGallery', 'Open image gallery')}
-              hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+              hint={copy('portalImageUploadHint', 'Upload stores a short file path, so website settings stay clean.')}
               cancelLabel={copy('cancelUpload', 'Cancel upload')}
               uploadingLabel={copy('uploading', 'Uploading...')}
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
@@ -1694,7 +1694,7 @@ function CatalogEditorSurfaceContent() {
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
               previewLabel={copy('openGallery', 'Open image gallery')}
-              hint={copy('portalImageUploadHint', 'Upload stores a short file path, so portal settings stay clean.')}
+              hint={copy('portalImageUploadHint', 'Upload stores a short file path, so website settings stay clean.')}
               cancelLabel={copy('cancelUpload', 'Cancel upload')}
               uploadingLabel={copy('uploading', 'Uploading...')}
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
@@ -1742,7 +1742,7 @@ function CatalogEditorSurfaceContent() {
               <HintLabel
                 className="text-sm font-semibold text-slate-900"
                 title={copy('portalCatalogSettings', 'Catalog settings')}
-                hint={copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the customer portal only.')}
+                hint={copy('stockThresholdHint', 'Global thresholds override the product-level stock badges on the website only.')}
               />
               <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <div>
@@ -1758,7 +1758,7 @@ function CatalogEditorSurfaceContent() {
                     menuClassName="min-w-[16rem]"
                     options={[
                       { value: 'product', label: copy('stockThresholdModeProduct', 'Use each product threshold') },
-                      { value: 'global', label: copy('stockThresholdModeGlobal', 'Use portal-wide thresholds') },
+                      { value: 'global', label: copy('stockThresholdModeGlobal', 'Use website-wide thresholds') },
                     ]}
                   />
                 </div>
@@ -1777,7 +1777,7 @@ function CatalogEditorSurfaceContent() {
               <HintLabel
                 className="text-sm font-semibold text-sky-900"
                 title={copy('portalMembershipSettings', 'Membership settings')}
-                hint={copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so this portal page can stay focused on customer-facing content.')}
+                hint={copy('pointsPageHint', 'Point earning rules, redemption values, customer point notes, and reward-point defaults are managed in Loyalty Points so the Website Editor can stay focused on customer-facing content.')}
               />
                 <button type="button" className="btn-secondary mt-2 text-sm" onClick={() => navigateTo('loyalty_points')}>
                   {copy('openPointsPage', 'Open Loyalty Points', 'បើកទំព័រពិន្ទុស្មោះត្រង់')}

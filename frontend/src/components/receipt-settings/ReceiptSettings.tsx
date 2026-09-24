@@ -177,7 +177,7 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
 
       {tpl.show_qr_codes && (
         <>
-          <Section title={t('receipt_qr_portal_title') || 'Online Shop / Portal Link'}>
+          <Section title={t('receipt_qr_portal_title') || 'Online Shop / Website Link'}>
             <Toggle
               label={t('show_qr_portal') || 'Show shop link QR code'}
               desc={t('rfd_show_qr_portal') || 'Lets customers scan to open your public catalog'}
@@ -187,7 +187,7 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
             {tpl.qr_show_portal !== false && (
               <div className="mt-3 space-y-3">
                 <div>
-                  <label htmlFor="qr-portal-url" className="mb-1 block text-xs text-gray-500">{t('qr_portal_url_label') || 'Public portal URL'}</label>
+                  <label htmlFor="qr-portal-url" className="mb-1 block text-xs text-gray-500">{t('qr_portal_url_label') || 'Public website URL'}</label>
                   <input
                     id="qr-portal-url"
                     name="qr_portal_url"
@@ -213,7 +213,7 @@ function ReceiptQrSettingsTab({ tpl, setT, t }: ReceiptQrSettingsTabProps) {
                 {showAdminWarning && (
                   <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
                     <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                    <span>{t('qr_admin_url_warning') || 'This looks like a link to your admin dashboard, not your public customer portal. Printing this on a receipt could let a customer open (or attempt to log into) your store management pages. Use your public catalog/portal link instead.'}</span>
+                    <span>{t('qr_admin_url_warning') || 'This looks like a link to your admin dashboard, not your public website. Printing this on a receipt could let a customer open (or attempt to log into) your store management pages. Use your public website link instead.'}</span>
                   </div>
                 )}
                 <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-400">

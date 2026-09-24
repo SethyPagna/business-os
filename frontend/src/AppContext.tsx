@@ -295,7 +295,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   cost_in_purchase: 'Cost price',
   current_stock: 'Current Stock',
   custom: 'Custom',
-  customer_portal: 'Customer Portal',
+  customer_portal: 'Website Editor',
   dashboard: 'Dashboard',
   delete: 'Delete',
   details: 'Details',

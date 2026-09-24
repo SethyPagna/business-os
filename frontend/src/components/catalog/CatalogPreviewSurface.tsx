@@ -403,7 +403,7 @@ export default function CatalogPreviewSurface({
                     })}
                     {!publicView ? (
                       <div className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                        {copy('previewBadge', 'Portal Studio')}
+                        {copy('previewBadge', 'Website Editor')}
                       </div>
                     ) : null}
                   </div>

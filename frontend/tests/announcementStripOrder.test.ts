@@ -1,0 +1,110 @@
+// The Announcement Strip shows the order the server stored, not only the
+// order the editor guessed (WEB-2, owner 24 Sep 2026).
+//
+// Before: a drop moved the cards locally, sent the new order, and threw the
+// server's answer away. The reorder PUT answers with every card in its stored
+// order, so a card another device had added or moved meanwhile never showed
+// where it really was, and a second drop could race the first.
+//
+// Pinned here:
+//   1. the Worker premise -- PUT /api/promotions/reorder/all answers with the
+//      rows in stored order (sort_order, then id), typed as Promotion[];
+//   2. the one path that saves an order puts that answer on screen, reloads
+//      on a failure or an unusable answer, and takes one move at a time --
+//      a drop, and the Up/Down buttons that move a card by touch or
+//      keyboard (dragging needs a mouse), all go through it;
+//   3. moveCard, run for real: the dragged card takes the target's slot, in
+//      both directions and to either end, and Up/Down swap neighbours;
+//   4. every write that sends a card sends its place too, and endOfStrip,
+//      run for real, puts a new card after every stored card.
+//
+// Run: node tests/announcementStripOrder.test.ts
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { transformSync } from 'esbuild'
+
+const read = (rel: string) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
+const source = read('../src/components/catalog/ManagePromotionsModal.tsx')
+const transport = read('../src/api/promotionsTransport.ts')
+const worker = read('../../cloudflare/src/routes/promotions.ts')
+
+// The text of one `const name = ...` declaration inside the component, up to
+// the next declaration at the same two-space indent.
+function declaration(name: string): string {
+  const start = source.indexOf(`\n  const ${name} = `)
+  assert.ok(start >= 0, `ManagePromotionsModal declares ${name}`)
+  const rest = source.slice(start + 1)
+  const end = rest.slice(1).search(/\n {2}const [A-Za-z]+ = /)
+  return end > 0 ? rest.slice(0, end + 1) : rest
+}
+
+// 1. The premise the editor relies on.
+const reorderRoute = worker.slice(worker.indexOf("app.put('/reorder/all'"))
+assert.ok(reorderRoute.length > 0, 'the Worker still has the strip reorder route')
+const reorderBody = reorderRoute.slice(0, reorderRoute.indexOf('\n})'))
+assert.match(reorderBody, /SELECT \* FROM promotions ORDER BY sort_order ASC, id ASC/, 'the reorder route reads every card back in stored order')
+assert.match(reorderBody, /return c\.json\(rows\)/, 'the reorder route answers with those rows')
+assert.match(transport, /export function reorderPromotions\(order: Array<number \| string>\): Promise<Promotion\[\]>/, 'the transport types the answer as the card list')
+
+// 2. One path saves an order, and it shows the server's answer.
+const saveOrder = declaration('saveOrder')
+assert.equal((source.match(/\breorderPromotions\(/g) || []).length, 1, 'reorderPromotions is called from exactly one place')
+assert.match(saveOrder, /const rows = await reorderPromotions\(next\.map\(\(p\) => p\.id\)\)/, 'saveOrder sends the new order and keeps the answer')
+assert.match(saveOrder, /if \(Array\.isArray\(rows\)\) setPromotions\(rows\)\s*\n\s*else await loadPromotions\(\)/, 'the list becomes the stored order; an unusable answer reloads it')
+assert.match(saveOrder, /catch \(error\) \{[\s\S]*?copy\('saveOrderFailed'[\s\S]*?await loadPromotions\(\)/, 'a failed save says so and reloads the stored order')
+assert.match(saveOrder, /if \(orderSaving\) return/, 'a move waits until the previous one is confirmed')
+assert.match(saveOrder, /setOrderSaving\(true\)[\s\S]*finally \{\s*\n\s*if \(aliveRef\.current\) setOrderSaving\(false\)/, 'the saving flag always clears')
+assert.match(source, /draggable=\{!orderSaving\}/, 'cards cannot be dragged while an order is being saved')
+assert.match(source, /aria-busy=\{orderSaving\}/, 'the list reports that it is saving')
+
+const handleDrop = declaration('handleDrop')
+assert.match(handleDrop, /void saveOrder\(moveCard\(promotions, fromIndex, toIndex\)\)/, 'a drop goes through saveOrder')
+assert.doesNotMatch(handleDrop, /setPromotions\(/, 'a drop never sets the list on its own')
+
+// Up/Down: a finger or a keyboard moves a card one place, same path.
+assert.match(source, /\{promotions\.map\(\(promo, index\) => \(/, 'each card knows its place in the list on screen')
+assert.match(source, /onClick=\{\(\) => void saveOrder\(moveCard\(promotions, index, index - 1\)\)\}\s*\n\s*disabled=\{index === 0\}/, 'Up moves a card one place towards the front; the first card has no Up')
+assert.match(source, /onClick=\{\(\) => void saveOrder\(moveCard\(promotions, index, index \+ 1\)\)\}\s*\n\s*disabled=\{index === promotions\.length - 1\}/, 'Down moves a card one place towards the end; the last card has no Down')
+assert.equal((source.match(/\bsaveOrder\(/g) || []).length, 3, 'every move -- a drop, Up, Down -- goes through saveOrder')
+
+// A plain module-level function of the component, compiled from its source
+// and returned so it can be run on real data.
+function moduleFunction<T>(name: string): T {
+  const start = source.indexOf(`\nfunction ${name}(`)
+  assert.ok(start >= 0, `${name} is a plain module function`)
+  const text = source.slice(start + 1, source.indexOf('\n}\n', start) + 2)
+  const compiled = transformSync(`${text}\nmodule.exports = ${name}`, { loader: 'ts', format: 'cjs' }).code
+  const mod = { exports: {} as unknown }
+  new Function('module', compiled)(mod)
+  return mod.exports as T
+}
+
+// 3. moveCard, run for real.
+const moveCard = moduleFunction<<T>(list: T[], from: number, to: number) => T[]>('moveCard')
+const ids = (list: Array<{ id: number }>) => list.map((p) => p.id).join(',')
+const cards = [1, 2, 3, 4].map((id) => ({ id }))
+assert.equal(ids(moveCard(cards, 0, 2)), '2,3,1,4', 'dragged down, the card takes the target slot')
+assert.equal(ids(moveCard(cards, 3, 1)), '1,4,2,3', 'dragged up, the card takes the target slot')
+assert.equal(ids(moveCard(cards, 0, 3)), '2,3,4,1', 'a card can reach the end')
+assert.equal(ids(moveCard(cards, 3, 0)), '4,1,2,3', 'a card can reach the front')
+assert.equal(ids(moveCard(cards, 1, 0)), '2,1,3,4', 'Up swaps a card with the one before it')
+assert.equal(ids(moveCard(cards, 1, 2)), '1,3,2,4', 'Down swaps a card with the one after it')
+assert.equal(ids(cards), '1,2,3,4', 'moveCard never mutates the list on screen')
+
+// 4. Every write that sends a card also sends its place. The Worker stores
+//    a missing sort_order as 0 on create and update alike, so an edit used
+//    to move the card to the front and a new card landed among the first.
+const handleSave = declaration('handleSave')
+assert.match(handleSave, /await createPromotion\(\{ \.\.\.payload, sort_order: endOfStrip\(promotions\) \}\)/, 'a new card is created at the end of the strip')
+assert.match(handleSave, /const place = promotions\.find\(\(p\) => p\.id === editingId\)\?\.sort_order \?\? 0\s*\n\s*await updatePromotion\(editingId, \{ \.\.\.payload, sort_order: place \}\)/, 'an edit sends the card its own place back')
+assert.match(declaration('handleToggleActive'), /updatePromotion\(promo\.id, \{ \.\.\.promo, /, 'Active/Hidden sends the whole stored card, place included')
+assert.equal((source.match(/\b(?:createPromotion|updatePromotion)\(/g) || []).length, 3, 'no other write path sends a card without its place')
+
+const endOfStrip = moduleFunction<(list: Array<{ sort_order: unknown }>) => number>('endOfStrip')
+const places = (...orders: unknown[]) => orders.map((sort_order) => ({ sort_order }))
+assert.equal(endOfStrip([]), 0, 'the first card starts the strip')
+assert.ok(endOfStrip(places(0, 0, 0)) > 0, 'a never-reordered strip (every place 0) still puts the new card last')
+assert.ok(endOfStrip(places(0, 1, 2)) > 2, 'after a reorder the new card follows the last place')
+assert.ok(endOfStrip(places(5, 2, null)) > 5, 'gaps and missing places still land after the highest')
+
+console.log('PASS announcementStripOrder: the strip shows the stored order after every move, and every write keeps it')
