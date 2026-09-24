@@ -794,6 +794,9 @@ const PORTAL_POSTS_KEYS = new Set([
   'customer_portal_promotions_intro',
   'customer_portal_show_promotions',
 ])
+// The row holding the Website Editor posts (lib/portalPosts.ts
+// PORTAL_POSTS_SETTING_KEY), which POST / ignores -- see there.
+const WEBSITE_POSTS_KEY = 'customer_portal_promo_items'
 const PORTAL_FAQ_KEYS = new Set([
   'customer_portal_faq_items',
   'customer_portal_faq_title',
@@ -1048,15 +1051,28 @@ app.post('/', async (c) => {
     }
   }
 
+  // Website Editor posts change only through their own endpoints
+  // (routes/portal.ts, /api/portal/posts), one post at a time against its
+  // version. An editor bundle cached before those existed still sends the
+  // whole post list with every editor save: rejecting it would fail the rest
+  // of that save, and writing it would overwrite every post made since. So
+  // the key is ignored -- not written, audited or announced -- and named back
+  // in `ignoredKeys`. It still counts above, in the permission check and in
+  // the version check, which must cover exactly the keys the client scoped
+  // its expectedUpdatedAt to.
+  const ignoredKeys = attemptedKeys.filter((key) => key === WEBSITE_POSTS_KEY)
+  const writeKeys = attemptedKeys.filter((key) => key !== WEBSITE_POSTS_KEY)
+  if (writeKeys.length === 0) return c.json({ updatedAt: await getSettingsUpdatedAt(c.env), keys: [], ignoredKeys })
+
   // The audit row used to say only WHICH keys were saved. Read the stored
   // values once before the batch so the row can say what each key changed
   // from and to; secret-bearing keys (settings' own isSensitiveSettingKey,
   // widened by the audit module's secret-shaped-key test) record that they
   // changed without recording either value.
-  const settingsBefore = await getSettingsValues(c.env, attemptedKeys)
+  const settingsBefore = await getSettingsValues(c.env, writeKeys)
   const settingsAfter: Record<string, unknown> = {}
   const db = getDb(c.env)
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = attemptedKeys.map((key) => {
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = writeKeys.map((key) => {
     const raw = body[key]
     const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw)
       : key === 'receipt_print_settings' ? sanitizeReceiptPrintSettingsValue(raw)
@@ -1095,9 +1111,9 @@ app.post('/', async (c) => {
   }
 
   const updatedAt = await getSettingsUpdatedAt(c.env)
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys },
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: writeKeys },
     changedFields(settingsBefore, settingsAfter, {
-      keys: attemptedKeys,
+      keys: writeKeys,
       redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),
     }))
   // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
@@ -1107,8 +1123,8 @@ app.post('/', async (c) => {
   // died (~60s). Settings writes now carry their own version; the portal
   // cache key composes it (see portalCacheVersion).
   c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
-  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: attemptedKeys }))
-  return c.json({ updatedAt, keys: attemptedKeys })
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: writeKeys }))
+  return c.json({ updatedAt, keys: writeKeys, ...(ignoredKeys.length ? { ignoredKeys } : {}) })
 })
 
 export default app
