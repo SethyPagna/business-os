@@ -18,6 +18,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const ts = require('typescript')
 
 const routeSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8')
 const snapshotSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'productMergeSnapshot.ts'), 'utf8')
@@ -191,14 +192,72 @@ check('both merge endpoints route through the ONE shared fold helper -- they can
   assert.ok(routeSrc.indexOf('foldDuplicateProductInto(', pairRouteAt) > pairRouteAt, 'POST /possible-duplicates/merge must fold via the shared helper')
 })
 
-check('the review merge refuses inactive or group rows and recomputes the keeper stock cache', () => {
-  const pairRouteAt = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
-  // Wide enough to reach past the two N15 refusals (an un-averageable cost
-  // pair, a still-reversible stock session) that now run before the fold.
-  const pairBlock = routeSrc.slice(pairRouteAt, pairRouteAt + 8000)
-  assert.ok(/Both products must be active/.test(pairBlock), 'merging an already-merged row must 409, not double-fold')
-  assert.ok(/is_group \|\| dup\.is_group/.test(pairBlock), 'group rows must be refused')
+function reviewMergeGuards(source) {
+  const file = ts.createSourceFile('products.ts', source, ts.ScriptTarget.Latest, true)
+  const route = file.statements.find((statement) => ts.isExpressionStatement(statement)
+    && ts.isCallExpression(statement.expression)
+    && statement.expression.expression.getText(file) === 'app.post'
+    && ts.isStringLiteral(statement.expression.arguments[0])
+    && statement.expression.arguments[0].text === '/possible-duplicates/merge')
+  assert.ok(route, 'the review merge route must exist')
+  const body = route.expression.arguments[1].body
+  assert.ok(ts.isBlock(body), 'the review merge handler must have a block body')
+  // Locate the actual top-level guards, without an arbitrary character limit
+  // or a match satisfied by a different route/comment. N1's exact receipt
+  // replay legitimately answers200 before the inactive-row guard; a new
+  // unrelated request must still refuse instead of folding an inactive row.
+  const guardFor = (field) => body.statements.find((statement) => ts.isIfStatement(statement)
+    && statement.expression.getText(file).includes(`keeper.${field}`)
+    && statement.expression.getText(file).includes(`dup.${field}`))
+  const inactive = guardFor('is_active')
+  const group = guardFor('is_group')
+  assert.ok(inactive, 'the ordinary inactive-product guard must exist')
+  assert.ok(group, 'the group-product guard must exist')
+  let fold
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(file) === 'foldDuplicateProductInto') fold = node
+    ts.forEachChild(node, visit)
+  }
+  visit(body)
+  assert.ok(fold, 'the review route must reach the shared fold')
+  assert.ok(inactive.end < fold.pos && group.end < fold.pos, 'both guards must run before the shared fold')
+  const replay = body.statements.find((statement) => ts.isIfStatement(statement) && statement.expression.getText(file) === 'resolveReplay')
+  assert.ok(replay && replay.end < inactive.getStart(file), 'exact operation replay must precede the ordinary inactive guard')
+  assert.match(replay.getText(file), /replayed: true/, 'the exact replay branch must answer from the completed merge')
+  const run = (guard, keeper, dup) => new Function('keeper', 'dup', 'c', `${guard.getText(file)}; return null`)(
+    keeper, dup, { json: (body, status = 200) => ({ body, status }) },
+  )
+  for (const [keeperActive, duplicateActive] of [[1, 1], [0, 1], [1, 0], [0, 0]]) {
+    const result = run(inactive, { is_active: keeperActive }, { is_active: duplicateActive })
+    if (keeperActive && duplicateActive) assert.equal(result, null, 'active products must reach further validation')
+    else {
+      assert.equal(result?.status, 409, 'either inactive product must refuse an ordinary merge')
+      assert.equal(result.body.code, 'product_merge_inactive')
+    }
+  }
+  for (const [keeperGroup, duplicateGroup] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const result = run(group, { is_group: keeperGroup }, { is_group: duplicateGroup })
+    if (!keeperGroup && !duplicateGroup) assert.equal(result, null, 'ordinary products must reach further validation')
+    else assert.equal(result?.status, 400, 'either group product must refuse a merge')
+  }
+  return { file, inactive, group }
+}
+
+check('the review merge refuses inactive or group rows after exact replay and recomputes the keeper stock cache', () => {
+  reviewMergeGuards(routeSrc)
   assert.ok(/stock_quantity=\(SELECT COALESCE\(SUM\(quantity\),0\) FROM branch_stock/.test(mergeBlock), 'the shared fold must recompute the keeper\'s denormalized stock cache')
+})
+
+check('NEGATIVE CONTROLS: missing or weakened inactive/group guards cannot satisfy the review checks', () => {
+  const { file, inactive, group } = reviewMergeGuards(routeSrc)
+  const withoutInactive = routeSrc.slice(0, inactive.getStart(file)) + routeSrc.slice(inactive.end)
+  assert.throws(() => reviewMergeGuards(withoutInactive), /ordinary inactive-product guard must exist/)
+  for (const guard of [inactive, group]) {
+    const expression = guard.expression.getText(file)
+    assert.ok(expression.includes('||'), 'negative control must change the actual either-product condition')
+    const weakened = routeSrc.slice(0, guard.expression.getStart(file)) + expression.replace('||', '&&') + routeSrc.slice(guard.expression.end)
+    assert.throws(() => reviewMergeGuards(weakened), /either (inactive|group) product must refuse/)
+  }
 })
 
 console.log(`\n${passed} check(s) passed.`)
