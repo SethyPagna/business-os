@@ -5921,6 +5921,7 @@
   "rpt_payments": "វិធីទូទាត់",
   "rpt_pending_credit": "ប្រាក់ជំពាក់",
   "rpt_phone": "ទូរស័ព្ទ",
+  "rpt_business_date": "កាលបរិច្ឆេទអាជីវកម្ម",
   "rpt_export_preparing": "កំពុងរៀបចំរបាយការណ៍ពេញលេញ…",
   "rpt_export_preview": "មើលរបាយការណ៍មុននាំចេញ",
   "rpt_export_unavailable": "ការនាំចេញនេះលែងមានសុពលភាព។ សូមរៀបចំម្ដងទៀត។",

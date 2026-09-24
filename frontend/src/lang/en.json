@@ -5921,6 +5921,7 @@
   "rpt_payments": "Payment methods",
   "rpt_pending_credit": "Not Paid",
   "rpt_phone": "Phone",
+  "rpt_business_date": "Business date",
   "rpt_export_preparing": "Preparing the complete report…",
   "rpt_export_preview": "Export preview",
   "rpt_export_unavailable": "This export is no longer available. Prepare it again.",

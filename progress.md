@@ -34,7 +34,10 @@ and permission-refusal handling. EN/KM messages were completed in `d52c15de`.
 The integrated source passes seven frontend files, six Worker files, both
 typechecks and i18n. Retry state is component-local; navigation does not preserve
 the retry handle. Absolute quantities and required revisions still reject stale
-competing corrections. Mounted browser checks remain in progress.
+competing corrections. Mounted local browser checks pass all eight combinations
+of desktop/mobile viewport, EN/KM and known-zero/hidden costs, including pending
+locks, identical retries and first permission refusals. These use mocked APIs;
+physical-device and production behavior are not certified by that check.
 
 Report Center's explicit export-intent prerequisite is integrated as `9d93ada5`
 after independent review: 308 real route requests cover view/export authority,
