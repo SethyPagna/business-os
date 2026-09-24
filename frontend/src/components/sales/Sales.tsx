@@ -633,6 +633,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
+  // The Worker answers 409 money_precision_invalid_rate when a sale has no
+  // usable exchange rate of its own (owner rule, 24 Sep 2026: a sale keeps its
+  // own rate and is never handed today's). Settle, add items and amend all say
+  // so in the shop's language instead of the raw code.
+  const saleInvalidRateMessage = (error: unknown): string | null =>
+    (error as { code?: unknown } | null)?.code === 'money_precision_invalid_rate'
+      ? translateOr('sale_invalid_own_rate', 'This sale has no exchange rate of its own, so it can\'t be settled or changed here. Contact an admin.', 'ការលក់នេះមិនមានអត្រាប្តូរប្រាក់ផ្ទាល់ខ្លួនទេ ដូច្នេះមិនអាចទូទាត់ ឬកែប្រែនៅទីនេះបានទេ។ សូមទាក់ទងអ្នកគ្រប់គ្រង។')
+      : null
   // The list, its unbounded stats aggregate, and the strip all read this ONE
   // range now — so the receipts shown, the footer count, and the strip cards
   // always describe the same window.
@@ -1261,7 +1269,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ? translateOr('write_outcome_unknown', 'The request did not finish. Its result may be unknown. Check the sale and Records before retrying.', 'សំណើមិនទាន់បញ្ចប់។ លទ្ធផលអាចមិនទាន់ប្រាកដ។ សូមពិនិត្យការលក់ និងកំណត់ត្រា មុនសាកល្បងម្ដងទៀត។')
           : code === 'customer_state_conflict'
             ? translateOr('customer_state_conflict', 'The selected customer changed before the sale was saved. Review the customer and try again.', 'អតិថិជនដែលបានជ្រើសបានផ្លាស់ប្តូរ មុនពេលរក្សាទុកការលក់។ សូមពិនិត្យអតិថិជន ហើយសាកល្បងម្ដងទៀត។')
-            : getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
+            : saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || translateOr('sale_settlement_failed', 'Unable to record this payment. Review the sale and try again.', 'មិនអាចកត់ត្រាការទូទាត់នេះបានទេ។ សូមពិនិត្យការលក់ ហើយសាកល្បងម្ដងទៀត។')))
         return { settlementError: detail }
       }
       if (directMutationOutcomeIsUnknown(error) && attemptedRequest) {
@@ -1433,7 +1441,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales()
         return false
       }
-      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${getErrorMessage(error, String(error || 'Unknown error'))}` }
+      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}` }
     }
   }
 
@@ -1500,7 +1508,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales()
         return false
       }
-      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${getErrorMessage(error, String(error || 'Unknown error'))}` }
+      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}` }
     }
   }
 

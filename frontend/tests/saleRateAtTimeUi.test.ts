@@ -158,6 +158,21 @@ await runTest('settling reads the sale\'s own rate for legacy and v1 alike, and 
   assert.match(modal, /const exchangeRate = saleOwnExchangeRate\(selectedSale\) \?\? CURRENCY\.DEFAULT_EXCHANGE_RATE/)
 })
 
+await runTest('a sale with no rate of its own is refused in the shop\'s language, not as the raw code, on settle, add items and amend', () => {
+  // The Worker's refusal, the code the UI maps.
+  const worker = fs.readFileSync(new URL('../../cloudflare/src/routes/sales.ts', import.meta.url), 'utf8')
+  assert.match(worker, /code: 'money_precision_invalid_rate' \}, 409\)/)
+  const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  assert.match(sales, /code === 'money_precision_invalid_rate'\s*\n\s*\? translateOr\('sale_invalid_own_rate'/)
+  // Settlement detail, add-items and amendment failures all route through it.
+  assert.equal(sales.match(/saleInvalidRateMessage\(error\) \?\? getErrorMessage\(/g)?.length, 3)
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
+  assert.match(en.sale_invalid_own_rate, /no exchange rate of its own/)
+  assert.match(km.sale_invalid_own_rate, /អត្រាប្តូរប្រាក់/)
+  assert.notEqual(km.sale_invalid_own_rate, en.sale_invalid_own_rate)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
