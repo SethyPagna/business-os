@@ -65,6 +65,14 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+// The card at `from` takes the slot at `to`; the cards between shift over.
+function moveCard(list: Promotion[], from: number, to: number): Promotion[] {
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}
+
 function toFormFields(promo: Promotion): EditableFields {
   return {
     title: promo.title || '',
@@ -120,6 +128,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
   const [uploadBusy, setUploadBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragOverId, setDragOverId] = useState<number | null>(null)
+  const [orderSaving, setOrderSaving] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Promotion | null>(null)
   const [deleting, setDeleting] = useState(false)
   const draggingIdRef = useRef<number | null>(null)
@@ -274,29 +283,39 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     }
   }
 
-  // Drag-and-drop reordering: optimistic local reorder, then persist. If the
-  // save fails, reload from the server rather than leaving the UI showing an
-  // order that didn't actually save.
-  const handleDrop = async (targetId: number) => {
+  // A move shows at once, then the list becomes the order the server
+  // confirmed: the reorder PUT answers with every card in its stored order,
+  // so a card another device added or moved meanwhile lands where it really
+  // is (same reconcile as the Notes list). Moves are one at a time -- the
+  // next waits for this answer -- so an older answer never lands on top of a
+  // newer move. A failed save reloads the stored order instead of leaving an
+  // order on screen that never saved.
+  const saveOrder = async (next: Promotion[]) => {
+    if (orderSaving) return
+    setPromotions(next)
+    setOrderSaving(true)
+    try {
+      const rows = await reorderPromotions(next.map((p) => p.id))
+      if (!aliveRef.current) return
+      if (Array.isArray(rows)) setPromotions(rows)
+      else await loadPromotions()
+    } catch (error) {
+      notify(getErrorMessage(error, copy('saveOrderFailed', 'Failed to save new order')), 'error')
+      await loadPromotions()
+    } finally {
+      if (aliveRef.current) setOrderSaving(false)
+    }
+  }
+
+  const handleDrop = (targetId: number) => {
     const draggingId = draggingIdRef.current
     setDragOverId(null)
     draggingIdRef.current = null
     if (draggingId == null || draggingId === targetId) return
-
-    const current = [...promotions]
-    const fromIndex = current.findIndex((p) => p.id === draggingId)
-    const toIndex = current.findIndex((p) => p.id === targetId)
+    const fromIndex = promotions.findIndex((p) => p.id === draggingId)
+    const toIndex = promotions.findIndex((p) => p.id === targetId)
     if (fromIndex === -1 || toIndex === -1) return
-    const [moved] = current.splice(fromIndex, 1)
-    current.splice(toIndex, 0, moved)
-    setPromotions(current)
-
-    try {
-      await reorderPromotions(current.map((p) => p.id))
-    } catch (error) {
-      notify(getErrorMessage(error, copy('saveOrderFailed', 'Failed to save new order')), 'error')
-      await loadPromotions()
-    }
+    void saveOrder(moveCard(promotions, fromIndex, toIndex))
   }
 
   const isEditing = editingId !== null
@@ -534,11 +553,12 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
             <div className="text-xs text-gray-400 dark:text-gray-500">{copy('clickNewPromotionHint', 'Click "New promotion" above to add your first banner.')}</div>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className={`flex flex-col gap-2 transition-opacity ${orderSaving ? 'opacity-70' : ''}`} aria-busy={orderSaving}>
+            {orderSaving ? <span role="status" className="sr-only">{copy('saving', 'Saving...')}</span> : null}
             {promotions.map((promo) => (
               <div
                 key={promo.id}
-                draggable
+                draggable={!orderSaving}
                 onDragStart={() => { draggingIdRef.current = promo.id }}
                 onDragOver={(e) => { e.preventDefault(); setDragOverId(promo.id) }}
                 onDragLeave={() => setDragOverId((id) => (id === promo.id ? null : id))}
