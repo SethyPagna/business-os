@@ -18,7 +18,7 @@ import {
   planUnreceiveBatchStock, restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
 import { multiplyMoney4 } from './moneyPrecision'
-import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
+import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { isDamagedLotReference } from './stockCondition'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
@@ -186,6 +186,21 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     : null
   if (setReference.startsWith('stock-set:') || String(setParent?.reference_id ?? '').startsWith('stock-set:')) {
     return { ok: false, status: 409, error: 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.' }
+  }
+  // N6: a stock-in line edit (lib/stockInLineEdit.ts) is replayed only through
+  // its own history generation, and a line that was edited is no longer just
+  // its root receipt row: reverting the root would take back the ORIGINAL
+  // quantity from the ORIGINAL lot. Both are refused; the line is changed (or
+  // set to 0) through its Edit, and an edit is reversed with Undo.
+  if (isStockInEditReference(setReference) || isStockInEditReference(setParent?.reference_id)) {
+    return { ok: false, status: 409, error: 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.' }
+  }
+  if (RECEIPT_TYPES.has(m.movement_type)) {
+    const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
+      .get<{ id: number }>(stockInEditRange(Number(m.id)))
+    if (edited) {
+      return { ok: false, status: 409, error: 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.' }
+    }
   }
   const plan = planMovementRevert(m)
   if (!plan.revertible) {

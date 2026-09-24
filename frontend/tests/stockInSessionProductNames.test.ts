@@ -67,8 +67,9 @@ runTest('the receipt shows the full product name, wrapped, with the barcode unde
   assert.ok(colgroup, 'receipt column sizing located')
   const granted = renderColumns(colgroup, true)
   const denied = renderColumns(colgroup, false)
-  assert.equal(granted, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-[7rem]"/><col class="w-10"/></colgroup>')
-  assert.equal(denied, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-10"/></colgroup>', 'no-view omits only the cost column; product remains flexible')
+  // N6: the last column holds two icon actions (Edit line, Remove), hence w-16.
+  assert.equal(granted, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-[7rem]"/><col class="w-16"/></colgroup>')
+  assert.equal(denied, '<colgroup><col/><col class="w-[7rem]"/><col class="w-[22%]"/><col class="w-[6rem]"/><col class="w-16"/></colgroup>', 'no-view omits only the cost column; product remains flexible')
   assert.match(receipt, /\{canViewCosts \? <th[^>]*>\{tr\('cost_price', 'Cost price'\)\}<\/th> : null\}/)
   assert.match(receipt, /\{canViewCosts \? <td[^>]*>\{unitCost == null[^]*?<\/td> : null\}/)
 })

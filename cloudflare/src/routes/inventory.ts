@@ -2679,6 +2679,20 @@ app.post('/movements/:id/revert', async (c) => {
   return c.json({ success: true, revertType: result.revertType, quantity: result.quantity, productId, movementId: id })
 })
 
+// N6: edit a saved stock-in line (quantity, unit cost, supplier, received
+// date) in one guarded, idempotent, undoable batch. The permission checks
+// (Full inventory adjust; cost-entry for a cost) live in the writer so the
+// history replay enforces the same ones.
+app.post('/stock-in-lines/:movementId/edit', async (c) => {
+  const movementId = Number.parseInt(String(c.req.param('movementId') || ''), 10)
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
+  const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
+  const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body)
+  if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
+  return c.json(result.body, result.status as 200)
+})
+
 app.patch('/movements/:id/reason', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {

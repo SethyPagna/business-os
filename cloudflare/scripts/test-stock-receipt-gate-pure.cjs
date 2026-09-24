@@ -152,7 +152,17 @@ const LOT_WRITER_CLASSIFICATION = {
   // A transfer clones immutable lot identity onto the destination product. It
   // does not receive goods, attribute a supplier, or establish a new cost.
   'src/lib/transferOperation.ts': 'not-a-receipt: preserves transferred lot provenance',
+  // N6 stock-in line edit. Its INSERT is the lot a saved (already gated) line
+  // MOVES into when its received date changes; it carries that line's own
+  // supplier and cost. Changing either runs stockReceiptGateCode on the
+  // changed field (asserted just below), so an edit cannot clear a supplier
+  // or declare an undeclared $0.00 receipt.
+  'src/lib/stockInLineEdit.ts': 'gated: moves an already-gated line; changed supplier/cost re-run the kernel',
 }
+assert.match(read(path.join('src', 'lib', 'stockInLineEdit.ts')), /if \(supplierChanged && q1 > 0\) \{\s*const gate = stockReceiptGateCode\(/,
+  'the stock-in line edit re-runs the receipt gate when it changes a supplier')
+assert.match(read(path.join('src', 'lib', 'stockInLineEdit.ts')), /if \(costChanged && q1 > 0\) \{\s*const gate = stockReceiptGateCode\(/,
+  'the stock-in line edit re-runs the receipt gate when it changes a cost')
 assert.deepEqual(lotWriters, Object.keys(LOT_WRITER_CLASSIFICATION).sort(),
   'a file that INSERTs a product_batches row appeared or vanished -- classify it in LOT_WRITER_CLASSIFICATION (gated, or declared not-a-receipt with the reason) before this census can be believed again')
 

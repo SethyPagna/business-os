@@ -46,6 +46,7 @@ export const AUDIT_ACTION_LABELS: Record<string, [string, string]> = {
   stock_remove: ['stock_out', 'Stock Remove'],
   stock_adjust: ['adjust_stock', 'Adjust'],
   stock_set: ['adjust_stock', 'Set stock'],
+  stock_in_line_edit: ['stock_in_line_edit_action', 'Stock-in line edit'],
   bulk_import: ['bulk_import', 'Bulk Import'],
   image_import: ['image_import', 'Image Import'],
   upload: ['upload_file', 'Upload'],

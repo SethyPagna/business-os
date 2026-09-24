@@ -262,6 +262,18 @@ export function revertStockMovement(id: number): Promise<unknown> {
   )
 }
 
+// N6: edit a saved stock-in line (lib/stockInLineEdit.ts). The body carries
+// its own client_request_id, so a retried POST is answered from the stored
+// operation instead of moving stock twice.
+export function editStockInLine(movementId: number, body: Record<string, unknown>): Promise<unknown> {
+  return route(
+    'inventory:stock-in-line:edit',
+    () => apiFetch('POST', `/api/inventory/stock-in-lines/${movementId}/edit`, { ...getDevicePayload(), ...body }),
+    null,
+    true,
+  )
+}
+
 export function editStockMovementReason(id: number, reason: string): Promise<unknown> {
   return route(
     'inventory:movement:reason',

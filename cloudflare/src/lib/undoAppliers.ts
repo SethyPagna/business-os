@@ -2191,6 +2191,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
+  // N6 stock-in line edit (lib/stockInLineEdit.ts): same exact-snapshot
+  // replay contract as the scoped Set above; a cost edit also needs the
+  // cost-entry permission, checked inside the replay.
+  'stock.session_line_edit': {
+    permission: 'inventory', action: 'adjust',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock-in line edit history context is required.')
+      const { replayStockInLineEdit } = await import('./stockInLineEdit')
+      await replayStockInLineEdit(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   'stock.transfer': {
     permission: 'branches', action: 'transfer',
     run: async (payload, ctx) => {
