@@ -810,7 +810,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }
   }, [])
 
-  const clearLocalBusinessState = useCallback(async (options: {
+  type LocalBusinessStateResetOptions = {
     clearAuth?: boolean
     preserveOrganization?: boolean
     preserveRuntimeMeta?: boolean
@@ -818,9 +818,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     preserveSyncServer?: boolean
     preserveOfflineWork?: boolean
     preserveUiDrafts?: boolean
-  } = {}) => {
-    if (isActorSessionQuarantined()) return
-    resetActorReadSession()
+  }
+  // Storage/cache reset without the quarantine guard or a new read-session
+  // marker. Only the confirmed sign-out path calls it directly, under the
+  // cookie-admission lock (see prepareConfirmedSignoutUi); everything else goes
+  // through clearLocalBusinessState below.
+  const resetLocalBusinessState = useCallback(async (options: LocalBusinessStateResetOptions = {}) => {
     await resetClientRuntimeState({
   // Authentication helpers.
       preserveDeviceSettings: true,
@@ -835,6 +838,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     }).catch(() => {})
     cacheClearAll()
   }, [])
+
+  const clearLocalBusinessState = useCallback(async (options: LocalBusinessStateResetOptions = {}) => {
+    if (isActorSessionQuarantined()) return
+    resetActorReadSession()
+    await resetLocalBusinessState(options)
+  }, [resetLocalBusinessState])
 
   const handleUnauthorizedSession = useCallback(async (message = 'Please sign in again to continue.'): Promise<void> => {
     if (isActorSessionQuarantined()) return
@@ -998,9 +1007,22 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         flushPendingWorkDrafts()
         disconnectWS()
         if (signout.phase === 'confirmed') {
-          // Keep all work/cache data; only remove local auth after the server
-          // proved this cookie is no longer authenticated.
-          const prepared = await prepareConfirmedSignoutUi(signout.token, () => {
+          // The server proved the old cookie is gone: run the account cleanup a
+          // completed logout always ran (A's cart, drafts, legacy pos_* keys,
+          // mirrors), keeping queued offline sales and device settings. It runs
+          // under the admission lock while this tombstone is current, so no
+          // newer account can be signed in yet. Nothing is erased while the
+          // sign-out is still unresolved (the pending branch below). No
+          // resetActorReadSession here: logout already rotated the marker, and
+          // rotating it again from each tab would re-quarantine the others.
+          const prepared = await prepareConfirmedSignoutUi(signout.token, async () => {
+            await resetLocalBusinessState({
+              clearAuth: true,
+              preserveSyncServer: true,
+              preserveSessionDuration: true,
+              preserveRuntimeMeta: true,
+              preserveOfflineWork: true,
+            }).catch(() => {})
             if (disposed) return
             clearPersistedAuthState()
             confirmedSignoutRef.current = signout.token
@@ -1062,7 +1084,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     window.addEventListener(SIGNOUT_RETRY_EVENT, retry)
     void reconcile()
     return () => { disposed = true; running++; unsubscribe(); window.removeEventListener(ACTOR_SESSION_RETRY_EVENT, retry); window.removeEventListener(SIGNOUT_RETRY_EVENT, retry) }
-  }, [applyBootstrapPayload, publicMode, user])
+  }, [applyBootstrapPayload, publicMode, resetLocalBusinessState, user])
 
   // Sync event listeners (loadSettings is defined above).
   const debounceRef = useRef<Record<string, number>>({})

@@ -187,21 +187,35 @@ http.setSyncServerUrl('https://signout.test')
 local.delete(signout.SIGNOUT_INTENT_KEY)
 scope.completeActorSessionReconciliation(scope.actorSessionReconciliationMarker())
 const mountedIntent = signout.beginUnresolvedSignout({ id: 71 })
-await signout.confirmSignoutIntent(mountedIntent.token)
 const effectsBlock = context.slice(context.indexOf('  const reconciledActorRef ='), context.indexOf('  // Sync event listeners'))
 const effectsCode = ts.transpileModule(effectsBlock, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 let pendingUser: unknown = undefined
 let authClears = 0
+const accountResets: any[] = []
 const mounted: any = { ...scope, ...signout, user: { id: 71 }, publicMode: false, effects: [],
   useRef: (current: unknown) => ({ current }), useEffect: (fn: () => unknown) => mounted.effects.push(fn),
   flushPendingWorkDrafts() {}, disconnectWS() {}, setPage() {}, setAuthReady() {}, applyBootstrapPayload() {},
+  recoverUnresolvedSignout: async () => {},
+  resetLocalBusinessState: async (options: unknown) => { accountResets.push({ options, userAtReset: pendingUser }) },
   clearPersistedAuthState() { authClears++ }, setUser(value: unknown) { pendingUser = value },
 }
 new Function('env', `with(env){${effectsCode}}`)(mounted)
+// Negative control: an UNRESOLVED sign-out erases nothing.
+const cleanupPending = mounted.effects[2]()
+await new Promise((resolve) => setImmediate(resolve))
+assert.equal(accountResets.length, 0, 'unresolved sign-out must not erase any account data')
+assert.equal(authClears, 0)
+cleanupPending()
+await signout.confirmSignoutIntent(mountedIntent.token)
 const cleanupMounted = mounted.effects[2]()
 await new Promise((resolve) => setImmediate(resolve))
 assert.equal(authClears, 1)
 assert.equal(pendingUser, null)
+// Confirmed sign-out runs the old logout's account cleanup, before the UI drops
+// the actor, while retaining queued offline sales and device settings.
+assert.equal(accountResets.length, 1, 'confirmed sign-out must clear the signed-out account state')
+assert.deepEqual(accountResets[0].options, { clearAuth: true, preserveSyncServer: true, preserveSessionDuration: true, preserveRuntimeMeta: true, preserveOfflineWork: true })
+assert.equal(accountResets[0].userAtReset, undefined, 'cleanup completes under the lock before setUser(null)')
 assert.equal(signout.isSignoutBlocked(), true, 'setUser scheduling alone cannot unhide mounted actor')
 mounted.effects[0]()
 assert.equal(signout.isSignoutBlocked(), true, 'old actor commit cannot acknowledge sign-out')

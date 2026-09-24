@@ -78,6 +78,7 @@ try {
       readActorSessionRecoveryBootstrap: () => response,
       shouldResetForRuntimeChange: () => false, readStoredRuntimeDescriptor: () => ({}), buildRuntimeDescriptorFromBootstrap: () => ({}),
       applyBootstrapPayload: async (payload: any) => { env.applied.push(payload); env.user = payload.user },
+      resetLocalBusinessState: async () => { throw Error('account quarantine must never run sign-out cleanup') },
     }
     new Function('env', `with(env){${code}}`)(env)
     const cleanup = env.effects[2]()

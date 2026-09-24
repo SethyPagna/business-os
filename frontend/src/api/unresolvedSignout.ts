@@ -101,11 +101,14 @@ export async function confirmSignoutIntent(token: string): Promise<void> {
   })
   changed()
 }
-/** Serialize auth-only cleanup with new login admission. Never erase B's
- * newer local auth while a different tab finishes A's confirmed sign-out. */
-export async function prepareConfirmedSignoutUi(token: string, clearAuth: () => void): Promise<boolean> {
+/** Serialize the signed-out account's cleanup with new login admission. The
+ * callback runs (and is awaited) under the admission lock, only while THIS
+ * confirmed tombstone is current and no login is pending, so it can never erase
+ * a newer account's auth or data: a new sign-in must first take this lock and
+ * consume the tombstone. */
+export async function prepareConfirmedSignoutUi(token: string, clearAuth: () => void | Promise<void>): Promise<boolean> {
   if (!window.navigator?.locks?.request) return false
-  return window.navigator.locks.request('businessos-auth-cookie-admission', { mode: 'exclusive' }, () => {
+  return window.navigator.locks.request('businessos-auth-cookie-admission', { mode: 'exclusive' }, async () => {
     const intent = readSignoutIntent()
     if (intent?.token !== token || intent.phase !== 'confirmed' || intent.authority !== authority()) return false
     try {
@@ -120,7 +123,7 @@ export async function prepareConfirmedSignoutUi(token: string, clearAuth: () => 
       return false
     }
     status = 'signout-confirmed'
-    clearAuth()
+    await clearAuth()
     return true
   })
 }
