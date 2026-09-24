@@ -1,11 +1,11 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
-import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
+import { bumpVersion, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
@@ -29,7 +29,22 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 import { customerIsProfileSql } from '../lib/anonymousCustomer'
 import { businessToday } from '../lib/businessDateWindow'
 import type { PromotionRule } from '../lib/promotionRules'
-import { PORTAL_POSTS_SETTING_KEY, hasDiscountPost, portalPromoCards, publicPortalPosts, readPortalPosts } from '../lib/portalPosts'
+import {
+  MAX_PORTAL_POSTS,
+  PORTAL_POSTS_SETTING_KEY,
+  applyPortalPostInput,
+  hasDiscountPost,
+  isPortalPostId,
+  portalPostRuleIds,
+  portalPromoCards,
+  publicPortalPosts,
+  readPortalPosts,
+  reorderPortalPosts,
+  staffPortalPosts,
+  withPortalPost,
+  type PortalPost,
+  type StaffPortalPost,
+} from '../lib/portalPosts'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -1791,6 +1806,207 @@ app.patch('/submissions/:id/review', requireAuth, async (c) => {
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'review', 'portal_submission', id ?? null, { status, rewardPoints })
   c.executionCtx.waitUntil(broadcast(c.env, 'portalSubmissions', { action: 'review', id }))
   return c.json({ success: true })
+})
+
+// ---------------------------------------------------------------------------
+// Website Editor posts (staff). Each post is posted on its own, with its own
+// Post button: these endpoints are the only way a post changes (the bulk
+// settings save ignores the row -- routes/settings.ts). Reading is open to
+// every grant that opens the Website Editor; changing needs portal_posts or
+// the broad settings grant, the pair the bulk save always asked for this row.
+// The model, the validation and the derived status live in lib/portalPosts.ts.
+// ---------------------------------------------------------------------------
+const PORTAL_EDITOR_GRANTS = ['portal_posts', 'portal_faq', 'portal_about', 'customer_portal', 'settings']
+
+function canReadPortalPosts(user: SessionUser): boolean {
+  return PORTAL_EDITOR_GRANTS.some((key) => hasPermission(user, key))
+}
+
+function canWritePortalPosts(user: SessionUser): boolean {
+  return hasPermission(user, 'portal_posts') || hasPermission(user, 'settings')
+}
+
+async function readStoredPosts(env: Env): Promise<string | null> {
+  const row = await getDb(env).prepare('SELECT value FROM settings WHERE key = @key').get<{ value: string | null }>({ key: PORTAL_POSTS_SETTING_KEY })
+  return row?.value ?? null
+}
+
+// The editor's list for a stored value, with each Discount post's rule read
+// in whatever state it is (one query, only when such a post exists).
+async function staffPostsOf(env: Env, stored: string | null, nowMs: number): Promise<StaffPortalPost[]> {
+  const posts = readPortalPosts(stored)
+  const ruleIds = portalPostRuleIds(posts)
+  const ruleRows = ruleIds.length
+    ? await getDb(env).prepare('SELECT * FROM promotion_rules WHERE id IN (SELECT value FROM json_each(@ids))').all<Record<string, unknown>>({ ids: JSON.stringify(ruleIds) })
+    : []
+  return staffPortalPosts(posts, ruleRows, nowMs)
+}
+
+type PostsRefusal = { status: 400 | 403 | 404 | 409; body: Record<string, unknown> }
+type PostsChange = { next: PortalPost[] } | { refusal: PostsRefusal }
+
+// Every post write is a compare-and-swap on the ONE settings row holding the
+// list: read it, apply the change to exactly what was read, and write only if
+// the row still holds that. A concurrent writer makes the write miss instead
+// of being overwritten, and the change is applied once more to the fresh
+// list; a second miss answers 409 posts_busy. `stored` is the value the
+// response presents: the new list, or the one the refusal was judged on.
+async function changePortalPosts(env: Env, change: (posts: PortalPost[]) => PostsChange): Promise<{ stored: string | null; refusal: PostsRefusal | null }> {
+  const db = getDb(env)
+  let stored: string | null = null
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    stored = await readStoredPosts(env)
+    const outcome = change(readPortalPosts(stored))
+    if ('refusal' in outcome) return { stored, refusal: outcome.refusal }
+    const next = JSON.stringify(outcome.next)
+    const written = await db.prepare(`
+      INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      WHERE settings.value IS @expected
+    `).run({ key: PORTAL_POSTS_SETTING_KEY, value: next, expected: stored })
+    if (written.changes > 0) return { stored: next, refusal: null }
+  }
+  return { stored, refusal: { status: 409, body: { error: 'The posts changed while this was being saved. Try again.', code: 'posts_busy' } } }
+}
+
+// After a write: the storefront's cached config and bootstrap are keyed on
+// the settings version, and every open editor refreshes its settings copy.
+function announcePostsWrite(env: Env, executionCtx: { waitUntil(promise: Promise<unknown>): void }) {
+  executionCtx.waitUntil(bumpVersion(env, 'settings'))
+  executionCtx.waitUntil(broadcast(env, 'settings', { action: 'update', keys: [PORTAL_POSTS_SETTING_KEY] }))
+}
+
+// The fields a post's audit row compares; version and updatedAt are
+// bookkeeping.
+const AUDITED_POST_FIELDS = ['kind', 'eyebrow', 'title', 'subtitle', 'body', 'ctaLabel', 'ctaHref', 'image', 'linkProductId', 'linkProductName', 'km', 'startsOn', 'endsOn', 'postedAt', 'pinned', 'hidden', 'ruleId', 'eventDate', 'location']
+
+function postAuditChange(before: PortalPost | null, after: PortalPost | null) {
+  return changedFields(before as unknown as Record<string, unknown> | null, after as unknown as Record<string, unknown> | null, { keys: AUDITED_POST_FIELDS })
+}
+
+// A write names the version it was made against: the post's version when it
+// was read, or 0 to create it.
+function expectedVersionOf(body: Record<string, unknown>): number | null {
+  const value = body.expected_version
+  return Number.isInteger(value) && (value as number) >= 0 ? value as number : null
+}
+
+async function postBodyOf(c: Context): Promise<Record<string, unknown> | Response> {
+  const rejection = await admitRequestBody(c, SMALL_BODY_BYTES)
+  if (rejection) return rejection
+  const body = await c.req.json<unknown>().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return c.json({ error: 'Send a JSON object.', code: 'invalid_post_body' }, 400)
+  }
+  return body as Record<string, unknown>
+}
+
+app.get('/posts', requireAuth, async (c) => {
+  if (!canReadPortalPosts(c.get('user'))) return c.json({ error: 'Forbidden' }, 403)
+  return c.json({ posts: await staffPostsOf(c.env, await readStoredPosts(c.env), Date.now()), limit: MAX_PORTAL_POSTS })
+})
+
+// Create (expected_version 0) or edit one post. Only the fields sent change.
+app.put('/posts/:id', requireAuth, async (c) => {
+  const user = c.get('user')
+  if (!canWritePortalPosts(user)) return c.json({ error: 'Forbidden' }, 403)
+  const body = await postBodyOf(c)
+  if (body instanceof Response) return body
+  const id = c.req.param('id') ?? ''
+  if (!isPortalPostId(id)) return c.json({ error: 'A post id is 1 to 64 letters, digits, - or _.', code: 'invalid_post_id' }, 400)
+  const expectedVersion = expectedVersionOf(body)
+  if (expectedVersion === null) {
+    return c.json({ error: 'expected_version is required: the version the post was read at, or 0 to create it.', code: 'expected_version_required' }, 400)
+  }
+
+  const nowMs = Date.now()
+  const write: { before: PortalPost | null; after: PortalPost | null } = { before: null, after: null }
+  const { stored, refusal } = await changePortalPosts(c.env, (posts) => {
+    const existing = posts.find((post) => post.id === id) ?? null
+    if ((existing?.version ?? 0) !== expectedVersion) {
+      return { refusal: { status: 409, body: { error: 'This post was changed or removed by someone else.', code: 'post_version_conflict', conflict: true } } }
+    }
+    if (!existing && posts.length >= MAX_PORTAL_POSTS) {
+      return { refusal: { status: 400, body: { error: `The Website Editor holds at most ${MAX_PORTAL_POSTS} posts. Delete an ended one first.`, code: 'posts_limit_reached', max: MAX_PORTAL_POSTS } } }
+    }
+    if (existing?.kind === 'discount' || body.kind === 'discount') {
+      return { refusal: { status: 400, body: { error: 'Discount posts are not available yet.', code: 'discount_post_unsupported' } } }
+    }
+    const applied = applyPortalPostInput(existing, id, body, new Date(nowMs).toISOString())
+    if ('error' in applied) return { refusal: { status: 400, body: { ...applied.error } } }
+    write.before = existing
+    write.after = applied.post
+    return { next: withPortalPost(posts, applied.post) }
+  })
+  const posts = await staffPostsOf(c.env, stored, nowMs)
+  if (refusal) {
+    const current = refusal.body.code === 'post_version_conflict' ? { current: posts.find((post) => post.id === id) ?? null } : {}
+    return c.json({ ...refusal.body, ...current, posts }, refusal.status)
+  }
+  const { before, after } = write
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), before ? 'update' : 'create', 'portal_post', id, { kind: after?.kind, title: after?.title, version: after?.version }, postAuditChange(before, after))
+  announcePostsWrite(c.env, c.executionCtx)
+  return c.json({ post: posts.find((candidate) => candidate.id === id) ?? null, posts })
+})
+
+app.delete('/posts/:id', requireAuth, async (c) => {
+  const user = c.get('user')
+  if (!canWritePortalPosts(user)) return c.json({ error: 'Forbidden' }, 403)
+  const body = await postBodyOf(c)
+  if (body instanceof Response) return body
+  const id = c.req.param('id') ?? ''
+  const expectedVersion = expectedVersionOf(body)
+  if (expectedVersion === null || expectedVersion === 0) {
+    return c.json({ error: 'expected_version is required: the version the post was read at.', code: 'expected_version_required' }, 400)
+  }
+
+  const nowMs = Date.now()
+  const write: { removed: PortalPost | null } = { removed: null }
+  const { stored, refusal } = await changePortalPosts(c.env, (posts) => {
+    const existing = posts.find((post) => post.id === id)
+    if (!existing) return { refusal: { status: 404, body: { error: 'This post no longer exists.', code: 'post_not_found' } } }
+    if (existing.version !== expectedVersion) {
+      return { refusal: { status: 409, body: { error: 'This post was changed by someone else.', code: 'post_version_conflict', conflict: true } } }
+    }
+    if (existing.kind === 'discount') {
+      return { refusal: { status: 400, body: { error: 'Discount posts are not available yet.', code: 'discount_post_unsupported' } } }
+    }
+    write.removed = existing
+    return { next: posts.filter((post) => post.id !== id) }
+  })
+  const posts = await staffPostsOf(c.env, stored, nowMs)
+  if (refusal) {
+    const current = refusal.body.code === 'post_version_conflict' ? { current: posts.find((post) => post.id === id) ?? null } : {}
+    return c.json({ ...refusal.body, ...current, posts }, refusal.status)
+  }
+  const { removed } = write
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'delete', 'portal_post', id, { kind: removed?.kind, title: removed?.title, version: removed?.version }, postAuditChange(removed, null))
+  announcePostsWrite(c.env, c.executionCtx)
+  return c.json({ deleted: id, posts })
+})
+
+// The order of the whole list (pinned posts still show first on the site).
+// It must name every post once; a stale list answers 409 with the current one.
+app.post('/posts/reorder', requireAuth, async (c) => {
+  const user = c.get('user')
+  if (!canWritePortalPosts(user)) return c.json({ error: 'Forbidden' }, 403)
+  const body = await postBodyOf(c)
+  if (body instanceof Response) return body
+
+  const nowMs = Date.now()
+  let beforeOrder: string[] = []
+  const { stored, refusal } = await changePortalPosts(c.env, (posts) => {
+    const next = reorderPortalPosts(posts, body.order)
+    if (next === 'invalid') return { refusal: { status: 400, body: { error: 'order must list post ids, each once.', code: 'invalid_post_order' } } }
+    if (next === 'stale') return { refusal: { status: 409, body: { error: 'The posts changed since this list was loaded.', code: 'posts_order_stale', conflict: true } } }
+    beforeOrder = posts.map((post) => post.id)
+    return { next }
+  })
+  const posts = await staffPostsOf(c.env, stored, nowMs)
+  if (refusal) return c.json({ ...refusal.body, posts }, refusal.status)
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reorder', 'portal_post', null, { count: posts.length }, changedFields({ order: beforeOrder }, { order: posts.map((post) => post.id) }))
+  announcePostsWrite(c.env, c.executionCtx)
+  return c.json({ posts })
 })
 
 // Ported following the same pattern as ../routes/products.ts. The full
