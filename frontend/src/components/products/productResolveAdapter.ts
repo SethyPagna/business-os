@@ -1,4 +1,5 @@
 import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
 import { identityBarcodeKey, isRealBarcode } from '../../utils/productDetailRule.ts'
 import type { ProductConflictCluster, ProductConflictProduct } from '../../utils/selectedConflictMerge.ts'
 import type { ResolveCell, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
@@ -36,6 +37,8 @@ type StockBranch = { branchId: number; branchName: string | null; quantity: numb
 type StockImpact = { totalQuantity: number; branches: StockBranch[] }
 
 export type ProductResolvePreview = {
+  reviewedDigest: string
+  groupProducts: ProductConflictProduct[]
   stockImpact: StockImpact
   needsStockChoice: boolean
   blocked: { code: string; operationId?: string } | null
@@ -44,6 +47,7 @@ export type ProductResolvePreview = {
 }
 
 export type ProductResolveData = {
+  reviewedDigest: string
   /** Every product of the group in id order: one grid column each. */
   ids: number[]
   products: Map<number, ProductConflictProduct>
@@ -56,6 +60,8 @@ export type ProductResolveData = {
 export type ProductResolveCost = { cost_price_usd: number; cost_price_khr?: number | null }
 
 export type ProductResolveToken = {
+  requestId: string
+  reviewedDigest: string
   keepId: number
   steps: Array<{ mergeId: number; name: string; stock?: 'merge' | 'write_off' }>
   /** Sent only by a user with the cost edit permission. */
@@ -64,7 +70,7 @@ export type ProductResolveToken = {
 
 export type ProductResolveApi = {
   preview: (keepId: number, mergeId: number, options: { keep: true; groupIds: number[]; signal?: AbortSignal }) => Promise<unknown>
-  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: { cost_price_usd?: number; cost_price_khr?: number | null }) => Promise<unknown>
+  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: { cost_price_usd?: number; cost_price_khr?: number | null; resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> } }) => Promise<unknown>
 }
 
 export type ProductResolveOptions = {
@@ -87,7 +93,7 @@ const DEFAULT_API: ProductResolveApi = {
 }
 
 // Refusals that mean the products moved under the review: read them again.
-const STALE_CODES = new Set(['merge_state_conflict', 'stock_choice_required'])
+const STALE_CODES = new Set(['merge_state_conflict', 'stock_choice_required', 'product_merge_not_duplicates', 'product_merge_inactive'])
 
 function tr(t: Translate, key: string, fallback: string): string {
   const value = t(key)
@@ -125,6 +131,8 @@ function readPreview(value: unknown): ProductResolvePreview {
   const blocked = raw.blocked && typeof raw.blocked === 'object' ? raw.blocked as { code?: unknown; operationId?: unknown } : null
   const groupCost = raw.groupCost && typeof raw.groupCost === 'object' ? raw.groupCost as Record<string, unknown> : null
   return {
+    reviewedDigest: String(raw.reviewedDigest ?? ''),
+    groupProducts: Array.isArray(raw.groupProducts) ? raw.groupProducts as ProductConflictProduct[] : [],
     stockImpact: readImpact(raw.stockImpact),
     needsStockChoice: Boolean(raw.needsStockChoice),
     blocked: blocked ? { code: String(blocked.code ?? ''), ...(blocked.operationId ? { operationId: String(blocked.operationId) } : {}) } : null,
@@ -395,8 +403,8 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
 export function createProductResolveAdapter(options: ProductResolveOptions): ResolveAdapter<ProductResolveData, ProductResolveToken> {
   const { cluster, t } = options
   const api = options.api ?? DEFAULT_API
-  const products = new Map(cluster.products.map((product) => [Number(product.id), product]))
-  const ids = [...products.keys()].sort((a, b) => a - b)
+  const listedProducts = new Map(cluster.products.map((product) => [Number(product.id), product]))
+  const ids = [...listedProducts.keys()].sort((a, b) => a - b)
   // A merge that stopped part way resumes from the step that did not answer.
   const progress = new WeakMap<ProductResolveToken, { index: number; keeper: Record<string, unknown> | null; absorbed: string[] }>()
 
@@ -419,9 +427,17 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       const included = includedIds(ids, edits)
       const keeperId = keeperOf(included, edits, options.keeperId) ?? options.keeperId
       const groupIds = included.includes(keeperId) ? included : [keeperId, ...included]
-      const others = ids.filter((id) => id !== keeperId)
+      if (groupIds.length > 12) return { ids, products: new Map(listedProducts), keeperId, previews: new Map(), reviewedDigest: '' }
+      const others = included.filter((id) => id !== keeperId)
       const answers = await Promise.all(others.map((id) => api.preview(keeperId, id, { keep: true, groupIds, signal })))
-      return { ids, products, keeperId, previews: new Map(others.map((id, index) => [id, readPreview(answers[index])])) }
+      const previews = new Map(others.map((id, index) => [id, readPreview(answers[index])]))
+      const first = previews.values().next().value as ProductResolvePreview | undefined
+      if ([...previews.values()].some((preview) => preview.reviewedDigest !== first?.reviewedDigest)) {
+        throw Object.assign(new Error(tr(t, 'resolve_stale_banner', 'These records changed. Reload and review again.')), { code: 'merge_state_conflict' })
+      }
+      const products = new Map(listedProducts)
+      for (const product of first?.groupProducts ?? []) products.set(Number(product.id), product)
+      return { ids, products, keeperId, previews, reviewedDigest: first?.reviewedDigest ?? '' }
     },
 
     initialSelection() {
@@ -450,6 +466,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
     blockers(data, draft) {
       const { ctx } = buildPlan(data, draft, options)
       const out: string[] = []
+      if (ctx.included.length > 12) out.push(fill(tr(t, 'resolve_merge_max', 'Merge at most {n} records at a time.'), { n: 12 }))
       if (ctx.included.length < 2) out.push(tr(t, 'resolve_merge_needs_two', 'Merge in at least two records.'))
       for (const id of ctx.merged) {
         const message = blockedMessage(ctx, id, t)
@@ -475,7 +492,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         const stock = stockAnswer(ctx, id)
         return { mergeId: id, name: name(id), ...(stock ? { stock } : {}) }
       })
-      const cost = options.canViewCosts && options.canEditCosts ? chosenCost(ctx, true) : null
+      const cost = options.canViewCosts && options.canEditCosts && costPick(ctx, true).kind !== 'rule' ? chosenCost(ctx, true) : null
 
       const changes: ResolveChange[] = []
       for (const row of rows) {
@@ -503,7 +520,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         message: fill(tr(t, 'resolve_product_confirm', 'Merge {products} into {name}.'), { products: ctx.merged.map(name).join(', '), name: name(keepId) }),
         changes,
         warnings,
-        token: { keepId, steps, cost },
+        token: { keepId, steps, cost, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
         undoable: true,
       }
     },
@@ -514,7 +531,10 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       const state = progress.get(token) ?? { index: 0, keeper: null, absorbed: [] }
       for (let index = state.index; index < total; index += 1) {
         const step = token.steps[index]
-        const keep = token.cost ? { cost_price_usd: token.cost.cost_price_usd, cost_price_khr: token.cost.cost_price_khr ?? null } : {}
+        const keep = {
+          ...(token.cost ? { cost_price_usd: token.cost.cost_price_usd, cost_price_khr: token.cost.cost_price_khr ?? null } : {}),
+          resolve: { requestId: token.requestId, reviewedDigest: token.reviewedDigest, steps: token.steps.map(({ mergeId, stock }) => ({ mergeId, ...(stock ? { stock } : {}) })) },
+        }
         let response: { keeper?: Record<string, unknown> | null } | null
         try {
           response = await api.merge(token.keepId, step.mergeId, step.stock, keep) as typeof response

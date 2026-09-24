@@ -68,6 +68,8 @@ function fakeApi(cluster: Cluster, extra: { blocked?: Record<number, unknown>; f
       const costs = [...new Set(options.groupIds.map((id) => Number(byId.get(id)?.cost_price_usd) || 0).filter(Boolean))]
       const mean = costs.length ? costs.reduce((sum, value) => sum + value, 0) / costs.length : 0
       return {
+        reviewedDigest: 'a'.repeat(64),
+        groupProducts: cluster.products,
         stockImpact: { totalQuantity: Number(merged.stock_quantity) || 0, branches: merged.stock_quantity ? [{ branchId: 1, branchName: 'shop', quantity: Number(merged.stock_quantity) }] : [] },
         needsStockChoice: Number(merged.stock_quantity) > 0,
         blocked: extra.blocked?.[mergeId] ?? null,
@@ -168,7 +170,7 @@ await test('N4: cost is hidden without cost view, locked without cost edit, and 
   assert.equal(rule.custom.kind, 'money')
   assert.equal(rule.custom.validate('-1'), 'Enter a cost of zero or more.')
   assert.equal(rule.custom.validate('6.25'), null)
-  assert.deepEqual((await editor.adapter.review(editor.data, EMPTY, signal)).token.cost, { cost_price_usd: 6, cost_price_khr: 24600 })
+  assert.equal((await editor.adapter.review(editor.data, EMPTY, signal)).token.cost, null, 'the server freezes the rule without accepting a client override')
   const typed: Draft = { selection: { cost: { custom: '6.25' } }, columns: {} }
   assert.equal(rowOf(editor.adapter.rows(editor.data, typed), 'cost').final.text, '$6.25')
   const review = await editor.adapter.review(editor.data, typed, signal)
@@ -228,7 +230,8 @@ await test('apply merges every product one step each, stops where a step fails a
   const result = await adapter.apply(review.token, signal, (done, total) => progress.push([done, total]))
   const merges = calls.filter((call) => call.kind === 'merge').map((call) => call.args)
   assert.deepEqual(merges.map((args) => args[1]), [51, 52, 52], 'the resumed apply re-sends only the step that did not answer')
-  assert.deepEqual(merges[0], [50, 51, 'merge', { cost_price_usd: 3, cost_price_khr: 12300 }], 'every step carries the chosen cost and its stock answer')
+  assert.deepEqual(merges[0], [50, 51, 'merge', { resolve: { requestId: review.token.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 51, stock: 'merge' }, { mergeId: 52 }] } }], 'every step carries the frozen group and its stock answers')
+  assert.deepEqual(merges[1][3], merges[2][3], 'lost responses resend exactly the same receipt identity and choices')
   assert.equal(merges[1][2], undefined, 'a product with no stock needs no answer')
   assert.equal(result.done, 2)
   assert.equal(result.total, 2)
@@ -248,7 +251,7 @@ await test('a refusal the Worker states in English reaches the operator in the p
   const review = await adapter.review(data, EMPTY, signal)
   await assert.rejects(adapter.apply(review.token, signal, () => {}), (error: any) => error.code === 'product_merge_not_duplicates' && error.message === km.selected_conflict_product_merge_not_duplicates)
   assert.equal(adapter.isStale(Object.assign(new Error('x'), { code: 'merge_state_conflict' })), true)
-  assert.equal(adapter.isStale(Object.assign(new Error('x'), { code: 'product_merge_not_duplicates' })), false)
+  assert.equal(adapter.isStale(Object.assign(new Error('x'), { code: 'product_merge_not_duplicates' })), true)
 })
 
 await test('every key the adapter reads exists in both packs', () => {

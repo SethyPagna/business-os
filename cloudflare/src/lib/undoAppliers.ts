@@ -322,6 +322,8 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 export type ProductMergeKeeperChoice = {
   follows: true
   cost?: { cost_price_usd: number; cost_price_khr?: number | null }
+  /** Server-frozen group economics; carried through each pair's undo/redo. */
+  economics?: ProductMergeEconomics
 }
 
 // The ONE list of foreign keys a product merge must move onto the survivor.

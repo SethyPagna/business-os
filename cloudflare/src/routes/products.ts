@@ -3307,7 +3307,7 @@ export async function foldDuplicateProductInto(
   // catalogue. The dead pair is written by nothing here on purpose.
   const foldEconomics = atomicHistory?.bulkClusterPlan
     ? resolveProductMergeClusterPlanEconomics(atomicHistory.bulkClusterPlan)
-    : economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
+    : keeperChoice?.economics ?? economicsOverride ?? resolveProductMergeEconomics([canonicalBefore, dupPricing])
   // N4: the cost the reviewer chose in the grid (the route checked the cost
   // edit permission) replaces the averaged cost; KHR follows the chosen record,
   // else the average's own KHR.
@@ -8195,6 +8195,41 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
 // and the product-form collision path -- read this BEFORE opening the dialog, so
 // the decision is made with the actual numbers in view rather than in the
 // abstract. Writes nothing.
+type ResolveProductStep = { mergeId: number; stock?: MergeStockDisposition }
+type ResolveProductRequest = { requestId: string; reviewedDigest: string; steps: ResolveProductStep[] }
+type ResolveProductPlan = ResolveProductRequest & {
+  keepId: number
+  cost: ProductMergeKeeperChoice['cost'] | null
+  rows: Record<string, unknown>[]
+  fingerprints: Record<string, string>
+}
+
+async function resolveProductDigest(value: unknown): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)))
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function resolveProductFingerprint(db: ReturnType<typeof getDb>, ids: number[], guards?: AtomicMergeStatement[]) {
+  // The existing graph fingerprint also supplies transaction guards for stock,
+  // lots, images and links. Never expose its unredacted JSON to the browser.
+  return resolveProductDigest(await mergeStateFingerprint(db, ids.map((id) => ({ keeperId: id, dupId: id } as MergeReversal)), guards))
+}
+
+async function readResolveProductGroup(db: ReturnType<typeof getDb>, ids: number[], keeperId: number) {
+  const sorted = [...new Set(ids)].sort((a, b) => a - b)
+  const { sql, params } = buildInClause('resolve', sorted)
+  const rows = await db.prepare(`SELECT id, name, barcode, image_path, stock_quantity, updated_at, is_active,
+    ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql}) ORDER BY id`).all<Record<string, unknown>>(params)
+  const fingerprints: Record<string, string> = {}
+  fingerprints[sorted.join(',')] = await resolveProductFingerprint(db, sorted)
+  const merged = sorted.filter((id) => id !== keeperId)
+  for (let index = 1; index < merged.length; index += 1) {
+    const remaining = merged.slice(index)
+    fingerprints[remaining.join(',')] = await resolveProductFingerprint(db, remaining)
+  }
+  return { rows, fingerprints, reviewedDigest: await resolveProductDigest({ rows, fingerprints }) }
+}
+
 app.get('/possible-duplicates/merge-preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
@@ -8224,9 +8259,11 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   let inCluster = false
   let keeperStock: MergeStockImpact | null = null
   let groupCost: { cost_price_usd: number; cost_price_khr: number } | null = null
+  let resolveGroup: Awaited<ReturnType<typeof readResolveProductGroup>> | null = null
   if (keepMode) {
     const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
-      .filter((id) => Number.isSafeInteger(id) && id > 0).slice(0, 12)
+      .filter((id) => Number.isSafeInteger(id) && id > 0)
+    if (groupIds.length > 12) return c.json({ code: 'resolve_group_too_large', error: 'Resolve at most 12 products at a time.' }, 400)
     const [clusters, keeperImpact, groupRows] = await Promise.all([
       findPossiblySameProductClusters(db),
       readMergeStockImpact(db, keepId, branchNameById),
@@ -8242,6 +8279,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
       cost_price_usd: Number(economics.merged.cost_price_usd ?? 0) || 0,
       cost_price_khr: Number(economics.merged.cost_price_khr ?? 0) || 0,
     }
+    resolveGroup = await readResolveProductGroup(db, groupIds, keepId)
   }
   return c.json({
     success: true,
@@ -8252,7 +8290,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     pricing,
     // The gate the client has always read and the server has never sent.
     identity,
-    ...(keepMode ? { cluster: inCluster, keeperStock, groupCost } : {}),
+    ...(keepMode ? { cluster: inCluster, keeperStock, groupCost, groupProducts: resolveGroup?.rows, reviewedDigest: resolveGroup?.reviewedDigest } : {}),
     // Read-only warnings, so the reviewer learns BEFORE choosing a keeper that
     // this pair cannot be merged yet, instead of after pressing Apply.
     blocked: keepMode && !inCluster
@@ -8272,7 +8310,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
   // The operator's answer for the discarded row's stock. Anything other than
@@ -8303,6 +8341,58 @@ app.post('/possible-duplicates/merge', async (c) => {
     chosenCost = { cost_price_usd: roundMoney4(usd), ...(khr !== null ? { cost_price_khr: roundMoney4(khr) } : {}) }
   }
   const db = getDb(c.env)
+  const resolve = body.resolve
+  const resolveGuards: AtomicMergeStatement[] = []
+  let resolvePlan: ResolveProductPlan | undefined
+  let resolveReplay = false
+  if (resolve !== undefined) {
+    if (!keepMode || !resolve || typeof resolve.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(resolve.requestId)
+      || typeof resolve.reviewedDigest !== 'string' || !/^[a-f0-9]{64}$/.test(resolve.reviewedDigest)
+      || !Array.isArray(resolve.steps) || resolve.steps.length < 1 || resolve.steps.length > 11
+      || resolve.steps.some((step) => !step || !Number.isSafeInteger(step.mergeId) || step.mergeId <= 0 || step.mergeId === keepId || (step.stock !== undefined && !['merge', 'write_off'].includes(step.stock)))
+      || new Set(resolve.steps.map((step) => step.mergeId)).size !== resolve.steps.length
+      || resolve.steps.some((step, index) => index > 0 && step.mergeId < resolve.steps[index - 1].mergeId)
+      || !resolve.steps.some((step) => step.mergeId === mergeId && (step.stock ?? null) === stockChoice)) {
+      return c.json({ code: 'invalid_resolve_plan', error: 'Invalid product resolve plan.' }, 400)
+    }
+    const receipts = await db.prepare(`SELECT details FROM audit_logs WHERE action='merge_duplicate' AND entity='product'
+      AND user_id=@actor AND json_valid(details) AND json_extract(details,'$.resolvePlan.requestId')=@requestId ORDER BY id`)
+      .all<{ details: string }>({ actor: user?.id ?? null, requestId: resolve.requestId })
+    const previous = receipts.map((row) => JSON.parse(row.details) as { resolvePlan: ResolveProductPlan; operationId: string; resolvedMergeId: number })
+    const semantic = (plan: Pick<ResolveProductPlan, 'keepId' | 'steps' | 'reviewedDigest' | 'cost'>) => JSON.stringify([plan.keepId, plan.steps, plan.reviewedDigest, plan.cost])
+    const requested = { keepId, steps: resolve.steps, reviewedDigest: resolve.reviewedDigest, cost: chosenCost ?? null }
+    if (previous.length) {
+      resolvePlan = previous[0].resolvePlan
+      if (semantic(resolvePlan) !== semantic(requested)) return c.json({ code: 'resolve_request_conflict', error: 'This resolve request already has different choices.' }, 409)
+      resolveReplay = previous.some((receipt) => receipt.resolvedMergeId === mergeId)
+      if (!resolveReplay) {
+        if (resolve.steps[previous.length]?.mergeId !== mergeId) return c.json({ code: 'resolve_request_conflict', error: 'Resolve steps must be applied in order.' }, 409)
+        const latest = previous[previous.length - 1]
+        const saved = await db.prepare(`SELECT status,payload_json FROM undo_snapshots WHERE kind='product.merge' AND created_by_id=@actor
+          AND json_extract(payload_json,'$.operationId')=@operationId ORDER BY id DESC LIMIT 1`)
+          .get<{ status: string; payload_json: string }>({ actor: user?.id ?? null, operationId: latest.operationId })
+        const reversal = saved ? JSON.parse(saved.payload_json) as MergeReversal & { fingerprintPending?: boolean } : null
+        if (!reversal || saved?.status !== 'applied' || reversal.fingerprintPending
+          || await mergeStateFingerprint(db, [reversal], resolveGuards) !== reversal.mergedStateFingerprint) {
+          return c.json({ code: 'merge_state_conflict', error: 'The previous merge changed. Refresh before continuing.' }, 409)
+        }
+      }
+    } else {
+      if (resolve.steps[0].mergeId !== mergeId) return c.json({ code: 'resolve_request_conflict', error: 'Resolve steps must be applied in order.' }, 409)
+      const ids = [keepId, ...resolve.steps.map((step) => step.mergeId)]
+      const current = await readResolveProductGroup(db, ids, keepId)
+      if (current.reviewedDigest !== resolve.reviewedDigest) return c.json({ code: 'merge_state_conflict', error: 'These products changed after review.' }, 409)
+      if (!productIdsInOneCluster(await findPossiblySameProductClusters(db), ids)) return c.json({ code: 'product_merge_not_duplicates', error: 'These products are not a current duplicate group.' }, 409)
+      resolvePlan = { ...resolve, ...requested, rows: current.rows, fingerprints: current.fingerprints }
+    }
+    if (!resolveReplay) {
+      const remaining = resolve.steps.slice(previous.length).map((step) => step.mergeId)
+      const checked = (previous.length ? remaining : [keepId, ...remaining]).sort((a, b) => a - b)
+      if (await resolveProductFingerprint(db, checked, resolveGuards) !== resolvePlan.fingerprints[checked.join(',')]) {
+        return c.json({ code: 'merge_state_conflict', error: 'These products changed after review.' }, 409)
+      }
+    }
+  }
   const [keeper, dup] = await Promise.all([
     db.prepare('SELECT id, name, image_path, is_active, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
       .get<{ id: number; name: string | null; image_path: string | null; is_active: number; is_group: number }>({ id: keepId }),
@@ -8310,13 +8400,20 @@ app.post('/possible-duplicates/merge', async (c) => {
       .get<{ id: number; name: string | null; image_path: string | null; is_active: number; is_group: number }>({ id: mergeId }),
   ])
   if (!keeper || !dup) return c.json({ error: 'Both products must exist' }, 404)
+  if (resolveReplay) {
+    if (!keeper.is_active || dup.is_active) return c.json({ code: 'merge_state_conflict', error: 'This merge was reversed or changed. Refresh before continuing.' }, 409)
+    const row = await db.prepare('SELECT id,name,barcode,selling_price_usd,cost_price_usd,cost_price_khr FROM products WHERE id=@id').get<Record<string, unknown>>({ id: keepId })
+    const stock = await readMergeStockImpact(db, keepId, new Map((await db.prepare('SELECT id,name FROM branches').all<{ id: number; name: string }>()).map((branch) => [branch.id, branch.name])))
+    const merged = await db.prepare('SELECT barcode FROM products WHERE id=@id').get<{ barcode: string | null }>({ id: mergeId })
+    return c.json({ success: true, replayed: true, keptId: keepId, mergedId: mergeId, keeper: { ...row, stock_quantity: stock.totalQuantity, branch_stock: stock.branches, absorbed_barcodes: absorbedBarcodes(row?.barcode, merged) } })
+  }
   if (!keeper.is_active || !dup.is_active) return c.json({ code: 'product_merge_inactive', error: 'Both products must be active — one of them was already merged or deleted' }, 409)
   if (keeper.is_group || dup.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
 
-  if (keepMode && !productIdsInOneCluster(await findPossiblySameProductClusters(db), [keeper.id, dup.id])) {
+  if (keepMode && !resolvePlan && !productIdsInOneCluster(await findPossiblySameProductClusters(db), [keeper.id, dup.id])) {
     return c.json({
       success: false,
       code: 'product_merge_not_duplicates',
@@ -8377,6 +8474,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   }
 
   let stats: Awaited<ReturnType<typeof foldDuplicateProductInto>>
+  const operationId = crypto.randomUUID()
   try {
     stats = await foldDuplicateProductInto(
       c.env, db, user,
@@ -8386,8 +8484,8 @@ app.post('/possible-duplicates/merge', async (c) => {
       keepMode ? 'resolve grid keep merge' : 'possible-duplicates review merge',
       stockChoice ?? 'merge',
       undefined,
-      { operationId: crypto.randomUUID() },
-      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}) } : undefined,
+      { operationId, ...(resolvePlan ? { preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
+      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}) } : undefined,
     )
   } catch (error) {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {

@@ -61,7 +61,14 @@ const adapter = {
       },
     }
   },
-  batch: (statements) => state.native.batch(statements),
+  batch: (statements) => {
+    if (state.beforeFold && statements.some((statement) => /INSERT INTO undo_snapshots/.test(statement.sql))) {
+      const mutate = state.beforeFold
+      state.beforeFold = null
+      mutate()
+    }
+    return state.native.batch(statements)
+  },
 }
 
 const moneyPrecision = load('lib/moneyPrecision.ts')
@@ -138,6 +145,7 @@ function fresh() {
   state.native.db.exec(SEED)
   state.user = ADMIN
   state.audits = []
+  state.beforeFold = null
 }
 const one = (sql, ...params) => { const row = state.native.db.prepare(sql).get(...params); return row ? { ...row } : row }
 const rows = (sql, ...params) => state.native.db.prepare(sql).all(...params).map((row) => ({ ...row }))
@@ -289,6 +297,96 @@ async function main() {
     await applier.run(JSON.parse(history.redo_payload), ctx('redo'))
     assert.deepEqual(one('SELECT name, barcode, cost_price_usd FROM products WHERE id = 10'), { name: 'Rose Toner 100ml', barcode: '8801111111111', cost_price_usd: 6.5 })
     assert.equal(one('SELECT is_active FROM products WHERE id = 11').is_active, 0)
+  })
+
+  await check('a non-editor resolving three products stores the same whole-group cost the preview showed', async () => {
+    fresh()
+    state.native.db.exec(`INSERT INTO products (id, name, barcode, cost_price_usd, selling_price_usd, is_active)
+      VALUES (60, 'Lip Oil', '600001', 2, 10, 1), (61, 'Lip Oil', '600002', 4, 10, 1), (62, 'Lip Oil', '600003', 6, 10, 1)`)
+    state.user = { ...MANAGER, permissions: JSON.stringify({ products: true, inventory: true, product_cost_view: true }) }
+    const seen = await preview(60, 61, '&groupIds=60,61,62')
+    assert.equal(seen.body.groupCost.cost_price_usd, 4)
+    const resolve = { requestId: 'three-products', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 61 }, { mergeId: 62 }] }
+    for (const mergeId of [61, 62]) {
+      const done = await merge({ keepId: 60, mergeId, keep: true, resolve })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+    }
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 60').cost_price_usd, seen.body.groupCost.cost_price_usd)
+    const history = one("SELECT id,undo_payload,redo_payload FROM action_history ORDER BY id DESC LIMIT 1")
+    const applier = undoAppliers.resolveUndoApplier(JSON.parse(history.undo_payload))
+    await applier.run(JSON.parse(history.undo_payload), { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 60').cost_price_usd, 4, 'undo restores the immediate previous group mean')
+    await applier.run(JSON.parse(history.redo_payload), { env: { DB: {} }, user: ADMIN, direction: 'redo', historyId: history.id })
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 60').cost_price_usd, 4, 'redo repeats frozen group economics')
+  })
+
+  await check('lost-success retry is receipted once and the same request continues; changed choices refuse', async () => {
+    fresh()
+    state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
+    const seen = await preview(10, 11, '&groupIds=10,11,12')
+    const resolve = { requestId: 'lost-success', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
+    const body = { keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve }
+    assert.equal((await merge(body)).status, 200)
+    const count = one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n
+    const replay = await merge(body)
+    assert.equal(replay.status, 200, JSON.stringify(replay.body))
+    assert.equal(replay.body.replayed, true)
+    assert.equal(one("SELECT COUNT(*) AS n FROM audit_logs WHERE action='merge_duplicate'").n, count)
+    assert.equal(replay.body.keeper.stock_quantity, 5, 'stock is carried once')
+    const altered = await merge({ ...body, cost_price_usd: 99 })
+    assert.equal(altered.body.code, 'resolve_request_conflict')
+    const continued = await merge({ keepId: 10, mergeId: 12, keep: true, resolve })
+    assert.equal(continued.status, 200, JSON.stringify(continued.body))
+    assert.equal(continued.body.keeper.cost_price_usd, 7)
+  })
+
+  await check('reviewed and continuation snapshots refuse unrelated edits before any next fold', async () => {
+    for (const target of ['before', 'keeper', 'remaining']) {
+      fresh()
+      state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
+      const seen = await preview(10, 11, '&groupIds=10,11,12')
+      const resolve = { requestId: 'stale-' + target, reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
+      if (target !== 'before') assert.equal((await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })).status, 200)
+      state.native.db.prepare('UPDATE products SET cost_price_usd=99 WHERE id=?').run(target === 'remaining' ? 12 : 10)
+      const before = dump()
+      const rejected = await merge({ keepId: 10, mergeId: target === 'before' ? 11 : 12, ...(target === 'before' ? { stock: 'merge' } : {}), keep: true, resolve })
+      assert.equal(rejected.body.code, 'merge_state_conflict', JSON.stringify(rejected))
+      assert.equal(dump(), before)
+    }
+  })
+
+  await check('preview refuses oversized groups rather than silently truncating costs', async () => {
+    fresh()
+    const seen = await preview(10, 11, '&groupIds=' + Array.from({ length: 13 }, (_, index) => index + 10).join(','))
+    assert.equal(seen.status, 400)
+    assert.equal(seen.body.code, 'resolve_group_too_large')
+  })
+
+  await check('a stock race between review validation and the atomic fold rolls the merge back', async () => {
+    fresh()
+    const seen = await preview(10, 11)
+    const resolve = { requestId: 'stock-race', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
+    state.beforeFold = () => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1')
+    const rejected = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
+    assert.equal(rejected.status, 409, JSON.stringify(rejected.body))
+    assert.equal(rejected.body.code, 'merge_state_conflict')
+    assert.equal(one('SELECT is_active FROM products WHERE id=11').is_active, 1)
+    assert.equal(one('SELECT quantity FROM branch_stock WHERE product_id=11 AND branch_id=1').quantity, 8, 'only the external mutation remains')
+    assert.equal(one("SELECT COUNT(*) n FROM audit_logs WHERE action='merge_duplicate'").n, 0)
+  })
+
+  await check('group receipts cannot grant cost edit or leak frozen costs to a non-viewer', async () => {
+    fresh()
+    const seen = await preview(10, 11)
+    const resolve = { requestId: 'no-cost-grant', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
+    state.user = MANAGER
+    assert.equal((await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve, cost_price_usd: 1 })).status, 403)
+    const done = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    assert.equal('cost_price_usd' in done.body.keeper, false)
+    const replay = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
+    assert.equal(replay.status, 200)
+    assert.equal('cost_price_usd' in replay.body.keeper, false)
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')

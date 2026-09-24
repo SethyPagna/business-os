@@ -438,11 +438,12 @@ export function mergePossiblySameProducts(
   // The Resolve grid's Keep merge: the kept product's name and barcode stay,
   // and a chosen cost (sent only by a user with the cost edit permission; the
   // Worker refuses it otherwise) replaces the averaged one.
-  keep?: { cost_price_usd?: number; cost_price_khr?: number | null },
+  keep?: { cost_price_usd?: number; cost_price_khr?: number | null; resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> } },
 ): Promise<unknown> {
   const body: Record<string, unknown> = stock ? { keepId, mergeId, stock } : { keepId, mergeId }
   if (keep) {
     body.keep = true
+    if (keep.resolve) body.resolve = keep.resolve
     if (keep.cost_price_usd !== undefined) body.cost_price_usd = keep.cost_price_usd
     if (keep.cost_price_khr != null) body.cost_price_khr = keep.cost_price_khr
   }
