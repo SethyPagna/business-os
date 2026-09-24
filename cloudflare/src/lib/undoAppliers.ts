@@ -141,6 +141,8 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
+  keeperChoice?: ProductMergeKeeperChoice
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
     category: string | null
@@ -314,6 +316,14 @@ export async function mergeReplayChangesProductImages(
 // for a stocked row is rejected (see routes/products.ts's merge endpoint).
 export type MergeStockDisposition = 'merge' | 'write_off'
 
+// The Resolve grid's Keep merge (owner N1/N4, 23 Sep 2026): the kept product
+// keeps its name and barcode, and a permitted reviewer's chosen cost replaces
+// the averaged one. Carried in the reversal so a redo repeats it exactly.
+export type ProductMergeKeeperChoice = {
+  follows: true
+  cost?: { cost_price_usd: number; cost_price_khr?: number | null }
+}
+
 // The ONE list of foreign keys a product merge must move onto the survivor.
 // Kept here (a lib) rather than in the route so the forward fold and the undo
 // applier read the SAME list and can never drift -- and so undo can validate a
@@ -414,6 +424,7 @@ export type MergeFoldFn = (
   mergeContext: string,
   stockDisposition?: MergeStockDisposition,
   economicsOverride?: ProductMergeEconomics,
+  keeperChoice?: ProductMergeKeeperChoice,
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -1467,6 +1478,7 @@ async function redoBulkMergeFolds(
       // silently fall back to merging stock the reviewer chose to write off.
       r.stockDisposition === 'write_off' ? 'write_off' : 'merge',
       economicsOverride,
+      r.keeperChoice,
     )
     preserveBulkClusterPlan(r, one)
     fresh.push(one)
@@ -2513,6 +2525,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           // reviewer settled as a write-off must not come back as a stock fold.
           reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
           economicsOverride,
+          reversal.keeperChoice,
         )
         preserveBulkClusterPlan(reversal, fresh)
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })

@@ -52,6 +52,7 @@ function compile(file, dir, stubs = {}) {
 const { contactDisplayAddress } = { contactDisplayAddress: (a) => (typeof a === 'string' ? a : '') }
 const { buildContactMergePlan } = compile('contactMerge.ts', 'lib', {
   './contactOptions': { contactDisplayAddress },
+  './phone': compile('phone.ts', 'lib'),
 })
 
 const migrationsDir = path.join(__dirname, '..', 'migrations')
@@ -206,7 +207,7 @@ function applyHelper(sqlite) {
           entity: 'supplier',
           editableColumns: SUPPLIER_COLUMNS,
           keeper,
-          merged,
+          members: [merged],
           hasCustomerReceivables: false,
           hasSupplierInvoices: true,
           audit: { operationId: `test-${loser.id}`, userId: null, userName: 'test', deviceName: null, deviceTz: null },

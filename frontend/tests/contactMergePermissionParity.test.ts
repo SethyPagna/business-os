@@ -23,7 +23,7 @@ const clusterCard = duplicatesUi.slice(
 assert.match(
   clusterCard,
   /canMergeDuplicates && cluster\.contacts\.length >= 2/,
-  'each Keep this merge control must use the combined merge capability',
+  'the one Resolve control must use the combined merge capability',
 )
 assert.match(
   clusterCard,
@@ -36,14 +36,36 @@ assert.match(
   'dismiss must remain available from the conflict-resolution capability without requiring merge',
 )
 
-const mergeHandler = duplicatesUi.slice(
-  duplicatesUi.indexOf('const handleMergeInto = async'),
+// Resolve (R12): the grid opens, restores and writes only with the combined
+// grant as it is NOW -- read through a ref, never a render's snapshot.
+assert.match(
+  duplicatesUi,
+  /const canMergeDuplicatesRef = useRef\(canMergeDuplicates\)\s+canMergeDuplicatesRef\.current = canMergeDuplicates/,
+  'the Resolve grid must read the live combined merge grant',
+)
+const resolveHandlers = duplicatesUi.slice(
+  duplicatesUi.indexOf('const openResolve ='),
   duplicatesUi.indexOf('const toggleSelected ='),
 )
 assert.match(
-  mergeHandler,
-  /if \(!canBulkContactsRef\.current \|\| !canMergeDuplicates\) return[\s\S]*?await mergeContacts\(/,
-  'the individual merge handler must refuse stale or programmatic calls after bulk or merge permission is lost',
+  resolveHandlers,
+  /const openResolve = useCallback\(\(target: ContactTableKind, cluster: ContactDuplicateCluster, draft\?: ResolveDraft\) => \{\s*if \(!canMergeDuplicatesRef\.current\) return/,
+  'opening the Resolve grid must refuse stale or programmatic calls after bulk or merge permission is lost',
+)
+assert.match(
+  resolveHandlers,
+  /canMerge: \(\) => canMergeDuplicatesRef\.current/,
+  'the grid must ask for the merge grant again right before it writes',
+)
+assert.match(
+  resolveHandlers,
+  /if \(!canMergeDuplicatesRef\.current \|\| \(parked\.table === 'suppliers' && !includeSuppliers\)\) \{\s*reparkDeniedRestore\(entry\)/,
+  'a parked Resolve must not reopen without the merge grant, or a supplier group without supplier access',
+)
+assert.match(
+  duplicatesUi,
+  /useEffect\(\(\) => \{\s*if \(!canMergeDuplicates\) setResolving\(null\)\s*\}, \[canMergeDuplicates\]\)/,
+  'losing the merge grant must close an open Resolve grid',
 )
 
 const bulkMergeHandler = duplicatesUi.slice(
@@ -71,10 +93,13 @@ assert.match(
   'multi-cluster selection must require bulk while individual dismiss and reopen remain available',
 )
 
-const mergeRoute = contactsRoute.slice(
-  contactsRoute.indexOf('app.post(`${config.path}/merge`'),
-  contactsRoute.indexOf('// Backfill:', contactsRoute.indexOf('app.post(`${config.path}/merge`')),
-)
+// The merge route runs up to the create route that follows it. The slice must
+// end there: an end marker that is not found makes slice() run to the end of
+// the file, and the checks below would then pass on any later route's code.
+const mergeRouteStart = contactsRoute.indexOf('app.post(`${config.path}/merge`')
+const mergeRouteEnd = contactsRoute.indexOf('app.post(config.path, async (c)', mergeRouteStart)
+assert.ok(mergeRouteStart >= 0 && mergeRouteEnd > mergeRouteStart, 'the merge route and the route after it are found')
+const mergeRoute = contactsRoute.slice(mergeRouteStart, mergeRouteEnd)
 assert.match(
   mergeRoute,
   /getPermissionTier\(user, 'contacts'\) === 'review'/,
@@ -91,8 +116,13 @@ assert.match(
   'the server merge route must enforce the Contacts bulk umbrella',
 )
 assert.match(
-  contactsRoute,
+  mergeRoute,
   /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
+  'the server merge route must enforce contacts:resolve_conflicts like canMergeDuplicates (behaviour: test-contact-merge-n-records-native.cjs T24d)',
+)
+assert.match(
+  contactsRoute,
+  /duplicates\/dismiss`, async \(c\) => \{\s+const user = c\.get\('user'\)\s+const denied = denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
   'dismiss and reopen routes must continue to enforce the distinct conflict-resolution action',
 )
 

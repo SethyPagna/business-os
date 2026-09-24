@@ -10,12 +10,13 @@ import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
-import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
+import { assertUpdatedAtMatch, getExpectedUpdatedAt, normalizeUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
 import {
   findContactDuplicates,
   findContactDuplicateState,
   findDuplicateContactClusters,
+  contactMergeCluster,
   dismissDuplicateCluster,
   undismissDuplicateCluster,
   collectContactPhones,
@@ -45,7 +46,18 @@ import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback }
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { buildContactMergePlan, contactMergeHasDistinctMemberships } from '../lib/contactMerge'
+import {
+  buildContactMergePlan,
+  stepContactMergePlan,
+  contactMergeStatementBudget,
+  contactMergeContinuation,
+  CONTACT_MERGE_MAX_RECORDS,
+  type ContactMergeChoice,
+  type ContactMergeInput,
+  type ContactMergePlan,
+  type ContactMergePortalAccount,
+} from '../lib/contactMerge'
+import { getPlanLimits } from '../lib/planTier'
 import {
   ANONYMOUS_CUSTOMER_ERROR_CODE,
   ANONYMOUS_CUSTOMER_MUTATION_ERROR,
@@ -527,6 +539,149 @@ async function hasTable(db: ReturnType<typeof getDb>, name: string): Promise<boo
   return Boolean(row)
 }
 
+const CONTACT_MERGE_STALE_ERROR = 'One of these contacts changed while the merge was being saved. Refresh the review and try again.'
+
+type ContactMergeRequest = {
+  legacy: boolean
+  keepId: number
+  mergeIds: number[]
+  clientRequestId: string | null
+  expected: Map<number, string | null> | null
+  choices: Record<string, ContactMergeChoice>
+  membershipSourceId: number | null
+  portalKeepContactId: number | null
+}
+
+function positiveContactId(value: unknown): number | null {
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+// A value typed into the Resolve grid is stored in the same shape an edit
+// stores it (see the POST/PUT handlers below).
+function contactMergeCustomValue(column: string, value: string | null, optionMode: ContactOptionMode): unknown {
+  if (value === null) return null
+  if (column === 'name') return value.trim()
+  if (value === '') return null
+  if (column === 'phone') return formatPhoneP8(value)
+  if (column === 'address') return formatContactOptionPhones(value, optionMode)
+  return value
+}
+
+// POST {path}/merge takes two bodies. { keepId, mergeId } is the original
+// two-record merge. { keepId, mergeIds, ... } is the Resolve grid: up to six
+// records, the reviewer's field choices, and the updated_at every record had
+// when the grid read it.
+function parseContactMergeRequest(body: Record<string, unknown>, config: ContactConfig): ContactMergeRequest | { error: string; code?: string } {
+  if (!Array.isArray(body.mergeIds)) {
+    const keepId = Number(body.keepId)
+    const mergeId = Number(body.mergeId)
+    if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
+      return { error: 'keepId and mergeId (two different ids) are required' }
+    }
+    return { legacy: true, keepId, mergeIds: [mergeId], clientRequestId: null, expected: null, choices: {}, membershipSourceId: null, portalKeepContactId: null }
+  }
+  const keepId = positiveContactId(body.keepId)
+  const mergeIds = body.mergeIds.map(positiveContactId)
+  if (!keepId || !mergeIds.length || mergeIds.length >= CONTACT_MERGE_MAX_RECORDS
+    || mergeIds.some((id) => !id || id === keepId) || new Set(mergeIds).size !== mergeIds.length) {
+    return { error: `keepId and 1 to ${CONTACT_MERGE_MAX_RECORDS - 1} other mergeIds are required`, code: 'contact_merge_invalid_ids' }
+  }
+  const recordIds = [keepId, ...(mergeIds as number[])]
+  const expected = new Map<number, string | null>()
+  for (const entry of Array.isArray(body.expected) ? body.expected : []) {
+    const id = positiveContactId((entry as Record<string, unknown> | null)?.id)
+    if (id) expected.set(id, normalizeUpdatedAt((entry as Record<string, unknown>).updated_at))
+  }
+  if (recordIds.some((id) => !expected.has(id))) {
+    return { error: 'expected must carry the updated_at the review showed for every record', code: 'contact_merge_expected_required' }
+  }
+  const invalidChoice = { error: 'A chosen value does not belong to these records.', code: 'contact_merge_invalid_choice' }
+  // null: not sent; false: sent but not one of these records.
+  const recordChoice = (value: unknown): number | null | false => {
+    if (value === undefined || value === null) return null
+    const id = positiveContactId(value)
+    return id && recordIds.includes(id) ? id : false
+  }
+  const membershipSourceId = recordChoice(body.membership_source_id)
+  const portalKeepContactId = recordChoice(body.portal_keep_contact_id)
+  if (membershipSourceId === false || portalKeepContactId === false) return invalidChoice
+  const rawChoices = body.choices ?? {}
+  if (typeof rawChoices !== 'object' || rawChoices === null || Array.isArray(rawChoices)) return invalidChoice
+  const choices: Record<string, ContactMergeChoice> = {}
+  for (const [column, raw] of Object.entries(rawChoices as Record<string, unknown>)) {
+    if (column === 'membership_number' || !config.columns.includes(column) || !raw || typeof raw !== 'object') return invalidChoice
+    const choice = raw as Record<string, unknown>
+    if ('source_id' in choice) {
+      const id = recordChoice(choice.source_id)
+      if (!id) return invalidChoice
+      choices[column] = { source_id: id }
+    } else if ('custom' in choice && column !== 'created_at' && (choice.custom === null || typeof choice.custom === 'string')) {
+      choices[column] = { custom: contactMergeCustomValue(column, choice.custom, config.optionMode) }
+    } else {
+      return invalidChoice
+    }
+  }
+  const clientRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim().slice(0, 120) || null : null
+  return { legacy: false, keepId, mergeIds: mergeIds as number[], clientRequestId, expected, choices, membershipSourceId, portalKeepContactId }
+}
+
+// Owner ruling (24 Sep 2026): merging is allowed ONLY for system-detected
+// duplicates. Returns the ids of the verified cluster, or null to refuse.
+//  - The normal case: one OPEN cluster of findDuplicateContactClusters (the
+//    Duplicates tab's own sweep, re-run now) holds every submitted id.
+//  - A free-plan stepped merge's later step (client_request_id `<base>:rN`,
+//    minted by contactMergeContinuation): the first step already verified the
+//    cluster and wrote its ids into its audit row, in the same batch as the
+//    merge. Those later steps may no longer look like a cluster (the kept
+//    record may have taken a typed name), so they are authorized by that
+//    committed receipt for the same kept record -- never by a client flag.
+async function verifyContactMergeCluster(
+  db: ReturnType<typeof getDb>,
+  config: ContactConfig,
+  keepId: number,
+  recordIds: number[],
+  clientRequestId: string | null,
+): Promise<number[] | null> {
+  const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode)
+  const cluster = contactMergeCluster(clusters, recordIds)
+  if (cluster) return cluster.contacts.map((contact) => Number(contact.id))
+  const base = clientRequestId && /:r\d+$/.test(clientRequestId) ? clientRequestId.replace(/:r\d+$/, '') : null
+  if (!base) return null
+  const receipts = await db.prepare(`SELECT details FROM audit_logs
+    WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId AND json_valid(details)
+      AND (json_extract(details, '$.clientRequestId') = @base
+        OR substr(json_extract(details, '$.clientRequestId'), 1, length(@prefix)) = @prefix)
+    ORDER BY id DESC LIMIT 10`).all<{ details: string }>({ entity: config.entity, entityId: String(keepId), base, prefix: `${base}:r` })
+  for (const receipt of receipts) {
+    const verified = (JSON.parse(receipt.details) as { clusterIds?: unknown }).clusterIds
+    if (!Array.isArray(verified)) continue
+    const ids = new Set(verified.map(Number))
+    if (recordIds.every((id) => ids.has(id))) return [...ids]
+  }
+  return null
+}
+
+// The planner's refusals as each body reports them: the original two-record
+// merge keeps its 409 blocks; the Resolve grid gets a 400 naming the decision
+// it still has to send.
+function contactMergeRefusal(error: unknown, legacy: boolean, accounts: ContactMergePortalAccount[]) {
+  const reason = error instanceof Error ? error.message : ''
+  if (reason === 'contact_merge_membership_lineage_required') {
+    return legacy
+      ? { status: 409 as const, body: { error: 'Both customers have different membership IDs. Preserve their membership lineage before merging.', code: 'membership_lineage_required' } }
+      : { status: 400 as const, body: { error: 'Choose which membership number to keep.', code: 'membership_choice_required' } }
+  }
+  if (reason === 'contact_merge_portal_choice_required') {
+    return legacy
+      ? { status: 409 as const, body: { error: 'Both customers have storefront accounts. Cancel this merge and resolve which storefront account must survive first.', code: 'portal_account_collision', accounts: accounts.map(({ id, contact_id }) => ({ id, contact_id })) } }
+      : { status: 400 as const, body: { error: 'Choose which storefront account stays linked.', code: 'portal_choice_required', accounts } }
+  }
+  if (reason === 'contact_merge_invalid_choice') return { status: 400 as const, body: { error: 'A chosen value does not belong to these records.', code: 'contact_merge_invalid_choice' } }
+  if (reason === 'contact_merge_name_required') return { status: 400 as const, body: { error: 'Name is required', code: 'contact_merge_name_required' } }
+  return null
+}
+
 // P4-2: the auto-resolve half of checkContactDuplicateBlock's supplier rule.
 // A create that resolved onto an existing supplier writes nothing (see the
 // POST handler); a create/rename/edit surface that had already loaded a
@@ -552,7 +707,7 @@ async function mergeSupplierIntoExisting(
     entity: config.entity,
     editableColumns: config.columns,
     keeper,
-    merged,
+    members: [merged],
     hasCustomerReceivables: false,
     hasSupplierInvoices,
     audit: {
@@ -1128,18 +1283,28 @@ function registerContactRoutes(config: ContactConfig) {
     return c.json({ ok: true })
   })
 
-  // Merges two contact records the reviewer has confirmed really are the
-  // same real-world person/business: every historical reference to
-  // `mergeId` is repointed at `keepId`, any field left blank on the
-  // keeper is backfilled from the merged record (never the other way --
-  // the keeper's own existing data always wins), and the merged row is
-  // then deleted. Same Full-Access-only gate as plain delete below, for
-  // the same reason (this IS a delete, just preceded by a repoint).
+  // Merges up to six contact records the reviewer confirmed are the same
+  // real-world person or business into the kept record, in ONE atomic batch:
+  // every historical reference to a merged record moves to the kept one, the
+  // kept record takes the chosen value of each field (a field nobody chose
+  // keeps the kept record's value, or its first non-blank one), and the
+  // merged records are deleted. Same Full-Access-only gate as plain delete
+  // below, for the same reason (this IS a delete, just preceded by a move).
+  // parseContactMergeRequest describes the two request bodies. Owner ruling
+  // (24 Sep 2026): only a CURRENT system-detected duplicate cluster merges --
+  // no request can skip that (verifyContactMergeCluster). In the Resolve grid
+  // a missing membership or storefront decision is a 400 and a record changed
+  // since the grid read it is a 409 naming it.
   app.post(`${config.path}/merge`, async (c) => {
     const user = c.get('user')
     if (getPermissionTier(user, 'contacts') === 'review') {
       return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
     }
+    // The Duplicates tab offers Merge only with contacts:resolve_conflicts
+    // (DuplicatesTab.tsx canMergeDuplicates); the same gate as the sibling
+    // dismiss/undismiss routes, enforced here so the API matches the button.
+    const deniedResolve = denyUnlessFullContactAction(c, 'resolve_conflicts')
+    if (deniedResolve) return deniedResolve
     // Per-action override (Part 546): 'contacts:merge' switched off for
     // this role blocks the action even at Full Access.
     if (getActionTier(user, 'contacts', 'merge') === 'none') {
@@ -1149,56 +1314,77 @@ function registerContactRoutes(config: ContactConfig) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-    const keepId = Number(body.keepId)
-    const mergeId = Number(body.mergeId)
-    if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
-      return c.json({ error: 'keepId and mergeId (two different ids) are required' }, 400)
-    }
+    const request = parseContactMergeRequest(body, config)
+    if ('error' in request) return c.json(request.code ? { error: request.error, code: request.code } : { error: request.error }, 400)
+    const { legacy, keepId, mergeIds } = request
     const db = getDb(c.env)
-    const [keeper, merged] = await Promise.all([
-      db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }),
-      db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: mergeId }),
-    ])
-    if (!keeper) return c.json({ error: `Contact to keep (id ${keepId}) not found` }, 404)
-    if (!merged) return c.json({ error: `Contact to merge (id ${mergeId}) not found` }, 404)
-    if (config.table === 'customers' && (isAnonymousCustomer(keeper) || isAnonymousCustomer(merged))) {
+    const recordIds = [keepId, ...mergeIds]
+    const idParams = Object.fromEntries(recordIds.map((id, index) => [`id${index}`, id]))
+    const idList = recordIds.map((_, index) => `@id${index}`).join(', ')
+    const rows = await db.prepare(`SELECT * FROM ${config.table} WHERE id IN (${idList})`).all<Record<string, unknown>>(idParams)
+    const rowById = new Map(rows.map((row) => [Number(row.id), row]))
+    const keeper = rowById.get(keepId)
+    const merged = mergeIds.map((id) => rowById.get(id)).filter((row): row is Record<string, unknown> => Boolean(row))
+    if (!keeper || merged.length !== mergeIds.length) {
+      if (legacy) {
+        return c.json({ error: keeper ? `Contact to merge (id ${mergeIds[0]}) not found` : `Contact to keep (id ${keepId}) not found` }, 404)
+      }
+      // A retry whose first attempt committed finds its merged records gone;
+      // the audit row of that attempt answers it instead of a false conflict.
+      if (keeper && request.clientRequestId) {
+        const receipt = await db.prepare(`SELECT details, old_value, new_value FROM audit_logs
+          WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId
+            AND json_valid(details) AND json_extract(details, '$.clientRequestId') = @clientRequestId
+          ORDER BY id DESC LIMIT 1`).get<{ details: string; old_value: string | null; new_value: string | null }>({ entity: config.entity, entityId: String(keepId), clientRequestId: request.clientRequestId })
+        if (receipt) {
+          const details = JSON.parse(receipt.details) as { operationId?: string; mergedIds?: number[] }
+          const before = receipt.old_value ? JSON.parse(receipt.old_value) as Record<string, unknown> : null
+          if (before) delete before.moved
+          return c.json({
+            keeper,
+            merged_ids: details.mergedIds ?? [],
+            before,
+            after: receipt.new_value ? JSON.parse(receipt.new_value) : null,
+            operationId: details.operationId ?? null,
+            replayed: true,
+            ...(merged.length ? {
+              remaining_merge_ids: merged.map((row) => Number(row.id)),
+              continuation: contactMergeContinuation(keeper, merged, config.columns, request.clientRequestId),
+            } : {}),
+          })
+        }
+      }
+      return c.json({
+        error: CONTACT_MERGE_STALE_ERROR,
+        code: 'contact_merge_conflict',
+        stale: recordIds.filter((id) => !rowById.has(id)).map((id) => ({ id, reason: 'deleted' })),
+      }, 409)
+    }
+    if (config.table === 'customers' && (isAnonymousCustomer(keeper) || merged.some((row) => isAnonymousCustomer(row)))) {
       return anonymousCustomerMutationResponse(c)
     }
+    const expected = request.expected
+    if (expected) {
+      const stale = [keeper, ...merged]
+        .filter((row) => normalizeUpdatedAt(row.updated_at) !== expected.get(Number(row.id)))
+        .map((row) => ({ id: Number(row.id), reason: 'updated', expected_updated_at: expected.get(Number(row.id)) ?? null, actual_updated_at: normalizeUpdatedAt(row.updated_at) }))
+      if (stale.length) return c.json({ error: CONTACT_MERGE_STALE_ERROR, code: 'contact_merge_conflict', stale }, 409)
+    }
 
-    // A merge endpoint is not a general hard-delete primitive. Re-prove that
-    // these two current rows still share the duplicate identity the review UI
-    // showed, then pin both complete editable snapshots in the atomic guard.
-    const duplicateMatches = await findContactDuplicates(db, config.table, {
-      id: keepId,
-      name: String(keeper.name || ''),
-      phones: collectContactPhones(keeper, config.optionMode),
-    }, config.optionMode)
-    if (!duplicateMatches.some((match) => Number(match.id) === mergeId)) {
+    // A merge endpoint is not a general hard-delete primitive: the submitted
+    // records must still be one open cluster of the Duplicates tab's own
+    // sweep. The atomic guard then pins every record's editable snapshot.
+    const clusterIds = await verifyContactMergeCluster(db, config, keepId, recordIds, request.clientRequestId)
+    if (!clusterIds) {
       return c.json({
-        error: 'These contacts no longer share a duplicate name or phone. Refresh the review before merging.',
-        code: 'contact_merge_identity_required',
+        error: 'These contacts are not a current system-detected duplicate group. Only duplicates the system found can be merged. Refresh the Duplicates list and try again.',
+        code: 'contact_merge_not_duplicates',
       }, 409)
     }
 
-    if (config.table === 'customers' && contactMergeHasDistinctMemberships(keeper, merged)) {
-      return c.json({
-        error: 'Both customers have different membership IDs. Preserve their membership lineage before merging.',
-        code: 'membership_lineage_required',
-      }, 409)
-    }
-    if (config.table === 'customers') {
-      const portalAccounts = await db.prepare(
-        `SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (@keepId, @mergeId) ORDER BY id`,
-      ).all<{ id: number; contact_id: number }>({ keepId, mergeId })
-      if (portalAccounts.some((row) => Number(row.contact_id) === keepId) && portalAccounts.some((row) => Number(row.contact_id) === mergeId)) {
-        return c.json({
-          error: 'Both customers have storefront accounts. Cancel this merge and resolve which storefront account must survive first.',
-          code: 'portal_account_collision',
-          accounts: portalAccounts,
-        }, 409)
-      }
-    }
-
+    const portalAccounts = config.table === 'customers'
+      ? await db.prepare(`SELECT id, contact_id, membership_id, name FROM portal_accounts WHERE contact_id IN (${idList}) ORDER BY id`).all<ContactMergePortalAccount>(idParams)
+      : []
     const [hasCustomerReceivables, hasSupplierInvoices] = await Promise.all([
       config.table === 'customers' ? hasTable(db, 'customer_receivables') : Promise.resolve(false),
       config.table === 'suppliers' ? hasTable(db, 'supplier_invoices') : Promise.resolve(false),
@@ -1219,22 +1405,40 @@ function registerContactRoutes(config: ContactConfig) {
     }
 
     const operationId = crypto.randomUUID()
-    const plan = buildContactMergePlan({
+    const planInput: ContactMergeInput = {
       table: config.table,
       entity: config.entity,
       editableColumns: config.columns,
       keeper,
-      merged,
+      members: merged,
+      choices: request.choices,
+      membershipSourceId: request.membershipSourceId,
+      portalAccounts,
+      portalKeepContactId: request.portalKeepContactId,
       hasCustomerReceivables,
       hasSupplierInvoices,
       audit: {
         operationId,
+        clientRequestId: request.clientRequestId,
+        clusterIds,
         userId: user?.id ?? null,
         userName: actorSnapshot(user),
         deviceName: auditDevice.deviceName,
         deviceTz: auditDevice.deviceTz,
       },
-    })
+    }
+    let plan: ContactMergePlan
+    try {
+      plan = buildContactMergePlan(planInput)
+    } catch (error) {
+      const refusal = contactMergeRefusal(error, legacy, portalAccounts)
+      if (refusal) return c.json(refusal.body, refusal.status)
+      throw error
+    }
+    // Free plan: a merge too large for this request's D1 query budget merges
+    // the first records now and returns the request that merges the rest.
+    const step = stepContactMergePlan(planInput, plan, contactMergeStatementBudget(getPlanLimits(c.env).d1QueriesPerInvocation))
+    plan = step.plan
 
     let committedKeeper: Record<string, unknown> = plan.finalKeeper
     try {
@@ -1244,21 +1448,19 @@ function registerContactRoutes(config: ContactConfig) {
       // marker is in that same transaction, so it is durable proof that this
       // exact request completed; reconcile before returning any failure.
       try {
+        const mergedParams = Object.fromEntries(plan.mergedIds.map((id, index) => [`m${index}`, id]))
         const [afterKeeper, afterMerged, receipt] = await Promise.all([
           db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }),
-          db.prepare(`SELECT id FROM ${config.table} WHERE id = @id`).get<{ id: number }>({ id: mergeId }),
+          db.prepare(`SELECT id FROM ${config.table} WHERE id IN (${Object.keys(mergedParams).map((key) => `@${key}`).join(', ')})`).all<{ id: number }>(mergedParams),
           db.prepare(`SELECT id FROM audit_logs
             WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId
               AND json_valid(details) AND json_extract(details, '$.operationId') = @operationId
             ORDER BY id DESC LIMIT 1`).get<{ id: number }>({ entity: config.entity, entityId: String(keepId), operationId }),
         ])
-        if (afterKeeper && !afterMerged && receipt) {
+        if (afterKeeper && !afterMerged.length && receipt) {
           committedKeeper = afterKeeper
         } else if (/malformed JSON|contact_merge_guard/i.test(String(error))) {
-          return c.json({
-            error: 'One of these contacts changed while the merge was being saved. Refresh the review and try again.',
-            code: 'contact_merge_conflict',
-          }, 409)
+          return c.json({ error: CONTACT_MERGE_STALE_ERROR, code: 'contact_merge_conflict' }, 409)
         } else {
           throw error
         }
@@ -1286,13 +1488,24 @@ function registerContactRoutes(config: ContactConfig) {
     // swallows its own KV/D1 errors, so wrap it the same way the old
     // Promise.allSettled did to keep a cache-bump failure from surfacing.
     await bumpVersions(c.env, [...new Set(mergeVersions)]).catch(() => {})
-    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedId: mergeId }).catch(() => {}))
+    c.executionCtx.waitUntil(broadcast(c.env, config.channel, { action: 'merge', id: keepId, mergedIds: plan.mergedIds }).catch(() => {}))
     try {
       committedKeeper = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id: keepId }) || committedKeeper
     } catch (_) {
       // Return the computed final keeper when a post-commit refresh is down.
     }
-    return c.json({ contact: committedKeeper, operationId })
+    if (legacy) return c.json({ contact: committedKeeper, operationId })
+    return c.json({
+      keeper: committedKeeper,
+      merged_ids: plan.mergedIds,
+      before: plan.before,
+      after: plan.after,
+      operationId,
+      ...(step.remaining.length ? {
+        remaining_merge_ids: step.remaining.map((row) => Number(row.id)),
+        continuation: contactMergeContinuation(committedKeeper, step.remaining, config.columns, request.clientRequestId),
+      } : {}),
+    })
   })
 
   app.post(config.path, async (c) => {
