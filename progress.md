@@ -1,4 +1,36 @@
-## Cloud handoff reconciliation — 24 September (branch claude/cloud-handoff-20260924-0unu3f, NOT deployed)
+## Current status — 25 September 2026 (Hong Kong)
+
+The owner-authorized Claude handoff **was deployed** from clean commit
+`7e7cc7dcebd18f016ca732589acd52ed1133bc85`. Worker version
+`ff4e1a9b-6558-4e6e-a319-db9a49c1f834` has 100% allocation; deployment
+`8f7e82d6-0e81-4ce6-a2c9-55dc241b7c02` was created at
+`2026-09-24T21:48:00.150459Z`. The pending and applied migration sets were
+exactly **0192, 0193, 0194**. Seven business-table pre/post counts/totals matched.
+No held migration ran. `/health` and runtime HTTP checks returned Cloudflare's
+403 challenge, so live HTTP health is **not certified**; deployment and allocation
+were verified through Cloudflare. No security rule was bypassed.
+
+Canonical checkout: `C:/Users/mrkl6/Projects/BusinessOS/Source`.
+Evidence: `Projects/BusinessOS/Records/Deployments/2026-09-25` under the user's home.
+The matching GitHub ZIP is `Projects/BusinessOS/Releases/business-os-7e7cc7dc.zip`;
+all 2,534 files matched the deployed commit. The former dirty shared checkout is
+preserved at `Projects/BusinessOS/Recovery/UnmergedWorkspace` (a junction), together
+with its patch, status and Git/worktree manifests. Do not remove that recovery:
+it contains unique edits, ignored local configuration and linked worktree metadata.
+
+Resumed work is on `codex/verified-resume-20260925`, separate from production.
+The fresh reports baseline passes `reportsDetailFloatClose`, `reportsRenderPass`
+and `reportsHubComposedResponsive`; the standalone float test passes all 16
+assertions including negative controls. The historical red is not reproduced.
+N1–N4 is being integrated and repaired before N6. N6 needs metadata conflict
+fencing before certification. Report Center follows those unfinished lanes.
+No new feature work in this section is deployed. Council decisions and the
+debloat blast-radius matrix: `docs/fleet/2026-09-25-resume-council.md`.
+
+Everything below is historical and is superseded by this dated status where it
+describes deployment, migration state or the old reports failure.
+
+## Historical cloud handoff — 24 September (not yet deployed at that time)
 
 **Read this first.** The newest code is on `claude/cloud-handoff-20260924-0unu3f`, not on `main`
 (main = a39a3cbbb, 23 Sep; production = Worker 250d3591 from f064e844, which main contains).
