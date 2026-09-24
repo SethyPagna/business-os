@@ -82,7 +82,6 @@ const cluster = {
 const request = {
   keepId: 11,
   mergeIds: [12, 13, 14, 15, 16],
-  manual: true,
   client_request_id: 'contact_merge_abc',
   expected: [11, 12, 13, 14, 15, 16].map((id) => ({ id, updated_at: `v${id}` })),
   choices: { name: { source_id: 11 } },
@@ -109,7 +108,7 @@ try {
     assert.equal(sent[0].method, 'POST')
     assert.match(sent[0].url, /\/api\/customers\/merge$/)
     assert.deepEqual(sent[0].body.mergeIds, [12, 13], 'every record travels in the one request')
-    assert.equal(sent[0].body.manual, true)
+    assert.equal('manual' in sent[0].body, false, 'owner ruling 24 Sep: no request skips the server cluster check')
     assert.equal(sent[0].body.membership_source_id, 13)
     assert.equal(sent[0].body.portal_keep_contact_id, 12)
     assert.deepEqual(outcome.merged, [{ id: 12, name: 'dara' }, { id: 13, name: 'Dara ' }])
@@ -121,7 +120,7 @@ try {
 
   await test('the free plan steps: every continuation is sent until no record remains', async () => {
     const continuation = {
-      keepId: 11, mergeIds: [15, 16], manual: true, client_request_id: 'contact_merge_abc:r2',
+      keepId: 11, mergeIds: [15, 16], client_request_id: 'contact_merge_abc:r2',
       expected: [{ id: 11, updated_at: 'v11b' }, { id: 15, updated_at: 'v15' }, { id: 16, updated_at: 'v16' }],
       choices: { name: { source_id: 11 } }, membership_source_id: 11, portal_keep_contact_id: 11,
     }
@@ -180,7 +179,7 @@ try {
       { id: 13, updated_at: null },
     ])
     assert.match(body.client_request_id, /^contact_merge_/)
-    assert.equal('manual' in body, false, 'bulk keeps the server re-check that the records still match')
+    assert.equal('manual' in body, false, 'bulk is held to the server cluster check like the grid')
     assert.equal('choices' in body, false)
     assert.notEqual(contactMergeRequest(cluster, 11, [12]).client_request_id, body.client_request_id, 'every merge is its own request')
   })

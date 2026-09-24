@@ -469,7 +469,6 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
       const request: ContactMergeRequest = {
         keepId,
         mergeIds,
-        manual: true,
         client_request_id: createClientRequestId('contact_merge'),
         expected: [keepId, ...mergeIds].map((id) => {
           const version = recordOf(ctx, id)?.updated_at

@@ -259,8 +259,6 @@ export type ContactMergeChoice = { source_id: number } | { custom: string | null
 export type ContactMergeRequest = {
   keepId: number
   mergeIds: number[]
-  /** The reviewer ruled these are one contact: no shared name/phone re-check. */
-  manual?: boolean
   /** A retry with the same id is answered from the first attempt's audit row. */
   client_request_id: string
   expected: Array<{ id: number; updated_at: string | null }>
@@ -284,8 +282,10 @@ export type ContactMergeOutcome = {
 }
 
 // Refusals the caller answers itself (the Resolve grid reads the records
-// again; bulk merge counts them), so the global write banner is cleared.
-const HANDLED_MERGE_CODES = new Set(['contact_merge_conflict', 'membership_choice_required', 'portal_choice_required', 'anonymous_customer_immutable'])
+// again or shows the refusal; bulk merge counts them), so the global write
+// banner is cleared. contact_merge_not_duplicates: owner ruling 24 Sep 2026,
+// only a current system-detected duplicate group merges (Worker-enforced).
+const HANDLED_MERGE_CODES = new Set(['contact_merge_conflict', 'contact_merge_not_duplicates', 'membership_choice_required', 'portal_choice_required', 'anonymous_customer_immutable'])
 
 type ContactMergeResponse = {
   keeper?: unknown
@@ -425,8 +425,9 @@ export function planBulkContactMerges(clusters: ContactDuplicateCluster[]): Bulk
 /**
  * The request that merges `mergeIds` into `keeperId` as the list read them.
  * Nobody chose field values here, so every field keeps the kept record's value
- * (else the first non-blank one), and without `manual` the server re-checks
- * that the records still share a name or phone. Two membership numbers or two
+ * (else the first non-blank one). The server merges only a current
+ * system-detected duplicate group (owner ruling 24 Sep 2026); no request can
+ * skip that check. Two membership numbers or two
  * storefront accounts need a person: the server answers
  * membership_choice_required / portal_choice_required.
  */

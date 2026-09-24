@@ -116,8 +116,13 @@ assert.match(
   'the server merge route must enforce the Contacts bulk umbrella',
 )
 assert.match(
-  contactsRoute,
+  mergeRoute,
   /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
+  'the server merge route must enforce contacts:resolve_conflicts like canMergeDuplicates (behaviour: test-contact-merge-n-records-native.cjs T24d)',
+)
+assert.match(
+  contactsRoute,
+  /duplicates\/dismiss`, async \(c\) => \{\s+const user = c\.get\('user'\)\s+const denied = denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/,
   'dismiss and reopen routes must continue to enforce the distinct conflict-resolution action',
 )
 

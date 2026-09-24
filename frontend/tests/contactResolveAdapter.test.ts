@@ -190,7 +190,6 @@ try {
     assert.deepEqual({ ...request, client_request_id: 'x' }, {
       keepId: 11,
       mergeIds: [12, 13],
-      manual: true,
       client_request_id: 'x',
       expected: [{ id: 11, updated_at: 'v11' }, { id: 12, updated_at: 'v12' }, { id: 13, updated_at: 'v13' }],
       choices: {

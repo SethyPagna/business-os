@@ -2,8 +2,11 @@
 // planner and duplicate finder, the full migration chain in SQLite and the
 // transactional d1compat.batch. All data is synthetic.
 //
-//   T24  a manual merge of records with different names returns 200 (the
-//        identity re-check that still guards an unruled merge returns 409)
+//   T24  owner ruling 24 Sep: only a CURRENT system-detected duplicate
+//        cluster merges. A hand-picked set is 409 even with the old
+//        `manual: true`, a cluster that changed or was kept as separate is
+//        409, a detected cluster applies with 200, and contacts:resolve_conflicts
+//        switched off is 403 (the Duplicates tab's own gate)
 //   T25  the chosen membership number is kept and every other number goes to
 //        the notes; a missing membership decision returns 400
 //   T26  the chosen storefront account moves to the kept record and every
@@ -45,10 +48,11 @@ const contactMerge = load('lib/contactMerge.ts', { './contactOptions': contactOp
 const planTier = load('lib/planTier.ts')
 
 // One Worker app for the whole run; each fixture swaps in a fresh database.
-const state = { db: null, batches: [], broadcasts: [], hook: null, lost: false }
+const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', permissions: '{}' }
+const state = { db: null, batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN }
 const contacts = load('routes/contacts.ts', {
   '../lib/db': { getDb: () => state.db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 7, username: 'admin', name: 'Fixture Admin', permissions: '{}' }); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,
   '../lib/actorSnapshot': load('lib/actorSnapshot.ts'),
   '../lib/acquisitionCostAccess': load('lib/acquisitionCostAccess.ts', { './permissions': permissions }),
@@ -69,7 +73,7 @@ app.route('/api', contacts)
 function fresh(seed) {
   const native = openDb(loadAll())
   native.db.exec(seed)
-  Object.assign(state, { batches: [], broadcasts: [], hook: null, lost: false })
+  Object.assign(state, { batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN })
   state.db = {
     prepare: (sql) => native.prepare(sql),
     async batch(statements) {
@@ -110,13 +114,14 @@ async function check(name, fn) {
   }
 }
 
-// Three customers the grid shows as one person under different names, each
+// Three customers the system detects as one person (a shared phone under
+// three different names: a phone_conflict cluster), each
 // holding links in every table that references a customer, plus a bystander.
 const CUSTOMER_SEED = `
   INSERT INTO customers(id,name,phone,phone_normalized,email,address,notes,membership_number,gender,is_anonymous,updated_at) VALUES
     (1,'Dara','012 111 111','012111111',NULL,NULL,'Keeper notes','LC-00001',NULL,0,'2026-09-01 10:00:00'),
-    (2,'Dara Sok','012 222 222','012222222','dara@example.invalid',NULL,NULL,'LC-00002','male',0,'2026-09-02 10:00:00'),
-    (3,'Sok Dara','012 333 333','012333333',NULL,'Street 3',NULL,NULL,NULL,0,'2026-09-03 10:00:00'),
+    (2,'Dara Sok','012 111 111','012111111','dara@example.invalid',NULL,NULL,'LC-00002','male',0,'2026-09-02 10:00:00'),
+    (3,'Sok Dara','012 111 111','012111111',NULL,'Street 3',NULL,NULL,NULL,0,'2026-09-03 10:00:00'),
     (4,'Bystander','012 444 444','012444444',NULL,NULL,NULL,'LC-00004',NULL,0,'2026-09-04 10:00:00');
   INSERT INTO sales(id,receipt_number,customer_id,customer_name,customer_phone) VALUES
     (11,'R-11',2,'Dara Sok','012 222 222'),(12,'R-12',3,'Sok Dara','012 333 333'),(13,'R-13',1,'Dara','012 111 111'),(14,'R-14',4,'Bystander','012 444 444');
@@ -133,7 +138,6 @@ function gridBody(raw, extra = {}) {
   return {
     keepId: 1,
     mergeIds: [2, 3],
-    manual: true,
     client_request_id: 'r11-grid',
     expected: extra.expected || expectedFor(raw, 'customers', [1, 2, 3]),
     choices: { email: { source_id: 2 }, address: { source_id: 3 }, notes: { custom: 'Prefers Telegram' } },
@@ -144,13 +148,19 @@ function gridBody(raw, extra = {}) {
 }
 
 async function main() {
-  await check('T24: an unruled merge of different names is still refused 409, the manual ruling applies with 200', async () => {
+  await check('T24: a hand-picked set is refused 409 even with manual:true; a detected cluster applies with 200', async () => {
     const raw = fresh(CUSTOMER_SEED)
     const before = dump(raw)
-    const unruled = await post('/api/customers/merge', gridBody(raw, { manual: false }))
-    assert.equal(unruled.status, 409, JSON.stringify(unruled.body))
-    assert.equal(unruled.body.code, 'contact_merge_identity_required')
+    // The bystander shares neither the phone nor a name: not a detected cluster.
+    const handPicked = await post('/api/customers/merge', gridBody(raw, { mergeIds: [2, 4], manual: true, choices: {}, portal_keep_contact_id: 2, expected: expectedFor(raw, 'customers', [1, 2, 4]) }))
+    assert.equal(handPicked.status, 409, JSON.stringify(handPicked.body))
+    assert.equal(handPicked.body.code, 'contact_merge_not_duplicates')
     assert.equal(dump(raw), before, 'a refused merge writes nothing')
+    // A forged stepped-merge id without the first step's receipt is no key.
+    const forged = await post('/api/customers/merge', gridBody(raw, { mergeIds: [2, 4], client_request_id: 'r11-grid:r1', choices: {}, portal_keep_contact_id: 2, expected: expectedFor(raw, 'customers', [1, 2, 4]) }))
+    assert.equal(forged.status, 409, JSON.stringify(forged.body))
+    assert.equal(forged.body.code, 'contact_merge_not_duplicates')
+    assert.equal(dump(raw), before)
     const ruled = await post('/api/customers/merge', gridBody(raw))
     assert.equal(ruled.status, 200, JSON.stringify(ruled.body))
     assert.deepEqual(ruled.body.merged_ids, [2, 3])
@@ -158,6 +168,49 @@ async function main() {
     assert.equal(ruled.body.continuation, undefined, 'the paid plan merges every record in one request')
     assert.deepEqual(state.batches.length, 1, 'one atomic batch')
     assert.deepEqual(state.broadcasts, [{ channel: 'customers', message: { action: 'merge', id: 1, mergedIds: [2, 3] } }])
+  })
+
+  await check('T24b: a cluster that changed since the review (a record left it) is refused 409', async () => {
+    const raw = fresh(CUSTOMER_SEED)
+    // Record 3 changes its phone: it no longer shares anything with 1 and 2.
+    raw.prepare("UPDATE customers SET phone = '012 333 333', phone_normalized = '012333333' WHERE id = 3").run()
+    const before = dump(raw)
+    const changed = await post('/api/customers/merge', gridBody(raw))
+    assert.equal(changed.status, 409, JSON.stringify(changed.body))
+    assert.equal(changed.body.code, 'contact_merge_not_duplicates')
+    assert.equal(dump(raw), before)
+    // The part that IS still detected merges.
+    const body = gridBody(raw, { mergeIds: [2], expected: expectedFor(raw, 'customers', [1, 2]), choices: { email: { source_id: 2 } } })
+    delete body.portal_keep_contact_id
+    const rest = await post('/api/customers/merge', body)
+    assert.equal(rest.status, 200, JSON.stringify(rest.body))
+    assert.deepEqual(rest.body.merged_ids, [2])
+    assert.deepEqual(JSON.parse(one(raw, "SELECT details FROM audit_logs WHERE action = 'merge'").details).clusterIds, [1, 2], 'the audit row names the verified cluster')
+  })
+
+  await check('T24c: a cluster kept as separate (dismissed) is not an open duplicate and is refused 409', async () => {
+    const raw = fresh(CUSTOMER_SEED)
+    raw.prepare("INSERT INTO contact_duplicate_dismissals (contact_table, cluster_type, cluster_value) VALUES ('customers', 'phone', '012111111')").run()
+    const before = dump(raw)
+    const kept = await post('/api/customers/merge', gridBody(raw))
+    assert.equal(kept.status, 409, JSON.stringify(kept.body))
+    assert.equal(kept.body.code, 'contact_merge_not_duplicates')
+    assert.equal(dump(raw), before)
+  })
+
+  await check('T24d: contacts:resolve_conflicts switched off is 403 before anything is read; merge and bulk still gate', async () => {
+    const raw = fresh(CUSTOMER_SEED)
+    const before = dump(raw)
+    const staff = (blocked) => ({ id: 8, username: 'staff', name: 'Staff', role: 'staff', permissions: JSON.stringify({ contacts: true,...Object.fromEntries(blocked.map((action) => [`contacts:${action}`, false])) }) })
+    for (const blocked of [['resolve_conflicts'], ['merge'], ['bulk']]) {
+      state.user = staff(blocked)
+      const refused = await post('/api/customers/merge', gridBody(raw))
+      assert.equal(refused.status, 403, `${blocked}: ${JSON.stringify(refused.body)}`)
+      assert.equal(dump(raw), before)
+    }
+    state.user = staff([])
+    const allowed = await post('/api/customers/merge', gridBody(raw))
+    assert.equal(allowed.status, 200, `a full-access role with every action on merges: ${JSON.stringify(allowed.body)}`)
   })
 
   await check('T25: the chosen membership number survives, every other number goes to the notes; no decision is a 400', async () => {
@@ -314,7 +367,7 @@ async function main() {
     assert.deepEqual(collision.body.accounts, [{ id: 53, contact_id: 8 }, { id: 54, contact_id: 9 }])
     const identity = await post('/api/customers/merge', { keepId: 5, mergeId: 10 })
     assert.equal(identity.status, 409)
-    assert.equal(identity.body.code, 'contact_merge_identity_required')
+    assert.equal(identity.body.code, 'contact_merge_not_duplicates', 'the original body is held to the same rule')
     assert.equal((await post('/api/customers/merge', { keepId: 5, mergeId: 6 })).status, 404)
     assert.equal((await post('/api/customers/merge', { keepId: 5, mergeId: 5 })).status, 400)
   })
@@ -322,9 +375,9 @@ async function main() {
   await check('three suppliers: products, batches, returns and invoices are re-pointed by id and by name', async () => {
     const raw = fresh(`
       INSERT INTO suppliers(id,name,phone,company,updated_at) VALUES
-        (11,'Lotus Trading',NULL,NULL,'2026-09-01 10:00:00'),
+        (11,'Lotus Trading','012 666 666',NULL,'2026-09-01 10:00:00'),
         (12,'Lotus Trading Co','012 666 666','Lotus Co Ltd','2026-09-02 10:00:00'),
-        (13,'LOTUS',NULL,NULL,'2026-09-03 10:00:00');
+        (13,'LOTUS','012 666 666',NULL,'2026-09-03 10:00:00');
       INSERT INTO products(id,name,supplier) VALUES (101,'Rice','Lotus Trading'),(102,'Oil','lotus'),(103,'Salt','Other Supplier');
       INSERT INTO product_batches(id,variant_product_id,batch_key,supplier_id,supplier_name) VALUES
         (201,101,'b1',12,'Lotus Trading Co'),(202,102,'b2',13,'LOTUS'),(203,102,'b3',NULL,'Lotus Trading Co'),(204,101,'b4',11,'Lotus Trading');
@@ -333,7 +386,7 @@ async function main() {
         (401,'Shop',1,13,'LOTUS','2026-01-01','outstanding','ap.csv',1),(402,'Shop',2,NULL,'lotus','2026-01-02','outstanding','ap.csv',2);
     `)
     const merged = await post('/api/suppliers/merge', {
-      keepId: 11, mergeIds: [12, 13], manual: true, client_request_id: 'r11-suppliers',
+      keepId: 11, mergeIds: [12, 13], client_request_id: 'r11-suppliers',
       expected: expectedFor(raw, 'suppliers', [11, 12, 13]),
       choices: { name: { source_id: 12 } },
     })
@@ -356,11 +409,11 @@ async function main() {
   await check('three delivery contacts: delivery sales and fees are re-pointed', async () => {
     const raw = fresh(`
       INSERT INTO delivery_contacts(id,name,phone,area,updated_at) VALUES
-        (21,'Rith',NULL,NULL,'2026-09-01 10:00:00'),(22,'Rith Moto','012 777 777',NULL,'2026-09-02 10:00:00'),(23,'rith',NULL,'Toul Kork','2026-09-03 10:00:00');
+        (21,'Rith','012 777 777',NULL,'2026-09-01 10:00:00'),(22,'Rith Moto','012 777 777',NULL,'2026-09-02 10:00:00'),(23,'rith','012 777 777','Toul Kork','2026-09-03 10:00:00');
       INSERT INTO sales(id,receipt_number,delivery_contact_id,delivery_contact_name) VALUES (501,'D-501',22,'Rith Moto'),(502,'D-502',23,'rith'),(503,'D-503',21,'Rith');
       INSERT INTO fees(id,fee_type,amount_usd,amount_khr,fee_date,delivery_contact_id) VALUES (90601,'delivery',2,8200,'2026-09-07',22),(90602,'delivery',1,4100,'2026-09-07',23);
     `)
-    const merged = await post('/api/delivery-contacts/merge', { keepId: 21, mergeIds: [22, 23], manual: true, expected: expectedFor(raw, 'delivery_contacts', [21, 22, 23]) })
+    const merged = await post('/api/delivery-contacts/merge', { keepId: 21, mergeIds: [22, 23], expected: expectedFor(raw, 'delivery_contacts', [21, 22, 23]) })
     assert.equal(merged.status, 200, JSON.stringify(merged.body))
     assert.deepEqual(rows(raw, 'SELECT id, name, phone, area FROM delivery_contacts'), [{ id: 21, name: 'Rith', phone: '012 777 777', area: 'Toul Kork' }])
     assert.deepEqual(rows(raw, 'SELECT id, delivery_contact_id, delivery_contact_name FROM sales ORDER BY id'), [
@@ -467,6 +520,30 @@ async function main() {
     assert.deepEqual(freeState.keeper, paidState.keeper, 'the kept record')
     CUSTOMER_TABLES.slice(1, -1).forEach((table, index) => assert.deepEqual(freeState.linked[index], paidState.linked[index], table))
     assert.deepEqual(rows(raw, "SELECT details FROM audit_logs WHERE action = 'merge' ORDER BY id").map((row) => JSON.parse(row.details).clientRequestId), ['r11-six', 'r11-six:r3', 'r11-six:r1'])
+  })
+
+  await check('free plan: later steps are authorized by the first step\'s verified cluster, even once the kept record left it', async () => {
+    const raw = fresh(SIX_SEED)
+    const body = { ...sixBody(raw), client_request_id: 'r11-typed', choices: { phone: { source_id: 2 }, name: { custom: 'Chan Dara' } } }
+    const first = await post('/api/customers/merge', body, 'free')
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(one(raw, 'SELECT name FROM customers WHERE id = 1').name, 'Chan Dara', 'the kept record no longer shares the cluster name')
+    let next = first.body.continuation
+    assert.ok(next && !('manual' in next), 'a continuation carries no manual flag')
+    // The continuation's id with an outsider slipped in is refused.
+    raw.prepare("INSERT INTO customers(id,name,is_anonymous,updated_at) VALUES (9,'Outsider',0,'2026-09-09 10:00:00')").run()
+    const smuggled = await post('/api/customers/merge', { ...next, mergeIds: [...next.mergeIds.slice(0, 1), 9], expected: expectedFor(raw, 'customers', [1, next.mergeIds[0], 9]) }, 'free')
+    assert.equal(smuggled.status, 409, JSON.stringify(smuggled.body))
+    assert.equal(smuggled.body.code, 'contact_merge_not_duplicates')
+    let requests = 1
+    while (next) {
+      const response = await post('/api/customers/merge', next, 'free')
+      assert.equal(response.status, 200, JSON.stringify(response.body))
+      next = response.body.continuation
+      requests += 1
+      assert.ok(requests < 6)
+    }
+    assert.deepEqual(rows(raw, 'SELECT id FROM customers ORDER BY id').map((row) => row.id), [1, 9])
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')

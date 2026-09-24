@@ -258,12 +258,16 @@ async function main() {
   await check('T23: three records plan to one statement list with a guard per record, every link moved and one audit row', threeRecordsOneStatementList)
 
   const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
-  await check('the route re-proves duplicate identity and executes only the planned atomic write batch', async () => {
+  await check('the route re-proves a current system-detected cluster with no manual bypass and executes only the planned atomic write batch', async () => {
     const start = route.indexOf('app.post(`${config.path}/merge`')
     const end = route.indexOf('app.post(config.path', start)
     const handler = route.slice(start, end)
-    assert.match(handler, /findContactDuplicates\(db, config\.table/)
-    assert.match(handler, /duplicateMatches\.some/)
+    // Owner ruling 24 Sep 2026; behaviour pinned by test-contact-merge-n-records-native.cjs T24-T24d.
+    assert.match(handler, /denyUnlessFullContactAction\(c, 'resolve_conflicts'\)/)
+    assert.match(handler, /await verifyContactMergeCluster\(db, config, keepId, recordIds, request\.clientRequestId\)/)
+    assert.match(handler, /contact_merge_not_duplicates/)
+    assert.doesNotMatch(route, /request\.manual|body\.manual/, 'no request field can skip the cluster check')
+    assert.match(route, /findDuplicateContactClusters\(db, config\.table, config\.optionMode\)\n  const cluster = contactMergeCluster\(clusters, recordIds\)/)
     assert.match(handler, /await db\.batch\(plan\.statements\)/)
     assert.match(handler, /contact_merge_status_unknown/)
     assert.doesNotMatch(handler, /await audit\(/)

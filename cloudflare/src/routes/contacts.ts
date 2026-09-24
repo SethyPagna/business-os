@@ -16,6 +16,7 @@ import {
   findContactDuplicates,
   findContactDuplicateState,
   findDuplicateContactClusters,
+  contactMergeCluster,
   dismissDuplicateCluster,
   undismissDuplicateCluster,
   collectContactPhones,
@@ -544,7 +545,6 @@ type ContactMergeRequest = {
   legacy: boolean
   keepId: number
   mergeIds: number[]
-  manual: boolean
   clientRequestId: string | null
   expected: Map<number, string | null> | null
   choices: Record<string, ContactMergeChoice>
@@ -579,7 +579,7 @@ function parseContactMergeRequest(body: Record<string, unknown>, config: Contact
     if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
       return { error: 'keepId and mergeId (two different ids) are required' }
     }
-    return { legacy: true, keepId, mergeIds: [mergeId], manual: false, clientRequestId: null, expected: null, choices: {}, membershipSourceId: null, portalKeepContactId: null }
+    return { legacy: true, keepId, mergeIds: [mergeId], clientRequestId: null, expected: null, choices: {}, membershipSourceId: null, portalKeepContactId: null }
   }
   const keepId = positiveContactId(body.keepId)
   const mergeIds = body.mergeIds.map(positiveContactId)
@@ -623,7 +623,43 @@ function parseContactMergeRequest(body: Record<string, unknown>, config: Contact
     }
   }
   const clientRequestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim().slice(0, 120) || null : null
-  return { legacy: false, keepId, mergeIds: mergeIds as number[], manual: body.manual === true, clientRequestId, expected, choices, membershipSourceId, portalKeepContactId }
+  return { legacy: false, keepId, mergeIds: mergeIds as number[], clientRequestId, expected, choices, membershipSourceId, portalKeepContactId }
+}
+
+// Owner ruling (24 Sep 2026): merging is allowed ONLY for system-detected
+// duplicates. Returns the ids of the verified cluster, or null to refuse.
+//  - The normal case: one OPEN cluster of findDuplicateContactClusters (the
+//    Duplicates tab's own sweep, re-run now) holds every submitted id.
+//  - A free-plan stepped merge's later step (client_request_id `<base>:rN`,
+//    minted by contactMergeContinuation): the first step already verified the
+//    cluster and wrote its ids into its audit row, in the same batch as the
+//    merge. Those later steps may no longer look like a cluster (the kept
+//    record may have taken a typed name), so they are authorized by that
+//    committed receipt for the same kept record -- never by a client flag.
+async function verifyContactMergeCluster(
+  db: ReturnType<typeof getDb>,
+  config: ContactConfig,
+  keepId: number,
+  recordIds: number[],
+  clientRequestId: string | null,
+): Promise<number[] | null> {
+  const clusters = await findDuplicateContactClusters(db, config.table, config.optionMode)
+  const cluster = contactMergeCluster(clusters, recordIds)
+  if (cluster) return cluster.contacts.map((contact) => Number(contact.id))
+  const base = clientRequestId && /:r\d+$/.test(clientRequestId) ? clientRequestId.replace(/:r\d+$/, '') : null
+  if (!base) return null
+  const receipts = await db.prepare(`SELECT details FROM audit_logs
+    WHERE action = 'merge' AND entity = @entity AND entity_id = @entityId AND json_valid(details)
+      AND (json_extract(details, '$.clientRequestId') = @base
+        OR substr(json_extract(details, '$.clientRequestId'), 1, length(@prefix)) = @prefix)
+    ORDER BY id DESC LIMIT 10`).all<{ details: string }>({ entity: config.entity, entityId: String(keepId), base, prefix: `${base}:r` })
+  for (const receipt of receipts) {
+    const verified = (JSON.parse(receipt.details) as { clusterIds?: unknown }).clusterIds
+    if (!Array.isArray(verified)) continue
+    const ids = new Set(verified.map(Number))
+    if (recordIds.every((id) => ids.has(id))) return [...ids]
+  }
+  return null
 }
 
 // The planner's refusals as each body reports them: the original two-record
@@ -1254,15 +1290,21 @@ function registerContactRoutes(config: ContactConfig) {
   // keeps the kept record's value, or its first non-blank one), and the
   // merged records are deleted. Same Full-Access-only gate as plain delete
   // below, for the same reason (this IS a delete, just preceded by a move).
-  // parseContactMergeRequest describes the two request bodies. In the
-  // Resolve grid a decision the user made always applies: `manual` skips the
-  // shared-identity re-check, a missing membership or storefront decision is
-  // a 400, and a record changed since the grid read it is a 409 naming it.
+  // parseContactMergeRequest describes the two request bodies. Owner ruling
+  // (24 Sep 2026): only a CURRENT system-detected duplicate cluster merges --
+  // no request can skip that (verifyContactMergeCluster). In the Resolve grid
+  // a missing membership or storefront decision is a 400 and a record changed
+  // since the grid read it is a 409 naming it.
   app.post(`${config.path}/merge`, async (c) => {
     const user = c.get('user')
     if (getPermissionTier(user, 'contacts') === 'review') {
       return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
     }
+    // The Duplicates tab offers Merge only with contacts:resolve_conflicts
+    // (DuplicatesTab.tsx canMergeDuplicates); the same gate as the sibling
+    // dismiss/undismiss routes, enforced here so the API matches the button.
+    const deniedResolve = denyUnlessFullContactAction(c, 'resolve_conflicts')
+    if (deniedResolve) return deniedResolve
     // Per-action override (Part 546): 'contacts:merge' switched off for
     // this role blocks the action even at Full Access.
     if (getActionTier(user, 'contacts', 'merge') === 'none') {
@@ -1329,22 +1371,15 @@ function registerContactRoutes(config: ContactConfig) {
       if (stale.length) return c.json({ error: CONTACT_MERGE_STALE_ERROR, code: 'contact_merge_conflict', stale }, 409)
     }
 
-    // Without a manual ruling a merge endpoint is not a general hard-delete
-    // primitive: re-prove that the current rows still share the duplicate
-    // identity the review showed. Either way the atomic guard pins every
-    // record's complete editable snapshot.
-    if (!request.manual) {
-      const duplicateMatches = await findContactDuplicates(db, config.table, {
-        id: keepId,
-        name: String(keeper.name || ''),
-        phones: collectContactPhones(keeper, config.optionMode),
-      }, config.optionMode)
-      if (!merged.every((row) => duplicateMatches.some((match) => Number(match.id) === Number(row.id)))) {
-        return c.json({
-          error: 'These contacts no longer share a duplicate name or phone. Refresh the review before merging.',
-          code: 'contact_merge_identity_required',
-        }, 409)
-      }
+    // A merge endpoint is not a general hard-delete primitive: the submitted
+    // records must still be one open cluster of the Duplicates tab's own
+    // sweep. The atomic guard then pins every record's editable snapshot.
+    const clusterIds = await verifyContactMergeCluster(db, config, keepId, recordIds, request.clientRequestId)
+    if (!clusterIds) {
+      return c.json({
+        error: 'These contacts are not a current system-detected duplicate group. Only duplicates the system found can be merged. Refresh the Duplicates list and try again.',
+        code: 'contact_merge_not_duplicates',
+      }, 409)
     }
 
     const portalAccounts = config.table === 'customers'
@@ -1385,6 +1420,7 @@ function registerContactRoutes(config: ContactConfig) {
       audit: {
         operationId,
         clientRequestId: request.clientRequestId,
+        clusterIds,
         userId: user?.id ?? null,
         userName: actorSnapshot(user),
         deviceName: auditDevice.deviceName,

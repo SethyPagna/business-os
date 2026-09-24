@@ -8,6 +8,8 @@ export type ContactMergeStatement = {
 export type ContactMergeAudit = {
   operationId: string
   clientRequestId?: string | null
+  /** The system-detected cluster the route verified; a stepped merge's later steps are authorized by it. */
+  clusterIds?: number[]
   userId: number | null
   userName: string | null
   deviceName: string | null
@@ -65,10 +67,11 @@ export const CONTACT_MERGE_MAX_BINDS_PER_STATEMENT = 80
 // customers plan to about 55 statements, inside the 80-statement cap.
 export const CONTACT_MERGE_MAX_RECORDS = 6
 // D1 queries POST {path}/merge spends outside its write batch: session auth
-// (up to 3), the record, storefront, table and device reads (4), the identity
-// re-check (2), failure reconciliation (3), the cache-version bump (up to 9)
-// and the refresh read (1). Each batch statement counts as one more query.
-export const CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES = 22
+// (up to 3), the record, storefront, table and device reads (4), the
+// system-detected cluster check (the sweep's 2 reads, plus 1 receipt read for
+// a stepped merge's later step), failure reconciliation (3), the cache-version
+// bump (up to 9) and the refresh read (1). Each batch statement is one more.
+export const CONTACT_MERGE_ROUTE_OVERHEAD_QUERIES = 23
 
 const SAFE_COLUMN = /^[a-z][a-z0-9_]*$/
 const MEMBERSHIP_NOTE_PREFIX = 'Merged membership: '
@@ -363,6 +366,7 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     details: JSON.stringify({
       operationId: audit.operationId,
       clientRequestId: audit.clientRequestId ?? null,
+      ...(audit.clusterIds?.length ? { clusterIds: audit.clusterIds } : {}),
       mergedIds,
       mergedNames: members.map((member) => member.name ?? null),
       backfilled,
@@ -465,7 +469,6 @@ export function contactMergeContinuation(
   return {
     keepId,
     mergeIds: remaining.map((row) => Number(row.id)),
-    manual: true,
     client_request_id: clientRequestId ? `${clientRequestId.replace(/:r\d+$/, '')}:r${remaining.length}` : null,
     expected: [keeper, ...remaining].map((row) => ({ id: Number(row.id), updated_at: row.updated_at ?? null })),
     choices: Object.fromEntries(editableColumns.filter((column) => column !== 'membership_number').map((column) => [column, { source_id: keepId }])),
