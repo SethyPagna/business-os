@@ -3981,6 +3981,7 @@
   "publicPathPlaceholder": "/តំណអតិថិជនរបស់អ្នក",
   "publicTranslation": "ឧបករណ៍ភាសា",
   "publicUrlHint": "ប្រើដែនសាធារណៈផ្សេង ឬ URL Funnel នៅទីនេះ នៅពេលអ្នកផ្សព្វផ្សាយគេហទំព័រនៅក្រៅតំណគ្រប់គ្រង។",
+  "publicUrlInvalid": "សូមប្រើ URL https:// ពេញលេញ សម្រាប់អាសយដ្ឋានគេហទំព័រសាធារណៈ ឬទុកវាឱ្យទទេ។",
   "publicUrlLabel": "URL គេហទំព័រសាធារណៈ",
   "publicUrlPlaceholder": "https://customers.example.com",
   "purchase": "ទិញ",

@@ -2662,7 +2662,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const sanitizedPublicUrl = String(editorDraft.customer_portal_public_url || '').trim()
       const sanitizedGoogleMapEmbed = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
       if (sanitizedPublicUrl && !/^https?:\/\/.+/i.test(sanitizedPublicUrl)) {
-        notify(copy('publicUrlHint', 'Use a full https:// URL for the public customer portal if you set one.'), 'error')
+        notify(copy('publicUrlInvalid', 'Use a full https:// URL for the public website address, or leave it empty.'), 'error')
         return
       }
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {

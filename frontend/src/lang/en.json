@@ -3981,6 +3981,7 @@
   "publicPathPlaceholder": "/your-customer-link",
   "publicTranslation": "Language tools",
   "publicUrlHint": "Use a different public domain or Funnel URL here when you publish the website outside the admin link.",
+  "publicUrlInvalid": "Use a full https:// URL for the public website address, or leave it empty.",
   "publicUrlLabel": "Public website URL",
   "publicUrlPlaceholder": "https://customers.example.com",
   "purchase": "Purchase",
