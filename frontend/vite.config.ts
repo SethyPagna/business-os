@@ -878,15 +878,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-ui'
-    // PageSizeSelect is imported by PaginationControls (shared-ui, below). Left to the
-    // generic '/src/components/shared/' catch-all further down, it lands in 'app-shared'
-    // instead -- and since PageSizeSelect itself imports a lucide icon that IS routed to
-    // 'shared-ui', that produces a circular chunk dependency (shared-ui -> app-shared ->
-    // shared-ui). At runtime that circularity causes a TDZ crash the first time app-shared
-    // evaluates a module-level icon factory call before shared-ui has finished initializing
-    // ("Cannot access '<var>' before initialization"), which blanks the whole app. Keeping
-    // PageSizeSelect in the same chunk as its only consumer avoids the cycle.
-    if (normalized.includes('/src/components/shared/PageSizeSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {
@@ -903,7 +894,7 @@ function manualChunks(id: string): string | undefined {
     // ImportReportModal is imported by both BackgroundImportTracker (its own
     // chunk, above) and Dashboard.tsx (the 'dashboard' route chunk) -- two
     // consumers in two different chunks, so it can't just follow "its only
-    // consumer" the way PageSizeSelect/PortalMenu above do. Left to the
+    // consumer" because both route chunks need it. Left to the
     // generic '/src/components/shared/' catch-all further down, it lands in
     // 'app-shared' -- and since it statically imports importJobsTransport.ts
     // (routed to 'import-jobs-api', which itself imports publicAssetUrls.ts,

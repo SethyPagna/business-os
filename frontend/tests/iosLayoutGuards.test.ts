@@ -367,7 +367,6 @@ const RAW_VH_ALLOWLIST = new Set([
   'components/shared/ImageGalleryLightbox.tsx',
   'components/shared/NotesWidget.tsx',
   'components/shared/NotificationCenter.tsx',
-  'components/shared/PageSizeSelect.tsx',
   'components/shared/RenameCascadeModal.tsx',
   'components/shared/SuggestionTextInput.tsx',
   'components/shared/kit/Fold.tsx',

@@ -37,10 +37,6 @@ const pagination = fs.readFileSync(
   new URL('../src/components/shared/PaginationControls.tsx', import.meta.url),
   'utf8',
 )
-const pageSizeSelect = fs.readFileSync(
-  new URL('../src/components/shared/PageSizeSelect.tsx', import.meta.url),
-  'utf8',
-)
 
 runTest('the merged pager is gated on BOTH compact and the opt-in flag', () => {
   // The new branch must sit ahead of the plain `if (compact)` branch and only
@@ -98,22 +94,6 @@ runTest('the merged pager keeps the editable page number and total-page count', 
   assert.match(branch, /\/ \{totalPages\}/, 'the total page count must be shown')
   assert.match(branch, /aria-label=\{backLabel\}/, 'a localized previous-page control must exist')
   assert.match(branch, /aria-label=\{nextLabel\}/, 'a localized next-page control must exist')
-})
-
-runTest('PageSizeSelect renders buttonContent over the size, but only when given', () => {
-  // buttonContent is the seam the merged pager uses. When omitted the button
-  // must fall back to the numeric page size, so every other PageSizeSelect
-  // caller is unchanged.
-  assert.match(
-    pageSizeSelect,
-    /buttonContent\?: ReactNode/,
-    'PageSizeSelect must accept an optional buttonContent override',
-  )
-  assert.match(
-    pageSizeSelect,
-    /buttonContent !== undefined \? buttonContent : safeValue/,
-    'buttonContent must win when provided and fall back to the size otherwise',
-  )
 })
 
 runTest('the opt-in centered pager fits its parent without clipping meaningful content', () => {
