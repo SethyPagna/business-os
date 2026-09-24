@@ -890,6 +890,14 @@ export interface SalesReportSnapshot {
   row_count: number
 }
 
+export class SalesReportExportTooLargeError extends RangeError {
+  constructor() { super('report_export_too_large'); this.name = 'SalesReportExportTooLargeError' }
+}
+
+/** Only full-export callers opt into this receipt ceiling. The shared scalar
+ * row ceiling still bounds every reader, including all child records. */
+export interface SalesReportReadOptions { maxReceipts?: number }
+
 export type SalesReportScalarScopeValue = string | number | null
 export type SalesReportScalarScope = (saleAlias: string) => {
   sql: string
@@ -966,13 +974,17 @@ async function reportKeysetRows(
   idExpr: string,
   params: Record<string, unknown>,
   rowBudget: { count: number },
+  maxReceipts?: number,
 ): Promise<ReportScalarRow[]> {
   const output: ReportScalarRow[] = []
   let afterId = 0
   for (;;) {
+    const pageSize = maxReceipts === undefined ? REPORT_MONEY_PAGE_SIZE
+      : Math.min(REPORT_MONEY_PAGE_SIZE, maxReceipts - output.length + 1)
     const page = await db.prepare(`${selectSql} AND ${idExpr} > @reportAfterId ORDER BY ${idExpr} LIMIT @reportPageSize`)
-      .all<ReportScalarRow>({ ...params, reportAfterId: afterId, reportPageSize: REPORT_MONEY_PAGE_SIZE })
+      .all<ReportScalarRow>({ ...params, reportAfterId: afterId, reportPageSize: pageSize })
     if (!page?.length) break
+    if (maxReceipts !== undefined && output.length + page.length > maxReceipts) throw new SalesReportExportTooLargeError()
     rowBudget.count += page.length
     if (page.length > REPORT_MONEY_PAGE_SIZE || rowBudget.count > REPORT_MONEY_MAX_ROWS) {
       throw new ReportMoneyPrecisionError('too_many_rows')
@@ -983,7 +995,7 @@ async function reportKeysetRows(
       afterId = id
       output.push(row)
     }
-    if (page.length < REPORT_MONEY_PAGE_SIZE) break
+    if (page.length < pageSize) break
   }
   return output
 }
@@ -1008,6 +1020,7 @@ async function readSalesReportPass(
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees: boolean,
   scalarScope: CapturedSalesReportScalarScope | null,
+  options: SalesReportReadOptions,
 ): Promise<SalesReportSnapshot> {
   const db = getDb(env)
   const salesColumns = await reportTableColumns(db, 'sales')
@@ -1047,8 +1060,8 @@ async function readSalesReportPass(
       s.source_return_id,s.amount_paid_usd${salePrecision},
       ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
       ${linkedDeliveryFee} AS delivery_has_linked_fee
-    FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget)
-  const voidSales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
+    FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget, options.maxReceipts)
+  const voidSales = options.maxReceipts !== undefined ? [] : await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
@@ -1117,7 +1130,10 @@ export async function readSalesReportSnapshot(
   f: SalesFilters & { contactId?: number | string | null },
   includeDeliveryFees = false,
   scalarScope?: SalesReportScalarScope,
+  options: SalesReportReadOptions = {},
 ): Promise<SalesReportSnapshot> {
+  if (options.maxReceipts !== undefined && (!Number.isSafeInteger(options.maxReceipts)
+    || options.maxReceipts < 1 || options.maxReceipts > 10_000)) throw new SalesReportExportTooLargeError()
   const db = getDb(env)
   // Capture a code-generated scope exactly once. Both passes and every child
   // EXISTS consume the same immutable SQL/params, so a stateful callback
@@ -1125,9 +1141,9 @@ export async function readSalesReportSnapshot(
   const capturedScope = captureSalesReportScalarScope(scalarScope)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await assertReportReadable(db)
-    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope)
+    const first = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
     await assertReportReadable(db)
-    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope)
+    const second = await readSalesReportPass(env, f, includeDeliveryFees, capturedScope, options)
     await assertReportReadable(db)
     if (reportRowsEqual(reportSnapshotScalars(first), reportSnapshotScalars(second))) return first
   }
@@ -1474,6 +1490,10 @@ export function salesTotalsFromSnapshot(snapshot: SalesReportSnapshot): SalesTot
 
 export async function getBusinessSummarySalesRows(env: Env, f: SalesFilters): Promise<Array<Record<string, unknown>>> {
   const snapshot = await readSalesReportSnapshot(env, f)
+  return businessSummarySalesRowsFromSnapshot(snapshot)
+}
+
+export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapshot): Array<Record<string, unknown>> {
   return reportSaleFacts(snapshot).map((fact) => {
     const sale = fact.sale; const version = fact.version
     const revenue = fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund) : ReportExactDecimal.zero()
