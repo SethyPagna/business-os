@@ -22,8 +22,15 @@ Resumed work is on `codex/verified-resume-20260925`, separate from production.
 The fresh reports baseline passes `reportsDetailFloatClose`, `reportsRenderPass`
 and `reportsHubComposedResponsive`; the standalone float test passes all 16
 assertions including negative controls. The historical red is not reproduced.
-N1–N4 is being integrated and repaired before N6. N6 needs metadata conflict
-fencing before certification. Report Center follows those unfinished lanes.
+N1–N4 is integrated as `be856c08` from repaired candidate `94955db9`:
+keeper selection refresh, frozen group costs, exact retry receipts, contact
+continuation restrictions and preview/write conflict fences. Independent checks
+on the integrated source pass 16 frontend files and five Worker files. The paid
+deployment is the target; the new resolver refuses before writes on Free, whose
+existing pair kernel exceeds the query budget. Full combined gates remain due.
+N6 is being repaired for metadata conflict fencing and frozen unknown-outcome
+retries. Report Center's explicit export-intent prerequisite is prepared in an
+isolated branch; ordinary report viewing must remain unaffected.
 No new feature work in this section is deployed. Council decisions and the
 debloat blast-radius matrix: `docs/fleet/2026-09-25-resume-council.md`.
 
