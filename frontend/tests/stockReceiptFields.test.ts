@@ -174,7 +174,9 @@ runTest('the shared adjust form actually asks for the cost and the payment', () 
   const modals = source('components/inventory/InventoryStockModals.tsx')
   // The form gates on the shared rule, not on `type === 'add'`, so a
   // set-that-raises gets the same fields (S4-16).
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity\)/)
+  // The scope argument keeps S4-16 for a legacy unscoped Set; a scoped Set
+  // (owner, 24 Sep) is a count correction and never a receipt.
+  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
   assert.match(modals, /id="inventory-adjust-unit-cost"/)
   assert.match(modals, /id="inventory-adjust-credit-due-date"/)
   assert.match(modals, /tr\('receipt_cost', 'Receipt cost'\)/)
@@ -193,7 +195,7 @@ runTest('both adjust surfaces send the receipt fields and a grouping session id'
     // supplier and received date follow the same stock-in rule now.
     assert.match(text, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, `${path} supplier must follow isStockIn`)
     assert.doesNotMatch(text, /supplierId: adjustForm\.type === 'add'/, `${path} must not gate supplier on 'add' alone`)
-    assert.match(text, /adjustForm\.type === 'set' \|\| \(Boolean\(numericBranchId\)/, `${path} received date must cover a set-increase`)
+    assert.match(text, /\(adjustForm\.type === 'set' && !scopedSet\) \|\| \(Boolean\(numericBranchId\)/, `${path} received date must cover a legacy set-increase, never a scoped Set`)
     // The id is per modal opening, never a module constant.
     assert.match(text, /receiptSessionIdRef = useRef\(Date\.now\(\)\)/, `${path} must mint its own session id`)
   }
@@ -384,22 +386,18 @@ runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-u
   }
 })
 
-runTest('a bulk SET states its receipt facts, because a set that raises stock is a receipt (N14-D)', () => {
-  // BulkAddStockModal sees no branch figures, so it cannot tell which rows of
-  // a 'set' rise. routes/inventory.ts gates each of those rows as the add it
-  // becomes, so the form must offer -- and send -- the supplier and cost for
-  // a set as well as an add. It offered them for 'add' only, which meant a
-  // bulk set-up was refused row by row with nothing on screen to fix.
+runTest('a bulk SET states no receipt facts: it is a scoped count correction (owner, 24 Sep)', () => {
+  // Before the scoped Set, a bulk 'set' that raised a row became a receipt the
+  // Worker gated as an add, so the form sent supplier and cost for it (N14-D).
+  // Every bulk Set is now scoped to a NAMED existing received date
+  // (lib/stockLotAdjustment.ts): it keeps that lot's own cost, has no supplier,
+  // and the Worker refuses receipt prices on it (correction_cost_input).
   assert.equal(bulkActionCanReceive('add'), true)
-  assert.equal(bulkActionCanReceive('set'), true)
+  assert.equal(bulkActionCanReceive('set'), false)
   assert.equal(bulkActionCanReceive('remove'), false)
 
   const draft = { unitCost: '2.50', freeGoods: false, supplierId: 4, supplierName: ' Sok Supply ', receivedDate: '2026-09-06' }
-  // Old answer for a 'set': {} -- no supplier, no cost, so the Worker refused
-  // every raising row with supplier_required.
-  assert.deepEqual(bulkStockReceiptWire('set', draft), {
-    unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
-  })
+  assert.deepEqual(bulkStockReceiptWire('set', draft), {})
   assert.deepEqual(bulkStockReceiptWire('add', draft), {
     unitCostUsd: 2.5, supplierId: 4, supplierName: 'Sok Supply', receivedDate: '2026-09-06',
   })
@@ -417,8 +415,7 @@ runTest('a bulk SET states its receipt facts, because a set that raises stock is
 
   const bulk = source('components/products/forms/BulkAddStockModal.tsx')
   assert.ok(bulk.includes('bulkStockReceiptWire'), 'the bulk surface must build its receipt half from the shared rule')
-  assert.ok(bulk.includes('bulkActionCanReceive'), 'the bulk gate must cover a set as well as an add')
-  assert.ok(!bulk.includes("isStockIn: action === 'add'"), 'a bulk set-up is a stock-in the Worker gates; the form must gate it too')
+  assert.ok(bulk.includes('isStockIn: bulkActionCanReceive(action)'), 'the bulk gate reads the one shared receive rule')
 })
 
 

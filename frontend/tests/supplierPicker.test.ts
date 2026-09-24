@@ -108,7 +108,9 @@ assert.match(inventoryModals, /supplier_id: '', supplier_name: ''/, 'InventorySt
 // remove -- and a set that lowers the figure -- still carries no supplier.
 assert.match(inventoryPage, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, 'Inventory.tsx sends supplier only for stock-ins')
 assert.match(inventoryPage, /supplierName: isStockIn && String\(adjustForm\.supplier_name \|\| ''\)\.trim\(\) !== ''/, 'Inventory.tsx name likewise stock-in only')
-assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
+// The scope argument: a scoped Set (owner, 24 Sep) is a count correction on a
+// named lot and never attributes a supplier.
+assert.match(inventoryPage, /const isStockIn = isStockInSubmission\(adjustForm\.type, qty, previousQuantity, adjustForm\.set_scope\)/, 'Inventory.tsx derives that from the shared rule, not its own copy')
 ok('Inventory adjust: form cleared on attributed lots, wire is stock-in only')
 
 // N14-D widened "adds only" here too, and for the same reason S4-16 widened
@@ -123,10 +125,12 @@ assert.deepEqual(
   {},
   'a bulk remove carries no supplier and no cost',
 )
-assert.equal(
-  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }).supplierId,
-  9,
-  'a bulk set can raise a row, and a raise is a receipt that names its supplier',
+// A bulk Set is now SCOPED to a named existing received date (owner, 24 Sep):
+// a count correction that keeps that lot's attribution, so it names no supplier.
+assert.deepEqual(
+  bulkReceiptWire('set', { unitCost: '3', freeGoods: false, supplierId: 9, supplierName: 'Bong Long', receivedDate: '2026-09-06' }),
+  {},
+  'a bulk scoped Set carries no supplier and no cost',
 )
 assert.match(bulkModal, /supplier_bulk_hint/, 'BulkAddStockModal explains the fill-not-rewrite semantics for existing lots')
 ok('BulkAddStockModal: one supplier per bulk event, receipts only, semantics explained')

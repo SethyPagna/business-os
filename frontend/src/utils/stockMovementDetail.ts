@@ -28,8 +28,19 @@ export function isStockReceiptMovement(value: unknown): boolean {
 // it -- the same reason the type allowlist above is mirrored at all.
 export const DAMAGED_LOT_REFERENCE_PREFIX = 'damaged_lot:'
 
+// A scoped Set (cloudflare/src/lib/stockLotAdjustment.ts) stamps its forward
+// movement `stock-set:<operation>:<generation>`; it is reversed ONLY through
+// its generation-guarded history Undo/Redo, and the Worker refuses a ledger
+// revert of it (and of its undo counter) 409. Mirrored so Revert is not offered.
+export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
+
+export function isStockSetMovement(referenceId: unknown): boolean {
+  return String(referenceId ?? '').startsWith(STOCK_SET_REFERENCE_PREFIX)
+}
+
 export function isRevertibleStockMovement(value: unknown, referenceId?: unknown): boolean {
   if (String(referenceId ?? '').startsWith(DAMAGED_LOT_REFERENCE_PREFIX)) return false
+  if (isStockSetMovement(referenceId)) return false
   return revertibleTypes.has(normalizedMovementType(value))
 }
 

@@ -141,7 +141,9 @@ runTest('the live surface carries the ported set-raise receipt rule (behaviour 2
   // The supplier and cost fields render on isStockIn -- exactly the predicate
   // the receipt gate applies -- not on a narrower "row.type === 'add'" copy
   // that would re-open the dead end a raising `set` used to hit.
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity\)/)
+  // The scope argument (owner, 24 Sep) keeps the raise-is-receipt rule for a
+  // legacy unscoped Set; a scoped Set is a count correction, never a receipt.
+  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
   assert.match(modals, /\{isStockIn && canEditCosts \? \(\s*\n\s*<SupplierPickerField/, 'authorized receipt inputs must cover both adds and raising sets')
   const supplierCondition = modals.match(/\{([^{}\n]+) \? \(\s*\n\s*<SupplierPickerField/)?.[1]
   assert.ok(supplierCondition, 'supplier visibility condition located')

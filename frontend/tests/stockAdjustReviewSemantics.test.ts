@@ -34,7 +34,9 @@ assert.deepEqual(buildStockAdjustQuantityReview({
 ])
 
 const source = readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
-assert.match(source, /setPendingAdjust\(\{ request: adjustmentRequest, beforeQuantity: currentQuantity \}\)/, 'the review freezes the authoritative branch quantity used by validation')
+// A lot-scope Set reviews against the received date it targets; every other
+// action (and a branch-total Set) against the authoritative branch quantity.
+assert.match(source, /setPendingAdjust\(\{\s*request: adjustmentRequest,[\s\S]*?beforeQuantity: scopedSet && setScope === 'lot' \? Number\(adjustForm\.batch_quantity\) : currentQuantity,/, 'the review freezes the quantity validation used')
 assert.match(source, /const adjustmentRequest = pendingAdjust\?\.request[\s\S]*?adjustStock\(adjustmentRequest\)/, 'display metadata never leaks into the inventory write payload')
 assert.match(source, /const reqReason = String\(req\.reason \|\| ''\)\.trim\(\)[\s\S]*?items\.push\(\{ label: tr\('reason'/, 'the required reason remains visible in every confirmation')
 

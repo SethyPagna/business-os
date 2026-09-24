@@ -52,6 +52,7 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
+  isStockSetMovement,
   isStockSessionGenerationMovement,
   recordedMovementCosts,
   showReceiptAccounting,
@@ -1255,6 +1256,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
+                  ) : isStockSetMovement(detail.reference_id) ? (
+                    <span className="text-xs text-gray-500 dark:text-gray-400">{tr(t, 'stock_correction_use_history', 'Use Undo/Redo in history for this Set')}</span>
                   ) : null}
                 </div>
               ) : (

@@ -84,9 +84,24 @@ export function adjustBranchQuantity(
  * A 'set' is only a receipt when it raises the on-hand figure; a set that
  * lowers it becomes a 'remove' server-side and carries no supplier or cost.
  */
-export function isStockInSubmission(type: string, quantity: unknown, currentQuantity: unknown): boolean {
+export type StockSetScope = 'lot' | 'branch'
+
+/** Owner, 24 Sep: "selected lot is the default". Anything but 'branch' is the lot. */
+export function normalizeStockSetScope(value: unknown): StockSetScope {
+  return value === 'branch' ? 'branch' : 'lot'
+}
+
+/** A Set carrying an explicit scope goes to the one lot-level Set writer. */
+export function isScopedSetSubmission(type: string, setScope: unknown): boolean {
+  return type === 'set' && (setScope === 'lot' || setScope === 'branch')
+}
+
+export function isStockInSubmission(type: string, quantity: unknown, currentQuantity: unknown, setScope?: unknown): boolean {
   if (type === 'add') return true
   if (type !== 'set') return false
+  // A scoped Set is a count correction on an EXISTING lot, never a receipt:
+  // no supplier, no cost entry, the lot keeps its own cost.
+  if (isScopedSetSubmission(type, setScope)) return false
   const requested = Number(quantity)
   const current = Number(currentQuantity)
   return Number.isFinite(requested) && Number.isFinite(current) && requested > current
@@ -99,8 +114,9 @@ export function isStockInSubmission(type: string, quantity: unknown, currentQuan
  * form offers the batch picker for it (N14-E) instead of letting the server
  * FIFO-drain whichever lots happen to be oldest.
  */
-export function isSetDownSubmission(type: string, quantity: unknown, currentQuantity: unknown): boolean {
+export function isSetDownSubmission(type: string, quantity: unknown, currentQuantity: unknown, setScope?: unknown): boolean {
   if (type !== 'set') return false
+  if (isScopedSetSubmission(type, setScope)) return false
   const requested = Number(quantity)
   const current = Number(currentQuantity)
   return Number.isFinite(requested) && Number.isFinite(current) && requested < current
@@ -115,6 +131,8 @@ export type StockAdjustBatchContext = {
   branchId: unknown
   /** Whatever the form is holding: '' (nothing picked), 'new', or a lot id. */
   batchId: string | number
+  /** Explicit Set scope; omitted keeps the historical branch-total Set. */
+  setScope?: StockSetScope
 }
 
 /**
@@ -132,7 +150,46 @@ export function isBatchPickerVisible(ctx: StockAdjustBatchContext): boolean {
   if (ctx.unlockPricing) return false
   if (!(Number(ctx.branchId) > 0)) return false
   if (ctx.type === 'add' || ctx.type === 'remove') return true
+  if (isScopedSetSubmission(ctx.type, ctx.setScope)) return true
   return isSetDownSubmission(ctx.type, ctx.quantity, ctx.currentQuantity)
+}
+
+export type ScopedSetPreview = {
+  scope: StockSetScope
+  targetQuantity: number
+  beforeLotQuantity: number
+  beforeBranchQuantity: number
+  /** Lot delta: what the selected received date gains (+) or gives up (-). */
+  delta: number
+  afterLotQuantity: number
+  afterBranchQuantity: number
+  valid: boolean
+}
+
+/**
+ * Pure mirror of cloudflare/src/lib/stockLotAdjustment.ts snapshotAfter, for
+ * the review dialog and early validation (the Worker re-checks it):
+ *   lot     d = q - L   L' = q      B' = max(0, B + d)
+ *   branch  d = q - B   L' = L + d  B' = q   (invalid when L + d < 0)
+ */
+export function scopedSetPreview(input: {
+  scope: unknown
+  targetQuantity: unknown
+  lotQuantity: unknown
+  branchQuantity: unknown
+}): ScopedSetPreview {
+  const scope = normalizeStockSetScope(input.scope)
+  const targetQuantity = Number(input.targetQuantity)
+  const beforeLotQuantity = Number(input.lotQuantity)
+  const beforeBranchQuantity = Number(input.branchQuantity)
+  const finite = [targetQuantity, beforeLotQuantity, beforeBranchQuantity].every(Number.isFinite)
+  const delta = scope === 'lot' ? targetQuantity - beforeLotQuantity : targetQuantity - beforeBranchQuantity
+  const afterLotQuantity = beforeLotQuantity + delta
+  const afterBranchQuantity = scope === 'lot' ? Math.max(0, beforeBranchQuantity + delta) : targetQuantity
+  return {
+    scope, targetQuantity, beforeLotQuantity, beforeBranchQuantity, delta, afterLotQuantity, afterBranchQuantity,
+    valid: finite && targetQuantity >= 0 && afterLotQuantity >= 0 && afterBranchQuantity >= 0,
+  }
 }
 
 /**
@@ -158,20 +215,15 @@ export function stockAdjustBatchWire(ctx: StockAdjustBatchContext): {
 }
 
 /**
- * N14-D on the BULK surface. BulkAddStockModal applies one action to many
- * products and can see none of their branch figures, so it cannot tell which
- * rows of a 'set' raise stock -- and a set that raises stock is a receipt the
- * Worker gates exactly like an add. Offering the receipt fields for 'add'
- * only left a bulk 'set' with no supplier and no cost to send, so every
- * raising row came back 400 with nothing on screen to fix.
- *
- * So 'add' and 'set' both state the receipt facts and 'remove' states none.
- * Over-stating on a set that turns out to lower every row costs nothing --
- * routes/inventory.ts ignores a receipt cost on the remove it becomes -- and
- * it is the only alternative to inventing the answer for the rows that rise.
+ * N14-D on the BULK surface: only 'add' states receipt facts. A bulk 'set'
+ * used to carry them too, because the unscoped Set converted a raise into an
+ * add the Worker gated as a receipt. Every bulk Set is now SCOPED (owner,
+ * 24 Sep): a count correction on the row's named received date
+ * (lib/stockLotAdjustment.ts), which keeps that lot's own cost and has no
+ * supplier, and the Worker refuses receipt prices on it.
  */
 export function bulkActionCanReceive(action: string): boolean {
-  return action === 'add' || action === 'set'
+  return action === 'add'
 }
 
 export type BulkStockReceiptDraft = {

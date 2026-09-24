@@ -75,6 +75,7 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
     || applier === 'product.merge.group'
     || applier === 'product.remove'
     || applier === 'stock.transfer'
+    || applier === 'stock.quantity_set'
     || applier === 'customer.gender_restore'
   return {
     require_applied: true,

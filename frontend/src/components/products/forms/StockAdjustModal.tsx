@@ -18,7 +18,7 @@ import { getBranches } from '../../../api/branchTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../../utils/stockReceiptFields.ts'
+import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../../utils/stockReceiptFields.ts'
 import {
   applyRowOutcome,
   browserStockStorage,
@@ -72,6 +72,9 @@ type AdjustForm = {
   cost_khr: InventoryFormValue
   barcode: string
   batch_id: InventoryId | ''
+  // Scoped Set: mirrors InventoryStockModals.tsx's set_scope / batch_quantity.
+  set_scope?: StockSetScope
+  batch_quantity?: number | ''
   received_date: string
   supplier_id: number | ''
   supplier_name: string
@@ -351,6 +354,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     cost_khr: 0,
     barcode: '',
     batch_id: '',
+    set_scope: 'lot',
+    batch_quantity: '',
     received_date: todayIsoDate(),
     supplier_id: '',
     supplier_name: '',
@@ -429,6 +434,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       cost_khr: canViewCosts ? product.cost_price_khr ?? product.purchase_price_khr ?? '' : '',
       barcode: product.barcode || '',
       batch_id: picked?.batchId != null ? String(picked.batchId) : '',
+      set_scope: 'lot',
+      batch_quantity: '',
       received_date: todayIsoDate(),
       supplier_id: '',
       supplier_name: '',
@@ -520,7 +527,19 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     // that happens to agree. (It did not: for a branch with no branch_stock
     // row this answered 0 while the prop below answered the product total.)
     const currentQuantity = adjustBranchQuantity(product.branch_stock, numericBranchId, stockQtyOf(product))
-    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity)
+    // Scoped Set -- the same rule as Inventory.tsx's submitter.
+    const scopedSet = adjustForm.type === 'set' && adjustForm.set_scope != null
+    const setScope = normalizeStockSetScope(adjustForm.set_scope)
+    if (scopedSet) {
+      const lotQuantity = Number(adjustForm.batch_quantity)
+      if (!numericBranchId || adjustForm.batch_id === '' || adjustForm.batch_id === 'new' || adjustForm.batch_quantity === '' || !Number.isFinite(lotQuantity)) {
+        notify(tr('select_batch_required', 'Select a received date first'), 'error'); return
+      }
+      if (!scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity, branchQuantity: currentQuantity }).valid) {
+        notify(tr('stock_set_lot_negative', 'The selected received date does not have enough stock for this branch total.'), 'error'); return
+      }
+    }
+    const isStockIn = isStockInSubmission(adjustForm.type, qty, currentQuantity, adjustForm.set_scope)
     if (isStockIn && !canEditCosts) {
       notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
       return
@@ -544,6 +563,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       unlockPricing,
       branchId: numericBranchId,
       batchId: adjustForm.batch_id,
+      setScope: scopedSet ? setScope : undefined,
     })
     // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts).
     // The sibling surface on this same shared form runs it identically.
@@ -573,11 +593,16 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       userName: user?.name || user?.username,
       unlockPricing,
       batchId: batchWire.batchId,
-      // S4-16: a 'set' above the current figure has no batch picker but
+      ...(scopedSet ? {
+        setScope,
+        expectedLotQuantity: Number(adjustForm.batch_quantity),
+        expectedBranchQuantity: currentQuantity,
+      } : {}),
+      // S4-16: a legacy 'set' above the current figure has no batch picker but
       // always creates or date-matches a lot server-side, so it carries the
       // date, supplier and receipt fields exactly as an explicit add does.
       receivedDate: isStockIn
-          && (unlockPricing || adjustForm.type === 'set' || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+          && (unlockPricing || (adjustForm.type === 'set' && !scopedSet) || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
           && adjustForm.received_date
         ? String(adjustForm.received_date)
         : undefined,
@@ -586,7 +611,8 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
       // P3-L6: the condition tag, sent only when the control offered it
       // (add/remove; a 'set' has no quantity of its own to tag and the route
       // refuses one). Absent means the ordinary untagged behaviour.
-      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove') && adjustForm.condition_tag
+      // A scoped Set that lowers stock may carry it too (loss rule, 24 Sep).
+      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove' || scopedSet) && adjustForm.condition_tag
         ? String(adjustForm.condition_tag)
         : undefined,
       ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
@@ -623,7 +649,11 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     }
     // Part 563: don't write yet -- park the validated request and open the
     // review dialog. commitAdjust runs the actual write once confirmed.
-    setPendingAdjust({ request: adjustmentRequest, beforeQuantity: currentQuantity })
+    setPendingAdjust({
+      request: adjustmentRequest,
+      // A lot-scope Set is reviewed against the received date it targets.
+      beforeQuantity: scopedSet && setScope === 'lot' ? Number(adjustForm.batch_quantity) : currentQuantity,
+    })
     // Keep the row's identity across a retry: an edited-and-resubmitted failed
     // row stays the SAME rowId, so the outcome list never grows a phantom
     // duplicate and a committed row can never be re-entered.
@@ -855,6 +885,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
         type: req.type,
         quantity: req.quantity,
         beforeQuantity: pendingAdjust?.beforeQuantity,
+        setScope: 'setScope' in req ? req.setScope : undefined,
         unit: product.unit,
         tr,
       }),

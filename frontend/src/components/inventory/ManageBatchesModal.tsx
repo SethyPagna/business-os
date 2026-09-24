@@ -215,7 +215,7 @@ export default function ManageBatchesModal({
       // the field actually changed. This is what lets a stock change be
       // applied to one specific batch instead of the product overall.
       if (Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)) {
-        const qtyRes = await updateBatchBranchQuantity(batch.id, branchId, nextQuantity)
+        const qtyRes = await updateBatchBranchQuantity(batch.id, branchId, nextQuantity, Number(batch.quantity))
         if ((qtyRes as any)?.success === false) {
           notify((qtyRes as any)?.error || tr('update_failed', 'Update failed'), 'error')
           return

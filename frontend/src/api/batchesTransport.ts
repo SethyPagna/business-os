@@ -1,4 +1,5 @@
 import { apiFetch, route } from './http.ts'
+import { createClientRequestId } from './requestIds.ts'
 
 // Batch / lot / expiry-date tracking transport (see
 // cloudflare/src/routes/batches.ts + cloudflare/src/lib/productBatches.ts).
@@ -218,10 +219,18 @@ export function updateBatch(id: number | string, patch: { expiryDate?: string | 
 // lets a stock change be scoped to a single batch/lot instead of the
 // product's overall quantity, per the "apply stock changes... to a
 // specific batch" request.
-export function updateBatchBranchQuantity(id: number | string, branchId: number | string, quantity: number): Promise<{ success: boolean }> {
+// Since 0193 this is the lot-scope Set (cloudflare lib/stockLotAdjustment.ts):
+// the lot figure it was read at rides along as a 409 guard, and one request id
+// per call makes a retried PATCH replay instead of setting stock twice.
+export function updateBatchBranchQuantity(id: number | string, branchId: number | string, quantity: number, expectedLotQuantity?: number): Promise<{ success: boolean }> {
+  const body = {
+    quantity,
+    ...(Number.isFinite(expectedLotQuantity) ? { expectedLotQuantity } : {}),
+    client_request_id: createClientRequestId('lot-set'),
+  }
   return route(
     'batches:update-branch-quantity',
-    () => apiFetch('PATCH', `/api/batches/${encodeURIComponent(String(id))}/branches/${encodeURIComponent(String(branchId))}`, { quantity }),
+    () => apiFetch('PATCH', `/api/batches/${encodeURIComponent(String(id))}/branches/${encodeURIComponent(String(branchId))}`, body),
     null,
     true,
   )

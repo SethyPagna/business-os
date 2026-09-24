@@ -27,6 +27,8 @@ export function buildStockAdjustQuantityReview(input: {
   type: unknown
   quantity: unknown
   beforeQuantity: unknown
+  /** Scoped Set: 'lot' (beforeQuantity is the received date's) or 'branch'. Omitted = legacy total. */
+  setScope?: unknown
   unit: unknown
   tr: TranslateWithFallback
 }): StockAdjustReviewItem[] {
@@ -45,7 +47,9 @@ export function buildStockAdjustQuantityReview(input: {
   if (action === 'set') {
     return [
       {
-        label: input.tr('stock_adjust_set_total_quantity', 'Set total quantity', 'កំណត់ចំនួនសរុប'),
+        label: input.setScope === 'lot'
+          ? input.tr('stock_adjust_set_lot_quantity', 'Set received-date quantity', 'កំណត់ចំនួនតាមថ្ងៃចូល')
+          : input.tr('stock_adjust_set_total_quantity', 'Set total quantity', 'កំណត់ចំនួនសរុប'),
         value: `${withUnit(displayQuantity(before))} → ${withUnit(displayQuantity(quantity))}`,
       },
       {

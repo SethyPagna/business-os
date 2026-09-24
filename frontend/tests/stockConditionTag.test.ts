@@ -151,15 +151,19 @@ runTest('the choice is one compact row, in both modals that offer it', () => {
   }
 })
 
-runTest('a set never offers a tag, on either surface', () => {
-  // A "set" is a target figure whose direction the server decides, so it has
-  // no quantity of its own to tag; POST /inventory/adjust refuses a tag on a
-  // set, and neither modal may offer one.
+runTest('a set offers a tag only once its preview LOWERS the lot, on either surface', () => {
+  // Loss rule (owner, 24 Sep): a downward scoped Set is a loss unless tagged,
+  // and tagged it follows the tagged Remove path. An upward or unchanged Set
+  // has no units to tag; the Worker refuses one (set_tag_requires_decrease)
+  // and neither modal offers or keeps one.
   const modals = readSource('frontend/src/components/inventory/InventoryStockModals.tsx')
-  assert.match(modals, /adjustForm\.type === 'remove' \|\| adjustForm\.type === 'add' \? \(/)
+  assert.match(modals, /adjustForm\.type === 'remove' \|\| adjustForm\.type === 'add' \|\| setLowersStock \? \(/)
+  assert.match(modals, /if \(adjustForm\.type === 'set' && !setLowersStock && adjustForm\.condition_tag\)/, 'a stale tag is dropped when the Set stops lowering stock')
   const fast = readSource('frontend/src/components/inventory/FastStockInModal.tsx')
-  assert.match(fast, /\{mode !== 'set' \? \(/)
-  assert.match(fast, /conditionTag: mode === 'set' \? '' : conditionTag/)
+  assert.match(fast, /\{mode !== 'set' \|\| fastSetLowers \? \(/)
+  assert.match(fast, /conditionTag: mode === 'set' && !fastSetLowers \? '' : conditionTag/)
+  const worker = readSource('cloudflare/src/lib/stockLotAdjustment.ts')
+  assert.match(worker, /if \(request\.conditionTag && lotDelta >= 0\)/, 'the Worker enforces the same direction rule')
 })
 
 runTest('held units are excluded from sellable stock, structurally', () => {
