@@ -69,3 +69,10 @@ frontend/playwright/.cache/
 # a private vite optimize cache, and the one-line Worker port for the proxy.
 frontend/.vite-lane-cache/
 frontend/.lane-api-port
+
+# Production D1 snapshots (ops/scripts/latest-data/snapshot-d1-readonly.mjs).
+# The tool refuses output paths inside the repo; this is the second line of
+# defence so a snapshot dir or its rebuilt SQLite can never be staged.
+d1-snapshot-*/
+*.snapshot.sqlite
+snapshot.sqlite
