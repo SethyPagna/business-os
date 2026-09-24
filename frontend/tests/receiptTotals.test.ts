@@ -331,4 +331,27 @@ const storeAbsorbedDelivery = {
   assert.equal(legacyPartial.outstandingUsd, 4, 'a partial tender still names its balance')
 }
 
+// ---------------------------------------------------------------------------
+// 9. The riel balance converts what is owed, once. A legacy column prints
+//    dollars to the cent, and converting that printed cent instead doubled a
+//    small debt: $10.00 at 4,100 paid with 40,979 riel (21 riel short) owes
+//    $0.0051 -- printed $0.01, and 21 riel, never the 41 riel a whole cent is.
+// ---------------------------------------------------------------------------
+{
+  const legacyPaidInRiel = (amount_paid_khr: number, exchange_rate = 4100) => receiptTotalsFigures({
+    exchange_rate, subtotal_usd: 10, discount_usd: 0, total_usd: 10, amount_paid_usd: 0, amount_paid_khr,
+  })
+  const short21 = legacyPaidInRiel(40979)
+  assert.equal(short21.outstandingUsd, 0.01, 'the legacy column still prints dollars to the cent')
+  assert.equal(short21.outstandingKhr, 21, '21 riel short owes 21 riel, not the 41 riel a rounded cent converts to')
+  assert.equal(legacyPaidInRiel(40978).outstandingKhr, 22)
+  // 20 riel short is inside the half-cent band: paid, in both currencies.
+  assert.equal(legacyPaidInRiel(40980).outstandingUsd, 0)
+  assert.equal(legacyPaidInRiel(40980).outstandingKhr, 0)
+  // A shortfall of a whole cent reads the same either way.
+  assert.equal(legacyPaidInRiel(40959).outstandingKhr, 41)
+  // Converted at the sale's own rate: booked at 4,000, 21 riel short.
+  assert.equal(legacyPaidInRiel(39979, 4000).outstandingKhr, 21)
+}
+
 console.log('receiptTotals: column foots to total_usd on every fixture (all-three-discounts, split payment, partial return, KHR-primary, absorbed delivery, production 16433)')

@@ -198,9 +198,10 @@ export function receiptTotalsFigures(
   // $9.61 sale at 4,100 is paid, never "$0.00 due"), otherwise the exact
   // shortfall -- on the same money basis the status rules use. Money the
   // kernel cannot read owes the whole total.
+  let owedUsd: number
   let outstandingUsd: number
   try {
-    const owed = recordedSaleOutstandingUsd({
+    owedUsd = recordedSaleOutstandingUsd({
       total_usd: totalUsd,
       amount_paid_usd: paidUsd,
       amount_paid_khr: paidKhr,
@@ -208,9 +209,9 @@ export function receiptTotalsFigures(
       money_precision_version: sale.money_precision_version,
       calculated_total_usd: sale.calculated_total_usd,
     })
-    outstandingUsd = version1 ? owed : round2(owed)
+    outstandingUsd = version1 ? owedUsd : round2(owedUsd)
   } catch {
-    outstandingUsd = Math.max(0, totalUsd)
+    owedUsd = outstandingUsd = Math.max(0, totalUsd)
   }
 
   return {
@@ -244,7 +245,11 @@ export function receiptTotalsFigures(
     changeUsd: num(sale.change_usd ?? sale.change_returned),
     changeKhr: num(sale.change_khr),
     outstandingUsd,
-    outstandingKhr: Math.round(outstandingUsd * exchangeRate),
+    // Riel converts what is owed, once. A legacy column prints dollars to the
+    // cent, so converting the printed figure doubled a small debt: 21 riel
+    // short of $10.00 at 4,100 owes $0.0051 -- printed $0.01, and 21 riel,
+    // never the 41 riel a whole cent is.
+    outstandingKhr: Math.round(owedUsd * exchangeRate),
   }
 }
 
