@@ -90,7 +90,9 @@ for (const language of ['en', 'km'] as const) {
     }
     await expect(page.getByText('241-245 / 245', { exact: true })).toBeVisible()
     await expect(page.locator('.report-shift-plain')).toContainText('SHIFT-241')
-    await page.locator('button[aria-haspopup="listbox"]').filter({ hasText: 'SHIFT-241' }).click()
+    // S1 (87563d491): the shift picker is a "Search cashier or ID" combobox,
+    // not a listbox button. Opening it lists the current page's shifts.
+    await page.getByRole('combobox', { name: t.shift_search_placeholder }).click()
     await expect(page.getByRole('option')).toHaveCount(5)
     await page.getByRole('option').filter({ hasText: 'SHIFT-245' }).click()
     await expect(page.locator('.report-shift-plain')).toContainText('SHIFT-245')

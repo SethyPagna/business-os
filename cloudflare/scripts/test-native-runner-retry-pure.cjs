@@ -115,7 +115,13 @@ async function main() {
     )
     check(
       'giving up after retries is reported RED with the decoded exit code, never zero bytes of explanation',
-      logsCrash.some((l) => l.startsWith('RED  ') && l.includes('giving up after retries') && l.includes('c0000409')),
+      // Windows reports the full 32-bit 0xC0000409; POSIX truncates an exit
+      // status to 8 bits (3221226505 & 0xff = 9). Assert the code the OS
+      // actually delivered is decoded in the RED line, and the Windows hex on
+      // Windows, so the check holds on a Linux runner too.
+      logsCrash.some((l) => l.startsWith('RED  ') && l.includes('giving up after retries') &&
+        l.includes(describeCode(crashResult.attempts[crashResult.attempts.length - 1].code)) &&
+        (process.platform !== 'win32' || l.includes('c0000409'))),
     )
 
     // A hang is killed on the harness's own timeout and classified the same
