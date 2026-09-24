@@ -51,6 +51,8 @@ const fixtureSource = String.raw`
         needsStockChoice: true, blocked: null,
         keeperStock: { totalQuantity: 3, branches: [{ branchId: 1, branchName: 'shop', quantity: 3 }] },
         groupCost: { cost_price_usd: 6, cost_price_khr: 24600 },
+        reviewedDigest: 'a'.repeat(64),
+        groupProducts: cluster.products,
       }
     },
     async merge(keepId, mergeId, stock, keep) {
@@ -214,7 +216,12 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
   await clickButton('^(Confirm|Resolve|Merge)$')
   await waitFor('done', async () => ((await evaluate<number>('window.__merges.length')) === 1 && /Barcodes kept on the merged records/.test(await dialogText()) ? true : null))
   const merges = await evaluate<Array<Record<string, unknown>>>('window.__merges')
-  assert.deepEqual(merges[0], { keepId: 10, mergeId: 11, stock: 'merge', keep: { cost_price_usd: 6, cost_price_khr: 24600 } })
+  const keep = merges[0].keep as { resolve: { requestId: string } }
+  assert.match(keep.resolve.requestId, /^resolve_[a-f0-9-]{36}$/)
+  assert.deepEqual(merges[0], {
+    keepId: 10, mergeId: 11, stock: 'merge',
+    keep: { resolve: { requestId: keep.resolve.requestId, reviewedDigest: 'a'.repeat(64), steps: [{ mergeId: 11, stock: 'merge' }] } },
+  }, 'the server applies the reviewed group rule; default cost is not a client override')
 
   // Cost viewer: the cost row is locked, nothing is sent for cost.
   await open(375, 'mode=grid&lang=en&perm=viewer', `document.querySelector('[role="dialog"] table')`)

@@ -8257,6 +8257,12 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     return c.json({ success: false, error: 'keepId and mergeId (two different product ids) are required' }, 400)
   }
   const db = getDb(c.env)
+  const keepMode = ['1', 'true'].includes(String(c.req.query('keep') || ''))
+  if (keepMode && getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({ success: true, blocked: { code: 'resolve_plan_budget' } })
+  const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (keepMode && groupIds.length > 12) return c.json({ code: 'resolve_group_too_large', error: 'Resolve at most 12 products at a time.' }, 400)
+  const beforeReview = keepMode ? await readResolveProductGroup(db, groupIds, keepId) : null
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
   const [stockImpact, pricing, identity, blockingSession] = await Promise.all([
@@ -8271,16 +8277,11 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   // cluster; a pair the system did not list together is. The grid also reads
   // the kept product's own stock per branch (its Before) and, with groupIds,
   // the cost the rule gives the whole group (its default Final cost).
-  const keepMode = ['1', 'true'].includes(String(c.req.query('keep') || ''))
   let inCluster = false
   let keeperStock: MergeStockImpact | null = null
   let groupCost: { cost_price_usd: number; cost_price_khr: number } | null = null
   let resolveGroup: Awaited<ReturnType<typeof readResolveProductGroup>> | null = null
   if (keepMode) {
-    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({ success: true, blocked: { code: 'resolve_plan_budget' } })
-    const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
-      .filter((id) => Number.isSafeInteger(id) && id > 0)
-    if (groupIds.length > 12) return c.json({ code: 'resolve_group_too_large', error: 'Resolve at most 12 products at a time.' }, 400)
     const [clusters, keeperImpact, groupRows] = await Promise.all([
       findPossiblySameProductClusters(db),
       readMergeStockImpact(db, keepId, branchNameById),
@@ -8297,6 +8298,9 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
       cost_price_khr: Number(economics.merged.cost_price_khr ?? 0) || 0,
     }
     resolveGroup = await readResolveProductGroup(db, groupIds, keepId)
+    if (resolveGroup.reviewedDigest !== beforeReview?.reviewedDigest) {
+      return c.json({ code: 'merge_state_conflict', error: 'These products changed while the preview was loading. Reload and review again.' }, 409)
+    }
   }
   return c.json({
     success: true,

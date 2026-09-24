@@ -54,7 +54,16 @@ const adapter = {
     const st = state.native.prepare(sql)
     return {
       get: (p) => { state.queries += 1; return st.get(p == null ? {} : p) },
-      all: (p) => { state.queries += 1; return st.all(p == null ? {} : p) },
+      all: (p) => {
+        state.queries += 1
+        const result = st.all(p == null ? {} : p)
+        if (state.afterStockRead && sql === 'SELECT branch_id, quantity FROM branch_stock WHERE product_id = @id') {
+          const mutate = state.afterStockRead
+          state.afterStockRead = null
+          mutate()
+        }
+        return result
+      },
       run: (p) => {
         state.queries += 1
         const r = st.run(p == null ? {} : p)
@@ -150,6 +159,7 @@ function fresh() {
   state.user = ADMIN
   state.audits = []
   state.beforeFold = null
+  state.afterStockRead = null
   state.tier = 'paid'
 }
 const one = (sql, ...params) => { const row = state.native.db.prepare(sql).get(...params); return row ? { ...row } : row }
@@ -449,6 +459,18 @@ async function main() {
     assert.equal(refused.body.code, 'resolve_plan_budget')
     assert.ok(refused.queries + 20 <= 50)
     assert.equal(dump(), before)
+  })
+
+  await check('a stock change between preview reads cannot issue a new digest for old displayed values', async () => {
+    fresh()
+    state.afterStockRead = () => state.native.db.exec('UPDATE branch_stock SET quantity=8 WHERE product_id=11 AND branch_id=1')
+    const mixed = await preview(10, 11)
+    assert.equal(mixed.status, 409, JSON.stringify(mixed.body))
+    assert.equal(mixed.body.code, 'merge_state_conflict')
+    assert.equal('reviewedDigest' in mixed.body, false)
+    const refreshed = await preview(10, 11)
+    assert.equal(refreshed.status, 200)
+    assert.equal(refreshed.body.stockImpact.totalQuantity, 9)
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
