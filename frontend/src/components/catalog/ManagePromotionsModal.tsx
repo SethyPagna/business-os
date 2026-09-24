@@ -73,6 +73,11 @@ function moveCard(list: Promotion[], from: number, to: number): Promotion[] {
   return next
 }
 
+// The sort_order that puts a new card after every card already stored.
+function endOfStrip(list: Promotion[]): number {
+  return list.reduce((last, p) => Math.max(last, Number(p.sort_order) || 0), -1) + 1
+}
+
 function toFormFields(promo: Promotion): EditableFields {
   return {
     title: promo.title || '',
@@ -223,11 +228,16 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     setSaving(true)
     try {
       const payload = toSavePayload(form)
+      // The Worker stores a missing sort_order as 0 on create AND on update,
+      // so an edited card jumped to the front of the strip and a new one
+      // landed among the first cards. An edit keeps the card's place; a new
+      // card joins the end.
       if (editingId === 'new') {
-        await createPromotion(payload)
+        await createPromotion({ ...payload, sort_order: endOfStrip(promotions) })
         notify(copy('promotionCreated', 'Promotion created'), 'success')
       } else if (editingId != null) {
-        await updatePromotion(editingId, payload)
+        const place = promotions.find((p) => p.id === editingId)?.sort_order ?? 0
+        await updatePromotion(editingId, { ...payload, sort_order: place })
         notify(copy('promotionUpdated', 'Promotion updated'), 'success')
       }
       cancelEdit()
