@@ -29,6 +29,16 @@ export function savedSaleRounding(value: { calculated_total_usd?: unknown; round
     || roundMoney2(raw) !== total || subtractMoney4(total, raw) !== adjustment) throw new SaleMoneyUnavailableError()
   return { calculatedTotalUsd: raw, roundingAdjustmentUsd: adjustment }
 }
+/** The rate a sale was booked at, or null when it stored no usable one.
+ * Owner rule (24 Sep 2026): older sales keep their own exchange rate -- it is
+ * the rate for everything about that sale, legacy or v1; only a new record
+ * takes today's Settings rate. The Worker refuses to settle a sale with none. */
+export function saleOwnExchangeRate(value: { exchange_rate?: unknown } | null | undefined): number | null {
+  const raw = value?.exchange_rate
+  if (raw == null || raw === '') return null
+  const rate = Number(raw)
+  return Number.isFinite(rate) && rate > 0 ? rate : null
+}
 export function saleUsesSavedExchangeRate(value: Parameters<typeof savedSaleRounding>[0] | null | undefined): boolean {
   if (!value) return false
   if (value.money_precision_version === 1) return true

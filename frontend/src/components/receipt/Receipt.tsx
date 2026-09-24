@@ -410,10 +410,9 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   // The composition lines below are spelled out as receiptLineMath.test.ts
   // pins them (Sep 4 2026); their inputs come from the shared read so the two
   // surfaces cannot drift on the same row.
-  const totals = useMemo(() => receiptTotalsFigures(sale, {
-    showItemDiscount,
-    fallbackExchangeRate: toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100,
-  }), [appliedSettings.exchange_rate, sale, showItemDiscount])
+  // The sale's own rate only (owner rule, 24 Sep 2026): today's Settings rate
+  // never reaches a printed or reprinted sale.
+  const totals = useMemo(() => receiptTotalsFigures(sale, { showItemDiscount }), [sale, showItemDiscount])
   const roundingDisplay = totals.calculatedTotalUsd === null ? null : receiptRoundingDisplay(totals.roundingAdjustmentUsd, fmtUSD)
   const exchangeRate = totals.exchangeRate
   const subtotalUsd = totals.subtotalUsd

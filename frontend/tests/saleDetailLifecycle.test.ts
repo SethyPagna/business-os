@@ -67,7 +67,7 @@ assert.equal(configEnv.paymentConfig.status, 'ready')
 
 const rows = [{ method: 'ABA', usd: '7', khr: '0' }]
 const hydration: any = {
-  usesSavedExchangeRate: false, savedExchangeRate: 4000,
+  saleSettlementRate: 4000,
   paymentConfig: configEnv.paymentConfig, paymentConfigLoaded: true, statusSaving: false, pendingStatus: false,
   session: { configuredMethods: [], exchangeRate: 4100, rows, expectedUpdatedAt: 'reviewed-version' },
   setSettlementSession(update: any) { this.session = update(this.session) },
@@ -85,17 +85,19 @@ assert.deepEqual(hydration.session.configuredMethods, ['Cash', 'ABA'], 'uncertai
 hydration.pendingStatus = false; hydrateEffect.render()
 assert.deepEqual(hydration.session.configuredMethods, ['Cash'])
 assert.equal(hydration.session.rows, rows)
-hydration.usesSavedExchangeRate = true
-hydration.savedExchangeRate = 4020
+// Owner rule (24 Sep 2026): older sales keep their own exchange rate. Every
+// sale -- v1, edited v0 and untouched legacy alike -- hydrates at its own
+// booked rate; the configured (live) 4200 above never reaches the session.
+// This block pinned the opposite for legacy sales until then.
+assert.equal(hydration.session.exchangeRate, 4000, 'legacy hydration keeps the booked rate, not the live 4200 setting')
+hydration.saleSettlementRate = 4020
 hydrateEffect.render()
 assert.equal(hydration.session.exchangeRate, 4020, 'v1 hydration uses the saved sale rate, not latest settings')
 assert.equal(hydration.session.rows, rows, 'saved-rate selection preserves typed tender')
-hydration.savedExchangeRate = 4050
+hydration.saleSettlementRate = 4050
 hydrateEffect.render()
-assert.equal(hydration.session.exchangeRate, 4050, 'edited-v0 valid rounding metadata uses the same saved-rate hydration flag without inventing captured pricing')
-hydration.usesSavedExchangeRate = false
-hydrateEffect.render()
-assert.equal(hydration.session.exchangeRate, 4200, 'untouched legacy NULL metadata retains configured payment-rate behavior')
+assert.equal(hydration.session.exchangeRate, 4050, 'a changed sale rate re-hydrates without recreating typed tender')
+assert.equal(hydration.session.rows, rows)
 
 const statusEnv: any = { detailScope: 'actor1:sale1', sale: { sale_status: 'awaiting_payment' }, statusSaving: false, pendingStatus: false, lastServerStatusRef: { current: 'actor1:sale1:awaiting_payment' }, selected: 'completed', setNewStatus(value: string) { this.selected = value } }
 statusEnv.setNewStatus = statusEnv.setNewStatus.bind(statusEnv)

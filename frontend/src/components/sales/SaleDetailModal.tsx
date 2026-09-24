@@ -27,7 +27,8 @@ import {
 } from '../../utils/saleAmendments.ts'
 import { receiptTotalsFigures } from '../../utils/receiptTotals.ts'
 import { recordedSaleOutstandingUsd } from '../../utils/saleStatusResolution.ts'
-import { saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
+import { saleOwnExchangeRate, saleUsesSavedExchangeRate } from '../../utils/saleMoneyV1.ts'
+import { CURRENCY } from '../../constants'
 import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
@@ -421,6 +422,7 @@ export default function SaleDetailModal({
   const savedMoneyVersion = sale?.money_precision_version === 1 ? 1 : 0
   const usesSavedExchangeRate = saleUsesSavedExchangeRate(sale)
   const savedExchangeRate = Number(sale?.exchange_rate)
+  const saleSettlementRate = saleOwnExchangeRate(sale) ?? CURRENCY.DEFAULT_EXCHANGE_RATE
   const securityGenerationRef = useRef({ fingerprint: securityFingerprint, generation: 0 })
   const detailScope = `${advanceSaleSecurityScope(securityGenerationRef.current, securityFingerprint)}:${sale?.id ?? ''}`
   const detailScopeRef = useRef(detailScope)
@@ -450,8 +452,9 @@ export default function SaleDetailModal({
     const rawSettings = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
     const configuredMethods = configuredSettlementMethods(rawSettings.pos_payment_methods)
     const savedRate = saleUsesSavedExchangeRate(selectedSale)
-    const exchangeRateValue = Number(savedRate ? selectedSale?.exchange_rate : rawSettings.exchange_rate)
-    const exchangeRate = Number.isFinite(exchangeRateValue) && exchangeRateValue > 0 ? exchangeRateValue : 4100
+    // The sale's own booked rate, legacy or v1 -- never today's setting. A
+    // sale with none shows the 4100 default; the Worker refuses to settle it.
+    const exchangeRate = saleOwnExchangeRate(selectedSale) ?? CURRENCY.DEFAULT_EXCHANGE_RATE
     const rows = initialSettlementRows({
       paymentDetails: selectedSale?.payment_details,
       paymentMethod: selectedSale?.payment_method,
@@ -479,7 +482,7 @@ export default function SaleDetailModal({
   const [settlementSession, setSettlementSession] = useState(() => settlementSnapshot(sale))
   const paymentConfigReady = paymentConfigLoaded && !!paymentConfig.value &&
     JSON.stringify(settlementSession.configuredMethods) === JSON.stringify(paymentConfig.value.configuredMethods) &&
-    settlementSession.exchangeRate === (usesSavedExchangeRate ? savedExchangeRate : paymentConfig.value.exchangeRate)
+    settlementSession.exchangeRate === saleSettlementRate
   const [settlementRows, setSettlementRows] = useState<SettlementRow[]>(settlementSession.rows)
   const settlementBaselineRef = useRef<SettlementRow[]>(settlementSession.rows)
   const settlementRequestIdRef = useRef(createSettlementRequestId())
@@ -668,8 +671,8 @@ export default function SaleDetailModal({
     if (!paymentConfigLoaded || !paymentConfig.value || statusSaving || pendingStatus) return
     // Eligibility and rate may hydrate after open. Never replace typed tender
     // rows, baseline, or request identity here; pending requests stay exact.
-    setSettlementSession((current) => ({ ...current, ...paymentConfig.value, ...(usesSavedExchangeRate ? { exchangeRate: savedExchangeRate } : {}) }))
-  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus, usesSavedExchangeRate, savedExchangeRate])
+    setSettlementSession((current) => ({ ...current, ...paymentConfig.value, exchangeRate: saleSettlementRate }))
+  }, [paymentConfig, paymentConfigLoaded, statusSaving, pendingStatus, saleSettlementRate])
 
   const lastServerStatusRef = useRef(`${detailScope}:${sale?.sale_status || 'completed'}`)
   useEffect(() => {

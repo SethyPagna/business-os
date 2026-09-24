@@ -200,9 +200,12 @@ const khrPrimary = {
 
   // Both currencies convert at the rate the sale was BOOKED at, never a
   // re-fetched current rate: a reprint has to tell the same story as the
-  // original. A sale that stored no rate falls back, and only then.
+  // original. A sale that stored no usable rate reads at the 4100 default the
+  // Worker books for it -- never the live Settings rate (owner rule, 24 Sep 2026).
   assert.equal(figures.exchangeRate, RATE)
-  assert.equal(receiptTotalsFigures({ ...khrPrimary, exchange_rate: null }, { fallbackExchangeRate: 4000 }).exchangeRate, 4000)
+  for (const missing of [null, 0, ''] as const) {
+    assert.equal(receiptTotalsFigures({ ...khrPrimary, exchange_rate: missing }).exchangeRate, 4100)
+  }
 }
 
 // ---------------------------------------------------------------------------

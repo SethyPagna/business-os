@@ -121,6 +121,43 @@ await runTest('a legacy sale 21 riel short prints a 21 riel balance, not the 41 
   assert.equal(row, '|Balance due:|$0.01|21៛|')
 })
 
+await runTest('a delivery sale booked at 4,000 prints every riel line at 4,000 while Settings says 4,200', () => {
+  const text = printedText(renderReceipt({ exchange_rate: 4000 }))
+  assert.match(text, /\|· 1 USD = 4,000 ៛\|/)
+  assert.match(text, /\|Serum\|2\|\$5\.00\|\$10\.00\|40,000៛\|/)
+  assert.match(text, /\|Delivery Fee:\|\$1\.00\|4,000៛\|/)
+  assert.match(text, /\|TOTAL\|\$11\.00\|44,000៛\|/)
+  assert.match(text, /\|Balance due:\|\$6\.00\|24,000៛\|/)
+  assert.doesNotMatch(text, /4,200|42,000|46,200|25,200/, 'the live 4,200 rate reached the paper')
+})
+
+for (const missing of [null, 0] as const) {
+  await runTest(`a delivery sale that stored rate ${missing} prints at the 4,100 default, never the live 4,200`, () => {
+    const text = printedText(renderReceipt({ exchange_rate: missing }))
+    assert.match(text, /\|· 1 USD = 4,100 ៛\|/)
+    assert.match(text, /\|Delivery Fee:\|\$1\.00\|4,100៛\|/)
+    assert.match(text, /\|TOTAL\|\$11\.00\|45,100៛\|/)
+    assert.match(text, /\|Balance due:\|\$6\.00\|24,600៛\|/)
+    assert.doesNotMatch(text, /4,200|46,200|25,200/, 'the live 4,200 rate reached the paper')
+  })
+}
+
+await runTest('settling reads the sale\'s own rate for legacy and v1 alike, and refuses to invent one', async () => {
+  const { saleOwnExchangeRate } = await import('../src/utils/saleMoneyV1.ts')
+  assert.equal(saleOwnExchangeRate({ exchange_rate: 4000 }), 4000)
+  assert.equal(saleOwnExchangeRate({ exchange_rate: '4000' }), 4000)
+  for (const missing of [null, undefined, 0, '', -1, 'abc']) {
+    assert.equal(saleOwnExchangeRate({ exchange_rate: missing }), null, String(missing))
+  }
+  // The Sale detail's settlement session: the sale's own rate, never the
+  // settings row. The source at the lane tip read `rawSettings.exchange_rate`
+  // for legacy sales and compared the session with the live config rate.
+  const modal = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(modal, /rawSettings\.exchange_rate/)
+  assert.doesNotMatch(modal, /paymentConfig\.value\.exchangeRate/)
+  assert.match(modal, /const exchangeRate = saleOwnExchangeRate\(selectedSale\) \?\? CURRENCY\.DEFAULT_EXCHANGE_RATE/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

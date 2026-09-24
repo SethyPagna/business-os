@@ -46,7 +46,8 @@ import {
 } from './receiptLineMath.ts'
 
 import { addMoney4, divideMoney4, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision.ts'
-import { savedSaleRounding } from './saleMoneyV1.ts'
+import { saleOwnExchangeRate, savedSaleRounding } from './saleMoneyV1.ts'
+import { CURRENCY } from '../constants.ts'
 import { recordedSaleOutstandingUsd } from './saleStatusResolution.ts'
 
 export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
@@ -89,12 +90,6 @@ export interface ReceiptTotalsOptions {
    * no item-discount figure to report either.
    */
   showItemDiscount?: boolean
-  /**
-   * Rate for a sale that stored none (old rows). NEVER a re-fetched live rate:
-   * every riel figure here converts at the rate the sale was booked at, or a
-   * reprint would tell a different story than the original.
-   */
-  fallbackExchangeRate?: number
 }
 
 export interface ReceiptTotalsFigures {
@@ -170,7 +165,11 @@ export function receiptTotalsFigures(
 ): ReceiptTotalsFigures {
   const version1 = sale.money_precision_version === 1
   const money = version1 ? roundMoney4 : round2
-  const exchangeRate = num(sale.exchange_rate) || options.fallbackExchangeRate || 4100
+  // Owner rule (24 Sep 2026): every riel figure converts at the rate the sale
+  // was booked at, whatever Settings says today, or a reprint would tell a
+  // different story than the original. A sale that stored none reads at the
+  // 4100 default the Worker books for it, never the live rate.
+  const exchangeRate = saleOwnExchangeRate(sale) ?? CURRENCY.DEFAULT_EXCHANGE_RATE
 
   const subtotalUsd = num(sale.subtotal_usd ?? sale.subtotal)
   const discountUsd = num(sale.discount_usd ?? sale.discount)
