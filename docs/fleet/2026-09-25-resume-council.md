@@ -105,6 +105,40 @@ fixtures passed unchanged (swLateUpgrade and swStaleChunkRecovery). No assertion
 was weakened. Logs are under BusinessOS/Records/frontend-full-baseline-20260925.log
 and frontend-sw-history-recheck-20260925.log. This baseline precedes WIP integration.
 
+## Complete Sales export follow-up
+
+Explorer and architecture review agree that walking all pages alone is not an
+adequate F1 repair. Receipt rows round money before presentation, and the current
+maximum-ID ceiling excludes inserts but does not detect edits. The selected
+scope is one end-to-end Sales receipt export, using the existing report table,
+CSV/Excel/print utilities and endpoint. A report registry and new routing are
+outside this slice.
+
+The Worker will derive searched receipt rows and canonical totals from the same
+verified scalar snapshot. Its export token covers normalized query, insertion
+ceiling, authorization projection, all authorized rows and authoritative totals.
+It deliberately excludes hidden raw facts: otherwise the token could reveal
+changes in hidden costs. Continuations and a final verification must match the
+token. This certifies consistency at verification time, not a freeze on later
+business edits. Export work is bounded to 10,000 source receipts before search,
+with existing scalar limits retained; oversized ranges fail rather than truncate.
+
+The frontend will freeze query, actor and display settings, validate every page,
+and publish only after complete traversal and final verification. CSV, Excel and
+Print use the same completed document and server totals. Excel keeps identifiers
+as text and dates/money as typed values; print uses a fresh preview action to
+avoid popup blocking after asynchronous collection. Permission revocation,
+filter changes, navigation and malformed/incomplete responses invalidate output.
+
+Implementation ownership is split between isolated Worker and frontend branches;
+the parent owns translations and integration. Required evidence includes real
+route cohort/precision/concurrent-edit checks, the actual Sales export action,
+permission changes during collection/publication, and an Excel write/read round
+trip with Khmer, leading-zero identifiers and business-midnight dates. The
+broader Report Center, other capped reports and held website-posts lane remain
+open. These five council perspectives use independent runs of the same model;
+they are not evidence of model diversity.
+
 ## Confidence and limits
 
 Independent follow-up found and reproduced a historical contact receipt allowing
