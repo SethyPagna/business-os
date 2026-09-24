@@ -225,6 +225,8 @@ export interface MergeReversal {
   // fold cleared that parent link, and undo puts this value back.
   keeperParentIdBefore?: number | null
   mergedStateFingerprint?: string
+  /** New resolver snapshots include received date, supplier and cost metadata. */
+  fullBatchMetadataFingerprint?: boolean
   fingerprintPending?: boolean
   operationId?: string
 }
@@ -480,6 +482,7 @@ export async function mergeStateFingerprint(
 ): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
+  const fullBatchMetadata = reversals.some((reversal) => reversal.fullBatchMetadataFingerprint)
   const products: Array<Record<string, unknown>> = []
   const branchStock: Array<Record<string, unknown>> = []
   const batches: Array<Record<string, unknown>> = []
@@ -499,7 +502,7 @@ export async function mergeStateFingerprint(
     reads.push(
       { key: `products:${index}`, sql: `SELECT * FROM products WHERE id IN (${placeholders})`, params: ids },
       { key: `branchStock:${index}`, sql: `SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, params: ids },
-      { key: `batches:${index}`, sql: `SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids },
+      { key: `batches:${index}`, sql: `SELECT ${fullBatchMetadata ? '*' : 'id, variant_product_id, batch_key, batch_number, is_active'} FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids },
       { key: `movementHeads:${index}`, sql: `SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, params: ids },
       { key: `productImages:${index}`, sql: `SELECT * FROM product_images WHERE product_id IN (${placeholders})`, params: ids },
       { key: `stockSessions:${index}`, sql: `SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`, params: ids },
@@ -515,7 +518,7 @@ export async function mergeStateFingerprint(
     // Old fingerprints intentionally project only lot identity/activation.
     // Preserve that serialized contract, but lock the entire current lot row
     // (received date, cost, supplier, etc.) against races during group undo.
-    if (transactionGuards) reads.push({
+    if (transactionGuards && !fullBatchMetadata) reads.push({
       key: `casBatchMetadata:${index}`,
       sql: `SELECT * FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids,
     })

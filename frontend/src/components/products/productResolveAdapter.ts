@@ -269,6 +269,7 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
   const blocked = ctx.data.previews.get(id)?.blocked
   if (!blocked?.code) return null
   const name = productLabel(ctx.data.products.get(id), id)
+  if (blocked.code === 'resolve_plan_budget') return tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
   if (blocked.code === 'stock_session_reversible') {
     return fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: blocked.operationId ?? '' })
   }
@@ -288,6 +289,8 @@ function localizedRefusal(error: unknown, t: Translate): unknown {
   const code = typeof problem?.code === 'string' ? problem.code : ''
   const message = code === 'product_merge_not_duplicates'
     ? tr(t, 'selected_conflict_product_merge_not_duplicates', 'These products are not a current duplicate group. Refresh the Duplicates list and try again.')
+    : code === 'resolve_plan_budget'
+      ? tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
       ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
       : code === 'stock_session_reversible'

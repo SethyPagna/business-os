@@ -4377,6 +4377,7 @@
   "resolve_contact_missing": "No longer exists, so it cannot be merged.",
   "resolve_merge_needs_two": "Merge in at least two records.",
   "contact_merge_not_duplicates": "These contacts are not a current duplicate group. Close this review and refresh the Duplicates list.",
+  "resolve_plan_budget": "Product resolving is unavailable on this deployment. No changes were saved.",
   "resolve_merge_max": "Merge at most {n} records at a time.",
   "resolve_contact_confirm": "Merge {records} into {name}.",
   "resolve_membership_to_notes": "Membership numbers moved to Notes",

@@ -22,6 +22,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
+import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -3790,6 +3791,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
     ...(keeperChoice ? { keeperChoice } : {}),
+    ...(keeperChoice?.economics ? { fullBatchMetadataFingerprint: true } : {}),
     ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
       selling_price_usd: Number(canonicalBefore?.selling_price_usd) || 0,
@@ -8212,20 +8214,34 @@ async function resolveProductDigest(value: unknown): Promise<string> {
 async function resolveProductFingerprint(db: ReturnType<typeof getDb>, ids: number[], guards?: AtomicMergeStatement[]) {
   // The existing graph fingerprint also supplies transaction guards for stock,
   // lots, images and links. Never expose its unredacted JSON to the browser.
-  return resolveProductDigest(await mergeStateFingerprint(db, ids.map((id) => ({ keeperId: id, dupId: id } as MergeReversal)), guards))
+  return resolveProductDigest(await mergeStateFingerprint(db, ids.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)), guards))
 }
 
 async function readResolveProductGroup(db: ReturnType<typeof getDb>, ids: number[], keeperId: number) {
   const sorted = [...new Set(ids)].sort((a, b) => a - b)
-  const { sql, params } = buildInClause('resolve', sorted)
-  const rows = await db.prepare(`SELECT id, name, barcode, image_path, stock_quantity, updated_at, is_active,
-    ${[...MERGE_COST_FIELDS, ...MERGE_PRICE_FIELDS].join(', ')} FROM products WHERE id IN (${sql}) ORDER BY id`).all<Record<string, unknown>>(params)
+  // One consistent seven-query read for the whole group. Derive every pending
+  // suffix in memory rather than rereading the graph once per future fold.
+  const serialized = await mergeStateFingerprint(db, sorted.map((id) => ({ keeperId: id, dupId: id, fullBatchMetadataFingerprint: true } as MergeReversal)))
+  const graph = JSON.parse(serialized) as Record<string, Array<Record<string, unknown>>>
+  const rows = graph.products
+  const subset = (ids: number[]) => {
+    const members = new Set(ids)
+    const batches = graph.batches.filter((row) => members.has(Number(row.variant_product_id)))
+    const batchIds = new Set(batches.map((row) => Number(row.id)))
+    return {
+      ...graph,
+      products: graph.products.filter((row) => members.has(Number(row.id))),
+      batches,
+      batchStock: graph.batchStock.filter((row) => batchIds.has(Number(row.batch_id))),
+      ...Object.fromEntries(['branchStock', 'movementHeads', 'productImages', 'stockSessions'].map((key) => [key, graph[key].filter((row) => members.has(Number(row.product_id)))])),
+    }
+  }
   const fingerprints: Record<string, string> = {}
-  fingerprints[sorted.join(',')] = await resolveProductFingerprint(db, sorted)
+  fingerprints[sorted.join(',')] = await resolveProductDigest(serialized)
   const merged = sorted.filter((id) => id !== keeperId)
   for (let index = 1; index < merged.length; index += 1) {
     const remaining = merged.slice(index)
-    fingerprints[remaining.join(',')] = await resolveProductFingerprint(db, remaining)
+    fingerprints[remaining.join(',')] = await resolveProductDigest(JSON.stringify(subset(remaining)))
   }
   return { rows, fingerprints, reviewedDigest: await resolveProductDigest({ rows, fingerprints }) }
 }
@@ -8261,6 +8277,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   let groupCost: { cost_price_usd: number; cost_price_khr: number } | null = null
   let resolveGroup: Awaited<ReturnType<typeof readResolveProductGroup>> | null = null
   if (keepMode) {
+    if (getPlanLimits(c.env).d1QueriesPerInvocation < 100) return c.json({ success: true, blocked: { code: 'resolve_plan_budget' } })
     const groupIds = [...new Set([keepId, mergeId, ...String(c.req.query('groupIds') || '').split(',').map(Number)])]
       .filter((id) => Number.isSafeInteger(id) && id > 0)
     if (groupIds.length > 12) return c.json({ code: 'resolve_group_too_large', error: 'Resolve at most 12 products at a time.' }, 400)
@@ -8327,6 +8344,11 @@ app.post('/possible-duplicates/merge', async (c) => {
   // needs the cost edit permission (product_cost_edit), the same grant the
   // product form's cost field enforces.
   const keepMode = body.keep === true
+  // The existing pair kernel already exceeds Free's 50-query ceiling.
+  // Refuse the new flow before writing, not after a fold has committed.
+  if (keepMode && getPlanLimits(c.env).d1QueriesPerInvocation < 100) {
+    return c.json({ code: 'resolve_plan_budget', error: 'Product resolving is unavailable on this deployment. No changes were saved.' }, 409)
+  }
   let chosenCost: ProductMergeKeeperChoice['cost'] | undefined
   if (body.cost_price_usd !== undefined || body.cost_price_khr !== undefined) {
     if (!keepMode) return c.json({ success: false, code: 'invalid_merge_cost', error: 'A chosen cost is only accepted by the Resolve merge.' }, 400)
@@ -8379,6 +8401,12 @@ app.post('/possible-duplicates/merge', async (c) => {
       }
     } else {
       if (resolve.steps[0].mergeId !== mergeId) return c.json({ code: 'resolve_request_conflict', error: 'Resolve steps must be applied in order.' }, 409)
+      resolveGuards.push({
+        sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM audit_logs WHERE action='merge_duplicate' AND entity='product'
+          AND user_id=@actor AND json_valid(details) AND json_extract(details,'$.resolvePlan.requestId')=@requestId)
+          THEN 1 ELSE json_extract('', '$') END AS resolve_request_guard`,
+        params: { actor: user?.id ?? null, requestId: resolve.requestId },
+      })
       const ids = [keepId, ...resolve.steps.map((step) => step.mergeId)]
       const current = await readResolveProductGroup(db, ids, keepId)
       if (current.reviewedDigest !== resolve.reviewedDigest) return c.json({ code: 'merge_state_conflict', error: 'These products changed after review.' }, 409)

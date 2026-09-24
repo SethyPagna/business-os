@@ -109,6 +109,35 @@ await test('load reads every other product against the kept one, in keep mode, w
   assert.deepEqual(calls.map((call) => call.args), [[51, 50, true, [50, 51, 52]], [51, 52, true, [50, 51, 52]]])
 })
 
+await test('load replaces stale list values with the reviewed server projection', async () => {
+  const fixture = fakeApi(CLUSTERS.same_name)
+  const api = { ...fixture.api, async preview(...args: Parameters<typeof fixture.api.preview>) {
+    const reply = await fixture.api.preview(...args)
+    return { ...reply, groupProducts: reply.groupProducts.map((entry) => entry.id === 10 ? { ...entry, name: 'Current server name', barcode: '999999' } : entry) }
+  } }
+  const adapter = createProductResolveAdapter({ cluster: CLUSTERS.same_name, keeperId: 10, t, canViewCosts: true, canEditCosts: false, canMerge: () => true, api })
+  const data = await adapter.load(signal, EMPTY)
+  assert.equal(rowOf(adapter.rows(data, EMPTY), 'name').final.text, 'Current server name')
+  assert.equal(rowOf(adapter.rows(data, EMPTY), 'barcode').final.text, '999999')
+  assert.equal(CLUSTERS.same_name.products[0].name, 'Rose Toner 100ml', 'the captured list is not mutated')
+})
+
+await test('an oversized group stays editable but cannot show a truncated resolve plan', async () => {
+  const cluster: Cluster = { ...CLUSTERS.three, products: Array.from({ length: 13 }, (_, index) => product(100 + index, 'Lip Oil', String(100000 + index), index + 1, 20)) }
+  const { adapter, data, calls } = await open(cluster, 100)
+  assert.equal(calls.length, 0, 'no truncated group is sent to the preview')
+  assert.ok(adapter.blockers!(data, EMPTY).includes('Merge at most 12 records at a time.'))
+  const reduced: Draft = { selection: {}, columns: { 112: { disposition: 'separate' } } }
+  const fresh = await adapter.load(signal, reduced)
+  assert.deepEqual(adapter.blockers!(fresh, reduced), [])
+  assert.equal(calls.filter((call) => call.kind === 'preview').length, 11)
+})
+
+await test('a deployment budget refusal blocks Resolve with localized copy', async () => {
+  const { adapter, data } = await open(CLUSTERS.same_name, 10, { view: true }, { blocked: { 11: { code: 'resolve_plan_budget' } } })
+  assert.deepEqual(adapter.blockers!(data, EMPTY), [en.resolve_plan_budget])
+})
+
 await test('N1: name and barcode follow the kept product; the other barcode is named, never a refusal', async () => {
   const { adapter, data } = await open(CLUSTERS.same_name, 10)
   const rows = adapter.rows(data, EMPTY)

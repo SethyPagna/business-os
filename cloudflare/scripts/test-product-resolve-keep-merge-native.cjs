@@ -53,15 +53,17 @@ const adapter = {
   prepare(sql) {
     const st = state.native.prepare(sql)
     return {
-      get: (p) => st.get(p == null ? {} : p),
-      all: (p) => st.all(p == null ? {} : p),
+      get: (p) => { state.queries += 1; return st.get(p == null ? {} : p) },
+      all: (p) => { state.queries += 1; return st.all(p == null ? {} : p) },
       run: (p) => {
+        state.queries += 1
         const r = st.run(p == null ? {} : p)
         return { changes: Number(r.meta?.changes ?? 0), lastInsertRowid: Number(r.meta?.last_row_id ?? 0) }
       },
     }
   },
   batch: (statements) => {
+    state.queries += statements.length
     if (state.beforeFold && statements.some((statement) => /INSERT INTO undo_snapshots/.test(statement.sql))) {
       const mutate = state.beforeFold
       state.beforeFold = null
@@ -73,6 +75,7 @@ const adapter = {
 
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const permissions = load('lib/permissions.ts')
+const planTier = load('lib/planTier.ts')
 const actorSnapshot = load('lib/actorSnapshot.ts')
 const sqlBinding = load('lib/sqlBinding.ts')
 const detailRule = load('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
@@ -100,6 +103,7 @@ const products = load('routes/products.ts', {
   '../lib/db': { getDb: () => adapter },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,
+  '../lib/planTier': planTier,
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/audit': noAudit,
@@ -146,17 +150,20 @@ function fresh() {
   state.user = ADMIN
   state.audits = []
   state.beforeFold = null
+  state.tier = 'paid'
 }
 const one = (sql, ...params) => { const row = state.native.db.prepare(sql).get(...params); return row ? { ...row } : row }
 const rows = (sql, ...params) => state.native.db.prepare(sql).all(...params).map((row) => ({ ...row }))
 const dump = () => JSON.stringify(['products', 'branch_stock', 'product_batches', 'audit_logs', 'action_history'].map((table) => rows(`SELECT * FROM ${table} ORDER BY rowid`)))
 
 async function request(method, url, body) {
+  state.queries = 0
+  planTier.__resetPlanTierCacheForTests()
   const init = { method, headers: { 'Content-Type': 'application/json' } }
   if (body !== undefined) init.body = JSON.stringify(body)
-  const res = await app.request(url, init, { DB: {} }, { waitUntil: () => {}, passThroughOnException: () => {} })
+  const res = await app.request(url, init, { DB: {}, PLAN_TIER: state.tier }, { waitUntil: () => {}, passThroughOnException: () => {} })
   const text = await res.text()
-  try { return { status: res.status, body: JSON.parse(text) } } catch { throw new Error(`${method} ${url} ${res.status}: ${text}`) }
+  try { return { status: res.status, body: JSON.parse(text), queries: state.queries } } catch { throw new Error(`${method} ${url} ${res.status}: ${text}`) }
 }
 const merge = (body) => request('POST', '/api/products/possible-duplicates/merge', body)
 const preview = (keepId, mergeId, extra = '') => request('GET', `/api/products/possible-duplicates/merge-preview?keepId=${keepId}&mergeId=${mergeId}&keep=1${extra}`)
@@ -175,6 +182,7 @@ async function main() {
     assert.equal(seen.body.blocked, null, 'a detected pair is never "different"')
     assert.deepEqual(seen.body.keeperStock.branches.map((b) => [b.branchId, b.quantity]), [[1, 3]])
     const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+    console.log('QUERY baseline pair=' + done.queries + ' preview=' + seen.queries)
     assert.equal(done.status, 200, JSON.stringify(done.body))
     const keeper = one('SELECT name, barcode, is_active FROM products WHERE id = 10')
     assert.deepEqual(keeper, { name: 'Rose Toner 100ml', barcode: '8801111111111', is_active: 1 })
@@ -309,6 +317,7 @@ async function main() {
     const resolve = { requestId: 'three-products', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 61 }, { mergeId: 62 }] }
     for (const mergeId of [61, 62]) {
       const done = await merge({ keepId: 60, mergeId, keep: true, resolve })
+      console.log('QUERY group step=' + done.queries + ' preview=' + seen.queries)
       assert.equal(done.status, 200, JSON.stringify(done.body))
     }
     assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 60').cost_price_usd, seen.body.groupCost.cost_price_usd)
@@ -387,6 +396,59 @@ async function main() {
     const replay = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
     assert.equal(replay.status, 200)
     assert.equal('cost_price_usd' in replay.body.keeper, false)
+  })
+
+  await check('received metadata changes invalidate review, including changes to the keeper after a prior fold', async () => {
+    for (const afterFirst of [false, true]) {
+      fresh()
+      state.native.db.exec("INSERT INTO products (id,name,barcode,cost_price_usd,is_active) VALUES (12,'Rose Toner 100ml','8803333333333',9,1)")
+      state.native.db.exec("INSERT INTO product_batches (id,variant_product_id,batch_key,received_at,received_cost_usd) VALUES (500,10,'2026-01-01','2026-01-01',3)")
+      const seen = await preview(10, 11, '&groupIds=10,11,12')
+      const resolve = { requestId: 'metadata-' + afterFirst, reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }, { mergeId: 12 }] }
+      if (afterFirst) assert.equal((await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })).status, 200)
+      state.native.db.exec('UPDATE product_batches SET received_cost_usd=8 WHERE id=500')
+      const result = await merge({ keepId: 10, mergeId: afterFirst ? 12 : 11, ...(afterFirst ? {} : { stock: 'merge' }), keep: true, resolve })
+      assert.equal(result.body.code, 'merge_state_conflict', JSON.stringify(result.body))
+    }
+  })
+
+  await check('an actor request ID claimed concurrently cannot commit a second different plan', async () => {
+    fresh()
+    const seen = await preview(10, 11)
+    const resolve = { requestId: 'concurrent-id', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: 11, stock: 'merge' }] }
+    state.beforeFold = () => state.native.db.prepare("INSERT INTO audit_logs(user_id,action,entity,entity_id,details) VALUES (1,'merge_duplicate','product','99',?)")
+      .run(JSON.stringify({ resolvePlan: { requestId: resolve.requestId } }))
+    const rejected = await merge({ keepId: 10, mergeId: 11, stock: 'merge', keep: true, resolve })
+    assert.equal(rejected.status, 409, JSON.stringify(rejected.body))
+    assert.equal(one('SELECT is_active FROM products WHERE id=11').is_active, 1)
+    assert.equal(one("SELECT COUNT(*) n FROM audit_logs WHERE entity_id='11'").n, 0)
+  })
+
+  await check('maximum group stays within Paid invocation budget; Free preview and apply refuse before writing', async () => {
+    fresh()
+    for (let id = 100; id < 112; id += 1) state.native.db.prepare("INSERT INTO products(id,name,barcode,cost_price_usd,is_active) VALUES (?,'Twelve Lip Oil',?,?,1)").run(id, String(id + 100000), id - 99)
+    const groupIds = Array.from({ length: 12 }, (_, index) => 100 + index)
+    const seen = await preview(100, 101, '&groupIds=' + groupIds.join(','))
+    assert.ok(seen.queries + 20 <= 50, 'preview has constant query count and reserves auth/middleware overhead')
+    const resolve = { requestId: 'maximum-group', reviewedDigest: seen.body.reviewedDigest, steps: groupIds.slice(1).map((mergeId) => ({ mergeId })) }
+    let maximum = 0
+    for (const step of resolve.steps) {
+      const done = await merge({ keepId: 100, mergeId: step.mergeId, keep: true, resolve })
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      maximum = Math.max(maximum, done.queries)
+      assert.ok(done.queries + 20 <= 1000, 'each invocation fits Paid with reserved middleware overhead')
+    }
+    console.log('QUERY maximum12 preview=' + seen.queries + ' apply=' + maximum + ' (SQL statements; excludes SQLite trigger internal effects)')
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id=100').cost_price_usd, 6.5)
+    fresh()
+    state.tier = 'free'
+    const before = dump()
+    const freePreview = await preview(10, 11)
+    assert.equal(freePreview.body.blocked.code, 'resolve_plan_budget')
+    const refused = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+    assert.equal(refused.body.code, 'resolve_plan_budget')
+    assert.ok(refused.queries + 20 <= 50)
+    assert.equal(dump(), before)
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
