@@ -113,6 +113,7 @@ for (const format of ['csv', 'xlsx', 'pdf']) for (const revoke of ['never', 'bef
     rows: [{ Product: 'Tea' }], columns: [{ key: 'Product', label: 'Product' }],
     fileBaseName: 'branch-stock', format, title: 'Stock', loadCsv: load, loadXlsx: load,
     openPrintExport: () => { downloads++; return true }, saveRememberedColumns: () => {}, rememberKey: 'branches', onClose: () => {},
+    todayStr: () => '2026-09-24',
   })
   await run()
   assert.equal(downloads, revoke === 'never' ? 1 : 0, `${format} rechecks permission immediately before publication`)
