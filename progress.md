@@ -1,3 +1,30 @@
+## Cloud handoff reconciliation — 24 September (branch claude/cloud-handoff-20260924-0unu3f, NOT deployed)
+
+**Read this first.** The newest code is on `claude/cloud-handoff-20260924-0unu3f`, not on `main`
+(main = a39a3cbbb, 23 Sep; production = Worker 250d3591 from f064e844, which main contains).
+Nothing below is deployed. Deploying and any remote migration still need the owner's go.
+
+- **Merged:**
+  - the checkpoint-4 line 87fbdfe70 (S4-41 sale-status guard, SW Part 628 tickets, native test supervisor, Records phase 2, Telegram T4-T9, shift ID/search S1);
+  - the shared sales stack 88f1912c4 (one definition of paid);
+  - rc lanes stockin-line-cap, park-held-migrations (0185-0191 parked in ops/scripts/migration/held/; highest applied in production is still 0184), website-editor-ui (WEB-2), business-zone-displays + audit times + filter-menu-shared (finished), rate-at-time api+ui (older sales keep their own rate; finished).
+- **Fixed:**
+  - cashier handover leak (confirmed sign-out clears the old account again), d84ed35c8;
+  - blocked-storage boot screen, f4fcdcf5e;
+  - storefront pre-paint requests 52 → 49, be863cfe9;
+  - SW test hang;
+  - stale e2e specs;
+  - Linux-only retry test.
+- **Recovered from the 9 Sep shared-checkout backup:** 3 docs and the session-log Parts 602-605. Also added the read-only D1 snapshot tool (PII masked by default, never run).
+- **Held:** rc/website-posts-api-20260924 (needs its frontend; the bulk settings save drops posts) and rc/resolve-grid-ui-20260924 (owner decision: manual merge of any ≤6 contacts bypasses the duplicate check).
+- **Open:**
+  - 0192 needs its council before any remote apply;
+  - the owner's 23 Sep N1-N4, N6, T10;
+  - stock-lot corrections as 0193 (loss rule: a downward Set counts as a loss unless tagged);
+  - Report Center (plan in docs/fleet/2026-09-24-report-center-council.md, deferred by the owner's budget order);
+  - branch deletions (manifest docs/fleet/2026-09-24-branch-cleanup-manifest.md) must run from the owner's machine.
+- **Registers:** docs/fleet/2026-09-07-owner-task-register.md rows are current as of ddc7cf0a2.
+
 ## Shift close fixed; checkpoint 80f379ff deployed (Worker ce056cc0) — September 21
 
 Root cause of "shift unable to close": POS stamped closed_at from the device clock
