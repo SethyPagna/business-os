@@ -248,7 +248,9 @@ function normalizePromotionInput(body: PromotionInput = {}) {
     badge_text: normalizeText(body.badge_text, 40) || null,
     badge_color: normalizeColor(body.badge_color),
     is_active: body.is_active === false || body.is_active === 0 ? 0 : 1,
-    sort_order: Number.isFinite(Number(body.sort_order)) ? Number(body.sort_order) : 0,
+    // null when the caller sent no order: the route decides (keep the current
+    // place on edit, go last on create) instead of silently jumping to 0.
+    sort_order: body.sort_order == null || String(body.sort_order).trim() === '' || !Number.isFinite(Number(body.sort_order)) ? null : Number(body.sort_order),
     starts_at: body.starts_at ? String(body.starts_at) : null,
     ends_at: body.ends_at ? String(body.ends_at) : null,
   }
@@ -273,6 +275,10 @@ app.post('/', requireKey('products'), async (c) => {
   if (input.link_type === 'product') {
     const productExists = await db.prepare('SELECT id FROM products WHERE id = ?').get([input.link_product_id])
     if (!productExists) return c.json({ error: 'Linked product not found' }, 400)
+  }
+  if (input.sort_order == null) {
+    const last = await db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM promotions').get<{ max_order: number }>()
+    input.sort_order = Number(last?.max_order ?? -1) + 1
   }
 
   const insert = await db.prepare(`
@@ -306,6 +312,8 @@ app.put('/:id', requireKey('products'), async (c) => {
     const productExists = await db.prepare('SELECT id FROM products WHERE id = ?').get([input.link_product_id])
     if (!productExists) return c.json({ error: 'Linked product not found' }, 400)
   }
+  // No order sent: the card keeps its place (was: silently moved to 0).
+  if (input.sort_order == null) input.sort_order = Number((current as { sort_order?: unknown }).sort_order ?? 0)
 
   await db.prepare(`
     UPDATE promotions SET
