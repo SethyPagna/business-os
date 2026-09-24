@@ -1,13 +1,13 @@
 # Browser end-to-end suite (Playwright)
 
-Nine spec files drive the **built** app in three browsers: desktop Chromium, a
+Sixteen spec files drive the **built** app in three browsers: desktop Chromium, a
 Pixel 7 Chromium and an iPhone 13 WebKit. They exist to catch the error classes
 this project has actually shipped before — blank page, runtime error, glitch,
 slowness, another cashier's data on my screen — at the only layer where those
 classes are observable at all.
 
 A tenth spec, `e2e/system/pos-sale.spec.ts`, is opt-in and answers the one
-question the other nine structurally cannot: does a sale rung on the till
+question the others structurally cannot: does a sale rung on the till
 actually survive the round trip through the real Worker and the real database.
 
 Nothing here can reach production. Every URL is loopback.
@@ -174,13 +174,20 @@ back into the failure message rather than left to expire.
 | file | one line |
 | --- | --- |
 | `storefront-boot.spec.ts` | the customer storefront renders real product cards — including when web storage throws (Safari private mode) and when the connection is dead. Guards **1defc523**, the blank storefront. |
-| `storefront-pager.spec.ts` | the grid never over-fills at any instant, and a returning shopper's stored page size is honoured. Guards **a1d55f12**, the pager over-fill. |
+| `storefront-pager.spec.ts` | the pager reads Back / page / Next with no per-page chooser (P10-20), the grid never over-fills at any instant, and a returning shopper's stored page size is honoured. Guards **a1d55f12**, the pager over-fill. |
+| `compact-pager-numbers.spec.ts` | the compact pager keeps every page and total digit visible in English and Khmer at 320 and 375 px, with negative controls that must find the clipping in the old layout. Its fixture carries the app's viewport meta, so the mobile projects really lay it out at those widths. It also has a single-worker desktop config: `npx playwright test -c e2e/compact-pager.config.ts`. |
 | `admin-boot.spec.ts` | the admin shell renders the real login controls, under blocked storage, a language switch and a stored theme. |
 | `pwa-update.spec.ts` | a deploy is detected by an already-open tab, "Restart now" replaces the cached document, and a sale queued offline in IndexedDB survives it. Runs against the real `sw.js`. |
 | `ios-layout.spec.ts` | nothing overflows horizontally, the bottom bar sits on the safe-area inset, modals do not leak taps to the page behind, at three iPhone widths. |
 | `scanner.spec.ts` | the barcode scanner explains itself on every camera outcome (granted, denied, unsupported) instead of opening onto a dead viewfinder. Guards **57d8f1a2**. |
 | `storage-isolation.spec.ts` | cashier A signs out, cashier B signs in on the same device, and none of A's state is still on the screen. |
 | `perf-budget.spec.ts` | the storefront and the till reach first useful paint within a measured budget, and the request count on the boot path does not grow. |
+| `admin-range-checkpoint.spec.ts` | the Dashboard and Reports send the continuous overnight endpoints a date-and-time range picks (for example 22:00 to 02:00 across two days). Synthetic reads, so UI and query dispatch only. |
+| `returns-time-range.spec.ts` | Returns keeps endpoint times inside a responsive date-only range picker and sends them on its reads. Synthetic reads. |
+| `shift-checkpoint.spec.ts` | the shift list pages, clamps and cancels through the built UI with long English and Khmer names, and no other write leaves the page. Synthetic responses. |
+| `stock-in-scope.spec.ts` | the supplier stock-in invoice report and its line drill-down ask for the right scope and show the synthetic figures. UI and request ownership only. |
+| `receipt-print.spec.ts` | the receipt that reaches the printer: Printer paper by default with no blank top band, one print call per tap, the 80x50 card from the top of the paper, the app's Khmer font in the print document, and Print → All printing the card and then the full receipt. |
+| `online-auth-safety.spec.ts` | a sign-out whose request is lost asks for confirmation ("Finish signing out") instead of leaving the app half signed in. Runs with the real service worker. |
 | `console-hygiene.spec.ts` | every public surface and every signed-out admin route boots with no uncaught error, no `console.error`, no failed resource and no unmocked API call. |
 | `system/pos-sale.spec.ts` | **opt-in.** A real cashier signs in against real bcrypt, rings a real sale through `POST /api/sales`, and the sale, its money, its item, its cashier, its branch, the shop's stock and the receipt on the Sales page all agree afterwards. |
 
