@@ -90,6 +90,8 @@ interface AuditLogParams {
 }
 
 interface AppContextValue {
+  // App language ('en' | 'km'); drives the period filter's month names.
+  language: string
   t: TranslateFn
   user?: {
     role_code?: unknown
@@ -353,7 +355,7 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
 }
 
 export default function AuditLog() {
-  const { t, user } = useApp()
+  const { t, user, language } = useApp()
   // E3: renders inside Review & Logs now -- lifecycle keys on that page.
   const isActive = useIsPageActive('review')
   const [logs, setLogs] = useState<AuditLogRow[]>([])
@@ -871,7 +873,7 @@ export default function AuditLog() {
         { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
         ...buildPeriodFilterOptions({
           yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: copy('all_time', 'All time'),
+          allTimeLabel: copy('all_time', 'All time'), language,
         }),
       ],
     },
@@ -883,7 +885,7 @@ export default function AuditLog() {
         { id: 'group-time-action', label: copy('group_time_action', 'Time + action'), active: groupMode === 'time+action', onClick: () => setGroupMode('time+action') },
       ],
     },
-  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, entityFilter, entityOptions, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
+  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, entityFilter, entityOptions, groupMode, isAdmin, language, monthFilter, sortDirection, t, userFilter, yearFilter])
 
   const activeFilterCount = useMemo(
     () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', Boolean(rangeStart || rangeEnd), actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),

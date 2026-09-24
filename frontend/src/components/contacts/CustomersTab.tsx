@@ -84,6 +84,8 @@ interface AppUser extends NonNullable<PermissionUser> {
 }
 
 interface AppContextValue {
+  // App language ('en' | 'km'); drives the period filter's month names.
+  language: string
   // Per-action gate (utils/permissionActions.ts) -- the same table the
   // admin permission editor renders, so a control's visibility here always
   // matches what an admin was shown when granting the tier.
@@ -296,7 +298,7 @@ const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
-  const { can, user, getPermissionTier, fmtUSD, fmtKHR } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -568,7 +570,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       searchable: true,
       options: buildPeriodFilterOptions({
         yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-        allTimeLabel: tr(t, 'all_time', 'All time'),
+        allTimeLabel: tr(t, 'all_time', 'All time'), language,
       }),
     },
     {
@@ -583,7 +585,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       ],
     },
 
-  ]), [availableYears, customerSortSpec, genderFilter, monthFilter, t, yearFilter])
+  ]), [availableYears, customerSortSpec, genderFilter, language, monthFilter, t, yearFilter])
   const displayContactFilterSections = useMemo(() => (
     contactFilterSections.map((section) => {
       if (section.id !== 'group') return section

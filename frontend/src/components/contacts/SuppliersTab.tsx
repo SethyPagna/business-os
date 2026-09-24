@@ -80,6 +80,8 @@ interface AppUser {
 }
 
 interface AppContextValue {
+  // App language ('en' | 'km'); drives the period filter's month names.
+  language: string
   // Per-action gate (utils/permissionActions.ts) -- the same table the
   // admin permission editor renders, so a control's visibility here always
   // matches what an admin was shown when granting the tier.
@@ -484,7 +486,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
 }
 
 function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabProps) {
-  const { can, user, getPermissionTier, fmtUSD, fmtKHR } = useApp()
+  const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -696,7 +698,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         { id: 'sort-asc', label: tr('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
         ...buildPeriodFilterOptions({
           yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: tr('all_time', 'All time'),
+          allTimeLabel: tr('all_time', 'All time'), language,
         }),
       ],
     },
@@ -720,7 +722,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
       ],
     },
 
-  ]), [availableYears, genderFilter, groupMode, monthFilter, sortDirection, tr, yearFilter])
+  ]), [availableYears, genderFilter, groupMode, language, monthFilter, sortDirection, tr, yearFilter])
   const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'])
   const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)

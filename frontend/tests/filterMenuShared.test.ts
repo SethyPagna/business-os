@@ -35,6 +35,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { buildPeriodFilterOptions } from '../src/utils/periodFilterOptions.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const filterMenuPath = path.resolve(here, '..', 'src', 'components', 'shared', 'FilterMenu.tsx')
@@ -232,7 +233,23 @@ runTest('AvailabilityFilterOptions.tsx no longer hardcodes the "(Default)" suffi
 runTest('periodFilterOptions.ts offers Khmer month names, not only English', () => {
   assert.doesNotMatch(periodSource, /\bDEFAULT_MONTH_OPTIONS\b/, 'the single English-only table must be gone, not just renamed and kept as the default')
   assert.match(periodSource, /KHMER_MONTH_ABBREVIATIONS/)
-  assert.match(periodSource, /documentElement\.lang/)
+  // The language is a parameter from the caller's React state, not the
+  // <html lang> attribute (written by an effect one commit late).
+  assert.doesNotMatch(periodSource, /documentElement/)
+})
+
+runTest('buildPeriodFilterOptions switches month names with the language argument', () => {
+  const build = (language: string) => buildPeriodFilterOptions({
+    yearFilter: '2026', setYearFilter: () => {}, monthFilter: 'all', setMonthFilter: () => {},
+    availableYears: [2026], allTimeLabel: 'All time', language,
+  }).map((option) => String(option.label))
+  assert.ok(build('km').includes('មករា'), 'km gets Khmer month names')
+  assert.ok(!build('km').includes('Jan'))
+  assert.ok(build('en').includes('Jan'), 'en gets English month names')
+  for (const caller of ['utils-settings/AuditLog.tsx', 'contacts/CustomersTab.tsx', 'contacts/SuppliersTab.tsx', 'contacts/DeliveryTab.tsx']) {
+    const callerSource = fs.readFileSync(path.resolve(here, '..', 'src', 'components', caller), 'utf8')
+    assert.match(callerSource, /buildPeriodFilterOptions\(\{[\s\S]{0,200}?\blanguage,/, `${caller} passes its language`)
+  }
 })
 
 const usedKeys = ['search', 'noMatches', 'clear', 'all', 'default_label', 'filter_selected_count']

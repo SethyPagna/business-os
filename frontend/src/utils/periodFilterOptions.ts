@@ -4,14 +4,13 @@ import type { FilterOption } from '../components/shared/FilterMenu'
 // (localized) month labels. Values are zero-padded '01'-'12' to match
 // CREATED_MONTH_OPTIONS and matchesYearMonthFilters' normalization.
 //
-// English and Khmer tables rather than a lang.json key: every caller of
-// buildPeriodFilterOptions (Sales.tsx, Inventory.tsx, Returns.tsx,
-// AuditLog.tsx, the contacts tabs, Products.tsx) already renders inside the
-// full app chrome where document.documentElement.lang is always set (see
-// AppContext.tsx's theme/lang effect), so reading it here needs no new prop
-// threaded through any of those callers -- the same reason DateTimeRangePicker
-// and the dashboard charts keep their own local month tables instead of
-// routing single short labels through the pack.
+// English and Khmer tables rather than a lang.json key, the same reason
+// DateTimeRangePicker and the dashboard charts keep their own local month
+// tables. The language is a PARAMETER from the caller's useApp().language,
+// not the <html lang> attribute: that attribute is written by an AppContext
+// effect after the render that switched the language, so a filter menu built
+// in that render kept the old month names until something else re-rendered
+// it. Taking it from React state switches them immediately.
 const ENGLISH_MONTH_ABBREVIATIONS: ReadonlyArray<readonly [string, string]> = [
   ['01', 'Jan'], ['02', 'Feb'], ['03', 'Mar'], ['04', 'Apr'],
   ['05', 'May'], ['06', 'Jun'], ['07', 'Jul'], ['08', 'Aug'],
@@ -26,9 +25,8 @@ const KHMER_MONTH_ABBREVIATIONS: ReadonlyArray<readonly [string, string]> = [
   ['09', 'កញ្ញា'], ['10', 'តុលា'], ['11', 'វិច្ឆិកា'], ['12', 'ធ្នូ'],
 ]
 
-function buildDefaultMonthOptions(): ReadonlyArray<readonly [string, string]> {
-  const lang = typeof document !== 'undefined' ? document.documentElement.lang : ''
-  return lang === 'km' ? KHMER_MONTH_ABBREVIATIONS : ENGLISH_MONTH_ABBREVIATIONS
+function defaultMonthOptions(language: string | undefined): ReadonlyArray<readonly [string, string]> {
+  return language === 'km' ? KHMER_MONTH_ABBREVIATIONS : ENGLISH_MONTH_ABBREVIATIONS
 }
 
 export interface BuildPeriodFilterOptionsParams {
@@ -38,13 +36,15 @@ export interface BuildPeriodFilterOptionsParams {
   setMonthFilter: (value: string) => void
   availableYears: Array<string | number>
   allTimeLabel: string
+  // The app language (useApp().language); picks the default month labels.
+  language: string
   monthOptions?: ReadonlyArray<readonly [string, string]>
 }
 
 // Merges the Year and Month filters into a single flat list of pills meant
-// to be appended after a section's sort-direction pills (see Sales.tsx,
-// Inventory.tsx, Returns.tsx, AuditLog.tsx, the contacts tabs, and
-// Products.tsx), instead of three separate filter-menu rows (Sort / Year /
+// to be appended after a section's sort-direction pills (callers:
+// utils-settings/AuditLog.tsx and contacts/CustomersTab.tsx, SuppliersTab.tsx,
+// DeliveryTab.tsx), instead of three separate filter-menu rows (Sort / Year /
 // Month) that mostly duplicated the same "narrow down by time" idea.
 //
 // With no year picked yet: an "All time" pill plus one pill per available
@@ -59,7 +59,8 @@ export function buildPeriodFilterOptions({
   setMonthFilter,
   availableYears,
   allTimeLabel,
-  monthOptions = buildDefaultMonthOptions(),
+  language,
+  monthOptions = defaultMonthOptions(language),
 }: BuildPeriodFilterOptionsParams): FilterOption[] {
   const years = (availableYears || []).map((year) => String(year)).filter(Boolean)
   if (!years.length) return []
