@@ -20456,3 +20456,38 @@ on 72 x 800. Registered, not started (owner task register, 23 Sep): Telegram nam
 status-change message tops, the shift report top and dash headers, shift ID `S-<yyyymmdd>-<HHMM>-<cashier>`, shift
 search by cashier or ID, the Reports overview sent to Telegram one minute after a shift closes, and the product
 conflict / Records / stock-in edit asks N1-N6.
+
+## Part 632 (24 Sep 2026, cloud coordinator) — handoff reconciliation, regressions fixed, lanes merged, not deployed
+
+**Ask:** continue the Windows handoff in the cloud. Check the backups and every branch so nothing older is lost, merge the newest work, clean up bloat and legacy with the AI Council, then (owner order) stock-lot → 23 Sep asks → Report Center; wrap up at the budget stop.
+
+**What changed (branch claude/cloud-handoff-20260924-0unu3f):**
+- **Merged:** checkpoint-4 87fbdfe70; the shared sales stack 88f1912c4; 7 of the 9 rc/*-20260924 lanes (the time-zone, filter-menu and rate-at-time lanes finished).
+- **Fixed:**
+  - the cashier handover leak;
+  - the blocked-storage boot screen;
+  - the storefront request budget (52 → 49);
+  - older sales re-rated at today's rate;
+  - stale and hanging tests.
+- **Added:**
+  - stock-lot corrections (0193);
+  - T10 (0194);
+  - the read-only D1 snapshot tool.
+- **Removed:** proven-dead code and the retired 9 Sep incident tooling.
+- **Recovered from backup/shared-checkout-20260924:** 3 docs and session-log Parts 602-605.
+- **Branch cleanup:** manifest in docs/fleet/2026-09-24-branch-cleanup-manifest.md. The deletions must run from the owner's machine (403 here).
+
+**Found:**
+- The backup was built on a 9 Sep commit, 2,657 commits behind main; nothing unique was lost beyond what was recovered.
+- The register cited branch names that were never pushed.
+- Parked migrations 0185-0191 were never applied.
+
+**Verified:** the certification at a29fb3823 showed no new reds against main (Playwright 145 passed); the Worker sweep ran 517/517 at bfa464f06; lane-level gates are in the commit bodies.
+
+**Not done:**
+- N1-N4 and N6 (WIP branches);
+- the Report Center;
+- rc/website-posts-api;
+- the deploy (owner's machine);
+- the branch deletions;
+- the Windows unpushed-work check.

@@ -25,6 +25,25 @@ Nothing below is deployed. Deploying and any remote migration still need the own
   - branch deletions (manifest docs/fleet/2026-09-24-branch-cleanup-manifest.md) must run from the owner's machine.
 - **Registers:** docs/fleet/2026-09-07-owner-task-register.md rows are current as of ddc7cf0a2.
 
+**Wrap-up (owner budget stop, 24 Sep):**
+- **Also merged:**
+  - stock-lot corrections 3d095e1aa..bfa464f06 (migration 0193; owner loss rule: a downward Set counts as a loss unless tagged);
+  - T10, the Reports overview to Telegram one minute after shift close, 990efa255 (migration 0194);
+  - the retired 9 Sep incident tooling removed, d31e6cdf5;
+  - the dead-code cleanup, 48fbd6d49 (bloat council record: docs/fleet/2026-09-24-bloat-council.md).
+- **Last full check:** the Worker sweep ran 517/517 green on bfa464f06.
+- **Unfinished, pushed as WIP branches (unverified; resume from them):**
+  - `wip/n1-n4-conflicts-resolve-grid-20260924`: N1-N4 product conflicts on the shared ResolveGrid, plus rc/resolve-grid-ui merged. OWNER RULE: contacts may merge ONLY system-detected duplicates; the Worker checks the cluster and contacts:resolve_conflicts. Its Worker sweep and frontend gates were not finished.
+  - `wip/n6-stock-in-session-edit-20260924`: N6 editable stock-in sessions. The layouts were checked; Khmer and the gates were not done.
+- **Not started:** the Report Center (plan: docs/fleet/2026-09-24-report-center-council.md).
+- **Held lane:** rc/website-posts-api-20260924 (needs its frontend).
+- **Deploy (owner's machine; the cloud session has no Cloudflare credentials):** from a clean worktree of `claude/cloud-handoff-20260924-0unu3f`, in `cloudflare/`:
+  1. `npm ci`
+  2. `npm run migrate:remote`: applies 0192, 0193 and 0194. First re-read the live d1_migrations tail; the highest applied must still be 0184, with 0185-0191 parked. 0192 still lacks its council record; the owner's deploy instruction of 24 Sep is the go.
+  3. `npm run deploy`
+  4. Check /health, then record the Worker version id here.
+- **Production repair to verify after the deploy:** the General customer 24969 legacy membership LC-04971 (Settings repair exists); check whether it has already been applied.
+
 ## Shift close fixed; checkpoint 80f379ff deployed (Worker ce056cc0) — September 21
 
 Root cause of "shift unable to close": POS stamped closed_at from the device clock
