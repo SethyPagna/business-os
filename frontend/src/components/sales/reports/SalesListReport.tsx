@@ -8,18 +8,20 @@
 import { useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import { useApp } from '../../../AppContext.tsx'
+import { captureActorReadScope } from '../../../api/actorReadScope.ts'
 import { getBusinessSummarySalesPage } from '../../../api/reportsTransport.ts'
-import { downloadCSV } from '../../../utils/csv.ts'
-import { openPrintExport } from '../../../utils/exportOptions.ts'
 import { fmtDateTime24 } from '../../../utils/formatters.ts'
 import { Button, Fold, OverflowMenu } from '../../shared/kit'
 import { getStatusLabel } from '../StatusBadge.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame from './ReportFrame.tsx'
-import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
-import { fmtInt, fmtPct, joinSummary, num, pct, reportFileName, reportQueryParams, round2, rowsToCsvObjects, type SortState, countLabel, REPORT_NOUNS } from './reportModel.ts'
+import ReportTable, { type ReportColumn } from './ReportTable.tsx'
+import { fmtInt, fmtPct, joinSummary, num, pct, reportFileName, reportQueryParams, round2, type SortState, countLabel, REPORT_NOUNS } from './reportModel.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
 import { usePagedReport } from './usePagedReport.ts'
+import { useSalesListExport } from './salesListExport.ts'
+import { SalesExportError } from './salesReportExport.ts'
 
 export interface SaleRow {
   id: number
@@ -105,6 +107,10 @@ export function sumSaleRows(rows: SaleRow[]): SaleRow {
 
 export default function SalesListReport(p: ReportViewProps) {
   const { tr, t, fmtMoney, options, style, filters, view, search } = p
+  const { language, exchangeRate, settings, user } = (useApp() || {}) as {
+    language?: string; exchangeRate?: number; settings?: { business_name?: unknown }
+    user?: { id?: unknown; permissions?: unknown; role_permissions?: unknown }
+  }
   const base = useMemo(() => reportQueryParams(filters, view), [filters, view])
   const depsKey = JSON.stringify({ base, search })
   const paged = usePagedReport<SaleRow>(
@@ -128,16 +134,18 @@ export default function SalesListReport(p: ReportViewProps) {
   const basisOf = (r: SaleRow) => (options.basis === 'gross' ? r.gross_sales_usd : options.basis === 'collected' ? r.collected_total_usd : r.net_revenue_usd)
   const basisLabel = options.basis === 'gross' ? tr('gross_sales', 'Gross sales') : options.basis === 'collected' ? tr('collected_total', 'Collected total') : tr('revenue', 'Revenue')
 
-  const columns = useMemo<Array<ReportColumn<SaleRow>>>(() => {
+  const buildColumns = (profitVisible: boolean): Array<ReportColumn<SaleRow>> => {
     const list: Array<ReportColumn<SaleRow> | null> = [
       { key: 'receipt_number', label: tr('receipt', 'Receipt'), primary: true, value: (r) => r.receipt_number },
+      { key: 'id', label: tr('record_id', 'Record ID'), value: (r) => r.id ? String(r.id) : '', defaultVisible: false },
       { key: 'date', label: tr('date', 'Date'), kind: 'datetime', value: (r) => r.date, sortDir: 'desc' },
+      { key: 'business_date', label: tr('rpt_business_date', 'Business date'), kind: 'date', value: (r) => r.business_date, defaultVisible: false },
       { key: 'customer', label: tr('customer', 'Customer'), value: (r) => r.customer || tr('walk_in', 'General') },
       { key: 'customer_phone', label: tr('rpt_phone', 'Phone'), value: (r) => r.customer_phone, defaultVisible: false },
       { key: 'cashier', label: tr('cashier', 'Cashier'), value: (r) => r.cashier },
       { key: 'branch', label: tr('branch', 'Branch'), value: (r) => r.branch, defaultVisible: false },
       { key: 'payment_method', label: tr('payment_method', 'Payment method'), value: (r) => r.payment_method },
-      { key: 'status', label: tr('status', 'Status'), value: (r) => getStatusLabel(r.status, t) },
+      { key: 'status', label: tr('status', 'Status'), value: (r) => r.id ? getStatusLabel(r.status, t) : '' },
       { key: 'gross_sales_usd', label: tr('gross_sales', 'Gross sales'), kind: 'money', value: (r) => r.gross_sales_usd, defaultVisible: options.basis === 'gross', emphasis: options.basis === 'gross' },
       { key: 'discounts', label: tr('discounts', 'Discounts'), kind: 'money', value: (r) => round2(r.store_discount_usd + r.membership_discount_usd), defaultVisible: false },
       { key: 'tax_usd', label: tr('tax', 'Tax'), kind: 'money', value: (r) => r.tax_usd, defaultVisible: false },
@@ -146,12 +154,14 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'net_revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.net_revenue_usd, emphasis: options.basis === 'revenue' },
       { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
-      showProfit ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
-      showProfit ? { key: 'gross_profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
-      showProfit ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.gross_profit_usd), basisOf(r)) } : null,
+      profitVisible ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
+      profitVisible ? { key: 'gross_profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
+      profitVisible ? { key: 'margin_pct', label: tr('rpt_margin', 'Margin'), kind: 'pct', value: (r) => pct(num(r.gross_profit_usd), basisOf(r)) } : null,
+      profitVisible ? { key: 'cost_missing_snapshot_lines', label: tr('rpt_missing_cost_lines', 'Lines without cost snapshot'), kind: 'int', value: (r) => r.cost_missing_snapshot_lines ?? null, defaultVisible: false } : null,
     ]
     return list.filter((c): c is ReportColumn<SaleRow> => !!c)
-  }, [tr, t, options.basis, showProfit]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
+  const columns = useMemo(() => buildColumns(showProfit), [tr, t, options.basis, showProfit]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sort, setSort] = useState<SortState | null>(null)
   const [openRow, setOpenRow] = useState<SaleRow | null>(null)
@@ -168,9 +178,31 @@ export default function SalesListReport(p: ReportViewProps) {
       ])
     : ''
 
-  const csv = () => rowsToCsvObjects(csvColumnsFor(columns, fmtMoney), rows)
-  const exportCsv = () => downloadCSV(reportFileName('sales', filters, 'csv'), csv())
-  const exportPrint = () => openPrintExport({ title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr), headers: columns.map((c) => c.label), rows: csv() })
+  const exportKey = JSON.stringify({ base, search, immediateSearch: p.exportScopeKey, options, language, exchangeRate, business: settings?.business_name,
+    actor: captureActorReadScope('reports:sales'), user: [user?.id, user?.permissions, user?.role_permissions] })
+  const exporter = useSalesListExport({ key: exportKey, query: { ...base, q: search },
+    canExport: () => p.canExport() && (p.exportScopeKey === undefined || p.exportScopeKey.trim() === search),
+    document: (result) => ({ ...result, totals: { ...result.totals, receipt_number: labels.total },
+      columns: buildColumns(typeof result.totals.gross_profit_usd === 'number'),
+      title: `${tr('reports', 'Reports')} · ${tr(view.labelKey, view.fallback)}`, subtitle: rangeSubtitle(filters, tr),
+      language: language || 'en', fmtMoney, filename: reportFileName('sales', filters, '').replace(/\.$/, ''),
+      metadata: [String(settings?.business_name || ''), countLabel(result.rowCount, REPORT_NOUNS.sale, tr),
+        `${tr('rpt_export_generated', 'Generated')}: ${fmtDateTime24(new Date().toISOString())} (UTC+7)`,
+        ...(result.totals.cost_missing_snapshot_lines ? [`${tr('rpt_missing_cost_lines', 'Lines without cost snapshot')}: ${result.totals.cost_missing_snapshot_lines}`] : [])].filter(Boolean),
+    }),
+  })
+  const exportCsv = () => { void exporter.prepare() }
+  const exportPrint = () => { void exporter.prepare() }
+  const errorMessages = {
+    invalid: tr('rpt_export_invalid', 'The report could not be verified. Try again.'),
+    empty: tr('rpt_export_empty', 'No matching receipts to export.'),
+    large: tr('rpt_export_too_large', 'This report is too large to export. Narrow the dates or filters.'),
+    changed: tr('rpt_export_changed', 'Report data changed. Prepare the export again.'),
+    unavailable: tr('rpt_export_unavailable', 'This export is no longer available. Prepare it again.'),
+  }
+  const exportError = exporter.error ? exporter.error instanceof SalesExportError ? errorMessages[exporter.error.code] : tr('export_failed', 'Export failed') : null
+  const [previewLimit, setPreviewLimit] = useState(250)
+  const completed = exporter.document
 
   const detailLines = (r: SaleRow) => [
     { key: 'date', label: tr('date', 'Date'), value: fmtDateTime24(r.date), kind: 'info' as const },
@@ -208,12 +240,27 @@ export default function SalesListReport(p: ReportViewProps) {
       title={tr(view.labelKey, view.fallback)}
       titleControl={p.titleControl}
       hint={{ label: tr(view.labelKey, view.fallback), text: tr('rpt_hint_sales_list', 'One row per receipt, newest first, 250 at a time. Revenue per receipt = net sale minus its refunds; Not Paid sales are recognized and only cancelled rows show 0.') }}
-      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> })} /> : null}
+      menuAction={p.canExport() ? <OverflowMenu label={tr('export', 'Export')} items={[...exportMenuItems(tr, p.canExport, exportCsv, exportPrint, { csv: <Download className="h-3.5 w-3.5" />, print: <Printer className="h-3.5 w-3.5" /> }), { label: tr('rpt_export_excel', 'Export Excel'), onSelect: () => { if (p.canExport()) void exporter.prepare() } }]} /> : null}
       summary={summary}
-      error={paged.error}
-      onRetry={paged.reload}
+      error={exportError || paged.error}
+      onRetry={exporter.error ? () => { void exporter.prepare() } : paged.reload}
       retryLabel={tr('retry', 'Retry')}
     >
+      {exporter.busy ? <p role="status" className="p-2 text-sm">{tr('rpt_export_preparing', 'Preparing the complete report…')}</p> : null}
+      {completed ? <section aria-label={tr('rpt_export_preview', 'Export preview')} className="mb-3 rounded border p-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="text-sm">{tr('rpt_export_preview', 'Export preview')} · {countLabel(completed.rowCount, REPORT_NOUNS.sale, tr)}</span>
+          <Button size="sm" onClick={exporter.csv}>{tr('export_csv', 'Export CSV')}</Button>
+          <Button size="sm" onClick={() => { void exporter.excel() }}>{tr('rpt_export_excel', 'Export Excel')}</Button>
+          <Button size="sm" onClick={exporter.print}>{tr('print', 'Print')}</Button>
+          <Button size="sm" variant="secondary" onClick={exporter.close}>{tr('close', 'Close')}</Button>
+        </div>
+        <p className="mb-2 text-xs">{completed.subtitle} · {tr('rpt_export_money_note', 'Excel amounts are in USD. Preview and print use the selected currency.')}</p>
+        <p className="mb-2 text-xs">{completed.metadata.join(' · ')}</p>
+        <ReportTable surfaceKey={`reports-sales-export-${options.basis}`} columns={completed.columns} rows={completed.rows.slice(0, previewLimit)}
+          rowKey={r => String(r.id)} style="excel" fmtMoney={completed.fmtMoney} labels={labels} totalsRow={completed.totals} maxHeight="calc(50 * var(--app-vh))"
+          footer={completed.rowCount > previewLimit ? <Button size="sm" variant="secondary" onClick={() => setPreviewLimit(n => n + 250)}>{tr('load_more', 'Load more')} ({fmtInt(Math.min(previewLimit, completed.rowCount))}/{fmtInt(completed.rowCount)})</Button> : null} />
+      </section> : null}
       <ReportTable
         surfaceKey={`reports-sales-${options.basis}`}
         columns={columns}

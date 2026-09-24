@@ -26,6 +26,8 @@ export interface ReportViewProps {
   filters: ReportFilters
   /** Debounced control-row search (already trimmed). */
   search: string
+  /** Immediate search-control value; invalidates exports before debounce settles. */
+  exportScopeKey?: string
   options: ReportOptions
   style: ReportStyle
   fmtMoney: (usd: number, khr?: number) => string

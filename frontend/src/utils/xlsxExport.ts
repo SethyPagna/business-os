@@ -138,3 +138,66 @@ export function downloadXLSX(filename: string, rows: unknown[]): void {
   const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer
   downloadBlob(filename, new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
 }
+
+export type TypedExportKind = 'text' | 'money' | 'int' | 'qty' | 'pct' | 'date' | 'datetime'
+export interface TypedExportColumn { key: string; label: string; kind: TypedExportKind }
+export interface TypedWorksheetInput {
+  sheetName: string
+  columns: TypedExportColumn[]
+  rows: Array<Record<string, unknown>>
+  totals?: Record<string, unknown>
+  metadata?: string[]
+}
+
+/** Excel dates are calendar serials, not device-zone Date objects. */
+export function exportDateSerial(raw: string, datetime = false): number {
+  if (!datetime) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error('Invalid export date')
+    const milliseconds = Date.parse(`${raw}T00:00:00Z`)
+    if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString().slice(0, 10) !== raw) throw new Error('Invalid export date')
+    return milliseconds / 86400000 + 25569
+  }
+  if (!/^\d{4}-\d{2}-\d{2}[T ]([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$/i.test(raw)) throw new Error('Invalid export timestamp')
+  exportDateSerial(raw.slice(0, 10))
+  const value = raw.replace(' ', 'T')
+  const milliseconds = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`)
+  if (!Number.isFinite(milliseconds)) throw new Error('Invalid export timestamp')
+  return (milliseconds + 7 * 3600000) / 86400000 + 25569
+}
+
+/** Explicit types preserve identifiers, absent values and numeric zero. */
+export function buildTypedWorkbook(input: TypedWorksheetInput): XLSX.WorkBook {
+  if (!input.rows.length || !input.columns.length) throw new Error('No rows to export')
+  const sheet: XLSX.WorkSheet = {}
+  const metadata = input.metadata || []
+  metadata.forEach((value, r) => { sheet[XLSX.utils.encode_cell({ r, c: 0 })] = { t: 's', v: value } })
+  const headerRow = metadata.length
+  input.columns.forEach((column, c) => { sheet[XLSX.utils.encode_cell({ r: headerRow, c })] = { t: 's', v: column.label } })
+  const rows = input.totals ? [...input.rows, input.totals] : input.rows
+  rows.forEach((row, index) => input.columns.forEach((column, c) => {
+    const raw = row[column.key]
+    if (raw === null || raw === undefined || raw === '') return
+    const address = XLSX.utils.encode_cell({ r: headerRow + index + 1, c })
+    if (column.kind === 'text') { sheet[address] = { t: 's', v: String(raw), z: '@' }; return }
+    if (column.kind === 'date' || column.kind === 'datetime') {
+      sheet[address] = { t: 'n', v: exportDateSerial(String(raw), column.kind === 'datetime'), z: column.kind === 'date' ? 'dd/mm/yyyy' : 'dd/mm/yyyy hh:mm' }
+      return
+    }
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) throw new Error(`Invalid export number: ${column.key}`)
+    sheet[address] = { t: 'n', v: column.kind === 'pct' ? raw / 100 : raw,
+      z: column.kind === 'pct' ? '0.00%' : column.kind === 'int' ? '#,##0' : '#,##0.00' }
+  }))
+  sheet['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: headerRow + rows.length, c: input.columns.length - 1 } })
+  sheet['!cols'] = input.columns.map(column => ({ wch: Math.min(36, Math.max(15, column.label.length + 2)) }))
+  const workbook = XLSX.utils.book_new()
+  const name = input.sheetName.replace(/[\\/?*\[\]:]/g, ' ').replace(/^'+|'+$/g, '').slice(0, 31).trim() || 'Report'
+  XLSX.utils.book_append_sheet(workbook, sheet, name)
+  return workbook
+}
+
+export function downloadTypedWorkbook(filename: string, input: TypedWorksheetInput, canPublish: () => boolean): void {
+  const workbook = buildTypedWorkbook(input)
+  const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer
+  if (!canPublish()) throw new Error('Export no longer available')
+  downloadBlob(filename, new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+}

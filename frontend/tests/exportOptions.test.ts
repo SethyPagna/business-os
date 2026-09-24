@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { runInNewContext } from 'node:vm'
 import {
   buildPrintDocument,
   exportColumnLabel,
@@ -80,6 +81,30 @@ const rows = [
     'Sales feeds the dialog from the contract, so chooser and file can never disagree')
   assert.ok(!/downloadXLSX\(`\$\{filePrefix\}/.test(sales), 'the old fixed-column direct download is gone')
   ok('C4 columns present; Sales export routes through the options dialog')
+}
+
+{
+  const html = buildPrintDocument({ title: 'Verified report', headers: ['Money'], rows: [{ Money: '0.00' }],
+    language: 'km', metadata: ['Shop', 'UTC+7'], numericHeaders: ['Money'], totals: { Money: '0.01' }, landscape: true })
+  assert.ok(html.includes('lang="km"') && html.includes('size: A4 landscape'))
+  assert.ok(html.includes('class="numeric"') && html.includes('class="totals"'))
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]
+  for (const scenario of ['allow', 'revoke', 'throw']) {
+    let loaded!: () => void, release!: () => void, print = 0, closed = 0, allowed = true
+    const timers: Array<() => void> = []
+    const document = { fonts: { ready: new Promise<void>(resolve => { release = resolve }) }, body: { textContent: 'private report' } }
+    const window = { addEventListener: (_event: string, fn: () => void) => { loaded = fn }, print: () => { print++ }, close: () => { closed++ },
+      __bosCanPrint: () => { if (scenario === 'throw') throw new Error('revoked'); return allowed } }
+    runInNewContext(script, { window, document, Promise, setTimeout: (fn: () => void, ms: number) => { if (ms === 150) timers.push(fn) } })
+    loaded(); assert.equal(print, 0)
+    release(); await new Promise<void>(resolve => setImmediate(resolve))
+    allowed = scenario !== 'revoke'
+    timers.forEach(fn => fn())
+    assert.equal(print, scenario === 'allow' ? 1 : 0)
+    assert.equal(closed, scenario === 'allow' ? 0 : 1)
+    if (scenario !== 'allow') assert.equal(document.body.textContent, '', 'revoked popup content is cleared')
+  }
+  ok('report print metadata and actual popup script recheck authority after font wait')
 }
 
 console.log(`\nexportOptions tests passed (${passed})`)

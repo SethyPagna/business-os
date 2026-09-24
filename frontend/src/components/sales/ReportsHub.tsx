@@ -354,6 +354,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     view,
     filters,
     search: supportsSearch ? search : '',
+    exportScopeKey: supportsSearch ? searchText : '',
     options,
     style,
     fmtMoney,
