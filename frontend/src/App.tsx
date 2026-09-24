@@ -1,5 +1,6 @@
 import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
+import { fmtTime } from './utils/formatters.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
 import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
@@ -1460,19 +1461,12 @@ function formatSyncTimestamp(value: unknown): string {
   }
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  // dd/mm HH:mm -- day-first like every other date in the app (Sep 4 2026).
-  // The locale is pinned to en-US and only its field VALUES are read, so a
-  // viewer's machine locale can no longer decide the order or the clock; the
-  // bare `[]` here used to hand both to the device.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-  return `${get('day')}/${get('month')}, ${get('hour')}:${get('minute')}`
+  // Business time (Asia/Phnom_Penh), never the viewer's device zone -- a
+  // sync banner/toast read on a device set to another zone must still show
+  // the same house dd/mm/yyyy, HH:mm every other timestamp in the app uses.
+  // See utils/formatters.ts's fmtTime for why the parts are assembled by
+  // hand rather than left to a locale.
+  return fmtTime(date)
 }
 
 function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, conflictsNeedReview }: OfflineModeBannerProps) {

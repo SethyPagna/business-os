@@ -11,6 +11,7 @@ import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 // note go through the one shared row model -- the card said "N/A", the table
 // said '-' and the detail said an em dash about the same transfer.
 import { historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
+import { fmtTime } from '../../utils/formatters.ts'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
@@ -284,24 +285,11 @@ function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:tex
  * 1.2 Shared format helper for transfer timestamps.
  */
 function formatTransferDate(rawValue: string | null | undefined): string {
-  if (!rawValue) return 'N/A'
-  const iso = rawValue.includes('T') || rawValue.endsWith('Z')
-    ? rawValue
-    : `${rawValue.replace(' ', 'T')}Z`
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return 'N/A'
-  // dd/mm/yyyy HH:mm, day-first (Sep 4 2026) -- see utils/formatters.ts for
-  // why the order is assembled here rather than left to a locale.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date)
-  const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-  return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}`
+  // Business time (Asia/Phnom_Penh), never the viewer's device zone -- see
+  // utils/formatters.ts's fmtTime, which already normalizes the space/Z/
+  // offset shapes this used to hand-roll and renders dd/mm/yyyy, HH:mm.
+  const formatted = fmtTime(rawValue)
+  return formatted === '—' ? 'N/A' : formatted
 }
 
 /**

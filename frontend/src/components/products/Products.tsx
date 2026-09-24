@@ -6,6 +6,7 @@ import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatal
 import { Suspense, memo, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { todayStr } from '../../utils/dateHelpers.ts'
 import MoreVertical from 'lucide-react/dist/esm/icons/more-vertical.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
@@ -3487,7 +3488,10 @@ function ProductsFullEditor() {
   const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products', groups?: import('./helpers/productExport.ts').ExportFieldGroup[], branchId?: string, format: 'csv' | 'xlsx' | 'pdf' = 'xlsx') => {
     const { buildProductExportRows } = await import('./helpers/productExport.ts')
     const rows = buildProductExportRows(rowsToExport, { canViewCosts, ...(groups ? { groups } : {}), ...(branchId ? { branchId } : {}) })
-    const filename = `${filePrefix}-${new Date().toISOString().slice(0,10)}`
+    // Business-day stamp, not the raw UTC date -- an export taken between
+    // 00:00 and 06:59 Phnom Penh time is still UTC "yesterday", so slicing
+    // toISOString() here named the file and print title a day early.
+    const filename = `${filePrefix}-${todayStr()}`
     if (format === 'csv') {
       const { downloadCSV } = await import('../../utils/csv.ts')
       downloadCSV(`${filename}.csv`, rows)
@@ -3496,7 +3500,7 @@ function ProductsFullEditor() {
     if (format === 'pdf') {
       const { openPrintExport } = await import('../../utils/exportOptions.ts')
       const opened = openPrintExport({
-        title: `${filePrefix} — ${new Date().toISOString().slice(0, 10)}`,
+        title: `${filePrefix} — ${todayStr()}`,
         subtitle: `${rows.length} ${t('records') || 'records'}`,
         headers: rows.length ? Object.keys(rows[0]) : [],
         rows,
