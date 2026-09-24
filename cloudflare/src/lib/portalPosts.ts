@@ -20,6 +20,8 @@
 // is Live exactly while that rule is active, so ending or switching off the
 // rule ends the offer on the site and at the till together, and the post
 // shows the rule's own label rather than a website-only copy of the deal.
+// The rule is made and changed on the Promotions page (POST/PUT
+// /api/promotions/rules); a post only links one, of a per-line type.
 import { businessToday } from './businessDateWindow'
 import { isRuleActive, normalizePromotionRule, promotionAutoLabel, type PromotionRule } from './promotionRules'
 import { MAX_LINK_URL_LENGTH, normalizeSafeLinkUrl } from './safeLinkUrl'
@@ -204,7 +206,15 @@ export function readPortalPosts(value: unknown): PortalPost[] {
   return posts
 }
 
-export type PortalPostRuleState = 'live' | 'scheduled' | 'ended' | 'missing'
+export type PortalPostRuleState = 'live' | 'scheduled' | 'ended' | 'missing' | 'unsupported'
+
+// The rule types a Discount post can show: the POS kernel's per-line types,
+// each priced on one line on its own. A cross-line rule (next_item: the
+// cheapest item of each group takes the cut) -- or a type added later, until
+// someone decides it -- cannot be linked, and a linked rule changed to one
+// afterwards is Unsupported, which takes the post off the site.
+export const PORTAL_DISCOUNT_RULE_TYPES = ['percent_off', 'fixed_off', 'quantity_save', 'spend_save', 'quantity_percent'] as const
+const DISCOUNT_RULE_TYPES: ReadonlySet<string> = new Set(PORTAL_DISCOUNT_RULE_TYPES)
 
 // Where a Discount post's rule stands, through the POS kernel's own
 // isRuleActive: a rule that is not active now but would be at its own start
@@ -212,6 +222,7 @@ export type PortalPostRuleState = 'live' | 'scheduled' | 'ended' | 'missing'
 // benefit left) is Ended.
 export function portalPostRuleState(rule: PromotionRule | null | undefined, nowMs: number): PortalPostRuleState {
   if (!rule) return 'missing'
+  if (!DISCOUNT_RULE_TYPES.has(rule.rule_type)) return 'unsupported'
   if (isRuleActive(rule, nowMs)) return 'live'
   const startMs = rule.starts_at ? new Date(rule.starts_at).getTime() : Number.NaN
   return Number.isFinite(startMs) && startMs > nowMs && isRuleActive(rule, startMs) ? 'scheduled' : 'ended'
@@ -225,7 +236,7 @@ export function portalPostStatus(post: PortalPost, nowMs: number, rulesById: Rea
   }
   if (post.kind === 'discount') {
     const state = portalPostRuleState(post.ruleId == null ? null : rulesById.get(post.ruleId), nowMs)
-    return state === 'missing' ? 'ended' : state
+    return state === 'live' || state === 'scheduled' ? state : 'ended'
   }
   const today = businessToday(nowMs)
   const endsOn = post.endsOn || (post.kind === 'event' ? post.eventDate : '')
@@ -418,9 +429,11 @@ function blankPost(id: string): PortalPost {
 // One post as a write leaves it. `existing` is the stored post (null to
 // create it); only the fields present in `input` change, each validated, and
 // then the kind's own rules apply:
-//   - a Story is Live for 24 hours from postedAt, so it has no start/end day;
+//   - a Story is Live for 24 hours from postedAt and a Discount runs on its
+//     rule's own window, so neither has a start or end day;
 //   - only an Event keeps an event date and a location;
-//   - only a Discount keeps a rule id;
+//   - only a Discount keeps a rule id, and it must have one (the rule itself
+//     is checked by the caller: portalDiscountRuleError);
 //   - a post links to a product OR to ctaHref -- the product wins, as it
 //     always has in the editor.
 // postedAt is stamped when the post is created, when it becomes a Story (its
@@ -469,7 +482,7 @@ export function applyPortalPostInput(
     if (hasField(input, 'hidden')) post.hidden = flagInput(input.hidden, 'hidden')
     if (hasField(input, 'ruleId')) post.ruleId = recordIdInput(input.ruleId, 'ruleId')
 
-    if (post.kind === 'story') {
+    if (post.kind === 'story' || post.kind === 'discount') {
       post.startsOn = ''
       post.endsOn = ''
     }
@@ -478,6 +491,9 @@ export function applyPortalPostInput(
       post.location = ''
     }
     if (post.kind !== 'discount') post.ruleId = null
+    else if (post.ruleId == null) {
+      refuse({ code: 'discount_rule_required', error: 'A Discount post shows a promotion rule: choose one.', field: 'ruleId' })
+    }
     if (post.linkProductId) post.ctaHref = ''
     else post.linkProductName = ''
 
@@ -496,6 +512,18 @@ export function applyPortalPostInput(
     if (error instanceof PostInputRefused) return { error: error.detail }
     throw error
   }
+}
+
+// Whether a Discount post may link this promotion_rules row (null: there is
+// no such rule), read the way the till reads it. Checked when a link is made
+// or changed; a link already made shows where its rule stands instead.
+export function portalDiscountRuleError(row: Record<string, unknown> | null | undefined): PortalPostInputError | null {
+  const rule = normalizePromotionRule(row)
+  if (!rule) return { code: 'discount_rule_not_found', error: 'That promotion rule does not exist.', field: 'ruleId' }
+  if (!DISCOUNT_RULE_TYPES.has(rule.rule_type)) {
+    return { code: 'discount_rule_not_per_line', error: 'This rule type cannot be posted: a Discount post shows only a rule priced on each line on its own.', field: 'ruleId' }
+  }
+  return null
 }
 
 // A created post goes to the top of the list; an edited one keeps its place.
