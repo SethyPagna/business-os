@@ -213,7 +213,10 @@ runTest('FilterMenu.tsx no longer hardcodes Clear/Search/No matches/selected-cou
 
 runTest('AvailabilityFilterOptions.tsx no longer hardcodes the "(Default)" suffix', () => {
   assert.doesNotMatch(availabilitySource, /' \(Default\)'/)
-  assert.match(availabilitySource, /T\('default', 'Default'\)/)
+  // default_label ("Default"), not the bare `default` key, which is lowercase
+  // in en.json for other callers -- the label must stay "Main (Default)".
+  assert.match(availabilitySource, /T\('default_label', 'Default'\)/)
+  assert.equal(en.default_label, 'Default', 'en default_label is capitalized')
 })
 
 runTest('periodFilterOptions.ts offers Khmer month names, not only English', () => {
@@ -222,7 +225,7 @@ runTest('periodFilterOptions.ts offers Khmer month names, not only English', () 
   assert.match(periodSource, /documentElement\.lang/)
 })
 
-const usedKeys = ['search', 'noMatches', 'clear', 'all', 'default', 'filter_selected_count']
+const usedKeys = ['search', 'noMatches', 'clear', 'all', 'default_label', 'filter_selected_count']
 runTest('both language packs carry every key this fix reuses or adds, with real (non-English) Khmer text', () => {
   for (const key of usedKeys) {
     assert.ok(Object.prototype.hasOwnProperty.call(en, key), `en.json missing '${key}'`)

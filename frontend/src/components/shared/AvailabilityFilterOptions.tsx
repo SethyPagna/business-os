@@ -66,7 +66,10 @@ export function buildAvailabilityFilterSection({
     { id: 'all', label: T('all', 'All'), active: branchFilter === 'all', onClick: () => setBranchFilter('all') },
     ...branches.map((branch) => ({
       id: branch.id ?? String(branch.name),
-      label: branch.is_default ? `${String(branch.name)} (${T('default', 'Default')})` : String(branch.name),
+      // default_label ("Default" / Khmer), not the bare `default` key: that one
+      // is lowercase in en.json for StockAdjustModal/SuppliersTab and would
+      // render "Main (default)" here instead of the established "Main (Default)".
+      label: branch.is_default ? `${String(branch.name)} (${T('default_label', 'Default')})` : String(branch.name),
       active: isMultiActive(branchFilter, String(branch.id)),
       onClick: () => setBranchFilter(String(branch.id)),
     })),
