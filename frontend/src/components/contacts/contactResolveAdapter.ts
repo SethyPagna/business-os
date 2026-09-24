@@ -379,6 +379,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
   // The running outcome of a merge that stopped part way, so Continue resumes
   // from the step that did not answer instead of starting over.
   const progress = new WeakMap<ContactResolveToken, ContactMergeOutcome>()
+  let clusterInvalidated = false
 
   const afterItems = (outcome: ContactMergeOutcome, token: ContactResolveToken): ResolveAfterItem[] => {
     const keeper = outcome.keeper ?? {}
@@ -451,6 +452,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
     blockers(data, draft) {
       const { ctx, rows } = buildPlan(data, draft, t)
       const out: string[] = []
+      if (clusterInvalidated) out.push(tr(t, 'contact_merge_not_duplicates', 'These contacts are not a current duplicate group. Refresh the Duplicates list.'))
       if (ctx.included.length < 2) out.push(tr(t, 'resolve_merge_needs_two', 'Merge in at least two records.'))
       if (ctx.included.length > CONTACT_MERGE_MAX_RECORDS) {
         out.push(fill(tr(t, 'resolve_merge_max', 'Merge at most {n} records at a time.'), { n: CONTACT_MERGE_MAX_RECORDS }))
@@ -525,6 +527,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
 
     isStale(error) {
       const code = (error as { code?: unknown } | null)?.code
+      if (code === 'contact_merge_not_duplicates') { clusterInvalidated = true; return true }
       return typeof code === 'string' && STALE_CODES.has(code)
     },
   }

@@ -312,6 +312,13 @@ try {
     assert.equal(sent.length, 0)
   })
 
+  await test('a cluster refusal returns to a blocked review instead of endless Continue', async () => {
+    const adapter = adapterFor()
+    const { data, draft } = await open(adapter, RECORDS)
+    assert.equal(adapter.isStale({ code: 'contact_merge_not_duplicates' }), true)
+    assert.ok(adapter.blockers?.(data, draft).includes(en.contact_merge_not_duplicates))
+  })
+
   await test('a record that no longer exists is shown as its own column and left out', async () => {
     const adapter = adapterFor()
     const { data, draft, columns, rows } = await open(adapter, RECORDS.slice(0, 2))
