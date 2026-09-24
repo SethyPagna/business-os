@@ -227,8 +227,14 @@ function portalPublicUrl(settings: SettingsMap, env: Env): string {
   return ((configuredIsStale ? '' : configured) || fallback).replace(/\/public$/i, '')
 }
 
+// The editor's "Portal language" select (CatalogEditorSurface.tsx) stores one
+// of these under customer_portal_language; anything else reads as 'auto'.
+const PORTAL_LANGUAGE_SETTINGS = new Set(['auto', 'en', 'km'])
+
 export function buildPortalConfig(settings: SettingsMap, env: Env) {
   const exchangeRate = toNumber(settings.exchange_rate, 4100)
+  const storedLanguage = String(settings.customer_portal_language || '').trim().toLowerCase()
+  const languageSetting = PORTAL_LANGUAGE_SETTINGS.has(storedLanguage) ? storedLanguage : 'auto'
   const pointsBasis = ['usd', 'khr'].includes(String(settings.customer_portal_points_basis || '').toLowerCase())
     ? (String(settings.customer_portal_points_basis).toLowerCase() as 'usd' | 'khr')
     : 'usd'
@@ -304,6 +310,15 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // editor had no effect on the live portal (the frontend's own default
     // is `true`, so a missing field was silently read as "on").
     translateWidgetEnabled: normalizeBoolean(settings.customer_portal_translate_widget_enabled, true),
+    // The same gap for the storefront's own language. `languageSetting` is
+    // the stored choice the editor reads back into its draft (CatalogPage.tsx
+    // buildDraft); without it every editor save wrote 'auto' over the owner's
+    // choice. `language` is what the storefront and the consent record read,
+    // with 'auto' resolved to English exactly as the editor preview resolves
+    // it (CatalogPage.tsx applyDraft), so a visitor never records 'auto' as a
+    // consent locale.
+    languageSetting,
+    language: languageSetting === 'auto' ? 'en' : languageSetting,
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiDisclaimer: settings.customer_portal_ai_disclaimer
