@@ -573,73 +573,81 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 onDragOver={(e) => { e.preventDefault(); setDragOverId(promo.id) }}
                 onDragLeave={() => setDragOverId((id) => (id === promo.id ? null : id))}
                 onDrop={(e) => { e.preventDefault(); handleDrop(promo.id) }}
-                className={`group flex items-center gap-3 rounded-xl border p-3 transition-all ${
+                className={`group flex flex-col gap-2 rounded-xl border p-3 transition-all sm:flex-row sm:items-center sm:gap-3 ${
                   dragOverId === promo.id
                     ? 'border-blue-400 bg-blue-50 shadow-sm dark:border-blue-700 dark:bg-blue-950/30'
                     : 'border-gray-200 hover:border-gray-300 hover:shadow-sm dark:border-gray-700 dark:hover:border-gray-600'
                 } ${promo.is_active ? '' : 'opacity-60'}`}
               >
-                <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label={copy('dragToReorder', 'Drag to reorder')} />
-                {promo.image_path ? (
-                  <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg border border-gray-100 object-cover dark:border-gray-800" />
-                ) : (
-                  <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
-                    <ImageIcon className="h-5 w-5 text-gray-300 dark:text-gray-600" />
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-gray-100">{promo.title}</span>
-                    {promo.badge_text ? (
-                      <span
-                        className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
-                        style={{ backgroundColor: promo.badge_color || '#dc2626' }}
-                      >
-                        {promo.badge_text}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
-                    {promo.subtitle || (linkTarget(promo)
-                      ? `${copy('linksTo', 'Links to')}: ${linkTarget(promo)}`
-                      : copy('noLink', 'No link'))}
+                {/* On a phone a card is two lines -- the card, then its
+                    actions -- so the title keeps the width it needs instead
+                    of the few pixels left beside five fixed controls; from
+                    `sm:` up it is one row again. */}
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label={copy('dragToReorder', 'Drag to reorder')} />
+                  {promo.image_path ? (
+                    <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg border border-gray-100 object-cover dark:border-gray-800" />
+                  ) : (
+                    <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+                      <ImageIcon className="h-5 w-5 text-gray-300 dark:text-gray-600" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-gray-100">{promo.title}</span>
+                      {promo.badge_text ? (
+                        <span
+                          className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
+                          style={{ backgroundColor: promo.badge_color || '#dc2626' }}
+                        >
+                          {promo.badge_text}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="detail-scroll-text text-xs text-gray-500 dark:text-gray-400">
+                      {promo.subtitle || (linkTarget(promo)
+                        ? `${copy('linksTo', 'Links to')}: ${linkTarget(promo)}`
+                        : copy('noLink', 'No link'))}
+                    </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleToggleActive(promo)}
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
-                    promo.is_active
-                      ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  {promo.is_active ? copy('active', 'Active') : copy('hiddenBadge', 'Hidden')}
-                </button>
-                {/* Same icon+label-on-large/icon-only-on-small treatment as
-                    the Products detail actions pane (ProductDetailModal.tsx)
-                    -- label visually hidden below `sm:`, kept for screen
-                    readers via the existing aria-label/title. */}
-                <button
-                  type="button"
-                  onClick={() => startEdit(promo)}
-                  title={copy('edit', 'Edit')}
-                  aria-label={copy('editItemAria', 'Edit {name}').replace('{name}', promo.title)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{copy('edit', 'Edit')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingDelete(promo)}
-                  title={copy('delete', 'Delete')}
-                  aria-label={copy('deleteItemAria', 'Delete {name}').replace('{name}', promo.title)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{copy('delete', 'Delete')}</span>
-                </button>
+                <div className="flex shrink-0 items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleActive(promo)}
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
+                      promo.is_active
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {promo.is_active ? copy('active', 'Active') : copy('hiddenBadge', 'Hidden')}
+                  </button>
+                  {/* Same icon+label-on-large/icon-only-on-small treatment as
+                      the Products detail actions pane (ProductDetailModal.tsx)
+                      -- label visually hidden below `sm:`, kept for screen
+                      readers via the existing aria-label/title. */}
+                  <button
+                    type="button"
+                    onClick={() => startEdit(promo)}
+                    title={copy('edit', 'Edit')}
+                    aria-label={copy('editItemAria', 'Edit {name}').replace('{name}', promo.title)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{copy('edit', 'Edit')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(promo)}
+                    title={copy('delete', 'Delete')}
+                    aria-label={copy('deleteItemAria', 'Delete {name}').replace('{name}', promo.title)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{copy('delete', 'Delete')}</span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
