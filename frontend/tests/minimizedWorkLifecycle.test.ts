@@ -163,6 +163,24 @@ assert.equal(peekPendingRestore('return_detail')?.payload?.returnId, 88)
 assert.equal(consumePendingRestore('return_detail')?.key, 'return-detail-88')
 assert.equal(consumePendingRestore('return_detail'), null, 'return detail restore stays one-shot')
 
+// A parked contact Resolve (R12) carries the group and the choices made so far
+// in the chip itself; even without explicit metadata it needs contacts:merge.
+minimizeWork({
+  key: 'contact_resolve:customers:name:dara',
+  kind: 'contact_resolve',
+  pageId: 'contacts',
+  anchor: 'hub:contacts:duplicates',
+  label: 'Resolve — Dara',
+  payload: { table: 'customers', cluster: { type: 'name', value: 'dara', contacts: [{ id: 11 }, { id: 12 }] }, draft: { selection: { phone: { source: '12' } }, columns: {} } },
+})
+const contactResolveEntry = getMinimizedWork()[0]!
+assert.equal(canRestoreMinimizedWork(contactResolveEntry, () => false), false, 'a parked contact Resolve requires the current merge grant')
+assert.equal(canRestoreMinimizedWork(contactResolveEntry, (permission, action) => permission === 'contacts' && action === 'merge'), true)
+dispatchRestore(contactResolveEntry)
+assert.deepEqual(getMinimizedWork(), [], 'contact Resolve dispatch removes the tray chip while its host accepts the restore')
+assert.deepEqual(consumePendingRestore('contact_resolve')?.payload?.draft, { selection: { phone: { source: '12' } }, columns: {} }, 'the choices come back with the chip')
+assert.equal(consumePendingRestore('contact_resolve'), null, 'contact Resolve restore stays one-shot')
+
 // Product edits are an exact-entity contract. Even if a legacy chip is missing
 // explicit permission metadata, the registry must enforce products:edit.
 const productEditDraftKey = scopedWorkDraftKey('product_edit_777')
@@ -336,5 +354,11 @@ assert.match(returnsSource, /canViewReturnsRef\.current && canRestoreMinimizedWo
 assert.match(returnsSource, /consumePendingRestore\('return_detail'\)/, 'the Returns host should accept a restore dispatched before its section mounted')
 assert.match(returnsSource, /onDenied: \(\) => \{[\s\S]*?reparkDeniedRestore\(entry\)/, 'permission revocation should repark the exact return detail chip')
 assert.match(returnDetailSource, /<MinimizeButton onMinimize=\{onMinimize\} tr=\{tr\} \/>[\s\S]*?aria-label=\{tr\('close', 'Close'\)\}/, 'return detail should put the durable minimize action directly beside Close')
+const contactDuplicatesSource = readFileSync(new URL('../src/components/contacts/DuplicatesTab.tsx', import.meta.url), 'utf8')
+assert.match(traySource, /contact_resolve: null/, 'a parked contact Resolve keeps its choices in the chip, so dismissing it has no draft to guess at')
+assert.match(contactDuplicatesSource, /kind: 'contact_resolve',[\s\S]*?pageId: 'contacts',[\s\S]*?anchor: 'hub:contacts:duplicates',[\s\S]*?payload: \{ table: resolving\.table, cluster: resolving\.cluster, draft \},[\s\S]*?requiredPermission: \{ permissionKey: 'contacts', actionKey: 'merge' \}/, 'contact Resolve chips restore the exact Conflicts section with the choices made so far and the current merge grant')
+assert.match(contactDuplicatesSource, /onMinimize=\{parkResolve\}/, 'the Resolve grid parks through its host')
+assert.match(contactDuplicatesSource, /consumePendingRestore\('contact_resolve'\)/, 'the Conflicts host accepts a restore dispatched before it mounted')
+assert.match(contactDuplicatesSource, /detail\?\.kind !== 'contact_resolve'[\s\S]*?markRestoreHandled\('contact_resolve'\)/, 'the mounted Conflicts host accepts the restore event and consumes it once')
 
 console.log('PASS minimized work is actor-scoped, exact-draft, one-shot and accessible')

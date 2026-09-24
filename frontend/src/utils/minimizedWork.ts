@@ -26,6 +26,7 @@ export type MinimizedWorkKind =
   | 'return_detail'
   | 'branch_transfer'
   | 'inventory_transfer'
+  | 'contact_resolve'
 
 export type MinimizedWorkPermission = {
   permissionKey: string
@@ -84,6 +85,7 @@ const FALLBACK_PERMISSION_BY_KIND: Partial<Record<MinimizedWorkKind, MinimizedWo
   return_detail: { permissionKey: 'returns', actionKey: 'view' },
   branch_transfer: { permissionKey: 'branches', actionKey: 'transfer' },
   inventory_transfer: { permissionKey: 'inventory', actionKey: 'transfer' },
+  contact_resolve: { permissionKey: 'contacts', actionKey: 'merge' },
 }
 
 export type TransferDraftKind = 'branch_transfer' | 'inventory_transfer'
