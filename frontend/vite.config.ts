@@ -199,10 +199,16 @@ function emitBuildManifest(): Plugin {
 }
 
 const routePreloadChunkNames = {
+  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas, qrcode
+  // and @ffmpeg/ffmpeg (241 KB raw / 63 KB gz), and no startup chunk imports
+  // it: Receipt, printReceipt, file-api and settings-otp-modal import() it,
+  // and only the lazy scanner chunk (vendor-zxing) imports it statically
+  // (measured in the emitted graph) -- yet it was preloaded at
+  // fetchpriority=high on every admin cold load. It stays in the eager
+  // precache below, so an installed PWA still prints offline.
   admin: [
     'AdminRoot',
     'vendor-react',
-    'vendor',
     'app-routing',
     'app-shell',
     'Sidebar',
@@ -310,6 +316,11 @@ const eagerPrecacheChunkNames = [...new Set([
   ...routePreloadChunkNames.pos,
   'lang-en',
   'lang-km',
+  // Receipt printing (html2canvas) and receipt QR codes (qrcode) must work
+  // offline the first time after an install or update, before any page has
+  // pulled this chunk in. It left the admin preload list in I6-2; it did not
+  // leave the offline set.
+  'vendor',
 ])]
 
 // I6-1: language pack chunk per UI language code. The route preload script

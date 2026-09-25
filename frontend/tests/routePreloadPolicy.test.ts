@@ -20,7 +20,9 @@ const transform = (html: string, bundle?: OutputBundle) => {
   return result as string
 }
 
-const admin = ['AdminRoot', 'vendor-react', 'vendor', 'app-routing', 'app-shell', 'Sidebar',
+// I6-2: generic 'vendor' (print/QR/ffmpeg, dynamic-import only) is not an
+// admin startup chunk; it is listed in `excluded` below so re-adding it fails.
+const admin = ['AdminRoot', 'vendor-react', 'app-routing', 'app-shell', 'Sidebar',
   'shared-ui', 'api-http-core', 'api-http-state', 'app-api', 'app-auth', 'app-bootstrap']
 const login = ['AdminRoot', 'auth-login', 'app-auth', 'app-bootstrap']
 const publicChunks = ['PublicCatalogRoot', 'app-shell', 'catalog-public-core', 'catalog-public-utils',
@@ -34,7 +36,7 @@ const otherRoutes: Record<string, string[]> = {
   branches: ['Branches', 'branch-api', 'product-shared', 'shared-page-header', 'route-sync-utils', 'api-local-cache', 'shared-ui'],
   backup: [], settings: [],
 }
-const excluded = ['unknown-future-chunk', 'file-picker-modal', 'image-lightbox', 'app-api-methods', 'app-system', 'app-local-db',
+const excluded = ['unknown-future-chunk', 'vendor', 'file-picker-modal', 'image-lightbox', 'app-api-methods', 'app-system', 'app-local-db',
   'vendor-dexie', 'vendor-zxing', 'vendor-xlsx', 'media-upload-utils', 'notification-center',
   'background-import-tracker', 'write-conflict-modal', 'browser-dialogs', 'product-detail',
   'shared-portal-menu', 'action-history-api', 'ai-api', 'audit-log-api', 'branch-api',
