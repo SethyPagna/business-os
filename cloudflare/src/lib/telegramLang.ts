@@ -54,8 +54,13 @@
 // S4-7 (the shift report) took exactly that route: fifteen entries at the end
 // of LABELS, one `/shift` command doc, and no change to any mechanism here.
 
+// Owner, 25 Sep 2026, reviewing the shift report sample: "English/Khmer"
+// (no spaces around the slash) everywhere a label carries both languages --
+// tighter on a phone-width bubble than the signage-style " / " the bot used
+// until now. `label()`'s one exception (the shift ID row, "ID សម្គាល់" with
+// no slash at all) is SPACE_JOINED_LABELS below, not this constant.
 /** Separator between the two labels of one line. */
-export const BILINGUAL_SEPARATOR = ' / '
+export const BILINGUAL_SEPARATOR = '/'
 
 // ---------------------------------------------------------------------------
 // Language mode (owner, Sep 21 2026: "Khmer + english, option to choose one or
@@ -115,7 +120,9 @@ const LABELS = {
   // owner's Sep 23 2026 words: "· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ:
   // Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់". `localizeValue` names both
   // statuses the way the app does, as it does on the plain Status row.
-  statusUpdated: { en: 'Invoice Status Updated', km: 'ស្ថានភាពផ្លាស់ប្ដូរ', localizeValue: true },
+  // SHORTENED 25 Sep 2026 (owner: "`Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ`
+  // becomes `Status updated/ស្ថានភាពផ្លាស់ប្ដូរ`"). Khmer unchanged.
+  statusUpdated: { en: 'Status updated', km: 'ស្ថានភាពផ្លាស់ប្ដូរ', localizeValue: true },
   date: { en: 'Date', km: 'កាលបរិច្ឆេទ' },
   // SHORTENED Sep 22 2026 (owner: "i changed some khmer that is too long and
   // no need so long"). វិក្កយបត្រ IS the invoice; លេខ- ("number of") added a
@@ -329,7 +336,10 @@ const HEADINGS = {
   // owner's sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527").
   // It replaced "Sale recorded / បានកត់ត្រាការលក់" and the INV row that
   // carried the number under the status and date.
-  '🛍️ Sale Invoice': 'វិក្កយបត្រការលក់',
+  // "Sale Invoice" -> "Sale invoice" and the Khmer drops ការលក់ (owner, 25 Sep
+  // 2026: "`Sale invoice/វិក្កយបត្រ` — drop ការលក់ from the Khmer"). វិក្កយបត្រ
+  // alone is what `🧾 Invoice` below already says, on purpose: one noun.
+  '🛍️ Sale invoice': 'វិក្កយបត្រ',
   // The status change's title, which names the invoice since Sep 23 2026
   // (the owner's sample: "🧾 Invoice / វិក្កយបត្រ: 20260922-110132"). It
   // replaced "Receipt status updated / ស្ថានភាពបានផ្លាស់ប្ដូរ" and the Receipt
@@ -434,7 +444,9 @@ const VALUE_PHRASE_RE = new RegExp(
   'g',
 )
 
-const BY_ENGLISH = new Map<string, LabelEntry>(Object.values(LABELS).map((entry) => [entry.en, entry as LabelEntry]))
+const BY_ENGLISH = new Map<string, [TelegramLabelKey, LabelEntry]>(
+  (Object.entries(LABELS) as [TelegramLabelKey, LabelEntry][]).map(([key, entry]) => [entry.en, [key, entry]]),
+)
 // The same statuses, reachable by the name they PRINT, so a line whose label
 // is a status ("Completed: $8.00") is localized like any other label row.
 const BY_STATUS_NAME = new Map<string, { en: string; km: string }>(
@@ -464,9 +476,18 @@ export function saleStatusMoneyLabel(status: string): string {
   return SALE_STATUS_PHRASES[readable as keyof typeof SALE_STATUS_PHRASES]?.en ?? readable
 }
 
-/** `'Cashier / អ្នកគិតប្រាក់'` -- the label pair on its own. */
+// The shift ID row is the one label the owner asked to carry NO separator at
+// all between its two languages -- 25 Sep 2026: "`ID / សម្គាល់` becomes
+// `ID សម្គាល់` (no slash)" -- unlike every other label, which drops only the
+// SPACES around the slash (BILINGUAL_SEPARATOR above). A plain space joins
+// the two words instead. Single-language modes are unaffected: `label()`
+// already returns just the one word then.
+const SPACE_JOINED_LABELS = new Set<TelegramLabelKey>(['shift'])
+
+/** `'Cashier/អ្នកគិតប្រាក់'` -- the label pair on its own. */
 export function label(key: TelegramLabelKey): string {
   const entry = LABELS[key]
+  if (currentLanguage === 'both' && SPACE_JOINED_LABELS.has(key)) return `${entry.en} ${entry.km}`
   return pair(entry.en, entry.km)
 }
 
@@ -640,8 +661,9 @@ export function localizeTelegramLine(line: string): string {
   // what any other line says.
   const status = BY_STATUS_NAME.get(head)
   if (status) return row(pair(status.en, status.km), text.slice(split + 2))
-  const entry = BY_ENGLISH.get(head)
-  if (!entry) return text
+  const found = BY_ENGLISH.get(head)
+  if (!found) return text
+  const [key, entry] = found
   let value = text.slice(split + 2)
   // routes/fees.ts puts a bare ISO `fee_date` on its Date line while every
   // other message uses dd/mm/yyyy. Normalising the one unambiguous shape here
@@ -650,8 +672,9 @@ export function localizeTelegramLine(line: string): string {
   if (entry.localizeValue) value = localizeTelegramValue(value)
   // Recognising the label is also what earns the bullet: a line this table
   // has no word for is not a label row and keeps its own shape (an item
-  // equation, a divider, a list bullet).
-  return row(pair(entry.en, entry.km), value)
+  // equation, a divider, a list bullet). `label(key)` (not a raw pair()) so
+  // this path takes the same SPACE_JOINED_LABELS exception label() does.
+  return row(label(key), value)
 }
 
 /**
@@ -707,21 +730,23 @@ export const GROUP_RULE = '─'.repeat(18)
 
 /**
  * The mark on either side of a SHIFT REPORT section's name:
- * `-----Invoices / វិក្កយបត្រ-----`, one line, no number and no rule above it.
+ * `====Invoices/វិក្កយបត្រ====`, one line, no number and no rule above it.
  *
- * Owner, Sep 23 2026: "for shift instead of line. do ---------Invoices /
- * វិក្កយបត្រ-------- use dash not line. and for inside each section do bullet
- * points ·". Plain hyphen-minus on purpose: the drawn `━` rule is exactly
- * what the owner asked to replace.
+ * Originally the plain hyphen-minus (owner, Sep 23 2026: "do
+ * ---------Invoices / វិក្កយបត្រ-------- use dash not line"). CHANGED to `=`
+ * on 25 Sep 2026, unifying with REPORT_SECTION_EDGE below (the owner: replace
+ * `-----Title / ខ្មែរ-----` with `====Title/ខ្មែរ====` -- 4 marks a side,
+ * up to 5 -- for EVERY outbound message, the shift report included). One
+ * glyph for every section header in every report now, not two.
  *
- * HOW MANY stand on each side is lib/telegram.ts's sectionHeader's job: five,
- * or fewer when five would push the header onto a second row. The owner, the
- * same day: "for the header marks, make sure the line stays in one line/row.
- * this means you can use less header marks if it pushes to next row for the
- * telegram message." So `---Cash count / ការរាប់សាច់ប្រាក់---` in both
- * languages, and five a side for the shorter names.
+ * HOW MANY stand on each side is lib/telegram.ts's sectionHeader's job: five
+ * at most, or fewer when five would push the header onto a second row. The
+ * owner, Sep 23 2026: "for the header marks, make sure the line stays in one
+ * line/row. this means you can use less header marks if it pushes to next
+ * row for the telegram message." So `===Cash count/ការរាប់សាច់ប្រាក់===` in
+ * both languages, and five a side for the shorter names.
  */
-export const SHIFT_SECTION_EDGE = '-'
+export const SHIFT_SECTION_EDGE = '='
 
 /**
  * The mark on either side of a section's name in every OTHER sectioned
@@ -813,11 +838,11 @@ function referenceLines(head: string, en: string, km: string): string[] {
 
 export function telegramCommandReference(): string {
   const lines = [
-    ...referenceLines('🤖 ', 'Business OS — Reports', 'របាយការណ៍ Business OS'),
+    ...referenceLines('🤖 ', 'Business OS: Reports', 'របាយការណ៍ Business OS'),
     RULE,
   ]
   for (const doc of TELEGRAM_COMMANDS) {
-    lines.push(...referenceLines(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — `, doc.en, doc.km))
+    lines.push(...referenceLines(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: `, doc.en, doc.km))
   }
   lines.push(
     RULE,
@@ -892,13 +917,13 @@ export function parseReportDate(argument: string | undefined, today: string): Pa
     message: [
       `⚠️ ${bi(`I could not read the date "${shown}".`, `មិនអាចអានកាលបរិច្ឆេទ "${shown}" បានទេ។`)}`,
       '',
-      bi('Use one of these — the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
+      bi('Use one of these, the DAY comes first:', 'សូមប្រើទម្រង់ណាមួយ៖ ថ្ងៃមកមុន'),
       // `•`, not `▸`: the arrow is this bot's POINTER glyph -- "now send that
       // other command" -- and the Sep 2026 redesign took every pointer line
       // out of every message. These four are a list of accepted forms, so
       // they are bulleted like any other list the bot sends.
-      `  • dd/mm/yyyy   — ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
-      `  • yyyy-mm-dd   — ${bi('e.g.', 'ឧ.')} 2026-09-01`,
+      `  • dd/mm/yyyy: ${bi('e.g.', 'ឧ.')} 01/09/2026 = ${bi('1 September', '1 កញ្ញា')}`,
+      `  • yyyy-mm-dd: ${bi('e.g.', 'ឧ.')} 2026-09-01`,
       `  • today ${BILINGUAL_SEPARATOR.trim()} yesterday`,
       `  • ${bi('nothing at all = today', 'មិនដាក់អ្វីសោះ = ថ្ងៃនេះ')}`,
     ].join('\n'),

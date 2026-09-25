@@ -17,9 +17,9 @@
 // prose blocks the pre-Sep-6 report used.
 //
 // On Sep 23 2026 the rule and the number came off each section: "for shift
-// instead of line. do ---------Invoices / វិក្កយបត្រ-------- use dash not line.
+// instead of line. do ---------Invoices/វិក្កយបត្រ-------- use dash not line.
 // and for inside each section do bullet points ·". A section now opens with
-// ONE line, `-----Invoices / វិក្កយបត្រ-----`, and every row inside it -- the
+// ONE line, `-----Invoices/វិក្កយបត្រ-----`, and every row inside it -- the
 // payment, delivery and expense lists too -- is a `·` row.
 //
 // What this file guards AFTER the Sep 21 layout:
@@ -207,27 +207,30 @@ const rowsOf = (text) => text.split('\n').reduce((joined, line) => {
 }, [])
 const rows = rowsOf(report)
 const lineWith = (english) => {
-  const prefix = `${lang.ROW_BULLET}${english}${SEP}`
+  // The ID row is space-joined, not SEP-joined (owner, 25 Sep 2026: no slash).
+  const prefix = english === 'ID' ? `${lang.ROW_BULLET}${lang.label('shift')}` : `${lang.ROW_BULLET}${english}${SEP}`
   const found = lines.find((line) => line.startsWith(prefix))
   assert.ok(found, `the report has no "${english}" line:\n${report}`)
   return found
 }
 const valueOf = (english) => lineWith(english).slice(lineWith(english).indexOf(': ') + 2)
-// A list row reads `· Label / ស្លាក — value` (an em dash, never ': '), so the
-// expense/delivery/payment breakdown rows need their own reader.
+// A list row reads `· Label/ស្លាក: value` (a colon glued to the name, never
+// an em dash -- retired 25 Sep 2026), so the expense/delivery/payment
+// breakdown rows need their own reader.
 const bulletValue = (english) => {
   const prefix = `${lang.ROW_BULLET}${english}${SEP}`
-  const found = rows.find((row) => row.startsWith(prefix) && row.includes(' — '))
+  const found = rows.find((row) => row.startsWith(prefix) && row.includes(': '))
   assert.ok(found, `the report has no "${english}" list row:\n${report}`)
-  return found.slice(found.indexOf(' — ') + 3)
+  return found.slice(found.indexOf(': ') + 2)
 }
-// A section opens with ONE line: its name between two dashed edges (owner,
-// Sep 23 2026: "do ---------Invoices / វិក្កយបត្រ-------- use dash not line"),
-// five a side, or fewer when five would push the line onto a second row (the
-// owner, the same day: "you can use less header marks if it pushes to next
-// row"). Spelled out here rather than read from lang.SHIFT_SECTION_EDGE, so
-// these checks judge the text the chat receives; the mark is pinned below.
-const SECTION_TITLE = /^(-{1,5})([^-](?:.*[^-])?)(-{1,5})$/
+// A section opens with ONE line: its name between two `=` edges (owner, Sep
+// 23 2026: "do ---------Invoices/វិក្កយបត្រ-------- use dash not line",
+// unified to `=` on 25 Sep 2026 with every other report), five a side, or
+// fewer when five would push the line onto a second row (the owner, the same
+// day: "you can use less header marks if it pushes to next row"). Spelled out
+// here rather than read from lang.SHIFT_SECTION_EDGE, so these checks judge
+// the text the chat receives; the mark is pinned below.
+const SECTION_TITLE = /^(={1,5})([^=](?:.*[^=])?)(={1,5})$/
 /** The section name a title row carries, or null for any other row. */
 const titleName = (row) => {
   const match = String(row).match(SECTION_TITLE)
@@ -260,17 +263,17 @@ const sectionNames = (text) => sectionTitleLines(text).map(titleName)
 assert.deepEqual(sectionNames(report), SECTION_KEYS.map((key) => lang.label(key)),
   `the six sections are not in the Sep 21 2026 order:\n${report}`)
 
-// Sep 23 2026, the section title's own shape. Plain hyphen-minus, the name in
-// between, on ONE line: no drawn rule above it and no number in front of it
-// -- the two things the owner asked to replace. Five a side where the row has
-// room; Cash count and Payment methods, in both languages, have room for
-// three and four.
+// Sep 23 2026, the section title's own shape. The name between two edge
+// marks, on ONE line: no drawn rule above it and no number in front of it --
+// the two things the owner asked to replace. Unified to `=` on 25 Sep 2026,
+// the same glyph as every other report. Five a side where the row has room;
+// Cash count, in both languages, has room for only four.
 assert.deepEqual(sectionTitleLines(report), [
-  '-----Invoices / វិក្កយបត្រ-----', '-----Sales / ការលក់-----', '---Cash count / ការរាប់សាច់ប្រាក់---',
-  '----Payment methods / វិធីទូទាត់----', '-----Delivery / ការដឹកជញ្ជូន-----', '-----Expenses / ចំណាយ-----',
+  '=====Invoices/វិក្កយបត្រ=====', '=====Sales/ការលក់=====', '====Cash count/ការរាប់សាច់ប្រាក់====',
+  '=====Payment methods/វិធីទូទាត់=====', '=====Delivery/ការដឹកជញ្ជូន=====', '=====Expenses/ចំណាយ=====',
 ], report)
 assert.ok(sectionTitleLines(report).every((title) => title.length <= 36), `a section title is wider than one phone row:\n${report}`)
-assert.equal(lang.SHIFT_SECTION_EDGE, '-', 'the exported shift section mark is the plain hyphen-minus the chat receives')
+assert.equal(lang.SHIFT_SECTION_EDGE, '=', 'the exported shift section mark is the plain equals sign the chat receives (unified 25 Sep 2026)')
 assert.ok(!lines.includes(lang.RULE), `a shift section still opens with the drawn rule:\n${report}`)
 assert.ok(!lines.some((line) => /^\d+\.\s/.test(line)), `a shift section is still numbered:\n${report}`)
 // And every row inside every section is a `·` row -- the lists included
@@ -281,7 +284,7 @@ for (const row of rows.slice(1)) {
   if (isSectionTitle(row)) continue
   assert.ok(row.startsWith(lang.ROW_BULLET), `"${row}" is inside a shift section but is not a · row`)
 }
-console.log('PASS sections: one dashed title line each, no rule, no number, every row a · row')
+console.log('PASS sections: one marked title line each, no rule, no number, every row a · row')
 
 // Inside the identity block and inside each section, the field order the
 // layout fixed. Matched strictly AFTER the previous hit (not from the top of
@@ -302,9 +305,13 @@ const ORDER = [
   // 6. Expenses -- the total, after its own bullets.
   'Total',
 ]
+// The ID row is the ONE label with no slash at all (owner, 25 Sep 2026: "`ID /
+// សម្គាល់` becomes `ID សម្គាល់` (no slash)") -- space-joined instead of the
+// SEP every other bilingual label uses.
 let cursor = -1
 for (const english of ORDER) {
-  const at = lines.findIndex((line, index) => index > cursor && line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
+  const prefix = english === 'ID' ? `${lang.ROW_BULLET}${lang.label('shift')}` : `${lang.ROW_BULLET}${english}${SEP}`
+  const at = lines.findIndex((line, index) => index > cursor && line.startsWith(prefix))
   assert.ok(at > cursor, `"${english}" is out of order (index ${at}, previous ${cursor}) -- the Sep 21 2026 layout fixed this sequence:\n${report}`)
   cursor = at
 }
@@ -313,7 +320,7 @@ for (const english of ORDER) {
 // for. The list rows carry the same `·` since Sep 23 2026, so they are
 // counted too -- none of this fixture's names contains ': '. The title is
 // not a row: since Sep 23 2026 it carries a colon of its own (`Shift report
-// / របាយការណ៍វេន: Closed / បិទ`), and it is judged on its own below.
+///របាយការណ៍វេន: Closed/បិទ`), and it is judged on its own below.
 const labelled = lines.slice(1).filter((line) => line.includes(': ') && !line.startsWith('  '))
 assert.equal(labelled.length, ORDER.length, `the report grew a labelled line the layout did not budget for:\n${report}`)
 console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines within them, in the fixed sequence`)
@@ -326,12 +333,13 @@ console.log(`PASS order: the six Sep 21 2026 sections, and ${ORDER.length} lines
 {
   const swapped = [...lines]
   const shopAt = swapped.findIndex((line) => line.startsWith(`${lang.ROW_BULLET}Shop${SEP}`))
-  const idAt = swapped.findIndex((line) => line.startsWith(`${lang.ROW_BULLET}ID${SEP}`));
+  const idAt = swapped.findIndex((line) => line.startsWith(`${lang.ROW_BULLET}${lang.label('shift')}`));
   [swapped[shopAt], swapped[idAt]] = [swapped[idAt], swapped[shopAt]]
   let brokenCursor = -1
   let rejected = false
   for (const english of ORDER) {
-    const at = swapped.findIndex((line, index) => index > brokenCursor && line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`))
+    const prefix = english === 'ID' ? `${lang.ROW_BULLET}${lang.label('shift')}` : `${lang.ROW_BULLET}${english}${SEP}`
+    const at = swapped.findIndex((line, index) => index > brokenCursor && line.startsWith(prefix))
     if (!(at > brokenCursor)) { rejected = true; break }
     brokenCursor = at
   }
@@ -341,10 +349,13 @@ console.log('PASS order is a real discriminator: a swapped Shop/ID pair fails th
 
 // --- 2. every label is bilingual --------------------------------------------
 
+// The ID row is the ONE label with no slash at all (owner, 25 Sep 2026), so
+// it is space-joined instead of SEP-joined; every other label still pairs.
 for (const line of labelled) {
   const labelPart = line.slice(0, line.indexOf(': '))
   assert.ok(KHMER.test(labelPart), `label "${labelPart}" shipped English-only`)
-  assert.ok(labelPart.includes(SEP), `label "${labelPart}" is not a bilingual pair`)
+  const isIdRow = labelPart === `${lang.ROW_BULLET}${lang.label('shift')}`
+  assert.ok(isIdRow || labelPart.includes(SEP), `label "${labelPart}" is not a bilingual pair`)
 }
 assert.ok(KHMER.test(lines[0]), 'the title is not bilingual')
 console.log(`PASS bilingual: ${labelled.length} labelled lines carry both languages`)
@@ -402,11 +413,11 @@ for (const banned of ['shortage', 'short by', 'must match', 'mismatch', 'Final a
   assert.ok(!new RegExp(banned, 'i').test(report), `the report reintroduced "${banned}" -- the cash block is a readout, not a check:\n${report}`)
 }
 // And no explanatory sentence anywhere: every line is a label and a figure, a
-// list row (a name, an em dash, a figure), a section title, an empty-section
-// marker, or the report's own title line.
+// list row (a name, a colon, a figure -- no em dash since 25 Sep 2026), a
+// section title, an empty-section marker, or the report's own title line.
 for (const line of rows.slice(1)) {
   if (isSectionTitle(line) || line === EMPTY_SECTION_MARKER) continue
-  assert.ok(line.includes(': ') || line.includes(' — '), `"${line}" is prose, not a labelled figure`)
+  assert.ok(line.includes(': '), `"${line}" is prose, not a labelled figure`)
   assert.ok(!/\. /.test(line), `"${line}" reads as a sentence`)
 }
 console.log('PASS readout: registered opening and closing cash, no alarm wording, no explanatory sentences')
@@ -423,7 +434,7 @@ const noCost = telegram.formatShiftReport('Shop', CLOSED, {
 assert.ok(!noCost.includes('Actual delivery cost'), 'a shift with no recorded courier cost must not print a $0.00 cost')
 const noCostLines = noCost.split('\n')
 assert.ok(noCostLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Delivery fee${SEP}`) && line.endsWith(': $6.00')), 'the charged fee is still reported')
-assert.deepEqual(sectionBlock(noCost, 'expenses'), [`${lang.ROW_BULLET}${lang.label('expensesOther')} — $4.00`, lang.labeled('total', '$4.00')],
+assert.deepEqual(sectionBlock(noCost, 'expenses'), [`${lang.ROW_BULLET}${lang.label('expensesOther')}: $4.00`, lang.labeled('total', '$4.00')],
   'an unrecorded courier cost must not be folded into the expense total as a zero, nor as its own bullet')
 console.log('PASS honesty: an unrecorded courier cost prints no line and enters no total')
 
@@ -545,7 +556,7 @@ const fullValue = (english) => {
   return line.slice(line.indexOf(': ') + 2)
 }
 assert.equal(fullValue('Difference'), '+$15.50 · +20,000៛')
-assert.notEqual(fullValue('Difference'), '—', 'a shift with a refund must still get a number, not a dash')
+assert.notEqual(fullValue('Difference'), 'N/A', 'a shift with a refund must still get a number, not N/A')
 assert.equal(50 + 210 - 12 - 4 - 3.5, 240.5)
 // A review code is reported separately and never erases a computed figure.
 const flagged = telegram.formatShiftReport('Shop', CLOSED, {
@@ -558,13 +569,13 @@ const partialDifference = telegram.formatShiftReport('Shop', CLOSED, {
   ...FIGURES,
   reconciliation: { ...RECONCILED, difference: { usd: 0, khr: null } },
 }, NOW)
-assert.ok(partialDifference.includes(lang.labeled('difference', '$0.00 · —')),
+assert.ok(partialDifference.includes(lang.labeled('difference', '$0.00 · N/A')),
   'one missing currency stays unknown without hiding the other currency\'s valid zero')
 const missingDifference = telegram.formatShiftReport('Shop', CLOSED, {
   ...FIGURES,
   reconciliation: { ...RECONCILED, difference: { usd: null, khr: null } },
 }, NOW)
-assert.ok(missingDifference.includes(lang.labeled('difference', '—')),
+assert.ok(missingDifference.includes(lang.labeled('difference', 'N/A')),
   'both missing currencies remain one truthful unknown')
 // Cash recognition is the shared module's, by KIND: renaming the method must
 // not empty the drawer (the old code compared against two exact spellings).
@@ -597,7 +608,7 @@ const openOpen = openLines.find((line) => line.startsWith(`${lang.ROW_BULLET}Ope
 // paste showed what that means on a shift opened minutes ago: an end
 // identical to the start, a window that reads as zero minutes long. An open
 // shift has NO close, so its Close row says N/A (the owner's Sep 23 sample:
-// "Close / បិទ: N/A") instead of a timestamp, and cannot be read as one.
+// "Close/បិទ: N/A") instead of a timestamp, and cannot be read as one.
 assert.equal(openClose, lang.labeled('close', 'N/A'), `an open shift has no close, so its Close row says N/A, got: ${openClose}`)
 assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(openClose), 'no timestamp may appear on an open shift\'s Close row')
 assert.equal(openOpen, lang.labeled('open', '04/09/2026 08:15'), 'an open shift still states when it opened')
@@ -625,7 +636,8 @@ assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}Opening ca
 // (De-duplicated: ORDER lists "Total" twice, once per section it labels.)
 const stillExpected = [...new Set(ORDER)].filter((entry) => entry !== 'Closing cash' && entry !== 'Difference')
 for (const english of stillExpected) {
-  assert.ok(openLines.some((line) => line.startsWith(`${lang.ROW_BULLET}${english}${SEP}`)), `open shift dropped the "${english}" line`)
+  const prefix = english === 'ID' ? `${lang.ROW_BULLET}${lang.label('shift')}` : `${lang.ROW_BULLET}${english}${SEP}`
+  assert.ok(openLines.some((line) => line.startsWith(prefix)), `open shift dropped the "${english}" line`)
 }
 assert.deepEqual(sectionTitleLines(openReport), sectionTitleLines(report),
   'an open shift still renders all six sections, in order')
@@ -889,7 +901,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // the already-rendered prefix rather than a TelegramLabelKey.
   const mappedRows = rowsOf(reply)
   const mappedBulletValue = (renderedPrefix) => {
-    const prefix = `${lang.ROW_BULLET}${renderedPrefix} — `
+    const prefix = `${lang.ROW_BULLET}${renderedPrefix}: `
     const found = mappedRows.find((row) => row.startsWith(prefix))
     assert.ok(found, `the report has no "${renderedPrefix}" list row:\n${reply}`)
     return found.slice(prefix.length)

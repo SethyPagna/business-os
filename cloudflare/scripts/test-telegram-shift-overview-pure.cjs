@@ -216,8 +216,8 @@ async function main() {
     '=====Invoices=====',
     '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====',
-    '· Cash — 12 · $300.00',
-    '· ABA Pay — 6 · $112.50',
+    '· Cash: 12 · $300.00',
+    '· ABA Pay: 6 · $112.50',
     '=====Expenses=====',
     '· Actual delivery cost: $4.50',
     '· Other expenses: $5.00 · 4,000៛',
@@ -246,8 +246,8 @@ async function main() {
     '=====វិក្កយបត្រ=====',
     '· សរុប: 18 · បានបោះបង់: 1',
     '=====វិធីទូទាត់=====',
-    '· Cash — 12 · $300.00',
-    '· ABA Pay — 6 · $112.50',
+    '· Cash: 12 · $300.00',
+    '· ABA Pay: 6 · $112.50',
     '=====ចំណាយ=====',
     '· ថ្លៃដឹកដើម: $4.50',
     '· ចំណាយផ្សេងទៀត: $5.00 · 4,000៛',
@@ -256,11 +256,11 @@ async function main() {
     '· សរុប: 2 · $10.00',
   ])
   check('KM: the overview text, line for line, Khmer labels from the packs', true)
-  check('both: the title carries both languages', both[0] === '📈 Reports overview / ទិដ្ឋភាពរួមរបាយការណ៍: 23/09/2026', both[0])
+  check('both: the title carries both languages', both[0] === '📈 Reports overview/ទិដ្ឋភាពរួមរបាយការណ៍: 23/09/2026', both[0])
   const headers = both.filter((line) => /^=+[^=].*[^=]=+$/.test(line))
   const expectedHeaders = ['sales', 'invoices', 'paymentMethods', 'expenses', 'returns'].map((key) => telegram.sectionHeader(key, telegramLang.REPORT_SECTION_EDGE))
   check('both: five `=====Name=====` sections, drawn by the shared sectionHeader (fewer marks when five would wrap)',
-    JSON.stringify(headers) === JSON.stringify(expectedHeaders) && headers.includes('====Payment methods / វិធីទូទាត់===='), headers.join('\n'))
+    JSON.stringify(headers) === JSON.stringify(expectedHeaders) && headers.includes('=====Payment methods/វិធីទូទាត់====='), headers.join('\n'))
   check('both: every other row is a `·` row', both.slice(1).every((line) => line.startsWith('· ') || headers.includes(line) || line.startsWith('     ')))
   const pack = { en: require(path.join(root, '..', 'frontend', 'src', 'lang', 'en.json')), km: require(path.join(root, '..', 'frontend', 'src', 'lang', 'km.json')) }
   check('the title words are the pack key telegram_reports_overview in both packs',
@@ -320,7 +320,7 @@ async function main() {
     (await telegram.scheduleTelegramShiftOverview(envPaid, paid.id, T0 + 1000)) === 'duplicate' && queued.length === 1)
   check('the request drain leaves a queued row to the queue while it is on time', (await telegram.drainDueTelegramShiftOverviews(envPaid, T0 + 61_000)) === 0 && posts.length === 0)
   check('the queue delivery sends it', (await telegram.deliverTelegramShiftOverview(envPaid, paidKey, T0 + 60_000)) === 'sent' && posts.length === 1)
-  check('it went to the alerts chat', posts[0].chat_id === '-1001234567890' && posts[0].text.startsWith('📈 Reports overview / ទិដ្ឋភាពរួមរបាយការណ៍: 23/09/2026'))
+  check('it went to the alerts chat', posts[0].chat_id === '-1001234567890' && posts[0].text.startsWith('📈 Reports overview/ទិដ្ឋភាពរួមរបាយការណ៍: 23/09/2026'))
   check('a duplicate queue delivery sends nothing', (await telegram.deliverTelegramShiftOverview(envPaid, paidKey, T0 + 61_000)) === 'taken' && posts.length === 1)
   check('the cron drain afterwards sends nothing', (await telegram.drainDueTelegramShiftOverviews(envPaid, T0 + 3_600_000, { sweepStale: true })) === 0 && posts.length === 1)
   check('the row says sent, once', rowFor(paidKey).status === 'sent' && rowFor(paidKey).attempts === 1)

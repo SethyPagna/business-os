@@ -143,24 +143,25 @@ assert.equal(
   'a value containing " / " must survive a single-language rendering intact',
 )
 // The heading keeps its emoji in every mode; only the words change.
-assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ វិក្កយបត្រការលក់')
-assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale Invoice')), '🛍️ Sale Invoice')
-// Since Sep 23 2026 the sale alert's heading names its receipt (the owner's
-// sample: "🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527"), and the
-// builder sends it as its first line. That line is a HEADING -- heading
-// words, no row bullet -- and the number after it is a value, never touched.
+assert.equal(inMode('km', () => lang.localizeTelegramHeading('🛍️ Sale invoice')), '🛍️ វិក្កយបត្រ')
+assert.equal(inMode('en', () => lang.localizeTelegramHeading('🛍️ Sale invoice')), '🛍️ Sale invoice')
+// Since Sep 23 2026 the sale alert's heading names its receipt (25 Sep 2026
+// sample: "Sale invoice/វិក្កយបត្រ: 20260923-153527", no space around the
+// slash and ការលក់ dropped from the Khmer), and the builder sends it as its
+// first line. That line is a HEADING -- heading words, no row bullet -- and
+// the number after it is a value, never touched.
 for (const [mode, title] of [
-  ['both', '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260923-153527'],
-  ['en', '🛍️ Sale Invoice: 20260923-153527'],
-  ['km', '🛍️ វិក្កយបត្រការលក់: 20260923-153527'],
+  ['both', '🛍️ Sale invoice/វិក្កយបត្រ: 20260923-153527'],
+  ['en', '🛍️ Sale invoice: 20260923-153527'],
+  ['km', '🛍️ វិក្កយបត្រ: 20260923-153527'],
 ]) {
-  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the title line`)
-  assert.equal(inMode(mode, () => lang.localizeTelegramHeading('🛍️ Sale Invoice: 20260923-153527')), title, `${mode}: the same title as a heading`)
+  assert.equal(inMode(mode, () => lang.localizeTelegramLine('🛍️ Sale invoice: 20260923-153527')), title, `${mode}: the title line`)
+  assert.equal(inMode(mode, () => lang.localizeTelegramHeading('🛍️ Sale invoice: 20260923-153527')), title, `${mode}: the same title as a heading`)
 }
 // The status change opens the same way since Sep 23 2026 (the owner's sample:
-// "🧾 Invoice / វិក្កយបត្រ: 20260922-110132").
+// "🧾 Invoice/វិក្កយបត្រ: 20260922-110132").
 for (const [mode, title] of [
-  ['both', '🧾 Invoice / វិក្កយបត្រ: 20260922-110132'],
+  ['both', '🧾 Invoice/វិក្កយបត្រ: 20260922-110132'],
   ['en', '🧾 Invoice: 20260922-110132'],
   ['km', '🧾 វិក្កយបត្រ: 20260922-110132'],
 ]) {
@@ -211,6 +212,12 @@ for (const [key, english] of Object.entries(enPack)) {
 // same word, and that claim has to be true.
 const SENSE_EXEMPT = {
   From: 'the pack\'s "From" is a date-range start (ចាប់ពី); a transfer\'s From is a source branch (ពី)',
+  // Owner, 25 Sep 2026, verbatim: "`Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ`
+  // becomes `Status updated/ស្ថានភាពផ្លាស់ប្ដូរ`" -- the English shortened to
+  // match km.json's own `status_updated` key, but the OWNER'S OWN KHMER (no
+  // បាន) is what the sample keeps, not that key's "ស្ថានភាពបានផ្លាស់ប្ដូរ".
+  // The label's Khmer is unchanged from before this rename.
+  'Status updated': 'owner\'s 25 Sep 2026 sample keeps ស្ថានភាពផ្លាស់ប្ដូរ, not km.json status_updated\'s ស្ថានភាពបានផ្លាស់ប្ដូរ',
 }
 
 const divergent = []
@@ -390,18 +397,18 @@ const saleLines = assertAllBilingual(telegram.formatSaleTelegramLines({
   driver: { name: 'Dara', phone: '099 111 222' },
   subtotalUsd: 1, discountUsd: 0.2, totalUsd: 0.8, totalKhr: 0, paidUsd: 0, paidKhr: 0,
 }), 'sale receipt summary')
-assert.equal(saleLines[0], '🛍️ Sale Invoice / វិក្កយបត្រការលក់: 20260903-100405', `the sale alert opens on its bilingual title:\n${saleLines.join('\n')}`)
+assert.equal(saleLines[0], '🛍️ Sale invoice/វិក្កយបត្រ: 20260903-100405', `the sale alert opens on its bilingual title:\n${saleLines.join('\n')}`)
 assert.ok(!saleLines.some((line) => line.startsWith('· INV')), 'the INV row moved into the title')
 // RENAMED Sep 22 2026. This line used to read
-// `Status / ស្ថានភាព: awaiting payment / កំពុងរង់ចាំការទូទាត់` -- a phrase the
+// `Status/ស្ថានភាព: awaiting payment/កំពុងរង់ចាំការទូទាត់` -- a phrase the
 // app had already replaced everywhere the owner could see it except here.
-assert.ok(saleLines.includes('· Status / ស្ថានភាព: Not Paid / ប្រាក់ជំពាក់'), `sale status value carries the app's own wording:\n${saleLines.join('\n')}`)
+assert.ok(saleLines.includes('· Status/ស្ថានភាព: Not Paid/ប្រាក់ជំពាក់'), `sale status value carries the app's own wording:\n${saleLines.join('\n')}`)
 assert.ok(!saleLines.join('\n').includes('awaiting payment'), 'the retired English phrase is gone')
 // REDESIGNED Sep 6 2026. The unsettled sale used to end on
-// `Paid / បានបង់: unpaid / មិនទាន់បង់` -- a label saying "paid", a value
+// `Paid/បានបង់: unpaid/មិនទាន់បង់` -- a label saying "paid", a value
 // saying "not paid", and the amount owed nowhere on the line. It now names
 // the owner's word and the positive figure, in both languages.
-assert.ok(saleLines.includes('· Not Paid / ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
+assert.ok(saleLines.includes('· Not Paid/ប្រាក់ជំពាក់: $0.80'), `the unsettled amount is one positive Not Paid line:\n${saleLines.join('\n')}`)
 assert.ok(!saleLines.some((line) => line.startsWith('· Paid')), 'no Paid line survives on a wholly unpaid sale')
 assert.ok(!saleLines.join('\n').includes('មិនទាន់បង់'), 'and no "unpaid" marker either')
 // P10: numbered like the printed receipt ("1. name ...") instead of a bullet.
@@ -415,8 +422,8 @@ const stockLines = assertAllBilingual(telegram.formatStockChangeTelegramLines({
   product: 'Rice 5kg', type: 'add', quantity: 12, branch: 'Shop', reason: 'Delivery', lot: '09032026',
   branchOnHand: 40, totalOnHand: 95, by: 'Sethy',
 }), 'stock change')
-assert.ok(stockLines.includes('· Stock change / ការផ្លាស់ប្ដូរស្តុក: +12'), 'stock delta has its own label')
-assert.ok(stockLines.some((line) => line.includes('all branches / គ្រប់សាខា 95')), 'the on-hand total is bilingual')
+assert.ok(stockLines.includes('· Stock change/ការផ្លាស់ប្ដូរស្តុក: +12'), 'stock delta has its own label')
+assert.ok(stockLines.some((line) => line.includes('all branches/គ្រប់សាខា 95')), 'the on-hand total is bilingual')
 assert.ok(!stockLines.some((line) => line.startsWith('· Change / ')), '"Change" must stay the money-handed-back label')
 
 assertAllBilingual(telegram.formatTransferTelegramLines({
@@ -430,7 +437,7 @@ const returnLines = assertAllBilingual(telegram.formatReturnTelegramLines({
   items: [{ product: 'Rice 5kg', quantity: 1, refundUsd: 7.25, stockAction: 'restock', branchOnHand: 39, totalOnHand: 94 }],
   refundUsd: 7.25, refundKhr: 0, by: 'Sethy',
 }), 'customer return')
-assert.ok(returnLines.includes('· Settlement / វិធីដោះស្រាយ: refund / សងប្រាក់'), 'the settlement enum is translated')
+assert.ok(returnLines.includes('· Settlement/វិធីដោះស្រាយ: refund/សងប្រាក់'), 'the settlement enum is translated')
 
 assertAllBilingual(telegram.formatReturnTelegramLines({
   kind: 'supplier', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'SRET-1', party: 'Acme',
@@ -444,23 +451,23 @@ const statusLines = assertAllBilingual(telegram.formatSaleStatusTelegramLines({
   customer: 'Sok Dara', reason: 'Customer cancelled', lostFeeUsd: 2, by: 'Sethy',
 }), 'sale status change')
 // Sep 23 2026: the receipt moved into the title and the Status row became
-// the owner's "Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ".
-assert.equal(statusLines[0], '🧾 Invoice / វិក្កយបត្រ: 20260903-100405', `the status change opens on its bilingual title:\n${statusLines.join('\n')}`)
-assert.equal(statusLines[1], '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់', statusLines.join('\n'))
-assert.ok(!statusLines.some((line) => /^· (Receipt|Status) /.test(line)), `the Receipt and Status rows are retired:\n${statusLines.join('\n')}`)
+// the owner's "Status updated/ស្ថានភាពផ្លាស់ប្ដូរ".
+assert.equal(statusLines[0], '🧾 Invoice/វិក្កយបត្រ: 20260903-100405', `the status change opens on its bilingual title:\n${statusLines.join('\n')}`)
+assert.equal(statusLines[1], '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់', statusLines.join('\n'))
+assert.ok(!statusLines.some((line) => /^· (Receipt|Status): /.test(line)), `the Receipt and Status rows are retired:\n${statusLines.join('\n')}`)
 // routes/fees.ts is the one route still composing lines inline.
 const feeLines = assertAllBilingual([
   'Type: rent', 'Amount: $150.00', 'Date: 2026-09-03', 'Label: September', 'Note: paid in cash',
 ], 'routes/fees.ts inline fee lines')
 // routes/fees.ts emits a bare ISO fee_date; the feed must show ONE date shape.
-assert.ok(feeLines.includes('· Date / កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the pinned dd/mm/yyyy')
-assert.equal(lang.localizeTelegramLine('Date: 03/09/2026 10:04'), '· Date / កាលបរិច្ឆេទ: 03/09/2026 10:04', 'an already-formatted date is untouched')
-assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), '· Note / កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
+assert.ok(feeLines.includes('· Date/កាលបរិច្ឆេទ: 03/09/2026'), 'an ISO Date value is normalised to the pinned dd/mm/yyyy')
+assert.equal(lang.localizeTelegramLine('Date: 03/09/2026 10:04'), '· Date/កាលបរិច្ឆេទ: 03/09/2026 10:04', 'an already-formatted date is untouched')
+assert.equal(lang.localizeTelegramLine('Note: 2026-09-03'), '· Note/កំណត់ចំណាំ: 2026-09-03', 'only the Date label is reformatted')
 console.log('PASS payloads: sale, status change, stock, transfer, both return kinds and the inline fee message are bilingual')
 
 // A free-text value must never be rewritten, however unlucky the wording.
-assert.equal(lang.localizeTelegramLine('Product: None'), '· Product / ផលិតផល: None', 'a product named "None" is left alone')
-assert.equal(lang.localizeTelegramLine('Note: item(s) damaged in transit'), '· Note / កំណត់ចំណាំ: item(s) damaged in transit', 'a free-text note is left alone')
+assert.equal(lang.localizeTelegramLine('Product: None'), '· Product/ផលិតផល: None', 'a product named "None" is left alone')
+assert.equal(lang.localizeTelegramLine('Note: item(s) damaged in transit'), '· Note/កំណត់ចំណាំ: item(s) damaged in transit', 'a free-text note is left alone')
 assert.equal(lang.localizeTelegramLine('• Rice 5kg 2 × $1.00 = $2.00'), '• Rice 5kg 2 × $1.00 = $2.00', 'item bullets pass through')
 assert.equal(lang.localizeTelegramLine('1. Rice 5kg 2 × $1.00 = $2.00'), '1. Rice 5kg 2 × $1.00 = $2.00', 'numbered item lines pass through, unbulleted')
 assert.equal(lang.localizeTelegramLine(lang.GROUP_RULE), lang.GROUP_RULE, 'a divider is not a label row and gains no bullet')
@@ -524,7 +531,7 @@ assert.ok(!reference.includes('▸'), 'no example lines survive in the reference
 // the owner called "so long".
 assert.ok(reference.split('\n').length <= 24, `the reference must stay at a glance; it is ${reference.split('\n').length} lines`)
 for (const doc of lang.TELEGRAM_COMMANDS) {
-  assert.ok(reference.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${doc.en}`), `${doc.command} has no usage line`)
+  assert.ok(reference.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: ${doc.en}`), `${doc.command} has no usage line`)
 }
 assert.ok(reference.includes('dd/mm/yyyy'), 'the reference states the project date convention')
 // The refusal inverted on Sep 4 2026 rather than loosening: exactly ONE
@@ -548,7 +555,7 @@ for (const [mode, single] of [['en', referenceEn], ['km', referenceKm]]) {
     `the '${mode}' reference must drop exactly one line per pair:\n${single}`)
   assert.ok(!single.split('\n').some((line) => line.trim() === ''), `the '${mode}' reference left an empty line behind`)
   for (const doc of lang.TELEGRAM_COMMANDS) {
-    assert.ok(single.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''} — ${mode === 'en' ? doc.en : doc.km}`),
+    assert.ok(single.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: ${mode === 'en' ? doc.en : doc.km}`),
       `${doc.command} has no usage line in '${mode}':\n${single}`)
   }
   // The accepted date FORMS are what the reader types; they never change.
@@ -743,23 +750,23 @@ const lastSent = () => sent[sent.length - 1].body.text
   const stockReply = lastSent()
 
   assert.deepEqual(inventoryReply.split('\n'), [
-    '🏷️ Inventory / ស្តុក',
-    '=====Products / ផលិតផល=====',
-    '· Active products / ផលិតផលសកម្ម: 1,240',
-    '· Units on hand / ឯកតាក្នុងស្តុក: 8,630',
-    '=====Stock / ស្តុក=====',
-    '· Low stock / ស្តុកទាប: 12',
-    '· Out of stock / អស់ស្តុក: 3',
+    '🏷️ Inventory/ស្តុក',
+    '=====Products/ផលិតផល=====',
+    '· Active products/ផលិតផលសកម្ម: 1,240',
+    '· Units on hand/ឯកតាក្នុងស្តុក: 8,630',
+    '=====Stock/ស្តុក=====',
+    '· Low stock/ស្តុកទាប: 12',
+    '· Out of stock/អស់ស្តុក: 3',
   ], `/inventory does not have the shared section shape:\n${inventoryReply}`)
   assert.deepEqual(stockReply.split('\n'), [
-    '📦 Low stock / ស្តុកទាប',
-    '=====Stock / ស្តុក=====',
-    '· Products / ផលិតផល: 2',
+    '📦 Low stock/ស្តុកទាប',
+    '=====Stock/ស្តុក=====',
+    '· Products/ផលិតផល: 2',
     // Sep 23 2026: a row too wide for a phone continues on the hanging indent.
-    '· OUT / អស់ស្តុក — Coca-Cola 330ml',
-    `${lang.HANGING_INDENT}— 0 (⚠ 5)`,
-    '· LOW / ស្តុកទាប — Rice 5kg',
-    `${lang.HANGING_INDENT}— 3 (⚠ 5)`,
+    // No em dash anywhere since 25 Sep 2026: the colon is glued to the name.
+    '· OUT/អស់ស្តុក: Coca-Cola 330ml:',
+    `${lang.HANGING_INDENT}0 (⚠ 5)`,
+    '· LOW/ស្តុកទាប: Rice 5kg: 3 (⚠ 5)',
   ], `/stock does not have the shared section shape:\n${stockReply}`)
   assert.equal(lang.REPORT_SECTION_EDGE, '=', 'a report section title is marked with `=`')
 
@@ -801,8 +808,8 @@ const lastSent = () => sent[sent.length - 1].body.text
   // -- proving the loop checks ORDER and not just presence.
   {
     const rows = inventoryReply.split('\n')
-    const productsAt = rows.indexOf('=====Products / ផលិតផល=====')
-    const stockAt = rows.indexOf('=====Stock / ស្តុក=====')
+    const productsAt = rows.indexOf('=====Products/ផលិតផល=====')
+    const stockAt = rows.indexOf('=====Stock/ស្តុក=====')
     const swapped = [...rows];
     [swapped[productsAt], swapped[stockAt]] = [swapped[stockAt], swapped[productsAt]]
     const swappedText = swapped.join('\n')
@@ -834,10 +841,13 @@ const lastSent = () => sent[sent.length - 1].body.text
   console.log('PASS stock replies: `=====` sections, strict order with a positive control, all three language modes, retired wording stays out')
 
   // ONE FIGURE PER LINE, the rule the redesign applied to the other five
-  // reports. A labelled line is `English / ខ្មែរ: value`; the product rows are
-  // a list, not a labelled figure, and carry no `: `, so they are not counted.
+  // reports. A labelled line is `English/ខ្មែរ: value`; the OUT/LOW product
+  // rows are a list, not a labelled figure -- they embed the product NAME
+  // (which may itself carry a digit, e.g. "Rice 5kg") ahead of a second colon
+  // and the quantity, so they are excluded here rather than counted.
   for (const [command, reply] of [['/inventory', inventoryReply], ['/stock', stockReply]]) {
     for (const line of reply.split('\n')) {
+      if (/^· (OUT|LOW)\//.test(line)) continue
       if (!line.includes(': ') || !line.slice(0, line.indexOf(': ')).includes(SEP)) continue
       const value = line.slice(line.indexOf(': ') + 2)
       const figures = value.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []
@@ -853,11 +863,11 @@ const lastSent = () => sent[sent.length - 1].body.text
   // zero ROW inside a section is still right; dropping the section is not.
   await wired.handleTelegramWebhook(env, { message: { text: '/inventory', chat: { id: -100111 } } })
   assert.deepEqual(lastSent().split('\n'), [
-    '🏷️ Inventory / ស្តុក',
-    '=====Products / ផលិតផល=====',
-    '· Active products / ផលិតផលសកម្ម: 0',
-    '· Units on hand / ឯកតាក្នុងស្តុក: 0',
-    '=====Stock / ស្តុក=====',
+    '🏷️ Inventory/ស្តុក',
+    '=====Products/ផលិតផល=====',
+    '· Active products/ផលិតផលសកម្ម: 0',
+    '· Units on hand/ឯកតាក្នុងស្តុក: 0',
+    '=====Stock/ស្តុក=====',
     '· N/A',
   ], `a shop with nothing low must still get its Stock section:\n${lastSent()}`)
   console.log('PASS stock replies: the shared header shape, one figure per line, no pointer line')
@@ -880,7 +890,7 @@ const lastSent = () => sent[sent.length - 1].body.text
   assert.deepEqual(testMessage.split('\n').slice(0, 3), [
     `✅ ${'Business OS alerts and commands are connected.'}${SEP}ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។`,
     '',
-    '🤖 Business OS — Reports',
+    '🤖 Business OS: Reports',
   ], testMessage)
   assert.ok(!/on by default|turn any off/i.test(testMessage), `the connection test still explains itself:\n${testMessage}`)
   assert.ok(testMessage.endsWith(lang.telegramCommandReference()), 'the connection test still carries the command reference')
@@ -899,11 +909,16 @@ const lastSent = () => sent[sent.length - 1].body.text
   // travels the real path: settings row -> getTelegramConfig -> the compose
   // scope, so the reply a group actually receives changes, and the mode is
   // put back afterwards so the next compose is not poisoned by this one.
+  // The bare `/` (no spaces since 25 Sep 2026) also appears in every dd/mm/yyyy
+  // date and in the literal value "N/A", so a bilingual PAIR is a letter, the
+  // separator, then another letter -- with the "N/A" figure stripped first,
+  // since it alone would otherwise read as a false positive letter pair.
+  const bilingualPairSlash = new RegExp(`[A-Za-zក-៿]\\${SEP}[A-Za-zក-៿]`)
   for (const [value, wants, rejects] of [['km', 'Khmer', 'English'], ['en', 'English', 'Khmer']]) {
     settingsRows.push({ key: 'telegram_language', value })
     await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: { id: -100111 } } })
     const reply = lastSent()
-    assert.ok(!reply.includes(SEP), `with telegram_language=${value} the chat must not get both languages:\n${reply}`)
+    assert.ok(!bilingualPairSlash.test(reply.replace(/N\/A/g, '')), `with telegram_language=${value} the chat must not get both languages:\n${reply}`)
     assert.equal(khmerText(reply), value === 'km', `telegram_language=${value} must answer in ${wants}, not ${rejects}:\n${reply}`)
     assert.ok(reply.includes('📊'), `telegram_language=${value} lost the report itself:\n${reply}`)
     assert.equal(lang.getTelegramLanguage(), 'both', 'the compose scope must restore the module mode')

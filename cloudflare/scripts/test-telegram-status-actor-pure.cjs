@@ -1,9 +1,9 @@
 // The receipt-status Telegram message: it must name the user who made the
 // update (S4-6), and it must name the STATUSES the way the app names them
 // (Sep 22 2026 -- the owner found "awaiting payment" still on their phone
-// long after the app had renamed that status to "Not Paid / ប្រាក់ជំពាក់").
+// long after the app had renamed that status to "Not Paid/ប្រាក់ជំពាក់").
 // Since Sep 23 2026 it is laid out as the owner's sample: a `🧾 Invoice`
-// title naming the receipt, the `Invoice Status Updated` row, a rule, then
+// title naming the receipt, the `Status updated` row, a rule, then
 // Customer ... By (OWNER_SAMPLE below).
 //
 // The lines used to be composed INLINE in routes/sales.ts's
@@ -166,19 +166,19 @@ const OWNER_CHANGE = {
   customer: 'bong meta', by: 'admin',
 }
 const OWNER_SAMPLE = [
-  '🧾 Invoice / វិក្កយបត្រ: 20260922-110132',
-  '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់',
+  '🧾 Invoice/វិក្កយបត្រ: 20260922-110132',
+  '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់',
   '──────────────────',
-  '· Customer / អតិថិជន: bong meta',
-  '· By / ដោយ: admin',
+  '· Customer/អតិថិជន: bong meta',
+  '· By/ដោយ: admin',
 ].join('\n')
 assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'s rule is the rule every event message uses')
 
 {
   const text = composeMessage(build({ name: 'Za', username: 'za01' }))
-  assert.ok(text.includes('· By / ដោយ: za01'), `composed message must carry the bilingual actor line, got:\n${text}`)
+  assert.ok(text.includes('· By/ដោយ: za01'), `composed message must carry the bilingual actor line, got:\n${text}`)
   assert.ok(/[ក-៿]/.test(text), 'the composed message must contain Khmer script somewhere')
-  console.log('PASS 5: the composed message carries "· By / ដោយ: za01" -- English label, Khmer label, one value')
+  console.log('PASS 5: the composed message carries "· By/ដោយ: za01" -- English label, Khmer label, one value')
 }
 
 {
@@ -213,7 +213,7 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
   })
   assert.deepEqual(full, [
     '🧾 Invoice: R-9',
-    'Invoice Status Updated: completed → cancelled',
+    'Status updated: completed → cancelled',
     telegramLang.GROUP_RULE,
     'Customer: Sok Dara',
     'Reason: Customer cancelled',
@@ -234,7 +234,7 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
   // A bare change -- no customer, no reason, no fee, no actor -- keeps its
   // title and first group and drops the second, divider and all.
   const bare = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled' })
-  assert.deepEqual(bare, ['🧾 Invoice: R-9', 'Invoice Status Updated: completed → cancelled'], bare.join('\n'))
+  assert.deepEqual(bare, ['🧾 Invoice: R-9', 'Status updated: completed → cancelled'], bare.join('\n'))
   // With no receipt at all the title is the bare heading, never one that
   // ends on a colon.
   const numberless = telegram.formatSaleStatusTelegramLines({ receipt: null, fromStatus: 'completed', toStatus: 'cancelled' })
@@ -305,15 +305,15 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
     // The whole message in each mode: the same five lines, each in the shop's
     // language, the title's emoji kept and the values never touched.
     assert.equal(both, [
-      '🧾 Invoice / វិក្កយបត្រ: R-9',
-      '· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Completed / បានបញ្ចប់ → Cancelled / បានបោះបង់',
+      '🧾 Invoice/វិក្កយបត្រ: R-9',
+      '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Completed/បានបញ្ចប់ → Cancelled/បានបោះបង់',
       '──────────────────',
-      '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា',
-      '· By / ដោយ: admin',
+      '· Stock skipped/មិនប៉ះពាល់ស្តុក: 3 unit(s)/ឯកតា',
+      '· By/ដោយ: admin',
     ].join('\n'), both)
     assert.equal(en, [
       '🧾 Invoice: R-9',
-      '· Invoice Status Updated: Completed → Cancelled',
+      '· Status updated: Completed → Cancelled',
       '──────────────────',
       '· Stock skipped: 3 unit(s)',
       '· By: admin',
@@ -325,7 +325,7 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
       '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា',
       '· ដោយ: admin',
     ].join('\n'), km)
-    assert.equal(skippedLine(both), '· Stock skipped / មិនប៉ះពាល់ស្តុក: 3 unit(s) / ឯកតា')
+    assert.equal(skippedLine(both), '· Stock skipped/មិនប៉ះពាល់ស្តុក: 3 unit(s)/ឯកតា')
     assert.equal(skippedLine(en), '· Stock skipped: 3 unit(s)')
     assert.equal(skippedLine(km), '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា')
     // THE REGRESSION, stated as its own assertion: an en-only shop must get no

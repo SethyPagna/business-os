@@ -220,23 +220,23 @@ check(`the Revenue line carries the KERNEL revenue, not the old gross ($115.00 p
 // shift report uses -- since Sep 23 2026 each opening with `=====Name=====`.
 const sectionTitles = report.split('\n').filter(isSection)
 check(`the day summary is a title line and ${sectionTitles.length} titled sections`,
-  /^📊 Business summary \/ [^\n]+ — 10\/08\/2026$/.test(report.split('\n')[0])
+  /^📊 Business summary\/[^\n]+: 10\/08\/2026$/.test(report.split('\n')[0])
   && sectionTitles.join(' | ') === DAY_SECTIONS.map(headerOf).join(' | ')
   && sectionTitles.every((line) => line.includes(SEP)), report)
-check('each section opens with `=====Name / ឈ្មោះ=====`: no rule above it, no number in front',
-  report.split('\n').includes('=====Sales / ការលក់=====') && lang.REPORT_SECTION_EDGE === '='
+check('each section opens with `=====Name/ឈ្មោះ=====`: no rule above it, no number in front',
+  report.split('\n').includes('=====Sales/ការលក់=====') && lang.REPORT_SECTION_EDGE === '='
   && !report.includes(lang.RULE) && !/^\d+\.\s/m.test(report), report)
 check('and every row inside a section is a `·` row, the cashier list included',
   report.split('\n').slice(1).every((line) => isSection(line) || line.startsWith(lang.ROW_BULLET) || line.startsWith(lang.HANGING_INDENT))
-  && report.split('\n').includes('· aza — 1 · $90.00') && !report.includes('•'), report)
+  && report.split('\n').includes('· aza: 1 · $90.00') && !report.includes('•'), report)
 // REDESIGNED Sep 6 2026: one figure per line. The counts of the SAME thing
 // share one compact row (Sep 21 2026), under the Invoices section.
 check('and the kernel receipt count, not the count that included the void',
-  /^· Total \/ [^\n]*: 2 · /m.test(report) && !/: 3 · /m.test(report) && !/: 3$/m.test(report))
+  /^· Total\/[^\n]*: 2 · /m.test(report) && !/: 3 · /m.test(report) && !/: 3$/m.test(report))
 check('the refund that produced the difference is printed, so the number explains itself',
-  /^· Refunds \/ [^\n]*: \$15\.00$/m.test(report))
+  /^· Refunds\/[^\n]*: \$15\.00$/m.test(report))
 check('the voided receipt is REPORTED as voided rather than silently counted or silently dropped',
-  /Cancelled \/ [^\n]*: 1/.test(report))
+  /Cancelled\/[^\n]*: 1/.test(report))
 // The whole point of the redesign, stated as a measurement rather than a
 // claim: the pre-redesign message spread the same day over prose-tagged
 // lines. This one is sections of figures, each under its own title. The cap
@@ -245,7 +245,7 @@ check('the voided receipt is REPORTED as voided rather than silently counted or 
 check(`the day summary fits one phone screen (${report.split('\n').length} lines)`,
   report.split('\n').length <= 21)
 check('and its Sales section leads with revenue and profit, the two that always print',
-  /^· Revenue \/ [^\n]*: \$115\.00$/m.test(report) && /^· Profit \/ /m.test(report))
+  /^· Revenue\/[^\n]*: \$115\.00$/m.test(report) && /^· Profit\//m.test(report))
 check('the tax and the delivery fee are not inside the sales figure',
   !report.includes('$103.00') && !report.includes('$128.00'))
 
@@ -268,6 +268,11 @@ check("'en' drops the Khmer half of every label and keeps every figure",
   && reportEn.split('\n').includes('· Revenue: $115.00')
   && reportEn.split('\n').includes('=====Sales=====')
   && reportEn.split('\n').filter(isSection).map(sectionName).join(' | ') === sectionTitles.map((line) => sectionName(line).split(SEP)[0]).join(' | '))
+// Cashier NAMES (`aza`, `sok`) are DATA, glued to a colon exactly like every
+// other list row since the 25 Sep 2026 em-dash removal -- they are excluded
+// here the same way a payment method or courier name is in the shift report
+// test, not because the label check is wrong.
+const KM_DATA_ROW_NAMES = new Set(['aza', 'sok'])
 check("'km' drops the English half and still carries the same figures",
   reportKm.includes('$115.00') && reportKm.startsWith('📊 ')
   && reportKm.split('\n').includes('=====ការលក់=====')
@@ -275,7 +280,9 @@ check("'km' drops the English half and still carries the same figures",
   && reportKm.split('\n').filter(isSection).every((line) => !/[A-Za-z]/.test(line))
   && reportKm.split('\n').every((line) => {
     const split = line.indexOf(': ')
-    return split <= 0 || !/[A-Za-z]/.test(line.slice(0, split))
+    if (split <= 0) return true
+    const labelPart = line.slice(0, split).replace(/^· /, '')
+    return KM_DATA_ROW_NAMES.has(labelPart) || !/[A-Za-z]/.test(labelPart)
   }), reportKm)
 check('all three renderings have the same number of lines -- one report, three languages',
   report.split('\n').length === reportEn.split('\n').length
@@ -342,13 +349,13 @@ check('and the retired quantity-first em-dash form is gone from the item lines',
 // own -- so it keeps one `=` a side instead of five ("you can use less header
 // marks if it pushes to next row"), while Sales and Invoices keep all five.
 check('/sales opens its three sections with `=====` headers and lists each receipt as a `·` row',
-  salesLines.filter(isSection).join(' | ') === [headerOf('sales'), headerOf('invoices'), '=Latest receipts / វិក្កយបត្រចុងក្រោយ='].join(' | ')
+  salesLines.filter(isSection).join(' | ') === [headerOf('sales'), headerOf('invoices'), '=Latest receipts/វិក្កយបត្រចុងក្រោយ='].join(' | ')
   && salesLines.includes('· 20260810-090000') && salesLines.includes('· 20260810-110000')
   && !salesMsg.includes('•') && !salesLines.includes(lang.RULE), salesMsg)
 check('a section name too long for five marks within one row gets fewer: Latest receipts keeps one a side',
-  salesLines.includes('=Latest receipts / វិក្កយបត្រចុងក្រោយ=') && !salesMsg.includes('==Latest receipts'), salesMsg)
+  salesLines.includes('=Latest receipts/វិក្កយបត្រចុងក្រោយ=') && !salesMsg.includes('==Latest receipts'), salesMsg)
 check('POSITIVE CONTROL: a name with room keeps all five, in the same message',
-  salesLines.includes('=====Sales / ការលក់=====') && salesLines.includes('=====Invoices / វិក្កយបត្រ====='), salesMsg)
+  salesLines.includes('=====Sales/ការលក់=====') && salesLines.includes('=====Invoices/វិក្កយបត្រ====='), salesMsg)
 // The single-language renderings have room for all five on every title.
 const [salesEn, salesKm] = await Promise.all([
   telegram.telegramCommandReply({}, '/sales 10/08/2026', Date.now(), 'en'),
@@ -369,7 +376,7 @@ const [overflowBoth, overflowEn, overflowKm] = await Promise.all([overflow('both
 const continuationOf = (text) => text.split('\n').find((line) => line.trim().startsWith('+ '))
 check(`the receipt lists 4 of its 6 items and closes with a continuation (${continuationOf(overflowBoth)})`,
   overflowBoth.split('\n').filter((line) => /^ {3}\d+\. /.test(line)).length === 4
-  && continuationOf(overflowBoth) === '   + 2 more item(s) / មុខទំនិញបន្ថែម', overflowBoth)
+  && continuationOf(overflowBoth) === '   + 2 more item(s)/មុខទំនិញបន្ថែម', overflowBoth)
 check('an English-only shop gets no Khmer on it',
   continuationOf(overflowEn) === '   + 2 more item(s)', overflowEn)
 check('and a Khmer-only shop gets no English word "more" on it',
@@ -392,12 +399,12 @@ insFee.run(2, 'Transport', null, 0, 20000, '2026-08-12')
 const feesMsg = await telegram.telegramCommandReply({}, '/fees 12/08/2026')
 check('/fees is its title, two `=====` sections and one `·` row per expense, newest first',
   JSON.stringify(feesMsg.split('\n')) === JSON.stringify([
-    '💸 Expenses / ចំណាយ — 12/08/2026',
-    '=====Expenses / ចំណាយ=====',
-    '· Total / សរុប: $120.00 · 20,000៛',
-    '=====Each expense / ចំណាយនីមួយៗ=====',
+    '💸 Expenses/ចំណាយ: 12/08/2026',
+    '=====Expenses/ចំណាយ=====',
+    '· Total/សរុប: $120.00 · 20,000៛',
+    '=====Each expense/ចំណាយនីមួយៗ=====',
     '· Transport: 20,000៛',
-    '· Rent — August: $120.00',
+    '· Rent (August): $120.00',
   ]), feesMsg)
 const feesKm = await telegram.telegramCommandReply({}, '/fees 12/08/2026', Date.now(), 'km')
 check('and a Khmer-only shop gets the same six lines under Khmer headers',
@@ -414,13 +421,13 @@ const inventoryMsg = await telegram.telegramCommandReply({}, '/inventory')
 
 // The product list is `·` rows since Sep 23 2026, like every row in a section.
 check('the LIMIT 12 the query has always carried still caps the product list (14 qualifying rows, 12 shown)',
-  stockMsg.split('\n').filter((line) => /^· (?:OUT|LOW) \/ /.test(line)).length === 12
-  && /^· Products \/ [^\n]*: 12$/m.test(stockMsg), stockMsg)
+  stockMsg.split('\n').filter((line) => /^· (?:OUT|LOW)\//.test(line)).length === 12
+  && /^· Products\/[^\n]*: 12$/m.test(stockMsg), stockMsg)
 check('is_active = 0 still excludes a product from /stock entirely', !stockMsg.includes('Inactive item'))
 check('a product above both thresholds is not listed', !stockMsg.includes('Healthy item'))
 check('/inventory counts only the active catalogue (14 qualifying + 1 healthy = 15), never the inactive row',
-  /Active products \/ [^\n]*: 15$/m.test(inventoryMsg) && /Units on hand \/ [^\n]*: 124$/m.test(inventoryMsg)
-  && /Low stock \/ [^\n]*: 8$/m.test(inventoryMsg) && /Out of stock \/ [^\n]*: 6$/m.test(inventoryMsg))
+  /Active products\/[^\n]*: 15$/m.test(inventoryMsg) && /Units on hand\/[^\n]*: 124$/m.test(inventoryMsg)
+  && /Low stock\/[^\n]*: 8$/m.test(inventoryMsg) && /Out of stock\/[^\n]*: 6$/m.test(inventoryMsg))
 
 // The section shape itself (Sep 23 2026): a title line, then
 // `=====<title>=====` headers -- no drawn rule, no number and no `•` row
@@ -534,11 +541,11 @@ const titleFault = (title) => {
   return ''
 }
 check('POSITIVE CONTROL: the title judge rejects the fixed five that wraps, a needless cut and uneven sides',
-  titleFault('=====Latest receipts / វិក្កយបត្រចុងក្រោយ=====') !== ''
-  && titleFault('====Sales / ការលក់====') !== ''
-  && titleFault('====Sales / ការលក់=====') !== ''
-  && titleFault('=Latest receipts / វិក្កយបត្រចុងក្រោយ=') === ''
-  && titleFault('=====Sales / ការលក់=====') === '')
+  titleFault('=====Latest receipts/វិក្កយបត្រចុងក្រោយ=====') !== ''
+  && titleFault('====Sales/ការលក់====') !== ''
+  && titleFault('====Sales/ការលក់=====') !== ''
+  && titleFault('=Latest receipts/វិក្កយបត្រចុងក្រោយ=') === ''
+  && titleFault('=====Sales/ការលក់=====') === '')
 const feesEn = await telegram.telegramCommandReply({}, '/fees 12/08/2026', Date.now(), 'en')
 const composedTitleFaults = []
 let composedTitles = 0
