@@ -45,7 +45,18 @@ export interface ReviewerInfo {
 }
 
 export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean }
-type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo) => Promise<void>
+// The approving request's waitUntil. Supplied by routes/reviewQueue.ts so a
+// broadcast never holds the approval response; without one (tests, any
+// non-request caller) the broadcast is awaited as before. broadcast() never
+// rejects, so deferring it cannot hide an error the response would carry.
+export type ReviewWaitUntil = (promise: Promise<unknown>) => void
+type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo, waitUntil?: ReviewWaitUntil) => Promise<void>
+
+async function notify(env: Env, waitUntil: ReviewWaitUntil | undefined, channel: Parameters<typeof broadcast>[1], payload: unknown): Promise<void> {
+  const sent = broadcast(env, channel, payload)
+  if (waitUntil) waitUntil(sent)
+  else await sent
+}
 
 const appliers = new Map<string, Applier>()
 
@@ -105,7 +116,7 @@ async function currentProductImages(env: Env, id: number): Promise<{ image_path:
 // original requester is already on the pending_actions row itself via
 // requested_by/requested_by_name, so that context isn't lost, just not
 // duplicated into the audit log's actor field).
-registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
+registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) => {
   const db = getDb(env)
   const id = row.entity_id
   if (id == null) throw new Error('Pending fee delete is missing its entity id')
@@ -120,7 +131,7 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
   }
   await db.prepare('DELETE FROM fees WHERE id = @id').run({ id })
   await audit(env, reviewer.id, reviewer.name, 'delete', 'fee', id, null)
-  await broadcast(env, 'fees', { type: 'deleted', id })
+  await notify(env, waitUntil, 'fees', { type: 'deleted', id })
 })
 
 // --- products / create / product -----------------------------------
@@ -129,7 +140,7 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer) => {
 // its own comment), same branch_stock seed, same image_gallery sync,
 // same cache bump + broadcast. The pending row's payload is the exact
 // request body the requester originally sent, unchanged since queueing.
-registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
+registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   readProductMoneyPlan(body)
   await resolveProductImageFields(getDb(env), body)
@@ -166,14 +177,14 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
   }
   await audit(env, reviewer.id, reviewer.name, 'create', 'product', id as number, null)
   await bumpVersion(env, 'products')
-  await broadcast(env, 'products', { action: 'create', id })
+  await notify(env, waitUntil, 'products', { action: 'create', id })
 })
 
 // --- products / update / product -----------------------------------
 // Mirrors routes/products.ts's own PUT /:id direct-write branch. A 404
 // (product deleted by some other path since this was queued) is treated
 // as a safe no-op, same reasoning as the fees applier above.
-registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
+registerApplier('products', 'update', 'product', async (env, row, reviewer, waitUntil) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
@@ -205,7 +216,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
   }
   await audit(env, reviewer.id, reviewer.name, 'update', 'product', id, null)
   await bumpVersion(env, 'products')
-  await broadcast(env, 'products', { action: 'update', id })
+  await notify(env, waitUntil, 'products', { action: 'update', id })
 })
 
 // --- products / delete / product -----------------------------------
@@ -214,7 +225,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
 // per-branch inventory_movements rows and the reason carried through).
 // The direct route already validated `reason` as required before this
 // was ever queued, so it's just carried through here, not re-validated.
-registerApplier('products', 'delete', 'product', async (env, row, reviewer) => {
+registerApplier('products', 'delete', 'product', async (env, row, reviewer, waitUntil) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending product delete is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
@@ -244,7 +255,7 @@ registerApplier('products', 'delete', 'product', async (env, row, reviewer) => {
   }
   await audit(env, reviewer.id, reviewer.name, 'delete', 'product', id, { name: existing?.name ?? null, reason })
   await bumpVersion(env, 'products')
-  await broadcast(env, 'products', { action: 'delete', id })
+  await notify(env, waitUntil, 'products', { action: 'delete', id })
 })
 
 // --- inventory / update / inventory_reason -------------------------
@@ -253,7 +264,7 @@ registerApplier('products', 'delete', 'product', async (env, row, reviewer) => {
 // see that route's own comment for why adjust/transfer/move-row are
 // deliberately NOT wired yet (live-state dependencies at apply time
 // that this simple settings-row overwrite doesn't have).
-registerApplier('inventory', 'update', 'inventory_reason', async (env, row, reviewer) => {
+registerApplier('inventory', 'update', 'inventory_reason', async (env, row, reviewer, waitUntil) => {
   const payload = JSON.parse(row.payload_json || '{}') as { items?: unknown }
   const items = Array.isArray(payload.items) ? payload.items : []
   await getDb(env).prepare(`
@@ -261,7 +272,7 @@ registerApplier('inventory', 'update', 'inventory_reason', async (env, row, revi
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run({ value: JSON.stringify(items) })
   await audit(env, reviewer.id, reviewer.name, 'update', 'inventory_reason', null, { count: items.length })
-  await broadcast(env, 'inventory', { action: 'reasons_update' })
+  await notify(env, waitUntil, 'inventory', { action: 'reasons_update' })
 })
 
 // Historical create requests must not bypass the fixed two-branch contract
@@ -276,7 +287,7 @@ registerApplier('branches', 'create', 'branch', async (env, row, reviewer) => {
 // --- branches / update / branch -----------------------------------
 // Mirrors routes/branches.ts's metadata-only PUT. The current identity is
 // read immediately before the shared atomic guard/write batch.
-registerApplier('branches', 'update', 'branch', async (env, row, reviewer) => {
+registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitUntil) => {
   const id = row.entity_id
   if (id == null) throw new Error('Pending branch update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
@@ -286,7 +297,7 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer) => {
   if (!current) throw new Error('The branch this pending action targeted no longer exists.')
   await db.batch(branchUpdateStatements(id, body, current))
   await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name })
-  await broadcast(env, 'branches', { action: 'update', id })
+  await notify(env, waitUntil, 'branches', { action: 'update', id })
 })
 
 // --- branches / delete / branch -----------------------------------
@@ -308,6 +319,7 @@ async function applyApprovedProductRemove(
   row: PendingActionRow,
   reviewer: ReviewerInfo,
   reviewerUser: SessionUser | undefined,
+  waitUntil?: ReviewWaitUntil,
 ): Promise<ReviewApplyOutcome> {
   const pointer = productRemovePendingPointer(row)
   if (!pointer) throw new Error('Invalid product removal approval pointer.')
@@ -344,8 +356,8 @@ async function applyApprovedProductRemove(
     throw error
   }
   await bumpVersion(env, 'products')
-  await broadcast(env, 'products', { action: 'delete', id: plan.product_id })
-  await broadcast(env, 'inventory', { action: 'update' })
+  await notify(env, waitUntil, 'products', { action: 'delete', id: plan.product_id })
+  await notify(env, waitUntil, 'inventory', { action: 'update' })
   void reviewer
   return { pendingActionMarkedAtomically: true }
 }
@@ -355,10 +367,11 @@ export async function applyApprovedPendingAction(
   row: PendingActionRow,
   reviewer: ReviewerInfo,
   reviewerUser?: SessionUser,
+  waitUntil?: ReviewWaitUntil,
 ): Promise<ReviewApplyOutcome> {
-  if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser)
+  if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser, waitUntil)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)
-  await fn(env, row, reviewer)
+  await fn(env, row, reviewer, waitUntil)
   return { pendingActionMarkedAtomically: false }
 }
