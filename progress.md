@@ -1,3 +1,71 @@
+<!-- PD-1 plan start -->
+## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE
+
+Owner report (25 Sep): the app is very slow on the website, desktop and installed PWA alike —
+product search, page loads, adding products, POS selling, printing and edits. Asks: go deep into
+the code, D1 and R2; debloat and remove dead code; AI Council; take over Codex's unfinished
+performance work; many subagents under strict supervision; keep this checklist current and clean
+up the past md files.
+
+Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked / needs owner · `[-]` dropped (reason given)
+
+- Supervisor: Claude (session "BusinessOS performance optimization"). Codex is paused (usage limit
+  until 1 Oct); its orphaned performance claims were released to this program on 25 Sep (team-state message).
+- Branch: `claude/perf-deep-20260925` (worktree `Worktrees/perf-deep-20260925`), based on Codex's local
+  `codex/performance-20260925` @ `c0d62e5d` = `codex/verified-resume-20260925` @ `2d1888ca` + two perf commits
+  that are still under independent audit (A1, A2 below).
+- Production: `7e7cc7dc` (Worker `ff4e1a9b-6558-4e6e-a319-db9a49c1f834`, deployed 24 Sep 21:48Z) on
+  `claude/cloud-handoff-20260924-0unu3f`. `origin/main` = `a39a3cbb` is stale (behind production).
+- Evidence, telemetry and anything with business numbers stay local (the repo is public):
+  `Downloads/Projects/BusinessOS/Records/Performance/2026-09-25/claude/`.
+- Production access in this program: read-only inspection only (schema, counts, EXPLAIN, D1 insights,
+  R2 metadata). No production writes, migrations or deploys without a separate owner yes.
+
+### Phase 0 — Takeover and orientation
+- [x] Status, Golden Rules, council protocol and standing rules read; GitHub branches mapped (855, of which 648 archive/*)
+- [x] Orphaned Codex claims released; program claim recorded; isolated worktrees with node_modules junctions
+- [x] This plan
+
+### Phase 1 — AI Council wave 1: evidence (read-only, parallel)
+- [~] I1 Worker pipeline and per-request overhead (Opus)
+- [~] I2 Hot read routes: D1 round-trip map (Opus)
+- [~] I3 Hot write routes: D1 round-trip map, triggers, background work (Opus)
+- [~] I4 D1 schema / index / query-plan lab at production scale in local SQLite (Opus)
+- [~] I5 R2 / images / KV / Cache API / Durable Objects / queues (Sonnet)
+- [~] I6 Frontend load: bundle, language packs, fonts, service worker, startup waterfall (Opus)
+- [~] I7 Frontend runtime: context fan-out, renders, lists, timers, refetch storms (Opus)
+- [~] I8 Printing path + audit of Codex's unfinished print change (Sonnet)
+- [~] I9 Dead code, unused dependencies, duplicate logic (Sonnet)
+- [~] I10 Production read-only telemetry: D1 insights, index parity, counts, R2 metadata (Sonnet)
+- [~] A1 Adversarial audit of Codex's invariant consolidation `c0d62e5d` (Opus; Fable unavailable without usage credits)
+- [~] A2 Audit of Codex's branch-stock read overlap `55728684` (Sonnet)
+- [~] A3 Audit of Codex's unfinished Products/POS search admission (Opus)
+
+### Phase 2 — Council wave 2: anonymized cross-critique
+- [ ] Five perspectives (Skeptic, First-principles, Expansionist, Outsider, Executor) on the anonymized evidence packet — simulated by separate subagents and disclosed as such
+
+### Phase 3 — Chairman verdict
+- [ ] Decision, biggest risk, number-one next step; lane plan with exclusive file ownership, tests and rollback
+
+### Phase 4 — Implementation lanes (isolated worktrees; one writer per path set; one commit per fix)
+- [ ] Filled in from the verdict
+
+### Phase 5 — Verification per lane
+- [ ] Supervisor diff review, an independent verifier with negative controls, and the dead-code/debloat gate for every lane
+
+### Phase 6 — Integration and certification (committed HEAD)
+- [ ] Cherry-pick lanes without squashing; Worker tsc + every scripts/test-*.cjs; frontend typecheck, verify:i18n, every tests/*.test.ts, build, e2e
+- [ ] Local browser before/after timings: product search, POS sale, add/edit product, print, page loads
+
+### Phase 7 — Docs cleanup
+- [ ] progress.md: archive history verbatim under docs/history/ and keep a lean live ledger with an open-items index
+- [ ] Other stale md files archived without losing content; session log; owner task register
+
+### Phase 8 — Ship (owner-gated)
+- [ ] Push the per-fix commits to GitHub
+- [!] Deploy and live verification — needs the owner's explicit yes
+<!-- PD-1 plan end -->
+
 ## Current status — 25 September 2026 (Hong Kong)
 
 The owner-authorized Claude handoff **was deployed** from clean commit
