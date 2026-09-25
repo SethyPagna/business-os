@@ -93,7 +93,6 @@ const PUBLIC_GOOGLE_TRANSLATE_LANGUAGES = PUBLIC_STOREFRONT_TRANSLATE_OPTIONS
   .filter((option) => option.kind === 'external')
   .map((option) => option.value)
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
-const CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
@@ -676,26 +675,14 @@ export default function PublicCatalogPage() {
   // once. Keeping the drawer's shortcut on its own state removes that
   // cross-talk entirely.
   const [contactOpen, setContactOpen] = useState(false)
-  // Minimized state is remembered per viewer, not per store -- a shopper who
-  // tucks the contact button away should not see it pop back on their next
-  // page view in this browser. Read once at mount; localStorage throws in
-  // Safari private mode, so a blocked read/write just falls back to "not
-  // minimized" instead of taking the storefront down.
-  const [contactMinimized, setContactMinimizedState] = useState(() => {
-    try {
-      return window.localStorage?.getItem(CONTACT_MINIMIZED_STORAGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const setContactMinimized = (value: boolean) => {
-    setContactMinimizedState(value)
-    try {
-      window.localStorage?.setItem(CONTACT_MINIMIZED_STORAGE_KEY, value ? '1' : '0')
-    } catch {
-      // Storage unavailable -- the choice still applies for this page view.
-    }
-  }
+  // Owner, 2026-09-25 (P-public-5): "the Contact us floating button is
+  // minimized by default as a small icon and expands on click." Every page
+  // view starts minimized. The old per-viewer memory
+  // (business-os-portal-contact-minimized-v1) only ever remembered
+  // "minimized", which is now the default, and remembering "expanded" would
+  // bring the full button back on every later visit -- the opposite of the
+  // ask. So there is no storage read or write at all.
+  const [contactMinimized, setContactMinimized] = useState(true)
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
@@ -1964,12 +1951,19 @@ export default function PublicCatalogPage() {
   // are (bg-slate-700, not just an outline that only fills on hover).
   const contactFab = contactChannels.length > 0 ? (
     contactMinimized ? (
+      // A small round icon (40px -- still a full touch target), in the same
+      // slot as the full button. One tap expands it AND opens the contact
+      // list, so reaching a channel never takes an extra tap.
       <button
         type="button"
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-0 z-50 flex h-11 w-7 items-center justify-center rounded-l-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:w-9 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700"
-        onClick={() => setContactMinimized(false)}
-        aria-label={copy('contactUsRestore', 'Show the contact us button')}
-        title={copy('contactUsRestore', 'Show the contact us button')}
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(0.75rem+env(safe-area-inset-right))] z-50 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-700 shadow-lg ring-1 ring-slate-200 transition hover:bg-white dark:bg-neutral-900/95 dark:text-neutral-100 dark:ring-neutral-700"
+        onClick={() => {
+          setContactMinimized(false)
+          setContactOpen(true)
+        }}
+        aria-label={copy('contactUs', 'Contact us')}
+        title={copy('contactUs', 'Contact us')}
+        aria-expanded={false}
       >
         <Headset className="h-4 w-4" />
       </button>

@@ -158,10 +158,15 @@ check('2 the header icon rows never wrap on a phone', () => {
 
 // --- 3. Contact FAB minimize ------------------------------------------------
 
-check('3 the contact FAB has a minimize control with a per-viewer memory', () => {
-  assert.match(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'/, 'the minimized flag must be versioned')
-  assert.match(publicCatalogPage, /const \[contactMinimized, setContactMinimizedState\] = useState/, 'minimize must be real state, not a CSS-only hover trick')
-  assert.match(publicCatalogPage, /window\.localStorage\?\.setItem\(CONTACT_MINIMIZED_STORAGE_KEY/, 'minimize must persist per viewer')
+// P-public-5 (owner, 2026-09-25): "minimized by default as a small icon and
+// expands on click" replaces the Sep 15 per-viewer memory. That memory only
+// ever stored "minimized", which is now the default for every page view, and
+// storing "expanded" would undo the ask on every later visit.
+check('3 the contact FAB starts minimized, expands on tap, and can be minimized again', () => {
+  assert.match(publicCatalogPage, /const \[contactMinimized, setContactMinimized\] = useState\(true\)/, 'every page view starts minimized')
+  assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring the full button back by default')
+  assert.match(publicCatalogPage, /onClick=\{\(\) => \{\s*setContactMinimized\(false\)\s*setContactOpen\(true\)\s*\}\}/, 'one tap on the icon expands it and opens the contact list')
+  assert.match(publicCatalogPage, /flex h-10 w-10 items-center justify-center rounded-full bg-white\/95/, 'the minimized icon is small but still a 40px touch target')
   // The X control must exist and be reachable on touch (not hover-only),
   // per the owner's "always reachable on touch" requirement.
   assert.match(publicCatalogPage, /setContactMinimized\(true\)/, 'there must be a control that minimizes the button')
@@ -173,8 +178,6 @@ check('3 the contact FAB has a minimize control with a per-viewer memory', () =>
   assert.doesNotMatch(publicCatalogPage, /-right-1\.5 -top-1\.5/, 'the minimize control must not overlap the main button corner')
   assert.doesNotMatch(publicCatalogPage, /opacity-0.*group-hover:opacity-100/, 'the minimize control must not be hover-gated invisible by default')
   assert.match(publicCatalogPage, /bg-slate-700 text-white shadow-md/, 'the minimize control is a plain always-filled pill')
-  // Restoring from the minimized tab.
-  assert.match(publicCatalogPage, /onClick=\{\(\) => setContactMinimized\(false\)\}/, 'tapping the minimized tab must restore the full button')
 })
 
 check('3 the minimize/restore labels exist in both language packs', () => {
