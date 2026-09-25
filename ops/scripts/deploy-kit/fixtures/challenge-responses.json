@@ -1,0 +1,20 @@
+[
+  {
+    "name": "managed challenge with cf-mitigated header (current Cloudflare)",
+    "status": 403,
+    "headers": { "content-type": "text/html; charset=UTF-8", "cf-mitigated": "challenge", "server": "cloudflare" },
+    "body": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title></head><body><noscript>Enable JavaScript and cookies to continue</noscript><script>(function(){window._cf_chl_opt={cType:'managed'};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1';document.getElementsByTagName('head')[0].appendChild(a);}());</script></body></html>"
+  },
+  {
+    "name": "challenge page without the header (older edge, 503)",
+    "status": 503,
+    "headers": { "content-type": "text/html; charset=UTF-8", "server": "cloudflare" },
+    "body": "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><div id=\"challenge-body-text\">Checking if the site connection is secure</div></body></html>"
+  },
+  {
+    "name": "challenge answered with 200 on a document read",
+    "status": 200,
+    "headers": { "content-type": "text/html" },
+    "body": "<html><head><title>Just a moment...</title><script src=\"/cdn-cgi/challenge-platform/scripts/jsd/main.js\"></script></head><body></body></html>"
+  }
+]

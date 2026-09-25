@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Cloudflare API ips (public, JSON)",
+    "status": 200,
+    "headers": { "content-type": "application/json", "server": "cloudflare" },
+    "body": "{\"result\":{\"ipv4_cidrs\":[\"192.0.2.0/24\"],\"ipv6_cidrs\":[\"2001:db8::/32\"],\"etag\":\"example\"},\"success\":true,\"errors\":[],\"messages\":[]}",
+    "expect": "ok"
+  },
+  {
+    "name": "Business OS /health",
+    "status": 200,
+    "headers": { "content-type": "application/json" },
+    "body": "{\"status\":\"ok\",\"version\":\"example\",\"time\":\"2026-01-01T00:00:00.000Z\"}",
+    "expect": "ok"
+  },
+  {
+    "name": "admin page shell (HTML, not a challenge)",
+    "status": 200,
+    "headers": { "content-type": "text/html; charset=utf-8" },
+    "body": "<!doctype html><html><head><title>Business OS</title></head><body><div id=\"root\"></div></body></html>",
+    "expect": "ok"
+  },
+  {
+    "name": "Cloudflare API auth error (JSON 403 is an error, not a challenge)",
+    "status": 403,
+    "headers": { "content-type": "application/json" },
+    "body": "{\"success\":false,\"errors\":[{\"code\":10000,\"message\":\"Authentication error\"}]}",
+    "expect": "error"
+  }
+]

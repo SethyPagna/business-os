@@ -41,7 +41,11 @@ function parseEnvFile(filePath) {
 const loaded = parseEnvFile(AUTH_FILE)
 const missing = !fs.existsSync(AUTH_FILE)
 
-if (missing) {
+if (missing && process.env.CLOUDFLARE_API_TOKEN) {
+  // CI (GitHub Actions secret) or an outer wrapper already set the token:
+  // it is passed through unchanged below. Never print its value.
+  console.warn('[with-wrangler-auth] No saved token file -- using CLOUDFLARE_API_TOKEN from the environment.')
+} else if (missing) {
   console.warn(
     `[with-wrangler-auth] No ${path.relative(process.cwd(), AUTH_FILE)} found -- ` +
     'falling back to wrangler\'s normal login/OAuth cache. ' +
