@@ -9,9 +9,11 @@ import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, 
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
 import { receiptLengthDiagnosticLine, receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
 import { appFontFaceCss, openPrintPreviewWindow, printHtmlInHiddenFrame, waitForFrameAssets } from './printSurface.ts'
+// Bounded: every asset shares one deadline, and a missing one is left out
+// rather than holding or failing the print (see receiptAssetLoader.ts).
+import { inlineReceiptAssets } from './receiptAssetLoader.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
-const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
 
 type ReceiptContent = string | HTMLElement
 type ReceiptSourceSettings = {
@@ -342,92 +344,6 @@ function escapeHtml(value: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('Failed to read receipt asset'))
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.readAsDataURL(blob)
-  })
-}
-
-async function mapReceiptAssets<T>(items: Iterable<T> | ArrayLike<T> | null | undefined, worker: (item: T, index: number) => Promise<void> | void): Promise<void> {
-  const list = Array.from(items || [])
-  if (!list.length) return
-  let nextIndex = 0
-  const workers = Array.from({ length: Math.min(RECEIPT_ASSET_INLINE_CONCURRENCY, list.length) }, async () => {
-    while (nextIndex < list.length) {
-      const index = nextIndex
-      nextIndex += 1
-      await worker(list[index], index)
-    }
-  })
-  await Promise.all(workers)
-}
-
-async function inlineImageNodeSources(root: unknown): Promise<void> {
-  if (!root || !(root instanceof HTMLElement)) return
-  const images = Array.from(root.querySelectorAll('img'))
-  await mapReceiptAssets(images, async (image) => {
-    const src = String(image.getAttribute('src') || '').trim()
-    if (!src || /^data:/i.test(src)) return
-    try {
-      const absoluteSrc = new URL(src, window.location.href).toString()
-      const response = await fetch(absoluteSrc, {
-        mode: 'cors',
-        credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
-      })
-      if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`)
-      const blob = await response.blob()
-      const dataUrl = await blobToDataUrl(blob)
-      image.setAttribute('src', dataUrl)
-    } catch (_) {
-      image.removeAttribute('src')
-      image.style.visibility = 'hidden'
-    }
-  })
-}
-
-function extractUrlsFromCssValue(value: unknown): string[] {
-  return Array.from(String(value || '').matchAll(/url\((['"]?)(.*?)\1\)/gi))
-    .map((match) => String(match[2] || '').trim())
-    .filter(Boolean)
-}
-
-async function inlineStyleAssetUrls(root: unknown): Promise<void> {
-  if (!root || !(root instanceof HTMLElement)) return
-  const nodes = [root, ...Array.from(root.querySelectorAll('*'))]
-  await mapReceiptAssets(nodes, async (node) => {
-    if (!(node instanceof HTMLElement)) return
-    const style = node.getAttribute('style') || ''
-    const urls = extractUrlsFromCssValue(style)
-    if (!urls.length) return
-
-    let nextStyle = style
-    for (const src of urls) {
-      if (/^data:/i.test(src)) continue
-      try {
-        const absoluteSrc = new URL(src, window.location.href).toString()
-        const response = await fetch(absoluteSrc, {
-          mode: 'cors',
-          credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
-        })
-        if (!response.ok) throw new Error(`Asset fetch failed with ${response.status}`)
-        const blob = await response.blob()
-        const dataUrl = await blobToDataUrl(blob)
-        nextStyle = nextStyle.split(src).join(dataUrl)
-      } catch (_) {
-        const escaped = String(src).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        nextStyle = nextStyle
-          .replace(new RegExp(`background-image\\s*:\\s*url\\((['"]?)${escaped}\\1\\)\\s*;?`, 'gi'), 'background-image:none;')
-          .replace(new RegExp(`background\\s*:[^;]*url\\((['"]?)${escaped}\\1\\)[^;]*;?`, 'gi'), 'background:none;')
-      }
-    }
-
-    node.setAttribute('style', nextStyle)
-  })
 }
 
 function normalizePrintableRoot(root: unknown, widthMm: number): HTMLElement | null {
@@ -936,8 +852,7 @@ async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canv
   cloned.style.maxWidth = `${width}px`
   cloned.style.minHeight = '0'
   cloned.style.margin = '0'
-  await inlineImageNodeSources(cloned)
-  await inlineStyleAssetUrls(cloned)
+  await inlineReceiptAssets(cloned)
   // Rasterizing an SVG <foreignObject> and then calling canvas.toDataURL()
   // taints the canvas in Safari and in current Chromium builds. That made the
   // visible receipt look correct but caused Open PDF / Image to fail and fall
@@ -1249,8 +1164,7 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.style.maxWidth = `${widthMm}mm`
     clone.style.minWidth = `${widthMm}mm`
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
-    await inlineImageNodeSources(clone)
-    await inlineStyleAssetUrls(clone)
+    await inlineReceiptAssets(clone)
     return {
       markup: clone.outerHTML,
       widthMm,
