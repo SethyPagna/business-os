@@ -62,6 +62,17 @@ type Row = {
   session_command_kind?: string | null
   // N6: how many edit rows the Worker folded into this line (0 = as saved).
   edit_count?: number | null
+  // U-records: the product's stock just before and just after this receipt,
+  // derived by the Worker with the Stock Changes ledger's own expression.
+  // null when there is no movement (a zero-quantity create) or the balance
+  // could not be derived -- shown as "—", never guessed.
+  before_qty?: number | null
+  after_qty?: number | null
+  // U-records: the line as RECEIVED, before any N6 edit. The cost pair is
+  // absent for a user without cost-view access (the Worker strips it).
+  received_quantity?: number | null
+  received_unit_cost_usd?: number | null
+  received_total_cost_usd?: number | null
 }
 type Session = {
   key: string; rows: Row[]; supplier: SupplierChoice; receivedDate: string; branchId: string
@@ -312,6 +323,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   }
   const cancelLineEdit = () => { if (!pendingAttemptRef.current && !lineAttemptBusyRef.current && !sessionRemovalBusyRef.current) setLineEdit(null) }
   const closeSession = () => { if (!pendingAttemptRef.current && !lineAttemptBusyRef.current && !sessionRemovalBusyRef.current) setSelected(null) }
+  const closeLine = () => { setSelectedLine(null); setCostFloatOpen(false) }
   const editHeader = () => {
     if (busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     setEditing(true)
@@ -461,22 +473,6 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           <div><div className="text-gray-400">{tr('quantity', 'Quantity')}</div><div className="font-semibold text-emerald-600">+{selected.quantity} <span className="font-normal text-gray-400">· {selected.rows.length} {tr('items', 'Items').toLowerCase()}</span></div></div>
           {canViewCosts && selected.linesWithoutCost ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300 sm:col-span-4">{selected.linesWithoutCost} {tr('stock_lines_without_cost', 'line(s) have no receipt-level cost. Shared received-date totals are not guessed.')}</div> : null}
         </div>}
-        {selectedLine ? <div className="relative grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 rounded-xl border border-blue-100 bg-blue-50/55 p-3 text-xs dark:border-blue-900/60 dark:bg-blue-950/20 sm:grid-cols-[4.5rem_minmax(0,1fr)]">
-          {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
-          <div className="min-w-0 pr-7"><div className="break-words font-semibold text-gray-900 dark:text-white">{selectedLine.product_name}</div><div className="mt-0.5 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4"><div><span className="block text-gray-400">{tr('quantity', 'Quantity')}</span><b className="text-emerald-600">+{Math.abs(Number(selectedLine.quantity) || 0)} {selectedLine.unit || ''}</b></div>{canViewCosts ? <div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div> : null}<div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div>{canViewCosts ? <div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b><button type="button" className="decoration-dotted underline-offset-2 hover:underline" onClick={() => setCostFloatOpen(true)} title={tr('cost_breakdown_title', 'Calculated cost price')}>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</button></b></div> : null}<div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="detail-scroll-text">{supplierDisplay(selectedLine.batch_supplier_name, tr)}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
-          </div><button type="button" className="absolute right-2 top-2 rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-white dark:hover:bg-gray-800" onClick={() => setSelectedLine(null)}>{tr('close', 'Close')}</button>
-        </div> : null}
-        {selectedLine && canViewCosts && costFloatOpen ? (
-          <CostCalculationFloat
-            productId={selectedLine.product_id}
-            productName={selectedLine.product_name}
-            onClose={() => setCostFloatOpen(false)}
-            fmtUSD={formatUsd}
-            fmtKHR={fmtKHR}
-            t={tr}
-          />
-        ) : null}
         {/* N6: edit one saved line. Compact: two columns on a phone, one row of
             four on desktop; the Worker decides what the lot allows. */}
         {lineEdit ? <div data-testid="stock-in-line-editor" className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/55 p-2.5 text-xs dark:border-blue-900/60 dark:bg-blue-950/20">
@@ -534,6 +530,76 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveHeader()}>{tr('save', 'Save')}</button><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={editHeader}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={addMoreStock}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => void removeSession()}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
       </div>
     </Modal> : null}
+    {/* U-records: a line opens as its OWN float, beside the session modal --
+        never inline at the top of it, where on a phone it opened above the
+        scrolled-to row and looked like nothing happened. It leads with what
+        the owner asked for: the stock before -> after this receipt, and for
+        an edited line the figures as received -> now. */}
+    {selected && selectedLine ? <Modal title={selectedLine.product_name} onClose={closeLine} size="md" unsavedChanges="read-only">
+      <div className="space-y-3 text-xs">
+        <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 sm:grid-cols-[4.5rem_minmax(0,1fr)]">
+          {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
+          <div className="min-w-0 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
+        </div>
+        <StockInLineChange row={selectedLine} canViewCosts={canViewCosts} tr={tr} />
+        {/* The quantity leads in the balance block above; these are the line's other facts. */}
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">{canViewCosts ? <div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div> : null}<div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div>{canViewCosts ? <div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b><button type="button" className="decoration-dotted underline-offset-2 hover:underline" onClick={() => setCostFloatOpen(true)} title={tr('cost_breakdown_title', 'Calculated cost price')}>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</button></b></div> : null}<div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="detail-scroll-text">{supplierDisplay(selectedLine.batch_supplier_name, tr)}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
+      </div>
+    </Modal> : null}
+    {selected && selectedLine && canViewCosts && costFloatOpen ? (
+      <CostCalculationFloat
+        productId={selectedLine.product_id}
+        productName={selectedLine.product_name}
+        onClose={() => setCostFloatOpen(false)}
+        fmtUSD={formatUsd}
+        fmtKHR={fmtKHR}
+        t={tr}
+      />
+    ) : null}
     {addMore ? <Suspense fallback={null}><FastStockInModal branchOptions={branches.map((branch) => ({ value: String(branch.id || ''), label: String(branch.name || branch.id || '') }))} defaultBranchId={addMore.branchId || null} initialHeader={{ branchId: addMore.branchId, receivedDate: addMore.receivedDate, supplier: addMore.supplier, paymentStatus: addMore.paymentStatus === 'credit' ? 'credit' : 'paid', creditDueDate: addMore.creditDueDate }} tr={(key, fallback = key) => tr(key, fallback)} notify={notify} onClose={() => setAddMore(null)} onDone={() => { void load(); onChanged() }} onMinimize={(label: string) => { minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', ...FAST_STOCK_IN_RESTORE_HOST, label, draftKey: scopedWorkDraftKey('fast_stockin'), requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' } }); notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info') }} /></Suspense> : null}
+  </div>
+}
+
+// Rendering helpers of a line's own float. Kept BELOW the component: the
+// handler region above it (sessionCost .. the component body) is executed
+// as plain TS by tests/stockInLineEditAttempt.test.ts, which has no JSX.
+// A recorded cost, or "—" when none was recorded -- never a $0.00 that
+// Number(null) would make of a missing one.
+function formatRecordedUsd(value: unknown): string {
+  return value == null || value === '' ? '—' : formatUsd(value)
+}
+
+function formatQty(value: unknown, unit?: string | null): string {
+  if (value == null || value === '') return '—'
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '—'
+  return unit ? `${amount} ${unit}` : String(amount)
+}
+
+// U-records: the "what did this line change" block of a line's own float.
+// Stock before -> after always; for a line edited after it was saved, each
+// figure as received -> now. Costs only for a cost viewer.
+function StockInLineChange({ row, canViewCosts, tr }: { row: Row; canViewCosts: boolean; tr: (key: string, fallback: string) => string }) {
+  const edited = Number(row.edit_count) > 0
+  const changes: Array<{ label: string; received: string; now: string }> = edited ? [
+    { label: tr('quantity', 'Quantity'), received: formatQty(row.received_quantity, row.unit), now: formatQty(row.quantity, row.unit) },
+    ...(canViewCosts ? [
+      { label: tr('unit_cost', 'Unit Cost'), received: formatRecordedUsd(row.received_unit_cost_usd), now: formatRecordedUsd(row.unit_cost_usd) },
+      { label: tr('total_cost', 'Total cost'), received: formatRecordedUsd(row.received_total_cost_usd), now: formatRecordedUsd(row.total_cost_usd) },
+    ] : []),
+  ] : []
+  return <div className="space-y-2">
+    <div data-testid="stock-in-line-balance" className="grid grid-cols-3 gap-2">
+      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('before_qty', 'Before')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{formatQty(row.before_qty, row.unit)}</div></div>
+      <div className="rounded-xl bg-emerald-50 px-3 py-2 dark:bg-emerald-900/20"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-emerald-700 dark:text-emerald-300">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">+{formatQty(row.received_quantity ?? row.quantity, row.unit)}</div></div>
+      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('after_qty', 'After')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{formatQty(row.after_qty, row.unit)}</div></div>
+    </div>
+    {changes.length ? <div data-testid="stock-in-line-edit-change" className="rounded-xl border border-blue-100 bg-blue-50/55 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
+      <div className="mb-1 text-[11px] font-semibold leading-relaxed text-blue-700 dark:text-blue-300">{tr('stock_in_line_changed_since', 'Edited after it was received')}</div>
+      <dl className="space-y-1">{changes.map((change) => <div key={change.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
+        <dt className="leading-relaxed text-gray-500">{change.label}</dt>
+        <dd className="tabular-nums font-semibold text-gray-800 dark:text-gray-100" aria-label={`${change.label}: ${tr('stock_in_line_as_received', 'As received')} ${change.received}, ${tr('stock_in_line_now', 'Now')} ${change.now}`}>{change.received} → {change.now}</dd>
+      </div>)}</dl>
+    </div> : null}
   </div>
 }
