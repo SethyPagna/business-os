@@ -136,7 +136,7 @@ app.post('/:id/resubmit', async (c) => {
   await audit(c.env, user.id, actorSnapshot(user), 'resubmit', 'pending_action', id, row)
   // Same channel the approve/reject handlers broadcast on, so an admin with
   // the Review page open sees it return to their queue without a refresh.
-  await broadcast(c.env, 'pendingActions', { id, status: 'open' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'open' }))
   return c.json({ success: true, data: row })
 })
 
@@ -221,7 +221,7 @@ app.post('/:id/approve', async (c) => {
   }
   const updatedRow = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'approve', 'pending_action', id, updatedRow)
-  await broadcast(c.env, 'pendingActions', { id, status: 'approved' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'approved' }))
   return c.json({ success: true, data: updatedRow })
 })
 
@@ -246,7 +246,7 @@ app.post('/:id/reject', async (c) => {
   if (!ok) return c.json({ error: 'Already reviewed or not found' }, 409)
   const row = await getPendingAction(c.env, id)
   await audit(c.env, user.id, actorSnapshot(user), 'reject', 'pending_action', id, row)
-  await broadcast(c.env, 'pendingActions', { id, status: 'rejected' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'pendingActions', { id, status: 'rejected' }))
   return c.json({ success: true, data: row })
 })
 

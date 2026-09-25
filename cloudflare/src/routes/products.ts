@@ -1639,7 +1639,7 @@ app.post('/bulk-price-adjust', async (c) => {
     { keys: [...fields, 'rows_touched'] },
   ))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  await broadcast(c.env, 'products', { action: 'bulk-price-adjust' }).catch(() => {})
+  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
   return c.json({ success: true, changed })
 })
 

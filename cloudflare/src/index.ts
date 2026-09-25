@@ -53,6 +53,7 @@ import { reapStalledImportJobs } from './routes/importJobs'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMoneyPrecision'
 import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
+import { broadcastHubStub } from './durable-objects/broadcastHub'
 
 export type Env = {
   DB: D1Database
@@ -492,9 +493,7 @@ app.get('/ws', async (c) => {
     server.close(4001, 'invalid_session')
     return new Response(null, { status: 101, webSocket: pair[0] })
   }
-  const id = c.env.BROADCAST_HUB.idFromName('global')
-  const stub = c.env.BROADCAST_HUB.get(id)
-  return stub.fetch(c.req.raw)
+  return broadcastHubStub(c.env).fetch(c.req.raw)
 })
 
 // Public: serves uploaded files straight from R2. Unauthenticated by design

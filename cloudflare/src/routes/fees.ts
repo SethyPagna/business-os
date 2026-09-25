@@ -642,7 +642,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Expense commit could not be verified. Retry the exact saved request.', code: 'write_outcome_unknown' }, 503)
   }
   const response = feeOperationReceiptResponse(committedReceipt)
-  await broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id })
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'created', id: committedReceipt.fee_id }))
   c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
     type: 'fees',
     lines: [
@@ -749,7 +749,7 @@ app.put('/:id', async (c) => {
     sale_id: saleId,
     branch_id: branchId,
   }, changedFields(existing as unknown as Record<string, unknown>, fee as unknown as Record<string, unknown>, { keys: FEE_AUDIT_COLUMNS }))
-  await broadcast(c.env, 'fees', { type: 'updated', id })
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'updated', id }))
   return c.json({ fee })
 })
 
@@ -785,7 +785,7 @@ app.delete('/:id', async (c) => {
   // after === null records every field of the deleted expense as removed.
   await audit(c.env, user.id, user.username || null, 'delete', 'fee', id, { before: existing, after: null },
     changedFields(existing as unknown as Record<string, unknown>, null, { keys: FEE_AUDIT_COLUMNS }))
-  await broadcast(c.env, 'fees', { type: 'deleted', id })
+  c.executionCtx.waitUntil(broadcast(c.env, 'fees', { type: 'deleted', id }))
   return c.json({ success: true })
 })
 

@@ -236,7 +236,7 @@ app.post('/:id/approve', async (c) => {
     firstIp: device.first_ip, lastIp: device.last_ip, firstCountry: device.first_country,
     lastCountry: device.last_country, targetTrustedDeviceRowId: device.id,
   })
-  await broadcast(c.env, 'notifications', { type: 'device_decision' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
   return c.json({ success: true })
 })
@@ -301,7 +301,7 @@ app.post('/:id/reset', async (c) => {
     },
     revokedSessions,
   })
-  await broadcast(c.env, 'notifications', { type: 'device_decision' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
   return c.json({ success: true, revokedSessions, nextLoginDeviceStatus: 'pending' })
 })
@@ -328,7 +328,7 @@ app.post('/:id/reject', async (c) => {
     firstIp: device.first_ip, lastIp: device.last_ip, firstCountry: device.first_country,
     lastCountry: device.last_country, targetTrustedDeviceRowId: device.id, revokedSessions,
   })
-  await broadcast(c.env, 'notifications', { type: 'device_decision' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
   return c.json({ success: true, revokedSessions })
 })
@@ -366,7 +366,7 @@ app.post('/:id/revoke', async (c) => {
     firstIp: device.first_ip, lastIp: device.last_ip, firstCountry: device.first_country,
     lastCountry: device.last_country, targetTrustedDeviceRowId: device.id, revokedSessions,
   })
-  await broadcast(c.env, 'notifications', { type: 'device_decision' })
+  c.executionCtx.waitUntil(broadcast(c.env, 'notifications', { type: 'device_decision' }))
 
   return c.json({ success: true, revokedSessions })
 })

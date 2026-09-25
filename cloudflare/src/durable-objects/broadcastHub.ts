@@ -79,19 +79,35 @@ export class BroadcastHub {
   }
 }
 
+// The hub lives where it is first created unless a location hint is given.
+// The original 'global' instance was created without one; the business, D1
+// and the pinned Worker placement are all in APAC, so sockets now connect to
+// an APAC-hinted instance. broadcast() also posts to the legacy instance so
+// tabs still attached to it keep receiving updates until they reconnect;
+// drop LEGACY_HUB_NAME once one release has cycled every open tab.
+const HUB_NAME = 'global-apac'
+const LEGACY_HUB_NAME = 'global'
+
+export function broadcastHubStub(env: Env): DurableObjectStub {
+  return env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(HUB_NAME), { locationHint: 'apac' })
+}
+
 // Fire-and-forget broadcast helper for route handlers. Safe to call even
 // if nothing is connected (recipients: 0) and safe to await inside
 // c.executionCtx.waitUntil() so it never blocks the response that
 // triggered it.
 export async function broadcast(env: Env, channel: BroadcastChannel, payload?: unknown): Promise<void> {
   try {
-    const id = env.BROADCAST_HUB.idFromName('global')
-    const stub = env.BROADCAST_HUB.get(id)
-    await stub.fetch('https://broadcast-hub.internal/broadcast', {
+    const body = JSON.stringify({ channel, payload })
+    const post = (stub: DurableObjectStub) => stub.fetch('https://broadcast-hub.internal/broadcast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel, payload }),
+      body,
     })
+    await Promise.all([
+      post(broadcastHubStub(env)),
+      post(env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(LEGACY_HUB_NAME))),
+    ])
   } catch (error) {
     console.error('[broadcastHub] failed to broadcast', channel, error)
   }
