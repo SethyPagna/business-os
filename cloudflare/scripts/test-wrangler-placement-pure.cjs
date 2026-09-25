@@ -1,4 +1,5 @@
-// P4-4a fix 5: Smart Placement (`[placement]\nmode = "targeted" + region aws:ap-southeast-1`) lets
+// P4-4a fix 5, revised 2026-09-25: placement is pinned to Singapore next to
+// the APAC D1 (`[placement]` mode "targeted", region "aws:ap-southeast-1"). Placement lets
 // Cloudflare run this D1-round-trip-bound Worker's invocation near the
 // backend it actually talks to, instead of always at the edge closest to the
 // requesting browser. It is free on both the Workers Free and Paid plans (no
