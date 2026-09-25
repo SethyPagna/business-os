@@ -17,6 +17,7 @@ import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
@@ -177,6 +178,7 @@ type PromotionsSection = 'rules' | 'discounts' | 'loyalty'
 
 export default function PromotionsPage() {
   const { t, notify, fmtUSD, getPermissionTier, can, hasPermission, navigateTo } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
   const canPromotions = can('promotions', 'view')
@@ -365,7 +367,12 @@ export default function PromotionsPage() {
     if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
     const rule = row.normalized
     const label = rule?.title || `#${row.id}`
-    if (!window.confirm((t('promo_rule_delete_confirm') || 'Delete promotion "{name}"? Prices return to normal immediately.').replace('{name}', label))) return
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('promo_rule_delete_confirm') || 'Delete promotion "{name}"? Prices return to normal immediately.').replace('{name}', label),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) return
     try {
       await deletePromotionRule(row.id)
       notify(t('promo_rule_deleted') || 'Promotion deleted.')
@@ -484,6 +491,7 @@ export default function PromotionsPage() {
     // inside PageSlot's overflow-hidden box and anything below the fold was
     // unreachable (reported: Promotions/Loyalty could not scroll).
     <div className="page-scroll p-4">
+      {confirmDialog}
       <div className="mx-auto max-w-5xl space-y-4">
         {/* No page title (user, Sep 3 2026). Promotions used to be the one
             hub that kept an always-visible "Promotions" heading above its
