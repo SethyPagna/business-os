@@ -90,6 +90,46 @@ const OUT_LIST = LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')
 // trusts to decide whether an edit could spill into another session.
 const RECEIPT_LIST = STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')
 
+/** A movement's quantity with the direction its type implies (see LEDGER_OUT_TYPES). */
+export function movementSignedQuantitySql(movement: string): string {
+  return `CASE WHEN ${movement}.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(${movement}.quantity, 0)) ELSE ABS(COALESCE(${movement}.quantity, 0)) END`
+}
+
+// after_qty: walk BACKWARD from the product's CURRENT stock (the one
+// authoritative number) through every movement NEWER than this row;
+// before_qty = after_qty - signed delta (attachBeforeQty below).
+// Movements store no before/after; deriving from current stock stays
+// consistent even where pre-migration history is a snapshot with no
+// movement rows -- the oldest derived "before" then reads as the
+// baseline the recorded actions imply: the honest best available
+// number, never a fabricated one. Correlated per row over
+// idx_inventory_movements_product_created_pg.
+//
+// ONE expression for every surface that shows a movement's before -> after
+// (the Stock Changes ledger and a stock-in session line), so the same
+// movement can never read two different balances on two screens.
+export function movementStockAfterSql(movement: string, product: string): string {
+  return `COALESCE(${product}.stock_quantity, 0) - COALESCE((
+        SELECT SUM(${movementSignedQuantitySql('mn')})
+        FROM inventory_movements mn
+        WHERE mn.product_id = ${movement}.product_id
+          AND (mn.created_at > ${movement}.created_at OR (mn.created_at = ${movement}.created_at AND mn.id > ${movement}.id))
+      ), 0)`
+}
+
+/**
+ * U-records: before/after for an arbitrary set of movement ids (a stock-in
+ * session's received lines). `idsSql` is a bound IN-list body. The rows go
+ * through attachBeforeQty like the ledger's.
+ */
+export function movementStockBalancesSql(idsSql: string): string {
+  return `
+    SELECT m.id, ${movementSignedQuantitySql('m')} AS signed_quantity, ${movementStockAfterSql('m', 'p')} AS after_qty
+    FROM inventory_movements m
+    LEFT JOIN products p ON p.id = m.product_id
+    WHERE m.id IN (${idsSql})`
+}
+
 // One join clause, shared by every statement below so the row list, the
 // count and the summary can never join differently (the supplier filter and
 // the barcode search both reach through these joins).
@@ -167,20 +207,11 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     ${whereSql}
   `
 
-  // after_qty: walk BACKWARD from the product's CURRENT stock (the one
-  // authoritative number) through every movement NEWER than this row;
-  // before_qty = after_qty - signed delta (added by the caller in JS).
-  // Movements store no before/after; deriving from current stock stays
-  // consistent even where pre-migration history is a snapshot with no
-  // movement rows -- the oldest derived "before" then reads as the
-  // baseline the recorded actions imply: the honest best available
-  // number, never a fabricated one. Correlated per page row (<=100) over
-  // idx_inventory_movements_product_created_pg.
   const rowsSql = `
     SELECT
       m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
       m.branch_id, ${movementBranchNameSql('m')} AS branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
-      CASE WHEN m.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(m.quantity, 0)) ELSE ABS(COALESCE(m.quantity, 0)) END AS signed_quantity,
+      ${movementSignedQuantitySql('m')} AS signed_quantity,
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
       ${movementReferenceSelectSql('m')},
@@ -193,12 +224,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
        FROM inventory_movements mx
        WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
-      COALESCE(p.stock_quantity, 0) - COALESCE((
-        SELECT SUM(CASE WHEN mn.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(mn.quantity, 0)) ELSE ABS(COALESCE(mn.quantity, 0)) END)
-        FROM inventory_movements mn
-        WHERE mn.product_id = m.product_id
-          AND (mn.created_at > m.created_at OR (mn.created_at = m.created_at AND mn.id > m.id))
-      ), 0) AS after_qty${LEDGER_FROM}
+      ${movementStockAfterSql('m', 'p')} AS after_qty${LEDGER_FROM}
     ${whereSql}
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT @limit OFFSET @offset

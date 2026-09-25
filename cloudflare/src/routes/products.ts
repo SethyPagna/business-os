@@ -14,7 +14,7 @@ import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogTe
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, movementStockBalancesSql, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
@@ -1492,7 +1492,34 @@ app.get('/stock-in-session-lines', async (c) => {
     // edit rather than risking an edit that spills into another receipt.
     for (const batchId of batchIds) receiptCounts.set(batchId, 2)
   }
-  rows = rows.map((row) => ({ ...row, batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0 }))
+  // U-records: each received line's stock before -> after, through the SAME
+  // expression the Stock Changes ledger uses (movementStockBalancesSql), so a
+  // receipt and its ledger row never disagree. Only the lines still on
+  // screen, in bounded parallel chunks. A zero-quantity create has no
+  // movement and gets null; so does every line if the lookup fails -- the
+  // receipt stays readable and shows "—" instead of a guessed balance.
+  const balances = new Map<number, { before_qty: number; after_qty: number }>()
+  const visibleMovementIds = rows.slice(0, 2000).map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+  try {
+    const chunkResults = await Promise.all(chunkForBinding(visibleMovementIds).map((chunk) => {
+      const clause = buildInClause('movement', chunk)
+      return db.prepare(movementStockBalancesSql(clause.sql)).all<{ id: number; signed_quantity: number; after_qty: number }>({ ...clause.params })
+    }))
+    for (const found of chunkResults) {
+      for (const row of attachBeforeQty(found)) balances.set(Number(row.id), { before_qty: row.before_qty, after_qty: Number(row.after_qty) })
+    }
+  } catch {
+    balances.clear()
+  }
+  rows = rows.map((row) => {
+    const balance = balances.get(Number(row.id))
+    return {
+      ...row,
+      batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0,
+      before_qty: balance ? balance.before_qty : null,
+      after_qty: balance ? balance.after_qty : null,
+    }
+  })
   const truncated = exceededLineLimit || rows.length > 2000
   return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated })
 })

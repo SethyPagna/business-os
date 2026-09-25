@@ -144,6 +144,14 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            -- as missing made the receipt claim a cost it does not know
            -- (a7ff72f7). Keep the test on NULL, never on > 0.
            CASE WHEN (${LINE_TOTAL_SQL}) IS NOT NULL THEN 0 ELSE 1 END AS cost_missing,
+           -- U-records: the line AS RECEIVED -- the root receipt row alone,
+           -- before any N6 edit folded into the columns above. An edited
+           -- line shows "as received -> now" from these; an unedited one
+           -- has the same values in both. The cost pair is NULL where the
+           -- receipt recorded none, and is stripped for anyone without
+           -- cost-view access by the route's acquisitionCostResponses.
+           ABS(COALESCE(m.quantity, 0)) AS received_quantity,
+           m.unit_cost_usd AS received_unit_cost_usd, m.total_cost_usd AS received_total_cost_usd,
            m.reason, m.reference_id, m.user_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
            -- The lot and its header fields are the line's CURRENT lot (cb); the
            -- session KEY above stays on the root lot (b), so an edit can never
@@ -190,6 +198,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            sm.branch_id, br.name AS branch_name, 'add' AS movement_type, 0 AS quantity,
            sm.unit_cost_usd, NULL AS unit_cost_khr, 0 AS total_cost_usd, NULL AS total_cost_khr,
            0 AS cost_missing,
+           0 AS received_quantity, sm.unit_cost_usd AS received_unit_cost_usd, 0 AS received_total_cost_usd,
            NULL AS reason, o.rowid AS reference_id, o.actor_id AS user_id,
            (SELECT u.username FROM users u WHERE u.id = o.actor_id) AS user_name, o.created_at, NULL AS batch_id,
            NULL AS batch_lot_code, NULL AS batch_received_at,
@@ -303,6 +312,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
            s.cost_price_usd, s.cost_price_khr,
            s.branch_id, s.branch_name, s.movement_type, s.quantity,
            s.unit_cost_usd, s.unit_cost_khr, s.total_cost_usd, s.total_cost_khr,
+           s.received_quantity, s.received_unit_cost_usd, s.received_total_cost_usd,
            s.reason, s.reference_id, s.user_name, s.created_at, s.batch_id,
            s.batch_lot_code, s.batch_received_at, s.batch_supplier_id, s.batch_supplier_name,
            s.batch_payment_status, s.batch_credit_due_date, s.batch_unit_cost_usd, s.batch_received_cost_usd,
