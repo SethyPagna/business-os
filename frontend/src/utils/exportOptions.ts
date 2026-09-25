@@ -85,11 +85,16 @@ function escapeHtml(value: unknown): string {
 
 // The printable document. Kept as a pure string builder so the test can
 // assert structure + escaping without a window.
-export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint = true }: {
+export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint = true, language, metadata = [], numericHeaders = [], totals, landscape }: {
   title: string
   subtitle?: string
   headers: string[]
   rows: Array<Record<string, unknown>>
+  language?: string
+  metadata?: string[]
+  numericHeaders?: string[]
+  totals?: Record<string, unknown>
+  landscape?: boolean
   // The window path relies on the document printing itself once it has
   // loaded. The hidden-frame path must NOT: printHtmlInHiddenFrame waits for
   // fonts and images and then prints the frame itself, and two print() calls
@@ -97,11 +102,12 @@ export function buildPrintDocument({ title, subtitle, headers, rows, autoPrint =
   autoPrint?: boolean
 }): string {
   const headCells = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')
-  const bodyRows = rows.map((row) => `<tr>${headers.map((header) => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('\n')
+  const cells = (row: Record<string, unknown>, tag = 'td') => headers.map(header => `<${tag}${numericHeaders.includes(header) ? ' class="numeric"' : ''}>${escapeHtml(row[header])}</${tag}>`).join('')
+  const bodyRows = rows.map((row) => `<tr>${cells(row)}</tr>`).join('\n')
   // The print document only has the fonts it declares: without the app's own
   // @font-face rules 'Noto Sans Khmer' falls back to a system font (as the
   // receipt did before Sep 23 2026).
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+  return `<!doctype html><html${language ? ` lang="${escapeHtml(language)}"` : ''}><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
 ${appFontFaceCss()}
   body { font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans Khmer', 'Khmer OS', sans-serif; margin: 24px; color: #0f172a; }
   h1 { font-size: 16px; margin: 0 0 2px; }
@@ -110,18 +116,27 @@ ${appFontFaceCss()}
   th, td { border: 1px solid #cbd5e1; padding: 3px 6px; text-align: left; vertical-align: top; word-break: break-word; }
   thead th { background: #f1f5f9; font-weight: 600; }
   thead { display: table-header-group; }
+  .numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  .totals { font-weight: 600; }
   tr { page-break-inside: avoid; }
-  @page { margin: 12mm; }
+  @page { ${landscape == null ? '' : `size: A4 ${landscape ? 'landscape' : 'portrait'}; `}margin: 12mm; }
 </style></head><body>
 <h1>${escapeHtml(title)}</h1>
 <p class="meta">${escapeHtml(subtitle || '')}</p>
+${metadata.map(line => `<p class="meta">${escapeHtml(line)}</p>`).join('\n')}
 <table><thead><tr>${headCells}</tr></thead><tbody>
 ${bodyRows}
+${totals ? `<tr class="totals">${cells(totals)}</tr>` : ''}
 </tbody></table>
 ${autoPrint ? `<script>window.addEventListener('load', function () {
   // Print once the declared fonts have loaded (or after the same wait the
   // hidden-frame path allows), so the Khmer text prints in the app font.
-  var print = function () { setTimeout(function () { window.print(); }, 150); };
+  var print = function () { setTimeout(function () {
+    try {
+      if (window.__bosCanPrint && !window.__bosCanPrint()) { document.body.textContent = ''; window.close(); return; }
+    } catch (_) { document.body.textContent = ''; window.close(); return; }
+    window.print();
+  }, 150); };
   var fonts = document.fonts;
   if (!fonts || !fonts.ready) return print();
   Promise.race([fonts.ready, new Promise(function (resolve) { setTimeout(resolve, ${PRINT_FRAME_ASSET_TIMEOUT_MS}); })]).then(print, print);
@@ -139,10 +154,12 @@ ${autoPrint ? `<script>window.addEventListener('load', function () {
 // alone meant "Print" did nothing at all on an iPhone or iPad. Returns false
 // only when neither surface exists, so the dialog can still tell the person
 // instead of failing silently.
-export function openPrintExport(input: { title: string; subtitle?: string; headers: string[]; rows: Array<Record<string, unknown>> }): boolean {
+export function openPrintExport(input: Omit<Parameters<typeof buildPrintDocument>[0], 'autoPrint'>, canPrint?: () => boolean): boolean {
+  if (canPrint) { try { if (!canPrint()) return false } catch { return false } }
   const printWindow = openPrintPreviewWindow()
   if (printWindow) {
     printWindow.document.open()
+    if (canPrint) (printWindow as Window & { __bosCanPrint?: () => boolean }).__bosCanPrint = canPrint
     printWindow.document.write(buildPrintDocument(input))
     printWindow.document.close()
     return true
@@ -152,7 +169,7 @@ export function openPrintExport(input: { title: string; subtitle?: string; heade
   // synchronous menu action, and the frame prints (and cleans itself up) on
   // its own; a failure there is reported to the console rather than as a
   // false "blocked popup" message the person cannot act on.
-  void printHtmlInHiddenFrame(buildPrintDocument({ ...input, autoPrint: false })).catch((error) => {
+  void printHtmlInHiddenFrame(buildPrintDocument({ ...input, autoPrint: false }), { canPrint }).catch((error) => {
     console.error('[exportOptions] print frame failed', error)
   })
   return true
