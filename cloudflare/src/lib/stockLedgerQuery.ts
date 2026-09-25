@@ -119,15 +119,67 @@ export function movementStockAfterSql(movement: string, product: string): string
 
 /**
  * U-records: before/after for an arbitrary set of movement ids (a stock-in
- * session's received lines). `idsSql` is a bound IN-list body. The rows go
- * through attachBeforeQty like the ledger's.
+ * session's received lines), SET-BASED -- one statement for any number of
+ * lines, never one correlated walk per line.
+ *
+ * The ids travel as ONE bound JSON array (@movementIds via json_each), so the
+ * statement never chunks against D1's bound-parameter cap. For the products
+ * those movements touch, it reads each product's movements from the oldest
+ * requested one onward (a range scan of
+ * idx_inventory_movements_product_created_pg) and runs the backward walk as a
+ * window: the sum of every STRICTLY NEWER movement, ordered exactly as
+ * movementStockAfterSql defines "newer" -- created_at, then id. after_qty is
+ * the product's current stock minus that sum, identical to the ledger's
+ * correlated expression (proved on the real migration chain by
+ * scripts/test-stock-in-line-balance-pure.cjs). Rows go through
+ * attachBeforeQty like the ledger's. A movement with no product or no
+ * timestamp is simply absent -- its caller shows "—", never a guess.
  */
-export function movementStockBalancesSql(idsSql: string): string {
-  return `
-    SELECT m.id, ${movementSignedQuantitySql('m')} AS signed_quantity, ${movementStockAfterSql('m', 'p')} AS after_qty
-    FROM inventory_movements m
-    LEFT JOIN products p ON p.id = m.product_id
-    WHERE m.id IN (${idsSql})`
+export const MOVEMENT_STOCK_BALANCES_SQL = `
+    WITH target AS (
+      SELECT m.id, m.product_id, m.created_at
+      FROM inventory_movements m
+      WHERE m.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@movementIds))
+    ),
+    scope AS (
+      SELECT product_id, MIN(created_at) AS since
+      FROM target
+      WHERE product_id IS NOT NULL AND created_at IS NOT NULL
+      GROUP BY product_id
+    ),
+    walk AS (
+      SELECT mn.id, mn.product_id,
+             ${movementSignedQuantitySql('mn')} AS signed_quantity,
+             SUM(${movementSignedQuantitySql('mn')}) OVER (
+               PARTITION BY mn.product_id
+               ORDER BY mn.created_at DESC, mn.id DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS newer_sum
+      FROM scope s
+      JOIN inventory_movements mn ON mn.product_id = s.product_id AND mn.created_at >= s.since
+    )
+    SELECT w.id, w.signed_quantity, COALESCE(p.stock_quantity, 0) - COALESCE(w.newer_sum, 0) AS after_qty
+    FROM walk w
+    JOIN target t ON t.id = w.id
+    LEFT JOIN products p ON p.id = w.product_id`
+
+/** The minimal D1 surface loadMovementStockBalances needs (lib/db.ts's D1Compat satisfies it). */
+export type MovementBalanceDb = {
+  prepare(sql: string): { all<T = Record<string, unknown>>(params?: Record<string, unknown>): Promise<T[]> }
+}
+
+/**
+ * Stock before -> after for each movement id, in ONE statement regardless of
+ * how many ids (the stock-in session-lines route; its speed test counts the
+ * prepares). Ids without a derivable balance are absent from the map.
+ */
+export async function loadMovementStockBalances(db: MovementBalanceDb, movementIds: readonly number[]): Promise<Map<number, { before_qty: number; after_qty: number }>> {
+  const balances = new Map<number, { before_qty: number; after_qty: number }>()
+  const ids = [...new Set(movementIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+  if (!ids.length) return balances
+  const rows = await db.prepare(MOVEMENT_STOCK_BALANCES_SQL).all<{ id: number; signed_quantity: number; after_qty: number }>({ movementIds: JSON.stringify(ids) })
+  for (const row of attachBeforeQty(rows)) balances.set(Number(row.id), { before_qty: row.before_qty, after_qty: Number(row.after_qty) })
+  return balances
 }
 
 // One join clause, shared by every statement below so the row list, the

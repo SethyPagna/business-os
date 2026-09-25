@@ -3,10 +3,14 @@
 // folded current figures and nothing about the stock it moved.
 //
 // This pins, against the REAL migration chain in node:sqlite:
-//   1. movementStockBalancesSql + attachBeforeQty give a received line the
-//      stock before -> after that the Stock Changes ledger shows for the SAME
-//      movement (one expression, two surfaces) -- hand-computed too, so a
-//      shared wrong answer cannot pass;
+//   1. loadMovementStockBalances gives a received line the stock before ->
+//      after that the Stock Changes ledger shows for the SAME movement --
+//      hand-computed too, so a shared wrong answer cannot pass -- and its
+//      set-based window agrees with the ledger's correlated expression for
+//      EVERY movement of a history with same-second ties and out types;
+//   1b. speed: it is ONE statement for 50 lines and for 2000 (a counting
+//      fake D1), and its plan range-seeks the product/created_at index
+//      instead of scanning inventory_movements;
 //   2. the session line carries its AS-RECEIVED quantity and cost beside the
 //      edit-folded current ones, so an edited line reads "received -> now";
 //   3. the route wires both, with a null fallback (never a guessed number);
@@ -72,12 +76,11 @@ db.exec(`
 `)
 
 // ---- 1. the balance, and parity with the ledger ----------------------------
-function balances(ids) {
-  const params = Object.fromEntries(ids.map((id, index) => [`movement${index}`, id]))
-  const sql = ledger.movementStockBalancesSql(ids.map((_, index) => `@movement${index}`).join(', '))
-  return new Map(ledger.attachBeforeQty(db.prepare(sql).bind(params).all()).map((row) => [row.id, row]))
-}
-const got = balances([3, 6])
+// lib/db.ts's D1Compat shape (prepare(sql).all(params)) over the harness db.
+const asD1 = (sqlDb) => ({ prepare: (sql) => ({ all: async (params) => sqlDb.prepare(sql).bind(params || {}).all() }) })
+
+async function main() {
+const got = await ledger.loadMovementStockBalances(asD1(db), [3, 6])
 ok(got.get(3).before_qty === 7 && got.get(3).after_qty === 12, 'the received line reads stock 7 -> 12 (hand-computed)')
 ok(got.get(6).before_qty === 0 && got.get(6).after_qty === 4, 'the second line reads 0 -> 4')
 
@@ -88,6 +91,60 @@ for (const id of [3, 6]) {
   assert.deepEqual([got.get(id).before_qty, got.get(id).after_qty], [row.before_qty, row.after_qty], `movement ${id}: session line and ledger agree`)
 }
 ok(true, 'a session line and the Stock Changes ledger give the same movement the same before -> after')
+
+// ---- 1a. window == correlated, on a history built to separate them -------
+// Product 3: same-second ties (the id breaks them), out types, a receipt in
+// the middle. A window ordered by created_at alone, or with the default
+// RANGE frame (which counts the row itself and its ties), answers
+// differently here -- the negative controls below prove it.
+const parity = openDb(loadAll())
+parity.exec(`
+  INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES (3,'Toner','1003','pcs',9,1), (4,'Mask','1004','pcs',1,1);
+  INSERT INTO inventory_movements (id,product_id,product_name,movement_type,quantity,created_at) VALUES
+    (10,3,'Toner','add',6,'2026-09-01 03:00:00'),
+    (11,3,'Toner','sale',1,'2026-09-02 03:00:00'),
+    (12,3,'Toner','add',4,'2026-09-02 03:00:00'),
+    (13,3,'Toner','damage_out',2,'2026-09-02 03:00:00'),
+    (14,3,'Toner','transfer_in',3,'2026-09-03 03:00:00'),
+    (15,3,'Toner','supplier_return',1,'2026-09-04 03:00:00'),
+    (16,4,'Mask','add',1,'2026-09-02 03:00:00');
+`)
+const truth = new Map(ledger.attachBeforeQty(parity.prepare(`
+  SELECT m.id, ${ledger.movementSignedQuantitySql('m')} AS signed_quantity, ${ledger.movementStockAfterSql('m', 'p')} AS after_qty
+  FROM inventory_movements m LEFT JOIN products p ON p.id = m.product_id`).bind({}).all()).map((row) => [row.id, row]))
+const allIds = [...truth.keys()]
+const windowed = await ledger.loadMovementStockBalances(asD1(parity), allIds)
+for (const id of allIds) {
+  assert.deepEqual([windowed.get(id).before_qty, windowed.get(id).after_qty], [truth.get(id).before_qty, Number(truth.get(id).after_qty)], `movement ${id}: window agrees with the ledger's correlated walk`)
+}
+// hand-computed: stock 9; newer than #12 are #13 (-2), #14 (+3), #15 (-1) -> after 9 - 0 = 9, before 5
+ok(windowed.get(12).before_qty === 5 && windowed.get(12).after_qty === 9, 'the tied receipt #12 reads 5 -> 9 (hand-computed)')
+ok(windowed.size === allIds.length, `the set-based balances agree with the correlated ledger expression for all ${allIds.length} movements`)
+for (const [label, broken] of [
+  // (created_at alone is not a usable control: SQLite then happens to walk
+  // the index's id DESC order, so it agrees by accident -- which is exactly
+  // why the id tiebreak is written out rather than left to the planner.)
+  ['the reversed id tiebreak', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ORDER BY mn.created_at DESC, mn.id DESC', 'ORDER BY mn.created_at DESC, mn.id ASC')],
+  ['the default RANGE frame', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING', '')],
+]) {
+  assert.notEqual(broken, ledger.MOVEMENT_STOCK_BALANCES_SQL, `${label}: mutation applied`)
+  const rows = parity.prepare(broken).bind({ movementIds: JSON.stringify(allIds) }).all()
+  ok(rows.some((row) => Number(row.after_qty) !== Number(truth.get(row.id).after_qty)), `negative control: ${label} disagrees with the ledger on this fixture`)
+}
+
+// ---- 1b. speed: one statement, whatever the line count ------------------
+for (const lineCount of [50, 2000]) {
+  let prepares = 0
+  let alls = 0
+  const counting = { prepare: (sql) => { prepares += 1; return { all: async (params) => { alls += 1; return parity.prepare(sql).bind(params || {}).all() } } } }
+  const ids = Array.from({ length: lineCount }, (_, index) => (index < allIds.length ? allIds[index] : 100000 + index))
+  const found = await ledger.loadMovementStockBalances(counting, ids)
+  ok(prepares === 1 && alls === 1 && found.size === allIds.length, `${lineCount} lines cost ${prepares} prepare / ${alls} all -- one statement, not one per line`)
+}
+const plan = parity.prepare(`EXPLAIN QUERY PLAN ${ledger.MOVEMENT_STOCK_BALANCES_SQL}`).bind({ movementIds: '[10,16]' }).all().map((row) => row.detail)
+console.log(`  plan:\n    ${plan.join('\n    ')}`)
+ok(plan.some((detail) => detail.includes('SEARCH mn USING INDEX idx_inventory_movements_product_created_pg (product_id=? AND created_at>?)')), 'each touched product is a range seek on idx_inventory_movements_product_created_pg')
+ok(!plan.some((detail) => /^SCAN (mn|m|inventory_movements)$/.test(detail)), 'no full scan of inventory_movements')
 
 // ---- 2. as received vs now -------------------------------------------------
 const locator = sessions.parseStockInSessionKey('session:300')
@@ -103,7 +160,8 @@ ok(lines.length === 2, 'the edit row is folded into its root line, never listed 
 // ---- 3. the route wires it -------------------------------------------------
 const route = fs.readFileSync(path.join(src, 'routes', 'products.ts'), 'utf8')
 const handler = route.slice(route.indexOf("app.get('/stock-in-session-lines'"), route.indexOf("app.get('/stock-ledger'"))
-ok(/movementStockBalancesSql\(/.test(handler) && /attachBeforeQty\(/.test(handler), 'the session-lines handler computes balances through the shared ledger expression')
+ok(/loadMovementStockBalances\(db, /.test(handler), 'the session-lines handler computes balances through the shared set-based helper')
+ok(!/movementStockAfterSql|buildInClause\('movement'/.test(handler), 'and no longer runs a correlated walk or a per-chunk fan-out for them')
 ok(/before_qty: balance \? balance\.before_qty : null/.test(handler) && /after_qty: balance \? balance\.after_qty : null/.test(handler), 'a line without a derivable balance gets null, not a number')
 ok(/app\.use\('\*', acquisitionCostResponses\)/.test(route), 'products routes still project acquisition costs out of every response')
 
@@ -118,3 +176,5 @@ const shown = costs.projectAcquisitionCosts(wire, viewer).rows[0]
 ok(shown.received_unit_cost_usd === 4, 'a cost viewer still sees them')
 
 console.log(`\n${checks} stock-in line balance checks passed`)
+}
+main().catch((error) => { console.error(error); process.exit(1) })

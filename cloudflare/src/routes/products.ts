@@ -14,7 +14,7 @@ import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogTe
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { attachBeforeQty, buildStockLedgerQuery, movementStockBalancesSql, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
@@ -1492,24 +1492,17 @@ app.get('/stock-in-session-lines', async (c) => {
     // edit rather than risking an edit that spills into another receipt.
     for (const batchId of batchIds) receiptCounts.set(batchId, 2)
   }
-  // U-records: each received line's stock before -> after, through the SAME
-  // expression the Stock Changes ledger uses (movementStockBalancesSql), so a
-  // receipt and its ledger row never disagree. Only the lines still on
-  // screen, in bounded parallel chunks. A zero-quantity create has no
-  // movement and gets null; so does every line if the lookup fails -- the
-  // receipt stays readable and shows "—" instead of a guessed balance.
-  const balances = new Map<number, { before_qty: number; after_qty: number }>()
-  const visibleMovementIds = rows.slice(0, 2000).map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
+  // U-records: each received line's stock before -> after, the same balance
+  // the Stock Changes ledger shows for that movement (parity pinned in
+  // scripts/test-stock-in-line-balance-pure.cjs). ONE set-based statement for
+  // every line still on screen -- never a query per line. A zero-quantity
+  // create has no movement and gets null; so does every line if the lookup
+  // fails -- the receipt stays readable and shows "—", not a guessed balance.
+  let balances = new Map<number, { before_qty: number; after_qty: number }>()
   try {
-    const chunkResults = await Promise.all(chunkForBinding(visibleMovementIds).map((chunk) => {
-      const clause = buildInClause('movement', chunk)
-      return db.prepare(movementStockBalancesSql(clause.sql)).all<{ id: number; signed_quantity: number; after_qty: number }>({ ...clause.params })
-    }))
-    for (const found of chunkResults) {
-      for (const row of attachBeforeQty(found)) balances.set(Number(row.id), { before_qty: row.before_qty, after_qty: Number(row.after_qty) })
-    }
+    balances = await loadMovementStockBalances(db, rows.slice(0, 2000).map((row) => Number(row.id)))
   } catch {
-    balances.clear()
+    balances = new Map()
   }
   rows = rows.map((row) => {
     const balance = balances.get(Number(row.id))
