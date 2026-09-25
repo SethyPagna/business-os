@@ -67,7 +67,7 @@ for (const id of ['fee-amount-usd', 'fee-amount-khr']) {
   const input = formSource.slice(formSource.indexOf(`id="${id}"`)).split('/>')[0]
   assert.match(input, /step="any"/, 'native input must permit the raw decimal and historical value before submit normalization')
 }
-const saveSource = stripTypeScriptTypes(formSource.slice(formSource.indexOf('  const handleSave = async () => {'), formSource.indexOf('  const discardPending = () => {')))
+const saveSource = stripTypeScriptTypes(formSource.slice(formSource.indexOf('  const handleSave = async () => {'), formSource.indexOf('  const discardPending = async () => {')))
 const runSave = new Function('scope', `const { savingRef, setTouched, amountsInvalid, dateInvalid, form, pendingCreate, fee, money, amountUsd, amountKhr, setSaving, onSave, savedRef, dirtyRef, restoredDraftRef, clearWorkDraft, draftKey, onClose, actorId, getPendingFeeCreate, setPendingCreate, setForm, feeCreateBodyToFormState } = scope; ${saveSource}; return handleSave()`)
 async function submitAmounts(usd: string, khr: string, existing: any = null, pending: any = null) {
   const form = { fee_type: 'expense', label: 'Physical expense', amount_usd: usd, amount_khr: khr, fee_date: '2026-09-13', sale_id: '', branch_id: '2', notes: 'Unchanged details' }

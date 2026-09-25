@@ -20,6 +20,7 @@ import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
 import PaginationControls, { DEFAULT_PAGE_SIZE, clampPage } from '../shared/PaginationControls'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -115,7 +116,7 @@ type FeeTypeFilter = FeeType | 'all'
 
 type ExpenseDeleteOperation = {
   canDelete: () => boolean
-  confirmDelete: () => boolean
+  confirmDelete: () => boolean | Promise<boolean>
   begin: () => boolean
   remove: () => Promise<unknown>
   onStart: () => void
@@ -132,7 +133,7 @@ export function expenseSaleLabel(receipt: string | null | undefined, saleId: num
 
 export async function performExpenseDelete(operation: ExpenseDeleteOperation): Promise<boolean> {
   if (!operation.canDelete()) return false
-  if (!operation.confirmDelete()) return false
+  if (!(await operation.confirmDelete())) return false
   if (!operation.canDelete()) return false
   if (!operation.begin()) return false
   operation.onStart()
@@ -203,6 +204,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
 
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
   const fmtMoney = useMemo(
@@ -595,7 +597,13 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const handleDelete = async (fee: FeeRecord): Promise<boolean> => {
     return performExpenseDelete({
       canDelete: () => canDeleteFeeRef.current,
-      confirmDelete: () => window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.')),
+      confirmDelete: () => askConfirm({
+        title: tr('delete', 'Delete'),
+        message: tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'),
+        items: [{ label: tr('fee_label', 'Label'), value: String(fee.label || fee.id) }],
+        confirmLabel: tr('delete', 'Delete'),
+        danger: true,
+      }),
       begin: () => beginKeyedAction(deleteActionRef, fee.id),
       onStart: () => setDeletingId(fee.id),
       remove: () => withLoaderTimeout(
@@ -656,6 +664,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
+      {confirmDialog}
       {/* Page title removed (Aug 19 2026 UI request): no other page in the
           app repeats its own name in an h1 here -- the sidebar nav item
           already names the page -- so Fees having one was the odd one out,

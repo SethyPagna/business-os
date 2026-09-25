@@ -62,9 +62,6 @@ function sourceFiles(dir: string): string[] {
 const REMAINING: Record<string, number> = {
   'components/branches/TransferModal.tsx': 1,
   'components/catalog/CatalogAccountSection.tsx': 1,
-  'components/fees/ExpenseLabelManagerModal.tsx': 2,
-  'components/fees/FeeForm.tsx': 1,
-  'components/fees/FeesPage.tsx': 1,
   'components/files/FilePickerModal.tsx': 1,
   'components/files/FilesPage.tsx': 1,
   'components/inventory/Inventory.tsx': 3,

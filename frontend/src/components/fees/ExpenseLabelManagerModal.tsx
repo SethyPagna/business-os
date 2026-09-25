@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Modal from '../shared/Modal.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import {
   classifyFeeLabel,
   getFeeLabelImpact,
@@ -26,6 +27,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
   const [loading, setLoading] = useState(true)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [classifying, setClassifying] = useState<string | null>(null)
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const tr = useCallback((key: string, fallback: string) => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -54,10 +56,16 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       const impact = await getFeeLabelImpact(entry.label, to) as { linked_records?: number; target_exists?: boolean }
       if (!canEdit()) return
       const linked = Number(impact.linked_records || 0)
-      const mergeNote = impact.target_exists ? ` "${to}" already exists, so these labels will merge.` : ''
-      if (!window.confirm(
-        `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}".${mergeNote}\n\nReplace only those exact matches with "${to}"? Audit history remains unchanged.`,
-      )) return
+      if (!(await askConfirm({
+        title: tr('rename_expense_label', 'Rename or merge expense label'),
+        message: tr('expense_label_replace_confirm', '{n} live expense record(s) use "{from}". Replace only those exact matches with "{to}"? Audit history remains unchanged.')
+          .replace('{n}', String(linked)).replace('{from}', entry.label).replace('{to}', to),
+        items: [
+          { label: tr('before', 'Before'), value: entry.label },
+          { label: tr('after', 'After'), value: to },
+        ],
+        note: impact.target_exists ? tr('expense_label_merge_note', '"{to}" already exists, so these labels will merge.').replace('{to}', to) : undefined,
+      }))) return
       if (!canEdit()) return
       await replaceFeeLabel(entry.label, to)
       if (!canEdit()) return
@@ -83,9 +91,15 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       const current = (impact.type_counts || [])
         .map((row) => `${row.uses} ${t(FEE_TYPE_OPTIONS.find((option) => option.value === row.fee_type)?.labelKey || '') || row.fee_type}`)
         .join(', ')
-      if (!window.confirm(
-        `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}"${current ? ` (${current})` : ''}.\n\nClassify every exact label match as ${nextLabel}? The source label and audit history remain unchanged.`,
-      )) return
+      if (!(await askConfirm({
+        title: tr('fee_type', 'Type'),
+        message: tr('expense_label_classify_confirm', '{n} live expense record(s) use "{label}". Classify every exact label match as {type}? The source label and audit history remain unchanged.')
+          .replace('{n}', String(linked)).replace('{label}', entry.label).replace('{type}', nextLabel),
+        items: [
+          { label: tr('before', 'Before'), value: current || '-' },
+          { label: tr('after', 'After'), value: `${linked} ${nextLabel}` },
+        ],
+      }))) return
       if (!canEdit()) return
       const result = await classifyFeeLabel(entry.label, feeType)
       if (!canEdit()) return
@@ -100,6 +114,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
 
   return (
     <Modal title={tr('manage_expense_labels', 'Expense labels')} onClose={onClose} size="sm" unsavedChanges={{ dirty: renaming !== null }}>
+      {confirmDialog}
       <div className="space-y-2">
         <p className="text-xs text-slate-500 dark:text-slate-400">{tr('expense_labels_help', 'Labels come from expense records. Preview exact linked records before renaming, merging, or changing their category.')}</p>
         <div className="max-h-80 space-y-1 overflow-y-auto">

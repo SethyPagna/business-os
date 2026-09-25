@@ -11,6 +11,7 @@ import {
 } from '../../utils/workDrafts.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
@@ -229,6 +230,7 @@ export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCre
 
 export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange }: FeeFormProps) {
   const { t } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
   const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
@@ -437,15 +439,19 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
     }
   }
 
-  const discardPending = () => {
+  const discardPending = async () => {
     if (!pendingCreate || savingRef.current || !actorId) return
     const warning = `${t('write_outcome_unknown') || 'The previous save may already have succeeded.'} ${t('discard_changes') || 'Discard changes'}?`
-    if (!window.confirm(warning)) return
+    if (!(await askConfirm({ title: t('discard_changes') || 'Discard changes', message: warning, confirmLabel: t('discard') || 'Discard', danger: true }))) return
+    // Re-check after the await: the pending create may have settled meanwhile.
+    if (savingRef.current) return
     discardPendingFeeCreate(actorId, pendingCreate.client_request_id)
     setPendingCreate(null)
   }
 
   return (
+    <>
+    {confirmDialog}
     <form
       className="space-y-4"
       onSubmit={(event) => {
@@ -674,7 +680,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
               : (t('save_fee') || 'Save Expense')}
         </button>
         {pendingCreate ? (
-          <button className="btn-secondary" type="button" disabled={saving} onClick={discardPending}>
+          <button className="btn-secondary" type="button" disabled={saving} onClick={() => void discardPending()}>
             {t('discard_retry') || 'Discard retry'}
           </button>
         ) : (
@@ -686,5 +692,6 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         )}
       </div>
     </form>
+    </>
   )
 }
