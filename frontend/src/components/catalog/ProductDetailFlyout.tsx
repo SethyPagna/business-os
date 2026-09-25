@@ -10,8 +10,6 @@ import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Leaf from 'lucide-react/dist/esm/icons/leaf.js'
 import TriangleAlert from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Users2 from 'lucide-react/dist/esm/icons/users.js'
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import { StatusPill } from './catalogUi'
@@ -205,7 +203,6 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   if (!product) return null
 
   const gallery = view.gallery.length ? view.gallery : []
-  const activeImage = gallery[Math.min(activeIndex, Math.max(gallery.length - 1, 0))] || ''
   const parsed = parseProductDescription(product.description)
   const categoryValues = multiValues(product.categories, product.category)
   const brandValues = multiValues(product.brands, product.brand)
@@ -272,68 +269,37 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-          {/* One image at a time, as a card. Arrows step through the set and
-              the image itself opens the lightbox, where the photos can be
-              viewed on their own without the rest of the page. The thumbnail
-              strip below stays as a direct way to jump to a specific photo. */}
-          <div className="relative aspect-[4/3] max-h-[22rem] w-full bg-slate-100 dark:bg-neutral-800 sm:max-h-[26rem]">
-            {activeImage ? (
-              <button
-                type="button"
-                className="block h-full w-full cursor-zoom-in"
-                onClick={() => setLightboxOpen(true)}
-                aria-label={copy('viewImages', 'View images')}
-              >
-                <CatalogProductImage src={activeImage} alt={galleryImageAlt} className="h-full w-full object-contain" />
-              </button>
-            ) : (
-              <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
-                <ShoppingBag className="h-14 w-14" />
-              </div>
-            )}
-            {gallery.length > 1 ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveIndex((current) => (current - 1 + gallery.length) % gallery.length)}
-                  aria-label={copy('prevImage', 'Previous image')}
-                  className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-700 shadow-md backdrop-blur transition hover:bg-white dark:bg-neutral-900/85 dark:text-neutral-100 dark:hover:bg-neutral-900"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveIndex((current) => (current + 1) % gallery.length)}
-                  aria-label={copy('nextImage', 'Next image')}
-                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-700 shadow-md backdrop-blur transition hover:bg-white dark:bg-neutral-900/85 dark:text-neutral-100 dark:hover:bg-neutral-900"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white" aria-live="polite" aria-atomic="true">
-                  {activeIndex + 1}/{gallery.length}
-                </div>
-              </>
-            ) : null}
-          </div>
-          {gallery.length > 1 ? (
-            <div className="flex gap-2 overflow-x-auto overscroll-x-contain p-3">
+          {/* Owner, 2026-09-25: the photos are a small album row -- square
+              cover-cropped tiles that scroll sideways -- so the name, price
+              and details are on screen at once instead of under one large
+              image. A tile opens the full-screen viewer at that photo. */}
+          {gallery.length ? (
+            <div
+              className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 pt-4"
+              data-product-detail-album="true"
+            >
               {gallery.map((image, index) => (
                 <button
                   type="button"
                   key={`${image}-${index}`}
-                  onClick={() => setActiveIndex(index)}
-                  // The thumbnail image is deliberately alt="" (it repeats the
-                  // photo above), which left this button with no accessible
-                  // name at all -- a screen reader read a row of "button".
+                  onClick={() => {
+                    setActiveIndex(index)
+                    setLightboxOpen(true)
+                  }}
+                  // The tile image is alt="" after the first (the label
+                  // names each one), so the button carries the position.
                   aria-label={imageLabel(index)}
-                  aria-current={index === activeIndex ? 'true' : undefined}
-                  className={`h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg border-2 ${index === activeIndex ? 'border-slate-900 dark:border-white' : 'border-transparent'}`}
+                  className="h-28 w-28 shrink-0 snap-start overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 transition hover:ring-slate-400 sm:h-32 sm:w-32 dark:bg-neutral-800 dark:ring-neutral-700"
                 >
-                  <CatalogProductImage src={image} alt="" className="h-full w-full object-cover" />
+                  <CatalogProductImage src={image} alt={index === 0 ? galleryImageAlt : ''} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>
-          ) : null}
+          ) : (
+            <div className="mx-4 mt-4 flex h-28 w-28 items-center justify-center rounded-xl bg-slate-100 dark:bg-neutral-800 text-slate-300" aria-hidden="true">
+              <ShoppingBag className="h-10 w-10" />
+            </div>
+          )}
 
           <div className="space-y-4 p-4 pt-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -451,6 +417,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             index={activeIndex}
             onClose={() => setLightboxOpen(false)}
             onIndexChange={(index: number) => setActiveIndex(index)}
+            variant="immersive"
             labels={{
               prev: copy('prevImage', 'Previous image'),
               next: copy('nextImage', 'Next image'),

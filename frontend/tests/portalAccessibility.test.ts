@@ -97,7 +97,9 @@ runTest('a product image is described by the product, never by the word "Product
   )
   const flyout = read('ProductDetailFlyout.tsx')
   assert.match(flyout, /const galleryImageAlt = \[product\.name, brandValues\[0\]\]/, 'the sheet photo does the same')
-  assert.match(flyout, /alt=\{galleryImageAlt\}/)
+  // P-public-6: the photos are an album row; the first tile carries the
+  // product description, the rest are named by their own button labels.
+  assert.match(flyout, /alt=\{index === 0 \? galleryImageAlt : ''\}/)
 })
 
 runTest('the logo and cover images name the business or hide themselves', () => {
@@ -116,7 +118,10 @@ runTest('the product-sheet thumbnail strip names each thumbnail', () => {
   // On the base tree each thumbnail button contained only an alt="" image,
   // so a reader announced a row of bare "button".
   assert.match(flyout, /aria-label=\{imageLabel\(index\)\}/, 'each thumbnail says which image it is')
-  assert.match(flyout, /aria-current=\{index === activeIndex \? 'true' : undefined\}/, 'and which one is showing')
+  // P-public-6: the strip is now the album itself (every tile opens the
+  // full-screen viewer), so there is no "currently showing" tile to mark --
+  // the viewer's own counter announces the position.
+  assert.match(flyout, /data-product-detail-album="true"/)
   assert.match(flyout, /const imageLabel = \(index: number\) => copy\('dotsLabel'/, 'the label is translated, not hardcoded')
 })
 

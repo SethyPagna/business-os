@@ -707,6 +707,7 @@ export default function CatalogPreviewSurface({
             index={productGalleryView.index}
             onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
             onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
+            variant="immersive"
             labels={{
               prev: copy('prevImage', 'Prev'),
               next: copy('nextImage', 'Next'),

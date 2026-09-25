@@ -6,6 +6,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import ZoomIn from 'lucide-react/dist/esm/icons/zoom-in.js'
 import ZoomOut from 'lucide-react/dist/esm/icons/zoom-out.js'
+import { swipeDirection } from './lightboxSwipe.ts'
 
 /**
  * Reusable gallery lightbox with arrows, dot navigation, and thumbnail rail.
@@ -34,6 +35,11 @@ type ImageGalleryLightboxProps = {
   onIndexChange?: (index: number) => void
   labels?: LightboxLabels
   renderImage?: (src: string, alt: string, className: string) => ReactNode
+  // 'immersive' (the public storefront, owner 2026-09-25): a solid dark
+  // full-screen viewer with a top bar (counter + close), arrows, and a
+  // horizontal swipe between photos; no thumbnail rail -- the caller's own
+  // album row already is one. 'default' (admin Products / POS) is unchanged.
+  variant?: 'default' | 'immersive'
 }
 
 type LabelValues = Record<string, string | number>
@@ -61,7 +67,9 @@ export default function ImageGalleryLightbox({
   onIndexChange,
   labels = {},
   renderImage,
+  variant = 'default',
 }: ImageGalleryLightboxProps) {
+  const immersive = variant === 'immersive'
   const safeImages = Array.isArray(images) ? images.filter(Boolean) as string[] : []
   const total = safeImages.length
   const safeIndex = total ? Math.max(0, Math.min(index, total - 1)) : 0
@@ -96,6 +104,7 @@ export default function ImageGalleryLightbox({
   const panStartRef = useRef<{ pointer: PanPointer; zoom: ZoomState } | null>(null)
   const pinchStartRef = useRef<{ distance: number; scale: number; midpoint: PanPointer; zoom: ZoomState } | null>(null)
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null)
+  const swipeStartRef = useRef<PanPointer | null>(null)
 
   function formatLabel(template: string, values: LabelValues) {
     return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
@@ -184,6 +193,7 @@ export default function ImageGalleryLightbox({
   function handleTouchStart(event: ReactTouchEvent<HTMLDivElement>) {
     if (event.touches.length === 2) {
       panStartRef.current = null
+      swipeStartRef.current = null
       const [a, b] = [event.touches[0], event.touches[1]]
       const pointA = { x: a.clientX, y: a.clientY }
       const pointB = { x: b.clientX, y: b.clientY }
@@ -208,6 +218,8 @@ export default function ImageGalleryLightbox({
       lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY }
       if (zoomRef.current.scale > MIN_SCALE) {
         panStartRef.current = { pointer: { x: touch.clientX, y: touch.clientY }, zoom: zoomRef.current }
+      } else if (immersive) {
+        swipeStartRef.current = { x: touch.clientX, y: touch.clientY }
       }
     }
   }
@@ -235,6 +247,13 @@ export default function ImageGalleryLightbox({
   }
 
   function handleTouchEnd(event: ReactTouchEvent<HTMLDivElement>) {
+    const swipeStart = swipeStartRef.current
+    swipeStartRef.current = null
+    if (swipeStart && event.touches.length === 0 && event.changedTouches.length && zoomRef.current.scale <= MIN_SCALE && total > 1) {
+      const touch = event.changedTouches[0]
+      const step = swipeDirection(touch.clientX - swipeStart.x, touch.clientY - swipeStart.y)
+      if (step) setIndex(safeIndex + step)
+    }
     if (event.touches.length < 2) pinchStartRef.current = null
     if (event.touches.length === 0) panStartRef.current = null
   }
@@ -290,6 +309,76 @@ export default function ImageGalleryLightbox({
   if (!open || !total) return null
 
   const isZoomed = zoom.scale > MIN_SCALE
+
+  if (immersive) {
+    const barButton = 'flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-35'
+    const arrowButton = 'absolute top-1/2 z-20 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/25'
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[90] flex flex-col bg-neutral-950 text-white"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || undefined}
+        data-lightbox-variant="immersive"
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 px-3 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5">
+          <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-medium tabular-nums" aria-live="polite" aria-atomic="true">
+            {formatLabel(copy.imageCount, { current: safeIndex + 1, total })}
+          </span>
+          <div className="flex items-center gap-2">
+            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale - ZOOM_BUTTON_STEP)} disabled={!isZoomed} aria-label="Zoom out">
+              <ZoomOut className="h-5 w-5" />
+            </button>
+            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale + ZOOM_BUTTON_STEP)} disabled={zoom.scale >= MAX_SCALE} aria-label="Zoom in">
+              <ZoomIn className="h-5 w-5" />
+            </button>
+            <button type="button" className={barButton} onClick={() => onClose?.()} aria-label={copy.close}>
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+        </div>
+        {/* Same stage and gestures as the default layout; at 1x a horizontal
+            swipe steps between photos (swipeDirection), pinch/double-tap
+            zoom as before. */}
+        <div
+          ref={stageRef}
+          className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden pb-[env(safe-area-inset-bottom)] ${isZoomed ? 'cursor-move' : ''}`}
+          style={{ touchAction: isZoomed ? 'none' : 'pan-y' }}
+          onWheel={handleWheel}
+          onDoubleClick={handleDoubleClick}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+        >
+          <div
+            ref={imageWrapRef}
+            className="flex h-full w-full select-none items-center justify-center"
+            style={{
+              transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`,
+              transition: panStartRef.current || pinchStartRef.current ? 'none' : 'transform 150ms ease-out',
+            }}
+          >
+            {renderGalleryImage(currentImage, title || 'Image', 'block h-full w-full object-contain')}
+          </div>
+          {total > 1 && !isZoomed ? (
+            <>
+              <button type="button" className={`${arrowButton} left-2 sm:left-4`} onClick={() => setIndex(safeIndex - 1)} aria-label={copy.prev}>
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+              <button type="button" className={`${arrowButton} right-2 sm:right-4`} onClick={() => setIndex(safeIndex + 1)} aria-label={copy.next}>
+                <ChevronRight className="h-6 w-6" />
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>,
+      document.body,
+    )
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-2 backdrop-blur-md sm:p-4" onClick={() => onClose?.()}>
