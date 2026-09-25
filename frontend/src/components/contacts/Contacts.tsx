@@ -69,12 +69,6 @@ const loadDeliveryTab = async (): Promise<{ DeliveryTab: ComponentType<ContactTa
   await import('./DeliveryTab') as unknown as { DeliveryTab: ComponentType<ContactTabProps> }
 )
 type DuplicatesTabProps = ContactTabProps & {
-  // Table kind matches contactDuplicates.ts's ContactTableKind
-  // ('customers' | 'suppliers' | 'delivery_contacts'); tab id is this
-  // page's own ContactTabId ('customers' | 'suppliers' | 'delivery') --
-  // DuplicatesTab maps between the two before calling this, since it's
-  // the one place both vocabularies need to meet.
-  onResolve?: (tab: ContactTabId, name: string) => void
   includeSuppliers?: boolean
 }
 
@@ -150,13 +144,10 @@ export default function Contacts() {
       id !== 'suppliers' || canSeeSuppliers)
     return (readStoredHubSection(CONTACTS_HUB_STORAGE_KEY, validIds) as ContactTabId | null) || 'customers'
   }, getHubDestinations('contacts', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
-  // Set when "Resolve" is clicked on a cluster in the Possible Duplicates
-  // tab -- switches to the record's real tab and seeds that tab's own
-  // search box with the contact's name, so the matching records land
-  // side by side in the list the operator already knows how to edit/
-  // merge/delete from. Keyed per-tab (not a single shared string) so
-  // switching tabs manually doesn't leave a stale search behind on a
-  // tab the operator didn't ask to jump to.
+  // Seeds a tab's own search box when an EntityLink elsewhere in the app
+  // opens a contact by name or phone. Keyed per-tab (not a single shared
+  // string) so switching tabs manually doesn't leave a stale search behind
+  // on a tab the operator didn't ask to jump to.
   const [resolveSearch, setResolveSearch] = useState<Partial<Record<ContactTabId, string>>>({})
   // EntityLink queues the exact name/phone before guarded navigation. Consume
   // it once the Contacts hub is active so customer, supplier, and delivery
@@ -190,10 +181,6 @@ export default function Contacts() {
     window.addEventListener('bos:entity-focus', consumeFocus)
     return () => window.removeEventListener('bos:entity-focus', consumeFocus)
   }, [canSeeSuppliers, isActive, setTab])
-  const resolveContact = (targetTab: ContactTabId, name: string): void => {
-    setResolveSearch((current) => ({ ...current, [targetTab]: name }))
-    setTab(targetTab)
-  }
 
   const sections: HubSectionDef[] = TABS(t).map(({ id, label, icon }) => ({
     id,
@@ -234,7 +221,7 @@ export default function Contacts() {
         ) : null}
         {tab === 'duplicates' ? (
           <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'conflicts'} />}>
-            <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} includeSuppliers={canSeeSuppliers} />
+            <DuplicatesTab t={t} notify={notify} active={isActive} includeSuppliers={canSeeSuppliers} />
           </Suspense>
         ) : null}
       </div>

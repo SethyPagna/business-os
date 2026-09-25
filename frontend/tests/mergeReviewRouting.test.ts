@@ -19,8 +19,9 @@ assert.deepEqual(request.remove_rows, [], 'leading-zero review must not infer in
 const tab = readFileSync(new URL('../src/components/products/ProductDuplicatesTab.tsx', import.meta.url), 'utf8')
 assert.match(tab, /onClick=\{\(\) => void openSelectedGroupReview\(clusters\.filter\(\(cluster\) => cluster\.severity === 'leading_zero'\), \{\}\)\}/)
 assert.doesNotMatch(tab, /onClick=\{onMergeLeadingZero\}/)
-assert.match(tab, /t\('cost_price'\).*money\(product\.cost_price_usd\)/)
-assert.match(tab, /t\('selling_price'\).*money\(product\.selling_price_usd\)/)
+// N2: the compact "Cost:" / "Selling:" labels on the conflict row.
+assert.match(tab, /t\('cost'\).*money\(product\.cost_price_usd\)/)
+assert.match(tab, /t\('selling'\).*money\(product\.selling_price_usd\)/)
 assert.doesNotMatch(tab, /money\(product\.cost_price_usd\)\} →/)
 assert.match(tab, /candidate\.products\.some\(\(product\) => Number\(product\.id\) === id\)/, 'collision routing requires persisted server evidence for both ids')
 assert.match(tab, /products: cluster\.products\.filter\(\(product\) => ids\.has\(Number\(product\.id\)\)\)/, 'collision review excludes unrelated siblings')

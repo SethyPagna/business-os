@@ -39,8 +39,8 @@ for (const source of [inventory, history]) {
 }
 
 const exportCallback = (variable(branches, 'openBranchExport').initializer as ts.CallExpression).arguments[0].getText()
-type Authority = { actorId: string; allowed: boolean }
-async function branchScenario(tab: string, authority: Authority, onRead?: (read: number, authority: Authority) => void) {
+type Authority = { actorId: string; allowed: boolean; canViewCosts?: boolean }
+async function branchScenario(tab: string, authority: Authority, onRead?: (read: number, authority: Authority) => void, cost?: unknown) {
   const reads: number[] = [], published: any[] = [], notices: string[] = []
   const inFlight = { current: false }
   const readPage = async (id: number) => {
@@ -48,7 +48,7 @@ async function branchScenario(tab: string, authority: Authority, onRead?: (read:
     onRead?.(reads.length, authority)
     return tab === 'transfers'
       ? { items: [{ id, product_name: 'Tea', quantity: 2 }], totalPages: 2 }
-      : [{ name: 'Tea', branch_quantity: 2 }]
+      : [{ name: 'Tea', branch_quantity: 2, ...(cost !== undefined ? { purchase_price_usd: cost } : {}) }]
   }
   const run = evaluate(exportCallback, {
     branchExportAuthorityRef: { current: authority }, branchExportInFlightRef: inFlight,
@@ -86,6 +86,23 @@ for (const tab of ['branches', 'transfers']) {
     assert.equal(result.published.length, 0, 'late results never open the export dialog')
   }
 }
+for (const canViewCosts of [false, true]) {
+  for (const cost of [undefined, null, '', 0, 3.25]) {
+    const result = await branchScenario('branches', { actorId: '7', allowed: true, canViewCosts }, undefined, cost)
+    const row = result.published[0].rows[0]
+    assert.equal(Object.hasOwn(row, 'Cost_USD'), canViewCosts, 'hidden acquisition columns are omitted, never fabricated as zero')
+    assert.equal(Object.hasOwn(row, 'Stock_Value_USD'), canViewCosts)
+    if (canViewCosts) {
+      const expected = typeof cost === 'number' ? cost : ''
+      assert.equal(row.Cost_USD, expected, 'known zero is numeric; absent cost remains blank')
+      assert.equal(row.Stock_Value_USD, expected === '' ? '' : expected * 2)
+    }
+  }
+}
+const revokedCost = await branchScenario('branches', { actorId: '7', allowed: true, canViewCosts: true }, (count, authority) => {
+  if (count === 1) authority.canViewCosts = false
+}, 3.25)
+assert.equal(revokedCost.published.length, 0, 'cost access revoked during a stock export invalidates the captured rows')
 
 const runExportSource = variable(dialog, 'runExport').initializer!.getText()
   .replace("import('../../utils/csv.ts')", 'loadCsv()')
@@ -124,5 +141,5 @@ for (const format of ['csv', 'xlsx', 'pdf']) for (const revoke of ['never', 'bef
 const legacyAllowed = evaluate(variable(dialog, 'exportAllowed').initializer!.getText(), { exportAuthorityRef: { current: undefined }, mountedRef: { current: true } })
 assert.equal(legacyAllowed(), true, 'existing callers retain default export behavior')
 assert.match(branches, /const canExportBranch = can\('branches', 'export'\)/)
-assert.match(branches, /canExport=\{\(\) => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId\}/)
-console.log('PASS Inventory/history effective admin authority, 24 branch export tier cases, actor/revoke read races and CSV/XLSX/PDF publication guards')
+assert.match(branches, /canExport=\{\(\) => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId && branchExportAuthorityRef.current.canViewCosts === exportDialog.canViewCosts\}/)
+console.log('PASS effective admin authority, branch export tiers, hidden/missing/zero costs, actor/cost revocation races and CSV/XLSX/PDF publication guards')

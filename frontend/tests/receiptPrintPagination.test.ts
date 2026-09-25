@@ -301,7 +301,31 @@ await runTest('both print delivery paths re-measure inside the actual print docu
   const surfaceSource = fs.readFileSync(new URL('../src/utils/printSurface.ts', import.meta.url), 'utf8')
   assert.match(surfaceSource, /await waitForFrameAssets\(frameWindow, frameDocument\)[\s\S]{0,200}if \(options\.beforePrint\)/,
     'printHtmlInHiddenFrame invokes beforePrint AFTER assets settle and BEFORE print()')
-  assert.match(surfaceSource, /if \(!printed\) frameWindow\.print\(\)/)
+  // The fallback now rechecks report authority. Keep the receipt invariant:
+  // assets -> measurement -> guarded execCommand -> guarded print fallback,
+  // with no second job when execCommand already succeeded.
+  const assertPrintOrder = (src: string) => {
+    const assets = src.indexOf('await waitForFrameAssets(frameWindow, frameDocument)')
+    const measure = src.indexOf('await options.beforePrint(frameWindow, frameDocument)', assets)
+    const guard = src.indexOf('if (!permitted()) return false', measure)
+    const exec = src.indexOf("frameDocument.execCommand?.('print', false, undefined)", guard)
+    const fallback = src.indexOf('if (!printed) {', exec)
+    assert.ok(assets >= 0 && measure > assets && guard > measure && exec > guard && fallback > exec,
+      'settled assets and receipt measurement precede permission and the first print attempt')
+    assert.match(src.slice(fallback), /^if \(!printed\) \{\s*if \(!permitted\(\)\) return false\s*frameWindow\.print\(\)\s*\}/,
+      'fallback must be guarded and run only when execCommand did not print')
+  }
+  assertPrintOrder(surfaceSource)
+  for (const [from, to] of [
+    ['await options.beforePrint(frameWindow, frameDocument)', 'void options.beforePrint(frameWindow, frameDocument)'],
+    ['if (!printed) {', 'if (true) {'],
+    ['if (!permitted()) return false\n      frameWindow.print()', 'frameWindow.print()'],
+  ]) {
+    const normalized = surfaceSource.replace(/\r\n/g, '\n')
+    const broken = normalized.replace(from, to)
+    assert.notEqual(broken, normalized, 'negative control must alter the implementation')
+    assert.throws(() => assertPrintOrder(broken), 'lost measurement/order/permission protection must fail')
+  }
 })
 
 // --- P7-receipt-page-modes: pageSizeMode fallbacks -------------------------

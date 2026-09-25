@@ -23,6 +23,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { buildProductFilterSections } from '../src/components/products/helpers/productMenuHelpers.ts'
 
 const surface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
@@ -210,8 +211,10 @@ runTest('the list surface renders only reading affordances on a group row', () =
 // ExportFieldsModal printed "for {count} product(s)" to operators.
 //
 // A report page is mostly counts, so this is pinned for the whole Products
-// tree. Three interpolation idioms are in use and all three count as handled:
+// tree. The original interpolation idioms remain handled:
 //   .replace('{x}', ...)   .split('{x}').join(...)   replaceVars(..., { x })
+// A local fill(tr(...), { x }) is accepted only after executing its actual
+// formatter and associating this key literal with this exact variables object.
 const INTERPOLATION_WINDOW = 700
 const INTERPOLATION_LOOKBEHIND = 200
 
@@ -220,6 +223,71 @@ function replaceVarsHandles(window: string, name: string): boolean {
     `replaceVars\\([\\s\\S]{0,${INTERPOLATION_WINDOW}}?,\\s*\\{[\\s\\S]{0,${INTERPOLATION_WINDOW}}?\\b${name}\\b\\s*(?::|,|\\})`,
   ).test(window)
 }
+
+function fillInterpolations(source: string): Map<number, Set<string>> {
+  const handled = new Map<number, Set<string>>()
+  if (!/function fill\s*\(/.test(source)) return handled
+  const file = ts.createSourceFile('product.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const declarations: ts.Node[] = []
+  const findBindings = (node: ts.Node): void => {
+    if ((ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node) || ts.isParameter(node))
+      && node.name && ts.isIdentifier(node.name) && node.name.text === 'fill') declarations.push(node)
+    ts.forEachChild(node, findBindings)
+  }
+  findBindings(file)
+  // Do not let another function/parameter with the same name inherit credit.
+  if (declarations.length !== 1 || !ts.isFunctionDeclaration(declarations[0]) || !declarations[0].body) return handled
+  const definition = declarations[0].getText(file)
+  const compiled = ts.transpileModule(definition, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+  const format = new Function(`${compiled}; return fill`)() as (template: string, vars: Record<string, string | number>) => string
+  assert.equal(format('{name}|{quantity}|{name}|{missing}', { name: 'A$&', quantity: 0 }), 'A$&|0|A$&|{missing}',
+    'the production fill formatter must replace supplied/repeated placeholders literally and preserve missing ones for detection')
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'fill') {
+      const [translated, vars] = node.arguments
+      if (translated && ts.isCallExpression(translated) && ts.isIdentifier(translated.expression)
+        && ['t', 'tr'].includes(translated.expression.text) && vars && ts.isObjectLiteralExpression(vars)
+        && !vars.properties.some(ts.isSpreadAssignment)) {
+        const key = translated.arguments.find(ts.isStringLiteralLike)
+        if (key) {
+          const names = new Set<string>()
+          for (const property of vars.properties) {
+            if ((ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+              && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))) names.add(property.name.text)
+          }
+          for (const name of names) {
+            assert.equal(format(`{${name}}|{${name}}`, { [name]: 'probe$&' }), 'probe$&|probe$&',
+              `the production fill formatter must substitute the call's ${name} property`)
+          }
+          handled.set(key.getStart(file), names)
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return handled
+}
+
+runTest('fill interpolation is verified and cannot hide missing or neighboring substitutions', () => {
+  const adapter = readFileSync(new URL('../src/components/products/productResolveAdapter.ts', import.meta.url), 'utf8')
+  const parsed = ts.createSourceFile('adapter.ts', adapter, ts.ScriptTarget.Latest, true)
+  const definition = parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'fill')
+  assert.ok(definition, 'the production formatter must exist')
+  const probe = (calls: string, formatter = definition.getText(parsed)): boolean => {
+    const source = `${formatter}\n${calls}`
+    return fillInterpolations(source).get(source.indexOf("'key'"))?.has('name') ?? false
+  }
+  assert.equal(probe("fill(tr(t, 'key', '{name}'), { name: 'Rose' })"), true)
+  assert.equal(probe("fill(tr(t, 'key', '{name}'), { name })"), true, 'shorthand properties count')
+  assert.equal(probe("fill(tr(t, 'key', '{name}'), { remaining: 1 })"), false, 'renamed property leaves the placeholder missing')
+  assert.equal(probe("fill(tr(t, 'key', '{name}'), {})"), false, 'missing variables are not exempted')
+  assert.equal(probe("fill(tr(t, 'other', '{name}'), { name }); tr(t, 'key', '{name}')"), false, 'a nearby filled call cannot cover another key')
+  assert.equal(probe("fill(tr(t, 'key', '{name}'), { name, ...unknown })"), false, 'an unchecked spread cannot replace verified variables')
+  assert.equal(probe("function shadow(fill) { return fill(tr(t, 'key', '{name}'), { name }) }"), false, 'shadowed fill is not the verified formatter')
+  assert.throws(() => probe("fill(tr(t, 'key', '{name}'), { name })", 'function fill(template, vars) { return template }'),
+    /production fill formatter must replace/, 'a replaced/no-op formatter must fail even when the call supplies matching names')
+})
 
 runTest('no Products surface renders an uninterpolated {placeholder}', () => {
   const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
@@ -249,6 +317,7 @@ runTest('no Products surface renders an uninterpolated {placeholder}', () => {
   const leaks: string[] = []
   for (const file of files) {
     const src = readFileSync(file, 'utf8')
+    const filled = fillInterpolations(src)
     for (const [key, marks] of keyPlaceholders) {
       for (const quote of ["'", '"', '`']) {
         let at = src.indexOf(quote + key + quote)
@@ -263,6 +332,7 @@ runTest('no Products surface renders an uninterpolated {placeholder}', () => {
               && !window.includes(`.split('${mark}')`)
               && !window.includes(`.split("${mark}")`)
               && !replaceVarsHandles(window, name)
+              && !filled.get(at)?.has(name)
           })
           if (unhandled.length) {
             const line = src.slice(0, at).split('\n').length

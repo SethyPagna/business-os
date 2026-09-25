@@ -40,6 +40,8 @@ const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   return_detail: null,
   branch_transfer: null,
   inventory_transfer: null,
+  // A parked contact Resolve carries its choices in the chip itself.
+  contact_resolve: null,
 }
 
 const useApp = useAppHook as unknown as () => {

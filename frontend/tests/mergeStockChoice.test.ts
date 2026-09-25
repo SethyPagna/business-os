@@ -31,6 +31,7 @@ const read = (...parts: string[]): string => readFileSync(join(here, '..', 'src'
 const dialog = read('components', 'products', 'MergeStockChoiceDialog.tsx')
 const hook = read('components', 'products', 'useMergeStockChoice.tsx')
 const duplicatesTab = read('components', 'products', 'ProductDuplicatesTab.tsx')
+const productResolveAdapter = read('components', 'products', 'productResolveAdapter.ts')
 const selectedConflictMerge = read('utils', 'selectedConflictMerge.ts')
 const selectedConflictReview = read('components', 'products', 'SelectedConflictMergeReviewModal.tsx')
 const productsPage = read('components', 'products', 'Products.tsx')
@@ -167,13 +168,22 @@ test('a merge that changes nothing but the row count still needs no dialog', () 
 test('exact-identity twin surfaces use the shared stock choice flow', () => {
   assert.match(hook, /export function useMergeStockChoice/)
   for (const [label, src] of [
-    ['Conflicts/duplicates tab', duplicatesTab],
     ['products list exact-duplicate resolver', productsPage],
   ] as const) {
     assert.match(src, /useMergeStockChoice/, `${label} must route through the shared flow`)
     assert.match(src, /mergeWithChoice\(/, `${label} must merge through mergeWithChoice`)
     assert.match(src, /\{mergeStockChoiceDialog\}/, `${label} must render the dialog`)
   }
+  // The Duplicates tab (cross-identity conflicts, owner N1/N3 of 23 Sep 2026)
+  // moved to the shared Resolve grid: the product adapter asks every merged
+  // product with stock Carry or Write off in the grid and sends that answer
+  // with its merge -- never a merge of stock without an answer
+  // (behaviour: tests/productResolveAdapter.test.ts).
+  assert.match(duplicatesTab, /createProductResolveAdapter\(/)
+  assert.match(duplicatesTab, /<ResolveModal/)
+  assert.doesNotMatch(duplicatesTab, /mergeWithChoice\(/, 'the tab has one merge path: the Resolve grid')
+  assert.match(productResolveAdapter, /if \(!ctx\.data\.previews\.get\(id\)\?\.needsStockChoice\) return undefined/)
+  assert.match(productResolveAdapter, /api\.merge\(token\.keepId, step\.mergeId, step\.stock, keep\)/)
   // No surface may reach past the flow and merge without an answer.
   for (const [label, src] of [['duplicates tab', duplicatesTab], ['products page', productsPage], ['product form', productForm]] as const) {
     assert.ok(!/mergePossiblySameProducts\(/.test(src), `${label} must not call the raw merge transport directly`)
@@ -296,7 +306,11 @@ test('every child row under the name is swept -- no rows[0], no LIMIT 1', () => 
   // The list surfaces loop EVERY member/removal rather than acting on the first.
   assert.match(productsPage, /info\.members\.filter\(\(m\) => Number\(m\.id\) !== Number\(keepId\)\)/)
   assert.match(productsPage, /for \(const other of others\)/)
-  assert.match(duplicatesTab, /for \(const other of removals\)/)
+  // The Duplicates tab hands the Resolve grid the keeper and EVERY removal, and
+  // the adapter merges every included product, one step each.
+  assert.match(duplicatesTab, /products: \[keeper, \.\.\.removals\]/)
+  assert.match(productResolveAdapter, /const steps = ctx\.merged\.map\(/)
+  assert.match(productResolveAdapter, /for \(let index = state\.index; index < total; index \+= 1\)/)
 })
 
 // THE WHOLE-CATALOG RUN, at both ends. "Merge duplicate products" is the one

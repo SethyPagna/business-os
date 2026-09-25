@@ -173,7 +173,7 @@ export function printFrameReleased(): Promise<void> {
  */
 export async function printHtmlInHiddenFrame(
   html: string,
-  options: { beforePrint?: (frameWindow: Window, frameDocument: Document) => void | Promise<void> } = {},
+  options: { beforePrint?: (frameWindow: Window, frameDocument: Document) => void | Promise<void>; canPrint?: () => boolean } = {},
 ): Promise<boolean> {
   if (typeof document === 'undefined' || !document.body) return false
   // Never two at once: the previous document is dropped before this one is
@@ -206,8 +206,20 @@ export async function printHtmlInHiddenFrame(
     if (options.beforePrint) {
       try { await options.beforePrint(frameWindow, frameDocument) } catch { /* fallback @page rule already in the document */ }
     }
+    const permitted = () => {
+      if (!options.canPrint) return true
+      let allowed = false
+      try { allowed = options.canPrint() } catch { /* export authority must fail closed */ }
+      if (!allowed) {
+        if (activePrintFrame === frame) discardActivePrintFrame()
+        else frame.remove()
+        return false
+      }
+      return true
+    }
     removeFrameAfterPrinting(frame, frameWindow)
     frameWindow.focus()
+    if (!permitted()) return false
     // Safari (every iOS browser is Safari's engine) and Chromium print the
     // frame's own document through execCommand, which returns true, so
     // print() below is skipped; Firefox returns false and is served by
@@ -218,7 +230,10 @@ export async function printHtmlInHiddenFrame(
     } catch {
       printed = false
     }
-    if (!printed) frameWindow.print()
+    if (!printed) {
+      if (!permitted()) return false
+      frameWindow.print()
+    }
     return true
   } catch (error) {
     discardActivePrintFrame()

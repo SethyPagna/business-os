@@ -7,7 +7,7 @@ const ts = require('typescript')
 const { Hono } = require('hono')
 const root = path.join(__dirname, '../src')
 const modules = new Map()
-let user, dbOpens = 0, checks = 0
+let user, branchRows, dbOpens = 0, checks = 0
 function load(filename) {
   if (modules.has(filename)) return modules.get(filename).exports
   const mod = { exports: {} }; modules.set(filename, mod)
@@ -20,7 +20,9 @@ function load(filename) {
       c.set('user', user); return next()
     } }
     if (name === '../lib/db' || name === './db') return { ...load(path.join(root, 'lib/db.ts')), getDb: () => {
-      dbOpens++; throw new Error('D1 tripwire')
+      dbOpens++
+      if (branchRows) return { prepare: () => ({ all: async () => branchRows }) }
+      throw new Error('D1 tripwire')
     } }
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), `${name}.ts`))
     return require(name)
@@ -110,6 +112,7 @@ app.route('/api/products', load(path.join(root, 'routes/products.ts')).default)
 app.route('/api/products', load(path.join(root, 'routes/productCost.ts')).default)
 app.route('/api/batches', load(path.join(root, 'routes/batches.ts')).default)
 app.route('/api/inventory', load(path.join(root, 'routes/inventory.ts')).default)
+app.route('/api/branches', load(path.join(root, 'routes/branches.ts')).default)
 const { commitStockSession } = load(path.join(root, 'lib/stockSession.ts'))
 const fixture = new Hono()
 fixture.use('*', async (c, next) => { c.set('user', user); await next() })
@@ -122,6 +125,18 @@ async function request(url, actor, method = 'GET', body) {
   return app.request(`http://test${url}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }, {})
 }
 async function main() {
+  branchRows = [{ id: 1, name: 'Tea', branch_quantity: 2, purchase_price_usd: 0, selling_price_usd: 3 }]
+  for (const allowed of [false, true]) {
+    const res = await request('/api/branches/1/stock', actor('staff', { branches: true, product_cost_view: allowed }))
+    assert.equal(res.status, 200)
+    const rows = await res.json()
+    assert.equal(rows[0].branch_quantity, 2)
+    assert.equal(rows[0].selling_price_usd, 3)
+    assert.equal(Object.hasOwn(rows[0], 'purchase_price_usd'), allowed, 'real branch stock route omits hidden costs before export')
+    if (allowed) assert.equal(rows[0].purchase_price_usd, 0, 'known zero remains available to an authorized viewer')
+    checks++
+  }
+  branchRows = undefined
   for (const actor of staff) {
     let res = await request('/api/products/1/cost-breakdown', actor)
     assert.equal(res.status, 403); assert.equal(dbOpens, 0)

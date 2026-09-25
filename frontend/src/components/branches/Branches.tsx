@@ -2,6 +2,8 @@ import ProductNameRail from '../shared/ProductNameRail'
 import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import type { PermissionUser } from '../../utils/permissions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -82,7 +84,7 @@ type BranchFlag = 0 | 1 | boolean
 type BranchModal = 'form' | 'transfer' | null
 type BranchTab = 'branches' | 'transfers'
 
-interface AppUser {
+type AppUser = NonNullable<PermissionUser> & {
   id?: string | number
   name?: string
 }
@@ -327,8 +329,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const canTransferStock = can('branches', 'transfer')
   const canEditBranch = can('branches', 'edit')
   const canExportBranch = can('branches', 'export')
-  const branchExportAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canExportBranch })
-  branchExportAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canExportBranch }
+  const canViewCosts = canViewAcquisitionCosts(user)
+  const branchExportAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canExportBranch, canViewCosts })
+  branchExportAuthorityRef.current = { actorId: String(user?.id ?? ''), allowed: canExportBranch, canViewCosts }
   // Same grant Inventory's own adjust/receive affordances check, because
   // POST /api/batches sits behind 'inventory' server-side -- a button the
   // server would 403 is worse than no button.
@@ -979,14 +982,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // its quantity for that branch in one response, so no page loop; one
   // fetch per active branch, flattened into Branch-per-row records for the
   // shared options dialog.
-  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; actorId: string } | null>(null)
+  const [exportDialog, setExportDialog] = useState<{ rows: Array<Record<string, unknown>>; baseName: string; actorId: string; canViewCosts: boolean } | null>(null)
   const [branchExportLoading, setBranchExportLoading] = useState(false)
   const branchExportInFlightRef = useRef(false)
-  useEffect(() => { setExportDialog(null) }, [canExportBranch, user?.id])
+  useEffect(() => { setExportDialog(null) }, [canExportBranch, canViewCosts, user?.id])
   const openBranchExport = useCallback(async () => {
     if (!branchExportAuthorityRef.current.allowed || branchExportInFlightRef.current) return
     const actorId = branchExportAuthorityRef.current.actorId
-    const isExportCurrent = () => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === actorId
+    const exportCosts = branchExportAuthorityRef.current.canViewCosts === true
+    const isExportCurrent = () => branchExportAuthorityRef.current.allowed
+      && branchExportAuthorityRef.current.actorId === actorId
+      && (branchExportAuthorityRef.current.canViewCosts === true) === exportCosts
     branchExportInFlightRef.current = true
     setBranchExportLoading(true)
     try {
@@ -1031,7 +1037,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           return
         }
         if (!isExportCurrent()) return
-        setExportDialog({ rows: exportRows, baseName: 'branch-transfers', actorId })
+        setExportDialog({ rows: exportRows, baseName: 'branch-transfers', actorId, canViewCosts: exportCosts })
         return
       }
 
@@ -1051,7 +1057,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       for (const { item: branch, value: stock } of stockLoad.successes) {
         for (const product of Array.isArray(stock) ? stock : []) {
           const quantity = Number(product.branch_quantity || 0)
-          const costUsd = Number(product.purchase_price_usd || 0)
+          const rawCost = product.purchase_price_usd
+          const costUsd = rawCost === null || rawCost === undefined || rawCost === '' ? null : Number(rawCost)
+          const knownCost = costUsd !== null && Number.isFinite(costUsd)
           rows.push({
             Branch: branch.name || `Branch ${branch.id}`,
             Product: product.name || '',
@@ -1059,8 +1067,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             Unit: product.unit || '',
             Quantity: quantity,
             Selling_USD: Number(product.selling_price_usd || 0),
-            Cost_USD: costUsd,
-            Stock_Value_USD: Math.round(quantity * costUsd * 100) / 100,
+            ...(exportCosts ? {
+              Cost_USD: knownCost ? costUsd : '',
+              Stock_Value_USD: knownCost ? Math.round(quantity * costUsd * 100) / 100 : '',
+            } : {}),
           })
         }
       }
@@ -1068,7 +1078,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('no_data_to_export', 'No data to export'), 'error')
         return
       }
-      if (isExportCurrent()) setExportDialog({ rows, baseName: 'branch-stock', actorId })
+      if (isExportCurrent()) setExportDialog({ rows, baseName: 'branch-stock', actorId, canViewCosts: exportCosts })
     } catch (error) {
       if (isExportCurrent()) notify(error instanceof Error && error.message ? error.message : tr('export_failed', 'Export failed.'), 'error')
     } finally {
@@ -1640,7 +1650,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </Modal>
       ) : null}
 
-      {exportDialog && canExportBranch && exportDialog.actorId === String(user?.id ?? '') ? (
+      {exportDialog && canExportBranch && exportDialog.actorId === String(user?.id ?? '') && exportDialog.canViewCosts === canViewCosts ? (
         <Suspense fallback={null}>
           <ExportOptionsDialog
             title={t('export_options_title') || 'Export options'}
@@ -1648,7 +1658,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             columns={columnsFromRows(exportDialog.rows)}
             rows={exportDialog.rows}
             rememberKey="branches"
-            canExport={() => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId}
+            canExport={() => branchExportAuthorityRef.current.allowed && branchExportAuthorityRef.current.actorId === exportDialog.actorId && branchExportAuthorityRef.current.canViewCosts === exportDialog.canViewCosts}
             t={t}
             notify={notify}
             onClose={() => setExportDialog(null)}

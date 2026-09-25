@@ -8,6 +8,11 @@ import {
   getBusinessSummaryDayRows,
   getBusinessSummaryPeriodRows,
   getBusinessSummarySalesRows,
+  businessSummarySalesRowsFromSnapshot,
+  readSalesReportSnapshot,
+  salesTotalsFromSnapshot,
+  SalesReportExportTooLargeError,
+  type SalesReportSnapshot,
   getSalesTotals,
   getDeliveryContactTotals,
   getSalesGroupedTotals,
@@ -55,6 +60,7 @@ import type { Env } from '../index'
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.onError((error, c) => {
+  if (error instanceof SalesReportExportTooLargeError) return c.json({ code: 'report_export_too_large', error: 'Export at most 10000 receipts at a time.' }, 413)
   if (error instanceof ReportMoneyPrecisionError) {
     const mapped = reportMoneyHttpError(error)
     return c.json({ error: mapped.message, code: error.code }, mapped.status)
@@ -294,6 +300,33 @@ export function gateBusinessSummarySaleRow(row: Record<string, unknown>, isAdmin
       : money_precision_mode !== undefined ? { money_precision_mode, money_complete, money_unknown_cost_lines, money_contributing_rows } : {}) }
 }
 
+/** The searched receipts define both detail and exact totals. Preserve the
+ * snapshot rows themselves: spreading a shaped row loses its diagnostic. */
+export function salesExportCohort(snapshot: SalesReportSnapshot, search: string): SalesReportSnapshot {
+  const selected = businessSummarySalesRowsFromSnapshot(snapshot).filter((row) => !search
+    || ['receipt_number', 'customer', 'customer_phone', 'cashier', 'branch', 'payment_method']
+      .some((key) => String(row[key] || '').toLowerCase().includes(search)))
+  const ids = new Set(selected.map((row) => Number(row.id)))
+  const voidIds = new Set(selected.filter((row) => row.status === 'cancelled').map((row) => Number(row.id)))
+  const sales = snapshot.sales.filter((row) => ids.has(Number(row.id)))
+  const items = snapshot.items.filter((row) => ids.has(Number(row.sale_id)))
+  const returns = snapshot.returns.filter((row) => ids.has(Number(row.sale_id)))
+  const returnIds = new Set(returns.map((row) => Number(row.id)))
+  const returnItems = snapshot.returnItems.filter((row) => returnIds.has(Number(row.return_id)))
+  return { sales, items, returns, returnItems, voidSales: sales.filter((row) => voidIds.has(Number(row.id))), deliveryFees: [],
+    precision_mode: [...sales, ...returns].some((row) => Number(row.money_precision_version) !== 1) ? 'exact_recorded' : 'canonical_v1',
+    row_count: sales.length + items.length + returns.length + returnItems.length }
+}
+
+function salesExportStamp(raw: string): number {
+  return new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`).getTime()
+}
+
+async function salesExportToken(payload: unknown): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(payload)))
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 export function gateCourierRow(row: Record<string, unknown>, isAdmin: boolean): Record<string, unknown> {
   if (isAdmin) return row
   const {
@@ -509,16 +542,93 @@ app.get('/grouped', async (c) => {
 // Bounded record pages for the existing Sales/Returns/Expenses report tabs.
 // Snapshot IDs exclude newly inserted/backdated records; they do not freeze
 // updates to existing rows. Caller must restart paging when filters change.
+// Ordinary reads remain available to report tabs. A full-walk export caller
+// must explicitly send intent=export; this prerequisite does not convert the
+// existing clients' loaded-row exports into protected full-walk exports.
 for (const kind of ['sales', 'returns', 'expenses'] as const) {
   app.get(`/business-summary/${kind}`, async (c) => {
     const user = c.get('user')
+    const intents = c.req.queries('intent')
+    if (intents && (intents.length !== 1 || intents[0] !== 'export')) {
+      return c.json({ error: 'intent must be export when provided' }, 400)
+    }
     const allowed = kind === 'sales' ? canReadSales(user) : kind === 'returns' ? canReadReturns(user) : canReadFees(user)
     if (!allowed) return c.json({ error: 'Forbidden' }, 403)
+    if (intents) {
+      const tier = getActionTier(user, kind === 'expenses' ? 'fees' : kind, 'export')
+      // Match permissionActions.ts: Returns review blocks export, whereas
+      // Sales view and Fees review permit it unless explicitly switched off.
+      if (kind === 'returns' ? tier !== 'full' : tier === 'none') return c.json({ error: 'Forbidden' }, 403)
+    }
     const query = c.req.query(); const db = getDb(c.env); const isAdmin = isAdminControlUser(user)
     let f: SalesFilters
     try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
     const pageSize = clampInt(query.pageSize, 250, 1, 500)
     if ((kind as string) === 'sales') {
+      if (intents) {
+        // A continuation is a complete frozen query plus token and ceiling.
+        // Reject partial/ambiguous state before any report read.
+        const keys = ['startDate', 'endDate', 'branchId', 'status', 'paymentMethod', 'createdFrom', 'createdTo',
+          'startTime', 'endTime', 'q', 'order', 'pageSize', 'snapshotMaxId', 'exportToken', 'afterCreatedAt', 'afterId', 'verifyOnly']
+        const has = (key: string) => query[key] !== undefined
+        const hasCursor = has('afterId') || has('afterCreatedAt')
+        const hasToken = has('exportToken')
+        const verifyOnly = query.verifyOnly === '1'
+        const snapshotMaxId = has('snapshotMaxId') ? Number(query.snapshotMaxId) : null
+        const afterId = Number(query.afterId)
+        const afterStamp = salesExportStamp(String(query.afterCreatedAt || ''))
+        if (keys.some((key) => (c.req.queries(key)?.length || 0) > 1)
+          || (has('order') && !['asc', 'desc'].includes(query.order))
+          || (has('verifyOnly') && !verifyOnly)
+          || (has('pageSize') && (!/^\d+$/.test(query.pageSize) || Number(query.pageSize) < 1 || Number(query.pageSize) > 500))
+          || hasToken !== has('snapshotMaxId')
+          || (hasToken && (!/^[a-f0-9]{64}$/.test(query.exportToken) || !/^\d+$/.test(query.snapshotMaxId)
+            || !Number.isSafeInteger(snapshotMaxId) || Number(snapshotMaxId) < 0))
+          || (hasCursor && (!hasToken || verifyOnly || !/^\d+$/.test(query.afterId || '') || !Number.isSafeInteger(afterId) || afterId < 1
+            || !/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[zZ]|[+-]\d{2}:?\d{2})?$/.test(query.afterCreatedAt || '') || !Number.isFinite(afterStamp)))
+          || (verifyOnly && !hasToken)) return c.json({ error: 'Invalid sales export continuation' }, 400)
+        // Normalize only effective SQL filters; do not bind page size, cursor,
+        // generated time or hidden raw facts into the authorization token.
+        if (f.branchId && /^\d+$/.test(String(f.branchId))) f.branchId = String(Number(f.branchId))
+        const effective = whereActiveSales('s', f)
+        const search = String(query.q || '').trim().toLowerCase()
+        const descending = query.order !== 'asc'
+        let snapshot: SalesReportSnapshot
+        try {
+          snapshot = await readSalesReportSnapshot(c.env, f, false,
+            snapshotMaxId === null ? undefined : (alias) => ({ sql: `${alias}.id <= @reportScope_exportMax`, params: { reportScope_exportMax: snapshotMaxId } }),
+            { maxReceipts: 10_000 })
+        } catch (error) {
+          if (error instanceof ReportMoneyPrecisionError && error.code === 'too_many_rows') {
+            return c.json({ code: 'report_export_too_large', error: 'This export is too large. Narrow the report filters.' }, 413)
+          }
+          if (error instanceof ReportMoneyPrecisionError && error.code === 'snapshot_changed') {
+            return c.json({ code: 'report_export_changed', error: 'Sales changed. Restart the export.' }, 409)
+          }
+          throw error
+        }
+        const maximum = snapshotMaxId ?? snapshot.sales.reduce((max, row) => Math.max(max, Number(row.id)), 0)
+        const cohort = salesExportCohort(snapshot, search)
+        const canViewCosts = canViewAcquisitionCosts(user)
+        const rows = businessSummarySalesRowsFromSnapshot(cohort).map((row) => gateBusinessSummarySaleRow(row, canViewCosts))
+        rows.sort((left, right) => (descending ? -1 : 1) * (salesExportStamp(String(left.cursor_at)) - salesExportStamp(String(right.cursor_at))
+          || Number(left.id) - Number(right.id)))
+        const totals = gateTotals(salesTotalsFromSnapshot(cohort) as unknown as Record<string, unknown>, isAdmin, canViewCosts)
+        const token = await salesExportToken({ export_version: 1, query: effective, search, order: descending ? 'desc' : 'asc',
+          snapshot_max_id: maximum, authorization: { is_admin: isAdmin, can_view_costs: canViewCosts }, row_count: rows.length, rows, totals })
+        if (hasToken && token !== query.exportToken) return c.json({ code: 'report_export_changed', error: 'Sales changed. Restart the export.' }, 409)
+        const envelope = { export_version: 1, export_token: token, snapshot_max_id: maximum, row_count: rows.length }
+        if (verifyOnly) return c.json({ ...envelope, verified: true })
+        const cursorIndex = hasCursor ? rows.findIndex((row) => Number(row.id) === afterId && salesExportStamp(String(row.cursor_at)) === afterStamp) : -1
+        if (hasCursor && cursorIndex < 0) return c.json({ error: 'Invalid sales export cursor' }, 400)
+        const limit = has('pageSize') ? Number(query.pageSize) : 500
+        const start = cursorIndex + 1
+        const page = rows.slice(start, start + limit)
+        const hasMore = start + page.length < rows.length
+        const last = page[page.length - 1]
+        return c.json({ ...envelope, totals, rows: page, has_more: hasMore,
+          next_cursor: hasMore && last ? { created_at: last.cursor_at, id: last.id } : null, is_admin: isAdmin })
+      }
       const requestedSnapshot = query.snapshotMaxId != null && query.snapshotMaxId !== ''
         ? clampInt(query.snapshotMaxId, 0, 0, Number.MAX_SAFE_INTEGER) : null
       if (requestedSnapshot === 0) return c.json({ rows: [], snapshot_max_id: 0, has_more: false, next_cursor: null })

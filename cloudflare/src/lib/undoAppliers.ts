@@ -141,6 +141,8 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
+  keeperChoice?: ProductMergeKeeperChoice
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
     category: string | null
@@ -223,6 +225,8 @@ export interface MergeReversal {
   // fold cleared that parent link, and undo puts this value back.
   keeperParentIdBefore?: number | null
   mergedStateFingerprint?: string
+  /** New resolver snapshots include received date, supplier and cost metadata. */
+  fullBatchMetadataFingerprint?: boolean
   fingerprintPending?: boolean
   operationId?: string
 }
@@ -313,6 +317,16 @@ export async function mergeReplayChangesProductImages(
 // There is deliberately no third, silent path: a caller that supplies neither
 // for a stocked row is rejected (see routes/products.ts's merge endpoint).
 export type MergeStockDisposition = 'merge' | 'write_off'
+
+// The Resolve grid's Keep merge (owner N1/N4, 23 Sep 2026): the kept product
+// keeps its name and barcode, and a permitted reviewer's chosen cost replaces
+// the averaged one. Carried in the reversal so a redo repeats it exactly.
+export type ProductMergeKeeperChoice = {
+  follows: true
+  cost?: { cost_price_usd: number; cost_price_khr?: number | null }
+  /** Server-frozen group economics; carried through each pair's undo/redo. */
+  economics?: ProductMergeEconomics
+}
 
 // The ONE list of foreign keys a product merge must move onto the survivor.
 // Kept here (a lib) rather than in the route so the forward fold and the undo
@@ -414,6 +428,7 @@ export type MergeFoldFn = (
   mergeContext: string,
   stockDisposition?: MergeStockDisposition,
   economicsOverride?: ProductMergeEconomics,
+  keeperChoice?: ProductMergeKeeperChoice,
 ) => Promise<{ reversal: MergeReversal }>
 
 let mergeFoldFn: MergeFoldFn | null = null
@@ -467,6 +482,7 @@ export async function mergeStateFingerprint(
 ): Promise<string> {
   const productIds = [...new Set(reversals.flatMap((r) => [Number(r.keeperId), Number(r.dupId)]).filter((id) => Number.isInteger(id) && id > 0))].sort((a, b) => a - b)
   if (!productIds.length) return ''
+  const fullBatchMetadata = reversals.some((reversal) => reversal.fullBatchMetadataFingerprint)
   const products: Array<Record<string, unknown>> = []
   const branchStock: Array<Record<string, unknown>> = []
   const batches: Array<Record<string, unknown>> = []
@@ -486,7 +502,7 @@ export async function mergeStateFingerprint(
     reads.push(
       { key: `products:${index}`, sql: `SELECT * FROM products WHERE id IN (${placeholders})`, params: ids },
       { key: `branchStock:${index}`, sql: `SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, params: ids },
-      { key: `batches:${index}`, sql: `SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids },
+      { key: `batches:${index}`, sql: `SELECT ${fullBatchMetadata ? '*' : 'id, variant_product_id, batch_key, batch_number, is_active'} FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids },
       { key: `movementHeads:${index}`, sql: `SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, params: ids },
       { key: `productImages:${index}`, sql: `SELECT * FROM product_images WHERE product_id IN (${placeholders})`, params: ids },
       { key: `stockSessions:${index}`, sql: `SELECT * FROM stock_session_members WHERE product_id IN (${placeholders})`, params: ids },
@@ -502,7 +518,7 @@ export async function mergeStateFingerprint(
     // Old fingerprints intentionally project only lot identity/activation.
     // Preserve that serialized contract, but lock the entire current lot row
     // (received date, cost, supplier, etc.) against races during group undo.
-    if (transactionGuards) reads.push({
+    if (transactionGuards && !fullBatchMetadata) reads.push({
       key: `casBatchMetadata:${index}`,
       sql: `SELECT * FROM product_batches WHERE variant_product_id IN (${placeholders})`, params: ids,
     })
@@ -1467,6 +1483,7 @@ async function redoBulkMergeFolds(
       // silently fall back to merging stock the reviewer chose to write off.
       r.stockDisposition === 'write_off' ? 'write_off' : 'merge',
       economicsOverride,
+      r.keeperChoice,
     )
     preserveBulkClusterPlan(r, one)
     fresh.push(one)
@@ -2174,6 +2191,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
+  // N6 stock-in line edit (lib/stockInLineEdit.ts): same exact-snapshot
+  // replay contract as the scoped Set above; a cost edit also needs the
+  // cost-entry permission, checked inside the replay.
+  'stock.session_line_edit': {
+    permission: 'inventory', action: 'adjust',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Stock-in line edit history context is required.')
+      const { replayStockInLineEdit } = await import('./stockInLineEdit')
+      await replayStockInLineEdit(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
+    },
+  },
   'stock.transfer': {
     permission: 'branches', action: 'transfer',
     run: async (payload, ctx) => {
@@ -2513,6 +2541,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
           // reviewer settled as a write-off must not come back as a stock fold.
           reversal.stockDisposition === 'write_off' ? 'write_off' : 'merge',
           economicsOverride,
+          reversal.keeperChoice,
         )
         preserveBulkClusterPlan(reversal, fresh)
         await db.prepare('UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id), updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: keeperId })

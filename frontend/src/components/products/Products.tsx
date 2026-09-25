@@ -5322,6 +5322,13 @@ function ProductsFullEditor() {
               notify={notify}
               canRemoveProduct={canRemoveProduct}
               onMergeLeadingZero={openLeadingZeroMergeReview}
+              // N2: a tap on a conflict row opens the same product preview a
+              // Products row opens, read fresh by id (the sweep's row is thin).
+              onPreviewProduct={(productId) => {
+                void fetchProductsByIds([productId])
+                  .then((rows) => { if (rows[0]) setDetailProduct(rows[0]) })
+                  .catch(() => notify(t('could_not_load_product') || 'Could not load this product', 'error'))
+              }}
             />
           </Suspense>
         </div>

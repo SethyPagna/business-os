@@ -1,4 +1,81 @@
-## Cloud handoff reconciliation — 24 September (branch claude/cloud-handoff-20260924-0unu3f, NOT deployed)
+## Current status — 25 September 2026 (Hong Kong)
+
+The owner-authorized Claude handoff **was deployed** from clean commit
+`7e7cc7dcebd18f016ca732589acd52ed1133bc85`. Worker version
+`ff4e1a9b-6558-4e6e-a319-db9a49c1f834` has 100% allocation; deployment
+`8f7e82d6-0e81-4ce6-a2c9-55dc241b7c02` was created at
+`2026-09-24T21:48:00.150459Z`. The pending and applied migration sets were
+exactly **0192, 0193, 0194**. Seven business-table pre/post counts/totals matched.
+No held migration ran. `/health` and runtime HTTP checks returned Cloudflare's
+403 challenge, so live HTTP health is **not certified**; deployment and allocation
+were verified through Cloudflare. No security rule was bypassed.
+
+Canonical checkout: `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Source`.
+Evidence: `Downloads/Projects/BusinessOS/Records/Deployments/2026-09-25` under the user's home.
+The matching GitHub ZIP is `Downloads/Projects/BusinessOS/Releases/business-os-7e7cc7dc.zip`;
+all 2,534 files matched the deployed commit. The former dirty shared checkout is
+preserved at `Downloads/Projects/BusinessOS/Recovery/UnmergedWorkspace` (a junction), together
+with its patch, status and Git/worktree manifests. Do not remove that recovery:
+it contains unique edits, ignored local configuration and linked worktree metadata.
+
+Resumed work is on `codex/verified-resume-20260925`, separate from production.
+The fresh reports baseline passes `reportsDetailFloatClose`, `reportsRenderPass`
+and `reportsHubComposedResponsive`; the standalone float test passes all 16
+assertions including negative controls. The historical red is not reproduced.
+N1–N4 is integrated as `be856c08` from repaired candidate `94955db9`:
+keeper selection refresh, frozen group costs, exact retry receipts, contact
+continuation restrictions and preview/write conflict fences. Independent checks
+on the integrated source pass 16 frontend files and five Worker files. The paid
+deployment is the target; the new resolver refuses before writes on Free, whose
+existing pair kernel exceeds the query budget. Combined frontend gates pass;
+the Worker sweep and focused repairs are complete, as recorded below.
+N6 is integrated as `7286d930` from independently reviewed `097341e4`, with
+retained lot revisions, frozen unknown-outcome retries, fresh sequential removal
+and permission-refusal handling. EN/KM messages were completed in `d52c15de`.
+The integrated source passes seven frontend files, six Worker files, both
+typechecks and i18n. Retry state is component-local; navigation does not preserve
+the retry handle. Absolute quantities and required revisions still reject stale
+competing corrections. Mounted local browser checks pass all eight combinations
+of desktop/mobile viewport, EN/KM and known-zero/hidden costs, including pending
+locks, identical retries and first permission refusals. These use mocked APIs;
+physical-device and production behavior are not certified by that check.
+
+Report Center's explicit export-intent prerequisite is integrated as `9d93ada5`
+after independent review: 308 real route requests cover view/export authority,
+with Returns requiring Full. Complete Sales export is integrated in the final
+candidate: searched-cohort canonical totals, edit-sensitive authorized tokens,
+complete-page validation and one preview/CSV/typed Excel/print document. The
+Worker bounds source receipts to 10,000 and verifies the authorized snapshot on
+every continuation and once more before publication. Hidden costs do not affect
+the token. EN/KM desktop/mobile checks cover 603 receipts beyond the 250-row
+browse page; four functional and four final layout cases pass. Independent
+negative controls reject changed totals, stale tokens, incomplete collection,
+invalid calendar dates and permission revocation during publication. These are
+local browser/route checks; physical printing remains unverified. Broader Report
+Center work, other report exports and Telegram report images remain open.
+
+Combined certification: the 560-file frontend sweep at 35c31acc passed 557 files
+and exposed three obsolete test assumptions. Test-only repairs preserve the
+production behavior and strengthen placeholder, print-order and real CSV checks;
+all three plus ten neighbors pass. The repaired candidate bccbdeb3 passes both
+frontend typechecks, i18n, production build and built-startup graph validation.
+Three assertion-overload typing errors in the repairs were corrected before
+those gates passed. The Worker typecheck passes on the combined runtime, whose
+Worker source is identical to bd9c1e44 used for the full sweep. Original failures
+and reruns remain in the external Records directory; this is not represented as
+one uninterrupted green full-suite run. The Worker sweep executed 523 files at
+unchanged bd9c1e44: 520 passed initially. One Miniflare synchronous-fetcher
+assertion passed on an unchanged focused rerun; the merge inactive/group guard
+test was repaired and passes with negative controls. The gallery test now loads
+the real plan-tier module; all nine SQLite gallery checks and three image-related
+neighbor files pass. No runtime change was needed for those sweep failures.
+No new feature work in this section is deployed. Council decisions and the
+debloat blast-radius matrix: `docs/fleet/2026-09-25-resume-council.md`.
+
+Everything below is historical and is superseded by this dated status where it
+describes deployment, migration state or the old reports failure.
+
+## Historical cloud handoff — 24 September (not yet deployed at that time)
 
 **Read this first.** The newest code is on `claude/cloud-handoff-20260924-0unu3f`, not on `main`
 (main = a39a3cbbb, 23 Sep; production = Worker 250d3591 from f064e844, which main contains).

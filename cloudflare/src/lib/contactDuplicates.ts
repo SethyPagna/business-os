@@ -443,7 +443,10 @@ export function contactDuplicateWriteGuardStatement(
   }
 }
 
-export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null }
+// updated_at is the optimistic-concurrency token the Resolve grid sends back
+// as `expected` on POST {path}/merge, so a record edited after the sweep is
+// refused as stale instead of being merged from an outdated view.
+export type ContactDuplicateClusterEntry = { id: number; name: string | null; phone: string | null; membershipNumber: string | null; updated_at: string | null }
 
 export type ContactDuplicateCluster = {
   type: 'phone' | 'name'
@@ -513,6 +516,20 @@ export async function undismissDuplicateCluster(
   }
 }
 
+// Owner ruling (24 Sep 2026): contacts merge ONLY when the system itself
+// detected them as duplicates. The merge route re-runs the same sweep the
+// Duplicates tab lists (findDuplicateContactClusters, open clusters only) and
+// accepts the submitted ids only when ONE current cluster holds every one of
+// them. A set the reviewer assembled by hand, a cluster that changed since the
+// review (a record renamed away, a phone edited) or a cluster marked "kept as
+// separate" is refused. Pure, so the rule is testable without a database.
+export function contactMergeCluster(clusters: ContactDuplicateCluster[], ids: number[]): ContactDuplicateCluster | null {
+  const wanted = [...new Set(ids.map(Number))]
+  if (wanted.length < 2 || wanted.some((id) => !Number.isSafeInteger(id) || id <= 0)) return null
+  return clusters.find((cluster) => !cluster.dismissed
+    && wanted.every((id) => cluster.contacts.some((contact) => Number(contact.id) === id))) ?? null
+}
+
 // Proactive whole-table sweep for the admin "Possible Duplicates" review
 // panel -- surfaces clusters already sitting in the data (most commonly
 // from records entered or imported before this feature existed) instead
@@ -555,7 +572,7 @@ export async function findDuplicateContactClusters(
     }
   }
 
-  const toEntry = (row: ContactDuplicateCandidateRow): ContactDuplicateClusterEntry => ({ id: row.id, name: row.name, phone: row.phone, membershipNumber: row.membership_number || null })
+  const toEntry = (row: ContactDuplicateCandidateRow): ContactDuplicateClusterEntry => ({ id: row.id, name: row.name, phone: row.phone, membershipNumber: row.membership_number || null, updated_at: row.updated_at ?? null })
 
   const clusters: ContactDuplicateCluster[] = []
   for (const [phone, group] of byPhone) {

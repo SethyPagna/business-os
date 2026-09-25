@@ -453,6 +453,41 @@ export function normalizeProductClusterKey(type: 'leadingzero' | 'barcode' | 'na
   return normalizeProductGroupName(value)
 }
 
+// The Resolve grid's Keep merge (owner N1/N3, 23 Sep 2026) may fold products
+// whose names or real barcodes differ -- but only when the system itself
+// listed them together: ONE current cluster of findPossiblySameProductClusters
+// (the Duplicates tab's own sweep, dismissed clusters already excluded) must
+// hold every id. The same rule the contacts merge follows (24 Sep ruling).
+export function productIdsInOneCluster(clusters: readonly PossiblySameProductCluster[], ids: readonly number[]): PossiblySameProductCluster | null {
+  const wanted = [...new Set(ids.map(Number))]
+  if (wanted.length < 2 || wanted.some((id) => !Number.isSafeInteger(id) || id <= 0)) return null
+  return clusters.find((cluster) => wanted.every((id) => cluster.products.some((product) => Number(product.id) === id))) ?? null
+}
+
+// N1 (owner, 23 Sep 2026): "merge into Keep follows the kept product, its
+// barcode included, and never fails on a barcode difference". The kept
+// product's stored barcode stays byte-for-byte (the leading-zero rule is
+// COMPARISON ONLY -- productDetailRule.ts -- so its spelling is never
+// rewritten). Only a kept product with NO barcode takes the merged product's
+// REAL one (the Sep 15 wildcard ruling: use the one with an actual barcode).
+// Every other barcode is recorded, not written: it stays on the merged
+// (deactivated) record and is named in the merge's audit row.
+export function keeperFollowsBarcode(
+  keeper: { barcode?: unknown } | null | undefined,
+  merged: { barcode?: unknown } | null | undefined,
+): string | null {
+  const own = keeper?.barcode
+  if (String(own ?? '').trim()) return String(own)
+  return isRealBarcode(merged?.barcode) ? String(merged?.barcode).trim() : (own == null ? null : String(own))
+}
+
+/** The merged product's barcode the kept one does not carry: recorded in the audit row. */
+export function absorbedBarcodes(finalBarcode: unknown, merged: { barcode?: unknown } | null | undefined): string[] {
+  const raw = String(merged?.barcode ?? '').trim()
+  if (!raw) return []
+  return identityBarcodeKey(raw) === identityBarcodeKey(finalBarcode) && String(finalBarcode ?? '').trim() ? [] : [raw]
+}
+
 export async function findPossiblySameProductClusters(db: D1Compat): Promise<PossiblySameProductCluster[]> {
   const [rows, dismissalRows] = await Promise.all([
     db.prepare(`
