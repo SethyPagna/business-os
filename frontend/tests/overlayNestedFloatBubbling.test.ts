@@ -39,7 +39,9 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const FLOAT_TAG = /(Float|Modal|Dialog)$/
+// `Sheet` counts too: ProductOptionSheet is a portal with its own closing
+// backdrop, so a tap outside it bubbled into its host's close as well.
+const FLOAT_TAG = /(Float|Modal|Dialog|Sheet)$/
 
 function attribute(element: ts.JsxOpeningLikeElement, name: string): ts.JsxAttribute | undefined {
   return element.attributes.properties.find(
@@ -130,24 +132,32 @@ runTest('the description reader stacks above the sheet it now sits beside', () =
   assert.match(source, /fixed inset-0 z-\[1070\]/, 'a body-level sibling of a z-[1050] sheet needs the nested layer, not z-[60]')
 })
 
-// The same defect, found by this sweep in files outside this lane (they are
-// owned elsewhere, or by the cost lane, and are reported rather than edited).
-// Each hosts a ConfirmDialog inside a backdrop whose onClick asks to close the
-// work surface, so a press in the confirm also runs that close request. The
-// list is a ratchet: fixing one must remove it from here, and a NEW offender
-// fails the test.
-const KNOWN_OFFENDERS = [
-  'branches/TransferModal.tsx',
-  'inventory/FastStockInModal.tsx',
-  'inventory/ReceiveBatchModal.tsx',
+// U-records: the three work surfaces this sweep first found with the same
+// defect -- each hosted its review dialog (and FastStockIn its product option
+// sheet) inside a backdrop whose onClick asks to close the surface, so a press
+// in the confirm also ran that close request. They now render those floats
+// beside the backdrop, so the allow-list is gone: ANY offender fails.
+const FORMER_OFFENDERS: Array<{ file: string; floats: string[] }> = [
+  { file: 'branches/TransferModal.tsx', floats: ['<ConfirmDialog'] },
+  { file: 'inventory/FastStockInModal.tsx', floats: ['<ConfirmDialog', '<ProductOptionSheet'] },
+  { file: 'inventory/ReceiveBatchModal.tsx', floats: ['<ConfirmDialog'] },
 ]
 
-runTest('no other closing backdrop hosts a float that its clicks would close', () => {
+runTest('the former offenders render their floats beside the backdrop, and still render them', () => {
+  for (const { file, floats } of FORMER_OFFENDERS) {
+    const full = path.join(componentsRoot, file)
+    const source = fs.readFileSync(full, 'utf8')
+    assert.deepEqual(floatsInsideClosingBackdrops(full, source), [], `${file} still nests a float inside its closing backdrop`)
+    for (const float of floats) assert.ok(source.includes(float), `${file} must still render ${float}`)
+  }
+})
+
+runTest('no closing backdrop anywhere hosts a float that its clicks would close', () => {
   const offenders = componentFiles(componentsRoot)
     .filter((file) => floatsInsideClosingBackdrops(file, fs.readFileSync(file, 'utf8')).length > 0)
     .map((file) => path.relative(componentsRoot, file).split(path.sep).join('/'))
     .sort()
-  assert.deepEqual(offenders, KNOWN_OFFENDERS)
+  assert.deepEqual(offenders, [])
 })
 
 if (failed) {

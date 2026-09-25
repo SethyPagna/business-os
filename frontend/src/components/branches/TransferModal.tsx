@@ -1229,6 +1229,12 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }
 
   return createPortal(
+    <>
+    {/* The review dialog below is a SIBLING of this backdrop, never a child.
+        It is a portal, but React bubbles synthetic events through the
+        component tree: inside this <div onClick={requestClose}> every press
+        in the confirm also asked to close the transfer (see
+        tests/overlayNestedFloatBubbling.test.ts). */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={() => { if (!saving && !savingBulk) closeGuard.requestClose() }}>
       <div className="modal-panel-safe fade-in flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700 sm:p-5">
@@ -1744,6 +1750,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           </button>
         </div>
       </div>
+      {/* S4-21: the shared discard prompt, not a local copy. */}
+      <UnsavedChangesPrompt guard={closeGuard} />
+    </div>
 
       {/* A run that takes more than one request is not one undoable step, and
           the operator has to be told that before committing, not after. */}
@@ -1775,9 +1784,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           t={t}
         />
       ) : null}
-      {/* S4-21: the shared discard prompt, not a local copy. */}
-      <UnsavedChangesPrompt guard={closeGuard} />
-    </div>,
+    </>,
     document.body,
   )
 }

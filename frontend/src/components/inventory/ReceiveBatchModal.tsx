@@ -370,6 +370,12 @@ export default function ReceiveBatchModal({
   }
 
   const modal = (
+    <>
+    {/* The receipt review below is a SIBLING of this backdrop, never a
+        child. It is a portal, but React bubbles synthetic events through the
+        component tree: inside this <div onClick={closeIfIdle}> every press in
+        the confirm also asked to close the receiver (see
+        tests/overlayNestedFloatBubbling.test.ts). */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
@@ -583,6 +589,7 @@ export default function ReceiveBatchModal({
         </div>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
+    </div>
       {pendingReceipt ? (
         <ConfirmDialog
           t={t}
@@ -595,7 +602,7 @@ export default function ReceiveBatchModal({
           onClose={() => { if (!saving) setPendingReceipt(null) }}
         />
       ) : null}
-    </div>
+    </>
   )
 
   if (typeof document === 'undefined') return modal

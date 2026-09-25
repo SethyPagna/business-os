@@ -1038,6 +1038,13 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   }
 
   return createPortal(
+    <>
+    {/* The commit review and the option sheet below are SIBLINGS of this
+        backdrop, never children. Both are portals, but React bubbles
+        synthetic events through the component tree: inside this
+        <div onClick={closeBackdropIfIdle}> every press in the confirm also
+        asked to close the receiver (see
+        tests/overlayNestedFloatBubbling.test.ts). */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeBackdropIfIdle}>
       <div ref={parentPanelRef} className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -1334,6 +1341,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         </div>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
+    </div>
 
       {pendingCommit ? (
         <ConfirmDialog
@@ -1387,7 +1395,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           onPick={(candidate, selection) => pickFromGroup(candidate as unknown as ProductCandidate, selection)}
         />
       ) : null}
-    </div>,
+    </>,
     document.body,
   )
 }
