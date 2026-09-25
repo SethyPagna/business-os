@@ -110,6 +110,104 @@ touches D1, never pushes secrets, and never deploys. Use this after
 pulling in a change to confirm it actually installs, typechecks, passes
 its tests, and builds, before deciding to cut a release.
 
+## Release without Claude
+
+The owner can run a whole release alone. Click-by-click setup (Cloudflare
+token, GitHub button, VPN split tunnel):
+[docs/setup/release-setup-guide.md](docs/setup/release-setup-guide.md).
+
+**VPN tip.** Cloudflare challenges the VPN's datacenter exit, so neither
+wrangler nor the site's `/api` works through it. Set the VPN to "only allow
+selected apps" (Claude, ChatGPT, Copilot, Chrome) and run the menu from a
+Windows Terminal opened from the Start menu, not from inside Claude or
+Chrome: anything those apps start inherits the VPN. Use Edge for the
+Cloudflare and GitHub dashboards.
+
+### The menu: `run\release.bat`
+
+```powershell
+run\release.bat                     # the menu
+run\release.bat release             # the whole release in order
+run\release.bat -DryRun             # walk every menu item, print every command, run none
+run\release.bat deploy -Plan free   # any single step, with options
+```
+
+Implementation: `ops/scripts/deploy-kit/release.cjs` (the steps), `exec.cjs`
+(every child process, the prompts, the log) and `lib.cjs` (every production
+command with its confirmation gate). Checked offline by
+`cloudflare/scripts/test-deploy-kit-pure.cjs`.
+
+1. **Network check.** GETs `https://api.cloudflare.com/client/v4/ips` and
+   `/health`. A `cf-mitigated: challenge` header or a "Just a moment..."
+   page means this window goes through the VPN. The kit never tries to get
+   past a challenge.
+2. **Choose version.** Default `claude/urgent-20260925`. The commit is
+   checked out into a dedicated clean worktree (`<home>\Worktrees\release`;
+   `-Worktree` changes it), with `npm ci` in both packages. It refuses the
+   main checkout, the checkout the kit runs from, any worktree with a branch
+   and any recovery folder. It stops if the folder is not clean at exactly
+   that commit (checked again before the deploy, after the build).
+   `<home>` is `BUSINESS_OS_HOME`, else the folder that holds the main checkout.
+3. **Tests at that commit.** Cloudflare typecheck plus every
+   `scripts/test-*.cjs` in its own process; frontend typecheck,
+   `verify:i18n` and build plus every `tests/*.test.ts` in its own process.
+   A red file is retried alone up to twice (timeouts, contention). Anything
+   still red stops the release and is listed.
+   **Skipping the tests** is offered only when Claude has certified the exact
+   commit: a file `<home>\Records\Deploys\certs\release-cert-<full 40-character
+   sha>.txt` that contains a line `sha: <the same full sha>`. Claude writes it
+   after running the full gate on that commit, with the gate results in the
+   same file. A short sha or a mismatched line is ignored.
+4. **Login check.** `wrangler whoami` through
+   `cloudflare/scripts/with-wrangler-auth.cjs`. If not logged in, the owner
+   runs `npx wrangler login` in the release folder's `cloudflare`. The kit
+   uses the saved token of the first checkout that has one (`-AuthFrom`, then
+   the kit's own checkout, then the main checkout). It only checks that the
+   file exists; the wrapper reads it. The kit never opens or copies it.
+5. **Safety snapshot** (asks y). The Time Travel bookmark of both databases,
+   the live Worker version, and the row counts of products, branch_stock,
+   product_batches, sales, sale_items, inventory_movements, customers and
+   returns, saved to `<home>\Records\Deploys\<date>-<sha12>\`. It prints the
+   restore commands.
+6. **Database updates.** Lists the waiting migrations of BOTH databases
+   (`business-os` via `migrate:remote`, `business-os-import` via
+   `migrate:import:remote`) with each file's first comment line, asks for
+   **YES**, and applies them in that order. On the first error it stops,
+   saves `migration-error.txt` and prints the recovery note.
+7. **Publish** (asks **YES**). `npm run deploy` (paid, the production plan)
+   or `npm run deploy:free`; both stamp the commit into the bundle. Secrets
+   are not synced: they already live on Cloudflare.
+8. **Live checks.** `/api/runtime/version` must report the commit with a
+   clean stamp, and the plan. `/health` must say ok (it carries an app label,
+   not the commit). The admin page must load. Then the row counts again: a
+   table that shrank with no migration touching it fails; tables a migration
+   changes, and till tables that only grew during the release, are warnings.
+9. **Undo** (each asks YES, then a second word). `wrangler rollback` to the
+   saved previous version, or a D1 Time Travel restore to the saved bookmark,
+   which loses every write made since.
+10. **Also:** the product-list export for official names (the public
+   catalogue search, pageSize 100, saved to
+   `<home>\Records\OfficialNames\<date>\products.json`); the R2-to-Asia steps
+   (printed from the local plan; the kit runs no R2 command); `verify-local.bat`;
+   and the old `full-automation.bat`.
+
+Every run writes a full transcript (`release-<time>.log`) and `state.json`
+into the deploy record folder, and prints the path at the end.
+
+### The GitHub button: `.github/workflows/deploy.yml`
+
+Manual only (`workflow_dispatch`), with `environment: production` (required
+reviewer), `concurrency: production-deploy` and `contents: read`. The
+`confirm` input must be `DEPLOY`. It runs the same kit with `-CI`: the same
+tests (with no Cloudflare secret in that step), the snapshot, the migrations
+(unless `run_migrations` is off), the deploy and the live checks. The
+repository is public, so the job summary holds counts, bookmarks and ids
+only, and the output of the production reads stays out of the log. Secrets
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are passed through `env:`
+only. With no saved token file, `with-wrangler-auth.cjs` passes the
+environment token through. To undo, use `.github/workflows/deploy-rollback.yml`
+(confirm `ROLLBACK`).
+
 ## Free vs paid deploy
 
 This repo ships **two** wrangler configs for the **same** Worker:
@@ -253,6 +351,10 @@ also clears the copied secret files). Peers' local environments are untouched;
 just make sure nobody else runs `migrate:remote` or `deploy` concurrently.
 
 ## Rolling back
+
+The release menu's **Undo a release** (or the GitHub **Deploy rollback**
+workflow) does both kinds of undo behind a double confirmation; see
+"Release without Claude".
 
 Cloudflare Workers keeps previous deployments. From the Cloudflare dashboard
 (Workers & Pages → business-os → Deployments) you can roll back to a prior
