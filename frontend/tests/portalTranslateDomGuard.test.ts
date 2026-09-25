@@ -1,7 +1,7 @@
-// Google Translate vs React (refuter follow-up to P-public-1): once a visitor
-// opts into a Google-translated language, removeChild/insertBefore on a node
-// Google has moved must not throw (React's NotFoundError crash). The guard is
-// installed only by the translate widget setup, never on the Khmer default.
+// Google Translate vs React (refuter follow-up to P-public-1): a node that a
+// translator (our widget, Chrome's own, an extension) has moved must not make
+// React's removeChild/insertBefore throw. The guard is installed on every
+// storefront load and never by the admin app.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -45,21 +45,10 @@ const languages = await import('../src/components/catalog/portalLanguageOptions.
   assert.throws(() => parent.removeChild(new FakeNode()), /not a child of this node/)
 }
 
-// 2. Khmer default: loading the modules and resolving the default language
-//    installs nothing, and the Khmer route has no Google target (so the
-//    PublicCatalogPage effect that calls the widget setup never runs).
+// 2. Admin: the admin app never installs it. Loading the translate modules
+//    and even setting up the widget (the admin portal editor's preview does)
+//    leaves the native methods alone.
 assert.equal(guard.isPortalTranslateDomGuardInstalled(), false, 'importing the translate modules must not patch Node')
-const khmerRoute = languages.resolvePublicStorefrontLanguage(languages.PUBLIC_STOREFRONT_DEFAULT_LANGUAGE, 'km')
-assert.equal(languages.PUBLIC_STOREFRONT_DEFAULT_LANGUAGE, 'km')
-assert.ok(!khmerRoute.googleTarget, 'the Khmer default must not route to Google Translate')
-assert.ok(!languages.resolvePublicStorefrontLanguage('', 'km').googleTarget, 'no choice = Khmer, no Google')
-assert.equal(languages.resolvePublicStorefrontLanguage('fr', 'km').googleTarget, 'fr', 'control: a real opt-in does route to Google')
-assert.equal(FakeNode.prototype.removeChild, nativeRemove, 'Khmer load keeps the native removeChild')
-const page = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'catalog', 'PublicCatalogPage.tsx'), 'utf8')
-assert.match(page, /if \(!translateWidgetEnabled \|\| !externalTranslateTarget [\s\S]{0,200}return undefined\s*\}\s*let cancelled = false\s*const cleanupWidget = setupPortalExternalTranslateWidget\(/, 'the widget (and so the guard) is set up only for an external translate target')
-assert.doesNotMatch(page, /installPortalTranslateDomGuard/, 'the page must not install the guard on its own')
-
-// 3. Opting into translate: the widget setup installs the guard.
 const combo = {}
 const host = { id: '', className: '', style: {}, parentNode: null as unknown, innerHTML: '', setAttribute() {}, querySelector: () => combo }
 const fakeDocument = {
@@ -73,7 +62,22 @@ const TranslateElement = Object.assign(() => ({}), { InlineLayout: { SIMPLE: 0 }
 let ready = false
 controller.setupPortalExternalTranslateWidget({ sourceLanguage: 'km', includedLanguages: ['fr'], onReady: () => { ready = true } })
 assert.ok(ready, 'fixture sanity: the widget reached ready')
-assert.equal(guard.isPortalTranslateDomGuardInstalled(), true, 'opting into translate installs the guard')
+assert.equal(FakeNode.prototype.removeChild, nativeRemove, 'widget setup (reachable from the admin editor preview) must not install the guard')
+const read = (relative: string) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', relative), 'utf8').replace(/\r\n/g, '\n')
+for (const adminFile of ['src/AdminRoot.tsx', 'src/App.tsx', 'src/index.tsx', 'src/components/catalog/portalTranslateController.ts', 'src/components/catalog/CatalogPage.tsx']) {
+  assert.doesNotMatch(read(adminFile), /installPortalTranslateDomGuard/, `${adminFile} must not install the guard (admin path)`)
+}
+assert.match(read('src/index.tsx'), /const RootComponent = publicCatalogMode \? PublicCatalogRoot : AdminRoot/, 'PublicCatalogRoot is the storefront-only entry')
+
+// 3. Storefront: installed at PublicCatalogRoot module scope, i.e. on every
+//    storefront page load before the first render -- Khmer default included,
+//    no language menu needed (Chrome's own translator causes the same crash).
+const root = read('src/PublicCatalogRoot.tsx')
+assert.match(root, /import \{ installPortalTranslateDomGuard \} from '\.\/components\/catalog\/portalTranslateDomGuard\.ts'/)
+assert.match(root, /^installPortalTranslateDomGuard\(\)$/m, 'called once at module scope, not inside a component or effect')
+assert.equal(languages.PUBLIC_STOREFRONT_DEFAULT_LANGUAGE, 'km')
+assert.equal(guard.installPortalTranslateDomGuard(), true, 'the storefront entry call installs it')
+assert.equal(guard.isPortalTranslateDomGuardInstalled(), true)
 
 // 4. Guarded behaviour.
 {
@@ -99,14 +103,15 @@ assert.equal(guard.isPortalTranslateDomGuardInstalled(), true, 'opting into tran
   assert.equal(parent.children[0], first, 'a genuine reference still inserts before it')
 }
 
-// 5. Idempotent: a second setup does not wrap the wrapper.
+// 5. Installed only once: a second call does not wrap the wrapper.
 const patched = FakeNode.prototype.removeChild
 assert.equal(guard.installPortalTranslateDomGuard(), true)
-controller.setupPortalExternalTranslateWidget({ sourceLanguage: 'km', includedLanguages: ['fr'] })
+assert.equal(guard.installPortalTranslateDomGuard(), true)
 assert.equal(FakeNode.prototype.removeChild, patched, 'installing twice must not double-wrap')
+assert.equal(FakeNode.prototype.insertBefore.name, 'guardedInsertBefore')
 
 // 6. The reload recovery stays as the last resort.
 const recovery = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'app', 'publicErrorRecovery.ts'), 'utf8')
 assert.match(recovery, /removeChild\|insertBefore/)
 
-console.log('PASS translate DOM guard: absent on Khmer load, installed on opt-in, idempotent, non-throwing')
+console.log('PASS translate DOM guard: installed on every storefront load, never by the admin app, once, non-throwing')

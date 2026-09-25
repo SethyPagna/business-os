@@ -16,9 +16,11 @@
 // until the next render replaces it. The reload recovery stays as the last
 // resort for anything this does not cover.
 //
-// Installed ONLY by setupPortalExternalTranslateWidget -- i.e. once a visitor
-// opts into a Google-translated language. The Khmer default (and English)
-// never load the widget and keep the untouched native DOM methods.
+// Installed on EVERY storefront page load by PublicCatalogRoot.tsx (the
+// storefront entry), not only when our widget loads: Chrome's built-in
+// translator and translation extensions cause the same crash for visitors
+// who never open our language menu. The guard only changes calls that would
+// otherwise throw. Never installed by the admin app (AdminRoot).
 
 export const PORTAL_TRANSLATE_DOM_GUARD_FLAG = '__businessOsTranslateDomGuard'
 

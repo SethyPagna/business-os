@@ -845,7 +845,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
     if (
       normalized.includes('/src/components/catalog/portalTranslateController.ts')
-      // Its only importer; the DOM guard it installs belongs in the same chunk.
+      // The DOM guard shares this chunk: PublicCatalogRoot (which installs
+      // it) already reaches this chunk statically via PublicCatalogPage.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
     ) {
       return 'portal-translate-controller'
