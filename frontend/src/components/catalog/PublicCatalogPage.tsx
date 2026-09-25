@@ -2086,7 +2086,7 @@ export default function PublicCatalogPage() {
       catalogSection={activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={secondaryTabSection}
       promotionsSection={promotionsSection}
-      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
+      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

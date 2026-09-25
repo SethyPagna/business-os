@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -11,6 +11,7 @@ import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
+import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -225,6 +226,23 @@ export default function CatalogPreviewSurface({
   }, [allPublicTranslateOptions, trimmedTranslateSearch])
   const firstPartyTranslateOptions = filteredTranslateOptions.filter((option) => option.kind !== 'external')
   const externalTranslateOptions = filteredTranslateOptions.filter((option) => option.kind === 'external')
+
+  // P-public-9: the footer's quick links are the nav's own tabs. This
+  // surface owns the tabs, so it hands them to whichever footer the caller
+  // mounted (public page and admin preview alike) -- one source, no drift.
+  // A footer jump always lands at the top of the section, so unlike a nav
+  // click it scrolls even when the tab is already active.
+  const handleFooterQuickLink = (key: string) => {
+    if (key !== activeTab) setActiveTab(key)
+    if (typeof window === 'undefined') return
+    window.requestAnimationFrame(() => {
+      const target = publicPortalNavRef?.current || previewSectionRef?.current
+      target?.scrollIntoView({ block: 'start' })
+    })
+  }
+  const footerWithQuickLinks = isValidElement<PortalFooterProps>(footer)
+    ? cloneElement(footer, { quickLinks: portalTabs.map((tab) => ({ key: tab.key, label: tab.label, onSelect: () => handleFooterQuickLink(tab.key) })) })
+    : footer
 
   const handlePortalTabClick = (key: string) => {
     if (key === activeTab) return
@@ -651,7 +669,7 @@ export default function CatalogPreviewSurface({
               {catalogSection}
               {secondaryTabSection}
             </main>
-            {footer}
+            {footerWithQuickLinks}
           </div>
         </div>
       </div>

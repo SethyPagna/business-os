@@ -448,7 +448,11 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const fallbackStory = copy('portalAboutFallback', 'Welcome to our store.')
   const storyText = String(previewConfig.aboutContent || fallbackStory).trim()
   const heroTitle = previewTitle || aboutTitle
-  const introText = String(previewConfig.intro || storyText || fallbackStory).trim()
+  // P-public-9: the hero line is the merchant's short intro only. It used to
+  // fall back to the story, so a shop without an intro printed its whole story
+  // twice -- once under the name and again in the story card below.
+  const configuredIntro = String(previewConfig.intro || '').trim()
+  const introText = configuredIntro && configuredIntro !== storyText ? configuredIntro : ''
   const aboutBlocks = Array.isArray(previewConfig.aboutBlocks)
     ? previewConfig.aboutBlocks.filter((block) => block?.title || block?.body || block?.mediaUrl)
     : []
@@ -568,6 +572,17 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           own full-width section below instead of sitting beside either
           column, so a long story never squeezes it down to a sliver. */}
       <div className="grid gap-4 lg:grid-cols-[1fr,1.4fr] lg:items-start">
+        {/* Story first in the DOM (P-public-9) so a phone, which stacks this
+            row, reads the story before the contact details; lg:order keeps
+            the requested desktop layout. */}
+        {storyText ? (
+          <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
+            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
+            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
+              <OwnerText text={storyText} />
+            </p>
+          </div>
+        ) : null}
         {hasContactInfo ? (
           <div data-portal-contact-tray="true" className={`space-y-3 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90 lg:order-1 ${storyText ? '' : 'lg:col-span-2'}`}>
             {businessFacts?.length ? (
@@ -615,7 +630,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                       href={item.value}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
+                      className="inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
                       aria-label={item.label}
                       title={item.label}
                     >
@@ -626,14 +641,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                 })}
               </div>
             ) : null}
-          </div>
-        ) : null}
-        {storyText ? (
-          <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
-            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
-              <OwnerText text={storyText} />
-            </p>
           </div>
         ) : null}
       </div>

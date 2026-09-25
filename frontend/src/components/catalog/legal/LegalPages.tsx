@@ -12,6 +12,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
+import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
+import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
+import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import {
@@ -66,6 +70,11 @@ const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-of
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
+/** A storefront section the footer can jump to (the nav's own tabs). */
+export type PortalFooterQuickLink = { key: string; label: string; onSelect: () => void }
+/** An already-normalised external profile link (website/facebook/...). */
+export type PortalFooterSocialLink = { key: string; label: string; value: string }
+
 export type PortalFooterProps = {
   copy: CopyFn
   businessName?: string
@@ -74,6 +83,20 @@ export type PortalFooterProps = {
   address?: string
   phone?: string
   email?: string
+  // P-public-9 (owner, 2026-09-25): the footer carries social links, quick
+  // links, contact and policies. Both optional: CatalogPreviewSurface injects
+  // the quick links (it owns the tabs) for every caller, and a caller passes
+  // the social links it has already filtered and normalised.
+  quickLinks?: PortalFooterQuickLink[]
+  socialLinks?: PortalFooterSocialLink[]
+}
+
+const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400'
+const FOOTER_LINK_CLASS = 'inline-flex min-h-10 items-center text-sm leading-6 text-slate-700 underline-offset-2 transition hover:text-slate-900 hover:underline dark:text-neutral-200 dark:hover:text-white'
+
+function SocialIcon({ kind }: { kind: string }) {
+  const Icon = kind === 'facebook' ? Facebook : kind === 'instagram' ? Instagram : kind === 'telegram' ? Send : Globe
+  return <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
 }
 
 /**
@@ -130,6 +153,8 @@ export default function PortalFooter({
   address,
   phone,
   email,
+  quickLinks = [],
+  socialLinks = [],
 }: PortalFooterProps) {
   const [activePage, setActivePage] = useState<LegalPageKey | null>(() =>
     typeof window === 'undefined' ? null : readLegalPageFromSearch(window.location.search))
@@ -261,28 +286,35 @@ export default function PortalFooter({
         data-portal-footer="true"
         className="mt-8 border-t border-slate-200 px-4 py-6 text-slate-600 dark:border-neutral-800 dark:text-neutral-400"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        {/* P-public-9 (owner, 2026-09-25): a real site footer -- contact,
+            quick links to the storefront sections, social profiles and the
+            policies, as columns that stack on a phone. Every column renders
+            only when it has something in it. */}
+        <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <div className="min-w-0 space-y-1 text-xs leading-relaxed">
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">
+            <div className="notranslate text-sm font-semibold leading-6 text-slate-900 dark:text-neutral-100" translate="no">
               {details.name}
             </div>
             {details.legalName ? (
-              <div>{text('portal_legal_identity_legal_name')}: {details.legalName}</div>
+              <div>{text('portal_legal_identity_legal_name')}: <span className="notranslate" translate="no">{details.legalName}</span></div>
             ) : null}
             {details.registrationNumber ? (
               <div>{text('portal_legal_identity_registration')}: {details.registrationNumber}</div>
             ) : null}
-            {details.address ? <div className="break-words">{details.address}</div> : null}
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {details.address || details.phone || details.email ? (
+              <div className="pt-2 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400">{text('portal_legal_footer_contact')}</div>
+            ) : null}
+            {details.address ? <div className="notranslate break-words" translate="no">{details.address}</div> : null}
+            <div className="flex flex-col">
               {details.phone ? (
                 contactHref('tel', details.phone)
-                  ? <a className="underline-offset-2 hover:underline" href={contactHref('tel', details.phone)}>{details.phone}</a>
+                  ? <a className={FOOTER_LINK_CLASS} href={contactHref('tel', details.phone)}>{details.phone}</a>
                   : <span>{details.phone}</span>
               ) : null}
               {details.email ? (
                 contactHref('mailto', details.email)
-                  ? <a className="underline-offset-2 hover:underline" href={contactHref('mailto', details.email)}>{details.email}</a>
-                  : <span>{details.email}</span>
+                  ? <a className={`${FOOTER_LINK_CLASS} break-all`} href={contactHref('mailto', details.email)}>{details.email}</a>
+                  : <span className="break-all">{details.email}</span>
               ) : null}
             </div>
             {/* A takedown route, in the one place every page of the site
@@ -294,14 +326,44 @@ export default function PortalFooter({
             {details.email ? (
               <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
             ) : null}
-            <div className="pt-1 text-[11px] text-slate-400 dark:text-neutral-500">{fill('portal_legal_footer_rights')}</div>
           </div>
+
+          {quickLinks.length ? (
+            <nav aria-label={text('portal_legal_footer_quick_links')} className="min-w-0" data-portal-footer-quick-links="true">
+              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_quick_links')}</div>
+              <ul className="flex flex-col">
+                {quickLinks.map((link) => (
+                  <li key={link.key}>
+                    <button type="button" className={`${FOOTER_LINK_CLASS} text-left`} onClick={link.onSelect}>
+                      {link.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : null}
+
+          {socialLinks.length ? (
+            <div className="min-w-0" data-portal-footer-social="true">
+              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_follow')}</div>
+              <ul className="flex flex-col">
+                {socialLinks.map((link) => (
+                  <li key={link.key}>
+                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer">
+                      <SocialIcon kind={link.key} />
+                      <span className="notranslate break-words" translate="no">{link.label}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {/* Owner, 2026-09-25 (P-public-7): the three policies are visible
               buttons, not a dropdown. Real links (shareable ?legal= hrefs,
               middle-click opens a tab); a plain click opens the reader. */}
-          <nav aria-label={text('portal_legal_policies')} className="shrink-0" data-portal-footer-policies="true">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
+          <nav aria-label={text('portal_legal_policies')} className="min-w-0" data-portal-footer-policies="true">
+            <div className={FOOTER_HEADING_CLASS}>
               <ShieldCheck className="h-3.5 w-3.5" />
               {text('portal_legal_policies')}
             </div>
@@ -323,6 +385,9 @@ export default function PortalFooter({
               ))}
             </div>
           </nav>
+        </div>
+        <div className="mx-auto mt-6 max-w-5xl border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
+          {fill('portal_legal_footer_rights')}
         </div>
       </footer>
 
