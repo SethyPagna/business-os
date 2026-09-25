@@ -2122,6 +2122,7 @@ export default function Settings() {
                   type="checkbox"
                   checked={String(form.telegram_automation_enabled ?? 'true') === 'true'}
                   onChange={(event) => setValue('telegram_automation_enabled', event.target.checked ? 'true' : 'false')}
+                  disabled={!canEditSettings}
                 />
               </label>
               <div>
@@ -2134,6 +2135,7 @@ export default function Settings() {
                   placeholder={t('telegram_chat_id_placeholder') || 'Example: -1001234567890'}
                   value={form.telegram_chat_id || ''}
                   onChange={(event) => setValue('telegram_chat_id', event.target.value)}
+                  disabled={!canEditSettings}
                 />
               </div>
               <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
@@ -2161,6 +2163,7 @@ export default function Settings() {
                     type="checkbox"
                     checked={String(form[key] ?? 'true') === 'true'}
                     onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
+                    disabled={!canEditSettings}
                   />
                 </label>
               ))}
