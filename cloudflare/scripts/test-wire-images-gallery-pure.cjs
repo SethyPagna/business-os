@@ -149,6 +149,9 @@ const productDelete = loadReal('lib/productDelete.ts', {
 })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  // N1 added the plan budget gate to products.ts. This pure module must be
+  // loaded from src, not resolved relative to this scripts/ harness.
+  '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
