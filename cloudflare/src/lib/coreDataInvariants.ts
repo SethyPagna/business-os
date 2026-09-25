@@ -97,9 +97,9 @@ export type CoreDataInvariants = {
 // every endpoint behind this middleware (i.e. every route in the app) was
 // observed 500ing together in bursts, then succeeding on a lone refresh
 // once the contention had cleared. This function turns the overwhelmingly
-// common case ("already set up, nothing to do") into a handful of plain
-// SELECTs -- which D1 handles fine under concurrency -- instead of a batch
-// of writes. Returns null if anything is missing/out of date, so the
+// common case ("already set up, nothing to do") into one read-only SQL
+// projection, avoiding eight serial D1 round-trips on each cold isolate.
+// Returns null if anything is missing/out of date, so the
 // caller falls through to the original (write-capable) path below.
 async function tryFastPath(
   db: ReturnType<typeof getDb>,
@@ -107,59 +107,55 @@ async function tryFastPath(
   orgSlug: string,
   publicId: string,
 ): Promise<CoreDataInvariants | null> {
-  const org = await db.prepare(`
-    SELECT id FROM organizations
-    WHERE (public_id = @publicId OR slug = @slug)
-      AND name = @name AND is_active = 1 AND setup_enabled = 0
-    ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
-  `).get<{ id: number }>({ publicId, slug: orgSlug, name: orgName })
-  if (!org?.id) return null
-
-  const group = await db.prepare(`
-    SELECT id FROM organization_groups
-    WHERE organization_id = @orgId AND slug = 'main' AND is_default = 1 AND is_active = 1
-    LIMIT 1
-  `).get<{ id: number }>({ orgId: org.id })
-  if (!group?.id) return null
-
-  const branch = await db.prepare(`
-    SELECT id FROM branches WHERE is_active = 1 AND is_default = 1 ORDER BY id ASC LIMIT 1
-  `).get<{ id: number }>()
-  if (!branch?.id) return null
-
-  const adminRole = await db.prepare(`
-    SELECT id, permissions FROM roles WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 LIMIT 1
-  `).get<{ id: number; permissions: string }>()
-  if (!adminRole?.id || adminRole.permissions !== JSON.stringify(DEFAULT_ROLE_PERMISSIONS.admin)) return null
-
-  const managerRole = await db.prepare(`SELECT id FROM roles WHERE code = 'manager' LIMIT 1`).get<{ id: number }>()
-  if (!managerRole?.id) return null
-
-  const employeeRole = await db.prepare(`SELECT id FROM roles WHERE code = 'employee' LIMIT 1`).get<{ id: number }>()
-  if (!employeeRole?.id) return null
-
-  const admin = await db.prepare(`
-    SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1
-  `).get<{ id: number }>()
-  if (!admin?.id) return null
-
-  // Same NOT IN check the write path uses below, just without the INSERT --
-  // an EXISTS short-circuits on the first missing row instead of scanning
-  // the whole table, so this stays cheap even as the catalog grows.
-  const missingBranchStock = await db.prepare(`
-    SELECT EXISTS(
-      SELECT 1 FROM products p
-      WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock)
-    ) AS missing
-  `).get<{ missing: number }>()
-  if (Number(missingBranchStock?.missing || 0)) return null
+  // Keep each selector's original predicates and ordering. In particular,
+  // check permissions AFTER choosing the admin role, and retain NOT IN's
+  // semantics for stock coverage. Scalar subqueries preserve missing rows
+  // as null without joining unrelated identities or multiplying results.
+  const state = await db.prepare(`
+    WITH org AS (
+      SELECT id FROM organizations
+      WHERE (public_id = @publicId OR slug = @slug)
+        AND name = @name AND is_active = 1 AND setup_enabled = 0
+      ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
+    ), admin_role AS (
+      SELECT id, permissions FROM roles
+      WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 LIMIT 1
+    )
+    SELECT org.id AS organizationId,
+      (SELECT id FROM organization_groups
+        WHERE organization_id = org.id AND slug = 'main' AND is_default = 1 AND is_active = 1
+        LIMIT 1) AS organizationGroupId,
+      (SELECT id FROM branches WHERE is_active = 1 AND is_default = 1 ORDER BY id ASC LIMIT 1) AS branchId,
+      (SELECT id FROM admin_role) AS adminRoleId,
+      (SELECT permissions FROM admin_role) AS adminPermissions,
+      (SELECT id FROM roles WHERE code = 'manager' LIMIT 1) AS managerRoleId,
+      (SELECT id FROM roles WHERE code = 'employee' LIMIT 1) AS employeeRoleId,
+      (SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1) AS adminUserId,
+      EXISTS(SELECT 1 FROM products p
+        WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock)) AS missingBranchStock
+    FROM org
+  `).get<{
+    organizationId: number
+    organizationGroupId: number | null
+    branchId: number | null
+    adminRoleId: number | null
+    adminPermissions: string | null
+    managerRoleId: number | null
+    employeeRoleId: number | null
+    adminUserId: number | null
+    missingBranchStock: number
+  }>({ publicId, slug: orgSlug, name: orgName })
+  if (!state?.organizationId || !state.organizationGroupId || !state.branchId || !state.adminRoleId
+    || state.adminPermissions !== JSON.stringify(DEFAULT_ROLE_PERMISSIONS.admin)
+    || !state.managerRoleId || !state.employeeRoleId || !state.adminUserId
+    || Number(state.missingBranchStock || 0)) return null
 
   return {
-    organizationId: org.id,
-    organizationGroupId: group.id,
-    branchId: branch.id,
-    adminRoleId: adminRole.id,
-    adminUserId: admin.id,
+    organizationId: state.organizationId,
+    organizationGroupId: state.organizationGroupId,
+    branchId: state.branchId,
+    adminRoleId: state.adminRoleId,
+    adminUserId: state.adminUserId,
     adminUserCreated: false,
     adminPassword: null,
   }

@@ -217,9 +217,10 @@ async function measureOutsideRoute() {
   return outsideRoute
 }
 
-check('the invocation overhead outside the route is what planTier.ts sized against', async () => {
+check('the invocation overhead stays below the conservative planTier.ts allowance', async () => {
   const overhead = await measureOutsideRoute()
-  assert.equal(overhead.calls, 9, 'core-invariants fast path 8 + maintenance flag 1')
+  assert.equal(overhead.calls, 2, 'core-invariants projection 1 + maintenance flag 1')
+  assert.equal(overhead.statements, 2, 'the invariant projection is one SQL statement')
   const fx = await fixture('free', 0)
   const empty = await commit(fx, [])
   assert.equal(empty.status, 400)
@@ -253,7 +254,10 @@ for (const tier of ['free', 'paid']) {
     const cap = limits.stockInLinesPerRequest
     assert.ok(Number.isInteger(cap) && cap >= 1, `stockInLinesPerRequest must be a positive integer on ${tier}, got ${cap}`)
     const overhead = await measureOutsideRoute()
-    // 13 = the measured outside-route 9 + auth 3 + the receipt-table probe 1.
+    // Retain the original conservative 13-call allowance and existing caps:
+    // outside-route work fell from 9 to 2; auth 3 + receipt-table probe 1
+    // now make 6 actual overhead calls. The saved 7 remain safety headroom.
+    assert.ok(overhead.calls + 3 + 1 <= 13)
     assert.equal(cap, Math.floor((limits.d1QueriesPerInvocation - 13) / LINE_BUDGET))
     const fx = await fixture(tier, cap + 3)
     const lines = Array.from({ length: cap + 3 }, (_, i) => worstLine(i + 1, fx.branchId))
