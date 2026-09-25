@@ -47,6 +47,23 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [~] Official product names: step 1 product list from the public catalog (local Records only) → brand batches researched in parallel → Excel for owner review; no import without owner review
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
 
+### Lane tracker (26 Sep) — one writer per file set; integrate only after a refuter verdict
+| Lane | Branch / worktree | Owns | State |
+|---|---|---|---|
+| U-cost | claude/u-cost-20260925 | catalogCostRecompute, migration 0195, batch lists (ManageBatchesModal, inventory ProductDetailModal) | building (resumed after usage limit) |
+| U-db | claude/u-db-20260925 | search relevance, sales.ts empty IN, salesAnalytics, migrations 0196/0197, catalog cache invalidation | building (resumed) |
+| U-records | claude/u-records-20260925 | stockLedgerQuery, movement balance endpoint, StockLineChange, MovementDetailFloat | branch + total built (4b7af334, 182333b4); refuter next |
+| U-load | claude/u-load-20260925 | language packs, preload lists, sw.js, icons | built; refuter running |
+| U-branch | claude/u-branch-20260926 | branch roles/successor, stock-writer guards, activeBranches UI, held consolidation migration, import routing | building (resumed) |
+| U-print | claude/u-print-20260926 | printReceipt, receiptAssetLoader, printSurface, exportOptions, Receipt | building (resumed) |
+| U-confirm | claude/u-confirm-20260926 | native confirm() to shared dialog, outside every other lane's files | building (resumed) |
+| U-broadcast | claude/u-broadcast-20260926 | awaited broadcast() in lib (reviewApply, bulkDelete, customer repairs) + guard test | building (resumed) |
+| U-worker | claude/u-worker-20260926 | auth.ts, coreDataInvariants, permissions, settings route, index middleware | building |
+| CERT | council-build (detached 19013909) | read-only: every test file individually + hygiene | running |
+| Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
+| Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
+| P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
+
 ### Verification (every lane, before integration)
 - [ ] Refuter per lane (separate agent, read-only): tries to prove the fix wrong; checks sibling surfaces (POS, inventory, reports, public preview), permissions (backend role gate = UI gate), both language packs, undo/audit, offline paths
 - [ ] Hygiene sweep per lane: dead code, orphan/zombie files, unused exports and keys, duplicated helpers, bloat vs the smallest correct change
