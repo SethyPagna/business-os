@@ -175,7 +175,27 @@ The parent integrated the complete branch, retained N1 undo changes, completed
 EN/KM messages, and passed seven frontend/six Worker files plus both typechecks
 and i18n. The exact retry handle is not durable across component unmounts.
 
-High confidence in the file organization and sequence; feature readiness depends
-on completed tests and independent review, recorded in progress.md. Hidden recovery
-content remains intentionally retained. The deployment's HTTP health is still
-uncertified because of Cloudflare's challenge, despite confirmed 100% allocation.
+The complete Sales export now implements the agreed contract. Independent Worker
+review found cancelled receipts were excluded before their canonical cancelled
+count could be derived; f947db08 includes the selected cancelled/void cohort.
+Eighteen native groups and the 308-request export-authority matrix pass. Tests
+that remove totals from the token or bypass token mismatch refusal fail as
+expected. Independent UI checks cover the 10,000-row/20-page boundary, final
+verification, malformed dates, late errors, font waits and permission revocation
+after loading Excel. Mounted checks pass all four EN/KM desktop/mobile cases
+using 603 receipts, with typed Excel identifiers/dates/numeric zero and canonical
+totals distinct from the rounded row sum. Review found 14px collapsed preview
+buttons on mobile; 84c1a015 gives all five actions a 44px minimum and all four
+final layout checks pass without overflow. Physical printers remain unverified.
+
+The combined frontend sweep executed all 560 files: 557 passed initially and
+three stale test assumptions were repaired with negative controls and actual
+formatter/CSV probes. Focused reruns and frontend typecheck, i18n, build and
+startup graph checks pass. The final Worker sweep and its explicit failure/rerun
+accounting are recorded in progress.md and the external Records directory.
+This certification does not imply the broader historical backlog is complete.
+
+High confidence in the file organization and verified slices, with limits above.
+Hidden recovery content remains intentionally retained. The deployment's HTTP
+health is still uncertified because of Cloudflare's challenge, despite confirmed
+100% allocation. The newly verified feature work has not been deployed.

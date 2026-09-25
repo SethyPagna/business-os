@@ -27,7 +27,8 @@ keeper selection refresh, frozen group costs, exact retry receipts, contact
 continuation restrictions and preview/write conflict fences. Independent checks
 on the integrated source pass 16 frontend files and five Worker files. The paid
 deployment is the target; the new resolver refuses before writes on Free, whose
-existing pair kernel exceeds the query budget. Full combined gates remain due.
+existing pair kernel exceeds the query budget. Combined frontend gates pass;
+the Worker sweep and focused repairs are complete, as recorded below.
 N6 is integrated as `7286d930` from independently reviewed `097341e4`, with
 retained lot revisions, frozen unknown-outcome retries, fresh sequential removal
 and permission-refusal handling. EN/KM messages were completed in `d52c15de`.
@@ -41,11 +42,33 @@ physical-device and production behavior are not certified by that check.
 
 Report Center's explicit export-intent prerequisite is integrated as `9d93ada5`
 after independent review: 308 real route requests cover view/export authority,
-with Returns requiring Full. The bounded complete Sales export is now being
-implemented in isolated Worker/frontend branches: searched-cohort canonical
-totals, edit-sensitive authorized export tokens, complete-page validation and a
-shared preview/CSV/typed Excel/print result. Broader Report Center work remains
-open. Full combined certification is due after this slice is integrated.
+with Returns requiring Full. Complete Sales export is integrated in the final
+candidate: searched-cohort canonical totals, edit-sensitive authorized tokens,
+complete-page validation and one preview/CSV/typed Excel/print document. The
+Worker bounds source receipts to 10,000 and verifies the authorized snapshot on
+every continuation and once more before publication. Hidden costs do not affect
+the token. EN/KM desktop/mobile checks cover 603 receipts beyond the 250-row
+browse page; four functional and four final layout cases pass. Independent
+negative controls reject changed totals, stale tokens, incomplete collection,
+invalid calendar dates and permission revocation during publication. These are
+local browser/route checks; physical printing remains unverified. Broader Report
+Center work, other report exports and Telegram report images remain open.
+
+Combined certification: the 560-file frontend sweep at 35c31acc passed 557 files
+and exposed three obsolete test assumptions. Test-only repairs preserve the
+production behavior and strengthen placeholder, print-order and real CSV checks;
+all three plus ten neighbors pass. The repaired candidate bccbdeb3 passes both
+frontend typechecks, i18n, production build and built-startup graph validation.
+Three assertion-overload typing errors in the repairs were corrected before
+those gates passed. The Worker typecheck passes on the combined runtime, whose
+Worker source is identical to bd9c1e44 used for the full sweep. Original failures
+and reruns remain in the external Records directory; this is not represented as
+one uninterrupted green full-suite run. The Worker sweep executed 523 files at
+unchanged bd9c1e44: 520 passed initially. One Miniflare synchronous-fetcher
+assertion passed on an unchanged focused rerun; the merge inactive/group guard
+test was repaired and passes with negative controls. The gallery test now loads
+the real plan-tier module; all nine SQLite gallery checks and three image-related
+neighbor files pass. No runtime change was needed for those sweep failures.
 No new feature work in this section is deployed. Council decisions and the
 debloat blast-radius matrix: `docs/fleet/2026-09-25-resume-council.md`.
 
