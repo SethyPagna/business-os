@@ -14,6 +14,7 @@ import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import AppSelect from '../../shared/AppSelect'
 import FilePickerModalBase from '../../files/FilePickerModal'
 import {
@@ -1116,6 +1117,7 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
 
 export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange, products = [] }: BulkImportModalProps) {
   const { notify, hasPermission, can } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const canEditCosts = hasPermission('product_cost_edit')
   const canViewCosts = hasPermission('product_cost_view')
   // Server-side gate lives in routes/importJobs.ts (requires the
@@ -1579,8 +1581,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const handleCancelCurrentJob = async () => {
     if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
     if (!currentJob?.id) return
-    if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
+    if (loading) {
+      const confirmed = await askConfirm({
+        title: T('cancel_import', 'Cancel import'),
+        message: T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'),
+        items: csvData?.name ? [{ label: T('selected_file', 'Selected file'), value: csvData.name }] : undefined,
+        danger: true,
+      })
       if (!confirmed) return
     }
     cancelRequestedRef.current = true
@@ -1655,9 +1662,12 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       finishImportAction('delete')
       return
     }
-    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-      ? true
-      : window.confirm(T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'))
+    const confirmed = await askConfirm({
+      title: T('delete', 'Delete'),
+      message: T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'),
+      confirmLabel: T('delete', 'Delete'),
+      danger: true,
+    })
     if (!confirmed) {
       finishImportAction('delete')
       return
@@ -1880,16 +1890,25 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     // existing cancel/delete-job confirms above, just red instead of the
     // neutral copy those use since this one can deactivate products.
     if (mode === 'products' && importMode === 'replace_all') {
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'))
+      const confirmed = await askConfirm({
+        title: T('csv_import_mode_label', 'Import mode'),
+        message: T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'),
+        items: [{ label: T('selected_file', 'Selected file'), value: csvData.name || 'products-import.csv' }],
+        danger: true,
+      })
       if (!confirmed) return
     }
     if (mode === 'products' && importMode === 'replace_columns') {
       if (!selectedReplaceColumns.length) return
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?'))
+      const confirmed = await askConfirm({
+        title: T('csv_import_mode_label', 'Import mode'),
+        message: T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?'),
+        items: [
+          { label: T('selected_file', 'Selected file'), value: csvData.name || 'products-import.csv' },
+          { label: T('columns', 'Columns'), value: REPLACE_COLUMN_GROUPS.filter((group) => replaceColumnGroupKeys.has(group.key)).map((group) => group.label).join(', ') },
+        ],
+        danger: true,
+      })
       if (!confirmed) return
     }
     if (!beginImportAction('import')) return
@@ -2465,6 +2484,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
 
   return (
     <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable unsavedChanges={{ dirty: Boolean(csvData) }}>
+      {confirmDialog}
       {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
 
       <div className="mb-5 flex gap-1.5">

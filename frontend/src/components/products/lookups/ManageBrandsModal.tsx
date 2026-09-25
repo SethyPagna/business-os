@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
@@ -204,6 +205,7 @@ export default function ManageBrandsModal({
   t,
 }: ManageBrandsModalProps) {
   const { settings, notify } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands', user })
   const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
@@ -408,11 +410,17 @@ export default function ManageBrandsModal({
       const targetAlreadyExists = allKnownBrandNames.some((entry) => normalizeLookup(entry) === toLookup && normalizeLookup(entry) !== fromLookup)
       const impact = await getRenameImpact('brand', from, to)
       const attached = Number(impact.products_primary || 0) + Number(impact.products_secondary || 0)
-      const confirmed = window.confirm(
-        targetAlreadyExists
-          ? `"${to}" already exists. Merge "${from}" into it and update ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`
-          : `Rename "${from}" to "${to}" and carry ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`,
-      )
+      const confirmed = await askConfirm({
+        title: t('brand') || 'Brand',
+        message: (targetAlreadyExists
+          ? (t('brand_merge_confirm') || '"{to}" already exists. Merge "{from}" into it and update {n} exact linked product(s)? Point-in-time audit history stays unchanged.')
+          : (t('brand_rename_confirm') || 'Rename "{from}" to "{to}" and carry {n} exact linked product(s)? Point-in-time audit history stays unchanged.'))
+          .replace('{to}', to).replace('{from}', from).replace('{n}', String(attached)),
+        items: [
+          { label: t('before') || 'Before', value: from },
+          { label: t('after') || 'After', value: to },
+        ],
+      })
       if (!confirmed) return
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
@@ -493,8 +501,21 @@ export default function ManageBrandsModal({
       .filter(Boolean)
     const affectedCount = affectedEntries.reduce((sum, entry) => sum + Number(entry.usage || 0), 0)
     const clearAppliedBrands = affectedCount > 0
-      ? window.confirm(`${brandNames.length} brand${brandNames.length === 1 ? '' : 's'} are used by ${affectedCount} product(s). Clear those product brand fields too?`)
-      : window.confirm(`Delete ${brandNames.length} selected brand${brandNames.length === 1 ? '' : 's'}?`)
+      ? await askConfirm({
+        title: t('delete') || 'Delete',
+        message: (t('brand_delete_in_use_confirm') || '{count} brand(s) are used by {n} product(s). Clear those product brand fields too?')
+          .replace('{count}', String(brandNames.length)).replace('{n}', String(affectedCount)),
+        items: [{ label: t('brand') || 'Brand', value: brandNames.join(', ') }],
+        confirmLabel: t('delete') || 'Delete',
+        danger: true,
+      })
+      : await askConfirm({
+        title: t('delete') || 'Delete',
+        message: (t('brand_bulk_delete_confirm') || 'Delete {count} selected brand(s)?').replace('{count}', String(brandNames.length)),
+        items: [{ label: t('brand') || 'Brand', value: brandNames.join(', ') }],
+        confirmLabel: t('delete') || 'Delete',
+        danger: true,
+      })
 
     if (!clearAppliedBrands) {
       finishNamedAction(actionInFlightRef, 'delete-brand')
@@ -594,6 +615,7 @@ export default function ManageBrandsModal({
 
   return (
     <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose} unsavedChanges={{ dirty: Boolean(newBrand.trim()) || Boolean(renamingBrand) }}>
+      {confirmDialog}
       <div className="space-y-4">
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{error}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />

@@ -1,6 +1,7 @@
 import { todayStr } from '../../../utils/dateHelpers.ts'
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import SearchInput from '../../shared/SearchInput'
 import ScanSearchButton from '../../shared/ScanSearchButton'
 import ProductOptionSheet from '../../shared/ProductOptionSheet.tsx'
@@ -329,11 +330,18 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
+    if (!(await askConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('delete_saved_reason_confirm', 'Delete this saved reason?'),
+      items: [{ label: tr('reason', 'Reason'), value: entry?.label || '' }],
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog, tr])
+  }, [askConfirm, inventoryReasons, saveReasonCatalog, tr])
 
   // --- adjust form (step 2) ---
   const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? { ...restoredDraft.form, ...(!canViewCosts ? { cost_usd: '', cost_khr: '', unit_cost_usd: '' } : {}) } as unknown as AdjustForm : ({
@@ -788,6 +796,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   if (!selectedProduct) {
     return (
       <Modal title={tr('adjust_pick_product', 'Choose a product to adjust')} onClose={onClose} size="sm" unsavedChanges="read-only">
+        {confirmDialog}
         <div className="space-y-3">
           <div className="flex gap-2">
             <div className="min-w-0 flex-1">
@@ -933,6 +942,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
 
   return (
     <>
+      {confirmDialog}
       <InventoryStockModals
         adjustModal={product}
         transferModal={null}

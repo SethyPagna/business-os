@@ -15,6 +15,7 @@ import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../
 import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import FilterMenu from '../shared/FilterMenu'
 import InfoHint from '../shared/InfoHint'
 import PortalMenu from '../shared/PortalMenu'
@@ -1391,6 +1392,7 @@ const ProductMobileCard = memo(ProductMobileCardComponent)
 
 function ProductsFullEditor() {
   const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate, getPermissionTier, hasPermission, navigateTo } = useProductsApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   // Settings > Stock Alerts. One config for the badges on every row, the Low
@@ -2665,7 +2667,15 @@ function ProductsFullEditor() {
 
   const handleBulkOutOfStock = async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
-    if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
+    if (!(await askConfirm({
+      title: tr('out_of_stock', 'Out of stock'),
+      message: tr('products_bulk_out_of_stock_confirm', 'Set {n} product(s) to out-of-stock (quantity = 0)?').replace('{n}', String(selectedVisibleCount)),
+      items: [
+        { label: tr('products', 'Products'), value: selectedVisibleCount },
+        { label: `${tr('quantity', 'Quantity')} (${tr('after', 'After')})`, value: 0 },
+      ],
+      danger: true,
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     const failedIds: number[] = []
@@ -2727,7 +2737,14 @@ function ProductsFullEditor() {
     if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
     const branch = branchesById.get(String(branchId))
     if (!branch) return
-    if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
+    if (!(await askConfirm({
+      title: tr('branch', 'Branch'),
+      message: tr('products_bulk_move_branch_confirm', 'Move stock of {n} product(s) to "{branch}"?').replace('{n}', String(selectedVisibleCount)).replace('{branch}', String(branch.name || '')),
+      items: [
+        { label: tr('products', 'Products'), value: selectedVisibleCount },
+        { label: `${tr('branch', 'Branch')} (${tr('after', 'After')})`, value: String(branch.name || '') },
+      ],
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     try {
@@ -4180,7 +4197,10 @@ function ProductsFullEditor() {
       notify('No changes specified', 'warning')
       return
     }
-    if (!window.confirm(`Do you want to update ${selectedVisibleCount} product${selectedVisibleCount === 1 ? '' : 's'}?`)) return
+    if (!(await askConfirm({
+      message: tr('products_bulk_update_confirm', 'Do you want to update {n} product(s)?').replace('{n}', String(selectedVisibleCount)),
+      items: [{ label: tr('products', 'Products'), value: selectedVisibleCount }],
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     let done = 0
@@ -4249,7 +4269,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user?.id, user?.name])
+  }, [actionHistory, askConfirm, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
 
   // Relative price change ("add $1 to all of these"), as opposed to
   // runBulkProductUpdates above which writes the SAME value to every
@@ -4296,7 +4316,12 @@ function ProductsFullEditor() {
       }
       const verb = direction === 'decrease' ? tr('bulk_price_decrease', 'Decrease') : tr('bulk_price_increase', 'Increase')
       const warning = tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
-      if (!window.confirm(`${verb} prices on ${count} products — ${warning}`)) return
+      if (!(await askConfirm({
+        title: verb,
+        message: tr('bulk_price_adjust_all_confirm', '{verb} prices on {n} products — {warning}').replace('{verb}', verb).replace('{n}', String(count)).replace('{warning}', warning),
+        items: [{ label: tr('products', 'Products'), value: count }],
+        danger: true,
+      }))) return
       const result = await bulkPriceAdjustAllProducts(payload)
       if (result?.success === false || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
       notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed) || count}`)
@@ -4306,7 +4331,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [bulkActionBusy, bulkEditForm, notify, tr, load])
+  }, [askConfirm, bulkActionBusy, bulkEditForm, notify, tr, load])
 
   const runBulkProductPriceAdjustment = useCallback(async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -4346,7 +4371,11 @@ function ProductsFullEditor() {
     const verb = bulkEditForm.adjust_direction === 'decrease'
       ? tr('bulk_price_decrease', 'Decrease')
       : tr('bulk_price_increase', 'Increase')
-    if (!window.confirm(`${verb} prices on ${adjustments.length} product${adjustments.length === 1 ? '' : 's'}?`)) return
+    if (!(await askConfirm({
+      title: verb,
+      message: tr('bulk_price_adjust_selected_confirm', '{verb} prices on {n} product(s)?').replace('{verb}', verb).replace('{n}', String(adjustments.length)),
+      items: [{ label: tr('products', 'Products'), value: adjustments.length }],
+    }))) return
 
     const adjustedIds = adjustments.map((entry) => entry.id)
     const snapshots = snapshotProductsByIds(adjustedIds)
@@ -4419,7 +4448,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, bulkEditForm, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
+  }, [actionHistory, askConfirm, bulkActionBusy, bulkEditForm, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
 
   const productFilterSections = useMemo(() => buildProductFilterSections({
     availabilitySection: buildAvailabilityFilterSection({
@@ -4670,6 +4699,7 @@ function ProductsFullEditor() {
   // top and nothing bleeds above it.
   return (
     <div className="page-scroll px-3 pb-3 sm:px-6 sm:pb-6">
+      {confirmDialog}
       {/* Page title + section switcher on the left; Manage / History / Add
           product on the right of the SAME row (Y15/Y16: the header actions
           join the section-chip row instead of getting their own toolbar

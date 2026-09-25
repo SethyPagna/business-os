@@ -3,6 +3,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
@@ -198,6 +199,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   const { notify, user } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
     : 'Review products'
@@ -393,7 +395,14 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const handleDelete = async (id: EntityId): Promise<void> => {
     if (saving || deletingId) return
     if (!beginSingleAction(deleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(t('confirm_delete'))) {
+    const target = categories.find((row) => String(row.id) === String(id))
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: t('confirm_delete') || 'Are you sure you want to delete this?',
+      items: target?.name ? [{ label: t('name') || 'Name', value: String(target.name) }] : undefined,
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -464,7 +473,12 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const handleDeleteSelected = async (): Promise<void> => {
     if (saving || deletingId || selectedIds.size === 0) return
     if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(`Delete ${selectedIds.size} selected categor${selectedIds.size === 1 ? 'y' : 'ies'}?`)) {
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('category_bulk_delete_confirm') || 'Delete {n} selected category(ies)?').replace('{n}', String(selectedIds.size)),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -518,6 +532,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
 
   return (
     <Modal title={t('manage_categories') || 'Manage Categories'} onClose={onClose} unsavedChanges={{ dirty: Boolean(newName.trim()) || editing !== null }}>
+      {confirmDialog}
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
         <ActionHistoryBar history={actionHistoryForBar} t={t} />

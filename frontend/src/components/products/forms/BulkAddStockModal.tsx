@@ -21,6 +21,7 @@ import { adjustBranchQuantity, bulkActionCanReceive, bulkStockReceiptWire, scope
 import { getProductBatches, type ProductBatch } from '../../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import UnsavedChangesPrompt from '../../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../../utils/useCloseGuard.ts'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
@@ -303,11 +304,18 @@ export default function BulkAddStockModal({ productIds, products, branches, user
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(t('delete_saved_reason_confirm') || 'Delete this saved reason?')) return
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: t('delete_saved_reason_confirm') || 'Delete this saved reason?',
+      items: [{ label: t('reason') || 'Reason', value: entry?.label || '' }],
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [askConfirm, inventoryReasons, saveReasonCatalog, t])
   const runBulkStockMutation = useCallback((loader: () => Promise<ApiResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, BULK_ADD_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
@@ -809,6 +817,7 @@ export default function BulkAddStockModal({ productIds, products, branches, user
           onClose={() => { if (!saving) setConfirmOpen(false) }}
         />
       ) : null}
+      {confirmDialog}
       <UnsavedChangesPrompt guard={closeGuard} items={bulkPromptItems} />
     </div>
   )

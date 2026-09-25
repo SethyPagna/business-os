@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" component Inventory's own
 // Adjust-stock modal already uses -- per the
@@ -116,11 +117,18 @@ export default function DeleteConfirmModal({
     const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(T('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
+    if (!(await askConfirm({
+      title: T('delete', 'Delete'),
+      message: T('delete_saved_reason_confirm', 'Delete this saved reason?'),
+      items: [{ label: T('reason', 'Reason'), value: entry?.label || '' }],
+      confirmLabel: T('delete', 'Delete'),
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [askConfirm, inventoryReasons, saveReasonCatalog])
 
   const isBulk = summary.productCount > 1
   const title = isBulk
@@ -131,6 +139,7 @@ export default function DeleteConfirmModal({
 
   return (
     <Modal title={title} onClose={onClose} size="sm" unsavedChanges="read-only">
+      {confirmDialog}
       <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
