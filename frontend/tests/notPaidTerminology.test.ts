@@ -83,7 +83,7 @@ assert.match(telegramLang, /credit: \{ en: 'Not Paid', km: 'ប្រាក់�
 // its own to be called Not Paid: the money line is labelled with the sale's
 // STATUS, whatever that status is, and `awaiting payment` is spelled Not Paid
 // by the status table the line below pins. One rule, every sale.
-assert.match(telegram, /\$\{saleStatusMoneyLabel\(status\)\}: \$\{money\(sale\.totalUsd, sale\.totalKhr, ' \/ '\)\}/)
+assert.match(telegram, /\$\{saleStatusMoneyLabel\(status\)\}: \$\{money\(sale\.totalUsd, sale\.totalKhr\)\}/)
 assert.match(telegramLang, /'awaiting payment': \{ en: 'Not Paid', km: 'ប្រាក់ជំពាក់' \}/)
 assert.match(telegram, /labeled\('credit'/, 'the internal Telegram key remains credit')
 
