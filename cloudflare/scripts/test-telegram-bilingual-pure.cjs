@@ -381,8 +381,17 @@ const bilingualOk = (line) => {
 // must be reported, or the check proves nothing.
 assert.equal(bilingualOk(`${lang.ROW_BULLET}Cashier: Za`), false, 'a known label with no Khmer must fail bilingualOk')
 assert.equal(bilingualOk(`${lang.ROW_BULLET}Cashier${SEP}អ្នកគិតប្រាក់: Za`), true)
+// A group opens with a `\u0001SECTION:<key>` marker rather than baked-in text
+// (Sep 25 2026): the real send path resolves it inside withLanguage, via
+// telegram.sectionHeader, so a test that skips that step would check text the
+// shop never sees. Mirror that one step here instead of re-baking the marker.
+const resolveEventLine = (line) => (
+  line.startsWith(telegram.EVENT_SECTION_MARKER)
+    ? telegram.sectionHeader(line.slice(telegram.EVENT_SECTION_MARKER.length), lang.REPORT_SECTION_EDGE)
+    : lang.localizeTelegramLine(line)
+)
 const assertAllBilingual = (lines, what) => {
-  const localized = lines.filter(Boolean).map(lang.localizeTelegramLine)
+  const localized = lines.filter(Boolean).map(resolveEventLine)
   const english = localized.filter((line) => !bilingualOk(line))
   assert.deepEqual(english, [], `${what}: these lines have an English label with no Khmer:\n  ${english.join('\n  ')}`)
   assert.ok(localized.some((line) => KHMER.test(line)), `${what} produced no Khmer at all`)
@@ -453,7 +462,7 @@ const statusLines = assertAllBilingual(telegram.formatSaleStatusTelegramLines({
 // Sep 23 2026: the receipt moved into the title and the Status row became
 // the owner's "Status updated/ស្ថានភាពផ្លាស់ប្ដូរ".
 assert.equal(statusLines[0], '🧾 Invoice/វិក្កយបត្រ: 20260903-100405', `the status change opens on its bilingual title:\n${statusLines.join('\n')}`)
-assert.equal(statusLines[1], '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់', statusLines.join('\n'))
+assert.equal(statusLines[2], '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់', statusLines.join('\n'))
 assert.ok(!statusLines.some((line) => /^· (Receipt|Status): /.test(line)), `the Receipt and Status rows are retired:\n${statusLines.join('\n')}`)
 // routes/fees.ts is the one route still composing lines inline.
 const feeLines = assertAllBilingual([
@@ -470,7 +479,7 @@ assert.equal(lang.localizeTelegramLine('Product: None'), '· Product/ផលិ�
 assert.equal(lang.localizeTelegramLine('Note: item(s) damaged in transit'), '· Note/កំណត់ចំណាំ: item(s) damaged in transit', 'a free-text note is left alone')
 assert.equal(lang.localizeTelegramLine('• Rice 5kg 2 × $1.00 = $2.00'), '• Rice 5kg 2 × $1.00 = $2.00', 'item bullets pass through')
 assert.equal(lang.localizeTelegramLine('1. Rice 5kg 2 × $1.00 = $2.00'), '1. Rice 5kg 2 × $1.00 = $2.00', 'numbered item lines pass through, unbulleted')
-assert.equal(lang.localizeTelegramLine(lang.GROUP_RULE), lang.GROUP_RULE, 'a divider is not a label row and gains no bullet')
+assert.equal(lang.localizeTelegramLine(lang.RULE), lang.RULE, 'a divider is not a label row and gains no bullet')
 assert.equal(lang.localizeTelegramLine('Mystery: 12'), 'Mystery: 12', 'an unknown label passes through instead of throwing')
 console.log('PASS safety: free-text values, item bullets and unknown labels are never rewritten')
 

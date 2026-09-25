@@ -155,8 +155,17 @@ const build = (user, overrides = {}) => telegram.formatSaleStatusTelegramLines({
 function cleanLine(value, max = 400) {
   return String(value ?? '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
+// A group opens with a `\u0001SECTION:<key>` marker rather than baked-in text
+// (Sep 25 2026): the real send path resolves it inside withLanguage, via
+// telegram.sectionHeader. Mirror that one step here so this "real pipeline"
+// check still matches what sendTelegramEvent actually sends (PASS 9 sends
+// through the real path too, so both must agree).
 function composeMessage(lines) {
-  return lines.map((line) => telegramLang.localizeTelegramLine(cleanLine(line))).filter(Boolean).join('\n')
+  return lines
+    .map((line) => (line.startsWith(telegram.EVENT_SECTION_MARKER)
+      ? telegram.sectionHeader(line.slice(telegram.EVENT_SECTION_MARKER.length), telegramLang.REPORT_SECTION_EDGE)
+      : telegramLang.localizeTelegramLine(cleanLine(line))))
+    .filter(Boolean).join('\n')
 }
 
 // The owner's Sep 23 2026 sample, verbatim: the message a shop in the
@@ -167,12 +176,12 @@ const OWNER_CHANGE = {
 }
 const OWNER_SAMPLE = [
   '🧾 Invoice/វិក្កយបត្រ: 20260922-110132',
+  '=====Details/លម្អិត=====',
   '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់',
-  '──────────────────',
+  '=====Customer/អតិថិជន=====',
   '· Customer/អតិថិជន: bong meta',
   '· By/ដោយ: admin',
 ].join('\n')
-assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'s rule is the rule every event message uses')
 
 {
   const text = composeMessage(build({ name: 'Za', username: 'za01' }))
@@ -213,8 +222,9 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
   })
   assert.deepEqual(full, [
     '🧾 Invoice: R-9',
+    `${telegram.EVENT_SECTION_MARKER}details`,
     'Status updated: completed → cancelled',
-    telegramLang.GROUP_RULE,
+    `${telegram.EVENT_SECTION_MARKER}customer`,
     'Customer: Sok Dara',
     'Reason: Customer cancelled',
     // UPDATED Sep 23 2026. The note is a PLAIN `Label: value` row like every
@@ -232,14 +242,48 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
   assert.ok(!full.join('\n').includes('ឯកតា') && !full.join('\n').includes('មិនប៉ះពាល់ស្តុក'),
     'the BUILDER emits English only -- the Khmer is added by the localizer, in the shop\'s mode')
   // A bare change -- no customer, no reason, no fee, no actor -- keeps its
-  // title and first group and drops the second, divider and all.
+  // title and first section and drops the second, section marker included.
   const bare = telegram.formatSaleStatusTelegramLines({ receipt: 'R-9', fromStatus: 'completed', toStatus: 'cancelled' })
-  assert.deepEqual(bare, ['🧾 Invoice: R-9', 'Status updated: completed → cancelled'], bare.join('\n'))
+  assert.deepEqual(bare, [
+    '🧾 Invoice: R-9',
+    `${telegram.EVENT_SECTION_MARKER}details`,
+    'Status updated: completed → cancelled',
+  ], bare.join('\n'))
   // With no receipt at all the title is the bare heading, never one that
   // ends on a colon.
   const numberless = telegram.formatSaleStatusTelegramLines({ receipt: null, fromStatus: 'completed', toStatus: 'cancelled' })
   assert.equal(numberless[0], '🧾 Invoice', numberless.join('\n'))
   console.log('PASS 8: the title names the receipt, every optional row is its own line in plain English, and an empty group takes its divider with it')
+}
+
+// ---- 8b. every real status, on both sides of the arrow, and no plain
+// divider anywhere -- the two regressions the owner flagged 25 Sep 2026:
+// "Not Paid/ប្រាក់ជំពាក់ → paid" (the new status shown raw and untranslated)
+// and the plain ────── row the sale invoice and status messages must never
+// use again. A sweep over every VALID_SALE_STATUSES pair is a positive
+// control this file did not have before: a builder that forgot to localize
+// ONE status combination would pass every other check in this file.
+{
+  const salesStatus = loadReal('lib/salesStatus.ts')
+  const resolveLine = (line) => (line.startsWith(telegram.EVENT_SECTION_MARKER)
+    ? telegram.sectionHeader(line.slice(telegram.EVENT_SECTION_MARKER.length), telegramLang.REPORT_SECTION_EDGE)
+    : telegramLang.localizeTelegramLine(line))
+  telegramLang.setTelegramLanguage('both')
+  for (const fromStatus of salesStatus.VALID_SALE_STATUSES) {
+    for (const toStatus of salesStatus.VALID_SALE_STATUSES) {
+      if (fromStatus === toStatus) continue
+      const raw = telegram.formatSaleStatusTelegramLines({ receipt: 'SWEEP', fromStatus, toStatus })
+      assert.ok(!raw.some((line) => line.includes('──────')), `${fromStatus} -> ${toStatus}: the plain ────── divider must never reappear:\n${raw.join('\n')}`)
+      const resolved = raw.map(resolveLine)
+      const statusLine = resolved.find((line) => line.includes('Status updated'))
+      assert.ok(statusLine, `${fromStatus} -> ${toStatus}: no Status updated row found:\n${resolved.join('\n')}`)
+      assert.ok(/[ក-៿]/.test(statusLine), `${fromStatus} -> ${toStatus}: the status row is missing Khmer:\n${statusLine}`)
+      assert.ok(/[A-Za-z]/.test(statusLine.replace(/^· /, '')), `${fromStatus} -> ${toStatus}: the status row is missing English:\n${statusLine}`)
+      assert.ok(!statusLine.includes(`: ${fromStatus} `) && !statusLine.includes(`${toStatus}$`),
+        `${fromStatus} -> ${toStatus}: a raw enum value leaked into the message untranslated:\n${statusLine}`)
+    }
+  }
+  console.log(`PASS 8b: every one of ${salesStatus.VALID_SALE_STATUSES.length * (salesStatus.VALID_SALE_STATUSES.length - 1)} status transitions is bilingual on both sides of the arrow, with no plain divider`)
 }
 
 // ---- 9. the three language modes, through the REAL send path --------------
@@ -306,22 +350,25 @@ assert.equal(OWNER_SAMPLE.split('\n')[2], telegramLang.GROUP_RULE, 'the sample\'
     // language, the title's emoji kept and the values never touched.
     assert.equal(both, [
       '🧾 Invoice/វិក្កយបត្រ: R-9',
+      '=====Details/លម្អិត=====',
       '· Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Completed/បានបញ្ចប់ → Cancelled/បានបោះបង់',
-      '──────────────────',
+      '=====Customer/អតិថិជន=====',
       '· Stock skipped/មិនប៉ះពាល់ស្តុក: 3 unit(s)/ឯកតា',
       '· By/ដោយ: admin',
     ].join('\n'), both)
     assert.equal(en, [
       '🧾 Invoice: R-9',
+      '=====Details=====',
       '· Status updated: Completed → Cancelled',
-      '──────────────────',
+      '=====Customer=====',
       '· Stock skipped: 3 unit(s)',
       '· By: admin',
     ].join('\n'), en)
     assert.equal(km, [
       '🧾 វិក្កយបត្រ: R-9',
+      '=====លម្អិត=====',
       '· ស្ថានភាពផ្លាស់ប្ដូរ: បានបញ្ចប់ → បានបោះបង់',
-      '──────────────────',
+      '=====អតិថិជន=====',
       '· មិនប៉ះពាល់ស្តុក: 3 ឯកតា',
       '· ដោយ: admin',
     ].join('\n'), km)

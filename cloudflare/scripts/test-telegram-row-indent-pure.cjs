@@ -163,10 +163,23 @@ function checkItemBlock(block, where) {
   assert.deepEqual(items.map((lines) => lines.join(' ')), oneLine, `${where}: the items' text is unchanged`)
 }
 
-const GROUP = telegramLang.GROUP_RULE
+// The item block is the "items" section (Sep 25 2026: a titled
+// `====Items/ខ្មែរ====` section replaced the plain ────── divider between an
+// event message's groups), so the raw builder lines carry the deferred
+// `\u0001SECTION:items` marker rather than baked-in header text -- pull the
+// block out by marker instead of splitting on a divider string.
+const MARKER = telegram.EVENT_SECTION_MARKER
+function sliceSection(allLines, key) {
+  const start = allLines.indexOf(`${MARKER}${key}`) + 1
+  assert.ok(start > 0, `no ${key} section marker found:\n${allLines.join('\n')}`)
+  let end = allLines.length
+  for (let i = start; i < allLines.length; i++) {
+    if (allLines[i].startsWith(MARKER)) { end = i; break }
+  }
+  return allLines.slice(start, end)
+}
 const lines = telegram.formatSaleTelegramLines(ownerSale)
-const groups = lines.join('\n').split(`\n${GROUP}\n`)
-const itemBlock = groups.find((group) => group.startsWith('1. ')).split('\n')
+const itemBlock = sliceSection(lines, 'items')
 checkItemBlock(itemBlock, 'formatSaleTelegramLines')
 assert.deepEqual(itemBlock.slice(0, 4), [
   '1. Candle Mango Papaya 411g',
@@ -196,9 +209,18 @@ console.log('PASS 2: the owner\'s 15-item sale opens each item at the left edge 
       assert.equal(sent, true, `sendTelegramEvent composed nothing in ${mode} mode`)
       assert.equal(posted.length, 1, `expected one captured message in ${mode} mode`)
       const text = posted[0].text
-      const block = text.split(`\n${GROUP}\n`).find((group) => group.startsWith('1. ')).split('\n')
-      checkItemBlock(block, `sent in ${mode} mode`)
-      assert.deepEqual(block, itemBlock, `${mode} mode: the item block arrives exactly as built`)
+      const textLines = text.split('\n')
+      telegramLang.setTelegramLanguage(mode)
+      const itemsHeader = telegram.sectionHeader('items', telegramLang.REPORT_SECTION_EDGE)
+      const start = textLines.indexOf(itemsHeader) + 1
+      assert.ok(start > 0, `${mode} mode: no items section header ("${itemsHeader}") found:\n${text}`)
+      let end = textLines.length
+      for (let i = start; i < textLines.length; i++) {
+        if (/^={4,5}.+={4,5}$/.test(textLines[i])) { end = i; break }
+      }
+      const sentBlock = textLines.slice(start, end)
+      checkItemBlock(sentBlock, `sent in ${mode} mode`)
+      assert.deepEqual(sentBlock, itemBlock, `${mode} mode: the item block arrives exactly as built`)
       // The label rows around it are untouched by the indent: still one
       // bullet row each, localized as before.
       assert.ok(text.split('\n').some((line) => line.startsWith(`${telegramLang.ROW_BULLET}`)), `${mode} mode: label rows keep their bullet`)

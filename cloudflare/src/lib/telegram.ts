@@ -3,7 +3,7 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, firstCharacters, getTelegramLanguage, GROUP_RULE, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
@@ -271,10 +271,16 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
     localizeTelegramHeading(event.heading || heading[event.type] || ''),
     // cleanLine trims, so the rest of a list row (telegramRowLines) gets its
     // indent back after cleaning. It continues the row above; it is not a
-    // label row of its own to localize.
+    // label row of its own to localize. A section marker (eventGroups) is
+    // resolved to its titled `====Name/ខ្មែរ====` header HERE, inside
+    // withLanguage, so it renders in the shop's own language setting instead
+    // of whatever was left in telegramLang's module state when the route
+    // built these lines.
     ...event.lines.map((line) => (line.startsWith(HANGING_INDENT)
       ? `${HANGING_INDENT}${cleanLine(line, 400)}`
-      : localizeTelegramLine(cleanLine(line, 400)))),
+      : line.startsWith(EVENT_SECTION_MARKER)
+        ? sectionHeader(line.slice(EVENT_SECTION_MARKER.length) as TelegramLabelKey, REPORT_SECTION_EDGE)
+        : localizeTelegramLine(cleanLine(line, 400)))),
   ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]])
   return true
 }
@@ -1758,25 +1764,42 @@ export type TelegramStockChange = {
 const TELEGRAM_MAX_ITEM_LINES = 20
 
 /**
- * Join an event message's row GROUPS with the one event divider.
+ * Join an event message's row GROUPS, each under its own titled section.
  *
  * Owner, Sep 22 2026, over a sale alert: "for sales we can do like this. so it
  * is easier to read." Their reference layout separates when/what-it-is, who
- * rang it up, who it was for, the items, and the money with a rule between
- * each -- five blocks a reader can jump between instead of one column of
- * fifteen rows.
+ * rang it up, who it was for, the items, and the money -- distinct blocks a
+ * reader can jump between instead of one column of fifteen rows. Owner, 25
+ * Sep 2026: "the sale invoice must also use ====Section/ខ្មែរ==== headers
+ * instead of the plain ────── lines" -- the same section glyph the reports
+ * use (REPORT_SECTION_EDGE), not a second divider style for event messages.
  *
  * A group whose rows are ALL empty (no customer at all, a sale with no
- * delivery) takes its divider with it, so an anonymous walk-in never ships a
- * rule with nothing under it and never two rules in a row. Blanks are dropped
- * HERE rather than by sendTelegramEvent's `.filter(Boolean)` because only
- * this function can tell an empty group from an empty row.
+ * delivery) takes its header with it, so an anonymous walk-in never ships a
+ * titled section with nothing under it. Blanks are dropped HERE rather than
+ * by sendTelegramEvent's `.filter(Boolean)` because only this function can
+ * tell an empty group from an empty row.
+ *
+ * The header text is NOT rendered here: `sale.receiptNumber`'s builder is
+ * called by the ROUTE, before sendTelegramEvent has read config.language and
+ * called withLanguage -- exactly the ordering bug a nearby comment already
+ * warns about ("the route calls it BEFORE sendTelegramEvent sets the shop's
+ * language"). Rendering `sectionHeader()` here would bake in whatever
+ * language happened to be left in telegramLang's module state, the SAME
+ * global-state leak, just for section titles instead of a stray line -- an
+ * en-only or km-only shop would still get a bilingual `====Details/
+ * ព័ត៌មាន====` row sitting above correctly single-language rows. A marker
+ * line instead defers the actual header text to sendTelegramEvent's mapping
+ * step, which runs INSIDE withLanguage.
  */
-function eventGroups(groups: string[][]): string[] {
+/** Exported for scripts/test-telegram-messages-pure.cjs, which asserts on the
+ *  raw builder output directly (before sendTelegramEvent resolves it). */
+export const EVENT_SECTION_MARKER = '\u0001SECTION:'
+function eventGroups(groups: Array<{ key: TelegramLabelKey; rows: string[] }>): string[] {
   return groups
-    .map((group) => group.filter(Boolean))
-    .filter((group) => group.length)
-    .flatMap((group, index) => (index ? [GROUP_RULE, ...group] : group))
+    .map((group) => ({ key: group.key, rows: group.rows.filter(Boolean) }))
+    .filter((group) => group.rows.length)
+    .flatMap((group) => [`${EVENT_SECTION_MARKER}${group.key}`, ...group.rows])
 }
 
 /**
@@ -1884,86 +1907,104 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // so it heads the message. sendTelegramEvent gives a sales event no heading
   // of its own: this first line is the heading.
   return [eventTitle('🛍️ Sale invoice', sale.receiptNumber), ...eventGroups([
-    // WHAT HAPPENED. Status leads, and it prints on EVERY sale now (owner's
-    // Sep 22 2026 reference layout opens on it). It used to be dropped on a
-    // completed sale as "the norm the heading already announces" -- but the
-    // reader scanning a phone at the till wants the same row in the same
-    // place on every message far more than they want one line saved, and a
-    // status that appears only when something is unusual is a row whose
-    // ABSENCE has to be interpreted. The value's wording comes from
-    // telegramLang's status table, so it says "Not Paid / ប្រាក់ជំពាក់".
-    // Status and Date only since Sep 23 2026: the INV row moved into the title.
-    [
-      `Status: ${status}`,
-      `Date: ${formatBusinessDateTime(sale.createdAt)}`,
-    ],
-    // WHO RANG IT UP.
-    [
-      `Cashier: ${sale.cashier || 'Unknown'}`,
-      sale.branch ? `Branch: ${sale.branch}` : '',
-    ],
+    // WHAT HAPPENED, WHO RANG IT UP. Status leads, and it prints on EVERY
+    // sale now (owner's Sep 22 2026 reference layout opens on it). It used to
+    // be dropped on a completed sale as "the norm the heading already
+    // announces" -- but the reader scanning a phone at the till wants the
+    // same row in the same place on every message far more than they want
+    // one line saved, and a status that appears only when something is
+    // unusual is a row whose ABSENCE has to be interpreted. The value's
+    // wording comes from telegramLang's status table, so it says "Not Paid /
+    // ប្រាក់ជំពាក់". Status and Date only since Sep 23 2026: the INV row moved
+    // into the title. Cashier and Branch join this same section (owner, 25
+    // Sep 2026: "====Details/ព័ត៌មាន==== for status, date and cashier").
+    {
+      key: 'details',
+      rows: [
+        `Status: ${status}`,
+        `Date: ${formatBusinessDateTime(sale.createdAt)}`,
+        `Cashier: ${sale.cashier || 'Unknown'}`,
+        sale.branch ? `Branch: ${sale.branch}` : '',
+      ],
+    },
     // WHO IT WAS FOR. The driver belongs with the customer, not alone at the
     // foot of the message: on a delivery the three of them are one fact --
     // who bought it, how to reach them, who is taking it to them.
-    [
-      sale.customer ? `Customer: ${sale.customer}` : '',
-      sale.phone ? `Tel: ${sale.phone}` : '',
-      sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
-    ],
+    {
+      key: 'customer',
+      rows: [
+        sale.customer ? `Customer: ${sale.customer}` : '',
+        sale.phone ? `Tel: ${sale.phone}` : '',
+        sale.driver?.name ? `Delivery driver: ${sale.driver.name}${sale.driver.phone ? ` · ${sale.driver.phone}` : ''}` : '',
+      ],
+    },
     // WHAT WAS BOUGHT.
-    [
-      ...items,
-      sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
-    ],
+    {
+      key: 'items',
+      rows: [
+        ...items,
+        sale.items.length > TELEGRAM_MAX_ITEM_LINES ? `+ ${sale.items.length - TELEGRAM_MAX_ITEM_LINES} more item(s)` : '',
+      ],
+    },
     // WHAT IT CAME TO.
-    [
-      sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
-      totalRepeatsNet ? '' : `Total: ${usd(grossTotalUsd)}`,
-      sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
-      sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
-      // totalKhr is the converted equivalent of totalUsd, while paidUsd and
-      // paidKhr are native tender amounts. Change from saleTotals is likewise
-      // an equivalent pair unless a caller can explicitly establish that both
-      // currencies were physically returned.
-      //
-      // THE MONEY LINE IS LABELLED WITH THE SALE'S STATUS (owner, Sep 23 2026:
-      // "a paid sale would usually already use a completed status"). So it
-      // reads `Completed / បានបញ្ចប់: $8.00 / 32,800៛` on a settled sale and
-      // `Not Paid / ប្រាក់ជំពាក់: $8.00 / 32,800៛` on an unsettled one -- one
-      // figure, stated once, under the name of the state the sale is in. The
-      // words come from the status table in telegramLang.ts, the same table
-      // that renders the `Status:` row at the top of this message, so renaming
-      // a status renames this line with it and the two can never disagree.
-      //
-      // It replaced a neutral `Net Total`, which told the reader nothing the
-      // heading had not already said, and which the unsettled sale had to be
-      // special-cased away from to get its own word.
-      `${saleStatusMoneyLabel(status)}: ${money(sale.totalUsd, sale.totalKhr, ' / ')}`,
-      // No recorded tender means no Paid line: the status above carries the
-      // "not paid" fact already, so a line saying it again is one more line
-      // for nothing.
-      paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
-      change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : ' / ')}` : '',
-    ],
+    {
+      key: 'payment',
+      rows: [
+        sale.isDelivery ? `Delivery service: ${usd(deliveryFee)}${shopAbsorbedDelivery ? ' (shop paid)' : ''}` : '',
+        totalRepeatsNet ? '' : `Total: ${usd(grossTotalUsd)}`,
+        sale.discountUsd ? `Discount: −${usd(sale.discountUsd)}` : '',
+        sale.taxUsd ? `Tax: ${usd(sale.taxUsd)}` : '',
+        // totalKhr is the converted equivalent of totalUsd, while paidUsd and
+        // paidKhr are native tender amounts. Change from saleTotals is likewise
+        // an equivalent pair unless a caller can explicitly establish that both
+        // currencies were physically returned.
+        //
+        // THE MONEY LINE IS LABELLED WITH THE SALE'S STATUS (owner, Sep 23 2026:
+        // "a paid sale would usually already use a completed status"). So it
+        // reads `Completed / បានបញ្ចប់: $8.00 · 32,800៛` on a settled sale and
+        // `Not Paid / ប្រាក់ជំពាក់: $8.00 · 32,800៛` on an unsettled one -- one
+        // figure, stated once, under the name of the state the sale is in. The
+        // words come from the status table in telegramLang.ts, the same table
+        // that renders the `Status:` row at the top of this message, so renaming
+        // a status renames this line with it and the two can never disagree.
+        // The currency pair uses `·`, the SAME separator the shift report's own
+        // money() calls default to (owner, 25 Sep 2026: "no spaced slashes ...
+        // for the currency pair use `$8.00 · 32,800៛`, matching the shift
+        // report's `$19.25 · 93,500៛`") -- a bare default call, not a literal
+        // repeated at this site.
+        //
+        // It replaced a neutral `Net Total`, which told the reader nothing the
+        // heading had not already said, and which the unsettled sale had to be
+        // special-cased away from to get its own word.
+        `${saleStatusMoneyLabel(status)}: ${money(sale.totalUsd, sale.totalKhr)}`,
+        // No recorded tender means no Paid line: the status above carries the
+        // "not paid" fact already, so a line saying it again is one more line
+        // for nothing.
+        paid > 0 ? `Paid: ${money(sale.paidUsd, sale.paidKhr, ' + ')}${sale.paymentMethod ? ` (${sale.paymentMethod})` : ''}` : '',
+        change > 0 ? `Change: ${money(sale.changeUsd, sale.changeKhr, sale.changeIsActualDual ? ' + ' : undefined)}` : '',
+      ],
+    },
   ])]
 }
 
 /**
  * The receipt-status change -- `PATCH /api/sales/:id/status`'s alert.
  *
- * Laid out as the owner's Sep 23 2026 sample:
+ * Laid out as the owner's Sep 23 2026 sample, updated 25 Sep 2026 to titled
+ * sections instead of a plain rule between the two groups:
  *
- *   🧾 Invoice / វិក្កយបត្រ: 20260922-110132
- *   · Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid / ប្រាក់ជំពាក់ → Completed / បានបញ្ចប់
- *   ──────────────────
- *   · Customer / អតិថិជន: bong meta
- *   · By / ដោយ: admin
+ *   🧾 Invoice/វិក្កយបត្រ: 20260922-110132
+ *   ====Details/ព័ត៌មាន====
+ *   · Status updated/ស្ថានភាពផ្លាស់ប្ដូរ: Not Paid/ប្រាក់ជំពាក់ → Completed/បានបញ្ចប់
+ *   ====Customer/អតិថិជន====
+ *   · Customer/អតិថិជន: bong meta
+ *   · By/ដោយ: admin
  *
  * The title names the invoice, like the sale alert's (it replaced the
  * "Receipt status updated" heading and the Receipt row under it), and the
- * change is the one row above the rule. The rows the sample does not show --
+ * change is the one row under Details. The rows the sample does not show --
  * Reason, Stock skipped, Lost fee -- keep their order, after Customer and
- * before By.
+ * before By, all under the Customer section.
  *
  * It lived INLINE in routes/sales.ts until Sep 22 2026, and that is exactly
  * why the owner found `Status: awaiting payment → completed` on their phone
@@ -2002,26 +2043,34 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
   return [eventTitle('🧾 Invoice', change.receipt), ...eventGroups([
     // The raw English MUST equal LABELS.statusUpdated.en exactly (telegramLang.ts):
     // localizeTelegramLine finds this label by that string before the first ': '.
-    [`Status updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`],
-    [
-      customer ? `Customer: ${customer}` : '',
-      change.reason ? `Reason: ${change.reason}` : '',
-      // S4-2: say it out loud on the shop's channel too -- a status change
-      // that moved no stock must not look like a normal one.
-      //
-      // A PLAIN ENGLISH LINE, like every other row here. It was briefly
-      // composed with bi() instead, and that is a bug this builder cannot
-      // survive: the route calls it BEFORE sendTelegramEvent sets the shop's
-      // language, so bi() read whatever mode was left in the module -- always
-      // the `both` default -- and the note shipped bilingual to an en-only and
-      // a km-only shop alike. Emitted as `Stock skipped: 3 unit(s)`, it goes
-      // through localizeTelegramLine with the rest of the message: the label
-      // pair comes from the table (en/km.json sale_stock_skipped) and the
-      // counter from the same `unit(s)` phrase the stock reports use.
-      skipped > 0 ? `Stock skipped: ${skipped} unit(s)` : '',
-      lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
-      change.by ? `By: ${change.by}` : '',
-    ],
+    // Both sides of the arrow are the SAME status vocabulary readable() feeds
+    // into the phrase table below (VALUE_PHRASES/SALE_STATUS_PHRASES), so a
+    // real sale status translates on both sides identically -- never only the
+    // "from" side -- because it is one regex pass over the whole line, not a
+    // per-argument lookup.
+    { key: 'details', rows: [`Status updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`] },
+    {
+      key: 'customer',
+      rows: [
+        customer ? `Customer: ${customer}` : '',
+        change.reason ? `Reason: ${change.reason}` : '',
+        // S4-2: say it out loud on the shop's channel too -- a status change
+        // that moved no stock must not look like a normal one.
+        //
+        // A PLAIN ENGLISH LINE, like every other row here. It was briefly
+        // composed with bi() instead, and that is a bug this builder cannot
+        // survive: the route calls it BEFORE sendTelegramEvent sets the shop's
+        // language, so bi() read whatever mode was left in the module -- always
+        // the `both` default -- and the note shipped bilingual to an en-only and
+        // a km-only shop alike. Emitted as `Stock skipped: 3 unit(s)`, it goes
+        // through localizeTelegramLine with the rest of the message: the label
+        // pair comes from the table (en/km.json sale_stock_skipped) and the
+        // counter from the same `unit(s)` phrase the stock reports use.
+        skipped > 0 ? `Stock skipped: ${skipped} unit(s)` : '',
+        lostFeeUsd || lostFeeKhr ? `Lost fee: ${money(lostFeeUsd, lostFeeKhr)}` : '',
+        change.by ? `By: ${change.by}` : '',
+      ],
+    },
   ])]
 }
 

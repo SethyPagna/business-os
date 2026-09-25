@@ -115,6 +115,14 @@ type LabelEntry = {
 // Every label any Telegram message emits, and nothing else.
 const LABELS = {
   // --- receipt summary (formatSaleTelegramLines) ---
+  // Section titles for the sale alert and the status-change alert (owner, 25
+  // Sep 2026: replace the plain ────── row between an event message's groups
+  // with a titled `====Name/ខ្មែរ====` section, the same glyph the reports
+  // use). Short on purpose -- sectionHeader gives up marks before it lets a
+  // name wrap onto a second phone row.
+  details: { en: 'Details', km: 'លម្អិត' },
+  items: { en: 'Items', km: 'ទំនិញ' },
+  payment: { en: 'Payment', km: 'ការទូទាត់' },
   status: { en: 'Status', km: 'ស្ថានភាព', localizeValue: true },
   // The status change's own row (formatSaleStatusTelegramLines), in the
   // owner's Sep 23 2026 words: "· Invoice Status Updated / ស្ថានភាពផ្លាស់ប្ដូរ:
@@ -714,19 +722,12 @@ export function localizeTelegramHeading(heading: string): string {
 // by one glyph.
 export const RULE = '━'.repeat(18)
 
-/**
- * The divider for an EVENT message -- the sale alert and the status change.
- *
- * Those two are not sectioned reports: they have no section headings, only
- * groups of rows (who/when, who rang it up, who bought it, what was bought,
- * what it came to), and the owner's Sep 22 2026 reference layout separates
- * those groups with a plain dashed row. A lighter weight than `RULE` says
- * "next group" rather than "next block", and the SAME width keeps
- * every Business OS message the same shape in the chat. One constant per
- * family, never a literal at a call site -- two hand-typed rules drift by a
- * glyph or by a length and the feed starts looking accidental.
- */
-export const GROUP_RULE = '─'.repeat(18)
+// GROUP_RULE (the plain dashed row between an event message's groups) is
+// retired as of 25 Sep 2026: the sale alert and the status change now open
+// each group with its own `====Name/ខ្មែរ====` section, the same glyph the
+// reports use (REPORT_SECTION_EDGE, via lib/telegram.ts's eventGroups), not a
+// second divider style. Left un-exported on purpose so nothing can quietly
+// bring the plain rule back at a new call site.
 
 /**
  * The mark on either side of a SHIFT REPORT section's name:

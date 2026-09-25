@@ -92,26 +92,33 @@ const lines = telegram.formatSaleTelegramLines({
   paidUsd: 10, paidKhr: 0, changeUsd: 0.5, changeKhr: 0, paymentMethod: 'Cash',
 }).filter(Boolean)
 // GROUPED Sep 22 2026 to the owner's own reference layout ("for sales we can
-// do like this. so it is easier to read"): five blocks -- what happened, who
-// rang it up, who it was for (the driver moved up here, beside the customer
-// and their phone), what was bought, what it came to -- separated by the one
-// event divider. Status now prints on EVERY sale, including a completed one.
-const GROUP = telegramLang.GROUP_RULE
+// do like this. so it is easier to read"): four titled sections -- Details
+// (what happened, who rang it up), Customer (who it was for), Items (what
+// was bought), Payment (what it came to). Status now prints on EVERY sale,
+// including a completed one. SECTIONED (not divided) since 25 Sep 2026 --
+// owner: "the sale invoice must also use ====Section/ខ្មែរ==== headers
+// instead of the plain ────── lines" -- so the raw builder output carries a
+// MARKER per section (telegram.EVENT_SECTION_MARKER + key), resolved to the
+// actual bilingual `====Name/ខ្មែរ====` text only once sendTelegramEvent has
+// read the shop's language (see the "as the shop receives it" block below,
+// and the marker's own comment in lib/telegram.ts for why it cannot be
+// rendered any earlier).
+const SECTION = (key) => `${telegram.EVENT_SECTION_MARKER}${key}`
 assert.deepEqual(lines, [
   // Sep 23 2026, the owner's sample: "🛍️ Sale invoice/វិក្កយបត្រ:
   // 20260923-153527", then Status and Date. The receipt number heads the
   // message and the INV row it used to sit on is gone.
   '🛍️ Sale invoice: 20260903-100405',
+  SECTION('details'),
   'Status: completed',
   'Date: 03/09/2026 10:04',
-  GROUP,
   'Cashier: Za',
   'Branch: Shop',
-  GROUP,
+  SECTION('customer'),
   'Customer: Sok Dara',
   'Tel: 012 345 678',
   'Delivery driver: Tuk Tuk Dara · 099 111 222',
-  GROUP,
+  SECTION('items'),
   // P3-L3: the promotion is named inside the cut's parentheses; a label on
   // a line with no cut prints nothing (the offer did not apply).
   // P10: numbered like the printed receipt, "1. name ...", not a bare bullet.
@@ -120,7 +127,7 @@ assert.deepEqual(lines, [
   '1. Coca Cola 330ml 2 × $0.60',
   `${telegramLang.HANGING_INDENT}(−$0.20 Summer sale) = $1.00`,
   '2. Rice 5kg 1 × $7.25 = $7.25',
-  GROUP,
+  SECTION('payment'),
   'Delivery service: $1.50',
   'Total: $9.75',
   'Discount: −$0.25',
@@ -130,27 +137,28 @@ assert.deepEqual(lines, [
   // the customer owes or paid, and what the shop wants beside it is whether
   // it HAS been paid. The words come from telegramLang's status table, so
   // this line and the `Status:` row at the top of the message cannot drift.
-  'Completed: $9.50 / 38,950៛',
+  // The currency pair uses `·` (owner, 25 Sep 2026: "no spaced slashes ...
+  // for the currency pair use `$8.00 · 32,800៛`, matching the shift report's
+  // `$19.25 · 93,500៛`") -- money()'s own default separator, not a literal.
+  'Completed: $9.50 · 38,950៛',
   'Paid: $10.00 (Cash)',
   'Change: $0.50',
 ])
-// ONE divider constant, never a hand-typed rule: two literals drift by a
-// glyph or a length and the feed starts looking accidental.
-assert.equal(GROUP, '─'.repeat(18))
-assert.equal(lines.filter((line) => line === GROUP).length, 4, 'four groups follow the first, so four dividers')
+// No message anywhere may still ship the retired plain divider.
+assert.ok(!lines.some((line) => line.includes('──────')), 'the plain ────── divider must never reappear in a sale alert')
+assert.equal(lines.filter((line) => line.startsWith(telegram.EVENT_SECTION_MARKER)).length, 4, 'four titled sections')
 // A walk-in with no customer, no phone and no driver drops the WHOLE group,
-// divider included -- never a rule with nothing under it, never two in a row.
+// section header included -- never a titled section with nothing under it.
 const walkIn = telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'WALK-IN', cashier: 'Za', exchangeRate: 4100,
   items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
   subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
 })
-assert.ok(!walkIn.some((line, index) => line === GROUP && walkIn[index + 1] === GROUP), walkIn.join('\n'))
-assert.notEqual(walkIn[walkIn.length - 1], GROUP, 'no trailing divider')
-assert.notEqual(walkIn[0], GROUP, 'no leading divider')
+assert.ok(!walkIn.some((line) => line.includes('──────')), 'no divider on a walk-in either')
 assert.equal(walkIn[0], '🛍️ Sale invoice: WALK-IN', 'the title leads a walk-in too')
-assert.equal(walkIn[1], 'Status: completed', 'and the Status row follows it directly, with no divider between')
-assert.equal(walkIn.filter((line) => line === GROUP).length, 3, 'the customer group is gone with its divider')
+assert.equal(walkIn[1], SECTION('details'), 'Details opens right after the title')
+assert.equal(walkIn[2], 'Status: completed', 'and the Status row follows it directly')
+assert.equal(walkIn.filter((line) => line.startsWith(telegram.EVENT_SECTION_MARKER)).length, 3, 'the customer section is gone with its header -- items and payment remain, alongside details')
 assert.ok(walkIn.includes('Status: completed'), 'the status row prints on an ordinary sale too')
 
 // The row is unconditional now, so a caller that supplies no status at all must
@@ -162,7 +170,7 @@ const noStatus = telegram.formatSaleTelegramLines({
   items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
   subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
 })
-assert.equal(noStatus[1], 'Status: completed', `a missing status still names one: ${noStatus[1]}`)
+assert.equal(noStatus[2], 'Status: completed', `a missing status still names one: ${noStatus[2]}`)
 assert.ok(!noStatus.some((line) => /^[A-Za-z ]+:\s*$/.test(line)), `no row may ship an empty value:\n${noStatus.join('\n')}`)
 
 // A discounted item line is a real equation: gross unit price × quantity,
@@ -215,9 +223,12 @@ const changeLines = (changeUsd, changeKhr) => telegram.formatSaleTelegramLines({
 assert.ok(changeLines(1, 0).includes('Change: $1.00'))
 assert.ok(changeLines(0, 4000).includes('Change: 4,000៛'))
 const dualChange = changeLines(1, 4000)
-assert.ok(dualChange.includes('Change: $1.00 / 4,000៛'), dualChange.join('\n'))
-assert.ok(dualChange.includes('Completed: $1.00 / 4,000៛'), dualChange.join('\n'))
+// Equivalent-currency pairs use `·` (owner, 25 Sep 2026: no spaced slashes;
+// match the shift report's `$19.25 · 93,500៛`) -- money()'s own default.
+assert.ok(dualChange.includes('Change: $1.00 · 4,000៛'), dualChange.join('\n'))
+assert.ok(dualChange.includes('Completed: $1.00 · 4,000៛'), dualChange.join('\n'))
 assert.ok(dualChange.includes('Paid: $1.00 + 4,000៛'), dualChange.join('\n'))
+assert.ok(!dualChange.some((line) => / \/ /.test(line)), `no spaced slash may survive as a currency-pair separator:\n${dualChange.join('\n')}`)
 const actualDualChange = telegram.formatSaleTelegramLines({
   status: 'completed', receiptNumber: 'ACTUAL-CHANGE', exchangeRate: 4000,
   items: [{ name: 'A', quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
@@ -304,7 +315,7 @@ const credit = telegram.formatSaleTelegramLines({
   status: 'awaiting_payment', receiptNumber: 'R1', items: [{ name: 'A', quantity: 1, unitPriceUsd: 2, lineTotalUsd: 2 }],
   exchangeRate: 4100, isDelivery: true, deliveryFeeUsd: 1, deliveryPaidBy: 'shop', subtotalUsd: 2, discountUsd: 0, totalUsd: 2,
 }).filter(Boolean)
-assert.deepEqual(credit.slice(0, 2), ['🛍️ Sale invoice: R1', 'Status: awaiting payment'])
+assert.deepEqual(credit.slice(0, 3), ['🛍️ Sale invoice: R1', SECTION('details'), 'Status: awaiting payment'])
 assert.ok(credit.includes('Delivery service: $1.00 (shop paid)'))
 // REDESIGNED Sep 6 2026. An unsettled sale states the amount ONCE, under the
 // owner's word for it -- not as a Total, a Net Total and a "Paid: unpaid"
@@ -327,7 +338,7 @@ const absorbed = telegram.formatSaleTelegramLines({
   subtotalUsd: 20, discountUsd: 0, totalUsd: 20, totalKhr: 82000, paidUsd: 20,
 }).filter(Boolean)
 assert.ok(absorbed.includes('Delivery service: $2.00 (shop paid)'), absorbed.join('\n'))
-assert.ok(absorbed.includes('Completed: $20.00 / 82,000៛'), absorbed.join('\n'))
+assert.ok(absorbed.includes('Completed: $20.00 · 82,000៛'), absorbed.join('\n'))
 // REDESIGNED Sep 6 2026: with no discount and no tax the pre-discount Total
 // IS the Net Total, so it does not print. It printing here would mean either
 // the repeated figure the owner asked us to drop or -- the older defect --
@@ -405,12 +416,12 @@ const moneyLineFor = (status, mode) => {
   finally { telegramLang.setTelegramLanguage(previous) }
 }
 for (const [status, both, en, km] of [
-  ['completed', '· Completed/បានបញ្ចប់: $8.00 / 32,800៛', '· Completed: $8.00 / 32,800៛', '· បានបញ្ចប់: $8.00 / 32,800៛'],
-  ['awaiting_payment', '· Not Paid/ប្រាក់ជំពាក់: $8.00 / 32,800៛', '· Not Paid: $8.00 / 32,800៛', '· ប្រាក់ជំពាក់: $8.00 / 32,800៛'],
-  ['awaiting_delivery', '· Awaiting Delivery/រង់ចាំការដឹកជញ្ជូន: $8.00 / 32,800៛', '· Awaiting Delivery: $8.00 / 32,800៛', '· រង់ចាំការដឹកជញ្ជូន: $8.00 / 32,800៛'],
-  ['partial_return', '· Partial Return/ប្រគល់ខ្លះ: $8.00 / 32,800៛', '· Partial Return: $8.00 / 32,800៛', '· ប្រគល់ខ្លះ: $8.00 / 32,800៛'],
-  ['cancelled', '· Cancelled/បានបោះបង់: $8.00 / 32,800៛', '· Cancelled: $8.00 / 32,800៛', '· បានបោះបង់: $8.00 / 32,800៛'],
-  ['returned', '· Returned/បានប្រគល់: $8.00 / 32,800៛', '· Returned: $8.00 / 32,800៛', '· បានប្រគល់: $8.00 / 32,800៛'],
+  ['completed', '· Completed/បានបញ្ចប់: $8.00 · 32,800៛', '· Completed: $8.00 · 32,800៛', '· បានបញ្ចប់: $8.00 · 32,800៛'],
+  ['awaiting_payment', '· Not Paid/ប្រាក់ជំពាក់: $8.00 · 32,800៛', '· Not Paid: $8.00 · 32,800៛', '· ប្រាក់ជំពាក់: $8.00 · 32,800៛'],
+  ['awaiting_delivery', '· Awaiting Delivery/រង់ចាំការដឹកជញ្ជូន: $8.00 · 32,800៛', '· Awaiting Delivery: $8.00 · 32,800៛', '· រង់ចាំការដឹកជញ្ជូន: $8.00 · 32,800៛'],
+  ['partial_return', '· Partial Return/ប្រគល់ខ្លះ: $8.00 · 32,800៛', '· Partial Return: $8.00 · 32,800៛', '· ប្រគល់ខ្លះ: $8.00 · 32,800៛'],
+  ['cancelled', '· Cancelled/បានបោះបង់: $8.00 · 32,800៛', '· Cancelled: $8.00 · 32,800៛', '· បានបោះបង់: $8.00 · 32,800៛'],
+  ['returned', '· Returned/បានប្រគល់: $8.00 · 32,800៛', '· Returned: $8.00 · 32,800៛', '· បានប្រគល់: $8.00 · 32,800៛'],
 ]) {
   assert.equal(moneyLineFor(status, 'both'), both, `${status} money line (both)`)
   assert.equal(moneyLineFor(status, 'en'), en, `${status} money line (en)`)
@@ -678,17 +689,29 @@ assert.ok(/event\.heading \|\| heading\[event\.type\]/.test(fs.readFileSync(path
     items: [{ name: 'A', quantity: 1, unitPriceUsd: 8, lineTotalUsd: 8 }], subtotalUsd: 8, discountUsd: 0, totalUsd: 8, totalKhr: 32800,
   }
   try {
-    for (const [mode, top] of [
-      ['both', ['🛍️ Sale invoice/វិក្កយបត្រ: 20260923-153527', '· Status/ស្ថានភាព: Not Paid/ប្រាក់ជំពាក់', '· Date/កាលបរិច្ឆេទ: 23/09/2026 15:35', GROUP, '· Cashier/អ្នកគិតប្រាក់: Za']],
-      ['en', ['🛍️ Sale invoice: 20260923-153527', '· Status: Not Paid', '· Date: 23/09/2026 15:35', GROUP, '· Cashier: Za']],
-      ['km', ['🛍️ វិក្កយបត្រ: 20260923-153527', '· ស្ថានភាព: ប្រាក់ជំពាក់', '· កាលបរិច្ឆេទ: 23/09/2026 15:35', GROUP, '· អ្នកគិតប្រាក់: Za']],
-    ]) {
+    // The section header text is computed with the REAL sectionHeader, per
+    // mode, rather than hand-typed -- so this test cannot silently agree with
+    // a wrong padding/mark count the way a literal copy-paste could. Owner,
+    // 25 Sep 2026: "the sale invoice must also use ====Section/ខ្មែរ====
+    // headers instead of the plain ────── lines".
+    const detailsHeader = (mode) => {
+      telegramLang.setTelegramLanguage(mode)
+      return wired.sectionHeader('details', telegramLang.REPORT_SECTION_EDGE)
+    }
+    for (const mode of ['both', 'en', 'km']) {
+      const top = mode === 'both'
+        ? ['🛍️ Sale invoice/វិក្កយបត្រ: 20260923-153527', detailsHeader(mode), '· Status/ស្ថានភាព: Not Paid/ប្រាក់ជំពាក់', '· Date/កាលបរិច្ឆេទ: 23/09/2026 15:35', '· Cashier/អ្នកគិតប្រាក់: Za']
+        : mode === 'en'
+          ? ['🛍️ Sale invoice: 20260923-153527', detailsHeader(mode), '· Status: Not Paid', '· Date: 23/09/2026 15:35', '· Cashier: Za']
+          : ['🛍️ វិក្កយបត្រ: 20260923-153527', detailsHeader(mode), '· ស្ថានភាព: ប្រាក់ជំពាក់', '· កាលបរិច្ឆេទ: 23/09/2026 15:35', '· អ្នកគិតប្រាក់: Za']
       const message = await sendSale(mode, ownerSale)
       assert.deepEqual(message.slice(0, 5), top, `${mode}:\n${message.join('\n')}`)
       // ONE heading, and the number stated once: no "Sale recorded" line above
       // the title and no INV row under it.
       assert.equal(message.filter((line) => line.includes('20260923-153527')).length, 1, `${mode}: the receipt number prints once:\n${message.join('\n')}`)
       assert.ok(!message.some((line) => /Sale recorded|បានកត់ត្រាការលក់|INV/.test(line)), `${mode}: a retired heading or row survives:\n${message.join('\n')}`)
+      assert.ok(!message.some((line) => line.includes('──────')), `${mode}: the plain ────── divider must never reappear:\n${message.join('\n')}`)
+      assert.ok(!message.some((line) => / \/ /.test(line)), `${mode}: no spaced slash may survive anywhere in the message:\n${message.join('\n')}`)
     }
     // A route's own heading still wins over the title-less default: a return
     // is sent as a `sales` event under '↩️ Return recorded'.
