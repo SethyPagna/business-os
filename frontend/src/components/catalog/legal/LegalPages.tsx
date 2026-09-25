@@ -11,8 +11,7 @@
 // this" notice. Nothing here is legal advice.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import {
@@ -132,14 +131,12 @@ export default function PortalFooter({
   phone,
   email,
 }: PortalFooterProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const [activePage, setActivePage] = useState<LegalPageKey | null>(() =>
     typeof window === 'undefined' ? null : readLegalPageFromSearch(window.location.search))
   // True while the reader was opened by us (so closing can go BACK and leave
   // no history crumb); false when the visitor arrived on a policy link
   // directly, where going back would leave the site entirely.
   const pushedRef = useRef(false)
-  const policiesTriggerRef = useRef<HTMLButtonElement | null>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   // Capture the catalogue title before a direct ?legal= reader's first
   // effect can replace it. Effect reruns must never promote a policy title to
@@ -167,13 +164,12 @@ export default function PortalFooter({
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
 
   const openPage = useCallback((page: LegalPageKey) => {
+    // The opener -- one of the footer's always-visible policy links, or the
+    // sign-up consent link -- stays mounted while the reader is open (the
+    // reader only marks it inert), so it is itself the stable focus target.
     if (!activePage && typeof document !== 'undefined') {
-      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      returnFocusRef.current = focused?.getAttribute('role') === 'menuitem'
-        ? policiesTriggerRef.current
-        : focused
+      returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     }
-    setMenuOpen(false)
     setActivePage(page)
     if (typeof window === 'undefined') return
     try {
@@ -240,10 +236,9 @@ export default function PortalFooter({
     return () => { document.title = baseDocumentTitleRef.current }
   }, [activePage, text, details.name])
 
-  // Restore focus only after the reader has unmounted. A footer menu item is
-  // removed as soon as it opens a policy, so the stable return target for that
-  // flow is the Policies trigger. A direct ?legal= link has no opener; the
-  // catalogue main landmark is the meaningful fallback.
+  // Restore focus only after the reader has unmounted, to the link that
+  // opened it. A direct ?legal= link has no opener; the catalogue main
+  // landmark is the meaningful fallback.
   const hadActivePageRef = useRef(!!activePage)
   useEffect(() => {
     const hadActivePage = hadActivePageRef.current
@@ -302,50 +297,32 @@ export default function PortalFooter({
             <div className="pt-1 text-[11px] text-slate-400 dark:text-neutral-500">{fill('portal_legal_footer_rights')}</div>
           </div>
 
-          <div className="relative shrink-0">
-            <button
-              ref={policiesTriggerRef}
-              type="button"
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              aria-label={text('portal_legal_open_policies')}
-            >
-              <ShieldCheck className="h-4 w-4" />
+          {/* Owner, 2026-09-25 (P-public-7): the three policies are visible
+              buttons, not a dropdown. Real links (shareable ?legal= hrefs,
+              middle-click opens a tab); a plain click opens the reader. */}
+          <nav aria-label={text('portal_legal_policies')} className="shrink-0" data-portal-footer-policies="true">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-neutral-400">
+              <ShieldCheck className="h-3.5 w-3.5" />
               {text('portal_legal_policies')}
-              <ChevronDown className={`h-3.5 w-3.5 transition ${menuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {menuOpen ? (
-              <>
-                {/* Click-away layer: the menu floats above content rather than
-                    pushing the footer taller. */}
-                <div className="fixed inset-0 z-[75]" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-                <div
-                  role="menu"
-                  aria-label={text('portal_legal_policies')}
-                  className="absolute bottom-full right-0 z-[76] mb-2 w-56 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {LEGAL_PAGE_ORDER.map((page) => (
+                <a
+                  key={page}
+                  href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
+                  aria-current={activePage === page ? 'page' : undefined}
+                  className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+                    event.preventDefault()
+                    openPage(page)
+                  }}
                 >
-                  {LEGAL_PAGE_ORDER.map((page) => (
-                    <a
-                      key={page}
-                      role="menuitem"
-                      href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
-                      className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                      onClick={(event) => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
-                        event.preventDefault()
-                        openPage(page)
-                      }}
-                    >
-                      {text(LEGAL_PAGE_TITLE_KEY[page])}
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-neutral-600" />
-                    </a>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
+                  {text(LEGAL_PAGE_TITLE_KEY[page])}
+                </a>
+              ))}
+            </div>
+          </nav>
         </div>
       </footer>
 

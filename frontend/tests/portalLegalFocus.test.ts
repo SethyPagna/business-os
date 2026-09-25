@@ -7,8 +7,13 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const legal = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'legal', 'LegalPages.tsx'), 'utf8')
 const surface = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'CatalogPreviewSurface.tsx'), 'utf8')
 
-assert.match(legal, /ref=\{policiesTriggerRef\}/, 'the Policies opener is not a stable focus target')
-assert.match(legal, /focused\?\.getAttribute\('role'\) === 'menuitem'[\s\S]{0,120}policiesTriggerRef\.current/, 'a menu item is still recorded even though opening the reader unmounts it')
+// P-public-7 (owner, 2026-09-25): the Policies dropdown is gone; the three
+// policies are always-visible footer links. The opener therefore stays
+// mounted while the reader is open (only made inert), so the focused link is
+// itself the stable return target -- no menuitem -> trigger redirection.
+assert.doesNotMatch(legal, /role="menu"|role="menuitem"|policiesTriggerRef/, 'the policies are a dropdown again')
+assert.match(legal, /data-portal-footer-policies="true"[\s\S]{0,800}LEGAL_PAGE_ORDER\.map\(\(page\) => \(\s*<a/, 'the three policies are visible links in the footer')
+assert.match(legal, /returnFocusRef\.current = document\.activeElement instanceof HTMLElement \? document\.activeElement : null/, 'the opening link is recorded as the focus return target')
 assert.match(legal, /requested\?\.isConnected \? requested : fallback/, 'focus does not reject an unmounted opener')
 assert.match(legal, /document\.getElementById\('portal-main-content'\)/, 'direct ?legal links have no meaningful close fallback')
 assert.match(legal, /window\.requestAnimationFrame\(\(\) => \{[\s\S]{0,180}target\?\.focus\(\)/, 'focus runs before the reader unmounts')
