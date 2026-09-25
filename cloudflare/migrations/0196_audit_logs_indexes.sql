@@ -1,0 +1,39 @@
+-- audit_logs has had no index at all since it was created, so every reader
+-- scans the whole table (I4-3, I4-6 in the 2026-09-25 D1 query lab):
+--
+--   * lib/saleRecords.ts, the sales list's per-sale history count:
+--       (SELECT COUNT(*) FROM audit_logs a
+--        WHERE a.entity = 'sale' AND a.entity_id = CAST(s.id AS TEXT) ...)
+--     planned as CORRELATED SCALAR SUBQUERY | SCAN a -- one full scan per
+--     listed sale. With idx_audit_logs_entity_entity_id: 100 sales
+--     286 -> 0.32 ms, GET /api/sales 427 -> 74 ms (seeded lab, 20K rows).
+--   * routes/notifications.ts, new-country login alerts:
+--       WHERE action = 'device_login_new_country'
+--         AND created_at > datetime('now', '-1 day') ORDER BY created_at DESC
+--     planned as SCAN audit_logs | USE TEMP B-TREE. idx_audit_logs_action_created
+--     serves the filter and the order: 3.2 -> 0.16 ms.
+--
+-- Estimated size: both indexes together measured 1.09 MB at 20K rows on the
+-- seeded lab DB, so about 0.3 MB at production's ~5.5K rows, growing
+-- linearly. Write cost: two extra b-tree inserts per audit row (100 inserts
+-- 2.1 vs 2.5 ms, within noise).
+--
+-- Index creation runs ONCE, at migrate time, over the existing production
+-- rows (one pass over ~5.5K rows); after that each index is maintained
+-- incrementally by the normal INSERTs. No row is read back or changed.
+--
+-- Purely additive and idempotent: CREATE INDEX IF NOT EXISTS on existing
+-- columns. No query can lose rows or change results; only plans change.
+--
+-- Pre-assert:  SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND tbl_name='audit_logs'
+--              -- expected 0 (production has no audit_logs index today)
+-- Post-assert: SELECT COUNT(*) FROM sqlite_master WHERE type='index'
+--                AND name IN ('idx_audit_logs_entity_entity_id','idx_audit_logs_action_created')
+--              -- expected 2; SELECT COUNT(*) FROM audit_logs unchanged.
+-- Deploy order: EITHER. No code names these indexes; the planner picks them up.
+-- Recovery:    DROP INDEX IF EXISTS idx_audit_logs_entity_entity_id;
+--              DROP INDEX IF EXISTS idx_audit_logs_action_created;
+--              removes only the seek paths, never data.
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_entity_id ON audit_logs(entity, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, created_at);
