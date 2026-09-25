@@ -1,4 +1,4 @@
-// P4-4a fix 5: Smart Placement (`[placement]\nmode = "smart"`) lets
+// P4-4a fix 5: Smart Placement (`[placement]\nmode = "targeted" + region aws:ap-southeast-1`) lets
 // Cloudflare run this D1-round-trip-bound Worker's invocation near the
 // backend it actually talks to, instead of always at the edge closest to the
 // requesting browser. It is free on both the Workers Free and Paid plans (no
@@ -23,18 +23,18 @@ function read(relPath) {
   return fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8')
 }
 
-const PLACEMENT_BLOCK = /\[placement\]\s*\nmode\s*=\s*"smart"/
+const PLACEMENT_BLOCK = /\[placement\]\s*\r?\nmode\s*=\s*"targeted"\s*\r?\nregion\s*=\s*"aws:ap-southeast-1"/
 
 function main() {
   const paidSrc = read('wrangler.toml')
   const freeSrc = read('wrangler.free.toml')
 
-  check('wrangler.toml (paid) declares [placement] mode = "smart"', () => {
-    assert.ok(PLACEMENT_BLOCK.test(paidSrc), 'expected a [placement]\\nmode = "smart" block in wrangler.toml')
+  check('wrangler.toml (paid) declares [placement] mode = "targeted" + region aws:ap-southeast-1', () => {
+    assert.ok(PLACEMENT_BLOCK.test(paidSrc), 'expected a [placement]\\nmode = "targeted" + region aws:ap-southeast-1 block in wrangler.toml')
   })
 
-  check('wrangler.free.toml declares the SAME [placement] mode = "smart" (Smart Placement is free-and-paid, not a plan-conditional diff)', () => {
-    assert.ok(PLACEMENT_BLOCK.test(freeSrc), 'expected a [placement]\\nmode = "smart" block in wrangler.free.toml')
+  check('wrangler.free.toml declares the SAME [placement] mode = "targeted" + region aws:ap-southeast-1 (pinned to Singapore in both configs, not a plan-conditional diff)', () => {
+    assert.ok(PLACEMENT_BLOCK.test(freeSrc), 'expected a [placement]\\nmode = "targeted" + region aws:ap-southeast-1 block in wrangler.free.toml')
   })
 
   check('[placement] is not listed as one of the documented free-vs-paid differences', () => {

@@ -124,8 +124,11 @@ crons = ["0 */6 * * *"]
 # elsewhere in this program), which is exactly the workload Smart Placement
 # is for. Free on both Workers plans (no [limits]-style Paid gate), so it
 # needs no free/paid branch the way cpu_ms above does.
+# 2026-09-25: mirrored from wrangler.toml -- pinned to Singapore next to the
+# APAC D1 (Smart Placement had left requests at the requesting edge).
 [placement]
-mode = "smart"
+mode = "targeted"
+region = "aws:ap-southeast-1"
 
 # CPU headroom for the import queue consumer (queue.ts) and other chunked
 # D1 work (importEngine.ts's runD1BatchInChunks). This block previously had

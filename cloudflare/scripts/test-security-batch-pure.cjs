@@ -75,7 +75,7 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
   // No session -> close 4001 (the code the client special-cases as invalid_session).
   assert.match(index, /app\.get\('\/ws', async \(c\) =>[\s\S]{0,1100}?if \(!user\)[\s\S]{0,260}?close\(4001/, 'M1: /ws must close 4001 when there is no session')
   // The BroadcastHub proxy must only be reached AFTER the session check.
-  assert.match(index, /getSessionUser\(c\)[\s\S]{0,400}?BROADCAST_HUB\.idFromName\('global'\)/, 'M1: the BroadcastHub proxy must come AFTER the session check, not before')
+  assert.match(index, /getSessionUser\(c\)[\s\S]{0,400}?broadcastHubStub\(c\.env\)/, 'M1: the BroadcastHub proxy must come AFTER the session check, not before')
   console.log('PASS M1 index.ts /ws is session-gated and closes 4001 for unauthenticated clients')
 }
 
