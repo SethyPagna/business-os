@@ -310,6 +310,10 @@ function isValidStaticResponse(request, response) {
   const contentType = String(response.headers.get('content-type') || '').toLowerCase()
   if (pathname.endsWith('.js')) return contentType.includes('javascript') || contentType.includes('ecmascript')
   if (pathname.endsWith('.css')) return contentType.includes('text/css')
+  // A hashed font, image or other asset answered with HTML is the SPA
+  // fallback, not the file. The immutable fast path in cacheFirstStatic
+  // never refetches, so storing it would serve that page for the whole build.
+  if (contentType.split(';')[0].trim() === 'text/html') return pathname === '/' || pathname.endsWith('.html')
   return true
 }
 

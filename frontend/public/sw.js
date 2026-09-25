@@ -308,6 +308,11 @@ function isValidStaticResponse(request, response) {
         return contentType.includes('javascript') || contentType.includes('ecmascript');
     if (pathname.endsWith('.css'))
         return contentType.includes('text/css');
+    // A hashed font, image or other asset answered with HTML is the SPA
+    // fallback, not the file. The immutable fast path in cacheFirstStatic
+    // never refetches, so storing it would serve that page for the whole build.
+    if (contentType.split(';')[0].trim() === 'text/html')
+        return pathname === '/' || pathname.endsWith('.html');
     return true;
 }
 // A same-origin 200 text/html answer passes every check above and can still

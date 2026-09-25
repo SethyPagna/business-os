@@ -522,15 +522,24 @@ export function primeStoredLanguagePack(): Promise<void> {
   const lang = readStoredUiLanguage()
   const loader = LANG_LOADERS[lang]
   if (!loader || CORE_LANGUAGE_CODES.has(lang) || fullyLoadedLangs.has(lang)) return Promise.resolve()
+  let waitExpired = false
   const loaded = loader()
     .then((messages) => {
       loadedLangs[lang] = messages
       fullyLoadedLangs.add(lang)
+      // Arrived after the admin root already painted: AppProvider's effect may
+      // then see the pack as loaded and skip its revision bump, leaving
+      // memoised text in English. Flag it so the effect re-renders once.
+      if (waitExpired) lateLoadedLangs.add(lang)
     })
     .catch(() => {})
-  const waitLimit = new Promise<void>((resolve) => { window.setTimeout(resolve, STARTUP_LANGUAGE_PACK_WAIT_MS) })
+  const waitLimit = new Promise<void>((resolve) => {
+    window.setTimeout(() => { waitExpired = true; resolve() }, STARTUP_LANGUAGE_PACK_WAIT_MS)
+  })
   return Promise.race([loaded, waitLimit])
 }
+
+const lateLoadedLangs = new Set<string>()
 
 function writeDeviceSettings(value: AppSettings): void {
   try {
@@ -1664,7 +1673,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     let idleId: number | null = null
     let loadListener: (() => void) | null = null
     const nextLang = String(language || 'en').trim() || 'en'
-    if (fullyLoadedLangs.has(nextLang)) return undefined
+    if (fullyLoadedLangs.has(nextLang)) {
+      if (lateLoadedLangs.delete(nextLang)) setLangRevision((value) => value + 1)
+      return undefined
+    }
 
     const loader = LANG_LOADERS[nextLang]
     if (!loader) return undefined
