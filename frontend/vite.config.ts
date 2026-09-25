@@ -795,6 +795,9 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
       // portalFaqLayout.ts: same consumer, same reason.
       || normalized.includes('/src/components/catalog/portalFaqLayout.ts')
+      // portalActiveFilters.ts (filter chips) is imported by
+      // CatalogProductsSection (catalog-products); same reason.
+      || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic

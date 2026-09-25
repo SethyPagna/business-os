@@ -4164,6 +4164,7 @@
   "remaining_return": "Remaining",
   "remove": "Remove",
   "removeFromBucket": "Remove",
+  "removeActiveFilter": "Remove filter: {label}",
   "remove_image": "Remove Image",
   "remove_import": "Remove import",
   "remove_import_confirm": "Remove this import from the tracker and delete its uploaded import files?",

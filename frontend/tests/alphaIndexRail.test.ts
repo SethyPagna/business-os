@@ -475,7 +475,7 @@ runTest('the admin portal EDITOR PREVIEW gets a brand index too, not a carve-out
   assert.match(catalogProducts, /\{initialOptions\.length > 1 \? \(/, 'the only gate left is "is there more than one initial to index"')
   assert.match(
     catalogProducts,
-    /className="relative lg:grid/,
+    /className="relative">/,
     'the in-flow rail needs a positioned ancestor to stick inside',
   )
   // The preview variant must not be viewport-fixed and must not portal out of
