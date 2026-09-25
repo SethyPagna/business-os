@@ -193,9 +193,35 @@ export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env
   deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' })
 }
 
+// One session lookup per request (perf F3, Records/Performance/2026-09-25
+// I1). Stacked routers each run requireAuth -- products + productCost,
+// inventory + stockInCommit, system + compat -- and index.ts's staff body
+// admission resolves the session before the route's own requireAuth. Every
+// one of those used to be its own D1 round trip for the same cookie.
+//
+// The memo is keyed by the request's Hono Context object, which exists for
+// exactly one request and is shared by every sub-app mounted with
+// app.route(). It is a WeakMap entry, never a header, cookie or module-level
+// value, so it cannot outlive the request or leak into another one. The
+// in-flight promise is stored, so concurrent lookups share one query, and it
+// is bound to the token it was computed for. A rejected lookup is dropped so
+// a later call in the same request retries; revokeSession() drops it too.
+const sessionLookupMemo = new WeakMap<object, { token: string; lookup: Promise<SessionUser | null> }>()
+
 export async function getSessionUser<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<SessionUser | null> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return null
+  const memo = sessionLookupMemo.get(c)
+  if (memo && memo.token === token) return memo.lookup
+  const lookup = lookupSessionUser(c, token)
+  sessionLookupMemo.set(c, { token, lookup })
+  lookup.catch(() => {
+    if (sessionLookupMemo.get(c)?.lookup === lookup) sessionLookupMemo.delete(c)
+  })
+  return lookup
+}
+
+async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string): Promise<SessionUser | null> {
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
 
@@ -328,6 +354,8 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return
+  // A revoked session must never be answered from this request's memo.
+  sessionLookupMemo.delete(c)
   const tokenHash = await hashToken(token)
   const db = getDb(c.env)
   await db.prepare("UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").run([tokenHash])
@@ -350,6 +378,10 @@ export async function revokeUserSessions(env: Env, userId: number | string): Pro
 // app.get('/x', requireAuth, handler). Stores the resolved user on
 // c.set('user', ...) for handlers to read via c.get('user').
 export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: () => Promise<void>) {
+  // A router stacked behind another one that already authenticated this
+  // request (see getSessionUser's memo note) has nothing left to check.
+  // `user` is only ever set below, from a real session lookup.
+  if (c.get('user')) return next()
   const user = await getSessionUser(c)
   // `code: 'invalid_session'` matters, not just the message text: the
   // frontend's isInvalidSessionError() (api/http.ts) checks this field
