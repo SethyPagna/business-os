@@ -118,8 +118,10 @@ async function tryFastPath(
         AND name = @name AND is_active = 1 AND setup_enabled = 0
       ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
     ), admin_role AS (
+      -- roles.code is not UNIQUE, and this CTE is read twice below (id and
+      -- permissions): ORDER BY pins both reads to the same, lowest-id row.
       SELECT id, permissions FROM roles
-      WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 LIMIT 1
+      WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 ORDER BY id ASC LIMIT 1
     )
     SELECT org.id AS organizationId,
       (SELECT id FROM organization_groups

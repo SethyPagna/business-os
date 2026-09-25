@@ -138,6 +138,10 @@ const cases = [
     INSERT INTO organization_groups(organization_id,name,slug,is_default,is_active) VALUES(-1,'Main','main',1,1)`, true],
   ['slug match accepted without public identity', "UPDATE organizations SET public_id='other'", true],
   ['lowest active default branch selected', "INSERT INTO branches(id,name,is_default,is_active) VALUES(-1,'Earlier',1,1)", true],
+  // roles.code is not UNIQUE: a lower-id duplicate admin role with drifted
+  // permissions is the row both selectors read, so the fallback must run.
+  ['duplicate admin role: lowest id decides', `INSERT INTO roles(id,name,code,is_system,permissions) VALUES(-1,'Admin','admin',1,'{"all":false}')`],
+  ['duplicate admin role: healthy lowest id certifies', `INSERT INTO roles(id,name,code,is_system,permissions) VALUES(-1,'Admin','admin',1,'{"all":true}')`, true],
 ]
 
 async function main() {
@@ -207,6 +211,24 @@ async function main() {
       await retry
       assert.equal(fx.stats.reads, 2)
       assert.equal(fx.stats.writes, 0)
+    } finally { fx.raw.close() }
+  })
+  // Discriminating control for the admin_role ORDER BY (roles.code is not
+  // UNIQUE). With no index, SQLite scans in rowid order and LIMIT 1 happens to
+  // pick the lowest id, so the parity cases above pass with or without ORDER
+  // BY. An index whose order runs the other way makes an unordered LIMIT 1
+  // pick the HIGHEST id; the projection must still decide on the lowest.
+  await check('duplicate admin role under a reversed index: lowest id still decides', async () => {
+    const fx = await healthy()
+    try {
+      fx.raw.exec(`CREATE INDEX test_roles_code_id_desc ON roles(code, name, is_system, id DESC);
+        INSERT INTO roles(id,name,code,is_system,permissions) VALUES(999,'Admin','admin',1,'{"all":false}')`)
+      const lowest = fx.raw.prepare("SELECT id FROM roles WHERE code='admin' ORDER BY id ASC LIMIT 1").get().id
+      const unordered = fx.raw.prepare("SELECT id FROM roles WHERE code='admin' AND name='Admin' AND is_system=1 LIMIT 1").get().id
+      assert.equal(unordered, 999, 'control: the fixture index must make an unordered LIMIT 1 pick the highest id')
+      const fast = await core.tryFastPath(fx.db, ...args)
+      assert.ok(fast, 'the healthy lowest-id admin role certifies')
+      assert.equal(fast.adminRoleId, lowest)
     } finally { fx.raw.close() }
   })
   await check('missing required schema still rejects instead of certifying healthy state', async () => {
