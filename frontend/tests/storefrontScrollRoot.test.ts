@@ -90,6 +90,17 @@ runTest('no storefront file locks the body or document scroll', () => {
   }
 })
 
+// 2026-09-25 (refuter follow-up to P-public-6): the product sheet and the
+// immersive viewer DO lock page scroll now -- but only through the counted
+// shared/documentScrollLock.ts, taken in a mount effect and released in its
+// cleanup, so an unmounted (closed) overlay cannot leave the lock armed.
+// tests/overlayScrollLockFocus.test.ts proves the count and the restore.
+runTest('storefront overlays lock scroll only through the counted, self-releasing helper', () => {
+  const flyout = sources.get('../src/components/catalog/ProductDetailFlyout.tsx')!
+  assert.match(flyout, /import \{ lockDocumentScroll \} from '\.\.\/shared\/documentScrollLock\.ts'/)
+  assert.match(flyout, /const releaseScroll = lockDocumentScroll\(\)[\s\S]{0,200}return \(\) => \{[\s\S]{0,80}releaseScroll\(\)/, 'the lock must be released in the same effect cleanup')
+})
+
 runTest('every storefront flyout is an overlay, so a CLOSED flyout leaves nothing locked', () => {
   // Each of these renders null (or nothing) when closed; none of them is a
   // wrapper whose closed state could still be constraining the page.

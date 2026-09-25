@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { lockDocumentScroll } from './documentScrollLock.ts'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -25,6 +26,8 @@ type LightboxLabels = {
   // only owns the English fallback.
   close?: string
 }
+
+const LIGHTBOX_FOCUSABLE_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
 
 type ImageGalleryLightboxProps = {
   open?: boolean
@@ -105,6 +108,8 @@ export default function ImageGalleryLightbox({
   const pinchStartRef = useRef<{ distance: number; scale: number; midpoint: PanPointer; zoom: ZoomState } | null>(null)
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null)
   const swipeStartRef = useRef<PanPointer | null>(null)
+  const immersiveRootRef = useRef<HTMLDivElement | null>(null)
+  const immersiveCloseRef = useRef<HTMLButtonElement | null>(null)
 
   function formatLabel(template: string, values: LabelValues) {
     return String(template || '').replace(/\{(\w+)\}/g, (_match, key) => String(values?.[key] ?? ''))
@@ -306,6 +311,43 @@ export default function ImageGalleryLightbox({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, total, safeIndex]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Immersive viewer = a real modal (refuter follow-up to P-public-6): focus
+  // moves to Close on open, Tab stays inside, the page behind cannot scroll,
+  // and on close focus returns to whatever opened it (the album tile). The
+  // default variant (POS, admin Products) is unchanged.
+  const immersiveOpen = immersive && open && total > 0
+  useEffect(() => {
+    if (!immersiveOpen || typeof document === 'undefined') return undefined
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const releaseScroll = lockDocumentScroll()
+    const frame = window.requestAnimationFrame(() => immersiveCloseRef.current?.focus())
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const root = immersiveRootRef.current
+      if (!root) return
+      const focusable = Array.from(root.querySelectorAll<HTMLElement>(LIGHTBOX_FOCUSABLE_SELECTOR))
+        .filter((element) => element.offsetParent !== null || element === document.activeElement)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const current = document.activeElement
+      if (event.shiftKey && (current === first || !root.contains(current))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (current === last || !root.contains(current))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', trapTab, true)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', trapTab, true)
+      releaseScroll()
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [immersiveOpen])
+
   if (!open || !total) return null
 
   const isZoomed = zoom.scale > MIN_SCALE
@@ -320,6 +362,7 @@ export default function ImageGalleryLightbox({
         aria-modal="true"
         aria-label={title || undefined}
         data-lightbox-variant="immersive"
+        ref={immersiveRootRef}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 px-3 pb-2 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5">
           <span className="rounded-full bg-white/10 px-3 py-1 text-sm font-medium tabular-nums" aria-live="polite" aria-atomic="true">
@@ -332,7 +375,7 @@ export default function ImageGalleryLightbox({
             <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale + ZOOM_BUTTON_STEP)} disabled={zoom.scale >= MAX_SCALE} aria-label="Zoom in">
               <ZoomIn className="h-5 w-5" />
             </button>
-            <button type="button" className={barButton} onClick={() => onClose?.()} aria-label={copy.close}>
+            <button ref={immersiveCloseRef} type="button" className={barButton} onClick={() => onClose?.()} aria-label={copy.close}>
               <X className="h-6 w-6" />
             </button>
           </div>

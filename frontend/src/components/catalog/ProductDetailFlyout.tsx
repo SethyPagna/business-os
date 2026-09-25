@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import { lockDocumentScroll } from '../shared/documentScrollLock.ts'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -168,9 +169,14 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null
+    // The sheet covers the page, so the page behind it must not scroll
+    // (refuter follow-up, 2026-09-25). Counted + released on unmount -- see
+    // shared/documentScrollLock.ts for why not a direct body.style write.
+    const releaseScroll = lockDocumentScroll()
     const raf = requestAnimationFrame(() => closeButtonRef.current?.focus())
     return () => {
       cancelAnimationFrame(raf)
+      releaseScroll()
       previouslyFocusedRef.current?.focus?.()
     }
   }, [])
@@ -185,6 +191,9 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
       return
     }
     if (event.key !== 'Tab') return
+    // The portalled viewer's key events bubble through the React tree to
+    // here; it traps its own Tab, and this trap would pull focus back out.
+    if (lightboxOpen) return
     const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
     if (!focusable || focusable.length === 0) return
     const first = focusable[0]
