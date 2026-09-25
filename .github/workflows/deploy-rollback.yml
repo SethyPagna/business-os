@@ -1,0 +1,104 @@
+# Undo a production release from GitHub. Runs only when someone presses
+# "Run workflow", waits for the `production` environment's required
+# reviewer, and refuses to start unless the confirm box says ROLLBACK.
+#
+#   worker   - put the website back to an earlier Worker version
+#              (empty version id = the version before the current one)
+#   database - put a D1 database back to a Time Travel restore point
+#              (from the Deploy run's summary). Every write made after that
+#              point is lost.
+#
+# Guide: docs/setup/release-setup-guide.md, "Undo a release".
+name: Deploy rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: What to put back
+        required: true
+        default: worker
+        type: choice
+        options:
+          - worker
+          - database
+      version_id:
+        description: Worker version id (worker only; empty = the previous version)
+        required: false
+        default: ''
+        type: string
+      database:
+        description: Database (database only)
+        required: true
+        default: business-os
+        type: choice
+        options:
+          - business-os
+          - business-os-import
+      bookmark:
+        description: Restore point from the Deploy summary (database only)
+        required: false
+        default: ''
+        type: string
+      confirm:
+        description: Type ROLLBACK to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back production
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if ($env:CONFIRM -cne 'ROLLBACK') {
+            Write-Output '::error::Type ROLLBACK (in capitals) in the confirm box.'
+            exit 1
+          }
+
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          path: release
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: release/cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: release/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Roll back
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_CONFIRM: ${{ inputs.confirm }}
+          TARGET: ${{ inputs.target }}
+          VERSION_ID: ${{ inputs.version_id }}
+          DATABASE: ${{ inputs.database }}
+          BOOKMARK: ${{ inputs.bookmark }}
+        run: |
+          $kitArgs = @('rollback', '-CI', '-ReleaseDir', 'release', '-Records', "${{ runner.temp }}/records", '-Target', $env:TARGET)
+          if ($env:TARGET -eq 'worker' -and $env:VERSION_ID) { $kitArgs += @('-VersionId', $env:VERSION_ID) }
+          if ($env:TARGET -eq 'database') { $kitArgs += @('-Db', $env:DATABASE, '-Bookmark', $env:BOOKMARK) }
+          node release/ops/scripts/deploy-kit/release.cjs @kitArgs

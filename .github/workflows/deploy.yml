@@ -1,0 +1,159 @@
+# Deploy Business OS to production from GitHub, so a release does not depend
+# on the owner's own network (a VPN exit that Cloudflare challenges).
+#
+# Runs ONLY when someone presses "Run workflow" (no push or pull request
+# trigger), waits for the `production` environment's required reviewer, and
+# refuses to start unless the confirm box says DEPLOY.
+#
+# This repository is public, so its Actions logs are public too. The job
+# summary carries row COUNTS, restore-point bookmarks and commit ids only:
+# never row data, names, customers or amounts. Output of the commands that
+# read production is kept out of the log (release.cjs -CI).
+#
+# Setup, click by click: docs/setup/release-setup-guide.md.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to release
+        required: true
+        default: claude/urgent-20260925
+        type: string
+      plan:
+        description: Cloudflare plan config (production runs paid)
+        required: true
+        default: paid
+        type: choice
+        options:
+          - paid
+          - free
+      run_migrations:
+        description: Apply waiting database updates before publishing
+        required: true
+        default: true
+        type: boolean
+      confirm:
+        description: Type DEPLOY to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Release to production
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if ($env:CONFIRM -cne 'DEPLOY') {
+            Write-Output '::error::Type DEPLOY (in capitals) in the confirm box to release.'
+            exit 1
+          }
+
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout: ops/scripts/deploy-kit
+
+      - name: Check out the commit to release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: release
+          persist-credentials: false
+
+      - name: Show the commit
+        working-directory: release
+        run: |
+          $sha = git rev-parse HEAD
+          $subject = git log -1 --format=%s
+          Write-Output "Releasing $sha  $subject"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # frontend/package.json engines: node >= 24 (cloudflare needs >= 22).
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            release/frontend/package-lock.json
+            release/cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: release/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Install packages (frontend)
+        working-directory: release/frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Record the release
+        run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
+
+      # The tests run the released commit's own code, so no Cloudflare secret
+      # is given to this step.
+      - name: Safety tests (every test file on its own, retried on timeout)
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 2
+
+      - name: Safety snapshot (restore point and row counts)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_CONFIRM: ${{ inputs.confirm }}
+        run: node kit/ops/scripts/deploy-kit/release.cjs snapshot -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
+
+      - name: Database updates (migrations)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_CONFIRM: ${{ inputs.confirm }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
+        run: |
+          $kitArgs = @('migrations', '-CI', '-ReleaseDir', 'release', '-Records', "${{ runner.temp }}/records")
+          if ($env:RUN_MIGRATIONS -ne 'true') { $kitArgs += '-NoApply' }
+          node kit/ops/scripts/deploy-kit/release.cjs @kitArgs
+
+      - name: Publish (deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_CONFIRM: ${{ inputs.confirm }}
+          PLAN: ${{ inputs.plan }}
+        run: node kit/ops/scripts/deploy-kit/release.cjs deploy -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Plan $env:PLAN
+
+      - name: Live checks and row counts after
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          RELEASE_CONFIRM: ${{ inputs.confirm }}
+          PLAN: ${{ inputs.plan }}
+        run: node kit/ops/scripts/deploy-kit/release.cjs live -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Plan $env:PLAN
+
+      - name: How to undo this release
+        if: always()
+        run: |
+          @(
+            '### How to undo this release'
+            ''
+            '1. Actions tab -> **Deploy rollback** -> **Run workflow**.'
+            '2. Website only: target `worker` (leave the version id empty to go back one version, or paste the "Worker version before" id from the snapshot above).'
+            '3. Database: target `database`, pick the database, paste its restore point from the snapshot above. This also removes every sale made after the snapshot.'
+            '4. Type ROLLBACK in the confirm box and approve the review.'
+          ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
