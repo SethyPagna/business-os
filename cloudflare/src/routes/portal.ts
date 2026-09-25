@@ -796,11 +796,15 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
   // versions means a save on either side invalidates immediately instead
   // of hiding behind the TTL. Reproduced live: stale at +30s, fresh only
   // after the 60s TTL, on every portal-editor save.
-  const [productsVersion, settingsVersion] = await Promise.all([
+  // I2-1: sales bump 'stock' rather than 'products'. The storefront's
+  // membership (out-of-stock hiding) and stock_status read stock, so the
+  // stock version is part of its key too.
+  const [productsVersion, settingsVersion, stockVersion] = await Promise.all([
     getVersionWithFallback(c.env, 'products'),
     getVersionWithFallback(c.env, 'settings'),
+    getVersionWithFallback(c.env, 'stock'),
   ])
-  return `portal-query-v1:${productsVersion}:${settingsVersion}`
+  return `portal-query-v1:${productsVersion}:${settingsVersion}:${stockVersion}`
 }
 
 app.get('/config', async (c) => {

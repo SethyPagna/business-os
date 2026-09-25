@@ -647,6 +647,84 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
   return merged
 }
 
+// The plain products columns every /search row carries. Shared by the page
+// query below and by refreshCachedProductRows, so a cached row is refreshed
+// with exactly the columns it was built from.
+const PRODUCT_SEARCH_ROW_COLUMNS = [
+  'id', 'name', 'sku', 'barcode', 'category', 'brand', 'unit', 'description',
+  'selling_price_usd', 'selling_price_khr',
+  'wholesale_price_usd', 'wholesale_price_khr',
+  'cost_price_usd', 'cost_price_khr', 'stock_quantity', 'low_stock_threshold',
+  'out_of_stock_threshold', 'image_path', 'is_active', 'supplier', 'parent_id',
+  'is_group', 'discount_enabled', 'discount_type', 'discount_percent',
+  'discount_amount_usd', 'discount_amount_khr', 'discount_label',
+  'discount_badge_color', 'discount_starts_at', 'discount_ends_at',
+  'expiry_date', 'expiry_alert_days', 'created_at', 'updated_at',
+] as const
+const PRODUCT_SEARCH_SELECT_SQL = PRODUCT_SEARCH_ROW_COLUMNS.map((column) => `p.${column}`).join(', ')
+
+// I2-1 -- product read cache contract.
+//
+// BEFORE: every sale bumped the 'products' version, and /search + / cached
+// whole pages (rows AND stock) under that one version. Each sale therefore
+// made every cached catalog page on every till unreachable, and the reload
+// every till runs on the resulting sync event re-ran the full family-
+// pagination/FTS query (70-240 ms on the lab DB) instead of hitting cache.
+//
+// AFTER: the cached part of a page is its MEMBERSHIP and ORDER (which ids,
+// in which order, the total). Stock writers that change nothing else (the
+// sale paths) bump 'stock' instead of 'products'. A page served from cache
+// is refreshed before it is returned: its rows' products columns are
+// re-read by primary key and branch_stock / stock_quantity / batch_count
+// are recomputed live (refreshCachedProductRows), so another till reads the
+// new stock -- and a matching updated_at token for the edit conflict
+// guard -- as soon as the sale commits, not after a TTL or a version bump.
+// Membership that depends on stock (stockState / issueState filters) keys
+// on BOTH versions, so a sale still turns those pages over. Any writer that
+// still bumps 'products' invalidates everything, exactly as before.
+function productSearchMembershipReadsStock(query: Record<string, string>): boolean {
+  return Boolean(
+    String(query.stockState || query.stock_state || '').trim()
+    || String(query.issueState || query.issue_state || '').trim(),
+  )
+}
+
+async function productSearchCacheVersion(env: Env, query: Record<string, string>): Promise<string> {
+  if (!productSearchMembershipReadsStock(query)) return getVersionWithFallback(env, 'products')
+  const [productsVersion, stockVersion] = await Promise.all([
+    getVersionWithFallback(env, 'products'),
+    getVersionWithFallback(env, 'stock'),
+  ])
+  return `${productsVersion}:stock:${stockVersion}`
+}
+
+// Brings rows served from the page cache up to the database's current state
+// without re-running the page query. In place, so every key keeps its
+// position and a refreshed row serialises byte-for-byte like a freshly
+// computed one. Only keys the row already has are overwritten (name-sibling
+// rows carry the same columns; pagination extras are left alone).
+async function refreshCachedProductRows(env: Env, items: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const ids = Array.from(new Set(items.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)))
+  if (!ids.length) return items
+  const db = getDb(env)
+  const [liveRows, withBranchStock] = await Promise.all([
+    selectInChunks(ids, 0, (chunk) => {
+      const { sql, params } = buildInClause('id', chunk)
+      return db.prepare(`SELECT ${PRODUCT_SEARCH_SELECT_SQL} FROM products p WHERE p.id IN (${sql})`).all<Record<string, unknown>>(params)
+    }),
+    attachBranchStock(env, items),
+    attachBatchCounts(db, items),
+  ])
+  const liveById = new Map(liveRows.map((row) => [Number(row.id), row]))
+  items.forEach((item, index) => {
+    const live = liveById.get(Number(item.id))
+    if (live) for (const column of PRODUCT_SEARCH_ROW_COLUMNS) if (column in item) item[column] = live[column]
+    item.stock_quantity = withBranchStock[index].stock_quantity
+    item.branch_stock = withBranchStock[index].branch_stock
+  })
+  return items
+}
+
 async function searchProductsPayload(env: Env, query: Record<string, string>, options: ProductSearchOptions = {}) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -752,19 +830,9 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     promotedFirst: true,
   })
 
-  const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
-           p.selling_price_usd, p.selling_price_khr,
-           p.wholesale_price_usd, p.wholesale_price_khr,
-           p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
-           p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
-           p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
-           p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
-           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
-           p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at`
-
   const { items, total, totalPages } = await paginateProductFamilies<Record<string, unknown>>({
     db,
-    selectColumns,
+    selectColumns: PRODUCT_SEARCH_SELECT_SQL,
     joinSql,
     whereSql,
     params,
@@ -1069,10 +1137,15 @@ app.get('/search', async (c) => {
   if (query.money_precision_version!==undefined && !['0','1'].includes(query.money_precision_version))
     return c.json({error:'Unsupported product pricing read version.',code:'money_precision_version_invalid'},400)
 
-  const version = await getVersionWithFallback(c.env, 'products')
-  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+  const version = await productSearchCacheVersion(c.env, query)
+  let produced = false
+  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+    produced = true
     return searchProductsWithIndexFallback(c.env, query)
   })
+  // I2-1: a cache hit is refreshed to live rows + stock (see productSearchCacheVersion).
+  const payload = produced ? cachedPayload
+    : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
   return c.json(isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(payload as { items?: unknown }, user) : payload)
 })
@@ -1086,10 +1159,14 @@ app.get('/', async (c) => {
   // /search (just above) already goes through, so every call re-ran the
   // full product query. Same version namespace ('products'), same TTL --
   // this endpoint is just /search with a fixed page/pageSize.
-  const version = await getVersionWithFallback(c.env, 'products')
-  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+  const version = await productSearchCacheVersion(c.env, {})
+  let produced = false
+  const cachedPayload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
+    produced = true
     return searchProductsPayload(c.env, { page: '1', pageSize: '100' })
   })
+  const payload = produced ? cachedPayload
+    : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
   const items = isImageOnlyRead(user, surface)
     ? payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)))
     : payload.items

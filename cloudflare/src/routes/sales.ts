@@ -1708,13 +1708,14 @@ app.post('/', async (c) => {
     }
   }
 
-  // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
-  // Products/POS/Inventory pages reflect this sale's stock deduction
-  // immediately instead of waiting out the TTL -- this write path deducts
-  // products.stock_quantity above but wasn't bumping the version, so a
-  // browsed-then-cached product list could show pre-sale stock for up to 20s.
+  // Stock visibility: /api/products/search refreshes every cached page's
+  // rows and stock live on each read (routes/products.ts
+  // refreshCachedProductRows), so this deduction shows on every till at once.
+  // 'stock' still turns over the pages whose MEMBERSHIP depends on stock
+  // (stockState/issueState filters) and the portal. Bumping 'products' here
+  // used to discard every cached catalog page on every sale (I2-1).
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
   if (recoveredCommittedCreate) {
@@ -2685,7 +2686,8 @@ app.patch('/:id/status', async (c) => {
         stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
       } : {}),
     }),
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
@@ -3570,7 +3572,8 @@ app.post('/:id/items', async (c) => {
   }
 
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
 
@@ -5203,7 +5206,8 @@ async function auditAmendment(
       sale_status: sale.sale_status ?? null,
       ...details,
     }),
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
 }

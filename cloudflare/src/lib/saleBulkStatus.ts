@@ -304,7 +304,7 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
     return { sql: 'INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@uid,@name,@action,\'sale\',@id,@details,\'sales\',@id,@details)', params: { uid: user.id, name: actorSnapshot(user), action: direction, id: operationId, details: JSON.stringify({ kind: BULK_STATUS_KIND, count }) } };
 }
 export async function notifyBulkStatus(env: Env) {
-    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'products'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
+    await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
 export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row) {
     permission(user);
