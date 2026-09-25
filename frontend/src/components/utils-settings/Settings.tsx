@@ -2193,6 +2193,39 @@ export default function Settings() {
                   ]}
                 />
               </div>
+              <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/70">
+                <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_topics_title') || 'Forum topics'}</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('telegram_topics_desc') || 'Send each message type to its own topic in a Telegram forum group. Leave a field empty to send to General.'}</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {[
+                    ['telegram_topic_shift', t('telegram_topic_shift_label') || 'Shift reports'],
+                    ['telegram_topic_sales', t('telegram_topic_sales_label') || 'Sale invoices'],
+                    ['telegram_topic_status', t('telegram_topic_status_label') || 'Status updates'],
+                    ['telegram_topic_expenses', t('telegram_topic_expenses_label') || 'Expenses & fees'],
+                    ['telegram_topic_stock', t('telegram_topic_stock_label') || 'Stock in/out'],
+                    ['telegram_topic_reports', t('telegram_topic_reports_label') || "Day's summary"],
+                    ['telegram_topic_alerts', t('telegram_topic_alerts_label') || 'Test & alerts'],
+                  ].map(([key, label]) => (
+                    <div key={key}>
+                      <label htmlFor={`settings-${key.replace(/_/g, '-')}`} className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{label}</label>
+                      <input
+                        id={`settings-${key.replace(/_/g, '-')}`}
+                        name={key}
+                        className="input w-full"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder={t('telegram_topic_placeholder') || 'Topic ID, or leave empty'}
+                        value={form[key] || ''}
+                        onChange={(event) => setValue(key, event.target.value)}
+                        disabled={!canEditSettings}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {t('telegram_topics_help') || 'To find a topic ID: open the topic in Telegram, tap Share, copy the link, and use the number after the last slash.'}
+                </p>
+              </div>
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">
                 <button type="button" className="btn-secondary text-sm" onClick={() => void runTelegramAction('test')} disabled={!canEditSettings || telegramAction !== null}>
                   {telegramAction === 'test' ? (t('telegram_sending_test') || 'Sending test...') : (t('telegram_send_test') || 'Send test message')}
