@@ -169,7 +169,10 @@ runTest('the desktop qty cell keeps its deliberate wrap, and the premise for tha
   assert.match(surface, /<table className="w-full min-w-\[58rem\] table-fixed /, 'the desktop table must stay table-fixed at min-w-[58rem] -- that is the whole reason the price columns cannot squeeze the qty column')
   // Positive control on the "different cell" half: the prices really are in
   // other <td>s, so the qty cell's wrap cannot be the owner's price-driven one.
-  for (const priceCell of ['<div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>', '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
+  // (The cost is a <span className="block"> since 25 Sep 2026: it sits inside
+  // the button that opens the cost calculation, and a button holds phrasing
+  // content only. Same line, same column.)
+  for (const priceCell of ['<span className="block font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</span>', '<div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>']) {
     assert.ok(products.includes(priceCell), `the desktop prices must stay in their own column: ${priceCell}`)
   }
   // And the MOBILE strip -- the row where the four values really do share one
