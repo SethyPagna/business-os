@@ -71,10 +71,16 @@ function renderFloat(movement: Record<string, unknown>, balanceState: unknown): 
 }
 
 const sale = { id: 77, product_id: 5, product_name: 'Cream', movement_type: 'sale', quantity: 3, unit: 'pcs', created_at: '2026-09-20 10:00:00', branch_name: 'Shop', user_name: 'dara', reason: 'Walk-in', reference_kind: 'sale', reference_label: '20260920-100000' }
-const balanceTiles = (html: string) => {
-  const block = /data-testid="stock-record-balance"[^>]*>(.*?)<\/div><\/div><\/div>/.exec(html)
-  assert.ok(block, 'the balance block renders')
-  return [...block[0].matchAll(/tabular-nums[^"]*">([^<]*)</g)].map((match) => match[1])
+// What the balance block says: the signed movement, then each before -> after
+// line as [scope, label, "before → after"] in render order.
+const balanceBlock = (html: string) => {
+  const start = html.indexOf('data-testid="stock-record-balance"')
+  assert.ok(start >= 0, 'the balance block renders')
+  const block = html.slice(start)
+  const moved = /tabular-nums">([^<]*)</.exec(block)
+  assert.ok(moved, 'the movement renders')
+  const lines = [...block.matchAll(/data-scope="(branch|total)"[^>]*><dt[^>]*>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((match) => [match[1], match[2], match[3]])
+  return { moved: moved[1], lines }
 }
 
 runTest('a Movements row opens the movement\'s own float, not the product card', () => {
@@ -90,23 +96,52 @@ runTest('first paint is the real record, with the balance marked as being read',
   const html = renderFloat(sale, null)
   assert.match(html, /data-title="Cream"/)
   for (const fact of ['at 2026-09-20 10:00:00', 'Shop', 'dara', 'Walk-in', 'Sale 20260920-100000']) assert.ok(html.includes(fact), `shows ${fact}`)
-  assert.deepEqual(balanceTiles(html), ['…', '−3 pcs', '…'])
+  assert.deepEqual(balanceBlock(html), { moved: '−3 pcs', lines: [['branch', 'Shop', '… → …'], ['total', 'Total', '… → …']] })
   assert.match(html, /aria-busy="true"/)
 })
 
-runTest('once read, it shows stock before -> the signed movement -> after', () => {
-  const html = renderFloat(sale, { id: 77, value: { before_qty: 12, after_qty: 9 }, failed: false })
-  assert.deepEqual(balanceTiles(html), ['12 pcs', '−3 pcs', '9 pcs'])
-  const receipt = renderFloat({ ...sale, movement_type: 'add', quantity: 4 }, { id: 77, value: { before_qty: 9, after_qty: 13 }, failed: false })
-  assert.deepEqual(balanceTiles(receipt), ['9 pcs', '+4 pcs', '13 pcs'])
+// Owner, 26 Sep -- the owner's own example. Branch and total DIFFER on every
+// number, so the total shown as the branch (or the reverse) fails here.
+const twoBranches = { before_qty: 18, after_qty: 15, branch_before_qty: 10, branch_after_qty: 7, active_branch_count: 2 }
+
+runTest('once read, the branch line comes first and the total across branches under it', () => {
+  const html = renderFloat(sale, { id: 77, value: twoBranches, failed: false })
+  assert.deepEqual(balanceBlock(html), { moved: '−3 pcs', lines: [['branch', 'Shop', '10 pcs → 7 pcs'], ['total', 'Total', '18 pcs → 15 pcs']] })
+  const receipt = renderFloat({ ...sale, movement_type: 'add', quantity: 4, branch_name: 'Warehouse' }, { id: 77, value: { before_qty: 11, after_qty: 15, branch_before_qty: 4, branch_after_qty: 8, active_branch_count: 2 }, failed: false })
+  assert.deepEqual(balanceBlock(receipt), { moved: '+4 pcs', lines: [['branch', 'Warehouse', '4 pcs → 8 pcs'], ['total', 'Total', '11 pcs → 15 pcs']] })
+})
+
+runTest('one active branch: a single line, the redundant Total dropped -- derived from the count, not a flag', () => {
+  const merged = renderFloat(sale, { id: 77, value: { before_qty: 10, after_qty: 7, branch_before_qty: 10, branch_after_qty: 7, active_branch_count: 1 }, failed: false })
+  assert.deepEqual(balanceBlock(merged).lines, [['branch', 'Shop', '10 pcs → 7 pcs']])
+  // the same numbers with two active branches keep both lines
+  assert.equal(balanceBlock(renderFloat(sale, { id: 77, value: { before_qty: 10, after_qty: 7, branch_before_qty: 10, branch_after_qty: 7, active_branch_count: 2 }, failed: false })).lines.length, 2)
+  // one active branch, but a record from a branch since closed still differs from the total: both stay
+  assert.deepEqual(balanceBlock(renderFloat(sale, { id: 77, value: { ...twoBranches, active_branch_count: 1 }, failed: false })).lines.map((line) => line[0]), ['branch', 'total'])
+  // an unknown count keeps both
+  assert.equal(balanceBlock(renderFloat(sale, { id: 77, value: { ...twoBranches, active_branch_count: null }, failed: false })).lines.length, 2)
 })
 
 runTest('an underivable or failed balance reads "—", never a guessed number, and a stale one is ignored', () => {
-  assert.deepEqual(balanceTiles(renderFloat(sale, { id: 77, value: { before_qty: null, after_qty: null }, failed: false })), ['—', '−3 pcs', '—'])
+  const noBranch = renderFloat(sale, { id: 77, value: { before_qty: 18, after_qty: 15, branch_before_qty: null, branch_after_qty: null, active_branch_count: 2 }, failed: false })
+  assert.deepEqual(balanceBlock(noBranch).lines, [['branch', 'Shop', '— → —'], ['total', 'Total', '18 pcs → 15 pcs']])
   const failedHtml = renderFloat(sale, { id: 77, value: null, failed: true })
-  assert.deepEqual(balanceTiles(failedHtml), ['—', '−3 pcs', '—'])
+  assert.deepEqual(balanceBlock(failedHtml).lines, [['branch', 'Shop', '— → —'], ['total', 'Total', '— → —']])
   assert.ok(failedHtml.includes('could not be read'))
-  assert.deepEqual(balanceTiles(renderFloat(sale, { id: 76, value: { before_qty: 1, after_qty: 2 }, failed: false })), ['…', '−3 pcs', '…'])
+  assert.deepEqual(balanceBlock(renderFloat(sale, { id: 76, value: twoBranches, failed: false })).lines, [['branch', 'Shop', '… → …'], ['total', 'Total', '… → …']])
+})
+
+runTest('stockBalanceLines: branch first, total second, and the one-branch collapse', () => {
+  const { stockBalanceLines } = stockLineChange
+  const labels = { branch: 'Branch', total: 'Total' }
+  assert.deepEqual(stockBalanceLines({ before_qty: 18, after_qty: 15, branch_before_qty: 10, branch_after_qty: 7 }, 'Shop', 2, labels),
+    [{ scope: 'branch', label: 'Shop', before: 10, after: 7 }, { scope: 'total', label: 'Total', before: 18, after: 15 }])
+  // explicit total_* wins over the compatibility before/after names
+  assert.deepEqual(stockBalanceLines({ total_before_qty: 18, total_after_qty: 15, before_qty: 0, after_qty: 0, branch_before_qty: 10, branch_after_qty: 7 }, 'Shop', 2, labels)[1], { scope: 'total', label: 'Total', before: 18, after: 15 })
+  // one branch, no branch pair: one line, the total under the branch's name
+  assert.deepEqual(stockBalanceLines({ before_qty: 5, after_qty: 6, branch_before_qty: null, branch_after_qty: null }, 'Shop', 1, labels), [{ scope: 'total', label: 'Shop', before: 5, after: 6 }])
+  // no branch name falls back to the generic label
+  assert.equal(stockBalanceLines({ before_qty: 1, after_qty: 2, branch_before_qty: 1, branch_after_qty: 2 }, '', 2, labels)[0].label, 'Branch')
 })
 
 runTest('the balance is the Worker\'s one-statement read, the same helper as the stock-in lines', () => {

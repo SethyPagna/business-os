@@ -70,6 +70,10 @@ type Row = {
   // could not be derived -- shown as "—", never guessed.
   before_qty?: number | null
   after_qty?: number | null
+  // Owner, 26 Sep: the same receipt at the line's OWN branch (before_qty/
+  // after_qty above are the total across branches). Same one statement.
+  branch_before_qty?: number | null
+  branch_after_qty?: number | null
   // U-records: the line as RECEIVED, before any N6 edit. The cost pair is
   // absent for a user without cost-view access (the Worker strips it).
   received_quantity?: number | null
@@ -81,6 +85,9 @@ type Session = {
   branchName: string; userName: string; createdAt: string; quantity: number; lineCount: number
   costUsd: number | null; linesWithoutCost: number; paymentStatus: 'paid' | 'credit' | 'mixed' | ''
   creditDueDate: string; hasSharedBatch: boolean; hasMixedHeader: boolean
+  // Active branches when the lines were read (the Worker counts them), so a
+  // line's float collapses to one balance line once there is one branch.
+  activeBranchCount?: number | null
 }
 // The write a ConfirmDialog is currently reviewing.
 type SessionReview = { kind: 'header' } | { kind: 'line'; row: Row } | { kind: 'session' }
@@ -236,7 +243,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     const actor = actorRef.current
     setOpening(true)
     try {
-      const payload = await getStockInSessionLines(summary.key) as { rows?: Row[]; truncated?: boolean }
+      const payload = await getStockInSessionLines(summary.key) as { rows?: Row[]; truncated?: boolean; active_branch_count?: number | null }
       if (!payload || !Array.isArray(payload.rows)) {
         throw new Error(tr('stock_session_invalid_response', 'Stock-in session details returned an unexpected response. Please retry.'))
       }
@@ -253,6 +260,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         paymentStatus: paymentState(rows), creditDueDate: rows.find((row) => row.batch_credit_due_date)?.batch_credit_due_date || '',
         hasSharedBatch: rows.some((row) => Number(row.batch_receipt_session_count) > 1),
         hasMixedHeader: summary.hasMixedHeader,
+        activeBranchCount: payload.active_branch_count ?? null,
       } satisfies Session
       if (settledAttempt) rememberAttempt(null)
       setSelected(session); setSelectedLine(null); setLineEdit(null); setReview(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
@@ -593,7 +601,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
           <div className="min-w-0 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
         </div>
-        <StockLineChange row={selectedLine} signedQuantity={Math.abs(Number(selectedLine.received_quantity ?? selectedLine.quantity) || 0)} canViewCosts={canViewCosts} tr={tr} />
+        <StockLineChange row={selectedLine} signedQuantity={Math.abs(Number(selectedLine.received_quantity ?? selectedLine.quantity) || 0)} canViewCosts={canViewCosts} tr={tr} branchName={selectedLine.branch_name} activeBranchCount={selected.activeBranchCount} />
         {/* The quantity leads in the balance block above; these are the line's other facts. */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">{canViewCosts ? <div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div> : null}<div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div>{canViewCosts ? <div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b><button type="button" className="decoration-dotted underline-offset-2 hover:underline" onClick={() => setCostFloatOpen(true)} title={tr('cost_breakdown_title', 'Calculated cost price')}>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</button></b></div> : null}<div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="detail-scroll-text">{supplierDisplay(selectedLine.batch_supplier_name, tr)}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
       </div>

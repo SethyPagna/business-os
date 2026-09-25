@@ -10,8 +10,14 @@
 // before -> after on every screen.
 
 export type StockLineChangeRow = {
+  // the TOTAL across branches (the name every existing reader uses)
   before_qty?: unknown
   after_qty?: unknown
+  total_before_qty?: unknown
+  total_after_qty?: unknown
+  // the movement's own branch; null when the Worker could not walk it back
+  branch_before_qty?: unknown
+  branch_after_qty?: unknown
   quantity?: unknown
   unit?: string | null
   edit_count?: unknown
@@ -39,18 +45,50 @@ export function formatQty(value: unknown, unit?: string | null): string {
   return unit ? `${amount} ${unit}` : String(amount)
 }
 
+/** One before -> after line of a stock record: its own branch, or the total across branches. */
+export type StockBalanceLine = { scope: 'branch' | 'total'; label: string; before: unknown; after: unknown }
+
+const samePair = (a: [unknown, unknown], b: [unknown, unknown]) => a.every((value, index) => value != null && b[index] != null && Number(value) === Number(b[index]))
+
+/**
+ * Owner, 26 Sep: the branch line first ("Shop 10 -> 7"), the total across
+ * branches under it ("Total 18 -> 15"). When the business runs ONE active
+ * branch (counted by the Worker from data, never a flag), the Total line is
+ * redundant and is dropped -- but only while it really says the same thing:
+ * a record from a branch since closed can still differ from the total, and
+ * then both lines stay. With one branch and no derivable branch pair, the
+ * single line carries the total under the branch's name. A null count
+ * (unknown) keeps both lines.
+ */
+export function stockBalanceLines(row: StockLineChangeRow, branchName: string | null | undefined, activeBranchCount: number | null | undefined, labels: { branch: string; total: string }): StockBalanceLine[] {
+  const branchLabel = String(branchName || '').trim() || labels.branch
+  const branch: [unknown, unknown] = [row.branch_before_qty, row.branch_after_qty]
+  const total: [unknown, unknown] = [row.total_before_qty ?? row.before_qty, row.total_after_qty ?? row.after_qty]
+  const branchKnown = branch.every((value) => value != null && value !== '')
+  if (activeBranchCount != null && Number(activeBranchCount) <= 1 && (!branchKnown || samePair(branch, total))) {
+    const pair = branchKnown ? branch : total
+    return [{ scope: branchKnown ? 'branch' : 'total', label: branchKnown ? branchLabel : (String(branchName || '').trim() || labels.total), before: pair[0], after: pair[1] }]
+  }
+  return [
+    { scope: 'branch', label: branchLabel, before: branch[0], after: branch[1] },
+    { scope: 'total', label: labels.total, before: total[0], after: total[1] },
+  ]
+}
+
 /**
  * `signedQuantity` is the movement with its direction (+ in, - out); null
  * when the direction is unknown, which shows the bare quantity. `pending`
  * while the balance is still being read: the tiles say so instead of "—",
  * which would claim the balance cannot be derived.
  */
-export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending = false }: {
+export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending = false, branchName, activeBranchCount }: {
   row: StockLineChangeRow
   signedQuantity: number | null
   canViewCosts: boolean
   tr: Tr
   pending?: boolean
+  branchName?: string | null
+  activeBranchCount?: number | null
 }) {
   const edited = Number(row.edit_count) > 0
   const changes: Array<{ label: string; received: string; now: string }> = edited ? [
@@ -61,6 +99,7 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
     ] : []),
   ] : []
   const balance = (value: unknown) => pending ? '…' : formatQty(value, row.unit)
+  const lines = stockBalanceLines(row, branchName, activeBranchCount, { branch: tr('branch', 'Branch'), total: tr('stock_balance_total', 'Total') })
   const moved = signedQuantity == null || !Number.isFinite(signedQuantity)
     ? formatQty(row.quantity, row.unit)
     : `${signedQuantity > 0 ? '+' : signedQuantity < 0 ? '−' : ''}${formatQty(Math.abs(signedQuantity), row.unit)}`
@@ -71,10 +110,16 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
       : 'bg-gray-50 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200'
   return <div className="space-y-2">
     {/* leading-relaxed on every label: Khmer glyphs need the vertical room. */}
-    <div data-testid="stock-record-balance" aria-busy={pending || undefined} className="grid grid-cols-3 gap-2">
-      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('before_qty', 'Before')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{balance(row.before_qty)}</div></div>
+    <div data-testid="stock-record-balance" aria-busy={pending || undefined} className="grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-2">
       <div className={`rounded-xl px-3 py-2 ${movedTone}`}><div className="text-[11px] uppercase leading-relaxed tracking-wide opacity-80">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums">{moved}</div></div>
-      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('after_qty', 'After')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{balance(row.after_qty)}</div></div>
+      {/* Branch line first, then the total across branches (owner, 26 Sep). */}
+      <dl className="min-w-0 rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 text-[11px] uppercase leading-relaxed tracking-wide text-gray-400"><span /><span>{tr('before_qty', 'Before')} → {tr('after_qty', 'After')}</span></div>
+        {lines.map((line) => <div key={line.scope} data-testid="stock-balance-line" data-scope={line.scope} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
+          <dt className="break-words leading-relaxed text-gray-500 dark:text-gray-400">{line.label}</dt>
+          <dd className="text-sm font-semibold tabular-nums leading-relaxed text-gray-800 dark:text-gray-100" aria-label={`${line.label}: ${tr('before_qty', 'Before')} ${balance(line.before)}, ${tr('after_qty', 'After')} ${balance(line.after)}`}>{balance(line.before)} → {balance(line.after)}</dd>
+        </div>)}
+      </dl>
     </div>
     {changes.length ? <div data-testid="stock-in-line-edit-change" className="rounded-xl border border-blue-100 bg-blue-50/55 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
       <div className="mb-1 text-[11px] font-semibold leading-relaxed text-blue-700 dark:text-blue-300">{tr('stock_in_line_changed_since', 'Edited after it was received')}</div>

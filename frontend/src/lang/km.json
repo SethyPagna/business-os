@@ -5746,6 +5746,7 @@
   "stock_in_line_as_received": "ពេលទទួល",
   "stock_in_line_now": "ឥឡូវនេះ",
   "stock_balance_unavailable": "មិនអាចអានស្តុកមុន និងក្រោយបានទេ។",
+  "stock_balance_total": "សរុបគ្រប់សាខា",
   "stock_in_line_edit_reason_placeholder": "ស្រេចចិត្ត ឧ. វាយខុសលើវិក្កយបត្រ",
   "stock_in_line_error_quantity": "សូមបញ្ចូលចំនួនចន្លោះពី 0 ដល់ 1,000,000,000។",
   "stock_in_line_error_cost": "សូមបញ្ចូលថ្លៃដើម/ឯកតាចាប់ពី 0 ឡើងទៅ។",

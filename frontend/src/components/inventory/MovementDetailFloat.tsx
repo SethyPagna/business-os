@@ -30,7 +30,15 @@ export type MovementDetailRecord = {
   reference_label?: unknown
 }
 
-type Balance = { before_qty: number | null; after_qty: number | null }
+// before_qty/after_qty are the TOTAL across branches; the branch pair is the
+// movement's own branch (owner, 26 Sep: both, branch first).
+type Balance = {
+  before_qty: number | null
+  after_qty: number | null
+  branch_before_qty?: number | null
+  branch_after_qty?: number | null
+  active_branch_count?: number | null
+}
 type Translator = (key: string) => string | undefined
 
 export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance, onOpenProduct, onClose }: {
@@ -65,7 +73,16 @@ export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance,
   return <Modal title={movement.product_name || tr('movement', 'Movement')} onClose={onClose} size="md" unsavedChanges="read-only">
     <div className="space-y-3 text-xs">
       <StockLineChange
-        row={{ before_qty: current?.value?.before_qty ?? null, after_qty: current?.value?.after_qty ?? null, quantity: movement.quantity, unit: movement.unit }}
+        row={{
+          before_qty: current?.value?.before_qty ?? null,
+          after_qty: current?.value?.after_qty ?? null,
+          branch_before_qty: current?.value?.branch_before_qty ?? null,
+          branch_after_qty: current?.value?.branch_after_qty ?? null,
+          quantity: movement.quantity,
+          unit: movement.unit,
+        }}
+        branchName={typeof movement.branch_name === 'string' ? movement.branch_name : null}
+        activeBranchCount={current?.value?.active_branch_count ?? null}
         signedQuantity={signedMovementQuantity(movement.movement_type, movement.quantity)}
         canViewCosts={false}
         tr={tr}

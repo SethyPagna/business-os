@@ -76,9 +76,19 @@ runTest('the float leads with stock before -> after and the as-received -> now c
   assert.match(float, /<StockLineChange row=\{selectedLine\}/)
   assert.match(source, /import \{ StockLineChange \} from '\.\.\/shared\/StockLineChange\.tsx'/)
   const block = functionBody('StockLineChange')
-  for (const field of ['row.before_qty', 'row.after_qty', 'row.received_quantity', 'row.received_unit_cost_usd', 'row.received_total_cost_usd']) {
+  for (const field of ['row.received_quantity', 'row.received_unit_cost_usd', 'row.received_total_cost_usd']) {
     assert.ok(block.includes(field), `the change block reads ${field}`)
   }
+  // Owner, 26 Sep: the balance lines -- the line's branch, then the total
+  // across branches -- are built by stockBalanceLines (rendered cases pinned
+  // in tests/movementRecordFloat.test.ts), fed the line's branch and the
+  // session's active-branch count.
+  const lines = functionBody('stockBalanceLines')
+  for (const field of ['row.branch_before_qty', 'row.branch_after_qty', 'row.before_qty', 'row.after_qty']) {
+    assert.ok(lines.includes(field), `the balance lines read ${field}`)
+  }
+  assert.match(float, /branchName=\{selectedLine\.branch_name\} activeBranchCount=\{selected\.activeBranchCount\}/)
+  assert.match(source, /activeBranchCount: payload\.active_branch_count \?\? null/)
   assert.match(block, /tr\('before_qty', 'Before'\)/)
   assert.match(block, /tr\('after_qty', 'After'\)/)
 })
