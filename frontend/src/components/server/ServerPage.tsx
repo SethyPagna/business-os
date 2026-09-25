@@ -10,6 +10,7 @@ import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
 import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -375,6 +376,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
 function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
   const { user, notify } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const actorKey = `${user?.id || ''}:${user?.organization_id ?? ''}:${syncUrl || ''}`
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
@@ -508,7 +510,11 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
   async function handleDiscardQueue() {
     const reviewToken = pendingSync.review_token
-    if (!reviewToken || !window.confirm('Clear only the pending sales reviewed in this account? This removes their local recovery copies. Other accounts and unidentified records will be retained.')) return
+    if (!reviewToken || !(await askConfirm({
+      title: copy('clear_reviewed_sales', 'Clear reviewed sales'),
+      message: copy('server_discard_reviewed_queue_confirm', 'Clear only the pending sales reviewed in this account? This removes their local recovery copies. Other accounts and unidentified records will be retained.'),
+      danger: true,
+    }))) return
     if (!getServerApi().discardPendingSyncQueue) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
@@ -529,6 +535,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
   return (
     <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+      {confirmDialog}
       <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-gray-800 dark:text-white">{copy('diagnostics', 'Diagnostics', 'ការវិនិច្ឆ័យ')}</span>

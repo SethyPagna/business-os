@@ -27,6 +27,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import PageHeader from '../shared/PageHeader'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -269,6 +270,7 @@ function getBackupApi(): BackupApi {
 // restart the restore (safe: full delete+reinsert) or force-clear, which
 // accepts the half-restored state. Renders nothing while maintenance is off.
 function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: NotifyFn }) {
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
   // Same page id the GoogleDriveSyncSection below uses -- Backup renders
@@ -297,10 +299,13 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
   ].filter(Boolean).join(' · ')
   const handleClear = async () => {
     if (clearing) return
-    if (!window.confirm(copy(
-      'restore_maintenance_clear_confirm',
-      'Force-clear restore maintenance? Writes re-open on a database whose restore did NOT finish. Restart the restore instead if you can.',
-    ))) return
+    if (!(await askConfirm({
+      message: copy(
+        'restore_maintenance_clear_confirm',
+        'Force-clear restore maintenance? Writes re-open on a database whose restore did NOT finish. Restart the restore instead if you can.',
+      ),
+      danger: true,
+    }))) return
     setClearing(true)
     try {
       await clearBackupMaintenance()
@@ -313,6 +318,8 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
     }
   }
   return (
+    <>
+    {confirmDialog}
     <div className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm ${failed
       ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200'
       : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200'}`}
@@ -330,6 +337,7 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
         </button>
       ) : null}
     </div>
+    </>
   )
 }
 
@@ -887,6 +895,7 @@ function minutesToSyncSeconds(minutes: unknown): number {
 
 function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null, canRestore = false, onRestoreStaged }: GoogleDriveSyncSectionProps) {
   const copy = useCopy(t)
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const [busy, setBusy] = useState<BackupAction>('')
   const [status, setStatus] = useState<DriveSyncStatus | null>(null)
   const [form, setForm] = useState<DriveSyncForm>({
@@ -1328,7 +1337,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const disconnect = async () => {
     if (actionLockRef.current) return
-    if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
+    if (!(await askConfirm({ message: copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'), danger: true }))) return
     if (!beginAction('disconnect')) return
     try {
       await yieldToBrowser()
@@ -1353,7 +1362,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const forgetCredentials = async () => {
     if (actionLockRef.current) return
-    if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
+    if (!(await askConfirm({ message: copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'), danger: true }))) return
     if (!beginAction('forget')) return
     try {
       await yieldToBrowser()
@@ -1384,6 +1393,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   return (
     <div className="card p-5 sm:p-6">
+      {confirmDialog}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="mb-1 flex items-center gap-2 text-base font-semibold text-gray-900 dark:text-white">
@@ -1660,6 +1670,7 @@ const MemoBackupOverview = memo(BackupOverview)
 export default function Backup() {
   const { t, notify, hasPermission, user } = useApp()
   const copy = useCopy(t)
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // E4: renders inside the Settings hub now.
   const isActive = useIsPageActive('settings')
   const [historyReady, setHistoryReady] = useState(false)
@@ -1797,7 +1808,13 @@ export default function Backup() {
     // database restore power; fixed both sides together this session.
     if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
-    if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+    if (!(await askConfirm({
+      message: copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.'),
+      items: [{ label: copy('folder', 'Folder'), value: folderImportPath }],
+      note: copy('import_backup_confirm', 'Continue?'),
+      confirmLabel: copy('continue', 'Continue'),
+      danger: true,
+    }))) return
 
     if (!beginBackupAction('folder-import')) return
     try {
@@ -1889,6 +1906,7 @@ export default function Backup() {
 
   return (
     <div className="page-scroll p-4 sm:p-6">
+      {confirmDialog}
       <div className="mx-auto max-w-6xl space-y-4">
         <PageHeader
           icon={HardDriveDownload}

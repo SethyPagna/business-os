@@ -20,6 +20,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { shouldPromptConflictReviewBeforeApprove } from './importJobApproveGate.ts'
+import { useConfirmDialog } from './useConfirmDialog.tsx'
 
 // This widget is the ONE place import jobs surface across every page
 // (mounted globally in NotificationCenter.tsx -- Products/Inventory/Sales/
@@ -760,6 +761,7 @@ function buildJobsSignature(jobs: ImportJob[] = []): string {
 
 export default function BackgroundImportTracker() {
   const { notify, t, settings } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const pagesNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const [jobs, setJobs] = useState<ImportJob[]>([])
   const [expanded, setExpanded] = useState(false)
@@ -1253,7 +1255,16 @@ export default function BackgroundImportTracker() {
   const handleRemove = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'remove')
     if (!action) return
-    const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
+    const okToRemove = await askConfirm({
+      title: t('remove') || 'Remove',
+      message: t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?',
+      items: [
+        { label: t('contacts_import_job_label') || 'Job', value: `#${String(job.id ?? '')}` },
+        { label: t('rows') || 'rows', value: Number(job.total_rows) || 0 },
+      ],
+      confirmLabel: t('remove') || 'Remove',
+      danger: true,
+    })
     if (!okToRemove) {
       finishTrackerAction(action)
       return
@@ -1392,7 +1403,11 @@ export default function BackgroundImportTracker() {
     )
   }
 
+  // The review dialog renders BESIDE the draggable tracker, so its presses
+  // never bubble (through the React tree) into the tracker's drag handlers.
   return (
+    <>
+    {confirmDialog}
     <div
       ref={trackerRef}
       style={dragPos ? { left: `${dragPos.left}px`, top: `${dragPos.top}px` } : undefined}
@@ -1655,5 +1670,6 @@ export default function BackgroundImportTracker() {
         </Suspense>
       ) : null}
     </div>
+    </>
   )
 }

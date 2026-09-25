@@ -383,7 +383,7 @@ await runTest('server queue and connection actions use guarded bounded actions',
   assert.match(source, /if \(!beginSingleAction\(queueActionInFlightRef, \{ blocked: retryingQueue \}\)\) return/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(reviewToken\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\('Reviewed pending sales were cleared\.', reviewToken\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /const reviewToken = pendingSync.review_token[\s\S]*if \(!reviewToken \|\| !window.confirm/)
+  assert.match(source, /const reviewToken = pendingSync.review_token[\s\S]*if \(!reviewToken \|\| !\(await askConfirm\(\{/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(queueActionInFlightRef\)[\s\S]*setRetryingQueue\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(testSyncInFlightRef, \{ blocked: testing \}\)\) return/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/)
