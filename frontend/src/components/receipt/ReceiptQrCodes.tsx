@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ReceiptQrSocialLink } from '../receipt-settings/constants'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink'
+import { receiptQrDataUrls } from '../../utils/receiptQrCache.ts'
 
 export interface ReceiptQrEntry {
   key: string
@@ -13,37 +14,17 @@ interface ReceiptQrCodesProps {
   scanLabel: string
 }
 
-// Small in-memory cache so re-rendering the same receipt (e.g. switching
-// language tabs) doesn't regenerate identical QR images every time.
-const qrDataUrlCache = new Map<string, string>()
-let qrcodeModulePromise: Promise<typeof import('qrcode')> | null = null
-
-function loadQrcodeModule(): Promise<typeof import('qrcode')> {
-  if (!qrcodeModulePromise) qrcodeModulePromise = import('qrcode')
-  return qrcodeModulePromise
-}
-
-async function generateQrDataUrl(url: string): Promise<string> {
-  const cached = qrDataUrlCache.get(url)
-  if (cached) return cached
-  const QRCode = await loadQrcodeModule()
-  const dataUrl = await QRCode.toDataURL(url, {
-    errorCorrectionLevel: 'M',
-    margin: 1,
-    width: 240,
-    color: { dark: '#111827', light: '#ffffff' },
-  })
-  qrDataUrlCache.set(url, dataUrl)
-  return dataUrl
-}
+// Generation, the session cache and in-flight sharing live in
+// utils/receiptQrCache.ts: the tiles mount with the receipt preview, so the QR
+// images are ready before Print is tapped.
 
 function QrTile({ entry }: { entry: ReceiptQrEntry }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(() => qrDataUrlCache.get(entry.url) || null)
+  const [dataUrl, setDataUrl] = useState<string | null>(() => receiptQrDataUrls.peek(entry.url))
 
   useEffect(() => {
     let cancelled = false
     if (!entry.url) return undefined
-    generateQrDataUrl(entry.url)
+    receiptQrDataUrls.get(entry.url)
       .then((url) => { if (!cancelled) setDataUrl(url) })
       .catch(() => { if (!cancelled) setDataUrl(null) })
     return () => { cancelled = true }

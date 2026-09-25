@@ -720,6 +720,8 @@ function loadQrComponent(): unknown {
   const compiled = transformSync(qrSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     if (id === 'react' || id === 'react/jsx-runtime') return require(id)
+    // Real: the tiles read their session cache synchronously on first render.
+    if (id.includes('receiptQrCache')) return require('../src/utils/receiptQrCache.ts')
     return { normalizeSocialQrUrl: (url: string) => ({ url }) }
   }, mod, mod.exports)
   return mod.exports.default
