@@ -88,8 +88,15 @@ crons = ["0 */6 * * *"]
 # elsewhere in this program), which is exactly the workload Smart Placement
 # is for. Free on both Workers plans (no [limits]-style Paid gate), so it
 # needs no free/paid branch the way cpu_ms above does.
+#
+# 2026-09-25: Smart Placement left requests at the requesting edge (live
+# header cf-placement: local-MRS), so a browser whose traffic exits in Europe
+# paid a Europe<->APAC round trip for every D1 query. D1 business-os runs in
+# APAC and the shop is in Cambodia, so pin invocation to Singapore, the
+# closest supported region: one long hop per request instead of one per query.
 [placement]
-mode = "smart"
+mode = "targeted"
+region = "aws:ap-southeast-1"
 
 # CPU headroom for the import queue consumer (queue.ts) and other chunked
 # D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
