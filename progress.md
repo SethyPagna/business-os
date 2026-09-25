@@ -53,7 +53,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 |---|---|---|---|
 | U-cost | claude/u-cost-20260925 | catalogCostRecompute, migration 0195, batch lists (ManageBatchesModal, inventory ProductDetailModal) | building (resumed after usage limit) |
 | U-db | claude/u-db-20260925 | search relevance, sales.ts empty IN, salesAnalytics, migrations 0196/0197, catalog cache invalidation | building (resumed) |
-| U-records | claude/u-records-20260925 | stockLedgerQuery, movement balance endpoint, StockLineChange, MovementDetailFloat | branch + total built (4b7af334, 182333b4); refuter next |
+| U-records | claude/u-records-20260925 | stockLedgerQuery, movement balance endpoint, StockLineChange, MovementDetailFloat | refuter: certified with exceptions (transfer total false on both legs, total labelled as a branch, guessed branch balance, mixed timestamps, ledger float, list markup); fixes building |
 | U-load | claude/u-load-20260925 | language packs, preload lists, sw.js, icons | built; refuter running |
 | U-branch | claude/u-branch-20260926 | branch roles/successor, stock-writer guards, activeBranches UI, held consolidation migration, import routing | building (resumed) |
 | U-print | claude/u-print-20260926 | printReceipt, receiptAssetLoader, printSurface, exportOptions, Receipt | building (resumed) |
@@ -64,7 +64,8 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 | Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
 | Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
 | P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
-| U-offline-removal | not yet created | drain-once, then remove snapshot/mirrors/outbox; offline banner + blocked saving; SW app-code only | mapping (read-only) running; build after U-sync phase 1 |
+| U-drain | claude/u-drain-20260926 | automatic one-time upload of queued sales/outbox rows (existing server duplicate checks), nothing auto-deleted; then snapshot/mirror removal, POS checkout gate and copy (after U-sync, U-confirm, U-branch) | building; the offline map is in local Records |
+| U-deploykit | claude/u-deploykit-20260926 | run/release.bat menu, GitHub Actions deploy (manual start + owner approval), beginner setup guide, VPN split-tunnel guide | building; not pushed |
 
 ### Verification (every lane, before integration)
 - [ ] Refuter per lane (separate agent, read-only): tries to prove the fix wrong; checks sibling surfaces (POS, inventory, reports, public preview), permissions (backend role gate = UI gate), both language packs, undo/audit, offline paths
