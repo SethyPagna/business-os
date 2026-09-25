@@ -4,6 +4,10 @@ import App from './App.tsx'
 import { AppProvider } from './AppContext.tsx'
 import RootErrorBoundary from './components/shared/RootErrorBoundary.tsx'
 
+// index.tsx awaits this in the AdminRoot lazy import (I6-1): a device set to
+// Khmer gets its pack before the first render instead of an English flash.
+export { primeStoredLanguagePack } from './AppContext.tsx'
+
 export default function AdminRoot(): ReactElement {
   return (
     // Above AppProvider on purpose: a throw inside the provider's own first

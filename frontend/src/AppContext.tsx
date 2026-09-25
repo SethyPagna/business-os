@@ -378,6 +378,11 @@ const LANG_LOADERS: Record<string, () => Promise<TranslationPack>> = {
 }
 const loadedLangs: Record<string, TranslationPack> = { en: CORE_ENGLISH_PACK }
 const fullyLoadedLangs = new Set<string>()
+// How long the admin root waits for a non-English pack before it renders
+// anyway (in CORE English, swapped once the pack lands). It only bounds a
+// hung download: the pack normally arrives alongside the admin chunks,
+// because index.html's route preload script started it before either.
+const STARTUP_LANGUAGE_PACK_WAIT_MS = 3000
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 const DEVICE_LOCAL_SETTING_KEYS = new Set([
   'theme',
@@ -494,6 +499,37 @@ function readDeviceSettings(): AppSettings {
   } catch (_) {
     return {}
   }
+}
+
+// The UI language this device last chose. `language` is a device-local
+// setting (DEVICE_LOCAL_SETTING_KEYS), and mergeSettingsWithDeviceOverrides
+// lets the device record win over the server's, so this is the language
+// loadSettings would settle on anyway -- known before any request. The route
+// preload script vite.config.ts inlines into index.html reads the same key
+// to start this pack's download before React loads.
+function readStoredUiLanguage(): string {
+  return String(readDeviceSettings().language || 'en').trim() || 'en'
+}
+
+// I6-1: resolve the stored non-English pack BEFORE the admin root first
+// renders, so a Khmer till opens in Khmer instead of painting CORE English
+// and then re-rendering the whole app when the pack lands. index.tsx awaits
+// this inside the AdminRoot lazy import. English is left to the idle-time
+// load in AppProvider on purpose: CORE_ENGLISH_PACK already covers its first
+// paint. Never rejects -- a failed or slow pack must not keep the app from
+// opening; AppProvider's own effect retries the load after first paint.
+export function primeStoredLanguagePack(): Promise<void> {
+  const lang = readStoredUiLanguage()
+  const loader = LANG_LOADERS[lang]
+  if (!loader || CORE_LANGUAGE_CODES.has(lang) || fullyLoadedLangs.has(lang)) return Promise.resolve()
+  const loaded = loader()
+    .then((messages) => {
+      loadedLangs[lang] = messages
+      fullyLoadedLangs.add(lang)
+    })
+    .catch(() => {})
+  const waitLimit = new Promise<void>((resolve) => { window.setTimeout(resolve, STARTUP_LANGUAGE_PACK_WAIT_MS) })
+  return Promise.race([loaded, waitLimit])
 }
 
 function writeDeviceSettings(value: AppSettings): void {
@@ -653,7 +689,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return null
   })
   const [settings,            setSettings]            = useState<AppSettings>({})
-  const [language,            setLanguage]            = useState('en')
+  // From the device record, not 'en': starting on 'en' rendered a Khmer
+  // device in English until loadSettings ran, even with its pack in memory.
+  const [language,            setLanguage]            = useState(readStoredUiLanguage)
   const [theme,               setTheme]               = useState('light')
   const [page,                setPage]                = useState(() => getInitialAdminPage(publicMode))
   const [notification,        setNotification]        = useState<AppNotification | null>(null)

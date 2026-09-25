@@ -312,9 +312,20 @@ const eagerPrecacheChunkNames = [...new Set([
   'lang-km',
 ])]
 
-function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
+// I6-1: language pack chunk per UI language code. The route preload script
+// preloads the device's stored non-English pack alongside the admin chunks,
+// so the pack is already downloaded when index.tsx waits for it
+// (primeStoredLanguagePack in AppContext.tsx) instead of being requested only
+// after React's first commit. English is absent on purpose: CORE_ENGLISH_PACK
+// covers its first paint and AppProvider loads the full pack at idle time.
+const languagePackChunkNames = {
+  km: 'lang-km',
+} satisfies Record<string, string>
+
+function buildRoutePreloadScript(preloads: Record<string, string[]>, languagePacks: Record<string, string>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
   var preloads = ${JSON.stringify(preloads)};
+  var languagePacks = ${JSON.stringify(languagePacks)};
   function normalizePath(value) {
     return String(value || '/')
       .split('?')[0]
@@ -374,6 +385,16 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   function hasEmbeddedAuthBootstrap() {
     return !!document.getElementById('business-os-auth-bootstrap');
   }
+  // Same key, same default and same trimming as readStoredUiLanguage in
+  // AppContext.tsx: the language is a device-local setting.
+  function storedUiLanguage() {
+    try {
+      var deviceSettings = JSON.parse(window.localStorage.getItem('businessos_device_settings') || '{}');
+      return (deviceSettings && typeof deviceSettings === 'object' ? String(deviceSettings.language || '').trim() : '') || 'en';
+    } catch (_) {
+      return 'en';
+    }
+  }
   function routePreloadKey(pathname) {
     var segment = pathname.split('/').filter(Boolean)[0] || '';
     if (segment === 'product') return 'products';
@@ -417,6 +438,10 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   var files = isPublicCatalogPath(pathname)
     ? preloads.public
     : (isLoginPath(pathname) ? preloads.login : [].concat(preloads.admin || [], preloads[routeKey] || []));
+  // The storefront has its own language packs; only the admin app and its
+  // sign-in page render from src/lang.
+  var languagePack = isPublicCatalogPath(pathname) ? '' : languagePacks[storedUiLanguage()];
+  if (languagePack) files = files.concat([languagePack]);
   var seen = {};
   files.forEach(function preload(file) {
     var href = '/' + String(file || '').replace(/^\\/+/, '');
@@ -447,7 +472,12 @@ function injectRouteAwareModulePreloads(): Plugin {
               .map(([key, names]) => [key, toRoutePreloadFiles(bundle, names)]),
           ),
         }
-        const script = buildRoutePreloadScript(preloads)
+        const languagePacks = Object.fromEntries(
+          Object.entries(languagePackChunkNames)
+            .map(([language, chunkName]) => [language, toRoutePreloadFiles(bundle, [chunkName])[0]])
+            .filter(([, file]) => Boolean(file)),
+        )
+        const script = buildRoutePreloadScript(preloads, languagePacks)
         return html.replace(/(\s*<script type="module")/, `\n    ${script}$1`)
       },
     },
@@ -991,6 +1021,21 @@ export default defineConfig({
         },
       },
     },
+  },
+
+  // I6-1 (Sep 25 2026): the language packs (src/lang/*.json, the only JSON
+  // the app itself imports) used to be emitted as ES modules with one named
+  // export per key -- every key name written again as a `const` and again in
+  // the export list, +151 KB raw per pack over its own JSON. Nothing imports
+  // a named key; AppContext only ever reads `default`. stringify emits
+  // `export default JSON.parse('...')` instead: the pack is its own JSON
+  // text again, and JSON.parse is faster to parse than an object literal of
+  // the same size. The option is global, so @ffmpeg/ffmpeg's package.json in
+  // the lazy `vendor` chunk is now carried whole (+2 KB raw, measured) -- a
+  // trade kept for the simpler config. The chunks keep their names (lang-en /
+  // lang-km), so the precache and the early head preload above still find them.
+  json: {
+    stringify: true,
   },
 
   css: {

@@ -46,7 +46,7 @@ const excluded = ['unknown-future-chunk', 'file-picker-modal', 'image-lightbox',
   'system-jobs-api', 'catalog', 'catalog-secondary-tabs', 'catalog-editor',
   'portal-language-packs', 'portal-content-i18n', 'backup-reset-tools', 'settings-otp-modal',
   'settings-api', 'user-profile-modal', 'user-detail-sheet', 'user-permission-editor',
-  'branch-transfer-modal', 'app-shell-icons', 'shared-icons']
+  'branch-transfer-modal', 'app-shell-icons', 'shared-icons', 'lang-en', 'lang-km']
 const names = [...new Set([...admin, ...login, ...publicChunks, ...productShared, 'Products', 'POS', ...Object.values(otherRoutes).flat(), ...excluded])]
 const fileFor = (name: string) => `assets/${name}-fixture.js`
 const bundle = Object.fromEntries(names.map(name => [fileFor(name), {
@@ -66,13 +66,20 @@ const script = built.match(/<script data-business-os-route-preloads>([\s\S]*?)<\
 assert.ok(script, 'plugin must emit an executable route preload script')
 
 type Link = { rel?: string; href?: string; fetchPriority?: string; attributes: Record<string, string>; setAttribute: (name: string, value: string) => void }
-function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string; rejectFetch?: boolean; unresolvedSignout?: boolean; blockedStorage?: boolean } = {}) {
+function run(pathname: string, options: { publicRoot?: boolean; embedded?: boolean; existingPromise?: boolean; existingLink?: string; source?: string; rejectFetch?: boolean; unresolvedSignout?: boolean; blockedStorage?: boolean; deviceSettings?: string } = {}) {
   const links: Link[] = []
   const calls: Array<{ url: string; init: RequestInit }> = []
   const existingPromise = options.existingPromise ? Promise.resolve({ user: 'already-started' }) : undefined
   const window = {
     location: { pathname },
-    get localStorage() { if (options.blockedStorage) throw new Error('Storage blocked'); return { getItem: (key: string) => key === 'businessos_unresolved_signout_v1' && options.unresolvedSignout ? 'retained-intent' : null } },
+    get localStorage() {
+      if (options.blockedStorage) throw new Error('Storage blocked')
+      return { getItem: (key: string) => {
+        if (key === 'businessos_unresolved_signout_v1') return options.unresolvedSignout ? 'retained-intent' : null
+        if (key === 'businessos_device_settings') return options.deviceSettings ?? null
+        return null
+      } }
+    },
     __businessOsAuthBootstrapPromise: existingPromise,
     fetch: (url: string, init: RequestInit) => {
       calls.push({ url, init })
@@ -93,8 +100,8 @@ function run(pathname: string, options: { publicRoot?: boolean; embedded?: boole
   vm.runInNewContext(options.source ?? script!, { window, document })
   return { links, calls, window, existingPromise }
 }
-function expectRoute(pathname: string, expected: string[], publicRoot = false, source?: string) {
-  const result = run(pathname, { publicRoot, source })
+function expectRoute(pathname: string, expected: string[], publicRoot = false, source?: string, deviceSettings?: string) {
+  const result = run(pathname, { publicRoot, source, deviceSettings })
   assert.deepEqual(result.links.map(link => link.href).sort(), [...new Set(expected)].map(name => '/' + fileFor(name)).sort(), pathname)
   for (const link of result.links) {
     assert.equal(link.rel, 'modulepreload')
@@ -114,6 +121,24 @@ for (const path of ['/', '/admin', '/dashboard']) expectRoute(path, admin)
 for (const path of ['/products', '/product', '//PRODUCTS///?page=2#top']) expectRoute(path, [...admin, 'Products', ...productShared])
 for (const path of ['/pos', '/point-of-sale']) expectRoute(path, [...admin, 'POS', ...productShared])
 for (const [route, chunks] of Object.entries(otherRoutes)) expectRoute('/' + route, [...admin, ...chunks])
+
+// I6-1: the device's stored non-English pack joins the admin and sign-in
+// preloads, so it downloads alongside the admin chunks instead of after
+// React's first commit. English never does -- CORE_ENGLISH_PACK paints it
+// and AppProvider loads the full pack at idle -- and the storefront has its
+// own packs. Unreadable or malformed storage means the English default.
+const khmerDevice = JSON.stringify({ theme: 'dark', language: 'km' })
+expectRoute('/', [...admin, 'lang-km'], false, undefined, khmerDevice)
+expectRoute('/pos', [...admin, 'POS', ...productShared, 'lang-km'], false, undefined, khmerDevice)
+expectRoute('/login', [...login, 'lang-km'], false, undefined, khmerDevice)
+expectRoute('/', [...admin, 'lang-km'], false, undefined, JSON.stringify({ language: ' km ' }))
+expectRoute('/', publicChunks, true, undefined, khmerDevice)
+expectRoute('/shop', publicChunks, false, undefined, khmerDevice)
+expectRoute('/', admin, false, undefined, JSON.stringify({ language: 'en' }))
+expectRoute('/', admin, false, undefined, JSON.stringify({ theme: 'dark' }))
+expectRoute('/', admin, false, undefined, 'not json')
+expectRoute('/', admin, false, undefined, JSON.stringify({ language: 'fr' }))
+assert.deepEqual(run('/', { blockedStorage: true }).links.map(link => link.href).sort(), admin.map(name => '/' + fileFor(name)).sort(), 'blocked storage preloads no pack')
 
 const bootstrap = run('/products')
 assert.equal(run('/products', { unresolvedSignout: true }).calls.length, 0, 'unresolved sign-out suppresses private early bootstrap')

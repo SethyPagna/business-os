@@ -41,12 +41,20 @@ try {
   for (const entry of ['index', 'auth-login', 'catalog-public', 'catalog-products', 'catalog-secondary-tabs']) {
     fs.writeFileSync(path.join(assets, `${entry}-12345678.js`), 'export const value = 1;')
   }
-  fs.writeFileSync(path.join(fixtureFrontend, 'dist/index.html'), 'var preloads = {"public":["/assets/catalog-public-12345678.js"]};')
+  // The validator also checks the language packs (I6-1): JSON text behind a
+  // default export, and the early Khmer preload naming an emitted chunk.
+  for (const language of ['en', 'km']) {
+    fs.writeFileSync(path.join(assets, `lang-${language}-12345678.js`), 'const e=JSON.parse(`{}`);export{e as default};')
+  }
+  fs.writeFileSync(path.join(fixtureFrontend, 'dist/index.html'), [
+    'var preloads = {"public":["/assets/catalog-public-12345678.js"]};',
+    'var languagePacks = {"km":"assets/lang-km-12345678.js"};',
+  ].join('\n'))
   fs.writeFileSync(path.join(assets, 'fixture.woff2'), '')
   fs.writeFileSync(path.join(assets, 'fixture.css'), [400, 500, 600].map(weight => `@font-face{font-family:Noto Sans Khmer;font-weight:${weight};src:url(/assets/fixture.woff2)}`).join('\n'))
   const valid = verify()
   assert.equal(valid.status, 0, valid.stdout + valid.stderr)
-  assert.match(valid.stdout, /emitted static chunk graph: 5 chunks, zero cycles/)
+  assert.match(valid.stdout, /emitted static chunk graph: 7 chunks, zero cycles/)
   fs.writeFileSync(path.join(assets, 'cycle-a.js'), 'export { value } from "./cycle-b.js";')
   fs.writeFileSync(path.join(assets, 'cycle-b.js'), 'export { value } from "./cycle-a.js";')
   const cyclic = verify()

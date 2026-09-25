@@ -182,6 +182,13 @@ assert.match(appContext, /const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000/, 'fu
 assert.doesNotMatch(appContext, /CORE_LANGUAGE_PACK_DEFER_MS/, 'the old fixed pre-idle defer was deliberately removed (see AppContext.tsx comment) -- it left non-core translation keys showing as raw key names in the UI for up to 29s after login')
 assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS \}\)/, 'full language pack should be requested via requestIdleCallback right after load, not stacked behind an extra fixed delay')
 assert.match(appContext, /useEffect\(\(\) => \{\s*if \(publicMode\) return undefined[\s\S]*CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*\}, \[language, publicMode\]\)/, 'public portal startup should not schedule the full admin language pack after first paint')
+// I6-1: a device set to Khmer renders its first admin frame in Khmer. The
+// language state starts from the device record (the setting is device-local,
+// so loadSettings would land on it anyway), and the AdminRoot lazy import
+// waits -- bounded -- for that pack, whose download index.html already started.
+assert.match(appContext, /useState\(readStoredUiLanguage\)/, 'admin language state must start from the stored device language, not a hard-coded English')
+assert.match(appContext, /export function primeStoredLanguagePack\(\): Promise<void> \{[\s\S]*CORE_LANGUAGE_CODES\.has\(lang\)[\s\S]*\.catch\(\(\) => \{\}\)[\s\S]*Promise\.race\(\[loaded, waitLimit\]\)/, 'the primer skips English, never rejects and is bounded by a timeout')
+assert.match(index, /import\('\.\/AdminRoot\.tsx'\)\.then\(async \(adminRoot\) => \{\s*await adminRoot\.primeStoredLanguagePack\(\)/, 'the admin root must not render before the stored pack is primed')
 assert.match(publicCatalogRoot, /import \{ PublicCatalogAppProvider \} from '\.\/app\/PublicCatalogAppProvider\.tsx'/, 'public catalog root should use the public-only provider instead of the full admin AppProvider')
 assert.doesNotMatch(publicCatalogRoot, /import \{ AppProvider \}|AppContext\.tsx/, 'public catalog root should not import the admin AppContext provider')
 assert.match(publicCatalogAppProvider, /AppContext\.Provider[\s\S]*SyncContext\.Provider/, 'public catalog provider should supply the shared hook contexts without admin startup side effects')
