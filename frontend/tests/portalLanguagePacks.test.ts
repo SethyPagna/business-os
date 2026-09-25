@@ -60,7 +60,11 @@ assert.equal(getPortalLanguageText('es', 'businessTagline'), '')
   const keys = new Set<string>()
   for (const match of flyout.matchAll(/copy\('([A-Za-z]+)'/g)) keys.add(match[1])
   for (const match of flyout.matchAll(/labelKey: '([A-Za-z]+)'/g)) keys.add(match[1])
-  assert.ok(keys.size >= 24, `expected the flyout's copy keys, found ${keys.size}`)
+  // A floor that catches a broken extraction regex, not a quota: P-public
+  // (2026-09-25) retired the flyout's generic empty-state lines
+  // (productCautionNotProvided, productNeedMoreDetailsFallback,
+  // productDetailNotProvided) in favour of owner defaults / hidden rows.
+  assert.ok(keys.size >= 18, `expected the flyout's copy keys, found ${keys.size}`)
   // imageCount is "{current}/{total}" in every language: digits and a slash.
   keys.delete('imageCount')
   const khmer = /[\u1780-\u17ff]/

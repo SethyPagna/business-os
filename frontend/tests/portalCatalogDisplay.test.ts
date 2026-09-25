@@ -604,7 +604,9 @@ runTest('public product details keep every prepared section visible when its dat
     assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should remain in the flyout even without content`)
   }
   assert.match(productDetailFlyoutSource, /productDetailNotProvided[\s\S]*Not provided yet\./)
-  assert.match(productDetailFlyoutSource, /productNeedMoreDetailsFallback[\s\S]*Contact us for more product details\./)
+  // Owner, 2026-09-25: Need More Details / Caution fall back to the owner's
+  // own wording (productDetailDefaultsText.ts), not a generic line.
+  assert.match(productDetailFlyoutSource, /resolveProductDetailDefault\('need_more_details'/)
 })
 
 runTest('public media blocks ordinary save, drag, and long-press interactions', () => {

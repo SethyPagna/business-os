@@ -727,6 +727,7 @@ export default function CatalogPreviewSurface({
             contactNote={productDetailContactNote}
             cautionDefault={productDetailCautionDefault}
             needMoreDetailsDefault={productDetailNeedMoreDetailsDefault}
+            language={translateTarget}
             onAddToBucket={onAddToBucket}
             bucketQty={productDetailView.product ? getBucketQty?.(productDetailView.product.id) : 0}
           />

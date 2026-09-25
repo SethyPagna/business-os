@@ -16,6 +16,7 @@ import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import { StatusPill } from './catalogUi'
 import { parseProductDescription } from './productDetailSections.ts'
+import { resolveProductDetailDefault } from './productDetailDefaultsText.ts'
 import type { ProductDetailSectionKey } from './productDetailSections.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -80,8 +81,12 @@ type ProductDetailFlyoutProps = {
   // being followed immediately by a generic one that might read as
   // contradictory. "Need More Details" has no per-product equivalent to
   // defer to -- it always renders when a non-empty default is supplied.
+  // Owner, 2026-09-25: with nothing saved, the owner's own wording
+  // (productDetailDefaultsText.ts) is the default, in `language`.
   cautionDefault?: string
   needMoreDetailsDefault?: string
+  /** The storefront's page language; 'km' picks the Khmer owner defaults. */
+  language?: string
   onAddToBucket?: (product: ProductDetailViewProduct, priceText?: string) => void
   bucketQty?: number
 }
@@ -148,7 +153,7 @@ function DetailSectionBlock({
 // ends of this list are where a trapped Tab wraps around.
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
+export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, language, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -214,7 +219,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const productCautionItems = sectionItems('caution')
   const cautionItems = productCautionItems.length
     ? productCautionItems
-    : (String(cautionDefault || '').trim() ? [String(cautionDefault).trim()] : [])
+    : [resolveProductDetailDefault('caution', cautionDefault, language)]
 
   // Alt text a shopper can actually use: the product name PLUS its brand, so
   // "Hydrating Toner" and "Hydrating Toner - Some Brand" are distinguishable
@@ -225,8 +230,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const imageLabel = (index: number) => copy('dotsLabel', 'Image {current} of {total}')
     .replace('{current}', String(index + 1))
     .replace('{total}', String(gallery.length))
-  const needMoreDetailsText = String(needMoreDetailsDefault || '').trim()
-    || copy('productNeedMoreDetailsFallback', 'Contact us for more product details.')
+  const needMoreDetailsText = resolveProductDetailDefault('need_more_details', needMoreDetailsDefault, language)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
@@ -378,7 +382,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
 
             <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} emptyText={emptyDetailText} />
             <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} emptyText={emptyDetailText} />
-            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} emptyText={copy('productCautionNotProvided', 'No product-specific caution has been added yet.')} />
+            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} emptyText="" />
 
             <div data-product-detail-section="need_more_details">
               <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
