@@ -17,7 +17,7 @@ export type { SyncChannelUpdate, SyncContextCoreValue, SyncUpdate }
 type PlainRecord = Record<string, unknown>
 type NotificationKind = 'success' | 'error' | 'warning' | 'info'
 
-type AppNotification = { id: number; message: string; type: NotificationKind | string }
+export type AppNotification = { id: number; message: string; type: NotificationKind | string }
 
 export type AppContextCoreValue = {
   AccessDenied: () => ReactNode
@@ -42,7 +42,6 @@ export type AppContextCoreValue = {
   login: (...args: unknown[]) => Promise<PlainRecord>
   logout: () => Promise<void>
   navigateTo: (pageId: string, anchor?: string) => void
-  notification: AppNotification | null
   notify: (message: unknown, type?: NotificationKind | string, duration?: number) => void
   page: string
   persistAuthenticatedUser: (...args: unknown[]) => Promise<void>
@@ -50,7 +49,6 @@ export type AppContextCoreValue = {
   saveSettings: (...args: unknown[]) => Promise<PlainRecord>
   setPage: (page: string) => void
   settings: PlainRecord
-  syncChannel: SyncChannelUpdate | null
   syncConnected: boolean
   syncServerUnreachable: boolean
   syncUrl: string
@@ -101,7 +99,6 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
   toggleTheme: () => {},
   toggleLanguage: () => {},
   notify: () => {},
-  notification: null,
   writeConflict: null,
   dismissWriteConflict: () => {},
   reloadWriteConflict: async () => {},
@@ -123,13 +120,20 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
   syncUrl: '',
   updateSyncUrl: () => {},
   syncConnected: false,
-  syncChannel: null,
   syncServerUnreachable: false,
   canWriteToServer: false,
   AccessDenied: () => null,
 }
 
 export const AppContext = createContext<AppContextCoreValue | null>(null)
+
+// The toast currently on screen. Kept out of AppContext on purpose: a toast
+// changes twice (shown, then cleared), and as part of the AppContext value
+// that re-rendered all ~110 useApp() readers each time. Only the shell's
+// toast renderer reads this; everyone else raises toasts through the stable
+// notify() in AppContext.
+export const NotificationContext = createContext<AppNotification | null>(null)
+export const useNotification = (): AppNotification | null => useContext(NotificationContext)
 
 export const useApp = (): unknown => useContext(AppContext) || FALLBACK_APP_CONTEXT
 export const useSync = (): unknown => useContext(SyncContext) || FALLBACK_SYNC_CONTEXT

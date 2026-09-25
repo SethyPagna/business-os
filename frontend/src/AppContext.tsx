@@ -39,6 +39,7 @@ import {
 import { createSyncCoalescer, SyncProvider, type SyncUpdate } from './app/syncUpdates.ts'
 import {
   AppContext,
+  NotificationContext,
   isBrokenLocalizedString,
   useApp,
   useLowStockConfig,
@@ -203,7 +204,6 @@ type AppContextValue = {
   // and the resolver App.tsx's modal calls with the user's choice.
   navGuard: { pageId: string; anchor?: string; entries: DirtyWorkEntry[] } | null
   resolveNavGuard: (action: 'save' | 'discard' | 'stay') => Promise<void>
-  notification: AppNotification | null
   notify: (message: unknown, type?: NotificationKind | string, duration?: number) => void
   page: string
   persistAuthenticatedUser: (nextUser: AppUser, sessionDuration?: string, sessionExpiresAt?: string) => Promise<void>
@@ -214,8 +214,6 @@ type AppContextValue = {
   /** C5: navigator.storage.persist()'s answer for this device, null until asked.
    *  false means the browser may evict IndexedDB -- including unsynced sales. */
   storagePersisted: boolean | null
-  /** The coalesced sync window; page effects read SyncContext (useSync) instead. */
-  syncChannel: SyncUpdate | null
   syncConnected: boolean
   syncServerUnreachable: boolean
   syncUrl: string
@@ -2572,6 +2570,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   const canWriteToServer = !!syncUrl && !syncServerUnreachable && !isActorSessionQuarantined()
 
+  // `notification` and the sync window are deliberately NOT in this value:
+  // each changes often (a toast twice, a sync window per broadcast burst) and
+  // would re-render every useApp() reader. The toast renderer reads
+  // NotificationContext; page effects read SyncContext (useSync).
+  //
   // Memoized on the actual fields so every consumer of useApp()/AppContext
   // (91 call sites) gets the SAME object reference across renders that
   // didn't change any of these values, instead of a brand-new object every
@@ -2586,7 +2589,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     settings, loadSettings, saveSettings,
     language, theme, t,
     toggleTheme, toggleLanguage,
-    notify, notification,
+    notify,
     writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
     hasPermission, canAccessPage, getPermissions, getPermissionTier, can,
     formatPrice, fmtUSD, fmtKHR,
@@ -2596,7 +2599,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncUrl, updateSyncUrl,
     // Expose sync status so components that use useApp() (legacy) can read it.
     syncConnected,
-    syncChannel: syncUpdate,
     syncServerUnreachable,
     canWriteToServer,
     storagePersisted,
@@ -2609,7 +2611,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     settings, loadSettings, saveSettings,
     language, theme, t,
     toggleTheme, toggleLanguage,
-    notify, notification,
+    notify,
     writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
     hasPermission, canAccessPage, getPermissions, getPermissionTier, can,
     formatPrice, fmtUSD, fmtKHR,
@@ -2618,7 +2620,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
     syncConnected,
-    syncUpdate,
     syncServerUnreachable,
     canWriteToServer,
     storagePersisted,
@@ -2629,7 +2630,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   return (
     <AppContext.Provider value={appValue as AppContextCoreValue}>
       <SyncProvider syncUpdate={syncUpdate} syncConnected={syncConnected} syncServerUnreachable={syncServerUnreachable}>
-        {children}
+        <NotificationContext.Provider value={notification}>
+          {children}
+        </NotificationContext.Provider>
       </SyncProvider>
     </AppContext.Provider>
   )

@@ -10,6 +10,7 @@ import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from './AppContext.tsx'
+import { useNotification } from './app/AppContextCore.tsx'
 import { NotesProvider } from './components/notes/NotesContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
@@ -90,11 +91,6 @@ interface AppSettings {
   default_landing_page?: string
 }
 
-interface AppNotification {
-  type?: string
-  message: string
-}
-
 interface SyncProblemDetail {
   errorId?: string | null
   reason?: string
@@ -162,7 +158,6 @@ interface AppContextValue {
   user: AppUser | null
   authReady: boolean
   page: AdminPageId
-  notification: AppNotification | null
   dismissNotification: () => void
   canAccessPage: (pageId: string) => boolean
   AccessDenied: ComponentType
@@ -196,7 +191,6 @@ interface PageErrorBoundaryState {
 }
 
 interface NotificationProps {
-  notification: AppNotification | null
   onDismiss?: () => void
 }
 
@@ -1159,9 +1153,12 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
   }
 }
 
-function Notification({ notification, onDismiss }: NotificationProps) {
+function Notification({ onDismiss }: NotificationProps) {
   // Toast notifications are rendered once here so feature pages only need to
-  // enqueue messages through AppContext.
+  // enqueue messages through AppContext's notify(). The toast itself comes
+  // from NotificationContext, so showing/clearing one re-renders only this
+  // component -- not App, and not every useApp() reader.
+  const notification = useNotification()
   if (!notification) return null
 
   const colorClass = getNotificationColor(notification.type)
@@ -1886,7 +1883,6 @@ export default function App() {
     user,
     authReady,
     page,
-    notification,
     dismissNotification,
     canAccessPage,
     AccessDenied,
@@ -2275,7 +2271,7 @@ export default function App() {
         </div>
       </NotesProvider>
 
-      <Notification notification={notification} onDismiss={dismissNotification} />
+      <Notification onDismiss={dismissNotification} />
       {/* One bottom stack for the shell's persistent advisories, so two of
           them can never land on top of each other, and so the clearance over
           the mobile bottom nav is decided once. Inert where empty. */}
