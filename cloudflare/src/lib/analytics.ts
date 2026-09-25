@@ -63,3 +63,47 @@ export function recordAnalytics(env: Env, event: AnalyticsEvent): void {
     // Intentionally silent -- see the docstring.
   }
 }
+
+// Edge-cache observation (K1). One data point per SAMPLED cached-route
+// request -- lib/serverTiming.ts does the 10% sampling, so this function
+// writes unconditionally when called.
+//
+// labels: [routeClass, status, colo] -- a policy letter from lib/httpCache.ts,
+//         HIT/MISS/BYPASS/STALE/NOT_MODIFIED, and the three/four-letter data
+//         centre code. None of them identifies a person.
+// values: [durMs, bytes] -- the request's wall time and the JSON body's
+//         length (string length, so an approximation of bytes: Khmer text
+//         is 3 bytes per character on the wire).
+//         Never money.
+//
+// The route PATH is deliberately not a label: paths carry ids and membership
+// numbers, and the class letter is what the hit-ratio question groups by.
+export type CacheObservation = {
+  routeClass: string
+  status: string
+  colo: string
+  durMs: number
+  bytes: number
+}
+
+const CACHE_LABEL_RE = /^[A-Za-z0-9_-]{1,24}$/
+
+function cacheLabel(value: string, fallback: string): string {
+  const text = String(value ?? '').trim()
+  return CACHE_LABEL_RE.test(text) ? text : fallback
+}
+
+export function recordCacheObservation(env: Env, observation: CacheObservation): void {
+  recordAnalytics(env, {
+    kind: 'cache',
+    labels: [
+      cacheLabel(observation.routeClass, 'unclassified'),
+      cacheLabel(observation.status, 'unknown'),
+      cacheLabel(observation.colo, 'unknown'),
+    ],
+    values: [
+      Math.max(0, Number(observation.durMs) || 0),
+      Math.max(0, Math.round(Number(observation.bytes) || 0)),
+    ],
+  })
+}
