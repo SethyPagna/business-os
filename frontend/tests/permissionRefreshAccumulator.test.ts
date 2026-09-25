@@ -9,6 +9,7 @@ import {
   finishPermissionRefresh,
   notePermissionRefreshIntent,
 } from '../src/utils/permissionRefreshAccumulator.ts'
+import { createSyncCoalescer } from '../src/app/syncUpdates.ts'
 
 const subject = { userId: 'me', roleId: 'cashier' }
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -86,10 +87,14 @@ test('a late refresh from an old session cannot clear or reschedule the new sess
   assert.equal(beginPermissionRefresh(currentSession), true, 'the later intent runs after the new refresh finishes')
 })
 
-test('AppContext records auth intent before the per-channel debounce can replace event detail', () => {
+// U-sync (26 Sep 2026): the per-channel debounce became one coalescing
+// window (app/syncUpdates.ts), which also replaces a channel's earlier detail
+// within the window -- so the ordering this pins is unchanged in substance.
+test('AppContext records auth intent before the sync coalescer can replace event detail', () => {
   const onUpdate = appContextSource.slice(appContextSource.indexOf('    const onUpdate = (e: Event) => {'), appContextSource.indexOf('    const onStatus = (e: Event) => {'))
   assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') >= 0)
-  assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') < onUpdate.indexOf('if (debounceRef.current[channel])'))
+  assert.ok(onUpdate.indexOf('syncCoalescer.push(') > 0)
+  assert.ok(onUpdate.indexOf('notePermissionRefreshIntent(') < onUpdate.indexOf('syncCoalescer.push('))
   assert.doesNotMatch(onUpdate, /affectsThisSession/)
   assert.match(appContextSource, /const accumulator = permissionRefreshRef\.current\n\s+if \(!beginPermissionRefresh\(accumulator\)\) return/)
   assert.match(appContextSource, /const needsAnotherRefresh = finishPermissionRefresh\(accumulator\)/)
@@ -112,7 +117,8 @@ async function runExtractedHandler(events: Array<{ channel: string; reason?: str
   const clearTimer = (id: number) => { timers.delete(id) }
   const context = {
     eventDetail: (event: { detail: unknown }) => event.detail,
-    debounceRef: { current: {} },
+    // Its own timer is never drained here: this test counts bootstraps.
+    createSyncCoalescer: (options: Parameters<typeof createSyncCoalescer>[0]) => createSyncCoalescer({ ...options, setTimer: () => 0, clearTimer: () => {} }),
     permissionRefreshRef: { current: createPermissionRefreshAccumulator() },
     permissionRefreshTimerRef: { current: null },
     schedulePermissionRefreshRef: { current: () => {} },
@@ -132,7 +138,7 @@ async function runExtractedHandler(events: Array<{ channel: string; reason?: str
     handleUnauthorizedSession: async () => {},
     getStoredUserPayload: () => ({ id: 'me' }),
     loadSettings: async () => {},
-    setSyncChannel: () => {},
+    setSyncUpdate: () => {},
   }
   vm.createContext(context)
   vm.runInContext(handler, context)

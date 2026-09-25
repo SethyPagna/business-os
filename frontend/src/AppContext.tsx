@@ -36,9 +36,9 @@ import {
   finishPermissionRefresh,
   notePermissionRefreshIntent,
 } from './utils/permissionRefreshAccumulator.ts'
+import { createSyncCoalescer, SyncProvider, type SyncUpdate } from './app/syncUpdates.ts'
 import {
   AppContext,
-  SyncContext,
   isBrokenLocalizedString,
   useApp,
   useLowStockConfig,
@@ -139,12 +139,6 @@ type BootstrapPayload = AppRecord & {
 }
 type NotificationKind = 'success' | 'error' | 'warning' | 'info'
 type AppNotification = { id: number; message: string; type: NotificationKind | string }
-type SyncChannelUpdate = {
-  channel: string
-  reason?: string | null
-  source?: string | null
-  ts: number
-}
 type WriteConflictDetail = AppRecord & {
   actualUpdatedAt?: string | null
   attempted?: AppSettings
@@ -220,7 +214,8 @@ type AppContextValue = {
   /** C5: navigator.storage.persist()'s answer for this device, null until asked.
    *  false means the browser may evict IndexedDB -- including unsynced sales. */
   storagePersisted: boolean | null
-  syncChannel: SyncChannelUpdate | null
+  /** The coalesced sync window; page effects read SyncContext (useSync) instead. */
+  syncChannel: SyncUpdate | null
   syncConnected: boolean
   syncServerUnreachable: boolean
   syncUrl: string
@@ -234,7 +229,6 @@ type AppContextValue = {
   user: AppUser | null
   writeConflict: WriteConflictDetail | null
 }
-type SyncContextValue = Pick<AppContextValue, 'syncChannel' | 'syncConnected' | 'syncServerUnreachable'>
 
 function getAppApi(): AppRuntimeApi {
   if (typeof window === 'undefined') return {}
@@ -689,7 +683,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // Initialize from actual WS state to avoid showing a disconnected badge
   // when the websocket connected before AppContext mounted.
   const [syncConnected,       setSyncConnected]       = useState(() => isWSConnected())
-  const [syncChannel,         setSyncChannel]         = useState<SyncChannelUpdate | null>(null)
+  // One value per coalescing window (app/syncUpdates.ts), not one per channel.
+  const [syncUpdate,          setSyncUpdate]          = useState<SyncUpdate | null>(null)
   const [syncServerUnreachable, setSyncServerUnreachable] = useState(false)
 
   useEffect(() => {
@@ -1087,7 +1082,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [applyBootstrapPayload, publicMode, resetLocalBusinessState, user])
 
   // Sync event listeners (loadSettings is defined above).
-  const debounceRef = useRef<Record<string, number>>({})
   const permissionRefreshRef = useRef(createPermissionRefreshAccumulator())
   const permissionRefreshTimerRef = useRef<number | null>(null)
   const schedulePermissionRefreshRef = useRef<() => void>(() => {})
@@ -1147,6 +1141,17 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     schedulePermissionRefreshRef.current = schedulePermissionRefresh
     if (permissionRefreshRef.current.pending) schedulePermissionRefresh()
 
+    // Every channel that arrives within one window becomes ONE state update
+    // (a reconnect/resume burst of ~17 channels used to be ~17 app-wide
+    // renders). See app/syncUpdates.ts.
+    const syncCoalescer = createSyncCoalescer({
+      windowMs: SYNC.EVENT_DEBOUNCE_MS,
+      onFlush: (update) => {
+        // Settings changes from other devices apply immediately; no reload needed.
+        if (update.channels.has('settings')) loadSettings().catch(() => {})
+        setSyncUpdate(update)
+      },
+    })
     const onUpdate = (e: Event) => {
       const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; payload?: { action?: string; id?: string | number } | null }>(e)
       const channel = String(detail.channel || '')
@@ -1155,18 +1160,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
         schedulePermissionRefresh()
       }
-      if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
-      debounceRef.current[channel] = window.setTimeout(async () => {
-        delete debounceRef.current[channel]
-        // Settings changes from other devices apply immediately; no reload needed.
-        if (channel === 'settings') loadSettings().catch(() => {})
-        setSyncChannel({
-          channel,
-          ts: Date.now(),
-          reason: detail.reason || null,
-          source: detail.source || null,
-        })
-      }, SYNC.EVENT_DEBOUNCE_MS)
+      syncCoalescer.push({ channel, reason: detail.reason || null, source: detail.source || null })
     }
     const onStatus = (e: Event) => {
       const detail = eventDetail<{ connected?: boolean }>(e)
@@ -1419,7 +1413,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       window.removeEventListener('runtime:version-mismatch', onRuntimeMismatch)
       window.removeEventListener('sync:conflict', onConflict)
       window.removeEventListener('auth:unauthorized', onUnauthorized)
-      Object.values(debounceRef.current).forEach((timer) => window.clearTimeout(timer))
+      syncCoalescer.dispose()
     }
   }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, publicMode, readAppBootstrap, t, user])
 
@@ -2602,7 +2596,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     syncUrl, updateSyncUrl,
     // Expose sync status so components that use useApp() (legacy) can read it.
     syncConnected,
-    syncChannel,
+    syncChannel: syncUpdate,
     syncServerUnreachable,
     canWriteToServer,
     storagePersisted,
@@ -2624,23 +2618,19 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     displayTimezone, deviceTimezone, formatDateTime,
     syncUrl, updateSyncUrl,
     syncConnected,
-    syncChannel,
+    syncUpdate,
     syncServerUnreachable,
     canWriteToServer,
     storagePersisted,
   ])
 
-  const syncValue: SyncContextValue = useMemo(() => ({
-    syncConnected,
-    syncChannel,
-    syncServerUnreachable,
-  }), [syncConnected, syncChannel, syncServerUnreachable])
-
+  // SyncProvider memoizes the SyncContext value itself and steps the legacy
+  // per-channel `syncChannel` view (app/syncUpdates.ts).
   return (
     <AppContext.Provider value={appValue as AppContextCoreValue}>
-      <SyncContext.Provider value={syncValue}>
+      <SyncProvider syncUpdate={syncUpdate} syncConnected={syncConnected} syncServerUnreachable={syncServerUnreachable}>
         {children}
-      </SyncContext.Provider>
+      </SyncProvider>
     </AppContext.Provider>
   )
 }

@@ -1,16 +1,23 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { resolveLowStockConfig, type LowStockConfig } from '../utils/lowStockSettings.ts'
+import {
+  FALLBACK_SYNC_CONTEXT,
+  SyncContext,
+  syncHas,
+  type SyncChannelUpdate,
+  type SyncContextCoreValue,
+  type SyncUpdate,
+} from './syncUpdates.ts'
+
+// SyncContext lives in syncUpdates.ts (with the coalescer that feeds it) and
+// is re-exported here so every existing import site keeps working.
+export { FALLBACK_SYNC_CONTEXT, SyncContext, syncHas }
+export type { SyncChannelUpdate, SyncContextCoreValue, SyncUpdate }
 
 type PlainRecord = Record<string, unknown>
 type NotificationKind = 'success' | 'error' | 'warning' | 'info'
 
 type AppNotification = { id: number; message: string; type: NotificationKind | string }
-type SyncChannelUpdate = {
-  channel: string
-  reason?: string | null
-  source?: string | null
-  ts: number
-}
 
 export type AppContextCoreValue = {
   AccessDenied: () => ReactNode
@@ -58,8 +65,6 @@ export type AppContextCoreValue = {
   writeConflict: PlainRecord | null
 }
 
-export type SyncContextCoreValue = Pick<AppContextCoreValue, 'syncChannel' | 'syncConnected' | 'syncServerUnreachable'>
-
 function normalizePriceValue(value: unknown): number {
   const numberValue = Number(value)
   if (!Number.isFinite(numberValue)) return 0
@@ -76,12 +81,6 @@ export function isBrokenLocalizedString(value: unknown): boolean {
   if (mojibakeMarkers.some((marker) => trimmed.includes(marker))) return true
   const questionMarks = (trimmed.match(/\?/g) || []).length
   return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
-}
-
-export const FALLBACK_SYNC_CONTEXT: SyncContextCoreValue = {
-  syncConnected: false,
-  syncChannel: null,
-  syncServerUnreachable: false,
 }
 
 export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
@@ -131,7 +130,6 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
 }
 
 export const AppContext = createContext<AppContextCoreValue | null>(null)
-export const SyncContext = createContext<SyncContextCoreValue | null>(null)
 
 export const useApp = (): unknown => useContext(AppContext) || FALLBACK_APP_CONTEXT
 export const useSync = (): unknown => useContext(SyncContext) || FALLBACK_SYNC_CONTEXT

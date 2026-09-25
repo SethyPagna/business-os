@@ -711,7 +711,15 @@ function manualChunks(id: string): string | undefined {
       return 'product-read-api'
     }
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
-    if (normalized.endsWith('/src/app/AppContextCore.tsx')) return 'app-context-core'
+    // syncUpdates.ts is AppContextCore's sync half (SyncContext, SyncProvider).
+    // Left to the /src/app/ rule below it lands in app-shell, and app-shell
+    // already imports app-context-core: a static chunk cycle.
+    if (
+      normalized.endsWith('/src/app/AppContextCore.tsx')
+      || normalized.endsWith('/src/app/syncUpdates.ts')
+    ) {
+      return 'app-context-core'
+    }
     if (
       normalized.endsWith('/src/api/authTransport.ts')
       || normalized.endsWith('/src/AppContext.tsx')

@@ -52,12 +52,17 @@ runTest('appValue is memoized with useMemo, not a fresh object literal every ren
   )
 })
 
-runTest('syncValue is memoized with useMemo keyed on its three fields', () => {
+// U-sync (26 Sep 2026): the SyncContext value moved into SyncProvider
+// (app/syncUpdates.ts), a child of AppProvider, so stepping the legacy
+// per-channel view never re-renders AppProvider. The memo moved with it.
+runTest('the SyncContext value is memoized with useMemo keyed on its four fields', () => {
+  const syncUpdates = readFrontend('src/app/syncUpdates.ts')
   assert.match(
-    appContext,
-    /const syncValue: SyncContextValue = useMemo\(\(\) => \(\{\s*\n\s*syncConnected,\s*\n\s*syncChannel,\s*\n\s*syncServerUnreachable,\s*\n\s*\}\), \[syncConnected, syncChannel, syncServerUnreachable\]\)/,
-    'syncValue must be memoized on syncConnected/syncChannel/syncServerUnreachable',
+    syncUpdates,
+    /const value = useMemo<SyncContextCoreValue>\(\(\) => \(\{\s*\n\s*syncConnected,\s*\n\s*syncServerUnreachable,\s*\n\s*syncUpdate,\s*\n\s*syncChannel,\s*\n\s*\}\), \[syncConnected, syncServerUnreachable, syncUpdate, syncChannel\]\)/,
+    'the SyncContext value must be memoized on syncConnected/syncServerUnreachable/syncUpdate/syncChannel',
   )
+  assert.match(appContext, /<SyncProvider syncUpdate=\{syncUpdate\} syncConnected=\{syncConnected\} syncServerUnreachable=\{syncServerUnreachable\}>/)
   assert.doesNotMatch(
     appContext,
     /const syncValue: SyncContextValue = \{\s*\n\s*syncConnected,/,
