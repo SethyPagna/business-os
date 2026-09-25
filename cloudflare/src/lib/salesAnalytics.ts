@@ -998,9 +998,11 @@ async function reportKeysetRows(
   params: Record<string, unknown>,
   rowBudget: { count: number },
   maxReceipts?: number,
+  // Keyset cursor to start from (exclusive); 0 = the start of the table.
+  startAfterId = 0,
 ): Promise<ReportScalarRow[]> {
   const output: ReportScalarRow[] = []
-  let afterId = 0
+  let afterId = startAfterId
   for (;;) {
     const pageSize = maxReceipts === undefined ? REPORT_MONEY_PAGE_SIZE
       : Math.min(REPORT_MONEY_PAGE_SIZE, maxReceipts - output.length + 1)
@@ -1021,6 +1023,39 @@ async function reportKeysetRows(
     if (page.length < pageSize) break
   }
   return output
+}
+
+// The report's sale-item read. The keyset walk drives from the sale_items
+// rowid and probes `sales` per item, so on its own it visits every item ever
+// sold even when the window holds one day of sales (I4-4). With a date or
+// shift window, the matching items occupy a narrow id band: read that band's
+// exact bounds first (sales through idx_sales_created_pg, their items through
+// the covering idx_sale_items_sale_id_pg) and walk only inside it. The band
+// is exact -- MIN/MAX over the very rows the walk keeps -- so the output is
+// row-for-row identical. Without a window the band is the whole table and the
+// bounds read is pure overhead, so the plain walk is kept (seeded lab DB:
+// 1 day 30 -> 1.4 ms, 30 days 31 -> 8 ms, all-time unchanged at ~83 ms).
+// `sale_id IN (...)` as the walk itself was measured and rejected: it
+// re-sorts the whole match set on every 2,000-row page (all-time 83 -> 627 ms).
+function reportFilterHasDateWindow(f: SalesFilters): boolean {
+  return Boolean(f.startDate || f.endDate || shiftWindowBound(f.createdFrom) || shiftWindowBound(f.createdTo))
+}
+
+async function readReportSaleItems(
+  db: ReturnType<typeof getDb>,
+  f: SalesFilters,
+  primary: { sql: string; params: Record<string, unknown> },
+  rowBudget: { count: number },
+  itemSelectSql: string,
+): Promise<ReportScalarRow[]> {
+  if (!reportFilterHasDateWindow(f)) return reportKeysetRows(db, itemSelectSql, 'si.id', primary.params, rowBudget)
+  const band = await db.prepare(`SELECT MIN(si.id) AS lo, MAX(si.id) AS hi FROM sale_items si
+    WHERE si.sale_id IN (SELECT s.id FROM sales s WHERE ${primary.sql})`).get<{ lo: number | null; hi: number | null }>(primary.params)
+  const lo = Number(band?.lo), hi = Number(band?.hi)
+  if (band?.lo == null || band?.hi == null) return []
+  if (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi) || lo < 1 || hi < lo) throw new ReportMoneyPrecisionError('unsupported_row')
+  return reportKeysetRows(db, `${itemSelectSql} AND si.id <= @reportItemIdMax`, 'si.id',
+    { ...primary.params, reportItemIdMax: hi }, rowBudget, undefined, lo - 1)
 }
 
 function reportRowsEqual(left: readonly string[], right: readonly string[]): boolean {
@@ -1088,9 +1123,9 @@ async function readSalesReportPass(
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
-  const items = await reportKeysetRows(db, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
+  const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
-    FROM sale_items si WHERE EXISTS(SELECT 1 FROM sales s WHERE s.id=si.sale_id AND ${primary.sql})`, 'si.id', primary.params, rowBudget)
+    FROM sale_items si WHERE EXISTS(SELECT 1 FROM sales s WHERE s.id=si.sale_id AND ${primary.sql})`)
   const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
     FROM returns r WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
