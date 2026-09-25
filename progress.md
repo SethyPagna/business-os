@@ -23,6 +23,13 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [ ] Official product names and details from brand websites (research lane → owner-reviewed import; no silent writes)
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
 
+### Verification (every lane, before integration)
+- [ ] Refuter per lane (separate agent, read-only): tries to prove the fix wrong; checks sibling surfaces (POS, inventory, reports, public preview), permissions (backend role gate = UI gate), both language packs, undo/audit, offline paths
+- [ ] Hygiene sweep per lane: dead code, orphan/zombie files, unused exports and keys, duplicated helpers, bloat vs the smallest correct change
+- [ ] Tests updated with the behavior (discriminating: red on the old code, green on the new); new frontend test files registered in test:utils
+- [ ] Rules/docs updated where behavior changed (Golden Rules unchanged unless the owner says so)
+- [~] V-location: every binding and external call checked for distance from Cambodia (D1, R2, Durable Objects, KV, queues, third-party scripts)
+
 ### Checkpoint 3 — A/B data architecture
 - [ ] From PD-1 evidence: precomputed search/catalog read model (organized once at write time, not parsed per request), indexes, query budget per hot route; A/B measured against current path before switching
 
