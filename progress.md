@@ -20,7 +20,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - Official names: research every product; deliver an Excel file, format "Brand + official product name", sourced from the brand's official site, official store or certified retailers; nothing imported without owner review.
 - Product name tap opens the product; chips keep filtering. Commit email stays ungsethypagna@gmail.com.
 - (26 Sep) Stock before/after shows the branch pair and the total pair; all staff keep seeing all branches (no per-branch access).
-- (26 Sep) Shop will soon move into Warehouse and Warehouse is renamed Shop (one branch). Prepare now so the day is one approved step: branch UI collapses to one line/view from data, dry-run + backup + recovery ready.
+- (26 Sep) Soon one branch: Warehouse (id 1) is renamed Store and Shop (id 2) is retired, keeping its name so its records read as legacy. The move is an official transfer ("+N from Shop" on each stock card) run as one fast backend step; history is never relabelled; returns/edits/queued sales against Shop are rewired to Store and keep that they came from Shop. Prepare now so the day is one approved step: branch UI collapses to one line/view from data, dry-run + backup + recovery ready.
 
 ### Data safety (nothing lost or corrupted)
 - [ ] Before any remote migration: record the D1 Time Travel bookmark (restore point) and pre-migration counts/totals in the deploy record
@@ -37,7 +37,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [~] U-db: search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
 - [x] Live-update hub moved to an APAC-hinted Durable Object; 12 route handlers no longer wait on it — dc2e4596
 - [!] Deploy blocked: this laptop exits through a German datacenter proxy/VPN and the Cloudflare API answers wrangler with a bot challenge; owner to switch network
-- [~] U-branch-prep: plan for merging Shop into Warehouse (every branch reference, lots keep batch identity, dry-run, backup, recovery, single-branch UI); execution is owner-gated
+- [~] U-branch-prep (plan in local Records; build lane claude/u-branch-20260926): retire Shop into Store (every branch reference, lots keep batch identity, dry-run, backup, recovery, single-branch UI); execution is owner-gated
 - [ ] Integrate → both package gates at committed HEAD → browser check → deploy → live check
 
 ### Checkpoint 2 — public site
