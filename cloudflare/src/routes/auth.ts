@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
-import { createSession, setSessionCookie, clearSessionCookie, getSessionUser, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -370,13 +370,19 @@ app.get('/me', async (c) => {
 })
 
 app.get('/bootstrap', async (c) => {
+  // Perf F5: read settings alongside the session lookup, not after it.
+  // No user: discarded unread (the catch keeps a failed read off the 401).
+  // No cookie: no read, so anonymous callers cost zero statements.
+  const db = getDb(c.env)
+  const readSettings = () => db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string | null }>()
+  const settingsRead = hasSessionCookie(c) ? readSettings() : null
+  settingsRead?.catch(() => {})
   const user = await getSessionUser(c)
   if (!user) {
     return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   }
 
-  const db = getDb(c.env)
-  const settingsRows = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string | null }>()
+  const settingsRows = await (settingsRead ?? readSettings())
   // Same redaction as GET /api/settings -- this bootstrap payload reaches
   // every logged-in account, and Drive OAuth tokens live in this table.
   const settings = stripSensitiveSettings(

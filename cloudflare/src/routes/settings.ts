@@ -86,13 +86,22 @@ async function getSettingsValues(env: Env, keys: string[]): Promise<Record<strin
 
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const rows = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>()
+  // One round trip for both reads (perf F5). The second statement is exactly
+  // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
+  // when the table has no timestamp.
+  const [rowsResult, updatedAtResult] = await db.batch([
+    { sql: 'SELECT key, value FROM settings' },
+    { sql: 'SELECT MAX(updated_at) AS updated_at FROM settings' },
+  ])
+  const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
+  const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at
+    || new Date().toISOString()
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
   // see lib/settingsSensitive.ts. requireAuth alone is not enough here:
   // every logged-in cashier gets this map.
-  return c.json({ ...stripSensitiveSettings(map), updatedAt: await getSettingsUpdatedAt(c.env) })
+  return c.json({ ...stripSensitiveSettings(map), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings

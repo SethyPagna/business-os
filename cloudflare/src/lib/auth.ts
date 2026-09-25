@@ -208,6 +208,13 @@ export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env
 // a later call in the same request retries; revokeSession() drops it too.
 const sessionLookupMemo = new WeakMap<object, { token: string; lookup: Promise<SessionUser | null> }>()
 
+// True when the request carries a session cookie at all. Not authentication:
+// only a cheap pre-filter so a route can skip speculative work for callers
+// that cannot possibly have a session (see routes/auth.ts's /bootstrap).
+export function hasSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): boolean {
+  return !!getCookie(c, SESSION_COOKIE_NAME)
+}
+
 export async function getSessionUser<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<SessionUser | null> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return null
