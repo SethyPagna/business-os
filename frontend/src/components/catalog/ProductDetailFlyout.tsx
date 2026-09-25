@@ -249,7 +249,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
               {copy('productShopName', "Shop's Product Name")}
             </div>
-            <div id={titleId} {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
+            <div id={titleId} translate="no" {...getKhmerTextProps(product.name || '', 'notranslate break-words text-base font-semibold text-slate-900 dark:text-white')}>
               {product.name || copy('productDetails', 'Product details')}
             </div>
           </div>
@@ -340,7 +340,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             </div>
 
             {view.showPrices && view.pricePresentation?.primaryText ? (
-              <div className="text-xl font-semibold text-slate-900 dark:text-white">
+              <div translate="no" className="notranslate text-xl font-semibold text-slate-900 dark:text-white">
                 {view.pricePresentation.primaryText}
                 {view.pricePresentation.originalText ? (
                   <span className="ml-2 text-sm font-normal text-slate-500 line-through dark:text-neutral-400">
@@ -351,7 +351,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             ) : null}
 
             <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-              <p {...getKhmerTextProps(parsed.officialName || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
+              <p translate={parsed.officialName ? 'no' : undefined} {...getKhmerTextProps(parsed.officialName || emptyDetailText, `${parsed.officialName ? 'notranslate ' : ''}whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
                 {parsed.officialName || emptyDetailText}
               </p>
             </DetailField>
@@ -371,7 +371,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             </DetailField>
 
             <DetailField label={copy('productBrand', 'Brand')}>
-              <p className={`text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
+              <p translate={brandValues.length ? 'no' : undefined} className={`${brandValues.length ? 'notranslate ' : ''}text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
                 {brandValues.join(', ') || emptyDetailText}
               </p>
             </DetailField>
@@ -394,7 +394,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-neutral-800/60 dark:text-neutral-400">
                 <Store className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                 <div>
-                  <div className="font-medium text-slate-700 dark:text-neutral-200">{shopName}</div>
+                  <div translate="no" className="notranslate font-medium text-slate-700 dark:text-neutral-200">{shopName}</div>
                   {contactNote ? <div className="mt-0.5">{contactNote}</div> : null}
                 </div>
               </div>

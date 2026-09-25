@@ -209,6 +209,7 @@
   "aboutContent": "About content",
   "aboutContentHint": "Tell customers about your story, hours, policies, or services.",
   "aboutEmpty": "Add your first About block to build a richer page with reorderable text, images, and video.",
+  "aboutNoTranslateHint": "Visitors reading in other languages see this page through Google Translate. Wrap any words that must stay exactly as written in double square brackets, for example [[Leang Cosmetics]].",
   "aboutTitle": "About title",
   "absorbed_by_store": "Absorbed by store",
   "accent_color": "Accent Color",

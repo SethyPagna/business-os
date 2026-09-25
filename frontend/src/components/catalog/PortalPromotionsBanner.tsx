@@ -243,7 +243,7 @@ export default function PortalPromotionsBanner({ copy, onOpenImage, onOpenProduc
                     ) : null}
                     {promo.link_type === 'product' && promo.link_product_name ? (
                       <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-700 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
-                        {copy('portalPromotionsViewProduct', 'View')} {promo.link_product_name}
+                        {copy('portalPromotionsViewProduct', 'View')} <span translate="no" className="notranslate">{promo.link_product_name}</span>
                         <span aria-hidden="true">→</span>
                       </div>
                     ) : null}

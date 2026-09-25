@@ -1,3 +1,5 @@
+import { canonicalTranslateLanguage } from './portalTranslateController.ts'
+
 export type FirstPartyPortalLanguageOption = {
   value: string
   label: string
@@ -84,4 +86,62 @@ export function normalizeFirstPartyPortalLanguage(value: unknown): string {
 
 export function isFirstPartyPortalLanguage(value: unknown): boolean {
   return !!normalizeFirstPartyPortalLanguage(value)
+}
+
+/**
+ * The live storefront's own language model (owner, 2026-09-25): "Default
+ * language of the public site = Khmer. For other languages, full manual
+ * translation of everything is unrealistic; use Google Translate."
+ *
+ * Only Khmer and English are rendered by the storefront itself, because only
+ * those two have every string on the page written by hand -- chrome AND the
+ * merchant-facing defaults. The 17 other hand-written packs above cover the
+ * page chrome only, so choosing one of them used to leave the About story,
+ * FAQ answers and every product description in the source language. On the
+ * storefront they now go through Google Translate with the rest of the
+ * machine-translated list, which translates the whole page. (The admin
+ * editor preview in CatalogPage.tsx still offers the chrome-only packs; it
+ * keeps ALL_PUBLIC_TRANSLATE_OPTIONS below.)
+ */
+export const PUBLIC_STOREFRONT_DEFAULT_LANGUAGE = 'km'
+const PUBLIC_STOREFRONT_BUILT_IN_LANGUAGES = ['km', 'en']
+
+/** True for the languages the storefront renders itself (Khmer, English). */
+export function isPublicStorefrontBuiltInLanguage(value: unknown): boolean {
+  return PUBLIC_STOREFRONT_BUILT_IN_LANGUAGES.includes(normalizeFirstPartyPortalLanguage(value))
+}
+
+/** The storefront's language picker: Khmer, English, then Google Translate. */
+export const PUBLIC_STOREFRONT_TRANSLATE_OPTIONS: { value: string; label: string; kind: 'first_party' | 'external'; dir?: 'ltr' | 'rtl' }[] = [
+  ...PUBLIC_STOREFRONT_BUILT_IN_LANGUAGES.map((value) => {
+    const option = FIRST_PARTY_TRANSLATE_LANG_OPTIONS.find((candidate) => candidate.value === value)
+    return { value, label: option?.label || value, kind: 'first_party' as const, dir: option?.dir }
+  }),
+  ...FIRST_PARTY_TRANSLATE_LANG_OPTIONS
+    .filter((option) => option.value !== 'original' && !PUBLIC_STOREFRONT_BUILT_IN_LANGUAGES.includes(option.value))
+    .map((option) => ({ ...option, kind: 'external' as const })),
+  ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
+]
+
+export type PublicStorefrontLanguageRoute = {
+  /** The hand-written pack the storefront's own text renders in. */
+  pageLanguage: string
+  /** The Google Translate target, or null when the page is already in the chosen language. */
+  googleTarget: string | null
+}
+
+/**
+ * Routes one picker choice. Khmer and English render directly. Anything
+ * else renders the page in the merchant's source language (the one Google is
+ * told the page is written in, see setupPortalExternalTranslateWidget) and
+ * hands it to Google Translate -- so Google never receives a page whose
+ * chrome is already in some third language it was not told about.
+ */
+export function resolvePublicStorefrontLanguage(choice: unknown, sourceLanguage: unknown): PublicStorefrontLanguageRoute {
+  const source = isPublicStorefrontBuiltInLanguage(sourceLanguage) ? normalizeFirstPartyPortalLanguage(sourceLanguage) : 'en'
+  const raw = String(choice || '').trim()
+  if (!raw || raw.toLowerCase() === 'original') return { pageLanguage: source, googleTarget: null }
+  if (isPublicStorefrontBuiltInLanguage(raw)) return { pageLanguage: normalizeFirstPartyPortalLanguage(raw), googleTarget: null }
+  const target = canonicalTranslateLanguage(raw, '')
+  return { pageLanguage: source, googleTarget: target && target !== source ? target : null }
 }

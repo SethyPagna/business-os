@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -20,6 +21,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
+import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -278,6 +280,23 @@ type CatalogSecondaryTabsProps = {
   tab?: string
 } & Record<string, unknown>
 
+/**
+ * Owner-written storefront copy. Phrases the owner wrapped in [[ ]] render
+ * inside translate="no" so Google Translate leaves them exactly as written;
+ * everything else stays translatable (see portalNoTranslate.ts).
+ */
+function OwnerText({ text }: { text: string }) {
+  return (
+    <>
+      {splitNoTranslateSegments(text).map((segment, index) => (
+        segment.noTranslate
+          ? <span key={index} translate="no" className="notranslate">{segment.text}</span>
+          : <Fragment key={index}>{segment.text}</Fragment>
+      ))}
+    </>
+  )
+}
+
 function normalizePortalColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
@@ -533,8 +552,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           </div>
 
           {introText ? (
-            <p className="notranslate mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7" translate="no">
-              {introText}
+            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7">
+              <OwnerText text={introText} />
             </p>
           ) : null}
 
@@ -612,7 +631,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
             <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
-              {storyText}
+              <OwnerText text={storyText} />
             </p>
           </div>
         ) : null}
@@ -662,18 +681,18 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   <button
                     type="button"
                     className={`flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-neutral-950/60 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
-                    onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
+                    onClick={() => openPortalImage(stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
                   >
                     {block.type === 'video' ? (
                       <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-2xl bg-white object-contain dark:bg-neutral-950 sm:h-full sm:max-h-none" />
                     ) : (
-                      <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
+                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
                     )}
                   </button>
                 ) : null}
                 <div className={`flex flex-col justify-center space-y-3 p-6 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
-                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{block.title}</h3> : null}
-                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">{block.body}</p> : null}
+                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
+                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
                 </div>
               </div>
             )
@@ -956,10 +975,10 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200">{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
+                        <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
+                        <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | {previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | <span translate="no" className="notranslate">{previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</span></div>
                       {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
                     </div>
                     <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>

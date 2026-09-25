@@ -788,6 +788,11 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      // portalNoTranslate.ts (owner [[ ]] never-translate markers) is imported by
+      // CatalogSecondaryTabs (catalog-secondary-tabs), which must not pull the
+      // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts). Same
+      // shared-by-several-catalog-surfaces case as the modules above.
+      || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic

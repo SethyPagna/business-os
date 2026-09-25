@@ -169,12 +169,13 @@ export default function PortalPromoStrip({
             onClick={() => openProductDetail?.(item.product)}
             className="inline-flex max-w-[14rem] shrink-0 items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs shadow-sm ring-1 ring-slate-200 hover:ring-rose-300 dark:bg-neutral-800 dark:ring-neutral-700"
           >
-            <span className="detail-scroll-text font-medium text-slate-700 dark:text-neutral-100">{item.label}</span>
+            <span translate="no" className="notranslate detail-scroll-text font-medium text-slate-700 dark:text-neutral-100">{item.label}</span>
             {/* Same merchant colour, used here as INK on the chip rather than
                 as a fill, so it is darkened (light card) or lightened (dark
                 card) until it clears 4.5:1 on the ground it actually lands on. */}
             <span
-              className="shrink-0 font-bold text-[color:var(--portal-promo-ink)] dark:text-[color:var(--portal-promo-ink-dark)]"
+              translate="no"
+              className="notranslate shrink-0 font-bold text-[color:var(--portal-promo-ink)] dark:text-[color:var(--portal-promo-ink-dark)]"
               style={{
                 '--portal-promo-ink': readableInkOn(item.color, PORTAL_LIGHT_SURFACE),
                 '--portal-promo-ink-dark': readableInkOn(item.color, '#262626'),

@@ -312,6 +312,30 @@ export function readStoredTranslateTarget(sourceLang: unknown): string {
   return 'original'
 }
 
+/**
+ * The language the live storefront opens in: the visitor's own earlier
+ * choice (a Google Translate cookie, then the stored preference), otherwise
+ * `defaultLanguage` -- Khmer, per the owner.
+ *
+ * Differs from readStoredTranslateTarget on purpose: that one answers
+ * 'original' when nothing was ever chosen, which rendered the storefront in
+ * the merchant's source language (English). A stored 'original' is treated
+ * the same as no choice -- the storefront picker never writes it; only the
+ * older picker and the cookie-clearing path did, so it never records a
+ * visitor asking for English.
+ */
+export function readPublicStorefrontLanguage(sourceLang: unknown, defaultLanguage = 'km'): string {
+  const cookieTarget = getPortalTranslateCookieTarget(normalizeLanguage(sourceLang))
+  if (cookieTarget) return cookieTarget
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = canonicalTranslateLanguage(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY), '')
+      if (stored && stored !== 'original') return stored
+    } catch (_) {}
+  }
+  return defaultLanguage
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }

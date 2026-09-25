@@ -896,6 +896,9 @@ function CatalogEditorSurfaceContent() {
                 value={editorDraft.customer_portal_about_content || ''}
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {copy('aboutNoTranslateHint', 'Visitors reading in other languages see this page through Google Translate. Wrap any words that must stay exactly as written in double square brackets, for example [[Leang Cosmetics]].')}
+              </p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />

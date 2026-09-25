@@ -828,10 +828,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           const pricePresentation = previewConfig.showPrices
             ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice, promotionRules)
             : null
+          // A brand is a proper name and is never machine-translated; a
+          // category ("Skincare") is ordinary copy and may be.
           const metadataChips = [
-            previewConfig.showProductCategory !== false ? product.category : '',
-            previewConfig.showProductBrand !== false ? product.brand : '',
-          ].map((chip) => String(chip || '').trim()).filter(Boolean)
+            { kind: 'category', text: previewConfig.showProductCategory !== false ? String(product.category || '').trim() : '' },
+            { kind: 'brand', text: previewConfig.showProductBrand !== false ? String(product.brand || '').trim() : '' },
+          ].filter((chip) => chip.text)
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
           const categoryHeaderLabel = categoryHeaderAt.get(index)
@@ -937,9 +939,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 {metadataChips.length ? (
                   <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-neutral-400">
                     {metadataChips.map((chip) => (
-                      <span key={`${product.id}-${chip}`} {...getKhmerTextProps(chip, '')}>
-                        {chip}
-                      </span>
+                      chip.kind === 'brand' ? (
+                        <span key={`${product.id}-brand`} translate="no" {...getKhmerTextProps(chip.text, 'notranslate')}>
+                          {chip.text}
+                        </span>
+                      ) : (
+                        <span key={`${product.id}-category`} {...getKhmerTextProps(chip.text, '')}>
+                          {chip.text}
+                        </span>
+                      )
                     ))}
                   </div>
                 ) : null}
@@ -953,12 +961,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
-                    {...getKhmerTextProps(product.name, `block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
+                    translate="no"
+                    {...getKhmerTextProps(product.name, `notranslate block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
                   >
                     {product.name}
                   </button>
                 ) : (
-                  <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
+                  <div translate="no" {...getKhmerTextProps(product.name, `notranslate ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
                     {product.name}
                   </div>
                 )}
@@ -992,7 +1001,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
 
                 <div className="flex items-center justify-between gap-2 pt-1">
                   {previewConfig.showPrices ? (
-                    <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                    <div translate="no" className={`notranslate font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                       {pricePresentation?.primaryText}
                       {showDiscountDetails && promotion?.active && pricePresentation?.originalText ? (
                         <span className="ml-2 text-[11px] font-normal text-slate-500 line-through dark:text-neutral-400">
