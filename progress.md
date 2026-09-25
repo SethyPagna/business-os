@@ -1,3 +1,31 @@
+<!-- U-1 plan start -->
+## U-1 — Urgent owner batch (25 Sep 2026) — ACTIVE, takes priority over PD-1 phases 2–7
+
+Owner order: **admin fixes → public site → A/B data architecture**, deployed as soon as each
+checkpoint is verified. Base: resume line `2d1888ca`; integration branch `claude/urgent-20260925`.
+Each lane has its own worktree under `Downloads/Projects/BusinessOS/Worktrees/` and one writer.
+PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing reports; it resumes after checkpoint 1.
+
+### Location (everything as close to Cambodia as possible)
+- [x] D1 `business-os` and `business-os-import` already run in APAC (read-only `d1 info`).
+- [x] Worker placement pinned to Singapore (`aws:ap-southeast-1`); Smart Placement had left calls at the requesting edge (`local-MRS`) — `3b8d37a9`
+- [ ] Verify live `cf-placement` after deploy (expect `remote-SIN`-style value) and D1 round trips
+- [!] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): new APAC bucket + copy + binding switch — plan and owner checkpoint after checkpoint 1
+
+### Checkpoint 1 — admin (lanes run in parallel)
+- [~] U-telegram: `====Title/ខ្មែរ====` sections, `English/Khmer`, `ID សម្គាល់`, `Sale invoice/វិក្កយបត្រ`, `Status updated/…`, colon instead of em dash; forum-topic routing per message type (shift, sale, status, more)
+- [~] U-cost: depleted (qty 0) received lots excluded from the cost average; lots with stock listed first, depleted greyed; guards; read-only production audit of affected products
+- [~] U-products-ui: invisible chip scroll on large screens; cost click opens cost; mobile hit targets (name ≠ received date, empty space ≠ records); record rows open their own before/after
+- [ ] Integrate → both package gates at committed HEAD → browser check → deploy (owner said deploy as soon as possible) → live check
+
+### Checkpoint 2 — public site
+- [~] P-public: Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
+- [ ] Official product names and details from brand websites (research lane → owner-reviewed import; no silent writes)
+- [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
+
+### Checkpoint 3 — A/B data architecture
+- [ ] From PD-1 evidence: precomputed search/catalog read model (organized once at write time, not parsed per request), indexes, query budget per hot route; A/B measured against current path before switching
+
 <!-- PD-1 plan start -->
 ## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE
 
