@@ -2,7 +2,7 @@ import { useMobileSectionNavMode } from './utils/sectionNavPreference.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
 import { fmtTime } from './utils/formatters.ts'
 import { getHubPageFromLocation } from './components/shared/hubNavigation.ts'
-import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Component, Suspense, lazy, memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ComponentType, ErrorInfo, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -227,7 +227,7 @@ interface StorageEvictionBandProps {
 
 interface PageSlotProps {
   accessDenied: ReactNode
-  activePageId: AdminPageId
+  isActive: boolean
   canAccessPage: (pageId: string) => boolean
   pageId: AdminPageId
 }
@@ -1712,9 +1712,14 @@ function NotificationCenterFallback({ onClick }: NotificationCenterFallbackProps
   )
 }
 
-function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }: PageSlotProps) {
+// Memoized: up to MAX_MOUNTED_PAGES slots stay mounted, and without memo every
+// App render (a toast, a pending-sync count, the pull-to-refresh distance)
+// re-rendered every kept page. Every prop is stable across those renders --
+// accessDeniedNode is memoized, canAccessPage is a useCallback on
+// [user, getPermissionTier, can] (all derived from user), and each slot gets its own `isActive` boolean rather than the
+// active page id, so switching pages re-renders only the two slots involved.
+const PageSlot = memo(function PageSlot({ accessDenied, isActive, canAccessPage, pageId }: PageSlotProps) {
   const PageComponent = PAGE_COMPONENTS[pageId] || Dashboard
-  const isActive = pageId === activePageId
 
   return (
     <div
@@ -1736,7 +1741,7 @@ function PageSlot({ accessDenied, activePageId, canAccessPage, pageId }: PageSlo
       </PageErrorBoundary>
     </div>
   )
-}
+})
 
 // A customer visiting the storefront must never see the admin's
 // "Business OS / Loading this workspace view..." splash (that's what
@@ -2261,7 +2266,7 @@ export default function App() {
               <PageSlot
                 key={mountedPage}
                 accessDenied={accessDeniedNode}
-                activePageId={page}
+                isActive={mountedPage === page}
                 canAccessPage={canAccessPage}
                 pageId={mountedPage}
               />
