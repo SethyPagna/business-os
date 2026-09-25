@@ -22,6 +22,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
+import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -711,15 +712,22 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
     expandedFaqId,
     setExpandedFaqId,
   } = props
+  const faqColumns = splitFaqColumns(publicFaqItems)
 
   return (
     <SectionShell
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Quick answers to common questions.')}
     >
-      <div className="grid items-start gap-4 sm:grid-cols-2">
-        {publicFaqItems.length ? publicFaqItems.map((item, index) => {
-          const open = expandedFaqId === item.id
+      {/* Two independent column stacks, not a shared grid: opening a card
+          only moves the cards below it in its own column (portalFaqLayout.ts). */}
+      {publicFaqItems.length ? (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start" data-portal-faq-columns="true">
+          {faqColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="flex min-w-0 flex-col gap-4 sm:flex-1">
+              {column.map(({ item, index, key }) => {
+          const open = expandedFaqId === key
+          const answerId = `portal-faq-answer-${index}`
           const accentClass = index % 2 === 0
             ? 'from-cyan-50 to-white border-cyan-200/80'
             : 'from-amber-50 to-white border-amber-200/80'
@@ -727,11 +735,13 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
             ? 'bg-cyan-100 text-cyan-700'
             : 'bg-amber-100 text-amber-700'
           return (
-            <article key={item.id || index} className={`self-start overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 ${accentClass}`}>
+            <article key={key} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 ${accentClass}`}>
               <button
                 type="button"
                 className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"
-                onClick={() => setExpandedFaqId((current) => current === item.id ? null : item.id)}
+                aria-expanded={open}
+                aria-controls={open ? answerId : undefined}
+                onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
               >
                 <div className="flex items-center gap-3">
                   <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClass}`}>
@@ -744,15 +754,18 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
                 </div>
                 <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
               </button>
-              {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
+              {open ? <div id={answerId} className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
             </article>
           )
-        }) : (
-          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 sm:col-span-2">
-            {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
-          </div>
-        )}
-      </div>
+              })}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
+          {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
+        </div>
+      )}
     </SectionShell>
   )
 }

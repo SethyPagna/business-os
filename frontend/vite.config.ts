@@ -793,6 +793,8 @@ function manualChunks(id: string): string | undefined {
       // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts). Same
       // shared-by-several-catalog-surfaces case as the modules above.
       || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
+      // portalFaqLayout.ts: same consumer, same reason.
+      || normalized.includes('/src/components/catalog/portalFaqLayout.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic
