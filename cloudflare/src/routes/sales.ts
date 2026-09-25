@@ -43,7 +43,7 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
-import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -5760,20 +5760,7 @@ app.get('/stats', async (c) => {
   // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const scopedParams:Record<string,string|number|null>={}
-    const scopedWhere=where.join(' AND ').replace(/\bs\./g,'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g,(_match,key:string)=>{
-      const value=params[key]
-      if(typeof value!=='string'&&typeof value!=='number'&&value!==null)throw new ReportMoneyPrecisionError('unsupported_row')
-      scopedParams[`reportScope_${key}`]=value
-      return `@reportScope_${key}`
-    })
-    // Preserve the list's rich, server-built predicates, including the LEFT
-    // customer join and item-branch search. The shared reader applies this
-    // immutable scope to every header/child query in both coherent passes.
-    const snapshot=await readSalesReportSnapshot(c.env,{},false,alias=>({
-      sql:`${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
-      params:scopedParams,
-    }))
+    const snapshot=await readSalesReportSnapshot(c.env,{},false,salesListFilterReportScope(where,params))
     const totals=salesTotalsFromSnapshot(snapshot)
     const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))

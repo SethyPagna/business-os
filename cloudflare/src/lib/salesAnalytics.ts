@@ -906,6 +906,29 @@ export type SalesReportScalarScope = (saleAlias: string) => {
 
 type CapturedSalesReportScalarScope = { sql: string; params: Record<string, SalesReportScalarScopeValue> }
 
+// A sales-LIST filter (GET /api/sales/stats: `where` clauses over alias `s`
+// plus their @params) as a report scope. Preserves the list's rich,
+// server-built predicates, including the LEFT customer join and item-branch
+// search. `where` starts with a '1=1' seed: with nothing else in it there is
+// no filter, and returning a scope anyway would be a no-op
+// `IN (... WHERE 1=1)` that still forces a full sales scan plus a
+// temp-B-tree sort on every 2,000-row keyset page (all-time stats walk:
+// 681 -> 48 ms on the seeded lab DB, identical rows; I4-2).
+export function salesListFilterReportScope(where: string[], params: Record<string, unknown>): SalesReportScalarScope | undefined {
+  if (!where.some((clause) => clause !== '1=1')) return undefined
+  const scopedParams: Record<string, SalesReportScalarScopeValue> = {}
+  const scopedWhere = where.join(' AND ').replace(/\bs\./g, 'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g, (_match, key: string) => {
+    const value = params[key]
+    if (typeof value !== 'string' && typeof value !== 'number' && value !== null) throw new ReportMoneyPrecisionError('unsupported_row')
+    scopedParams[`reportScope_${key}`] = value
+    return `@reportScope_${key}`
+  })
+  return (alias) => ({
+    sql: `${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
+    params: scopedParams,
+  })
+}
+
 function captureSalesReportScalarScope(scope?: SalesReportScalarScope): CapturedSalesReportScalarScope | null {
   if (!scope) return null
   const captured = scope('s')
