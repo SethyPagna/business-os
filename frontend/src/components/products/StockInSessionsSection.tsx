@@ -18,6 +18,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import Modal from '../shared/Modal.tsx'
+import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
@@ -80,6 +81,8 @@ type Session = {
   costUsd: number | null; linesWithoutCost: number; paymentStatus: 'paid' | 'credit' | 'mixed' | ''
   creditDueDate: string; hasSharedBatch: boolean; hasMixedHeader: boolean
 }
+// The write a ConfirmDialog is currently reviewing.
+type SessionReview = { kind: 'header' } | { kind: 'line'; row: Row } | { kind: 'session' }
 
 function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: number } {
   let total = 0
@@ -176,6 +179,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const [editPayment, setEditPayment] = useState<'paid' | 'credit'>('paid')
   const [editCreditDueDate, setEditCreditDueDate] = useState('')
   const [addMore, setAddMore] = useState<Session | null>(null)
+  const [review, setReview] = useState<SessionReview | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -250,7 +254,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         hasMixedHeader: summary.hasMixedHeader,
       } satisfies Session
       if (settledAttempt) rememberAttempt(null)
-      setSelected(session); setSelectedLine(null); setLineEdit(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
+      setSelected(session); setSelectedLine(null); setLineEdit(null); setReview(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
       setEditPayment(session.paymentStatus === 'credit' ? 'credit' : 'paid'); setEditCreditDueDate(session.creditDueDate)
       return true
     } catch (error) {
@@ -258,20 +262,19 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       return false
     } finally { setOpening(false) }
   }
+  // Why a header edit cannot be saved, or null. Checked when the review opens
+  // AND again by saveHeader, which stays the one gate a confirm runs through.
+  const headerSaveRefusal = (session: Session): string | null => {
+    if (session.hasSharedBatch || session.hasMixedHeader) {
+      return tr('shared_batch_session_edit_blocked', 'This session shares a received date with another receipt. Review both receipts before editing it; changing it here could rewrite another session.')
+    }
+    if (editPayment === 'credit' && !editCreditDueDate.trim()) return tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')
+    return null
+  }
   const saveHeader = async () => {
     if (!selected || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
-    if (selected.hasSharedBatch || selected.hasMixedHeader) {
-      notify(tr('shared_batch_session_edit_blocked', 'This session shares a received date with another receipt. Review both receipts before editing it; changing it here could rewrite another session.'), 'error')
-      return
-    }
-    if (editPayment === 'credit' && !editCreditDueDate.trim()) {
-      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
-      return
-    }
-    if (!window.confirm(tr(
-      'confirm_update_stock_session',
-      'Update the receipt details for this {count}-line stock-in session? The selected received-date records will be updated.',
-    ).replace('{count}', String(selected.rows.length)))) return
+    const refusal = headerSaveRefusal(selected)
+    if (refusal) { notify(refusal, 'error'); return }
     setBusy(true)
     try {
       const batches = new Map<number, Row>()
@@ -299,7 +302,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const removeRow = async (row: Row) => {
     if (pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     if (row.id == null) return
-    if (busy || !window.confirm(tr('confirm_remove_stock_line', `Remove ${row.product_name} from this session? This posts a reversing stock movement.`))) return
+    if (busy) return
     if (Number(row.edit_count) > 0 && selected) {
       try { await commitLineAttempt(lineRemovalAttempt(row), selected, () => removeLine(row)) }
       catch (error) { notify(stockInLineEditErrorText(error, tr), 'error') }
@@ -388,7 +391,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const revertibleRows = selected ? selected.rows.filter((row) => row.id != null) : []
   const editableLots = selected ? selected.rows.some((row) => Number(row.batch_id) > 0) : false
   const removeSession = async () => {
-    if (!selected || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current || !revertibleRows.length || !window.confirm(tr('confirm_remove_stock_session', `Remove this ${revertibleRows.length}-line stock-in session? Each line will be reversed; history is preserved.`))) return
+    if (!selected || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current || !revertibleRows.length) return
     sessionRemovalBusyRef.current = true
     const actor = actorRef.current
     setBusy(true)
@@ -411,6 +414,54 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       setSelected(null); await load(); onChanged()
     } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
     finally { sessionRemovalBusyRef.current = false; setBusy(false) }
+  }
+
+  // U-records, owner rule: a mutating action is reviewed in the ONE shared
+  // ConfirmDialog -- never native confirm() -- and the review names each value
+  // before and after. These only OPEN the review; saveHeader / removeRow /
+  // removeSession above stay the single gate, re-checking every lock when the
+  // operator confirms.
+  const writeLocked = () => busy || Boolean(pendingAttemptRef.current) || lineAttemptBusyRef.current || sessionRemovalBusyRef.current
+  const reviewHeaderSave = () => {
+    if (!selected || writeLocked()) return
+    const refusal = headerSaveRefusal(selected)
+    if (refusal) { notify(refusal, 'error'); return }
+    setReview({ kind: 'header' })
+  }
+  const reviewLineRemoval = (row: Row) => { if (row.id != null && !writeLocked()) setReview({ kind: 'line', row }) }
+  const reviewSessionRemoval = () => { if (selected && revertibleRows.length && !writeLocked()) setReview({ kind: 'session' }) }
+  const confirmReview = () => {
+    const current = review
+    setReview(null)
+    if (current?.kind === 'header') void saveHeader()
+    else if (current?.kind === 'line') void removeRow(current.row)
+    else if (current?.kind === 'session') void removeSession()
+  }
+  const paymentLabel = (status: string) => status === 'credit' ? tr('on_credit', 'Not Yet Paid') : status === 'paid' ? tr('paid', 'Paid') : tr('not_recorded', 'Not recorded')
+  const change = (before: string, after: string) => `${before || '—'} → ${after || '—'}`
+  const reviewItems = (current: SessionReview, session: Session): ConfirmReviewItem[] => {
+    if (current.kind === 'header') {
+      const noSupplier = tr('no_supplier_recorded', 'No supplier')
+      return [
+        { label: tr('lines', 'Lines'), value: String(session.rows.length) },
+        { label: tr('received_date', 'Received date'), value: change(fmtDate(session.receivedDate || session.createdAt), editDate ? fmtDate(editDate) : '') },
+        { label: tr('supplier', 'Supplier'), value: change(session.supplier.supplierName || noSupplier, editSupplier.supplierName || noSupplier) },
+        { label: tr('payment', 'Payment'), value: change(paymentLabel(session.paymentStatus), paymentLabel(editPayment)) },
+        ...(session.paymentStatus === 'credit' || editPayment === 'credit' ? [{
+          label: tr('due_date', 'Due date'),
+          value: change(session.creditDueDate ? fmtDate(session.creditDueDate) : '', editPayment === 'credit' && editCreditDueDate ? fmtDate(editCreditDueDate) : ''),
+        }] : []),
+      ]
+    }
+    const rows = current.kind === 'line' ? [current.row] : revertibleRows
+    const units = rows.reduce((sum, row) => sum + Math.abs(Number(row.quantity) || 0), 0)
+    return [
+      current.kind === 'line'
+        ? { label: tr('product', 'Product'), value: current.row.product_name }
+        : { label: tr('lines', 'Lines'), value: String(rows.length) },
+      // The line's own quantity, before -> after the reversal.
+      { label: tr('quantity', 'Quantity'), value: change(`+${units}`, '0') },
+    ]
   }
 
   return <div className="space-y-3">
@@ -513,7 +564,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
                 <td><span className="detail-scroll-text text-gray-500">{row.reason || '—'}</span></td>
                 <td className="text-right font-bold tabular-nums text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</td>
                 {canViewCosts ? <td className="text-right tabular-nums">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)}`}</td> : null}
-                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <span className="inline-flex items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-3.5 w-3.5" /></button> : null}<button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => void removeRow(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button></span>}</td>
+                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <span className="inline-flex items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-3.5 w-3.5" /></button> : null}<button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-3.5 w-3.5" /></button></span>}</td>
               </tr>
             })}</tbody>
           </table></div>
@@ -524,10 +575,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           return <div key={lineKey(row)} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine === row ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
             <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}{Number(row.edit_count) > 0 ? <span className="ml-1 inline-block rounded bg-blue-50 px-1 py-0.5 align-middle text-[10px] font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">{tr('stock_in_line_edited', 'Edited')}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block detail-scroll-text text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
             <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b>{canViewCosts ? <span className="block text-[11px] text-gray-400">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span> : null}</span>
-            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <span className="flex shrink-0 items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded-lg p-2 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-4 w-4" /></button> : null}<button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => void removeRow(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button></span>}
+            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <span className="flex shrink-0 items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded-lg p-2 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-4 w-4" /></button> : null}<button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('remove_stock', 'Remove Stock')}><Trash2 className="h-4 w-4" /></button></span>}
           </div>
         })}</div>
-        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-primary h-8 px-2.5 text-xs" onClick={() => void saveHeader()}>{tr('save', 'Save')}</button><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={editHeader}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={addMoreStock}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={() => void removeSession()}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
+        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-primary h-8 px-2.5 text-xs" onClick={reviewHeaderSave}>{tr('save', 'Save')}</button><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={editHeader}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={addMoreStock}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={reviewSessionRemoval}><Trash2 className="h-3.5 w-3.5" />{tr('remove_session', 'Remove')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
       </div>
     </Modal> : null}
     {/* U-records: a line opens as its OWN float, beside the session modal --
@@ -554,6 +605,25 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         fmtUSD={formatUsd}
         fmtKHR={fmtKHR}
         t={tr}
+      />
+    ) : null}
+    {/* The review of a session write, beside the modals it guards. */}
+    {selected && review ? (
+      <ConfirmDialog
+        layer="nested"
+        title={review.kind === 'header' ? tr('stock_in_session', 'Stock-in session') : review.kind === 'line' ? tr('remove_stock', 'Remove stock') : tr('remove_session', 'Remove session')}
+        message={review.kind === 'header'
+          ? tr('confirm_update_stock_session', 'Update received date, supplier and payment for all {count} lines in this session?').replace('{count}', String(selected.rows.length))
+          : review.kind === 'line'
+            ? tr('confirm_remove_stock_line', 'Remove this stock-in line? Stock will be reversed and history is preserved.')
+            : tr('confirm_remove_stock_session', `Remove this ${revertibleRows.length}-line stock-in session? Each line will be reversed; history is preserved.`)}
+        items={reviewItems(review, selected)}
+        confirmLabel={review.kind === 'header' ? tr('save', 'Save') : tr('remove', 'Remove')}
+        danger={review.kind !== 'header'}
+        working={busy}
+        t={(key, fallback) => tr(key, fallback ?? key)}
+        onConfirm={confirmReview}
+        onClose={() => { if (!busy) setReview(null) }}
       />
     ) : null}
     {addMore ? <Suspense fallback={null}><FastStockInModal branchOptions={branches.map((branch) => ({ value: String(branch.id || ''), label: String(branch.name || branch.id || '') }))} defaultBranchId={addMore.branchId || null} initialHeader={{ branchId: addMore.branchId, receivedDate: addMore.receivedDate, supplier: addMore.supplier, paymentStatus: addMore.paymentStatus === 'credit' ? 'credit' : 'paid', creditDueDate: addMore.creditDueDate }} tr={(key, fallback = key) => tr(key, fallback)} notify={notify} onClose={() => setAddMore(null)} onDone={() => { void load(); onChanged() }} onMinimize={(label: string) => { minimizeWork({ key: 'fast-stockin', kind: 'fast_stockin', ...FAST_STOCK_IN_RESTORE_HOST, label, draftKey: scopedWorkDraftKey('fast_stockin'), requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' } }); notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info') }} /></Suspense> : null}

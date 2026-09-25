@@ -64,7 +64,10 @@ runTest('the Worker lists zero-quantity session members beside receipt movements
 runTest('a receipt line may have no movement id, and only lines with one are ever reverted', () => {
   assert.match(sectionSource, /id: number \| null; session_line_id\?: string \| null/)
   // the revert transport is called only behind a null guard
-  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(busy \|\| !window\.confirm\(/)
+  // (U-records: the review is the shared ConfirmDialog, which only opens for
+  // a line with an id; removeRow still re-checks before the write.)
+  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(busy\) return/)
+  assert.match(sectionSource, /const reviewLineRemoval = \(row: Row\) => \{ if \(row\.id != null && /)
   assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null\) : \[\]/)
   // Bulk removal retains movement identities but refreshes their lot revisions
   // after each write; the actual-handler test covers zero/mixed/shared-lot rows.

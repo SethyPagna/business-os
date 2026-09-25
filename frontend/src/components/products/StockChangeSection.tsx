@@ -23,6 +23,7 @@ import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import PaginationControls from '../shared/PaginationControls'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
@@ -260,6 +261,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [rowBusy, setRowBusy] = useState(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
+  // U-records: the reason edit awaiting review in the shared ConfirmDialog
+  // (never native confirm()), holding the recorded and the typed reason.
+  const [reasonReview, setReasonReview] = useState<{ before: string; after: string } | null>(null)
   // adjustType now opens StockAdjustModal ONLY to resume a failed attempt
   // (resumeFailedAttempt below). The header's Adjust menu (Products.tsx)
   // opens the fast flow in the chosen mode instead.
@@ -409,10 +413,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     setDetail(row)
     setEditingReason(null)
     setConfirmRevert(false)
+    setReasonReview(null)
   }, [])
 
   const closeDetail = useCallback(() => {
-    setDetail(null); setEditingReason(null); setConfirmRevert(false)
+    setDetail(null); setEditingReason(null); setConfirmRevert(false); setReasonReview(null)
   }, [])
 
   // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
@@ -513,11 +518,18 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     }
   }, [detail, app, t, closeDetail, load])
 
-  const saveReason = useCallback(async () => {
-    if (!detail || editingReason == null) return
+  // Save opens the review; commitReason is the write the review confirms.
+  const saveReason = useCallback(() => {
+    if (!detail || editingReason == null || rowBusy) return
     const next = editingReason.trim()
     if (!next) { app.notify(tr(t, 'reason_required', 'A reason is required'), 'error'); return }
-    if (!window.confirm(tr(t, 'confirm_update_stock_reason', 'Update the reason recorded for this stock movement?'))) return
+    setReasonReview({ before: String(detail.reason || '').trim(), after: next })
+  }, [detail, editingReason, rowBusy, app, t])
+
+  const commitReason = useCallback(async () => {
+    if (!detail || !reasonReview) return
+    const next = reasonReview.after
+    setReasonReview(null)
     setRowBusy(true)
     try {
       const res = await editStockMovementReason(detail.id, next) as { success?: boolean; error?: string } | undefined
@@ -531,7 +543,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     } finally {
       setRowBusy(false)
     }
-  }, [detail, editingReason, app, t, load])
+  }, [detail, reasonReview, app, t, load])
 
   // Header-row action bridge (user, Aug 31): the Adjust menu + ledger export
   // moved onto the page header row, rendered by Products.tsx. Its trigger
@@ -1268,15 +1280,33 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     onChange={(event) => setEditingReason(event.target.value)}
                     className="input min-w-[10rem] flex-1 text-sm"
                     placeholder={tr(t, 'reason', 'Reason')}
-                    onKeyDown={(event) => { if (event.key === 'Enter') void saveReason() }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') saveReason() }}
                   />
-                  <button type="button" disabled={rowBusy} onClick={() => void saveReason()} className="btn-primary px-3 text-sm disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
+                  <button type="button" disabled={rowBusy} onClick={saveReason} className="btn-primary px-3 text-sm disabled:opacity-50">{tr(t, 'save', 'Save')}</button>
                   <button type="button" disabled={rowBusy} onClick={() => setEditingReason(null)} className="btn-secondary px-3 text-sm disabled:opacity-50">{tr(t, 'cancel', 'Cancel')}</button>
                 </div>
               )
             ) : null}
           </div>
         </Modal>
+      ) : null}
+      {/* The reason edit's review, beside the detail modal it guards: the
+          recorded reason before -> the typed one after. */}
+      {detail && reasonReview ? (
+        <ConfirmDialog
+          layer="nested"
+          title={tr(t, 'edit_reason', 'Edit reason')}
+          message={tr(t, 'confirm_update_stock_reason', 'Update the reason recorded for this stock movement?')}
+          items={[
+            { label: tr(t, 'product', 'Product'), value: detail.product_name },
+            { label: tr(t, 'reason', 'Reason'), value: `${reasonReview.before || '—'} → ${reasonReview.after}` },
+          ]}
+          confirmLabel={tr(t, 'save', 'Save')}
+          working={rowBusy}
+          t={(key, fallback) => tr(t, key, fallback ?? key)}
+          onConfirm={() => void commitReason()}
+          onClose={() => { if (!rowBusy) setReasonReview(null) }}
+        />
       ) : null}
 
       {adjustType ? (

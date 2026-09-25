@@ -5787,6 +5787,7 @@
   "confirm_transfer_stock_details": "Transfer {quantity} of {product} from {from} to {to}? This posts a traceable stock movement.",
   "confirm_update_batch_details": "Update received date {batch} for {product}?{note}",
   "confirm_update_stock_session": "Update the receipt details for this {count}-line stock-in session? The selected received date records will be updated.",
+  "confirm_update_stock_reason": "Update the reason recorded for this stock movement?",
   "drive_restore_stage": "Stage latest for restore",
   "drive_restore_stage_complete": "Drive backup staged and validated",
   "drive_restore_stage_failed": "Drive restore staging failed",

@@ -5783,6 +5783,7 @@
   "confirm_transfer_stock_details": "ផ្ទេរ {quantity} នៃ {product} ពី {from} ទៅ {to} មែនទេ? វានឹងកត់ត្រាចលនាស្តុកដែលអាចតាមដានបាន។",
   "confirm_update_batch_details": "ធ្វើបច្ចុប្បន្នភាពថ្ងៃចូល {batch} សម្រាប់ {product} មែនទេ?{note}",
   "confirm_update_stock_session": "ធ្វើបច្ចុប្បន្នភាពព័ត៌មានវិក្កយបត្រសម្រាប់ការទទួលស្តុក {count} ជួរនេះមែនទេ? កំណត់ត្រាថ្ងៃចូលដែលបានជ្រើសនឹងត្រូវបានធ្វើបច្ចុប្បន្នភាព។",
+  "confirm_update_stock_reason": "ធ្វើបច្ចុប្បន្នភាពមូលហេតុដែលបានកត់ត្រាសម្រាប់ចលនាស្តុកនេះមែនទេ?",
   "drive_restore_stage": "រៀបចំកំណែថ្មីបំផុតសម្រាប់ស្ដារ",
   "drive_restore_stage_complete": "បានរៀបចំ និងផ្ទៀងផ្ទាត់បម្រុងទុក Drive",
   "drive_restore_stage_failed": "ការរៀបចំស្ដារពី Drive បានបរាជ័យ",
