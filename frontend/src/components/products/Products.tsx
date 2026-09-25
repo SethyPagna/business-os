@@ -44,6 +44,7 @@ import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
 import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import EntityLink from '../shared/EntityLink.tsx'
+import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -756,6 +757,8 @@ type ProductRowCtx = {
   handleDuplicateKeepBoth: (info: ExactDuplicateInfo) => Promise<void>
   navigateTo: (page: string, anchor?: string) => void
   setDetailProduct: (product: ProductRecord | null) => void
+  // Owner, 25 Sep 2026: "clicking cost must open the cost details directly".
+  openCostFloat: (product: ProductRecord) => void
 }
 
 function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { product: ProductRecord; indented?: boolean; ctx: ProductRowCtx }) {
@@ -767,7 +770,7 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct,
+    setDetailProduct, openCostFloat,
   } = ctx
     const productId = p.id ?? 0
     const productName = String(p.name || '')
@@ -1013,8 +1016,25 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
           />
         </td>
         <td className="px-3 py-2 text-right col-highlight-red">
-          {canViewCosts ? <><div className="font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</div>
-          {costKhr > 0 && <div className="text-xs text-gray-400">{fmtKHR(costKhr)}</div>}</> : <span>—</span>}
+          {/* The cost opens its own calculation, straight from the list (owner,
+              25 Sep 2026). The row opens the product on the RELEASE of a press
+              (utils/longPress.ts), so the button stops the whole press -- the
+              same four stoppers the thumbnail carries -- not just the click. */}
+          {canViewCosts ? (
+            <button
+              type="button"
+              className="block w-full cursor-pointer text-right decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+              title={t('cost_breakdown_title') || 'Calculated cost price'}
+              onMouseDown={(event) => event.stopPropagation()}
+              onMouseUp={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+              onTouchEnd={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
+            >
+              <span className="block font-medium text-red-700 dark:text-red-400">{fmtUSD(costUsd)}</span>
+              {costKhr > 0 && <span className="block text-xs text-gray-400">{fmtKHR(costKhr)}</span>}
+            </button>
+          ) : <span>—</span>}
         </td>
         <td className="px-3 py-2 text-right col-highlight-green">
           <div className="font-semibold text-green-700 dark:text-green-400">{fmtUSD(sellingUsd)}</div>
@@ -1071,7 +1091,7 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
     promotionRules, lowStockConfig, renderUnitChip, selectionModeActive,
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
-    setDetailProduct,
+    setDetailProduct, openCostFloat,
   } = ctx
     const productId = p.id ?? 0
     const productName = String(p.name || '')
@@ -1322,7 +1342,23 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
                 </span>
               ) : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
-              {canViewCosts ? <span className="text-red-600">{fmtUSD(costUsd)}</span> : null}
+              {/* Same as the desktop cost cell: the cost opens its calculation,
+                  and the button owns the whole press so the card does not also
+                  open the product sheet underneath it. */}
+              {canViewCosts ? (
+                <button
+                  type="button"
+                  className="text-red-600 decoration-dotted underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
+                  title={t('cost_breakdown_title') || 'Calculated cost price'}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onMouseUp={(event) => event.stopPropagation()}
+                  onTouchStart={(event) => event.stopPropagation()}
+                  onTouchEnd={(event) => event.stopPropagation()}
+                  onClick={(event) => { event.stopPropagation(); openCostFloat(p) }}
+                >
+                  {fmtUSD(costUsd)}
+                </button>
+              ) : null}
               <span className="price-strip-divider text-gray-300 dark:text-gray-600">|</span>
               {/* Colored by stock status (red/yellow/green) instead of the
                   separate "In"/"Low"/"Out" badge this row used to show up
@@ -1595,6 +1631,8 @@ function ProductsFullEditor() {
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
   }, [can, canAddProduct, notify])
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
+  // The list's cost cell opens the cost calculation directly (owner, 25 Sep 2026).
+  const [costFloatProduct, setCostFloatProduct] = useState<ProductRecord | null>(null)
   const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
   const [restoreStockAdjustDraftKey, setRestoreStockAdjustDraftKey] = useState<string | null>(null)
   const restoringStockAdjustRef = useRef<MinimizedWorkEntry | null>(null)
@@ -4459,7 +4497,8 @@ function ProductsFullEditor() {
     t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey,
     canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo,
     setDetailProduct,
-  }), [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct])
+    openCostFloat: setCostFloatProduct,
+  }), [branchFilter, branchNameById, catMap, copy, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, lowStockConfig, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr, exactDuplicateIndex, dupResolverBusyKey, canMergeDuplicates, handleDuplicateKeepThis, handleDuplicateKeepBoth, navigateTo, setDetailProduct, setCostFloatProduct])
 
   const renderDesktopProductRow = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => (
     <ProductDesktopRow key={p.id} product={p} indented={indented} ctx={productRowCtx} />
@@ -5337,6 +5376,17 @@ function ProductsFullEditor() {
           </Suspense>
         </div>
       )}
+
+      {canViewCosts && costFloatProduct ? (
+        <CostCalculationFloat
+          productId={costFloatProduct.id as number | string}
+          productName={String(costFloatProduct.name || '')}
+          onClose={() => setCostFloatProduct(null)}
+          fmtUSD={fmtUSD}
+          fmtKHR={fmtKHR}
+          t={(key, fallback) => t(key) || fallback}
+        />
+      ) : null}
 
       {/* Product detail modal */}
       {detailProduct && (

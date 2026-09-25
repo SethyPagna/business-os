@@ -155,6 +155,26 @@ runTest('product names open the product through the row, never through a link', 
   assert.ok((products.match(/onClick: \(target\) => \{[\s\S]{0,400}?setDetailProduct\(p\)/g) || []).length >= 2, 'both row shapes open the product sheet from a tap')
 })
 
+// Owner, 25 Sep 2026: "clicking cost must open the cost details directly".
+// The cost figure on both row shapes is a button that opens the cost
+// calculation float and owns its whole press -- stopping only the click (the
+// Inventory shape) is not enough here, because this row opens the product on
+// the RELEASE, so the sheet would open over the float.
+runTest('the cost figure opens the cost calculation, and only that', () => {
+  const products = read('components/products/Products.tsx')
+  const buttons = [...products.matchAll(/<button\b(?:(?!<\/button>)[\s\S])*?openCostFloat\(p\)(?:(?!<\/button>)[\s\S])*?<\/button>/g)].map((match) => match[0])
+  assert.equal(buttons.length, 2, 'desktop cost cell and mobile price-strip cost')
+  for (const button of buttons) {
+    assert.match(button, /fmtUSD\(costUsd\)/, 'the button is the cost figure itself')
+    for (const handler of ['onMouseDown', 'onMouseUp', 'onTouchStart', 'onTouchEnd']) {
+      assert.match(button, new RegExp(`${handler}=\\{\\(event\\) => event\\.stopPropagation\\(\\)\\}`), `${handler} must stop at the cost, or the row opens the product sheet over the float`)
+    }
+    assert.match(button, /onClick=\{\(event\) => \{ event\.stopPropagation\(\); openCostFloat\(p\) \}\}/)
+  }
+  assert.match(products, /canViewCosts && costFloatProduct \? \(\s*<CostCalculationFloat/, 'the float renders only for a user who may see costs')
+  assert.match(products, /openCostFloat: setCostFloatProduct,/)
+})
+
 if (failed) {
   console.error(`\n${failed} product row tap-target test(s) failed`)
   process.exit(1)

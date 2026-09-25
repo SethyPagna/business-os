@@ -264,6 +264,8 @@ await runTest('catalog float renders distinct-positive means and never the legac
 // ---------------------------------------------------------------------------
 const DISPLAY_SITES: Array<{ file: string; mustContain: string[] }> = [
   { file: 'components/inventory/InventoryProductsSurface.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatProduct'] },
+  // Owner, 25 Sep 2026: "clicking cost must open the cost details directly" (Products list, both row shapes).
+  { file: 'components/products/Products.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatProduct', 'openCostFloat(p)'] },
   { file: 'components/inventory/ProductDetailModal.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
   { file: 'components/products/surfaces/ProductDetailModal.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
   { file: 'components/products/StockInSessionsSection.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },

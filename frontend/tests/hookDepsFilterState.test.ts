@@ -59,7 +59,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['branchFilter', 'brandFilter', 'catFilter', 'groupFilter', 'stockFilter', 'supplierFilter'],
-    line: 2141,
+    line: 2222,
     reason:
       'Deferred filter-metadata fallback. filterMetaScope includes all six filters; '
       + 'its own effect just above invalidates the outstanding fallback and clears readiness, '
@@ -70,12 +70,14 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'ProductMobileCard memo extraction) inserted the two new row components above '
       + 'ProductsFullEditor and shifted it from :1497 to :2141: the filter scope, invalidation '
       + 'order and main-load dependency chain are unchanged, only the line number moved. '
-      + 'FRAGILE: re-verify if metadata stops arriving with the main product response.',
+      + 'FRAGILE: re-verify if metadata stops arriving with the main product response. '
+      + 'RE-VERIFIED 2026-09-25 after U-products-ui (row cost buttons, cost float state) moved it '
+      + 'to :2222; the fallback effect body and its deps are unchanged.',
   },
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 3435,
+    line: 3507,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
@@ -83,7 +85,8 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'extraction moved the source position from :2653 to :3359; effectiveStockState '
       + 'remains in the dependency array. RE-VERIFIED 2026-09-21 after 43f656d3 (product '
       + 'save actor fence) and 6324e286 (edit-history preservation) moved it to :3435; the '
-      + 'object key and the effectiveStockState dependency are unchanged.',
+      + 'object key and the effectiveStockState dependency are unchanged. RE-VERIFIED 2026-09-25 '
+      + 'after U-products-ui moved it to :3507; unchanged.',
   },
 ]
 
