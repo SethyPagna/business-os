@@ -393,7 +393,32 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
   for (const rel of REPORT_VIEW_FILES) {
     const src = read(rel)
     assert.ok(src.includes('fmtMoney('), `${rel} renders money via fmtMoney`)
-    assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
+    if (rel.endsWith('/SalesListReport.tsx')) {
+      // Sales prepares a verified full-cohort document, then a fresh preview
+      // button delegates CSV publication. Pin those real call sites rather
+      // than requiring the old browse-page downloader to return.
+      const assertSalesWiring = (source: string) => {
+        assert.match(source, /const exporter = useSalesListExport\(/)
+        assert.match(source, /const exportCsv = \(\) => \{ void exporter\.prepare\(\) \}/)
+        assert.match(source, /exportMenuItems\(tr, p\.canExport, exportCsv, exportPrint,/)
+        assert.match(source, /onClick=\{exporter\.csv\}/)
+        assert.match(source, /document: \(result\) => \([\s\S]*?language: language \|\| 'en', fmtMoney,/,
+          'the completed document retains the selected-currency formatter')
+        assert.doesNotMatch(source, /downloadCSV\(/, 'Sales must not publish its loaded browse page directly')
+      }
+      assertSalesWiring(src)
+      for (const [from, to] of [
+        ['void exporter.prepare()', 'void exporter.csv()'],
+        ['onClick={exporter.csv}', 'onClick={() => {}}'],
+        ["language: language || 'en', fmtMoney,", "language: language || 'en', fmtMoney: String,"],
+      ]) {
+        const broken = src.replace(from, to)
+        assert.notEqual(broken, src, 'Sales wiring negative control must apply')
+        assert.throws(() => assertSalesWiring(broken), undefined, 'a disconnected or currency-losing delegate must fail')
+      }
+    } else {
+      assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
+    }
     assert.ok(src.includes('exportMenuItems('), `${rel} offers Export CSV / Print on its title row`)
   }
   // The hub threads its explicit report-currency fmtMoney into every view.
@@ -401,6 +426,39 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
   assert.ok(/const viewProps[\s\S]{0,400}fmtMoney,/.test(hub), 'ReportsHub passes fmtMoney to the views')
   assert.ok(hub.includes('displayCurrency: options.currency'), 'report currency is display-only and defaults independently to USD')
   assert.ok(!hub.includes("options.currency === 'setting'"), 'the removed App setting choice cannot remain active invisibly')
+})
+
+test('Sales CSV delegate executes with the frozen selected-currency formatter and canonical total', () => {
+  const require = createRequire(import.meta.url)
+  const source = read('src/components/sales/reports/salesListExport.ts')
+  const doc = {
+    filename: 'sales', rows: [{ revenue: 1.25 }], totals: { revenue: 2.5 },
+    columns: [{ key: 'revenue', label: 'Revenue', kind: 'money', value: (row: { revenue: number }) => row.revenue }],
+    fmtMoney: (usd: number) => `KHR ${(usd * 4000).toFixed(0)}`,
+  }
+  const executeCsv = (hookSource: string) => {
+    const downloads: unknown[] = []
+    const mod = { exports: {} as Record<string, any> }
+    const compiled = transformSync(hookSource, { loader: 'ts', format: 'cjs' }).code
+    new Function('require', 'module', 'exports', compiled)((id: string) => {
+      if (id === 'react') return {
+        useRef: (value: unknown) => ({ current: value }), useEffect: () => {},
+        useState: () => [{ key: 'KHR', generation: 0, document: doc, current: () => true }, (state: { error?: unknown }) => { if (state.error) throw state.error }],
+      }
+      if (id.endsWith('/csv.ts')) return { downloadCSV: (name: string, rows: unknown) => downloads.push({ name, rows }) }
+      if (id === './salesReportExport.ts') return require('../src/components/sales/reports/salesReportExport.ts')
+      // Preparation, actor capture and print are deliberately outside this
+      // publication probe; salesListExport.test.ts executes their lifecycle.
+      return {}
+    }, mod, mod.exports)
+    mod.exports.useSalesListExport({ key: 'KHR', query: {}, canExport: () => true, document: () => doc }).csv()
+    assert.deepEqual(downloads, [{ name: 'sales.csv', rows: [{ Revenue: 'KHR 5000' }, { Revenue: 'KHR 10000' }] }],
+      'real CSV hook uses display currency for both receipt and authoritative footer, not their row sum')
+  }
+  executeCsv(source)
+  const rawUsd = source.replace('saleExportObjects(document, true)', 'saleExportObjects(document, false)')
+  assert.notEqual(rawUsd, source, 'negative control must switch display values to raw USD')
+  assert.throws(() => executeCsv(rawUsd), undefined, 'dropping selected-currency formatting must fail')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {
