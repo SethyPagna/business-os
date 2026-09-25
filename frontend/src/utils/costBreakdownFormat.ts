@@ -19,7 +19,11 @@
 // 'superseded'. Both are just another excluded reason to this module; the
 // float dims and tags the row the same way for every reason.
 
-export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | null
+// U-cost (owner, 2026-09-25): a lot with nothing left on hand ('depleted')
+// no longer counts; the Worker lists those rows after the on-hand ones.
+export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | 'depleted' | null
+
+const EXCLUSION_REASONS: ReadonlySet<string> = new Set(['zero', 'duplicate', 'inactive', 'superseded', 'overridden', 'depleted'])
 
 export type CostBreakdownInput = {
   source: 'lot' | 'manual' | 'catalog'
@@ -33,6 +37,8 @@ export type CostBreakdownInput = {
   previous_cost_usd?: number | null
   cost_usd: number | null
   cost_khr: number | null
+  /** A lot's remaining on-hand quantity across branches; null on a manual row or an older payload. */
+  remaining_quantity?: number | null
   excluded: CostBreakdownExclusionReason
 }
 
@@ -71,6 +77,7 @@ export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason): s
   if (excluded === 'inactive') return 'cost_breakdown_excluded_inactive'
   if (excluded === 'superseded') return 'cost_breakdown_excluded_superseded'
   if (excluded === 'overridden') return 'cost_breakdown_excluded_overridden'
+  if (excluded === 'depleted') return 'cost_breakdown_excluded_depleted'
   return null
 }
 
@@ -125,7 +132,8 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     previous_cost_usd: typeof entry.previous_cost_usd === 'number' && Number.isFinite(entry.previous_cost_usd) ? entry.previous_cost_usd : null,
     cost_usd: entry.cost_usd == null ? null : Number(entry.cost_usd),
     cost_khr: entry.cost_khr == null ? null : Number(entry.cost_khr),
-    excluded: (entry.excluded === 'zero' || entry.excluded === 'duplicate' || entry.excluded === 'inactive' || entry.excluded === 'superseded' || entry.excluded === 'overridden') ? entry.excluded : null,
+    remaining_quantity: entry.remaining_quantity == null ? null : Number(entry.remaining_quantity),
+    excluded: typeof entry.excluded === 'string' && EXCLUSION_REASONS.has(entry.excluded) ? entry.excluded as CostBreakdownExclusionReason : null,
   }))
   return {
     product_id: Number(raw.product_id) || 0,
