@@ -66,9 +66,6 @@ const REMAINING: Record<string, number> = {
   'components/inventory/ManageBatchesModal.tsx': 2,
   'components/server/ServerPage.tsx': 1,
   'components/shared/BackgroundImportTracker.tsx': 1,
-  'components/users/DeviceApprovals.tsx': 1,
-  'components/users/UserProfileModal.tsx': 1,
-  'components/users/Users.tsx': 2,
   'components/utils-settings/Backup.tsx': 4,
   'components/utils-settings/Settings.tsx': 2,
 }

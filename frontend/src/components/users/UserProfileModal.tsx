@@ -7,6 +7,7 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -490,6 +491,7 @@ function AvatarViewerModal({
 
 export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const { user, notify, hasPermission, saveSettings, settings, t } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile', user })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
@@ -680,6 +682,20 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
       const userId = requireCurrentUserId()
       const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
+      // Asked BEFORE the timed save starts; Cancel (or X / Escape) keeps the
+      // native Cancel meaning -- save, recording the new username only.
+      const renameCascade = usernameChanged
+        ? ((await askConfirm({
+          title: tr('username', 'Username'),
+          message: tr('user_rename_cascade_confirm', 'Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.'),
+          items: [
+            { label: tr('before', 'Before'), value: String(user?.username || '').trim() },
+            { label: tr('after', 'After'), value: String(profile.username || '').trim() },
+          ],
+          confirmLabel: tr('user_rename_cascade_carry', 'Update linked records too'),
+          cancelLabel: tr('user_rename_cascade_record_only', 'Rename only'),
+        })) ? 'carry' : 'record_only')
+        : null
       const result = await withLoaderTimeout(() => getProfileApi().updateUserProfile(userId, {
         name: profile.name,
         username: profile.username,
@@ -691,11 +707,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         adminOverride: canAdminOverride,
         userId,
         userName: user?.name,
-        ...(usernameChanged ? {
-          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
-            ? 'carry'
-            : 'record_only',
-        } : {}),
+        ...(renameCascade ? { __rename_cascade: renameCascade } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || 'Failed to save profile', 'error')
@@ -984,6 +996,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
   return (
     <>
+      {confirmDialog}
       <Modal title={title} onClose={onClose} wide unsavedChanges={{ dirty: profileDirty }}>
         {loading || !profile ? (
           <div className="py-10 text-center text-sm text-gray-400">{tr('loading_account', 'Loading account...')}</div>

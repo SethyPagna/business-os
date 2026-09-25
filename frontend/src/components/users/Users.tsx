@@ -11,6 +11,7 @@ import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec 
 import Modal from '../shared/Modal'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
@@ -320,6 +321,7 @@ function UsersMobileSkeletonCards() {
 
 export default function Users() {
   const { t, notify, user: currentUser } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const { syncChannel } = useSync()
   // E4: renders inside the Settings hub now.
   const isActive = useIsPageActive('settings')
@@ -781,6 +783,20 @@ export default function Users() {
     setSaving(true)
     try {
       const usernameChanged = Boolean(selectedUser) && String(selectedUser?.username || '').trim() !== userForm.username.trim()
+      // Same two outcomes the native OK/Cancel had: Cancel (or X / Escape)
+      // still saves, recording the new username only.
+      const renameCascade = usernameChanged
+        ? ((await askConfirm({
+          title: tr('username', 'Username'),
+          message: tr('user_rename_cascade_confirm', 'Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.'),
+          items: [
+            { label: tr('before', 'Before'), value: String(selectedUser?.username || '').trim() },
+            { label: tr('after', 'After'), value: userForm.username.trim() },
+          ],
+          confirmLabel: tr('user_rename_cascade_carry', 'Update linked records too'),
+          cancelLabel: tr('user_rename_cascade_record_only', 'Rename only'),
+        })) ? 'carry' : 'record_only')
+        : null
       const payload: UserWritePayload = {
         name: userForm.name.trim(),
         username: userForm.username.trim(),
@@ -792,11 +808,7 @@ export default function Users() {
         expectedUpdatedAt: selectedUser?.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
-        ...(usernameChanged ? {
-          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
-            ? 'carry'
-            : 'record_only',
-        } : {}),
+        ...(renameCascade ? { __rename_cascade: renameCascade } : {}),
       }
 
       const result = selectedUser
@@ -1017,7 +1029,12 @@ export default function Users() {
       return
     }
     if (!beginSingleAction(deleteRoleInFlightRef, { blocked: deletingRoleId != null, value: role.id })) return
-    if (!window.confirm(`Delete role "${role.name}"?`)) {
+    if (!(await askConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('confirm_delete_role', 'Delete role "{name}"?').replace('{name}', String(role.name || '')),
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteRoleInFlightRef)
       return
     }
@@ -1063,6 +1080,7 @@ export default function Users() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
+      {confirmDialog}
       {!canManage ? (
           <div className="mb-4 rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700 dark:border-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300">
             {tr('users_view_only_note', 'View-only mode for shared users. Account details and OTP can still be managed from your profile button.')}

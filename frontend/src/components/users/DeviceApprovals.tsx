@@ -4,6 +4,7 @@ import ShieldX from 'lucide-react/dist/esm/icons/shield-x.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js'
 import { fmtDate } from '../../utils/formatters'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import {
   approveDevice,
   getAllDevices,
@@ -39,6 +40,7 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
 // permission check here can't itself grant access -- this UI is
 // convenience, not the security boundary.
 export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const [pending, setPending] = useState<TrustedDeviceRecord[]>([])
   const [approvedDevices, setApprovedDevices] = useState<TrustedDeviceRecord[]>([])
   const [rejectedHistory, setRejectedHistory] = useState<TrustedDeviceRecord[]>([])
@@ -92,12 +94,15 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
     }
   }
 
-  const resetForReapproval = (device: TrustedDeviceRecord) => {
-    const confirmed = window.confirm(tr(
-      t,
-      'device_reapproval_reset_confirm',
-      'Remove this rejected device request? This does not approve the device. The person must sign in again, then an administrator must approve the new request.',
-    ))
+  const resetForReapproval = async (device: TrustedDeviceRecord) => {
+    const confirmed = await askConfirm({
+      message: tr(
+        t,
+        'device_reapproval_reset_confirm',
+        'Remove this rejected device request? This does not approve the device. The person must sign in again, then an administrator must approve the new request.',
+      ),
+      danger: true,
+    })
     if (!confirmed) return
     void runAction(device.id, 'reset', tr(t, 'device_reapproval_reset_done', 'Rejected device request removed. It must sign in again for a new approval request.'))
   }
@@ -180,6 +185,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
         {tr(
           t,
@@ -374,7 +380,7 @@ export default function DeviceApprovals({ t, notify }: DeviceApprovalsProps) {
                     type="button"
                     disabled={busyId === device.id}
                     className="btn-secondary px-2.5 py-1 text-xs"
-                    onClick={() => resetForReapproval(device)}
+                    onClick={() => void resetForReapproval(device)}
                   >
                     {tr(t, 'device_reapproval_reset', 'Reset for re-approval')}
                   </button>
