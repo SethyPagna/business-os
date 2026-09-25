@@ -184,15 +184,20 @@ check('3 the contact FAB starts minimized, expands on tap, and can be minimized 
   assert.match(publicCatalogPage, /bg-slate-700 text-white shadow-md/, 'the minimize control is a plain always-filled pill')
 })
 
-check('3 the minimize/restore labels exist in both language packs', () => {
+// P-public-5: the minimized icon IS the contact button (one tap expands and
+// opens it), so it is labelled `contactUs`; the separate "Show the contact us
+// button" restore label was retired with the remembered-minimized state.
+check('3 the minimize/contact labels exist in both language packs', () => {
   const pagesEn = en.pages as Record<string, unknown>
   const pagesKm = km.pages as Record<string, unknown>
-  const portalEditor = (pagesEn?.portalEditor as { contactUsMinimize?: string; contactUsRestore?: string } | undefined)
-  const portalEditorKm = (pagesKm?.portalEditor as { contactUsMinimize?: string; contactUsRestore?: string } | undefined)
+  const portalEditor = (pagesEn?.portalEditor as { contactUs?: string; contactUsMinimize?: string; contactUsRestore?: string } | undefined)
+  const portalEditorKm = (pagesKm?.portalEditor as { contactUs?: string; contactUsMinimize?: string; contactUsRestore?: string } | undefined)
   assert.ok(portalEditor?.contactUsMinimize, 'en.json must carry portalEditor.contactUsMinimize')
-  assert.ok(portalEditor?.contactUsRestore, 'en.json must carry portalEditor.contactUsRestore')
+  assert.ok(portalEditor?.contactUs, 'en.json must carry portalEditor.contactUs')
   assert.ok(portalEditorKm?.contactUsMinimize && portalEditorKm.contactUsMinimize !== portalEditor?.contactUsMinimize, 'km.json must carry a REAL Khmer translation, not the English string')
-  assert.ok(portalEditorKm?.contactUsRestore && portalEditorKm.contactUsRestore !== portalEditor?.contactUsRestore, 'km.json must carry a REAL Khmer translation, not the English string')
+  assert.ok(portalEditorKm?.contactUs && portalEditorKm.contactUs !== portalEditor?.contactUs, 'km.json must carry a REAL Khmer translation, not the English string')
+  assert.equal(portalEditor?.contactUsRestore, undefined, 'the retired restore label is back in en.json')
+  assert.equal(portalEditorKm?.contactUsRestore, undefined, 'the retired restore label is back in km.json')
 })
 
 // --- 4. Pagination row order + results count + dead hint removed ----------
