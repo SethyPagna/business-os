@@ -12,6 +12,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  branchRole,
   branchCanBeTransferDestination,
   branchCanBeTransferSource,
   branchCanTransferBetween,
@@ -34,24 +35,9 @@ const runTest = (name: string, fn: () => void): void => {
 const read = (relative: string): string =>
   readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-// The Worker copy, evaluated for real. Both files are plain functions with
-// no imports, so stripping the type annotations is enough to run one.
-const workerSource = read('../../cloudflare/src/lib/branchRoles.ts')
-const asRunnable = workerSource
-  .replace(/export type BranchRole[^\n]*\n/, '')
-  .replace(/: BranchRole/g, '')
-  .replace(/\(name: unknown\)/g, '(name)')
-  .replace(/\(fromName: unknown, toName: unknown\)/g, '(fromName, toName)')
-  .replace(/: boolean/g, '')
-  .replace(/export function/g, 'function')
-const worker = new Function(`${asRunnable}
-return { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination, branchCanTransferBetween }`)() as {
-  branchRoleFromName: (name: unknown) => string
-  branchCanSell: (name: unknown) => boolean
-  branchCanBeTransferSource: (name: unknown) => boolean
-  branchCanBeTransferDestination: (name: unknown) => boolean
-  branchCanTransferBetween: (fromName: unknown, toName: unknown) => boolean
-}
+// The Worker copy, imported for real (Node strips the types), so the two
+// files are compared by what they ANSWER, not by a regex-stripped copy.
+import * as worker from '../../cloudflare/src/lib/branchRoles.ts'
 
 // Every shape a branch name arrives in: the two canonical names, the casing
 // and padding a hand-typed one carries, a third branch a bigger deployment
@@ -81,6 +67,43 @@ runTest('both packages answer identically for every branch-name shape', () => {
   }
 })
 
+// Branch ROWS: the explicit role column (held migration) wins; a row with no
+// role, or a blank/unknown one, falls back to its name.
+const ROWS: unknown[] = [
+  { name: 'Shop' }, { name: 'Warehouse' }, { name: 'Store' },
+  { name: 'Store', role: 'shop' }, { name: 'Store', role: ' SHOP ' }, { name: 'Warehouse', role: 'shop' },
+  { name: 'Shop', role: 'warehouse' }, { name: 'Shop', role: null }, { name: 'Shop', role: '' },
+  { name: 'Depot', role: 'kiosk' }, { name: null, role: null }, {}, [],
+]
+
+runTest('both packages answer identically for every branch-row shape', () => {
+  for (const row of [...ROWS, ...NAMES]) {
+    const label = JSON.stringify(row)
+    assert.equal(worker.branchRole(row), branchRole(row), `role ${label}`)
+    assert.equal(worker.branchCanSell(row), branchCanSell(row), `canSell ${label}`)
+    assert.equal(worker.branchCanBeTransferSource(row), branchCanBeTransferSource(row), `source ${label}`)
+  }
+  for (const from of ROWS) for (const to of ROWS) {
+    assert.equal(worker.branchCanTransferBetween(from, to), branchCanTransferBetween(from, to), `pair ${JSON.stringify(from)} -> ${JSON.stringify(to)}`)
+  }
+})
+
+runTest('the rule itself: the explicit role column decides, the name is only the fallback', () => {
+  // The consolidation's survivor: renamed Store, role shop -> it sells.
+  assert.equal(branchCanSell({ name: 'Store', role: 'shop' }), true)
+  // The same row by NAME alone would not sell: callers must pass the row.
+  assert.equal(branchCanSell('Store'), false)
+  assert.equal(branchCanSell({ name: 'Store' }), false)
+  // No role column yet (today): the name rule, exactly as before.
+  assert.equal(branchCanSell({ name: 'Shop' }), true)
+  assert.equal(branchCanSell({ name: 'Warehouse' }), false)
+  // A blank or unknown role never overrides the name.
+  assert.equal(branchRole({ name: 'Shop', role: '' }), 'shop')
+  assert.equal(branchRole({ name: 'Warehouse', role: 'kiosk' }), 'warehouse')
+  // An explicit role beats a contradicting name.
+  assert.equal(branchRole({ name: 'Shop', role: 'warehouse' }), 'warehouse')
+})
+
 runTest('the rule itself: only the exact Shop may sell', () => {
   assert.equal(branchRoleFromName('  WAREHOUSE '), 'warehouse')
   assert.equal(branchCanSell('  WAREHOUSE '), false)
@@ -103,10 +126,10 @@ runTest('the rule itself: stock moves both ways between opposite canonical roles
   assert.equal(branchCanTransferBetween('Depot', 'Shop'), false)
 })
 
-runTest('nothing keys on is_default, or on any column other than the name', () => {
+runTest('nothing keys on is_default, or on any column other than role and name', () => {
   // is_default only says which branch a blank picker preselects. Both copies
   // must be a pure function OF THE NAME -- no other field may appear.
-  for (const source of [workerSource, read('../src/utils/branchRoles.ts')]) {
+  for (const source of [read('../../cloudflare/src/lib/branchRoles.ts'), read('../src/utils/branchRoles.ts')]) {
     const code = source.split('export type BranchRole')[1] || ''
     assert.doesNotMatch(code, /is_default/)
     assert.doesNotMatch(code, /\bkind\b/)
@@ -118,7 +141,7 @@ runTest('nothing keys on is_default, or on any column other than the name', () =
 runTest('the two copies are the same code, not merely the same behaviour today', () => {
   const body = (source: string): string => source.split('export type BranchRole')[1]
   assert.equal(
-    body(workerSource),
+    body(read('../../cloudflare/src/lib/branchRoles.ts')),
     body(read('../src/utils/branchRoles.ts')),
     'keep the twin byte-identical below its header comment',
   )
