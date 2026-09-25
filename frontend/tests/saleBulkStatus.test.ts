@@ -130,5 +130,8 @@ for(const language of ['en','km']) {
   for(const key of ['sale_bulk_limit','sale_bulk_pending','sale_bulk_retry','sale_bulk_discard','sale_bulk_discard_warning']) assert.ok(labels[key])
 }
 assert.match(source,/handleBulkStatusUpdate\(pendingBulkRequest.target_status, null, true, true\)/)
-assert.match(source,/window.confirm\(translateOr\('sale_bulk_discard_warning'/)
+// U-confirm: discarding asks through the shared review dialog, never native confirm().
+assert.match(source,/const askDiscardRetry = useCallback\(\(\) => askConfirm\(\{[\s\S]*?message: translateOr\('sale_bulk_discard_warning'[\s\S]*?danger: true/)
+assert.match(source,/askDiscardRetry\(\)\.then\(\(ok\) => \{ if \(ok\) savePendingBulkRequest\(null\) \}\)/)
+assert.doesNotMatch(source,/window\.confirm\(/)
 console.log('PASS real persistence hooks restore full request after remount, isolate actor, discard and tolerate storage failures; EN/KM retry UX')

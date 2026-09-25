@@ -10,6 +10,7 @@ import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleLis
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
@@ -348,6 +349,7 @@ export function isKnownUncommittedSaleCustomerChangeError(error: unknown): boole
 
 export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const { t, settings, fmtUSD, fmtKHR, notify, user, authReady, can, getPermissionTier } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const securityFingerprint = saleSecurityFingerprint(user, authReady)
   const securityGenerationRef = useRef({ fingerprint: securityFingerprint, generation: 0 })
   const statusSecurityScope = advanceSaleSecurityScope(securityGenerationRef.current, securityFingerprint)
@@ -633,6 +635,14 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
+  // Every "Discard retry" on this page (direct status, bulk status, bulk
+  // field, customer change) asks the same question through the shared dialog.
+  const askDiscardRetry = useCallback(() => askConfirm({
+    title: translateOr('sale_bulk_discard', 'Discard retry'),
+    message: translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'),
+    confirmLabel: translateOr('sale_bulk_discard', 'Discard retry'),
+    danger: true,
+  }), [askConfirm, translateOr])
   // The Worker answers 409 money_precision_invalid_rate when a sale has no
   // usable exchange rate of its own (owner rule, 24 Sep 2026: a sale keeps its
   // own rate and is never handed today's). Settle, add items and amend all say
@@ -1349,10 +1359,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const discardPendingDirectStatus = (): void => {
+  const discardPendingDirectStatus = async (): Promise<void> => {
     const pending = currentPendingDirectStatus()
     if (!pending || statusActionRef.current.size > 0) return
-    if (!window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) return
+    if (!(await askDiscardRetry())) return
     try { savePendingDirectStatus(pending.entityId, null) }
     catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
   }
@@ -2522,6 +2532,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col px-3 pb-3 pt-0 sm:px-6 sm:pb-6 sm:pt-0`}>
+      {confirmDialog}
       {/* Import/Manage/History action row. The Sales daily/reports view moved
           out to its own top-level Reports hub section (ReportsHub.tsx), so
           Sales now shows only the receipts list. Import/Export each take an
@@ -2699,7 +2710,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving || !canChangeSaleStatus} onClick={() => handleBulkStatusUpdate(pendingBulkRequest.target_status, null, true, true)}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving} onClick={() => {
-            if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkRequest(null)
+            void askDiscardRetry().then((ok) => { if (ok) savePendingBulkRequest(null) })
           }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}
@@ -2855,7 +2866,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               void submitSaleCustomerChange(saleCustomerPrompt.sale, target, saleCustomerPendingRequest)
             } : undefined}
             onDiscardPending={saleCustomerPendingRequest ? () => {
-              if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null)
+              void askDiscardRetry().then((ok) => { if (ok) savePendingBulkFieldRequest(null) })
             } : undefined}
           />
         </Suspense>
@@ -2873,7 +2884,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             onSave={({ name }) => submitSaleCustomerChange(saleCustomerNameForm.sale, null, undefined, name)}
             onRetryPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => { void submitSaleCustomerChange(saleCustomerNameForm.sale, null, pendingBulkFieldRequest) } : undefined}
             onDiscardPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => {
-              if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null)
+              void askDiscardRetry().then((ok) => { if (ok) savePendingBulkFieldRequest(null) })
             } : undefined}
             onClose={() => {
               if (saleCustomerSaving || bulkFieldSaving) return
@@ -2983,7 +2994,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               else notify(translateOr('sale_customer_retry_find', 'Find and open the original sale to review this pending customer-name change.'), 'error')
             } else void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest)
           }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
-          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
+          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { void askDiscardRetry().then((ok) => { if (ok) savePendingBulkFieldRequest(null) }) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}
 

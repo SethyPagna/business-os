@@ -67,7 +67,6 @@ const REMAINING: Record<string, number> = {
   'components/returns/EditReturnModal.tsx': 1,
   'components/returns/ReturnReasonManagerModal.tsx': 2,
   'components/returns/Returns.tsx': 2,
-  'components/sales/Sales.tsx': 5,
   'components/server/ServerPage.tsx': 1,
   'components/shared/BackgroundImportTracker.tsx': 1,
   'components/users/DeviceApprovals.tsx': 1,
