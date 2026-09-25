@@ -206,11 +206,18 @@ const routePreloadChunkNames = {
   // (measured in the emitted graph) -- yet it was preloaded at
   // fetchpriority=high on every admin cold load. It stays in the eager
   // precache below, so an installed PWA still prints offline.
+  //
+  // I6-3: 'app-shared' (the /src/components/shared/ catch-all, 257 KB raw /
+  // 76 KB gz) is a static import of AdminRoot and of PublicCatalogRoot, so
+  // every admin page, the sign-in page and the storefront wait for it -- but
+  // it was not preloaded, so the browser only discovered it after the root
+  // chunk had downloaded and parsed: one extra round trip on every cold load.
   admin: [
     'AdminRoot',
     'vendor-react',
     'app-routing',
     'app-shell',
+    'app-shared',
     'Sidebar',
     'shared-ui',
     'api-http-core',
@@ -221,6 +228,7 @@ const routePreloadChunkNames = {
   ],
   login: [
     'AdminRoot',
+    'app-shared',
     'auth-login',
     'app-auth',
     'app-bootstrap',
@@ -228,6 +236,7 @@ const routePreloadChunkNames = {
   public: [
     'PublicCatalogRoot',
     'app-shell',
+    'app-shared',
     'catalog-public-core',
     'catalog-public-utils',
     'catalog-public',

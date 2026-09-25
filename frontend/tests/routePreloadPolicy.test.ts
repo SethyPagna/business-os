@@ -22,10 +22,12 @@ const transform = (html: string, bundle?: OutputBundle) => {
 
 // I6-2: generic 'vendor' (print/QR/ffmpeg, dynamic-import only) is not an
 // admin startup chunk; it is listed in `excluded` below so re-adding it fails.
-const admin = ['AdminRoot', 'vendor-react', 'app-routing', 'app-shell', 'Sidebar',
+// I6-3: app-shared is a static import of both roots, so all three startup
+// lists name it rather than leaving it to be discovered after the root parses.
+const admin = ['AdminRoot', 'vendor-react', 'app-routing', 'app-shell', 'app-shared', 'Sidebar',
   'shared-ui', 'api-http-core', 'api-http-state', 'app-api', 'app-auth', 'app-bootstrap']
-const login = ['AdminRoot', 'auth-login', 'app-auth', 'app-bootstrap']
-const publicChunks = ['PublicCatalogRoot', 'app-shell', 'catalog-public-core', 'catalog-public-utils',
+const login = ['AdminRoot', 'app-shared', 'auth-login', 'app-auth', 'app-bootstrap']
+const publicChunks = ['PublicCatalogRoot', 'app-shell', 'app-shared', 'catalog-public-core', 'catalog-public-utils',
   'catalog-public', 'catalog-icons', 'catalog-products', 'route-sync-utils', 'app-portal', 'portal-tools']
 const productShared = ['product-read-api', 'product-shared', 'productDisplayHelpers',
   'route-sync-utils', 'settings-refresh', 'app-api', 'shared-ui']

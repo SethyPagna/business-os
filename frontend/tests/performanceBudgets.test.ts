@@ -159,6 +159,32 @@ await runTest('the public preload closure (index.html\'s own preload list) never
   console.log(`  measured: ${chunks} chunks (baseline ${PUBLIC_PRELOAD_BASELINE_CHUNKS})`)
 })
 
+await runTest('startup preloads name app-shared (a static import of both roots) and never the dynamic-only print/QR vendor chunk', () => {
+  if (!distAvailable) {
+    console.log('  (skipped: no frontend/dist -- run `npm run build` first)')
+    return
+  }
+  // I6-3: app-shared sits in the static closure of AdminRoot and of
+  // PublicCatalogRoot, so a startup list without it leaves the browser to
+  // discover it only after the root chunk parses. I6-2: generic `vendor` is
+  // reached only through import() (and the lazy scanner chunk), so preloading
+  // it at high priority spends 63 KB gz of the cold load on nothing.
+  const graph = buildEmittedGraph()
+  const html = fs.readFileSync(path.join(frontendRoot, 'dist/index.html'), 'utf8')
+  const preloads = JSON.parse(html.match(/var preloads = (\{[^\n]+\});/)?.[1] ?? '{}') as Record<string, string[]>
+  const chunkNamed = (name: string) => (file: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(path.posix.basename(file))
+  const emitted = [...graph.keys()]
+  for (const root of ['AdminRoot', 'PublicCatalogRoot']) {
+    const rootFile = emitted.find(chunkNamed(root))
+    assert.ok(rootFile, `missing ${root} chunk`)
+    assert.ok(closureBytesAndCount(graph, [rootFile]).files.some(chunkNamed('app-shared')), `app-shared must still be a static import of ${root}, or this preload is dead weight`)
+  }
+  for (const list of ['admin', 'login', 'public']) {
+    assert.ok((preloads[list] ?? []).some(chunkNamed('app-shared')), `the ${list} startup preload must name app-shared`)
+    assert.equal((preloads[list] ?? []).some(chunkNamed('vendor')), false, `the ${list} startup preload must not name the print/QR vendor chunk`)
+  }
+})
+
 await runTest('discriminating: the +10% budget actually rejects a doubled closure, and accepts one at the baseline', () => {
   const graph = new Map<string, string[]>([
     ['entry.js', ['a.js', 'b.js']],
