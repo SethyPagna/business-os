@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MouseEventHandler, TouchEventHandler, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
+import type { MouseEventHandler, TouchEventHandler } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
@@ -257,80 +257,8 @@ function DualPriceInput({ labelUsd, labelKhr, valueUsd, valueKhr, onUsdChange, o
   )
 }
 
-// Single-line text a user can pan horizontally to read the full value
-// when it overflows, in place of a hard `truncate` (user, Aug 31 2026:
-// "for long names do a scroll -- don't show the scroll icon, just built
-// in when they touch or click hold move on the name"). Used on the
-// small-screen product card so a long product name stays fully
-// readable without opening the detail.
-//
-//  - Touch: the browser's own overflow-x panning handles it, and the
-//    events keep bubbling so the card's tap-to-open / long-press-to-
-//    select gestures still work -- a pan past tolerance simply cancels
-//    them (see utils/longPress.ts), which is exactly right, since a pan
-//    is neither a tap nor a hold.
-//  - Mouse: click-drag is wired up manually below (native overflow-x
-//    does not drag-scroll with a mouse), and its press/click events are
-//    stopped from reaching the card so dragging to read never opens the
-//    detail flyout or trips select mode.
-//  - The scrollbar itself is hidden on every engine (WebKit/Blink,
-//    Firefox, old Edge) so only the text moves, no chrome.
-function DragScrollText({ children, className = '', title, lang }: {
-  children: ReactNode
-  className?: string
-  title?: string
-  lang?: 'km'
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const drag = useRef({ active: false, startX: 0, scrollLeft: 0, moved: false })
+// DragScrollText lived here: a per-element mouse drag for an overflowing
+// name that nothing rendered any more. The drag is now one delegated runtime
+// for every shared scroller (runtime/horizontalDragScroll.ts).
 
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === 'touch') return // native scroll handles touch
-    const el = ref.current
-    if (!el || el.scrollWidth <= el.clientWidth) return // nothing to pan
-    drag.current = { active: true, startX: event.clientX, scrollLeft: el.scrollLeft, moved: false }
-    try { el.setPointerCapture(event.pointerId) } catch { /* pre-pointer-capture browsers */ }
-  }
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const el = ref.current
-    if (!drag.current.active || !el) return
-    const dx = event.clientX - drag.current.startX
-    if (Math.abs(dx) > 3) drag.current.moved = true
-    el.scrollLeft = drag.current.scrollLeft - dx
-  }
-  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.current.active) return
-    drag.current.active = false
-    try { ref.current?.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
-  }
-
-  return (
-    <div
-      ref={ref}
-      title={title}
-      lang={lang}
-      // touch-action: pan-x lets a finger pan this strip horizontally even
-      // though the scroll ancestors (.page-scroll / body) set
-      // `touch-action: pan-y pinch-zoom` — without it the browser refuses the
-      // horizontal gesture on touch, so a long product name could not be
-      // swiped to read (user, Sep 1 2026, on a phone). Mouse panning is
-      // handled by the pointer handlers above; this only re-enables the
-      // native touch scroll the onPointerDown handler defers to.
-      className={`overflow-x-auto whitespace-nowrap [touch-action:pan-x] [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${className}`}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      // Keep MOUSE presses off the card gesture (touch is left to bubble
-      // so tap-to-open still works); swallow the click that ends a real
-      // drag so panning to read never opens the detail.
-      onMouseDown={(event) => event.stopPropagation()}
-      onMouseUp={(event) => event.stopPropagation()}
-      onClickCapture={(event) => { if (drag.current.moved) { event.stopPropagation(); drag.current.moved = false } }}
-    >
-      {children}
-    </div>
-  )
-}
-
-export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, DragScrollText, sanitizeNumericInput, parseNumericInput }
+export { ProductImg, ProductImagePlaceholder, MarginCard, DualPriceInput, sanitizeNumericInput, parseNumericInput }

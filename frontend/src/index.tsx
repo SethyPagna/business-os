@@ -12,6 +12,7 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from './runtime/runtimeErrorClassifier.ts'
 import { installNumberInputWheelGuard } from './runtime/numberInputWheelGuard.ts'
+import { installHorizontalDragScroll } from './runtime/horizontalDragScroll.ts'
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
@@ -231,6 +232,13 @@ function installFormFieldAccessibility() {
 // below uses for its cosmetic pass.
 if (typeof document !== 'undefined') {
   installNumberInputWheelGuard()
+}
+
+// Mouse drag for every hidden-scrollbar chip/name scroller (.detail-scroll-text,
+// .scroll-x-clean). Their bars are invisible (owner, 25 Sep 2026), so without
+// this a plain mouse could not reach the overflow at all.
+if (typeof window !== 'undefined') {
+  installHorizontalDragScroll()
 }
 
 // Keep known browser-extension and CSS-injection noise away from React startup.

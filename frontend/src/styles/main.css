@@ -708,10 +708,15 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
     text-overflow: clip;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
+    /* Invisible, not thin (owner, 25 Sep 2026): a thin bar still drew a
+       track with stepper arrows inside every chip on Windows. The overflow
+       stays reachable: touch and trackpads pan it, shift+wheel scrolls it,
+       and a mouse drags it (runtime/horizontalDragScroll.ts). */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     touch-action: pan-x;
   }
-  .detail-scroll-text::-webkit-scrollbar { height: 3px; }
+  .detail-scroll-text::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
   /* Portalled dialogs must fit the actually visible iOS viewport and stay
      clear of notches/home indicators. This also keeps footer buttons from

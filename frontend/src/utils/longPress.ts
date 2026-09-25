@@ -19,6 +19,11 @@
 // gesture on the same element, so they cannot disagree about how long a
 // hold is.
 export const LONG_PRESS_THRESHOLD_MS = 500
+// How far a press may wander and still be a tap or a hold (see the default
+// below). Exported for runtime/horizontalDragScroll.ts, whose mouse drag of a
+// chip only engages past this same distance -- by then the row under the chip
+// has already decided the press was not a tap.
+export const LONG_PRESS_MOVE_TOLERANCE_PX = 18
 
 export interface LongPressState {
   timerId: number | null
@@ -96,6 +101,7 @@ export interface LongPressHandlers {
   onMouseDown: (event: React.MouseEvent) => void
   onMouseUp: () => void
   onMouseLeave: () => void
+  onMouseMove: (event: React.MouseEvent) => void
   onTouchStart: (event: React.TouchEvent) => void
   // The event is optional so a caller replaying a release it already owns
   // (shared/textAffordances.ts) can still drive the detector.
@@ -135,7 +141,7 @@ interface LongPressOptions {
 // same, while giving an ordinary tap enough slack to register.
 export function createLongPressHandlers(
   state: LongPressState,
-  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = 18, disabled = false }: LongPressOptions,
+  { onLongPress, onClick, thresholdMs = LONG_PRESS_THRESHOLD_MS, moveTolerancePx = LONG_PRESS_MOVE_TOLERANCE_PX, disabled = false }: LongPressOptions,
 ): LongPressHandlers {
   const clearTimer = () => {
     if (state.timerId != null) {
@@ -197,6 +203,10 @@ export function createLongPressHandlers(
     onMouseDown: (event) => start(event.clientX, event.clientY, event.target),
     onMouseUp: () => end(),
     onMouseLeave: () => cancel(),
+    // A mouse press that travels is a drag (a chip being scrolled sideways,
+    // runtime/horizontalDragScroll.ts), not a tap -- the same rule touchmove
+    // applies below. Only while a press is pending: a hover is not a press.
+    onMouseMove: (event) => { if (state.timerId != null) checkMove(event.clientX, event.clientY) },
     onTouchStart: (event) => {
       const touch = event.touches[0]
       if (touch) start(touch.clientX, touch.clientY, event.target)
