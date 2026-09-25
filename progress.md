@@ -1,4 +1,4 @@
-<!-- U-1 plan start -->
+ integrated (3fbb9fb4..b3583a9a, migrations 0196/0197); refuter certified with test-gap notes |
 ## U-1 — Urgent owner batch (25 Sep 2026) — ACTIVE, takes priority over PD-1 phases 2–7
 
 Owner order: **admin fixes → public site → A/B data architecture**, deployed as soon as each
@@ -34,8 +34,8 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [~] U-cost: depleted (qty 0) received lots excluded from the cost average; lots with stock listed first, depleted greyed; guards; read-only production audit of affected products
 - [x] U-products-ui (integrated; refuter certified): invisible chip scroll on large screens; cost click opens cost; mobile hit targets (name ≠ received date, empty space ≠ records); record rows open their own before/after
 - [~] U-records (first part integrated; now adding branch + total before/after): stock-in lines get before/after (one set-based query), record floats beside the backdrop in Transfer / Fast stock-in / Receive batch, shared confirm dialog instead of native confirm in stock screens, movement rows open their own record
-- [~] U-load (built: KM pack 205→148 KB gz, icons −28% lossless; refuter running): language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
-- [~] U-db: search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
+- [x] U-load (integrated; refuter certified: KM pack 205→148 KB gz, icons −28% lossless): language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
+- [x] U-db (integrated; refuter certified): search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
 - [x] Live-update hub moved to an APAC-hinted Durable Object; 12 route handlers no longer wait on it — dc2e4596
 - [!] Deploy blocked: this laptop exits through a German datacenter proxy/VPN and the Cloudflare API answers wrangler with a bot challenge; owner to switch network
 - [~] U-branch-prep (plan in local Records; build lane claude/u-branch-20260926): retire Shop into Store (every branch reference, lots keep batch identity, dry-run, backup, recovery, single-branch UI); execution is owner-gated
@@ -64,6 +64,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 | Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
 | Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
 | P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
+| U-sync | claude/u-sync-20260926 | sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers | phase 1 done; refuter running |
 | U-drain | claude/u-drain-20260926 | automatic one-time upload of queued sales/outbox rows (existing server duplicate checks), nothing auto-deleted; then snapshot/mirror removal, POS checkout gate and copy (after U-sync, U-confirm, U-branch) | building; the offline map is in local Records |
 | U-deploykit | claude/u-deploykit-20260926 | run/release.bat menu, GitHub Actions deploy (manual start + owner approval), beginner setup guide, VPN split-tunnel guide | building; not pushed |
 
