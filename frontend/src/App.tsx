@@ -628,17 +628,36 @@ function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
   }
 }
 
+// A hidden tab has nobody to show the pending-sync count to, so a tick while
+// hidden is skipped and remembered, and the first return to visible refreshes
+// once. Queue changes still refresh immediately through the sync:queue-changed
+// and offline-sale listeners in useSyncErrorBanner; this is only the backstop.
 function scheduleDeferredPendingSyncPolling(refresh: () => void): CancelWarmup {
   if (typeof window === 'undefined') return () => {}
 
   let intervalId: number | null = null
+  let missedWhileHidden = false
+  const poll = () => {
+    if (document.visibilityState === 'hidden') {
+      missedWhileHidden = true
+      return
+    }
+    refresh()
+  }
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden' || !missedWhileHidden) return
+    missedWhileHidden = false
+    refresh()
+  }
   const timerId = window.setTimeout(() => {
-    intervalId = window.setInterval(refresh, PENDING_SYNC_POLL_INTERVAL_MS)
+    intervalId = window.setInterval(poll, PENDING_SYNC_POLL_INTERVAL_MS)
   }, PENDING_SYNC_INITIAL_REFRESH_DELAY_MS)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 
   return () => {
     window.clearTimeout(timerId)
     if (intervalId != null) window.clearInterval(intervalId)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
   }
 }
 

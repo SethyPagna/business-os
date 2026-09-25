@@ -1143,18 +1143,30 @@ export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): S
   return result
 }
 
+function isDocumentHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+}
+
+// One scheduled tick. A hidden tab (a till left in the background, a second
+// window) has nobody to show the result to, so the probe is skipped. The
+// return to visible is already covered: web-api.ts's visibilitychange
+// recovery (recoverForegroundSession) calls pingServerHealth, and this module
+// deliberately does not register a second visibility listener for it.
+function runScheduledHealthCheck(): void {
+  if (isDocumentHidden()) return
+  pingServerHealth().catch(() => {})
+}
+
 // Active health check runs on a slower cadence after the first shared probe.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck(): void {
   ensureHealthLifecycleListeners()
   if (_healthTimer) return
-  _healthTimer = setInterval(async () => {
-    await pingServerHealth()
-  }, HEALTH_CHECK_INTERVAL_MS)
+  _healthTimer = setInterval(runScheduledHealthCheck, HEALTH_CHECK_INTERVAL_MS)
   _healthInitialTimer = setTimeout(() => {
     _healthInitialTimer = null
-    pingServerHealth().catch(() => {})
+    runScheduledHealthCheck()
   }, HEALTH_CHECK_INITIAL_DELAY_MS)
 }
 
