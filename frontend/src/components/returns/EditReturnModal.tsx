@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
 import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction, type DamagedDisposition } from './helpers/returnOptions.ts'
@@ -151,6 +152,7 @@ function isWriteConflict(error: unknown): boolean {
 
 export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }: EditReturnModalProps) {
   const { user, t } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -329,7 +331,12 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     </div>, document.body,
   )
 
+  // The review dialog sits BESIDE the closing backdrop: React bubbles its
+  // clicks through the component tree, so inside it they would also run
+  // closeIfIdle (tests/overlayNestedFloatBubbling.test.ts).
   return createPortal(
+    <>
+    {confirmDialog}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
 
@@ -511,7 +518,12 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                 {submitting ? `⏳ ${T('saving_label','Saving…')}` : T('retry_original_request', 'Retry original request')}
               </button>
               <button type="button" disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50" onClick={() => {
-                if (window.confirm(T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) clearPendingRequest()
+                void askConfirm({
+                  title: T('discard_retry', 'Discard retry'),
+                  message: T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'),
+                  confirmLabel: T('discard_retry', 'Discard retry'),
+                  danger: true,
+                }).then((ok) => { if (ok) clearPendingRequest() })
               }}>
                 {T('discard_retry', 'Discard retry')}
               </button>
@@ -526,7 +538,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         </div>
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
-    </div>,
+    </div>
+    </>,
     document.body,
   )
 }

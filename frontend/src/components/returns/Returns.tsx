@@ -8,6 +8,7 @@ import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import SearchInput from '../shared/SearchInput'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
@@ -345,6 +346,7 @@ function ReturnPlusIcon({ className = '' }: { className?: string }) {
 
 export default function Returns({ embedded = false }: { embedded?: boolean }) {
   const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const canPriceSupplierReturn = canViewAcquisitionCosts(user) && canEditAcquisitionCosts(user)
   // Editing a return reverses and re-applies batch restocking against live
   // stock, so routes/returns.ts blocks it outright for the Review Required
@@ -1441,6 +1443,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <div className={`${embedded ? '' : 'page-scroll '}flex flex-col p-3 sm:p-6`}>
+      {confirmDialog}
       {activePendingHistoryRequest ? (
         <div data-needs-reconciliation={activePendingHistoryRequest.needsReconciliation || undefined} className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
           <span className="min-w-0 flex-1">{activePendingHistoryRequest.needsReconciliation
@@ -1450,9 +1453,15 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             void retryPendingReturnHistoryRequest()
               .catch((error) => notify(String((error as { message?: unknown })?.message || error), 'error'))
           }}>{tr('retry_original_request', 'Retry original request')}</button>
-          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
-            if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try { savePendingHistoryRequest(activePendingHistoryRequest.entityId, null) }
+          <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={async () => {
+            const entityId = activePendingHistoryRequest.entityId
+            if (await askConfirm({
+              title: tr('discard_retry', 'Discard retry'),
+              message: tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'),
+              confirmLabel: tr('discard_retry', 'Discard retry'),
+              danger: true,
+            })) {
+              try { savePendingHistoryRequest(entityId, null) }
               catch (error) { notify(String((error as { message?: unknown })?.message || error), 'error') }
             }
           }}>{tr('discard_retry', 'Discard retry')}</button>
@@ -1463,7 +1472,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>
           <button type="button" className="btn-secondary" disabled={bulkActionSaving} onClick={() => { void applyBulkAction(pendingBulkRequest).catch(() => {}) }}>{tr('retry_original_request', 'Retry original request', 'សាកល្បងសំណើដើមឡើងវិញ')}</button>
           <button type="button" className="btn-secondary" onClick={() => {
-            if (window.confirm(tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។'))) savePendingBulkRequest(null)
+            void askConfirm({
+              title: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
+              message: tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។'),
+              confirmLabel: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
+              danger: true,
+            }).then((ok) => { if (ok) savePendingBulkRequest(null) })
           }} disabled={bulkActionSaving}>{tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង')}</button>
         </div>
       ) : null}

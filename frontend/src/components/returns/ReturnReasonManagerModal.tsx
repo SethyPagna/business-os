@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Modal from '../shared/Modal.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { getReturnReasonPresets } from '../../api/returnsReadTransport.ts'
 import { getReturnReasonImpact, replaceReturnReason, saveReturnReasonPresets } from '../../api/returnsTransport.ts'
 import {
@@ -31,6 +32,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const { askConfirm, confirmDialog } = useConfirmDialog()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -81,18 +83,24 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
       const linked = Number(impact.linked_records || 0)
       const targetNote = impact.target_exists ? ` ${tr('return_reason_merge_notice', 'The target already exists, so the presets will merge.')}` : ''
       const scopeLabel = tr(scope, scope === 'customer' ? 'Customer' : 'Supplier').toLocaleLowerCase()
-      const confirmMessage = [
-        tr('return_reason_replace_confirm_intro', '{count} live {scope} return(s) use "{from}".{targetNote}')
+      // The native OK/Cancel carried the two outcomes in its text; the shared
+      // dialog puts them on the buttons. Cancel, X and Escape all keep the
+      // old Cancel meaning: rename only the saved preset.
+      const replaceLinked = linked > 0 && await askConfirm({
+        title: tr('rename_reason_prompt', 'Rename saved reason'),
+        message: tr('return_reason_replace_confirm_intro', '{count} live {scope} return(s) use "{from}".{targetNote}')
           .replace('{count}', String(linked))
           .replace('{scope}', scopeLabel)
           .replace('{from}', from)
           .replace('{targetNote}', targetNote),
-        '',
-        tr('return_reason_replace_confirm_ok', 'OK: update those exact matches too.'),
-        tr('return_reason_replace_confirm_cancel', 'Cancel: rename only the saved preset.'),
-        tr('return_reason_replace_confirm_note', 'Audit and stock history remain unchanged.'),
-      ].join('\n')
-      const replaceLinked = linked > 0 && window.confirm(confirmMessage)
+        items: [
+          { label: tr('before', 'Before'), value: from },
+          { label: tr('after', 'After'), value: to },
+        ],
+        note: tr('return_reason_replace_confirm_note', 'Audit and stock history remain unchanged.'),
+        confirmLabel: tr('return_reason_replace_confirm_ok', 'OK: update those exact matches too.'),
+        cancelLabel: tr('return_reason_replace_confirm_cancel', 'Cancel: rename only the saved preset.'),
+      })
       const response = await replaceReturnReason({
         return_scope: scope,
         from,
@@ -113,12 +121,17 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   }
 
   const remove = async (value: string) => {
-    if (!window.confirm(tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value))) return
+    if (!(await askConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value),
+      danger: true,
+    }))) return
     await persist(removeReturnReasonPreset(presets, scope, value), tr('return_reason_removed', 'Saved choice removed; existing returns were preserved.'))
   }
 
   return (
     <Modal title={tr('return_reasons_title', 'Return reasons')} onClose={onClose} size="sm" unsavedChanges={{ dirty: Boolean(draft.trim()) }}>
+      {confirmDialog}
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
           {(['customer', 'supplier'] as ReturnReasonScope[]).map((value) => (
