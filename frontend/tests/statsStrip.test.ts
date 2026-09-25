@@ -414,7 +414,7 @@ test('Part 553/554: report sections render selected-currency money + a CSV expor
       ]) {
         const broken = src.replace(from, to)
         assert.notEqual(broken, src, 'Sales wiring negative control must apply')
-        assert.throws(() => assertSalesWiring(broken), undefined, 'a disconnected or currency-losing delegate must fail')
+        assert.throws(() => assertSalesWiring(broken), 'a disconnected or currency-losing delegate must fail')
       }
     } else {
       assert.ok(src.includes('downloadCSV('), `${rel} exports CSV`)
@@ -458,7 +458,7 @@ test('Sales CSV delegate executes with the frozen selected-currency formatter an
   executeCsv(source)
   const rawUsd = source.replace('saleExportObjects(document, true)', 'saleExportObjects(document, false)')
   assert.notEqual(rawUsd, source, 'negative control must switch display values to raw USD')
-  assert.throws(() => executeCsv(rawUsd), undefined, 'dropping selected-currency formatting must fail')
+  assert.throws(() => executeCsv(rawUsd), 'dropping selected-currency formatting must fail')
 })
 
 test('old bespoke stat surfaces are really gone (no zombie tile grids)', () => {

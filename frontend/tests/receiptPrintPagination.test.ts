@@ -324,7 +324,7 @@ await runTest('both print delivery paths re-measure inside the actual print docu
     const normalized = surfaceSource.replace(/\r\n/g, '\n')
     const broken = normalized.replace(from, to)
     assert.notEqual(broken, normalized, 'negative control must alter the implementation')
-    assert.throws(() => assertPrintOrder(broken), undefined, 'lost measurement/order/permission protection must fail')
+    assert.throws(() => assertPrintOrder(broken), 'lost measurement/order/permission protection must fail')
   }
 })
 
