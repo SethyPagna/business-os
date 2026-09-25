@@ -13,13 +13,18 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [!] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): new APAC bucket + copy + binding switch — plan and owner checkpoint after checkpoint 1
 
 ### Checkpoint 1 — admin (lanes run in parallel)
-- [~] U-telegram: `====Title/ខ្មែរ====` sections, `English/Khmer`, `ID សម្គាល់`, `Sale invoice/វិក្កយបត្រ`, `Status updated/…`, colon instead of em dash; forum-topic routing per message type (shift, sale, status, more)
+- [x] U-telegram (integrated; refuter certified after deleted-topic fallback + uniform settings gate): `====Title/ខ្មែរ====` sections, `English/Khmer`, `ID សម្គាល់`, `Sale invoice/វិក្កយបត្រ`, `Status updated/…`, colon instead of em dash; forum-topic routing per message type (shift, sale, status, more)
 - [~] U-cost: depleted (qty 0) received lots excluded from the cost average; lots with stock listed first, depleted greyed; guards; read-only production audit of affected products
-- [~] U-products-ui: invisible chip scroll on large screens; cost click opens cost; mobile hit targets (name ≠ received date, empty space ≠ records); record rows open their own before/after
-- [ ] Integrate → both package gates at committed HEAD → browser check → deploy (owner said deploy as soon as possible) → live check
+- [x] U-products-ui (integrated; refuter certified): invisible chip scroll on large screens; cost click opens cost; mobile hit targets (name ≠ received date, empty space ≠ records); record rows open their own before/after
+- [~] U-records: stock-in lines get before/after (one set-based query), record floats beside the backdrop in Transfer / Fast stock-in / Receive batch, shared confirm dialog instead of native confirm in stock screens, movement rows open their own record
+- [~] U-load: language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
+- [~] U-db: search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
+- [x] Live-update hub moved to an APAC-hinted Durable Object; 12 route handlers no longer wait on it — dc2e4596
+- [!] Deploy blocked: this laptop exits through a German datacenter proxy/VPN and the Cloudflare API answers wrangler with a bot challenge; owner to switch network
+- [ ] Integrate → both package gates at committed HEAD → browser check → deploy → live check
 
 ### Checkpoint 2 — public site
-- [~] P-public: Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
+- [x] P-public (refuter certified; translate DOM guard, viewer focus/scroll lock, CSP frame-src added; on-screen check pending): Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
 - [ ] Official product names and details from brand websites (research lane → owner-reviewed import; no silent writes)
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
 
