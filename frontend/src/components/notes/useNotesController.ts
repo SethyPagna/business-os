@@ -238,7 +238,11 @@ export function useNotesController() {
       })
   }, [notes, notify, sortedNotes, t])
 
-  return {
+  // NotesProvider hands this object to NotesContext, and NotesProvider
+  // re-renders with the whole App shell (navigation, a pending-sync count,
+  // the pull-to-refresh distance). A fresh object each time re-rendered every
+  // notes reader for nothing; memoized, it changes only when a field does.
+  return useMemo(() => ({
     t,
     loading,
     notes,
@@ -259,5 +263,26 @@ export function useNotesController() {
     handleTogglePin,
     handleDelete,
     reorderNotes,
-  }
+  }), [
+    t,
+    loading,
+    notes,
+    sortedNotes,
+    activeId,
+    activeNote,
+    draftTitle,
+    draftContent,
+    saveState,
+    busy,
+    ensureLoaded,
+    openNote,
+    closeEditor,
+    flushPendingSave,
+    handleNewNote,
+    handleTitleChange,
+    handleContentChange,
+    handleTogglePin,
+    handleDelete,
+    reorderNotes,
+  ])
 }
