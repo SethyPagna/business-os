@@ -14,7 +14,7 @@ import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogTe
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
@@ -1576,23 +1576,28 @@ app.get('/stock-in-session-lines', async (c) => {
   // every line still on screen -- never a query per line. A zero-quantity
   // create has no movement and gets null; so does every line if the lookup
   // fails -- the receipt stays readable and shows "—", not a guessed balance.
-  let balances = new Map<number, { before_qty: number; after_qty: number }>()
+  // Owner, 26 Sep: both pairs -- the line's branch, then the total across
+  // branches (before_qty/after_qty stay the total, for compatibility) -- and
+  // the active-branch count, so the float collapses to one line once the
+  // business runs a single branch.
+  let balances = new Map<number, MovementStockBalance>()
+  let activeBranchCount: number | null = null
   try {
-    balances = await loadMovementStockBalances(db, rows.slice(0, 2000).map((row) => Number(row.id)))
+    ({ balances, activeBranchCount } = await loadMovementStockBalances(db, rows.slice(0, 2000).map((row) => Number(row.id))))
   } catch {
     balances = new Map()
+    activeBranchCount = null
   }
   rows = rows.map((row) => {
     const balance = balances.get(Number(row.id))
     return {
       ...row,
       batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0,
-      before_qty: balance ? balance.before_qty : null,
-      after_qty: balance ? balance.after_qty : null,
+      ...movementBalanceFields(balance),
     }
   })
   const truncated = exceededLineLimit || rows.length > 2000
-  return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated })
+  return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated, active_branch_count: activeBranchCount })
 })
 
 app.get('/stock-ledger', async (c) => {

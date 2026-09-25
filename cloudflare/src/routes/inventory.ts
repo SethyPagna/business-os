@@ -1067,9 +1067,11 @@ app.get('/movements', async (c) => {
 app.get('/movements/:id/balance', async (c) => {
   const id = Number.parseInt(String(c.req.param('id') || ''), 10)
   if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
-  const { loadMovementStockBalances } = await import('../lib/stockLedgerQuery')
-  const balance = (await loadMovementStockBalances(getDb(c.env), [id])).get(id)
-  return c.json({ id, before_qty: balance ? balance.before_qty : null, after_qty: balance ? balance.after_qty : null })
+  const { loadMovementStockBalances, movementBalanceFields } = await import('../lib/stockLedgerQuery')
+  // Owner, 26 Sep: the branch pair and the total pair (before_qty/after_qty
+  // stay the total, for compatibility), plus the active-branch count.
+  const { balances, activeBranchCount } = await loadMovementStockBalances(getDb(c.env), [id])
+  return c.json({ id, ...movementBalanceFields(balances.get(id)), active_branch_count: activeBranchCount })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----

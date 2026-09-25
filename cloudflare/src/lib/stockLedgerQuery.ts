@@ -119,21 +119,32 @@ export function movementStockAfterSql(movement: string, product: string): string
 
 /**
  * U-records: before/after for an arbitrary set of movement ids (a stock-in
- * session's received lines), SET-BASED -- one statement for any number of
- * lines, never one correlated walk per line.
+ * session's received lines, a Movements-tab record), SET-BASED -- one
+ * statement for any number of lines, never one correlated walk per line.
+ *
+ * Owner, 26 Sep: before/after shows BOTH numbers -- the movement's own
+ * branch first ("Shop 10 -> 7"), the total across branches under it
+ * ("Total 18 -> 15"). Both pairs come out of the SAME statement:
+ *
+ *   total  -- the product's current stock_quantity minus the sum of every
+ *             STRICTLY NEWER movement of the product, ordered exactly as
+ *             movementStockAfterSql defines "newer" (created_at, then id).
+ *             Identical to the Stock Changes ledger's correlated expression
+ *             (proved on the real migration chain by
+ *             scripts/test-stock-in-line-balance-pure.cjs).
+ *   branch -- the same walk partitioned by (product, branch), starting from
+ *             that branch's branch_stock row. When the movement has no
+ *             branch, or a NEWER movement of the product has none (its
+ *             branch cannot be walked back through), the branch pair is
+ *             null: the caller shows "—", never a guess.
  *
  * The ids travel as ONE bound JSON array (@movementIds via json_each), so the
  * statement never chunks against D1's bound-parameter cap. For the products
- * those movements touch, it reads each product's movements from the oldest
- * requested one onward (a range scan of
- * idx_inventory_movements_product_created_pg) and runs the backward walk as a
- * window: the sum of every STRICTLY NEWER movement, ordered exactly as
- * movementStockAfterSql defines "newer" -- created_at, then id. after_qty is
- * the product's current stock minus that sum, identical to the ledger's
- * correlated expression (proved on the real migration chain by
- * scripts/test-stock-in-line-balance-pure.cjs). Rows go through
- * attachBeforeQty like the ledger's. A movement with no product or no
- * timestamp is simply absent -- its caller shows "—", never a guess.
+ * those movements touch it range-reads each product's movements from the
+ * oldest requested one onward (idx_inventory_movements_product_created_pg);
+ * the branch_stock read is the unique (product_id, branch_id) index. The
+ * count of ACTIVE branches rides along so a caller can collapse to one line
+ * once the business runs a single branch -- derived from data, not a flag.
  */
 export const MOVEMENT_STOCK_BALANCES_SQL = `
     WITH target AS (
@@ -148,20 +159,35 @@ export const MOVEMENT_STOCK_BALANCES_SQL = `
       GROUP BY product_id
     ),
     walk AS (
-      SELECT mn.id, mn.product_id,
+      SELECT mn.id, mn.product_id, mn.branch_id,
              ${movementSignedQuantitySql('mn')} AS signed_quantity,
              SUM(${movementSignedQuantitySql('mn')}) OVER (
                PARTITION BY mn.product_id
                ORDER BY mn.created_at DESC, mn.id DESC
                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-             ) AS newer_sum
+             ) AS newer_sum,
+             SUM(${movementSignedQuantitySql('mn')}) OVER (
+               PARTITION BY mn.product_id, mn.branch_id
+               ORDER BY mn.created_at DESC, mn.id DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS branch_newer_sum,
+             SUM(CASE WHEN mn.branch_id IS NULL THEN 1 ELSE 0 END) OVER (
+               PARTITION BY mn.product_id
+               ORDER BY mn.created_at DESC, mn.id DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS newer_unbranched
       FROM scope s
       JOIN inventory_movements mn ON mn.product_id = s.product_id AND mn.created_at >= s.since
     )
-    SELECT w.id, w.signed_quantity, COALESCE(p.stock_quantity, 0) - COALESCE(w.newer_sum, 0) AS after_qty
+    SELECT w.id, w.branch_id, w.signed_quantity,
+           COALESCE(p.stock_quantity, 0) - COALESCE(w.newer_sum, 0) AS after_qty,
+           CASE WHEN w.branch_id IS NULL OR COALESCE(w.newer_unbranched, 0) > 0 THEN NULL
+                ELSE COALESCE(bs.quantity, 0) - COALESCE(w.branch_newer_sum, 0) END AS branch_after_qty,
+           (SELECT COUNT(*) FROM branches b WHERE COALESCE(b.is_active, 1) = 1) AS active_branch_count
     FROM walk w
     JOIN target t ON t.id = w.id
-    LEFT JOIN products p ON p.id = w.product_id`
+    LEFT JOIN products p ON p.id = w.product_id
+    LEFT JOIN branch_stock bs ON bs.product_id = w.product_id AND bs.branch_id = w.branch_id`
 
 /** The minimal D1 surface loadMovementStockBalances needs (lib/db.ts's D1Compat satisfies it). */
 export type MovementBalanceDb = {
@@ -169,17 +195,53 @@ export type MovementBalanceDb = {
 }
 
 /**
- * Stock before -> after for each movement id, in ONE statement regardless of
- * how many ids (the stock-in session-lines route; its speed test counts the
- * prepares). Ids without a derivable balance are absent from the map.
+ * One movement's stock before -> after, twice. before_qty/after_qty are the
+ * TOTAL pair (the name every existing reader already uses); the branch pair
+ * is null when it cannot be walked back (see MOVEMENT_STOCK_BALANCES_SQL).
  */
-export async function loadMovementStockBalances(db: MovementBalanceDb, movementIds: readonly number[]): Promise<Map<number, { before_qty: number; after_qty: number }>> {
-  const balances = new Map<number, { before_qty: number; after_qty: number }>()
+export type MovementStockBalance = {
+  before_qty: number
+  after_qty: number
+  branch_before_qty: number | null
+  branch_after_qty: number | null
+}
+
+/** The wire shape of a balance: both pairs, the total pair twice (before_qty/after_qty stay for compatibility). */
+export function movementBalanceFields(balance: MovementStockBalance | undefined): Record<string, number | null> {
+  return {
+    before_qty: balance ? balance.before_qty : null,
+    after_qty: balance ? balance.after_qty : null,
+    total_before_qty: balance ? balance.before_qty : null,
+    total_after_qty: balance ? balance.after_qty : null,
+    branch_before_qty: balance ? balance.branch_before_qty : null,
+    branch_after_qty: balance ? balance.branch_after_qty : null,
+  }
+}
+
+/**
+ * Stock before -> after for each movement id, branch and total, in ONE
+ * statement regardless of how many ids (the session-lines route's speed test
+ * counts the prepares). Ids without a derivable balance are absent from the
+ * map; activeBranchCount is null when nothing was read.
+ */
+export async function loadMovementStockBalances(db: MovementBalanceDb, movementIds: readonly number[]): Promise<{ balances: Map<number, MovementStockBalance>; activeBranchCount: number | null }> {
+  const balances = new Map<number, MovementStockBalance>()
   const ids = [...new Set(movementIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
-  if (!ids.length) return balances
-  const rows = await db.prepare(MOVEMENT_STOCK_BALANCES_SQL).all<{ id: number; signed_quantity: number; after_qty: number }>({ movementIds: JSON.stringify(ids) })
-  for (const row of attachBeforeQty(rows)) balances.set(Number(row.id), { before_qty: row.before_qty, after_qty: Number(row.after_qty) })
-  return balances
+  if (!ids.length) return { balances, activeBranchCount: null }
+  const rows = await db.prepare(MOVEMENT_STOCK_BALANCES_SQL).all<{ id: number; signed_quantity: number; after_qty: number; branch_after_qty: number | null; active_branch_count: number }>({ movementIds: JSON.stringify(ids) })
+  let activeBranchCount: number | null = null
+  for (const row of attachBeforeQty(rows)) {
+    const signed = Number(row.signed_quantity || 0)
+    const branchAfter = row.branch_after_qty == null ? null : Number(row.branch_after_qty)
+    balances.set(Number(row.id), {
+      before_qty: row.before_qty,
+      after_qty: Number(row.after_qty),
+      branch_before_qty: branchAfter == null ? null : branchAfter - signed,
+      branch_after_qty: branchAfter,
+    })
+    if (activeBranchCount == null && row.active_branch_count != null) activeBranchCount = Number(row.active_branch_count)
+  }
+  return { balances, activeBranchCount }
 }
 
 // One join clause, shared by every statement below so the row list, the
