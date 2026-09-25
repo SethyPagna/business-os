@@ -138,6 +138,9 @@ export async function serveUpload(env: Env, requestPath: string, request: Reques
  */
 function originalAsFallback(variant: ImageVariantRequest, original: R2ObjectBody): Response {
   const headers = applySafeUploadHeaders(new Headers(), variant.originalKey, original.httpMetadata?.contentType)
+  // Unreachable for a name that passed isSafeVariantSourceName (every source
+  // extension is servable), but the serving policy stays the single authority.
+  if (!headers) return notFound()
   headers.set('cache-control', IMAGE_VARIANT_FALLBACK_CACHE_CONTROL)
   return new Response(original.body, { headers })
 }
@@ -198,6 +201,7 @@ export async function serveImageVariant(env: Env, variant: ImageVariantRequest, 
     if (ctx) ctx.waitUntil(persist)
     else await persist
     const headers = applySafeUploadHeaders(new Headers(), variant.variantKey, 'image/webp')
+    if (!headers) throw new Error('variant key not servable')
     headers.set('cache-control', IMAGE_VARIANT_CACHE_CONTROL)
     return new Response(bytes, { headers })
   } catch {

@@ -108,38 +108,55 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
 // /uploads/* is public and same-origin with the admin app. It used to replay
 // whatever Content-Type the UPLOADER supplied (object.writeHttpMetadata), so
 // an uploaded .html or .svg rendered inline and ran script on the admin
-// origin. The served type is now decided HERE, from a server allowlist, and
-// the stored metadata is never replayed:
+// origin. Owner direction: public /uploads is for IMAGES. The served type is
+// decided HERE, from the key's extension, and stored metadata is never
+// replayed:
 //
-//   - the extension decides first (a .jpg is image/jpeg whatever the uploader
-//     claimed -- with nosniff, a browser will not reinterpret it as HTML);
-//   - an extensionless key falls back to its STORED type, but only when that
-//     type is itself on the allowlist;
-//   - anything else is `application/octet-stream` + `Content-Disposition:
-//     attachment`, so it downloads instead of rendering.
+//   inline      jpeg / png / webp / gif / avif (and the image variants,
+//               always .webp). The extension wins over whatever type the
+//               uploader stored; with nosniff a browser will not reinterpret
+//               a .jpg as HTML.
+//   attachment  types a CURRENT flow still serves from /uploads (see
+//               ATTACHMENT_UPLOAD_TYPES). Correct media type so <video>/<img>
+//               keep working, but Content-Disposition: attachment so a
+//               navigation downloads instead of rendering.
+//   404         everything else (.html, .svg, .js, .bin, ...), and an
+//               extensionless key unless its STORED type is an inline image.
 //
 // Every response also carries nosniff and a sandboxing CSP. A CSP on an image
 // response does not affect embedding it in <img>; it only governs the
 // response when it is navigated to as a document.
-const INLINE_CONTENT_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+const INLINE_UPLOAD_TYPES: Readonly<Record<string, string>> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.avif': 'image/avif',
-  // Raster formats that cannot carry script; lib/fileAssets.ts accepts both
-  // as uploads, and an attachment-typed .bmp/.mov would stop rendering in
-  // <img>/<video> on browsers that honour nosniff for media.
-  '.bmp': 'image/bmp',
+}
+// TODO(owner: public /uploads is images-only): these are non-images a current
+// flow still reaches through /uploads, kept as attachments until those flows
+// move to an authenticated/download route:
+//   - video: the public storefront About block (CatalogSecondaryTabs <video>),
+//     the catalog editor, and the Files page / file picker previews;
+//   - .bmp: lib/fileAssets.ts still accepts it as an image upload;
+//   - .pdf / .csv: the Files page lists and copies every asset's public URL.
+const ATTACHMENT_UPLOAD_TYPES: Readonly<Record<string, string>> = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
+  '.bmp': 'image/bmp',
   '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
 }
-const INLINE_CONTENT_TYPES = new Set(Object.values(INLINE_CONTENT_TYPE_BY_EXTENSION))
+const INLINE_STORED_TYPES = new Set(Object.values(INLINE_UPLOAD_TYPES))
 
 export const UPLOAD_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+
+export type UploadServePolicy =
+  | { kind: 'inline'; contentType: string }
+  | { kind: 'attachment'; contentType: string }
+  | { kind: 'deny' }
 
 function keyExtension(key: string): string {
   const lastSegment = String(key || '').split('/').pop() || ''
@@ -147,33 +164,54 @@ function keyExtension(key: string): string {
   return match ? match[0].toLowerCase() : ''
 }
 
-/** The inline Content-Type for this key, or null when it must be an attachment. */
-export function inlineContentTypeFor(key: string, storedContentType?: string | null): string | null {
+/**
+ * How a stored key may be served. Pass `storedContentType` only once the
+ * object has been read; without it an extensionless key is 'deny' for now
+ * (callers use policyNeedsStoredType to know whether to look).
+ */
+export function uploadServePolicy(key: string, storedContentType?: string | null): UploadServePolicy {
   const ext = keyExtension(key)
-  if (ext) return INLINE_CONTENT_TYPE_BY_EXTENSION[ext] || null
+  if (ext) {
+    if (INLINE_UPLOAD_TYPES[ext]) return { kind: 'inline', contentType: INLINE_UPLOAD_TYPES[ext] }
+    if (ATTACHMENT_UPLOAD_TYPES[ext]) return { kind: 'attachment', contentType: ATTACHMENT_UPLOAD_TYPES[ext] }
+    return { kind: 'deny' }
+  }
   const stored = String(storedContentType || '').split(';')[0].trim().toLowerCase()
-  return INLINE_CONTENT_TYPES.has(stored) ? stored : null
+  return INLINE_STORED_TYPES.has(stored) ? { kind: 'inline', contentType: stored } : { kind: 'deny' }
+}
+
+/** True when the policy cannot be decided from the key alone. */
+function policyNeedsStoredType(key: string): boolean {
+  return keyExtension(key) === ''
 }
 
 /**
  * Sets the served type, disposition and hardening headers on `headers`,
  * REPLACING any content-type/content-disposition already there. Used for
  * fresh R2 reads, for edge-cache hits (entries cached before this guard
- * existed still hold the replayed type) and for image variants.
+ * existed still hold the replayed type) and for image variants. Returns
+ * null when the key must not be served at all.
  */
-export function applySafeUploadHeaders(headers: Headers, key: string, storedContentType?: string | null): Headers {
-  const inlineType = inlineContentTypeFor(key, storedContentType)
-  if (inlineType) {
-    headers.set('content-type', inlineType)
+export function applySafeUploadHeaders(headers: Headers, key: string, storedContentType?: string | null): Headers | null {
+  const policy = uploadServePolicy(key, storedContentType)
+  if (policy.kind === 'deny') return null
+  headers.set('content-type', policy.contentType)
+  if (policy.kind === 'inline') {
     headers.delete('content-disposition')
   } else {
-    headers.set('content-type', 'application/octet-stream')
     const fileName = (String(key || '').split('/').pop() || 'download').replace(/[^\w.-]+/g, '_')
     headers.set('content-disposition', `attachment; filename="${fileName}"`)
   }
   headers.set('x-content-type-options', 'nosniff')
   headers.set('content-security-policy', UPLOAD_CONTENT_SECURITY_POLICY)
   return headers
+}
+
+function deniedUpload(): Response {
+  return new Response('Not found', {
+    status: 404,
+    headers: { 'x-content-type-options': 'nosniff', 'content-security-policy': UPLOAD_CONTENT_SECURITY_POLICY },
+  })
 }
 
 // Serves an R2 object as an HTTP response, honoring conditional requests
@@ -238,6 +276,9 @@ export async function serveStoredObject(
   // portal.ts caller) -- both because that route must never share-cache and
   // because `caches` does not exist as a global outside a real Workers
   // runtime, so referencing it unconditionally would break every caller.
+  // Refused by extension before any cache or R2 read: a denied type costs
+  // nothing and can never be served from a pre-guard cache entry either.
+  if (!policyNeedsStoredType(key) && uploadServePolicy(key).kind === 'deny') return deniedUpload()
   const cache = ctx ? caches.default : null
   const cacheKey = ctx ? new Request(new URL(request.url).toString(), { method: 'GET' }) : null
   if (cache && cacheKey) {
@@ -250,6 +291,7 @@ export async function serveStoredObject(
       // entry: a response cached before the content-type guard existed
       // would otherwise keep serving the uploader's type for a year.
       const cachedHeaders = applySafeUploadHeaders(new Headers(cached.headers), key, cached.headers.get('content-type'))
+      if (!cachedHeaders) return deniedUpload()
       const etag = cached.headers.get('etag')
       const ifNoneMatch = request.headers.get('if-none-match')
       if (ifNoneMatchMatches(ifNoneMatch, etag)) {
@@ -265,7 +307,7 @@ export async function serveStoredObject(
   const headers = new Headers()
   // Deliberately NOT object.writeHttpMetadata(headers): that replays the
   // uploader-supplied content-type/disposition. See applySafeUploadHeaders.
-  applySafeUploadHeaders(headers, key, object.httpMetadata?.contentType)
+  if (!applySafeUploadHeaders(headers, key, object.httpMetadata?.contentType)) return deniedUpload()
   headers.set('etag', object.httpEtag)
   headers.set('cache-control', 'public, max-age=31536000, immutable')
   if (!('body' in object)) {
