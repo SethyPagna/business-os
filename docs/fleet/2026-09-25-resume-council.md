@@ -39,7 +39,7 @@ proceed N1–N4, then N6, then 0b. The parent owns shared conflict resolution.
 
 ## Chairman decisions
 
-1. Use `C:/Users/mrkl6/Projects`, with a visible Downloads/Projects junction.
+1. Use the owner-selected `C:/Users/mrkl6/Downloads/Projects` physical root. Fourteen project folders moved there; the locked eProducts folder is linked. Old project paths remain compatible through links.
    Preserve locked active checkouts through project links and retain hidden old
    paths where tasks depend on them. Preserve the old dirty Business OS checkout
    in Recovery; record hashes/manifests before recycling verified duplicates.

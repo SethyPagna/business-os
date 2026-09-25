@@ -10,11 +10,11 @@ No held migration ran. `/health` and runtime HTTP checks returned Cloudflare's
 403 challenge, so live HTTP health is **not certified**; deployment and allocation
 were verified through Cloudflare. No security rule was bypassed.
 
-Canonical checkout: `C:/Users/mrkl6/Projects/BusinessOS/Source`.
-Evidence: `Projects/BusinessOS/Records/Deployments/2026-09-25` under the user's home.
-The matching GitHub ZIP is `Projects/BusinessOS/Releases/business-os-7e7cc7dc.zip`;
+Canonical checkout: `C:/Users/mrkl6/Downloads/Projects/BusinessOS/Source`.
+Evidence: `Downloads/Projects/BusinessOS/Records/Deployments/2026-09-25` under the user's home.
+The matching GitHub ZIP is `Downloads/Projects/BusinessOS/Releases/business-os-7e7cc7dc.zip`;
 all 2,534 files matched the deployed commit. The former dirty shared checkout is
-preserved at `Projects/BusinessOS/Recovery/UnmergedWorkspace` (a junction), together
+preserved at `Downloads/Projects/BusinessOS/Recovery/UnmergedWorkspace` (a junction), together
 with its patch, status and Git/worktree manifests. Do not remove that recovery:
 it contains unique edits, ignored local configuration and linked worktree metadata.
 
