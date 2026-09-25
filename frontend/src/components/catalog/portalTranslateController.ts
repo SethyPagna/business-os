@@ -1,3 +1,5 @@
+import { installPortalTranslateDomGuard } from './portalTranslateDomGuard.ts'
+
 export const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
 export const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
 export const PORTAL_TRANSLATE_RELOAD_KEY = 'business-os:portal-translate-last-reload'
@@ -208,6 +210,10 @@ export function setupPortalExternalTranslateWidget({
     onFailure?.()
     return () => {}
   }
+
+  // A visitor has opted into a Google-translated language: from here on
+  // Google rewrites text nodes React owns. See portalTranslateDomGuard.ts.
+  installPortalTranslateDomGuard()
 
   let cancelled = false
   let container: Element | HTMLDivElement | null = ensurePortalTranslateWidgetHost()

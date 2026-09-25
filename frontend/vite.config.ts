@@ -843,7 +843,11 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
-    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
+    if (
+      normalized.includes('/src/components/catalog/portalTranslateController.ts')
+      // Its only importer; the DOM guard it installs belongs in the same chunk.
+      || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
+    ) {
       return 'portal-translate-controller'
     }
     if (
