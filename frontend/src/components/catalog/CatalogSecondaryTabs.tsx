@@ -545,7 +545,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   {previewConfig.businessName}
                 </div>
               ) : null}
-              <h2 className="notranslate mt-1 truncate text-2xl font-semibold tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
+              <h2 className="notranslate mt-1 break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
               {previewConfig.businessTagline ? <div className="notranslate mt-1 text-sm text-slate-500 dark:text-neutral-400" translate="no">{previewConfig.businessTagline}</div> : null}

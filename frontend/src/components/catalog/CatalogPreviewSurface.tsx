@@ -354,7 +354,13 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            {/* Square, full-width bars (P-public-8, owner 2026-09-25): the 28px
+                corners on these two shells sat 4px (px-1) from their content, so
+                in dark mode -- where both shells and the nav track paint a
+                background -- the curve cut into the header row, and the sticky
+                nav's rounded bottom left two see-through notches that the About
+                hero (the first section) scrolled through. */}
+            <header className="portal-header-shell border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
@@ -602,7 +608,7 @@ export default function CatalogPreviewSurface({
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
               <div
-                className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
+                className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
                 <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
