@@ -690,7 +690,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, matchTierSql, hasSearchTerm } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm } = filters
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -773,6 +773,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     familyOrderSql: effectiveFamilyOrderSql,
     intraFamilyOrderSql,
     matchRankSql,
+    rankCteSql,
     matchTierSql,
     promotedRankSql,
     // Only opted in when a search term is actually in play (see
@@ -946,7 +947,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
     useSearchIndex: options.useSearchIndex !== false,
   })
-  const { matchRankSql, matchTierSql, titleOnly, hasSearchTerm } = searchQuery
+  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm } = searchQuery
   const searchWhereClause = searchQuery.whereClause
 
   // brand/category can now carry more than one value per product (see
@@ -1042,7 +1043,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, matchTierSql, titleOnly, hasSearchTerm }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {

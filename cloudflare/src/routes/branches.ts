@@ -844,6 +844,7 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
   const searchQuery = buildProductSearchQuery(rawQuery, params)
   if (searchQuery.whereClause) where.push(searchQuery.whereClause)
   const matchRankSql = searchQuery.matchRankSql
+  const rankCteSql = searchQuery.rankCteSql
   const matchTierSql = searchQuery.matchTierSql
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {
@@ -858,7 +859,7 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
     if (stockState === 'low') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState, matchRankSql, matchTierSql }
+  return { where, params, stockState, matchRankSql, rankCteSql, matchTierSql }
 }
 
 app.get('/:id/stock', async (c) => {
@@ -900,7 +901,7 @@ app.get('/:id/stock', async (c) => {
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
   const lowStock = await loadLowStockConfig(c.env)
-  const { where, params, stockState, matchRankSql, matchTierSql } = buildBranchStockWhere(c, branchId, lowStock)
+  const { where, params, stockState, matchRankSql, rankCteSql, matchTierSql } = buildBranchStockWhere(c, branchId, lowStock)
   const whereSql = `WHERE ${where.join(' AND ')}`
   const summaryWhere = buildBranchStockWhere(c, branchId, lowStock, { includeStockState: false })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
@@ -972,6 +973,7 @@ app.get('/:id/stock', async (c) => {
     }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql,
+    rankCteSql,
     matchTierSql,
   })
 

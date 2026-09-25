@@ -185,6 +185,7 @@ async function search(rawQuery, { page = 1, pageSize = 20 } = {}) {
     }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: q.matchRankSql,
+    rankCteSql: q.rankCteSql,
     matchTierSql: q.matchTierSql,
   })
   return {

@@ -278,6 +278,7 @@ async function searchWithOldOrder(rawQuery, { page = 1, pageSize = 50 } = {}) {
       : 'family_promoted DESC, family_sort_value ASC, family_name ASC',
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: filters.matchRankSql,
+    rankCteSql: filters.rankCteSql,
     promotedRankSql,
     familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
   })

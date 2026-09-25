@@ -355,7 +355,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: Lo
     mode: query.searchMode || query.search_mode,
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
   })
-  const { matchRankSql, matchTierSql, titleOnly } = searchQuery
+  const { matchRankSql, rankCteSql, matchTierSql, titleOnly } = searchQuery
   const searchWhereClause = searchQuery.whereClause
 
   // Same multi-brand membership check as products.ts's buildSearchFilters
@@ -454,7 +454,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: Lo
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, matchTierSql, titleOnly }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly }
 }
 
 async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery) {
@@ -551,7 +551,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
   const db = getDb(env)
   const filters = appendInventoryProductFilters(query, await loadLowStockConfig(env))
-  const { where, joins, params, matchRankSql, matchTierSql } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql } = filters
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -605,6 +605,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
       // below), so fall back to the one column guaranteed to exist.
       intraFamilyOrderSql: metadataOnly ? 'id ASC' : 'lower(name) ASC, id ASC',
       matchRankSql: metadataOnly ? undefined : matchRankSql,
+      rankCteSql: metadataOnly ? undefined : rankCteSql,
       matchTierSql: metadataOnly ? undefined : matchTierSql,
     }),
     includeMetadata ? getInventoryProductMetadata(env, query) : Promise.resolve({ filters: { brands: [], categories: [] }, initials: [] }),

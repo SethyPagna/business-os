@@ -1912,6 +1912,7 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const searchQuery = buildProductSearchQuery(query.query || query.q || '', params, { paramPrefix: 'portal' })
   const searchWhereClause = searchQuery.whereClause
   const matchRankSql = searchQuery.matchRankSql
+  const rankCteSql = searchQuery.rankCteSql
   const matchTierSql = searchQuery.matchTierSql
 
   for (const field of ['brand', 'category']) {
@@ -1964,7 +1965,7 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   const baseWhere = [...where]
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql, matchTierSql }
+  return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql, rankCteSql, matchTierSql }
 }
 
 // The storefront's highest-traffic endpoint, and the one that scales with
@@ -2111,6 +2112,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     }),
     intraFamilyOrderSql: 'lower(name) ASC, id ASC',
     matchRankSql: filters.matchRankSql,
+    rankCteSql: filters.rankCteSql,
     matchTierSql: filters.matchTierSql,
     promotedRankSql: searchPromotedRankSql,
     familySortValueSql: PORTAL_BRAND_SORT_KEY_SQL,
