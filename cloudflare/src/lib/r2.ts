@@ -102,6 +102,80 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// Served content types (stored-XSS guard).
+//
+// /uploads/* is public and same-origin with the admin app. It used to replay
+// whatever Content-Type the UPLOADER supplied (object.writeHttpMetadata), so
+// an uploaded .html or .svg rendered inline and ran script on the admin
+// origin. The served type is now decided HERE, from a server allowlist, and
+// the stored metadata is never replayed:
+//
+//   - the extension decides first (a .jpg is image/jpeg whatever the uploader
+//     claimed -- with nosniff, a browser will not reinterpret it as HTML);
+//   - an extensionless key falls back to its STORED type, but only when that
+//     type is itself on the allowlist;
+//   - anything else is `application/octet-stream` + `Content-Disposition:
+//     attachment`, so it downloads instead of rendering.
+//
+// Every response also carries nosniff and a sandboxing CSP. A CSP on an image
+// response does not affect embedding it in <img>; it only governs the
+// response when it is navigated to as a document.
+const INLINE_CONTENT_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.avif': 'image/avif',
+  // Raster formats that cannot carry script; lib/fileAssets.ts accepts both
+  // as uploads, and an attachment-typed .bmp/.mov would stop rendering in
+  // <img>/<video> on browsers that honour nosniff for media.
+  '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.pdf': 'application/pdf',
+}
+const INLINE_CONTENT_TYPES = new Set(Object.values(INLINE_CONTENT_TYPE_BY_EXTENSION))
+
+export const UPLOAD_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+
+function keyExtension(key: string): string {
+  const lastSegment = String(key || '').split('/').pop() || ''
+  const match = /\.[^.]+$/.exec(lastSegment)
+  return match ? match[0].toLowerCase() : ''
+}
+
+/** The inline Content-Type for this key, or null when it must be an attachment. */
+export function inlineContentTypeFor(key: string, storedContentType?: string | null): string | null {
+  const ext = keyExtension(key)
+  if (ext) return INLINE_CONTENT_TYPE_BY_EXTENSION[ext] || null
+  const stored = String(storedContentType || '').split(';')[0].trim().toLowerCase()
+  return INLINE_CONTENT_TYPES.has(stored) ? stored : null
+}
+
+/**
+ * Sets the served type, disposition and hardening headers on `headers`,
+ * REPLACING any content-type/content-disposition already there. Used for
+ * fresh R2 reads, for edge-cache hits (entries cached before this guard
+ * existed still hold the replayed type) and for image variants.
+ */
+export function applySafeUploadHeaders(headers: Headers, key: string, storedContentType?: string | null): Headers {
+  const inlineType = inlineContentTypeFor(key, storedContentType)
+  if (inlineType) {
+    headers.set('content-type', inlineType)
+    headers.delete('content-disposition')
+  } else {
+    headers.set('content-type', 'application/octet-stream')
+    const fileName = (String(key || '').split('/').pop() || 'download').replace(/[^\w.-]+/g, '_')
+    headers.set('content-disposition', `attachment; filename="${fileName}"`)
+  }
+  headers.set('x-content-type-options', 'nosniff')
+  headers.set('content-security-policy', UPLOAD_CONTENT_SECURITY_POLICY)
+  return headers
+}
+
 // Serves an R2 object as an HTTP response, honoring conditional requests
 // (If-None-Match / If-Modified-Since) so browsers and CDNs can cache
 // uploaded assets without re-downloading them.
@@ -139,12 +213,16 @@ export async function serveObject(
       // Still honor a conditional request against the cached ETag -- the
       // cache entry replaces the R2 read, not the conditional-request
       // contract this route already had.
+      // Headers are re-derived on the way out, never trusted from the
+      // entry: a response cached before the content-type guard existed
+      // would otherwise keep serving the uploader's type for a year.
+      const cachedHeaders = applySafeUploadHeaders(new Headers(cached.headers), key, cached.headers.get('content-type'))
       const etag = cached.headers.get('etag')
       const ifNoneMatch = request.headers.get('if-none-match')
       if (etag && ifNoneMatch && ifNoneMatch === etag) {
-        return new Response(null, { status: 304, headers: cached.headers })
+        return new Response(null, { status: 304, headers: cachedHeaders })
       }
-      return cached.clone()
+      return new Response(cached.body, { status: cached.status, headers: cachedHeaders })
     }
   }
   const object = await bucket.get(key, {
@@ -154,7 +232,9 @@ export async function serveObject(
     return new Response('Not found', { status: 404 })
   }
   const headers = new Headers()
-  object.writeHttpMetadata(headers)
+  // Deliberately NOT object.writeHttpMetadata(headers): that replays the
+  // uploader-supplied content-type/disposition. See applySafeUploadHeaders.
+  applySafeUploadHeaders(headers, key, object.httpMetadata?.contentType)
   headers.set('etag', object.httpEtag)
   headers.set('cache-control', 'public, max-age=31536000, immutable')
   if (!('body' in object)) {
