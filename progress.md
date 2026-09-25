@@ -21,6 +21,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - Product name tap opens the product; chips keep filtering. Commit email stays ungsethypagna@gmail.com.
 - (26 Sep) Stock before/after shows the branch pair and the total pair; all staff keep seeing all branches (no per-branch access).
 - (26 Sep) Soon one branch: Warehouse (id 1) is renamed Store and Shop (id 2) is retired, keeping its name so its records read as legacy. The move is an official transfer ("+N from Shop" on each stock card) run as one fast backend step; history is never relabelled; returns/edits/queued sales against Shop are rewired to Store and keep that they came from Shop. Prepare now so the day is one approved step: branch UI collapses to one line/view from data, dry-run + backup + recovery ready.
+- (26 Sep) Offline mode is cancelled for good, and the app is optimized as online-only. The next build uploads any sales or actions still queued on a till exactly once, then removes offline data. Without internet, a clear "No connection" banner appears, Save/Checkout are blocked, and the cart stays on screen. The app stays installable, keeps the "Restart now" bar, and caches app code only. The dashboard may be up to 20 s stale. Anonymous A/B comparison telemetry (hashes, counts, timings) goes to Analytics Engine.
 
 ### Data safety (nothing lost or corrupted)
 - [ ] Before any remote migration: record the D1 Time Travel bookmark (restore point) and pre-migration counts/totals in the deploy record
@@ -63,6 +64,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 | Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
 | Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
 | P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
+| U-offline-removal | not yet created | drain-once, then remove snapshot/mirrors/outbox; offline banner + blocked saving; SW app-code only | mapping (read-only) running; build after U-sync phase 1 |
 
 ### Verification (every lane, before integration)
 - [ ] Refuter per lane (separate agent, read-only): tries to prove the fix wrong; checks sibling surfaces (POS, inventory, reports, public preview), permissions (backend role gate = UI gate), both language packs, undo/audit, offline paths
