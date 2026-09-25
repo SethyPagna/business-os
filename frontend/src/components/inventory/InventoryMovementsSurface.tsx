@@ -6,6 +6,7 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import ExportMenu from '../shared/ExportMenu'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -229,6 +230,7 @@ export default function InventoryMovementsSurface({
   collapsedMovementSections,
   visibleMovementGroups,
 }: InventoryMovementsSurfaceProps) {
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // Every data column of the desktop table, for the day/action header rows
   // to span; +1 while the Select-mode checkbox column exists.
   const desktopColumnCount = movementSelectMode ? 8 : 7
@@ -344,6 +346,7 @@ export default function InventoryMovementsSurface({
 
   return (
         <>
+          {confirmDialog}
           {/* Compact movement controls. The date range is optional, so the
               page opens with the complete history rather than only today. */}
           <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800/60">
@@ -357,9 +360,15 @@ export default function InventoryMovementsSurface({
                     <button
                       type="button"
                       className="btn-secondary px-2 py-1 text-[11px]"
-                      onClick={() => {
-                        if (!window.confirm(tr('confirm_export_selected_movements'))) return
-                        exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')
+                      onClick={async () => {
+                        const groups = selectedMovementGroups
+                        if (!(await askConfirm({
+                          title: tr('export_selected', 'Export selected'),
+                          message: tr('confirm_export_selected_movements', 'Export the selected movements?'),
+                          items: [{ label: tr('selected', 'selected'), value: groups.length }],
+                          confirmLabel: tr('export_selected', 'Export selected'),
+                        }))) return
+                        exportMovementGroups(groups, 'inventory-movements-selected')
                       }}
                     >
                       {tr('export_selected', 'Export selected')}

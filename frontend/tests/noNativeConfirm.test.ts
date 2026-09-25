@@ -63,7 +63,6 @@ const REMAINING: Record<string, number> = {
   'components/branches/TransferModal.tsx': 1,
   'components/catalog/CatalogAccountSection.tsx': 1,
   'components/inventory/Inventory.tsx': 3,
-  'components/inventory/InventoryMovementsSurface.tsx': 1,
   'components/inventory/ManageBatchesModal.tsx': 2,
   'components/products/DeleteConfirmModal.tsx': 1,
   'components/products/Products.tsx': 5,
