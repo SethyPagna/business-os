@@ -830,7 +830,7 @@ app.post('/shared-general-customer-membership-repair/apply', async (c) => {
   const beforeToken = await repair.readGeneralCustomerMembershipRepairCacheToken(c.env)
   try {
     const result = await repair.applyGeneralCustomerMembershipRepair(db, plan)
-    const refresh = await repair.refreshGeneralCustomerMembershipRepair(c.env, beforeToken)
+    const refresh = await repair.refreshGeneralCustomerMembershipRepair(c.env, beforeToken, (promise) => c.executionCtx.waitUntil(promise))
     return c.json({
       success: true,
       outcome: result.outcome,
@@ -1036,7 +1036,7 @@ app.post('/finalize-migration', async (c) => {
       // exact replay. An unrelated pre-commit version advance must never be
       // mistaken for this repair's successful invalidation.
       const beforeToken = await repair.readGeneralCustomerRepairCacheToken(c.env)
-      const refresh = await repair.refreshGeneralCustomerRepair(c.env, beforeToken)
+      const refresh = await repair.refreshGeneralCustomerRepair(c.env, beforeToken, (promise) => c.executionCtx.waitUntil(promise))
       return c.json({
         success: true,
         outcome: result.outcome,
