@@ -595,15 +595,19 @@ runTest('neither public path seeds its grid from a payload cut at another page s
   }
 })
 
-runTest('public product details keep every prepared section visible when its data is empty', () => {
+// Reversed by the owner on 2026-09-25 (P-public-3): an empty row is left out
+// instead of reading "Not provided yet." Every section stays WIRED -- a
+// product that has the text still shows it -- and the gating itself is
+// pinned in tests/productDetailOfficialName.test.ts.
+runTest('public product details wire every prepared section and show none as "Not provided yet"', () => {
   for (const section of ['features_benefits', 'who_for', 'ingredients', 'caution']) {
-    assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay visibly wired`)
+    assert.match(productDetailFlyoutSource, new RegExp(`sectionKey="${section}"`), `${section} should stay wired`)
   }
   assert.match(productDetailFlyoutSource, /data-product-detail-section="need_more_details"/)
   for (const label of ['productOfficialName', 'productIntroduction', 'productCategory', 'productBrand']) {
-    assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should remain in the flyout even without content`)
+    assert.match(productDetailFlyoutSource, new RegExp(`copy\\('${label}'`), `${label} should stay wired for products that have it`)
   }
-  assert.match(productDetailFlyoutSource, /productDetailNotProvided[\s\S]*Not provided yet\./)
+  assert.doesNotMatch(productDetailFlyoutSource, /Not provided yet\./)
   // Owner, 2026-09-25: Need More Details / Caution fall back to the owner's
   // own wording (productDetailDefaultsText.ts), not a generic line.
   assert.match(productDetailFlyoutSource, /resolveProductDetailDefault\('need_more_details'/)

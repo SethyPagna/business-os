@@ -15,7 +15,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import { StatusPill } from './catalogUi'
-import { parseProductDescription } from './productDetailSections.ts'
+import { parseProductDescription, resolveOfficialProductName } from './productDetailSections.ts'
 import { resolveProductDetailDefault } from './productDetailDefaultsText.ts'
 import type { ProductDetailSectionKey } from './productDetailSections.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
@@ -115,17 +115,18 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   )
 }
 
+// A section with nothing to say is not rendered at all (owner, 2026-09-25:
+// no placeholder rows for missing data on the storefront).
 function DetailSectionBlock({
   sectionKey,
   items,
   copy,
-  emptyText,
 }: {
   sectionKey: ProductDetailSectionKey
   items: string[]
   copy: CopyFn
-  emptyText: string
 }) {
+  if (!items.length) return null
   const meta = SECTION_META[sectionKey]
   const SectionIcon = meta.icon
   return (
@@ -141,8 +142,8 @@ function DetailSectionBlock({
           ))}
         </ul>
       ) : (
-        <p {...getKhmerTextProps(items[0] || emptyText, `whitespace-pre-line text-sm leading-6 ${items.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-          {items[0] || emptyText}
+        <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+          {items[0]}
         </p>
       )}
     </div>
@@ -209,7 +210,9 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const categoryValues = multiValues(product.categories, product.category)
   const brandValues = multiValues(product.brands, product.brand)
   const promotion = view.pricePresentation?.promotion
-  const emptyDetailText = copy('productDetailNotProvided', 'Not provided yet.')
+  // Only a real official name -- never the shop's name (see
+  // resolveOfficialProductName for why a copy of it counts as none).
+  const officialName = resolveOfficialProductName(parsed.officialName, product.name)
   const sectionItems = (...keys: ProductDetailSectionKey[]) => parsed.sections
     .filter((section) => keys.includes(section.key))
     .flatMap((section) => section.items)
@@ -354,35 +357,46 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               </div>
             ) : null}
 
-            <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-              <p translate={parsed.officialName ? 'no' : undefined} {...getKhmerTextProps(parsed.officialName || emptyDetailText, `${parsed.officialName ? 'notranslate ' : ''}whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-                {parsed.officialName || emptyDetailText}
-              </p>
-            </DetailField>
+            {/* Owner, 2026-09-25: a row with no value is left out rather
+                than shown with a placeholder. Caution and Need More
+                Details always have text (owner defaults). */}
+            {officialName ? (
+              <DetailField label={copy('productOfficialName', 'Official Product Name')}>
+                <p translate="no" {...getKhmerTextProps(officialName, 'notranslate whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                  {officialName}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailField label={copy('productIntroduction', 'Introduction')}>
-              <p {...getKhmerTextProps(parsed.intro || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.intro ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-                {parsed.intro || emptyDetailText}
-              </p>
-            </DetailField>
+            {parsed.intro ? (
+              <DetailField label={copy('productIntroduction', 'Introduction')}>
+                <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                  {parsed.intro}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} emptyText={emptyDetailText} />
+            <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} />
 
-            <DetailField label={copy('productCategory', 'Category')}>
-              <p className={`text-sm leading-6 ${categoryValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
-                {categoryValues.join(', ') || emptyDetailText}
-              </p>
-            </DetailField>
+            {categoryValues.length ? (
+              <DetailField label={copy('productCategory', 'Category')}>
+                <p className="text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                  {categoryValues.join(', ')}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailField label={copy('productBrand', 'Brand')}>
-              <p translate={brandValues.length ? 'no' : undefined} className={`${brandValues.length ? 'notranslate ' : ''}text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
-                {brandValues.join(', ') || emptyDetailText}
-              </p>
-            </DetailField>
+            {brandValues.length ? (
+              <DetailField label={copy('productBrand', 'Brand')}>
+                <p translate="no" className="notranslate text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                  {brandValues.join(', ')}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} emptyText={emptyDetailText} />
-            <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} emptyText={emptyDetailText} />
-            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} emptyText="" />
+            <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} />
+            <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} />
+            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} />
 
             <div data-product-detail-section="need_more_details">
               <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
