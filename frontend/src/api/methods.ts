@@ -21,7 +21,6 @@ let productWriteTransportPromise = null
 let rfidTransportPromise = null
 let salesTransportPromise = null
 let settingsTransportPromise = null
-let offlineSnapshotTransportPromise = null
 let returnsTransportPromise = null
 let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
@@ -123,11 +122,6 @@ function loadSalesTransport() {
 function loadSettingsTransport() {
   if (!settingsTransportPromise) settingsTransportPromise = import('./settingsTransport.ts')
   return settingsTransportPromise
-}
-
-function loadOfflineSnapshotTransport() {
-  if (!offlineSnapshotTransportPromise) offlineSnapshotTransportPromise = import('./offlineSnapshotTransport.ts')
-  return offlineSnapshotTransportPromise
 }
 
 function loadReturnsTransport() {
@@ -278,11 +272,6 @@ export async function getPendingSyncState() {
 export async function retryPendingSyncNow(reviewToken?: string) {
   const { retryPendingSyncNow: retryPendingSyncNowRequest } = await loadPendingSyncTransport()
   return retryPendingSyncNowRequest(reviewToken)
-}
-
-export async function refreshOfflineDeviceSnapshot(options = {}) {
-  const { refreshOfflineDeviceSnapshot: refreshOfflineDeviceSnapshotRequest } = await loadOfflineSnapshotTransport()
-  return refreshOfflineDeviceSnapshotRequest(options)
 }
 
 // mirrorTables: when omitted, every local IndexedDB mirror table is wiped

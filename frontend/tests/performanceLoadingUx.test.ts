@@ -798,8 +798,11 @@ assert.doesNotMatch(inventory, /window\.api|\(window as Window & \{ api\?:/, 'In
 assert.match(actionHistory, /function loadActionHistoryTransport\(\): Promise<ActionHistoryTransportModule>[\s\S]*import\('\.\.\/api\/actionHistoryTransport\.ts'\)/, 'action history hook should lazy-load its focused transport instead of window.api')
 assert.match(actionHistoryTransport, /export function getActionHistoryUsers\(\): Promise<unknown>[\s\S]*apiFetch\('GET', '\/api\/users'\)/, 'action history admin user filter should stay in the focused action-history transport')
 assert.doesNotMatch(actionHistory, /window\.api\?\.(?:getActionHistory|getUsers|createActionHistory|undoActionHistory|redoActionHistory|updateActionHistory)/, 'action history hook should not wake the broad API registry for history or user-filter work')
-assert.match(offlineSnapshotTransport, /export async function refreshOfflineDeviceSnapshot/, 'idle offline snapshot refresh should live in a focused transport')
-assert.doesNotMatch(offlineSnapshotTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"/, 'idle offline snapshot transport should not import the broad API registry')
+// K5: the snapshot is retired; the module survives only as a no-import stub
+// for web-api.ts until U-drain deletes its callers (runtime proof:
+// offlineSnapshotRetired.test.ts).
+assert.match(offlineSnapshotTransport, /export async function refreshOfflineDeviceSnapshot/, 'the retired snapshot keeps its export until web-api.ts stops importing it')
+assert.doesNotMatch(offlineSnapshotTransport, /^\s*import\b/m, 'the retired snapshot stub must not import the API registry, http or Dexie')
 assert.match(apiMethods, /function loadSaleWriteTransport\(\) \{[\s\S]*import\('\.\/saleWriteTransport\.ts'\)/, 'legacy API registry should lazy-load the focused sale write transport without creating a manual chunk cycle')
 assert.match(apiMethods, /export async function createSale\(d\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return createSaleRequest\(d\)/, 'legacy API registry should delegate createSale to the focused sale write transport')
 assert.match(apiMethods, /function loadPendingSyncTransport\(\) \{[\s\S]*import\('\.\/pendingSyncTransport\.ts'\)/, 'legacy API registry should lazy-load the focused pending sync transport')

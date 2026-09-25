@@ -129,10 +129,11 @@ await runTest('offline security hardening test is part of the utility suite', ()
   assert.match(packageSource, /"test:utils": "node tests\/runTestChain\.ts"/)
 })
 
-await runTest('offline customer snapshots use the bounded picker shape and replace the prior mirror', () => {
-  assert.match(offlineSnapshotSource, /\/api\/customers\?fields=picker&limit=\$\{OFFLINE_CUSTOMER_MIRROR_LIMIT\}/)
-  assert.match(offlineSnapshotSource, /await mirrorTable\('customers'\)\(items\)/)
-  assert.doesNotMatch(offlineSnapshotSource, /apiFetch\('GET', '\/api\/customers'\)/)
+// K5 (26 Sep 2026): the offline snapshot is retired, so no customer copy is
+// downloaded or mirrored onto the device at all (runtime proof:
+// offlineSnapshotRetired.test.ts).
+await runTest('the retired offline snapshot downloads and mirrors no customers', () => {
+  assert.doesNotMatch(offlineSnapshotSource, /apiFetch|mirrorTable|fields=picker/)
 })
 
 if (failed > 0) {

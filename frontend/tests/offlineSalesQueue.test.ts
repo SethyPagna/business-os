@@ -59,17 +59,13 @@ await runTest('browser startup and reconnect refresh reads without replaying ret
   assert.match(webApiSource, /addEventListener\('online'/)
 })
 
-await runTest('online device snapshots refresh local mirrors for server-offline reopening', () => {
-  assert.match(methodsSource, /export async function refreshOfflineDeviceSnapshot/)
-  assert.match(methodsSource, /loadOfflineSnapshotTransport\(\)/)
-  assert.doesNotMatch(methodsSource, /offline_device_snapshot_meta/)
-  assert.match(offlineSnapshotTransportSource, /offline_device_snapshot_meta/)
-  assert.match(offlineSnapshotTransportSource, /getSettingsSnapshot\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getProducts\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getBranches\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getSales\(\{\}\)/)
-  assert.match(offlineSnapshotTransportSource, /getReturnsSnapshot\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getInventoryMovements\(\{ pageSize: 5000 \}\)/)
+// K5 (26 Sep 2026): offline selling is cancelled, so the device snapshot that
+// re-read eleven lists every five minutes is retired. The runtime proof that
+// the stub makes no request is tests/offlineSnapshotRetired.test.ts; this
+// keeps the registry from growing a second entry point back.
+await runTest('the retired device snapshot has no registry entry and reads nothing', () => {
+  assert.doesNotMatch(methodsSource, /refreshOfflineDeviceSnapshot|offlineSnapshotTransport/)
+  assert.doesNotMatch(offlineSnapshotTransportSource, /apiFetch|getLocalDb|getProducts|getSales|getInventoryMovements\(/)
 })
 
 await runTest('offline mode banner stays visible while offline and announces sync timestamps', () => {
