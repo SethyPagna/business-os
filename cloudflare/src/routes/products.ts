@@ -454,17 +454,21 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
   // Branch rows are read once and joined in JS rather than re-selected per
   // chunk: `branches` is a handful of rows and repeating them per chunk
   // would multiply reads for no gain.
-  const branches = await db.prepare(`
-    SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
-  `).all<{ id: number; name: string }>()
-  const stockRows = await selectInChunks(ids, 0, (chunk) => {
-    const { sql, params } = buildInClause('id', chunk)
-    return db.prepare(`
-      SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity
-      FROM branch_stock
-      WHERE product_id IN (${sql})
-    `).all<{ product_id: number; branch_id: number; quantity: number }>(params)
-  })
+  // These reads depend only on the requested ids, not on each other. Overlap
+  // their waits while retaining the bounded, sequential stock-chunk chain.
+  const [branches, stockRows] = await Promise.all([
+    db.prepare(`
+      SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
+    `).all<{ id: number; name: string }>(),
+    selectInChunks(ids, 0, (chunk) => {
+      const { sql, params } = buildInClause('id', chunk)
+      return db.prepare(`
+        SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity
+        FROM branch_stock
+        WHERE product_id IN (${sql})
+      `).all<{ product_id: number; branch_id: number; quantity: number }>(params)
+    }),
+  ])
 
   const quantityByProductBranch = new Map<string, number>()
   const quantityByProduct = new Map<number, number>()
