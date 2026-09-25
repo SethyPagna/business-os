@@ -29,6 +29,7 @@ import {
   legalText,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
+import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
 
 export const LEGAL_QUERY_PARAM = 'legal'
 
@@ -419,10 +420,9 @@ function LegalReader({
   useEffect(() => {
     closeRef.current?.focus()
     const dialog = dialogRef.current
-    const previousOverflow = document.body.style.overflow
-    const previousDocumentOverflow = document.documentElement.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.documentElement.style.overflow = 'hidden'
+    // The shared counted lock: a plain inline overflow write loses to the
+    // storefront's html overflow-y: auto !important (documentScrollLock.ts).
+    const releaseScroll = lockDocumentScroll()
 
     // The reader is rendered beside the catalogue landmarks, rather than
     // inside them. Marking those landmarks inert keeps pointer and keyboard
@@ -461,8 +461,7 @@ function LegalReader({
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = previousOverflow
-      document.documentElement.style.overflow = previousDocumentOverflow
+      releaseScroll()
       background.forEach((element, index) => {
         if (!previouslyInert[index]) element.removeAttribute('inert')
       })

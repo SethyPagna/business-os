@@ -18,10 +18,12 @@ assert.match(legal, /requested\?\.isConnected \? requested : fallback/, 'focus d
 assert.match(legal, /document\.getElementById\('portal-main-content'\)/, 'direct ?legal links have no meaningful close fallback')
 assert.match(legal, /window\.requestAnimationFrame\(\(\) => \{[\s\S]{0,180}target\?\.focus\(\)/, 'focus runs before the reader unmounts')
 assert.match(surface, /<main id="portal-main-content" tabIndex=\{-1\}>/, 'the direct-link fallback cannot receive programmatic focus')
-assert.match(legal, /document\.body\.style\.overflow = 'hidden'/, 'opening the modal does not lock background document scroll')
-assert.match(legal, /document\.body\.style\.overflow = previousOverflow/, 'closing the modal does not restore the exact prior overflow style')
-assert.match(legal, /document\.documentElement\.style\.overflow = 'hidden'/, 'the document scroll owner remains scrollable behind the modal')
-assert.match(legal, /document\.documentElement\.style\.overflow = previousDocumentOverflow/, 'closing the modal does not restore the document scroll owner')
+// The reader locks the page through the shared counted helper: a plain inline
+// overflow write loses to html overflow-y: auto !important (main.css), and a
+// counted lock survives nesting with the product sheet / photo viewer.
+assert.match(legal, /import \{ lockDocumentScroll \} from '\.\.\/\.\.\/shared\/documentScrollLock\.ts'/, 'the reader does not use the shared scroll lock')
+assert.match(legal, /const releaseScroll = lockDocumentScroll\(\)[\s\S]{0,2600}return \(\) => \{[\s\S]{0,200}releaseScroll\(\)/, 'opening the reader does not lock document scroll, or the effect cleanup does not release it')
+assert.doesNotMatch(legal, /\.style\.overflow\s*=/, 'a direct overflow write bypasses the counted lock and loses to the !important scroll root')
 assert.match(legal, /setAttribute\('inert', ''\)/, 'background landmarks remain interactive while the legal modal is open')
 assert.match(legal, /removeAttribute\('inert'\)/, 'temporary inert state is not restored on close')
 assert.match(legal, /event\.key !== 'Tab'[\s\S]{0,900}last\.focus\(\)[\s\S]{0,400}first\.focus\(\)/, 'Tab and Shift+Tab do not cycle within the dialog')

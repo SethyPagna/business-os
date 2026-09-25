@@ -1,5 +1,6 @@
 // One counted document scroll lock for overlays that cover the page (the
-// storefront product sheet and the immersive photo viewer; refuter follow-up
+// storefront product sheet, the immersive photo viewer and the policy
+// reader in legal/LegalPages.tsx; refuter follow-up
 // to P-public-6, 2026-09-25).
 //
 // Why a shared, counted helper instead of each overlay writing
