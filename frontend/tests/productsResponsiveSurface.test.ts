@@ -75,7 +75,9 @@ assert.match(productRowParts, /mb-1 flex min-w-0 flex-wrap gap-1/, 'branch detai
 // list rows ragged. The pin stays, pointed at the new rule: names are still
 // content (never ellipsised away), they just scroll inside their own cell now.
 // The scroll behaviour itself is pinned in tests/productNameScrollCells.test.ts.
-assert.match(products, /getKhmerTextProps\(productName, 'min-w-0 text-sm font-semibold[^\n]*\{\.\.\.copy\(productName\)\}>\s*<EntityLink[^>]*>\s*<ProductNameRail name=\{productName\} \/>/, 'mobile product names retain Khmer typography, copy and link wrappers around the full-text two-line rail')
+// Owner, 25 Sep 2026: the name is no longer a link -- it opens the product
+// sheet through the row (tests/productRowTapTargets.test.ts pins why).
+assert.match(products, /getKhmerTextProps\(productName, 'min-w-0 text-sm font-semibold[^\n]*\{\.\.\.copy\(productName\)\}>(?:(?!<\/div>)[\s\S])*?<ProductNameRail name=\{productName\} \/>/, 'mobile product names retain Khmer typography and the copy wrapper around the full-text two-line rail')
 assert.equal((products.match(/<ProductNameRail name=\{productName\} \/>/g) || []).length, 2, 'desktop and mobile names share the same bounded full-text rail')
 assert.match(products, /shrink-0 whitespace-nowrap rounded-full bg-slate-100[\s\S]*\{barcode\}/, 'the mobile barcode pill must show every digit on one line rather than truncating or wrapping')
 assert.match(products, /aria-disabled=\{!thumbnailState\.hasImage\}[\s\S]*if \(thumbnailState\.hasImage\) openLightbox\(thumbnailState\.gallery, 0, productName\)/, 'product image slots must isolate row detail clicks and only open the gallery when an image exists')

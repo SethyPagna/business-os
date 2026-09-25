@@ -59,8 +59,16 @@ export default function EntityLink({
     <a
       href={href}
       onClick={onClick}
+      // A link inside a pressable row (the Products list, Sales, Returns) owns
+      // its WHOLE press, not just the start of it. Rows synthesise their own
+      // tap from the release (utils/longPress.ts), and a release that reached
+      // the row used to open the row's record as well -- on a phone the record
+      // sheet then slid up under the finger and took the link's own click.
+      // Owner, 25 Sep 2026: each region opens what it shows.
       onMouseDown={(event) => event.stopPropagation()}
+      onMouseUp={(event) => event.stopPropagation()}
       onTouchStart={(event) => event.stopPropagation()}
+      onTouchEnd={(event) => event.stopPropagation()}
       aria-label={ariaLabel}
       title={title}
       className={`text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:decoration-blue-700 dark:hover:text-blue-100 ${className}`}

@@ -115,14 +115,16 @@ runTest('Duplicates conflict rows show the whole name, never clamped',()=>{
  assert.doesNotMatch(nameSpan,/line-clamp-|\btruncate\b|scroll-x-clean/)
  assert.match(nameSpan,/copyMarker\(product\.name/)
 })
-runTest('Products preserves copy wrappers, links and row gestures',()=>{
+runTest('Products preserves copy wrappers and row gestures',()=>{
  const source=read('components/products/Products.tsx')
  assert.equal((source.match(/<ProductNameRail name=\{productName\} \/>/g)||[]).length,2)
  assert.equal((source.match(/getKhmerTextProps\(productName, ['`]min-w-0/g)||[]).length,2)
  assert.equal((source.match(/\{\.\.\.copy\(productName\)\}/g)||[]).length,2)
  assert.ok((source.match(/createLongPressHandlers\(rowLongPressState, \{/g)||[]).length>=2)
  assert.equal((source.match(/deferCopySurfaceAction\(copyTarget/g)||[]).length,4)
- assert.equal((source.match(/search=\{productName\}/g)||[]).length,2)
+ // Owner, 25 Sep 2026: the name opens the product through the row, not a
+ // name-search link (tests/productRowTapTargets.test.ts).
+ assert.equal((source.match(/search=\{productName\}/g)||[]).length,0)
 })
 // The mobile card takes the two-line rail; the dense desktop row has ONE line
 // to give, so it takes the horizontal scroller instead. Neither clips. (The

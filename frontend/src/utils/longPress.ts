@@ -79,12 +79,27 @@ export function consumeLongPressClick(state: LongPressState): boolean {
   return true
 }
 
+// A native control between the touched element and the surface that owns the
+// detector (the surface itself excluded -- a row may carry role="button").
+// Exported for tests.
+const CONTROL_SELECTOR = 'button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="checkbox"], [contenteditable="true"]'
+export function tapLandsOnControl(target: EventTarget | null, surface: EventTarget | null): boolean {
+  const start = target as Element | null
+  if (!start || typeof start.closest !== 'function') return false
+  const control = start.closest(CONTROL_SELECTOR)
+  if (!control || control === surface) return false
+  const owner = surface as Element | null
+  return !owner || typeof owner.contains !== 'function' || owner.contains(control)
+}
+
 export interface LongPressHandlers {
   onMouseDown: (event: React.MouseEvent) => void
   onMouseUp: () => void
   onMouseLeave: () => void
   onTouchStart: (event: React.TouchEvent) => void
-  onTouchEnd: () => void
+  // The event is optional so a caller replaying a release it already owns
+  // (shared/textAffordances.ts) can still drive the detector.
+  onTouchEnd: (event?: React.TouchEvent) => void
   onTouchMove: (event: React.TouchEvent) => void
   onContextMenu: (event: React.MouseEvent) => void
 }
@@ -143,7 +158,8 @@ export function createLongPressHandlers(
     }, thresholdMs)
   }
 
-  const end = () => {
+  // `claimTap` runs only when this release IS the tap -- see onTouchEnd.
+  const end = (claimTap?: () => void) => {
     clearTimer()
     const target = state.target
     state.target = null
@@ -159,7 +175,10 @@ export function createLongPressHandlers(
       state.cancelled = false
       return
     }
-    if (!disabled) onClick?.(target)
+    if (!disabled && onClick) {
+      claimTap?.()
+      onClick(target)
+    }
   }
 
   const cancel = () => {
@@ -182,7 +201,26 @@ export function createLongPressHandlers(
       const touch = event.touches[0]
       if (touch) start(touch.clientX, touch.clientY, event.target)
     },
-    onTouchEnd: () => end(),
+    // The ghost click (owner, 25 Sep 2026, Products on a phone: "tapping the
+    // product name opens received date; tapping empty space opens records").
+    // A tap is resolved HERE, on touchend, and onClick usually opens something
+    // -- the product sheet slides up under the finger before the browser has
+    // dispatched the tap's compatibility mouse events. Those are hit-tested at
+    // the tap point AFTER this handler, so the `click` landed on whatever the
+    // new sheet had drawn there: its "Received dates" row under a name, its
+    // records pills under empty card space. Cancelling the touchend is the
+    // standard way to say "this tap is handled": the browser then dispatches
+    // no compatibility mousedown/mouseup/click at all. Only a release that
+    // fires onClick is claimed; a hold, a scroll, or a detector with no
+    // onClick (the contact tabs, whose cells keep their own taps) leaves the
+    // event alone -- and so does a tap on a CONTROL inside the surface (the
+    // Products group card's expand button, a duplicate row's Keep buttons):
+    // that control's own click IS the compatibility click, and cancelling it
+    // would make the button dead on a phone.
+    onTouchEnd: (event) => end(() => {
+      if (!event?.cancelable || tapLandsOnControl(event.target, event.currentTarget)) return
+      event.preventDefault()
+    }),
     onTouchMove: (event) => {
       const touch = event.touches[0]
       if (touch) checkMove(touch.clientX, touch.clientY)

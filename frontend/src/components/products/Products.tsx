@@ -977,9 +977,11 @@ function ProductDesktopRowComponent({ product: p, indented = false, ctx }: { pro
                   before. */}
               {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
               <div {...getKhmerTextProps(productName, `min-w-0 text-gray-900 dark:text-white ${indented ? 'font-medium' : 'font-semibold'}`)} {...copy(productName)}>
-                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                  <ProductNameRail name={productName} />
-                </EntityLink>
+                {/* No link here (owner, 25 Sep 2026): the name opens the product sheet
+                    through the row, like every other bare part of the row. A link that
+                    filtered the list by this name made the name the one region that did
+                    something different from its row. */}
+                <ProductNameRail name={productName} />
               </div>
             </div>
             {dupInfo ? (
@@ -1209,9 +1211,11 @@ function ProductMobileCardComponent({ product: p, indented = false, ctx }: { pro
               <div className="min-w-0 flex-1">
                 {/* Product names wrap into two lines; the shared rail keeps the remaining text reachable. */}
                 <div {...getKhmerTextProps(productName, 'min-w-0 text-sm font-semibold text-gray-900 dark:text-white')} {...copy(productName)}>
-                  <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={tr('open_product', 'Open product', 'បើកផលិតផល')}>
-                    <ProductNameRail name={productName} />
-                  </EntityLink>
+                  {/* No link here (owner, 25 Sep 2026): the name opens the product sheet
+                      through the row, like every other bare part of the row. A link that
+                      filtered the list by this name made the name the one region that did
+                      something different from its row. */}
+                  <ProductNameRail name={productName} />
                 </div>
               </div>
               {/* Batch count rides the name row as a small YELLOW badge
