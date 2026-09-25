@@ -176,6 +176,52 @@ return isStaleBuildAsset`)({ location: { origin: 'https://admin.example.com' } }
   })
 }
 
+// I6-4: a cache hit on a content-hashed /assets/ file used to start a
+// background refetch every time (about 40 per admin open). Those files are
+// immutable, so a hit must cost zero requests -- while the unhashed icons and
+// manifests, whose bytes can change under the same name, keep revalidating.
+// Runs the real functions against a fake cache and counts network calls, so
+// the always-refresh implementation and the right one disagree here.
+for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
+  await runTestAsync(`a cache hit on a hashed build asset issues no request; unhashed hits still revalidate (${label})`, async () => {
+    const responseChecks = functionBody(source, 'function isValidTransportResponse', 'async function isAppShellDocument')
+    const staticPath = functionBody(source, 'function isImmutableBuildAsset', 'async function retainedStaticAsset')
+    const contentTypes: Record<string, string> = {
+      '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.json': 'application/json', '.png': 'image/png',
+    }
+    const fakeResponse = (url: string) => ({
+      ok: true, type: 'basic', redirected: false,
+      headers: new Headers({ 'content-type': contentTypes[url.slice(url.lastIndexOf('.'))] ?? 'text/plain' }),
+      clone() { return this },
+    })
+    async function hit(pathname: string) {
+      const url = `https://admin.example.com${pathname}`
+      let fetches = 0
+      let backgroundTasks = 0
+      const cached = fakeResponse(url)
+      const cache = { match: async () => cached, put: async () => {}, delete: async () => true }
+      const run = new Function('self', 'caches', 'fetch', 'STATIC_CACHE', `${responseChecks}
+${staticPath}
+return cacheFirstStatic`)(
+        { location: { origin: 'https://admin.example.com' } },
+        { open: async () => cache },
+        async (request: { url: string }) => { fetches += 1; return fakeResponse(request.url) },
+        'business-os-static-test',
+      ) as (request: { url: string }, event: { waitUntil: (task: Promise<unknown>) => void }) => Promise<unknown>
+      const served = await run({ url }, { waitUntil: () => { backgroundTasks += 1 } })
+      await new Promise(resolve => setTimeout(resolve, 0))
+      assert.equal(served, cached, `${pathname}: a cache hit answers from the cache`)
+      return { fetches, backgroundTasks }
+    }
+    for (const pathname of ['/assets/AdminRoot-AyyEAtBX.js', '/assets/index-D-UtyEn4.css', '/assets/lang-km-Di9qEzr0.js', '/assets/noto-sans-khmer-khmer-400-normal-Bq_9gC3t.woff2']) {
+      assert.deepEqual(await hit(pathname), { fetches: 0, backgroundTasks: 0 }, `${pathname} is immutable: no refetch`)
+    }
+    for (const pathname of ['/manifest.json', '/icon-512.png', '/theme-bootstrap.js', '/assets/unhashed.js']) {
+      assert.deepEqual(await hit(pathname), { fetches: 1, backgroundTasks: 1 }, `${pathname} can change under its name: still revalidated in the background`)
+    }
+  })
+}
+
 for (const [label, source] of [['source', swSource], ['shipped sw.js', builtSw]] as const) {
   await runTestAsync(`migration uses direct incumbent capability, never cache poisoning as authority (${label})`, async () => {
     const probe = functionBody(source, 'function validShellVersion', 'async function readIncumbentVersion')
