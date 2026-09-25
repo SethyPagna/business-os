@@ -23,6 +23,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import { loadSortSpec, saveSortSpec, type SortField, type SortSpec } from '../../utils/listSort'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -299,6 +300,7 @@ type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -897,7 +899,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   const handleDelete = async (customer: CustomerRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete customer "${customer.name}"?`)) {
+    if (!(await askConfirm({
+      title: tr(t, 'delete', 'Delete'),
+      message: tr(t, 'customer_delete_confirm', 'Delete customer "{name}"?').replace('{name}', String(customer.name || '')),
+      confirmLabel: tr(t, 'delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -936,7 +943,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) {
+    if (!(await askConfirm({
+      title: tr(t, 'delete', 'Delete'),
+      message: tr(t, 'customer_bulk_delete_confirm', 'Delete {n} customer(s)?').replace('{n}', String(selectedIds.size)),
+      confirmLabel: tr(t, 'delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1012,6 +1024,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   return (
     <div className="flex flex-col gap-3">
+      {confirmDialog}
       {/* Top-level section chips: the customer Directory (rows) OR the
           receivables ledger, one shown at a time -- the same compact one-row
           chip shape the Suppliers tab uses for Directory / Invoices, so the

@@ -21,6 +21,7 @@ import Modal from '../shared/Modal'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -485,6 +486,7 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabProps) {
   const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -978,7 +980,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleDelete = async (c: DeliveryContact) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete "${c.name}"?`)) {
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('delivery_contact_delete_confirm') || 'Delete "{name}"?').replace('{name}', String(c.name || '')),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -1015,7 +1022,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('delivery_contact_bulk_delete_confirm') || 'Delete {n} delivery contact(s)?').replace('{n}', String(selectedIds.size)),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1081,6 +1093,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   return (
     <div className="flex flex-col gap-3">
+      {confirmDialog}
       {/* Manage (Import + Export folded into one dropdown, same pattern
           Products.tsx uses) / History / Add Delivery -- History before
           Manage per the ordering used on Products. */}

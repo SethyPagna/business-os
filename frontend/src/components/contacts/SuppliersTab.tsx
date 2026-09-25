@@ -21,6 +21,7 @@ import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -487,6 +488,7 @@ function SupplierForm({ supplier, onSave, onUseExisting, onClose, t }: SupplierF
 
 function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabProps) {
   const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -1005,7 +1007,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
   const handleDelete = async (supplier: SupplierRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete supplier "${supplier.name}"?`)) {
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('supplier_delete_confirm') || 'Delete supplier "{name}"?').replace('{name}', String(supplier.name || '')),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -1044,7 +1051,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) {
+    if (!(await askConfirm({
+      title: t('delete') || 'Delete',
+      message: (t('supplier_bulk_delete_confirm') || 'Delete {n} supplier(s)?').replace('{n}', String(selectedIds.size)),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1117,6 +1129,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
   return (
     <div className="flex flex-col gap-3">
+      {confirmDialog}
       {/* Top-level section chips: the supplier Directory (rows) OR the merged
           invoice ledgers, one shown at a time. The invoice reports used to be
           two folded cards stacked below the supplier rows in this same scroll;
