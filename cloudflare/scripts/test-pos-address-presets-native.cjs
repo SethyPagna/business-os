@@ -64,6 +64,11 @@ const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/permissions': permissions,
   '../lib/searchMatch': { normalizedHaystackSql: (expression) => expression },
   '../lib/settingsSensitive': { stripSensitiveSettings: (value) => value },
+  // routes/settings.ts validates every Telegram forum-topic setting against
+  // this list (25 Sep 2026); this test never exercises that path, so a
+  // fixture array is enough -- it only needs to be an array of setting-key
+  // strings, not the real module's send/webhook machinery.
+  '../lib/telegram': { TELEGRAM_TOPIC_KEYS: ['telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts'] },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
 }).default
 settingsRoute.onError((_error, c) => c.json({ error: 'Internal Server Error' }, 500))
