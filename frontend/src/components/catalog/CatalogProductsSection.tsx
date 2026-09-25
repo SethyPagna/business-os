@@ -528,7 +528,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     key={value}
                     type="button"
                     onClick={() => toggleFilterValue(stockFilter, setStockFilter, value)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
+                    className={`inline-flex min-h-10 items-center rounded-full border px-3 py-1.5 text-xs font-semibold leading-5 transition-colors ${
                       active
                         ? 'border-blue-700 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950'
                         : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-800/90 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:bg-neutral-700/80 dark:hover:text-amber-300'
@@ -602,7 +602,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               field no accessible name at all: a reader announced a bare "edit
               text". A placeholder is not a name -- it disappears the moment
               anything is typed, and several readers ignore it outright. */}
-          <label htmlFor="portal-product-search" className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
+          <label htmlFor="portal-product-search" className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
             <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" aria-hidden="true" />
             <span className="sr-only">{copy('searchPlaceholder', 'Search products')}</span>
             <input
@@ -624,7 +624,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               trigger={(
                 <button
                   type="button"
-                  className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  className={`inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
                     filtersOpen || portalActiveFilterCount > 0 ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
                   }`}
                   aria-label={copy('filters', 'Filters')}
@@ -648,13 +648,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
                     <div className="flex items-center gap-2">
                       {portalActiveFilterCount > 0 ? (
-                        <button type="button" className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                        <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
                           {copy('clear', 'Clear')}
                         </button>
                       ) : null}
                       <button
                         type="button"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
                         onClick={closeMenu}
                         aria-label={copy('closeFilters', 'Close filters')}
                       >

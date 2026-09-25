@@ -417,7 +417,7 @@ export default function CatalogPreviewSurface({
                           href={item.value}
                           target="_blank"
                           rel="noreferrer"
-                          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
+                          className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
                           aria-label={item.label}
                           title={item.label}
                         >
@@ -463,7 +463,7 @@ export default function CatalogPreviewSurface({
                     {onOpenWishlist ? (
                       <button
                         type="button"
-                        className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                        className="relative inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                         onClick={onOpenWishlist}
                         aria-label={copy('wishlistTitle', 'Wishlist')}
                         title={copy('wishlistTitle', 'Wishlist')}
@@ -479,7 +479,7 @@ export default function CatalogPreviewSurface({
                     {onOpenAccount ? (
                       <button
                         type="button"
-                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
                         onClick={onOpenAccount}
                         aria-label={copy('account', 'Account')}
                         title={copy('account', 'Account')}
@@ -496,7 +496,7 @@ export default function CatalogPreviewSurface({
                         trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                            className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
                           >
@@ -604,7 +604,7 @@ export default function CatalogPreviewSurface({
                     ) : null}
                     <button
                       type="button"
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                      className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                       onClick={toggleTheme}
                       aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}

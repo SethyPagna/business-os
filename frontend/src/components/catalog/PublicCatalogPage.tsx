@@ -1971,7 +1971,7 @@ export default function PublicCatalogPage() {
       <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-1.5">
         <button
           type="button"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
           onClick={() => {
             setContactOpen(false)
             setContactMinimized(true)
@@ -1979,7 +1979,7 @@ export default function PublicCatalogPage() {
           aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
           title={copy('contactUsMinimize', 'Minimize the contact us button')}
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-4 w-4" />
         </button>
         <button
           type="button"

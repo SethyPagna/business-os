@@ -262,7 +262,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             type="button"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X className="h-4 w-4" />
           </button>

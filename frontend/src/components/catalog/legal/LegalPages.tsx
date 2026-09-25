@@ -497,7 +497,7 @@ function LegalReader({
             onClick={onClose}
             aria-label={text('portal_legal_close')}
             title={text('portal_legal_close')}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
             <X className="h-5 w-5" />
           </button>

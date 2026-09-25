@@ -52,7 +52,7 @@ assert.deepEqual(withoutFilterValue(['Nivea'], 'Other'), ['Nivea'])
 // 5. Wiring in the section.
 const section = read('src/components/catalog/CatalogProductsSection.tsx')
 assert.doesNotMatch(section, /lg:grid-cols-\[17rem_minmax\(0,1fr\)\]/, 'the permanent desktop rail that narrowed the search row is back')
-assert.match(section, /<label htmlFor="portal-product-search" className="flex min-w-0 flex-1/, 'search takes the rest of the row')
+assert.match(section, /<label htmlFor="portal-product-search" className="flex (?:min-h-10 )?min-w-0 flex-1/, 'search takes the rest of the row')
 assert.match(section, /data-portal-active-filters="true"[^>]*flex-wrap/, 'chips wrap instead of scrolling over the list')
 assert.match(section, /onClick=\{\(\) => removeActiveFilterChip\(chip\)\}/)
 assert.match(section, /copy\('removeActiveFilter', 'Remove filter: \{label\}'\)/)

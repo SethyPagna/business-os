@@ -151,9 +151,13 @@ check('2 the header icon rows never wrap on a phone', () => {
   // Every icon button in both rows shrinks one size below `sm` rather than
   // wrapping -- catches a partial fix that stops wrapping but overflows the
   // header instead.
-  const iconButtonCount = (catalogPreviewSurface.match(/h-8 w-8 shrink-0 items-center justify-center rounded-full/g) || []).length
-    + (catalogPreviewSurface.match(/inline-flex h-8 w-8 shrink-0/g) || []).length
+  // P-public-11 (owner, 2026-09-25: 40px touch targets at 360/390): the icons
+  // are 40px TALL on a phone; width stays one size down (32px below 360,
+  // 36px from 360) because 4 social + 4 account icons at 40px wide do not fit
+  // one 360px row, and wrapping them is what this check exists to prevent.
+  const iconButtonCount = (catalogPreviewSurface.match(/inline-flex h-10 w-8 min-\[360px\]:w-9 shrink-0 items-center justify-center rounded-full[^"`]*sm:h-9 sm:w-9/g) || []).length
   assert.ok(iconButtonCount >= 4, `expected at least 4 shrink-below-sm icon buttons, found ${iconButtonCount}`)
+  assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
 
 // --- 3. Contact FAB minimize ------------------------------------------------
