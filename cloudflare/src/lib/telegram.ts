@@ -229,18 +229,36 @@ export function splitTelegramMessage(text: string): string[] {
   return chunks
 }
 
-async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId, messageThreadId?: number): Promise<void> {
+function sendTelegramApi(config: TelegramConfig, chatId: string, part: string, messageThreadId?: number): Promise<Response> {
+  return fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId, text: part, disable_web_page_preview: true,
+      ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+    }),
+  })
+}
+
+// A forum topic the owner deleted or closed answers every send into it with
+// HTTP 400 forever -- silently dropping every alert of that family until
+// someone notices the chat has gone quiet. Refuter, 25 Sep 2026: retry once
+// straight into the chat's General stream so the message still lands, and
+// name the exact settings key in the warning so the owner knows what to fix.
+// Any OTHER 400 (bad chat id, blocked bot, malformed text) keeps today's
+// behaviour -- it throws, unretried.
+const DELETED_TOPIC_MESSAGE = /message thread not found|topic_deleted|topic closed/i
+
+async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId, messageThreadId?: number, topicKey?: TelegramTopicKey): Promise<void> {
   for (const part of splitTelegramMessage(text)) {
-    const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId, text: part, disable_web_page_preview: true,
-        ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
-      }),
-    })
+    let response = await sendTelegramApi(config, chatId, part, messageThreadId)
     if (!response.ok) {
-      const body = await response.text().catch(() => '')
-      throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
+      let body = await response.text().catch(() => '')
+      if (response.status === 400 && messageThreadId && DELETED_TOPIC_MESSAGE.test(body)) {
+        console.warn(`Telegram: the topic for "${topicKey || 'message_thread_id'}" (chat ${chatId}, thread ${messageThreadId}) looks deleted or closed; retrying in General. Fix ${topicKey ? `the ${topicKey} setting` : 'the topic setting'} in Settings.`)
+        response = await sendTelegramApi(config, chatId, part)
+        if (!response.ok) body = await response.text().catch(() => '')
+      }
+      if (!response.ok) throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
     }
   }
 }
@@ -281,7 +299,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
       : line.startsWith(EVENT_SECTION_MARKER)
         ? sectionHeader(line.slice(EVENT_SECTION_MARKER.length) as TelegramLabelKey, REPORT_SECTION_EDGE)
         : localizeTelegramLine(cleanLine(line, 400)))),
-  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]])
+  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]], eventTopic[event.type])
   return true
 }
 
@@ -672,7 +690,7 @@ export async function sendTelegramTodaySummary(env: Env): Promise<void> {
   if (problem) throw new Error(problem)
   const today = businessToday()
   const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
-  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports)
+  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
 }
 
 async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
@@ -1338,7 +1356,7 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
     if (!config.enabled || configurationProblem(config)) return false
     const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
     if (!shift) return false
-    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language), config.chatId, config.topics.telegram_topic_shift)
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
     return true
   } catch (error) {
     console.error('[telegram] shift report could not be sent', error)
@@ -1600,7 +1618,7 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
     const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
-    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics.telegram_topic_shift)
+    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
     await settle('sent', null, ', sent_at = @now')
     return 'sent'
   } catch (error) {

@@ -229,13 +229,80 @@ const baseSettings = [
     globalThis.fetch = realFetch
   }
 
+  // ---- deleted/closed forum topic: retry once into General, no other 400 ---
+  // Refuter, 25 Sep 2026: a topic the owner deleted or closed answers every
+  // send into it with HTTP 400 forever, silently dropping that whole message
+  // family. postTelegram must retry ONCE with message_thread_id dropped, and
+  // warn naming the setting key -- but any OTHER 400 (unrelated to a missing
+  // topic) must keep today's behaviour: throw, no retry.
+  try {
+    const env = { TELEGRAM_BOT_TOKEN: 'test-token-not-a-real-one', BUSINESS_OS_ADMIN_URL: 'https://admin.example.com' }
+    const deletedTopicWired = wireTelegram(baseSettings)
+    const attempts = []
+    const warnings = []
+    const realWarn = console.warn
+    console.warn = (...args) => warnings.push(args.join(' '))
+    globalThis.fetch = async (url, init) => {
+      const body = JSON.parse(init.body)
+      attempts.push(body)
+      if (attempts.length === 1) {
+        return { ok: false, status: 400, text: async () => '{"ok":false,"error_code":400,"description":"Bad Request: message thread not found"}' }
+      }
+      return { ok: true, status: 200, text: async () => '', json: async () => ({ ok: true }) }
+    }
+    try {
+      const sent = await deletedTopicWired.sendTelegramEvent(env, { type: 'sales', lines: ['x'] })
+      assert.equal(sent, true, 'sendTelegramEvent must still report success once the retry lands')
+      assert.equal(attempts.length, 2, `expected exactly one retry, got ${attempts.length} attempts:\n${JSON.stringify(attempts)}`)
+      assert.equal(attempts[0].message_thread_id, 22, 'the first attempt still carries the configured topic')
+      assert.ok(!('message_thread_id' in attempts[1]), `the retry must drop message_thread_id entirely, not send it as null/0: ${JSON.stringify(attempts[1])}`)
+      assert.ok(warnings.some((w) => w.includes('telegram_topic_sales')), `the warning must name the topic setting key so the owner can fix it:\n${warnings.join('\n')}`)
+    } finally { console.warn = realWarn }
+    console.log('PASS deleted/closed topic (message thread not found): exactly one retry without message_thread_id, warning names telegram_topic_sales')
+
+    // Case-insensitive, and the two other Telegram phrasings for the same
+    // condition (TOPIC_DELETED, "topic closed") get the same treatment.
+    for (const description of ['bad request: TOPIC_DELETED', 'Topic closed', 'MESSAGE THREAD NOT FOUND']) {
+      const wired = wireTelegram(baseSettings)
+      const tries = []
+      globalThis.fetch = async (url, init) => {
+        tries.push(JSON.parse(init.body))
+        if (tries.length === 1) return { ok: false, status: 400, text: async () => JSON.stringify({ ok: false, description }) }
+        return { ok: true, status: 200, text: async () => '', json: async () => ({ ok: true }) }
+      }
+      await wired.sendTelegramEvent(env, { type: 'sales', lines: ['x'] })
+      assert.equal(tries.length, 2, `"${description}" must trigger exactly one retry`)
+      assert.ok(!('message_thread_id' in tries[1]), `"${description}": the retry must drop message_thread_id`)
+    }
+    console.log('PASS deleted/closed topic wording: TOPIC_DELETED and "topic closed" are matched case-insensitively too')
+
+    // An UNRELATED 400 (a malformed request, say) must NOT retry -- retrying a
+    // real error would silently double-send once the underlying cause is
+    // fixed, or mask the actual problem from the caller entirely.
+    const unrelatedWired = wireTelegram(baseSettings)
+    const unrelatedAttempts = []
+    globalThis.fetch = async (url, init) => {
+      unrelatedAttempts.push(JSON.parse(init.body))
+      return { ok: false, status: 400, text: async () => '{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}' }
+    }
+    await assert.rejects(
+      () => unrelatedWired.sendTelegramEvent(env, { type: 'sales', lines: ['x'] }),
+      /Telegram rejected the message \(400\)/,
+      'an unrelated 400 must still throw',
+    )
+    assert.equal(unrelatedAttempts.length, 1, `an unrelated 400 must not retry: ${JSON.stringify(unrelatedAttempts)}`)
+    console.log('PASS unrelated 400 (chat not found): no retry, error still thrown')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+
   // ---- shift report and shift overview: source-pinned, since a full close/
   // reopen fixture is already exercised end-to-end by
   // test-telegram-shift-report-pure.cjs and test-telegram-shift-overview-pure.cjs.
   // This only pins that BOTH postTelegram calls carry telegram_topic_shift.
   const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
-  assert.match(telegramSource, /shiftReportFor\(env, shift, nowMs, config\.language\), config\.chatId, config\.topics\.telegram_topic_shift\)/, 'sendTelegramShiftReport must pass telegram_topic_shift')
-  assert.match(telegramSource, /formatShiftOverview\(name, shift, figures, config\.categories, nowMs\)\), config\.chatId, config\.topics\.telegram_topic_shift\)/, 'deliverTelegramShiftOverview must pass telegram_topic_shift')
+  assert.match(telegramSource, /shiftReportFor\(env, shift, nowMs, config\.language\), config\.chatId, config\.topics\.telegram_topic_shift, 'telegram_topic_shift'\)/, 'sendTelegramShiftReport must pass telegram_topic_shift')
+  assert.match(telegramSource, /formatShiftOverview\(name, shift, figures, config\.categories, nowMs\)\), config\.chatId, config\.topics\.telegram_topic_shift, 'telegram_topic_shift'\)/, 'deliverTelegramShiftOverview must pass telegram_topic_shift')
   console.log('PASS sendTelegramShiftReport/deliverTelegramShiftOverview: both source-pinned to telegram_topic_shift')
 
   // ---- backend validation: routes/settings.ts rejects a non-integer, non-
