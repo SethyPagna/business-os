@@ -198,6 +198,39 @@ export async function serveObject(
   request: Request,
   ctx?: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<Response> {
+  return (await serveStoredObject(bucket, key, request, ctx)) || new Response('Not found', { status: 404 })
+}
+
+// Strong-or-weak ETag comparison (RFC 9110 13.1.2: If-None-Match uses the
+// WEAK comparison, so `W/` is ignored on either side) against a header that
+// may be `*` or a comma-separated list. The old check was a plain string
+// equality, so a CDN- or browser-weakened `W/"x"` or a multi-tag list never
+// matched and every revalidation re-downloaded the whole image.
+export function ifNoneMatchMatches(ifNoneMatch: string | null | undefined, etag: string | null | undefined): boolean {
+  const header = String(ifNoneMatch || '').trim()
+  const current = String(etag || '').trim()
+  if (!header || !current) return false
+  if (header === '*') return true
+  const opaque = (tag: string) => tag.trim().replace(/^W\//i, '')
+  const target = opaque(current)
+  return header.split(',').some((candidate) => {
+    const value = opaque(candidate)
+    return value !== '' && value === target
+  })
+}
+
+/**
+ * serveObject without the 404: resolves to null when the key does not exist,
+ * so a caller with a fallback (the image-variant route: miss -> transform)
+ * can tell "absent" from "served". Same cache, conditional and safe-header
+ * behaviour as serveObject.
+ */
+export async function serveStoredObject(
+  bucket: R2Bucket,
+  key: string,
+  request: Request,
+  ctx?: { waitUntil(promise: Promise<unknown>): void },
+): Promise<Response | null> {
   // Keyed on the URL alone (method normalized to GET) -- never on the
   // request's own conditional/auth headers, so every visitor's request for
   // the same asset hits the same cache entry. `caches.default` is only
@@ -219,7 +252,7 @@ export async function serveObject(
       const cachedHeaders = applySafeUploadHeaders(new Headers(cached.headers), key, cached.headers.get('content-type'))
       const etag = cached.headers.get('etag')
       const ifNoneMatch = request.headers.get('if-none-match')
-      if (etag && ifNoneMatch && ifNoneMatch === etag) {
+      if (ifNoneMatchMatches(ifNoneMatch, etag)) {
         return new Response(null, { status: 304, headers: cachedHeaders })
       }
       return new Response(cached.body, { status: cached.status, headers: cachedHeaders })
@@ -228,9 +261,7 @@ export async function serveObject(
   const object = await bucket.get(key, {
     onlyIf: request.headers,
   })
-  if (object === null) {
-    return new Response('Not found', { status: 404 })
-  }
+  if (object === null) return null
   const headers = new Headers()
   // Deliberately NOT object.writeHttpMetadata(headers): that replays the
   // uploader-supplied content-type/disposition. See applySafeUploadHeaders.
