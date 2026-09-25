@@ -12,6 +12,20 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [ ] Verify live `cf-placement` after deploy (expect `remote-SIN`-style value) and D1 round trips
 - [!] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): new APAC bucket + copy + binding switch — plan and owner checkpoint after checkpoint 1
 
+### Owner decisions (25 Sep 2026)
+- Cost = quantity-weighted average over lots still on hand; 0-cost lots excluded; nothing on hand → newest received lot cost; 4dp round-up kept. Replaces the distinct-cost mean.
+- One-time cost repair runs inside migration 0195, after a backup table of the old values.
+- Deploy the 55 certified-but-undeployed resume commits together with U-1.
+- Move R2 images to an APAC bucket after checkpoint 1 (copy + verify + switch; old bucket kept until the owner says delete).
+- Official names: research every product; deliver an Excel file, format "Brand + official product name", sourced from the brand's official site, official store or certified retailers; nothing imported without owner review.
+- Product name tap opens the product; chips keep filtering. Commit email stays ungsethypagna@gmail.com.
+
+### Data safety (nothing lost or corrupted)
+- [ ] Before any remote migration: record the D1 Time Travel bookmark (restore point) and pre-migration counts/totals in the deploy record
+- [ ] Every data-changing migration writes a backup table first and carries tested recovery SQL (round-trip test: migrate → recover → byte-identical)
+- [ ] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
+- [x] Recovery checkout and Codex worktrees untouched; no force pushes; exact-path commits only
+
 ### Checkpoint 1 — admin (lanes run in parallel)
 - [x] U-telegram (integrated; refuter certified after deleted-topic fallback + uniform settings gate): `====Title/ខ្មែរ====` sections, `English/Khmer`, `ID សម្គាល់`, `Sale invoice/វិក្កយបត្រ`, `Status updated/…`, colon instead of em dash; forum-topic routing per message type (shift, sale, status, more)
 - [~] U-cost: depleted (qty 0) received lots excluded from the cost average; lots with stock listed first, depleted greyed; guards; read-only production audit of affected products
