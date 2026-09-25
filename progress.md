@@ -1,5 +1,9 @@
- integrated (3fbb9fb4..b3583a9a, migrations 0196/0197); refuter certified with test-gap notes |
+<!-- U-1 plan start -->
 ## U-1 — Urgent owner batch (25 Sep 2026) — ACTIVE, takes priority over PD-1 phases 2–7
+
+**How to read this file with the session log.** Status marks: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked.
+Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
+and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
 Owner order: **admin fixes → public site → A/B data architecture**, deployed as soon as each
 checkpoint is verified. Base: resume line `2d1888ca`; integration branch `claude/urgent-20260925`.
@@ -48,13 +52,21 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [~] Official product names: step 1 product list from the public catalog (local Records only) → brand batches researched in parallel → Excel for owner review; no import without owner review
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
 
+### Owner queue (26 Sep) — after RELEASE-1 deploys
+- [ ] Q14 Branch-scoped order visibility permission (staff see all by default) + per-branch performance/KPI in profile
+- [~] Q15 Profile as a full page, friendlier design; verify photo upload, sign-in linking, OTP/2FA setup; annotated screenshot tutorials (EN/KM) — read-only audit running
+- [ ] Q17 Review queue and audit log show a preview of the actual change in the same format/UI as the real screen (before → after), not raw ids
+- [ ] Q12 Repos: private main + public sanitized mirror; new repo from `archive/docker-postgres-2026-07-26`, then port post-pivot changes (owner OK before creating any repo)
+- [ ] Q13 Print waits for QR codes (grey placeholder printed if tapped early)
+- [ ] PR 9 (codex/verified-resume-20260925): fully contained in urgent; close after RELEASE-1 with owner OK
+
 ### Lane tracker (26 Sep) — one writer per file set; integrate only after a refuter verdict
 | Lane | Branch / worktree | Owns | State |
 |---|---|---|---|
 | U-cost | claude/u-cost-20260925 | catalogCostRecompute, migration 0195, batch lists (ManageBatchesModal, inventory ProductDetailModal) | building (resumed after usage limit) |
-| U-db | claude/u-db-20260925 | search relevance, sales.ts empty IN, salesAnalytics, migrations 0196/0197, catalog cache invalidation | building (resumed) |
+| U-db | claude/u-db-20260925 | search relevance, sales.ts empty IN, salesAnalytics, migrations 0196/0197, catalog cache invalidation | [x] integrated (3fbb9fb4..b3583a9a, migrations 0196/0197); refuter certified with test-gap notes |
 | U-records | claude/u-records-20260925 | stockLedgerQuery, movement balance endpoint, StockLineChange, MovementDetailFloat | refuter: certified with exceptions (transfer total false on both legs, total labelled as a branch, guessed branch balance, mixed timestamps, ledger float, list markup); fixes building |
-| U-load | claude/u-load-20260925 | language packs, preload lists, sw.js, icons | built; refuter running |
+| U-load | claude/u-load-20260925 | language packs, preload lists, sw.js, icons | [x] integrated (8d2f7cd8..d2b4acf6 + fix c589d67b); refuter certified |
 | U-branch | claude/u-branch-20260926 | branch roles/successor, stock-writer guards, activeBranches UI, held consolidation migration, import routing | building (resumed) |
 | U-print | claude/u-print-20260926 | printReceipt, receiptAssetLoader, printSurface, exportOptions, Receipt | building (resumed) |
 | U-confirm | claude/u-confirm-20260926 | native confirm() to shared dialog, outside every other lane's files | building (resumed) |

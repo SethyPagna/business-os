@@ -10,6 +10,10 @@ decisions, environment notes, and the live backlog.
 
 Entries are chronological, oldest first. Newest work is at the **bottom**.
 
+**Matching `progress.md` (from Part 633).** Each Part header names the progress IDs it moved, and ends with an
+"IDs" line using the same marks: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked. Example:
+`IDs: U-db [x] · U-cost [~] · Q15 [ ]`. The matching progress.md item points back with "→ Part N".
+
 ## Known numbering collisions
 
 Two Part numbers were used twice, because those sessions did not check the highest
