@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
@@ -113,6 +114,7 @@ export default function FilePickerModal({
   layer = 'default',
 }: FilePickerModalProps) {
   const { notify, user, t } = useApp()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
   const normalizedInitialSelectedKey = Array.isArray(initialSelected) ? initialSelected.filter(Boolean).join('\u0000') : ''
   const [files, setFiles] = useState<FileAsset[]>([])
   const [loading, setLoading] = useState(false)
@@ -257,7 +259,12 @@ export default function FilePickerModal({
       return
     }
     deleteInFlightRef.current = true
-    if (!window.confirm(`Delete "${asset.original_name}"?`)) {
+    if (!(await askConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('file_delete_confirm', 'Delete "{name}"?').replace('{name}', String(asset.original_name || '')),
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       deleteInFlightRef.current = false
       return
     }
@@ -298,6 +305,7 @@ export default function FilePickerModal({
     // picker choice that Cancel intentionally discards. Closing cannot lose
     // an uncommitted library write, so this modal is explicitly read-only.
     <Modal title={title} onClose={onClose} wide layer={layer} unsavedChanges="read-only">
+      {confirmDialog}
       <div className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />

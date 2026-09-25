@@ -216,11 +216,13 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
     assert.match(source, /disabled=\{uploading \|\| deletingAssetId != null\}/)
   }
 
-  // Picker keeps the plain window.confirm gate; FilesPage.tsx replaced it
+  // Picker keeps a plain yes/no gate -- now the shared review dialog, never
+  // native confirm() (U-confirm); FilesPage.tsx replaced it
   // with a real "type CONFIRM DELETE" modal (with an unlock checkbox for
   // locked/in-use files) -- these diverged on purpose, so each gets its
   // own assertion instead of sharing the loop above.
-  assert.match(picker, /deleteInFlightRef\.current = true[\s\S]*window\.confirm/)
+  assert.match(picker, /deleteInFlightRef\.current = true[\s\S]*await askConfirm\(\{[\s\S]*danger: true/)
+  assert.doesNotMatch(picker, /window\.confirm\(/)
   assert.match(filesPage, /deleteConfirmText\.trim\(\)\.toUpperCase\(\) !== 'CONFIRM DELETE'\) return[\s\S]*const locked = !asset\.canDelete[\s\S]*if \(locked && !deleteUnlockChecked\) return[\s\S]*deleteInFlightRef\.current = true/)
 
   assert.match(filesPage, /const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000/)
