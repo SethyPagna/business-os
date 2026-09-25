@@ -100,9 +100,13 @@ const costEntries = (id) => raw.prepare('SELECT * FROM product_cost_entries WHER
 function seedProduct(name) {
   return Number(raw.prepare(`INSERT INTO products(name, cost_price_usd, cost_price_khr, is_active, updated_at) VALUES (?, 7, 0, 1, NULL)`).run(name).lastInsertRowid)
 }
+// U-cost (2026-09-25): only lots still on hand average, so a seeded receipt
+// also carries the unit it received (branch 1).
 function seedLot(productId, unitCostUsd) {
-  return Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
+  const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
     .run(productId, `k${Math.random()}`, unitCostUsd).lastInsertRowid)
+  raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId)
+  return lotId
 }
 // A D1Compat-shaped wrapper (get/all/run, named @params) for lib functions
 // called directly (recomputeCatalogCost, catalogCostRecomputeStatement,

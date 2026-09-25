@@ -8,8 +8,10 @@ const SQLite = require('better-sqlite3')
 const raw = new SQLite(':memory:')
 raw.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
   CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
-  CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL);
-  INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345)`)
+  CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
+  CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL);
+  INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345,NULL);
+  INSERT INTO branch_batch_stock VALUES(1,1,1,3)`)
 const db = { prepare(sql) {
   const statement = raw.prepare(sql)
   const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]
@@ -76,8 +78,10 @@ async function request(method, cost, extra = {}) {
   const raw2 = new SQLite(':memory:')
   raw2.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,cost_price_usd REAL,purchase_price_usd REAL);
     CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL);
-    INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345)`)
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
+    CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL);
+    INSERT INTO products VALUES(1,1.2345,1.2345); INSERT INTO product_batches VALUES(1,1,1,NULL,1.2345,NULL);
+    INSERT INTO branch_batch_stock VALUES(1,1,1,3)`)
   const db2 = { prepare(sql) {
     const statement = raw2.prepare(sql)
     const args = (p) => Array.isArray(p) ? p : p == null ? [] : [p]

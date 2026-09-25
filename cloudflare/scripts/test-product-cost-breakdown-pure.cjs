@@ -60,6 +60,9 @@ const lot = (id, unitCostUsd, overrides = {}) => ({
   branch_name: overrides.branch_name ?? null,
   unit_cost_usd: unitCostUsd,
   is_active: overrides.is_active ?? 1,
+  // U-cost (2026-09-25): only lots still on hand average. These fixtures
+  // describe received stock, so each lot holds 1 unit unless a case says otherwise.
+  remaining_quantity: overrides.remaining_quantity ?? 1,
 })
 
 // ---------------------------------------------------------------------------
