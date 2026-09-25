@@ -1,6 +1,9 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { consumeQuota } from './quotaGuard'
+import { getBuildStamp } from './buildStamp'
+import { getMergedPermissions, isAdminControlUser, type PermissionUser } from './permissions'
+import { serverTimingOf } from './serverTiming'
 // Runtime cache, replacing backend/src/runtimeCache.ts's Redis-backed
 // short-TTL read-through cache (getOrSetJson / deleteByPrefix) with Workers
 // KV.
@@ -77,6 +80,13 @@ export async function getOrSetJson<T>(kv: KVNamespace, key: string, ttlSeconds: 
 // `version` should come from versionedKey's bumpVersion mechanism (KV) --
 // bumping it changes every cache key at once without needing to enumerate
 // and delete old entries, the same trick versionedKey uses for KV itself.
+//
+// K1: this signature is frozen for its existing callers (contacts, portal,
+// products, sales). It now runs through cachedJson() below, so it gains the
+// build hash in the key, the per-isolate stampede guard and the stored-at
+// stamp, but it never answers 304 and never honours a client bypass: it has
+// no actor identity to make either safe. Routes that want those call
+// cachedJson() + sendCachedJson() instead.
 export async function cachedJsonResponse<T>(
   request: Request,
   ctx: { waitUntil(promise: Promise<unknown>): void },
@@ -84,26 +94,336 @@ export async function cachedJsonResponse<T>(
   ttlSeconds: number,
   producer: () => Promise<T> | T,
 ): Promise<T> {
-  const cache = caches.default
-  const cacheUrl = new URL(request.url)
-  cacheUrl.searchParams.set('_v', version)
-  const cacheKey = new Request(cacheUrl.toString(), request)
+  const result = await cachedJson<T>(request, ctx, {
+    version,
+    ttlSeconds,
+    producer,
+    conditional: false,
+    allowClientBypass: false,
+  })
+  return result.payload as T
+}
+
+// ---------------------------------------------------------------------------
+// K1 edge cache core: cachedJson()
+// ---------------------------------------------------------------------------
+//
+// ORDER OF OPERATIONS (each step exists for a stated reason):
+//
+// 1. The ETag is DERIVED, not hashed from the body: sha1 over the route id,
+//    the canonical query, the version token, the projection class, the actor,
+//    the actor's permission fingerprint, the build hash and (stock-bearing
+//    routes only) a 20 s bucket. It is therefore known BEFORE any cache or
+//    database access, and a matching If-None-Match costs zero Cache API reads
+//    and zero producer (D1) reads. The actor and the permission fingerprint
+//    are inputs so a 304 can never confirm one user's copy for another user,
+//    or confirm a copy made under permissions the user no longer has.
+//    Correctness contract for callers: read the version token(s) BEFORE the
+//    producer runs, and the producer's output must be a function of exactly
+//    (URL, version, projectionClass) -- anything else that changes the body
+//    must either bump a version or be declared stockBearing.
+// 2. A staff client may send `Cache-Control: no-cache` after its own write
+//    (read-your-writes across KV's propagation window). Only when the route
+//    opted in with allowClientBypass: the storefront cannot be cache-busted by
+//    a visitor. A bypass skips the 304, skips the match, never joins an
+//    in-flight producer that may predate the write, and writes the fresh
+//    result back so the next reader benefits.
+// 3. cache.match on a key that carries `_v` (version) and `_b` (build hash):
+//    a deploy that changes a payload's shape can never serve the previous
+//    build's bytes.
+// 4. A miss runs the producer ONCE per isolate per key, however many requests
+//    miss concurrently (the stampede guard). Joiners get their own parsed copy
+//    so no caller can mutate another's payload.
+// 5. Optional SWR: an entry older than swrAfterMs is served (STALE) and
+//    refreshed in waitUntil; an entry older than hardMaxAgeMs is never served.
+
+export type CachedJsonStatus = 'HIT' | 'MISS' | 'BYPASS' | 'STALE' | 'NOT_MODIFIED'
+
+export type CachedJsonOptions<T> = {
+  /** Namespaced version token(s), e.g. from readVersionTokens(). */
+  version: string
+  /** Cache API lifetime; also the hard max age unless hardMaxAgeMs is set. */
+  ttlSeconds: number
+  producer: () => Promise<T> | T
+  /** Stable route identity for the ETag; defaults to the URL path. */
+  routeId?: string
+  /** Defaults to the request URL's query, sorted. */
+  canonicalQuery?: string
+  /** null/undefined means an actor-neutral (public) response. */
+  actorId?: string | number | null
+  /** permissionFingerprint(user) for staff routes. */
+  permissionFingerprint?: string | null
+  /**
+   * A label for a producer whose output differs by audience (e.g. 'cost' vs
+   * 'nocost'). It is part of the cache key as well as the ETag.
+   */
+  projectionClass?: string
+  /** Adds floor(now / 20 s) to the ETag: a stock figure is never confirmed for longer. */
+  stockBearing?: boolean
+  /** Staff routes only. Default false so public routes cannot be busted. */
+  allowClientBypass?: boolean
+  /** Default true. false = never answer 304 (the legacy wrapper). */
+  conditional?: boolean
+  /** Serve-stale-and-refresh threshold. Absent = no SWR. */
+  swrAfterMs?: number
+  /** Never serve an entry older than this. Defaults to ttlSeconds * 1000. */
+  hardMaxAgeMs?: number
+  // Test seams. Production callers leave these unset.
+  now?: () => number
+  cache?: Cache
+  buildHash?: string
+}
+
+export type CachedJsonResult<T> = {
+  status: CachedJsonStatus
+  /** null only when status is NOT_MODIFIED. */
+  payload: T | null
+  etag: string
+  /** The version token the ETag and key were built from; send as X-BOS-V. */
+  versionToken: string
+  buildHash: string
+  /** Serialized JSON string length (approximate bytes; 0 for NOT_MODIFIED). */
+  bytes: number
+}
+
+export const STOCK_BUCKET_MS = 20_000
+const STORED_AT_HEADER = 'x-bos-stored-at'
+
+type Produced = { body: string; value: unknown }
+const inflight = new Map<string, Promise<Produced>>()
+
+/** Test/diagnostic seam: how many keys currently have a producer running. */
+export function inflightCacheProducers(): number {
+  return inflight.size
+}
+
+export function stockBucket(nowMs: number): number {
+  return Math.floor(nowMs / STOCK_BUCKET_MS)
+}
+
+export function canonicalQueryOf(url: URL): string {
+  const entries = Array.from(url.searchParams.entries())
+    .filter(([key]) => key !== '_v' && key !== '_b' && key !== '_p')
+    .sort(([ak, av], [bk, bv]) => (ak < bk ? -1 : ak > bk ? 1 : av < bv ? -1 : av > bv ? 1 : 0))
+  return new URLSearchParams(entries).toString()
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value ?? null)
+}
+
+/**
+ * Everything about a staff user that can change what a response may contain.
+ * Hashed into the ETag, so it may be long; it never leaves the Worker.
+ */
+export function permissionFingerprint(user: PermissionUser | null | undefined): string {
+  if (!user) return 'anonymous'
+  return `${String(user.role_code || '').trim().toLowerCase()}|admin=${isAdminControlUser(user) ? 1 : 0}|${stableJson(getMergedPermissions(user))}`
+}
+
+export type EtagParts = {
+  routeId: string
+  canonicalQuery: string
+  versionToken: string
+  projectionClass: string
+  actorId: string
+  permissionFingerprint: string
+  buildHash: string
+  bucket: string
+}
+
+async function sha1Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text))
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/** Weak because it names a version of the data, not a byte-exact body. */
+export async function computeCacheEtag(parts: EtagParts): Promise<string> {
+  // A JSON array rather than a '|' join: no field value can forge a boundary.
+  const material = JSON.stringify([
+    parts.routeId, parts.canonicalQuery, parts.versionToken, parts.projectionClass,
+    parts.actorId, parts.permissionFingerprint, parts.buildHash, parts.bucket,
+  ])
+  return `W/"${await sha1Hex(material)}"`
+}
+
+/** Weak comparison per RFC 9110 13.1.2; `*` is deliberately not honoured. */
+export function ifNoneMatchSatisfied(header: string | null | undefined, etag: string): boolean {
+  if (!header) return false
+  const target = etag.replace(/^W\//, '')
+  return header.split(',').some((candidate) => {
+    const value = candidate.trim().replace(/^W\//, '')
+    return value !== '' && value !== '*' && value === target
+  })
+}
+
+export function requestsClientBypass(request: Request): boolean {
+  const directives = String(request.headers.get('cache-control') || '').toLowerCase()
+  return directives.split(',').some((directive) => directive.trim() === 'no-cache')
+}
+
+function cacheKeyFor(request: Request, version: string, buildHash: string, projectionClass: string): Request {
+  const url = new URL(request.url)
+  url.searchParams.set('_v', version)
+  url.searchParams.set('_b', buildHash)
+  if (projectionClass) url.searchParams.set('_p', projectionClass)
+  // A header-free GET: HEAD cannot be put, and nothing of the caller's
+  // (cookies, Cache-Control) belongs in a shared key.
+  return new Request(url.toString(), { method: 'GET' })
+}
+
+function runCoalesced(key: string, fresh: boolean, run: () => Promise<Produced>): { promise: Promise<Produced>; leader: boolean } {
+  if (!fresh) {
+    const existing = inflight.get(key)
+    if (existing) return { promise: existing, leader: false }
+  }
+  const promise = run()
+  if (fresh) return { promise, leader: true }
+  inflight.set(key, promise)
+  const clear = () => { if (inflight.get(key) === promise) inflight.delete(key) }
+  promise.then(clear, clear)
+  return { promise, leader: true }
+}
+
+export async function cachedJson<T>(
+  request: Request,
+  ctx: { waitUntil(promise: Promise<unknown>): void },
+  options: CachedJsonOptions<T>,
+): Promise<CachedJsonResult<T>> {
+  const now = options.now ?? (() => Date.now())
+  const startedAt = now()
+  const buildHash = options.buildHash ?? getBuildStamp().sourceHash
+  const url = new URL(request.url)
+  const projectionClass = String(options.projectionClass || '')
+  const versionToken = String(options.version)
+  const timing = serverTimingOf(request)
+  const etag = await computeCacheEtag({
+    routeId: options.routeId || url.pathname,
+    canonicalQuery: options.canonicalQuery ?? canonicalQueryOf(url),
+    versionToken,
+    projectionClass,
+    actorId: options.actorId == null || options.actorId === '' ? 'public' : `actor:${String(options.actorId)}`,
+    permissionFingerprint: String(options.permissionFingerprint ?? ''),
+    buildHash,
+    bucket: options.stockBearing ? String(stockBucket(startedAt)) : '',
+  })
+  const finish = (status: CachedJsonStatus, payload: T | null, bytes: number): CachedJsonResult<T> => {
+    timing?.setCache(status, bytes)
+    return { status, payload, etag, versionToken, buildHash, bytes }
+  }
+
+  const method = request.method.toUpperCase()
+  const bypass = options.allowClientBypass === true && requestsClientBypass(request)
+  if (!bypass && options.conditional !== false && (method === 'GET' || method === 'HEAD')
+    && ifNoneMatchSatisfied(request.headers.get('if-none-match'), etag)) {
+    return finish('NOT_MODIFIED', null, 0)
+  }
+
+  const cache = options.cache ?? caches.default
+  const cacheKey = cacheKeyFor(request, versionToken, buildHash, projectionClass)
+  const keyString = cacheKey.url
+  const hardMaxAgeMs = Math.max(1000, options.hardMaxAgeMs ?? options.ttlSeconds * 1000)
+  const storeSeconds = Math.max(1, Math.ceil(hardMaxAgeMs / 1000))
+
+  const produceAndStore = async (): Promise<Produced> => {
+    const value = await options.producer()
+    const body = JSON.stringify(value) ?? 'null'
+    const response = new Response(body, {
+      headers: {
+        'content-type': 'application/json',
+        'cache-control': `public, max-age=${storeSeconds}`,
+        [STORED_AT_HEADER]: String(now()),
+      },
+    })
+    // Not awaited by the caller -- Workers needs waitUntil() for the write to
+    // outlive the response. A failed put only costs the next reader a miss.
+    ctx.waitUntil(cache.put(cacheKey, response).catch(() => {}))
+    return { body, value }
+  }
+  const take = async (coalesced: { promise: Promise<Produced>; leader: boolean }) => {
+    const produced = await coalesced.promise
+    // The leader keeps the producer's own object (no extra parse on the hot
+    // miss path); every joiner gets a private copy.
+    const payload = (coalesced.leader ? produced.value : JSON.parse(produced.body)) as T
+    return { payload, bytes: produced.body.length }
+  }
+
+  if (bypass) {
+    const { payload, bytes } = await take(runCoalesced(keyString, true, produceAndStore))
+    return finish('BYPASS', payload, bytes)
+  }
 
   const cached = await cache.match(cacheKey)
   if (cached) {
-    return cached.json<T>()
+    const stamp = cached.headers.get(STORED_AT_HEADER)
+    const storedAt = stamp == null ? NaN : Number(stamp)
+    // An entry this module wrote always carries the stamp. One without it can
+    // only be bounded by the Cache API's own max-age, so it is served as a
+    // plain HIT and never considered for SWR. A stamp slightly in the future
+    // (clock skew between machines) counts as age 0.
+    const age = Number.isFinite(storedAt) ? Math.max(0, startedAt - storedAt) : null
+    if (age == null || age <= hardMaxAgeMs) {
+      const body = await cached.text()
+      const payload = JSON.parse(body) as T
+      if (age != null && options.swrAfterMs != null && options.swrAfterMs >= 0 && age > options.swrAfterMs) {
+        const refresh = runCoalesced(keyString, false, produceAndStore).promise.catch(() => undefined)
+        ctx.waitUntil(refresh)
+        return finish('STALE', payload, body.length)
+      }
+      return finish('HIT', payload, body.length)
+    }
   }
 
-  const value = await producer()
-  const response = new Response(JSON.stringify(value), {
-    headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
-  })
-  // Don't make the caller wait for the cache write -- same non-blocking
-  // shape as the KV path's fire-and-forget put, but explicit here since
-  // Workers requires ctx.waitUntil() to guarantee a background write
-  // actually completes after the response is already sent.
-  ctx.waitUntil(cache.put(cacheKey, response))
-  return value
+  const { payload, bytes } = await take(runCoalesced(keyString, false, produceAndStore))
+  return finish('MISS', payload, bytes)
+}
+
+type CachedJsonContext = {
+  json: (object: any, status?: any, headers?: any) => Response
+  body: (data: null, status?: any, headers?: any) => Response
+}
+
+/**
+ * Builds the response for a cachedJson() result. A 200 goes through c.json so
+ * response projections installed as c.json wrappers (acquisitionCostResponses)
+ * still apply; a 304 carries no body, so there is nothing to project.
+ *
+ * Cache-Control is left to lib/httpCache.ts's policy table unless the caller
+ * passes one, so a route never has to know its own class.
+ */
+export function sendCachedJson<T>(c: CachedJsonContext, result: CachedJsonResult<T>, extra: { cacheControl?: string } = {}): Response {
+  const headers: Record<string, string> = {
+    ETag: result.etag,
+    'X-BOS-V': result.versionToken,
+  }
+  if (extra.cacheControl) headers['Cache-Control'] = extra.cacheControl
+  if (result.status === 'NOT_MODIFIED') return c.body(null, 304, headers)
+  return c.json(result.payload, 200, headers)
+}
+
+/**
+ * Reads several namespace versions at once and composes them into one token
+ * (`products=k2:4;stock=d2:9`), timing the reads into Server-Timing's kv entry
+ * when a collector is attached. The per-namespace map is returned too, so a
+ * route can expose exactly what it was keyed on.
+ */
+export async function readVersionTokens(
+  env: Env,
+  namespaces: string[],
+  request?: Request | null,
+): Promise<{ token: string; tokens: Record<string, string> }> {
+  const unique = Array.from(new Set(namespaces.filter(Boolean))).sort()
+  const timing = serverTimingOf(request)
+  const read = () => Promise.all(unique.map((namespace) => getVersionWithFallback(env, namespace)))
+  const values = timing ? await timing.timeKv(read) : await read()
+  const tokens: Record<string, string> = {}
+  unique.forEach((namespace, index) => { tokens[namespace] = values[index] })
+  return { token: unique.map((namespace) => `${namespace}=${tokens[namespace]}`).join(';'), tokens }
 }
 
 // Namespace-versioned key builder. Call bumpVersion(kv, 'products') after any

@@ -222,6 +222,10 @@ async function main() {
     const { bumpVersions } = loadTs('lib/cache.ts', {
       './db': { getDb: () => ({ batch: async (statements) => { batchCalls.push(statements); return statements.map(() => ({})) } }) },
       './quotaGuard': { consumeQuota: async () => ({ zone: 'critical' }) },
+      // K1: pure modules cache.ts now imports (build-hash keys, Server-Timing).
+      './buildStamp': loadTs('lib/buildStamp.ts'),
+      './permissions': loadTs('lib/permissions.ts'),
+      './serverTiming': loadTs('lib/serverTiming.ts', { './analytics': { recordCacheObservation: () => {} } }),
     })
     await bumpVersions(fakeEnv, ['products', 'sales', 'returns'])
     assert.equal(batchCalls.length, 1, 'bumping several namespaces that all fall back to D1 must issue ONE db.batch() call')

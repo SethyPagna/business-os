@@ -251,6 +251,8 @@ function loadModule(name) {
     // ARE the free column -- a stub would make limitsFor() read undefined.
     if (request === './planTier') return loadModule('planTier.ts')
     if (request === '../index') return {}
+    // K1: pure modules cache.ts now imports (build-hash keys, Server-Timing).
+    if (request === './buildStamp' || request === './permissions' || request === './serverTiming') return loadModule(`${request.slice(2)}.ts`)
     return require(request)
   }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(

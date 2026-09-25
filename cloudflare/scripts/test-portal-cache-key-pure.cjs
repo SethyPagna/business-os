@@ -4,7 +4,14 @@ const { Hono } = require('hono')
 const { load } = require('./test-request-body-guard-pure.cjs')
 
 async function main() {
-  const cacheModule = load('lib/cache.ts')
+  // K1: cache.ts keys on the build hash and reports to Server-Timing; both are
+  // pure modules, loaded for real rather than poisoned.
+  const cacheDeps = {
+    './buildStamp': load('lib/buildStamp.ts'),
+    './permissions': load('lib/permissions.ts'),
+    './serverTiming': load('lib/serverTiming.ts', { './analytics': { recordCacheObservation: () => {} } }),
+  }
+  const cacheModule = load('lib/cache.ts', cacheDeps)
   const { portalCacheRequest } = load('routes/portal.ts')
   const entries = new Map()
   let produced = 0, lastKey
@@ -88,6 +95,7 @@ async function main() {
   // hit must not introduce a D1 gate. Cache matches expose the real generated key.
   let dbCalls = 0, versionReads = 0
   const realCache = load('lib/cache.ts', {
+    ...cacheDeps,
     './db': { getDb: () => { dbCalls++; throw new Error('Unexpected D1 on cache hit') } },
   })
   const portal = load('routes/portal.ts', {
