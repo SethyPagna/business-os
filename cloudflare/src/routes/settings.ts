@@ -26,6 +26,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
+import { TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -997,6 +998,22 @@ app.post('/', async (c) => {
       }, 400)
     }
     body.sale_amendment_window_minutes = String(parsedWindow)
+  }
+
+  // A Telegram forum topic id: a positive whole number, or empty (General).
+  // Rejected rather than silently dropped, so a mistyped topic id does not
+  // quietly start sending to the wrong topic -- or nowhere, if Telegram
+  // rejects it at send time instead.
+  for (const key of TELEGRAM_TOPIC_KEYS) {
+    if (!attemptedKeys.includes(key)) continue
+    const raw = String(body[key] ?? '').trim()
+    if (raw !== '' && !/^\d+$/.test(raw)) {
+      return c.json({
+        error: 'Telegram topic ID must be a whole number, or left empty for General.',
+        code: 'invalid_telegram_topic_id',
+      }, 400)
+    }
+    body[key] = raw
   }
 
   // The ordinary Settings save may add, remove, or reorder methods, but it

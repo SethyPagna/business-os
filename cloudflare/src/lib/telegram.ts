@@ -42,17 +42,40 @@ type TelegramConfig = {
    * shift report is on"); `enabled` above still gates both.
    */
   shiftOverview: boolean
+  /** Per-message-family forum topic (message_thread_id); undefined = General. */
+  topics: Record<TelegramTopicKey, number | undefined>
 }
-type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string } }
+type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string }; message_thread_id?: number }
 type TelegramUpdate = { message?: TelegramMessage }
 
-// sql-bound-params: bounded by construction -- this fixed nine-key enum is
-// owned by this module and never grows from request or database input.
+// The owner's Telegram forum topics: one settings key per message family,
+// read the same way every other Telegram setting is (generic key/value, no
+// migration). Empty means "send to General", exactly as before this existed.
+export const TELEGRAM_TOPIC_KEYS = [
+  'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status',
+  'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
+] as const
+export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
+
+// sql-bound-params: bounded by construction -- this fixed enum is owned by
+// this module and never grows from request or database input.
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
+  ...TELEGRAM_TOPIC_KEYS,
 ] as const
+
+// Integer or empty -- a non-numeric or fractional value is treated as unset
+// rather than sent to Telegram as a broken thread id. routes/settings.ts
+// enforces the same rule on write; this is the defensive read.
+export function parseTelegramTopicId(value: string | undefined | null): number | undefined {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return undefined
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const parsed = Number(trimmed)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
 
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
   return value == null || value === '' ? fallback : String(value).trim().toLowerCase() !== 'false'
@@ -91,7 +114,7 @@ function rowWords(text: string): string[] {
  * A list row (`1. name …`, `• name …`) as the lines a phone shows it on.
  * `head` breaks between words. `parts` share one line when they fit one
  * (`1 × $28.00 (−$3.00) = $25.00`); otherwise each part stays whole where it
- * fits, one wider than a line breaks at its own separators (`— Warehouse 90`
+ * fits, one wider than a line breaks at its own separators (`· Warehouse 90`
  * `· Shop 25` `· all branches 115`), and a piece still wider between words.
  * `nest` indents the whole row under the row above it (a /sales receipt's
  * items), and its continuation lines by the hanging indent beyond that.
@@ -130,9 +153,13 @@ function money(usd: unknown, khr: unknown, separator = ' · '): string {
   if (khrValue) parts.push(`${Math.round(khrValue).toLocaleString()}៛`)
   return parts.length ? parts.join(separator) : '$0.00'
 }
+// 'N/A', not an em dash, for a currency half with no value -- owner, 25 Sep
+// 2026: "No em dash (—) anywhere in Telegram output". Reuses the module's own
+// NOT_APPLICABLE constant (declared further down, beside EMPTY_SECTION); the
+// reference is safe because this function only ever runs after module load.
 function registeredMoney(usdValue: number | null, khrValue: number | null): string {
-  const dollars = usdValue == null ? '—' : usd(usdValue)
-  const rielAmount = khrValue == null ? '—' : riel(khrValue)
+  const dollars = usdValue == null ? NOT_APPLICABLE : usd(usdValue)
+  const rielAmount = khrValue == null ? NOT_APPLICABLE : riel(khrValue)
   return `${dollars} · ${rielAmount}`
 }
 
@@ -178,6 +205,7 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
       sales: isEnabled(values.telegram_sales_enabled, true), status: isEnabled(values.telegram_status_enabled, true),
       fees: isEnabled(values.telegram_fees_enabled, true), stock_in: isEnabled(values.telegram_stock_in_enabled, true), stock_out: isEnabled(values.telegram_stock_out_enabled, true),
     },
+    topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
   }
 }
 
@@ -201,11 +229,14 @@ export function splitTelegramMessage(text: string): string[] {
   return chunks
 }
 
-async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId): Promise<void> {
+async function postTelegram(config: TelegramConfig, text: string, chatId = config.chatId, messageThreadId?: number): Promise<void> {
   for (const part of splitTelegramMessage(text)) {
     const response = await fetch(`https://api.telegram.org/bot${config.token}/sendMessage`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: part, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: chatId, text: part, disable_web_page_preview: true,
+        ...(messageThreadId ? { message_thread_id: messageThreadId } : {}),
+      }),
     })
     if (!response.ok) {
       const body = await response.text().catch(() => '')
@@ -224,6 +255,13 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   // formatSaleStatusTelegramLines know, so their first line IS the heading.
   // A route's own heading still wins (a return).
   const heading: Partial<Record<TelegramEventType, string>> = { fees: '💸 Fee recorded', stock_in: '📥 Stock in', stock_out: '📤 Stock out' }
+  // Per-message-family forum topic (owner's Telegram topics, 25 Sep 2026):
+  // sales and status get their own topic each; fees, stock in and stock out
+  // share the Expenses/Stock slots this event type maps onto.
+  const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
+    sales: 'telegram_topic_sales', status: 'telegram_topic_status',
+    fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
+  }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
   // the composed line (rather than in each builder) means the one route that
   // still assembles its lines inline -- routes/fees.ts's fee -- is covered
@@ -237,7 +275,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
     ...event.lines.map((line) => (line.startsWith(HANGING_INDENT)
       ? `${HANGING_INDENT}${cleanLine(line, 400)}`
       : localizeTelegramLine(cleanLine(line, 400)))),
-  ].filter(Boolean).join('\n')))
+  ].filter(Boolean).join('\n')), config.chatId, config.topics[eventTopic[event.type]])
   return true
 }
 
@@ -257,7 +295,7 @@ export async function sendTelegramTest(env: Env): Promise<void> {
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
     '',
     telegramCommandReference(),
-  ].join('\n')))
+  ].join('\n')), config.chatId, config.topics.telegram_topic_alerts)
   await configureTelegramWebhook(env)
 }
 
@@ -392,7 +430,7 @@ export function formatBusinessDay(isoDate: string): string {
 }
 
 const reportTitle = (icon: string, en: string, km: string, date?: string): string =>
-  `${icon} ${bi(en, km)}${date ? ` — ${formatBusinessDay(date)}` : ''}`
+  `${icon} ${bi(en, km)}${date ? `: ${formatBusinessDay(date)}` : ''}`
 
 // The stock lines are the only place a bilingual counter still earns its
 // keep: "12 · 340" would not say which half is movements and which is units.
@@ -438,15 +476,13 @@ function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCo
 //
 // Sep 23 2026 the drawn rule and the `N.` number that opened each section
 // went. A section now opens with ONE line, its name between two edges and
-// nothing drawn above it: `=====Sales / ការលក់=====` in the day summary,
-// /sales, /fees, /stock and /inventory (REPORT_SECTION_EDGE; owner: "for
-// telegram reports, instead of plain line ------we can do =====section
-// name===== instead."), and `-----Invoices / វិក្កយបត្រ-----` in the shift
-// report (SHIFT_SECTION_EDGE; the owner's words are with formatShiftReport
-// below). Five marks a side is the most: sectionHeader takes fewer when five
-// would push the line onto a second row. RULE is left for what separates
-// WHOLE blocks: the shift reports a `/shift` answer joins, and the command
-// reference.
+// nothing drawn above it. Since 25 Sep 2026 EVERY report shares the same
+// glyph, `=`: `====Sales/ការលក់====` in the day summary, /sales, /fees,
+// /stock, /inventory AND the shift report alike (REPORT_SECTION_EDGE and
+// SHIFT_SECTION_EDGE, both `=` now -- see telegramLang.ts). Five marks a
+// side is the most: sectionHeader takes fewer when five would push the line
+// onto a second row. RULE is left for what separates WHOLE blocks: the shift
+// reports a `/shift` answer joins, and the command reference.
 
 /** The most marks a section header stands on either side of its name. */
 const SECTION_EDGE_MARKS = 5
@@ -621,7 +657,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // is dropped here and only here: the section is a list of cashiers, so the
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
-  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])))
+  section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])))
   return lines.join('\n')
 }
 
@@ -630,7 +666,7 @@ export async function sendTelegramTodaySummary(env: Env): Promise<void> {
   if (problem) throw new Error(problem)
   const today = businessToday()
   const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
-  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)))
+  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports)
 }
 
 async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
@@ -702,7 +738,9 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
       sectionHeader('eachExpense', REPORT_SECTION_EDGE),
     ]
     if (!fees.length) lines.push(EMPTY_SECTION)
-    for (const fee of fees) lines.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(fee.fee_type)}${fee.label ? ` — ${cleanLine(fee.label, 90)}` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
+    // Parentheses, not an em dash, join the fee type and its optional label --
+    // a trailing "type: label:" double colon reads worse than "type (label):".
+    for (const fee of fees) lines.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(fee.fee_type)}${fee.label ? ` (${cleanLine(fee.label, 90)})` : ''}:`, [money(fee.amount_usd, fee.amount_khr)]))
     return lines.join('\n')
   })
 }
@@ -726,7 +764,7 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     const lines = [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length)]
     for (const row of rows) {
       const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')} — ${cleanLine(row.name, 120)}`, [`— ${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
+      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
     }
     return lines.join('\n')
   })
@@ -1038,8 +1076,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // counted value (and therefore no difference), but the employee still needs
   // the current target while trading.
   const expected = recon.expected.usd == null && recon.expected.khr == null
-    ? '—'
-    : `${recon.expected.usd == null ? '—' : usd(recon.expected.usd)} · ${recon.expected.khr == null ? '—' : riel(recon.expected.khr)}`
+    ? NOT_APPLICABLE
+    : `${recon.expected.usd == null ? NOT_APPLICABLE : usd(recon.expected.usd)} · ${recon.expected.khr == null ? NOT_APPLICABLE : riel(recon.expected.khr)}`
   cash.push(labeled('expectedCash', expected))
   // The closing count only exists once the employee has ended the shift by
   // hand, so an open shift shows no difference against a count that was
@@ -1047,8 +1085,8 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   if (shift.closed_at) {
     const signed = (n: number, format: (value: number) => string) => `${n < 0 ? '−' : n > 0 ? '+' : ''}${format(Math.abs(n))}`
     const difference = recon.difference.usd == null && recon.difference.khr == null
-      ? '—'
-      : `${recon.difference.usd == null ? '—' : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? '—' : signed(recon.difference.khr, riel)}`
+      ? NOT_APPLICABLE
+      : `${recon.difference.usd == null ? NOT_APPLICABLE : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? NOT_APPLICABLE : signed(recon.difference.khr, riel)}`
     cash.push(labeled('difference', difference))
     if (recon.needs_review) {
       const reviewLabels: Partial<Record<string, TelegramLabelKey>> = {
@@ -1061,7 +1099,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
         .map((code) => reviewLabels[code])
         .filter((key): key is TelegramLabelKey => !!key)
         .map((key) => label(key))
-      cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : '—'))
+      cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : NOT_APPLICABLE))
     }
   }
   lines.push(sectionHeader('cashCount', SHIFT_SECTION_EDGE), ...cash)
@@ -1072,14 +1110,14 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   lines.push(sectionHeader('paymentMethods', SHIFT_SECTION_EDGE))
   const paymentMethods = figures.paymentMethods || []
   lines.push(...(paymentMethods.length
-    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`]))
+    ? paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`]))
     : [EMPTY_SECTION]))
 
   lines.push(sectionHeader('delivery', SHIFT_SECTION_EDGE))
   const deliveries = figures.deliveries || []
   lines.push(...(deliveries.length
-    ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}`, [
-      `— ${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
+    ? deliveries.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, 40)}:`, [
+      `${Number(row.count) || 0} · ${usd(row.feeUsd)} ${bi('fee', 'ថ្លៃដឹក')}`,
       // An UNRECORDED courier cost is NULL, never $0.00: a "$0.00 cost" tail
       // would claim the courier worked for free, so it is left off instead.
       Number(row.costUsd) > 0 ? `· ${usd(row.costUsd)} ${bi('cost', 'ថ្លៃដើម')}` : '',
@@ -1095,14 +1133,14 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
   })
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}`, [`— ${usd(expenses.courierUsd)}`]))
+  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [usd(expenses.courierUsd)]))
   const details = figures.expenseDetails || []
   if (details.length) {
-    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}`, [`— ${money(detail.usd, detail.khr)}`]))
+    for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [money(detail.usd, detail.khr)]))
   } else if (expenses.otherUsd || expenses.otherKhr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}`, [`— ${money(expenses.otherUsd, expenses.otherKhr)}`]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(expenses.otherUsd, expenses.otherKhr)]))
   }
   lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
@@ -1269,7 +1307,7 @@ async function shiftReport(env: Env, date: string, nowMs: number, language: Tele
   `).all<ShiftReportSession>({ date })
   if (!shifts.length) {
     return withLanguage(language, () => [
-      `🧑‍💼 ${label('shiftReport')} — ${formatBusinessDay(date)}`,
+      `🧑‍💼 ${label('shiftReport')}: ${formatBusinessDay(date)}`,
       bi('No shift was registered on this day.', 'គ្មានវេនណាមួយបានចុះបញ្ជីក្នុងថ្ងៃនេះទេ។'),
     ].join('\n'))
   }
@@ -1294,7 +1332,7 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
     if (!config.enabled || configurationProblem(config)) return false
     const shift = await getDb(env).prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions WHERE id = @id`).get<ShiftReportSession>({ id: shiftId })
     if (!shift) return false
-    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language))
+    await postTelegram(config, await shiftReportFor(env, shift, nowMs, config.language), config.chatId, config.topics.telegram_topic_shift)
     return true
   } catch (error) {
     console.error('[telegram] shift report could not be sent', error)
@@ -1425,7 +1463,7 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
-  section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}`, [`— ${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
+  section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
 
   const expenses = expenseTotals({
     otherUsd: showExpenses ? figures.otherExpenseUsd : 0, otherKhr: showExpenses ? figures.otherExpenseKhr : 0,
@@ -1556,7 +1594,7 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
     const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
-    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)))
+    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics.telegram_topic_shift)
     await settle('sent', null, ', sent_at = @now')
     return 'sent'
   } catch (error) {
@@ -1659,15 +1697,20 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
   const config = await getTelegramConfig(env)
   // No token means there is no way to reply at all, so say nothing.
   if (commandProblem(config)) return
+  // A typed command replies IN THE TOPIC IT WAS ASKED FROM -- the reader is
+  // already looking at that thread -- rather than the configured push topic,
+  // which is for alerts nobody asked for. General chat carries no thread id,
+  // so this is undefined there, same as before topics existed.
+  const threadId = Number(message?.message_thread_id) || undefined
   // THE ACCESS BOUNDARY (S4-9). A Telegram group carries no Business OS
   // session, so the only thing that can be checked is which chat is asking.
   // Any chat that is not on the owner's allow-list gets a refusal carrying
   // nothing but its own chat id -- never a figure, a receipt or a product.
   if (!config.chatIds.includes(chatId)) {
-    await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId)
+    await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId, threadId)
     return
   }
-  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId)
+  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId, threadId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
@@ -1840,7 +1883,7 @@ export function formatSaleTelegramLines(sale: TelegramSaleSummary): string[] {
   // under the status and date; it is the invoice the whole message is about,
   // so it heads the message. sendTelegramEvent gives a sales event no heading
   // of its own: this first line is the heading.
-  return [eventTitle('🛍️ Sale Invoice', sale.receiptNumber), ...eventGroups([
+  return [eventTitle('🛍️ Sale invoice', sale.receiptNumber), ...eventGroups([
     // WHAT HAPPENED. Status leads, and it prints on EVERY sale now (owner's
     // Sep 22 2026 reference layout opens on it). It used to be dropped on a
     // completed sale as "the norm the heading already announces" -- but the
@@ -1957,7 +2000,9 @@ export function formatSaleStatusTelegramLines(change: TelegramStatusChange): str
   const lostFeeKhr = Number(change.lostFeeKhr) || 0
   const customer = cleanLine(change.customer, 120)
   return [eventTitle('🧾 Invoice', change.receipt), ...eventGroups([
-    [`Invoice Status Updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`],
+    // The raw English MUST equal LABELS.statusUpdated.en exactly (telegramLang.ts):
+    // localizeTelegramLine finds this label by that string before the first ': '.
+    [`Status updated: ${readable(change.fromStatus)} → ${readable(change.toStatus)}`],
     [
       customer ? `Customer: ${customer}` : '',
       change.reason ? `Reason: ${change.reason}` : '',
@@ -2032,11 +2077,16 @@ export type TelegramReturnSummary = {
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
 
-// The resulting on-hand of one bullet, `— Warehouse 90 · Shop 25 · all
-// branches 115`; a figure the route could not read back is left out.
+// The resulting on-hand of one bullet, `· Warehouse 90 · Shop 25 · all
+// branches 115`. This is a mid-row CONTINUATION piece, not a label: value row
+// -- telegramRowLines joins every part with a leading space of its own, so a
+// colon here would read as "150 : Warehouse 90" (a space before the colon).
+// `·`, the app's own generic figure separator (money()'s join), replaces the
+// em dash instead (owner, 25 Sep 2026: "no em dash anywhere"). A figure the
+// route could not read back is left out.
 function onHandPart(parts: Array<[string, number | null | undefined]>): string {
   const shown = parts.filter(([, value]) => value != null).map(([label, value]) => `${label} ${Number(value) || 0}`)
-  return shown.length ? `— ${shown.join(' · ')}` : ''
+  return shown.length ? `· ${shown.join(' · ')}` : ''
 }
 
 // Each product is one bullet; a bullet too wide for a phone continues on the
