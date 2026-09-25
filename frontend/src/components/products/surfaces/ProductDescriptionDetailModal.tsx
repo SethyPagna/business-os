@@ -63,7 +63,12 @@ export default function ProductDescriptionDetailModal({
   const parsed = parseProductDescription(description)
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    // z-[1070]: the nested-float layer (shared/Modal's layer="nested"). The
+    // product sheet that opens this sits at z-[1050] and renders it as a
+    // SIBLING of its overlay (so a click here cannot bubble into the sheet's
+    // close handler), which puts both in the same body-level stacking context;
+    // the old z-[60] only won while this was nested inside the sheet's overlay.
+    <div className="fixed inset-0 z-[1070] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
         className="flex max-h-[calc(88*var(--app-vh))] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl pb-[env(safe-area-inset-bottom)] sm:max-h-[calc(85*var(--app-vh))] sm:max-w-2xl sm:rounded-2xl sm:pb-0 dark:bg-gray-800"
         onClick={(event) => event.stopPropagation()}

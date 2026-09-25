@@ -270,12 +270,16 @@ export default function ProductDetailModal({
   ) : null
 
   const modal = (
-    // This sheet used to live inside Products' page tree at z-50. On mobile,
-    // that put it in a lower stacking context than the fixed app header and
-    // bottom navigation, so those bars could cover its rows and action
-    // footer. Rendering at the body-level overlay layer ensures the sheet is
-    // above both bars, while the safe viewport classes keep every control
-    // inside the usable screen area on notched/short devices.
+    <>
+    {/* This sheet used to live inside Products' page tree at z-50. On mobile,
+        that put it in a lower stacking context than the fixed app header and
+        bottom navigation, so those bars could cover its rows and action
+        footer. Rendering at the body-level overlay layer ensures the sheet is
+        above both bars, while the safe viewport classes keep every control
+        inside the usable screen area on notched/short devices.
+
+        The child floats (description, field history, cost calculation) are
+        SIBLINGS of this overlay, never children -- see the note after it. */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -561,6 +565,17 @@ export default function ProductDetailModal({
           </div>
         </div>
       </div>
+    </div>
+    {/* Owner, 25 Sep 2026: opening a specific record from this sheet "goes
+        back to the default view instead of showing that record, with no
+        before/after". Root cause: these floats used to render INSIDE the
+        overlay <div> above, whose onClick is onClose. Every float here is a
+        portal, but React bubbles synthetic events through the COMPONENT tree,
+        not the DOM -- so pressing a row in the Field history float (or
+        anything in the cost or description float) bubbled up to that onClick
+        and closed the whole product sheet, unmounting the float with it.
+        Inventory's ProductDetailModal and POS's ProductDetailSheet already
+        render theirs as siblings of the overlay; this is the same shape. */}
       {descriptionDetailOpen ? (
         <Suspense fallback={null}>
           <ProductDescriptionDetailModal
@@ -596,7 +611,7 @@ export default function ProductDetailModal({
           t={(key, fallback) => T(key, fallback)}
         />
       ) : null}
-    </div>
+    </>
   )
 
   if (typeof document === 'undefined') return modal
