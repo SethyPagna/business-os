@@ -14,7 +14,9 @@ assert.match(source, /EPC \/ TID/)
 assert.match(source, /barcode fallback/i)
 assert.match(source, /openMovementProductDetail/)
 assert.match(source, /getInventoryApi\(\)\.getProductsByIds/)
-assert.match(movementsSurface, /onClick=\{\(\) => openMovementProductDetail\(movement\)\}/)
+// U-records: a Movements row opens its own record float; the product card
+// (openMovementProductDetail) is reached from inside it.
+assert.match(movementsSurface, /onClick=\{\(\) => openMovementDetail\(movement\)\}/)
 // parseInventoryTimestamp left with the products slice (Part 562) -- the
 // movement day-grouping runs through buildTimeActionSections/getTimeParts now.
 

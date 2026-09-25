@@ -78,6 +78,22 @@ export function getInventoryBootstrap(params: QueryParams = {}): Promise<unknown
   return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/bootstrap', query), 'inventory:bootstrap')
 }
 
+export type InventoryMovementBalance = { id: number; before_qty: number | null; after_qty: number | null }
+
+/**
+ * U-records: ONE movement's stock before -> after, read when its record
+ * float opens (GET /api/inventory/movements/:id/balance). Offline there is
+ * no balance to derive, so both read null and the float shows "—".
+ */
+export function getInventoryMovementBalance(id: string | number): Promise<InventoryMovementBalance | null> {
+  const movementId = Math.trunc(Number(id))
+  return route<InventoryMovementBalance>(
+    `inventory:movement-balance:${movementId}`,
+    () => apiFetch('GET', `/api/inventory/movements/${movementId}/balance`),
+    () => ({ id: movementId, before_qty: null, after_qty: null }),
+  )
+}
+
 export function getInventoryMovements({
   branchId,
   userId,

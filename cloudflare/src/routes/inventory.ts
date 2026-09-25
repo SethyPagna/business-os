@@ -1055,6 +1055,22 @@ app.get('/movements', async (c) => {
   return c.json({ items: (items || []).map((row) => withResolvedActorName(withResolvedBranchName(row))), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) })
 })
 
+// U-records: ONE movement's stock before -> after, for the Movements tab's
+// record float. The same set-based helper the stock-in session lines use
+// (lib/stockLedgerQuery.ts, parity with the Stock Changes ledger pinned in
+// scripts/test-stock-in-line-balance-pure.cjs) -- one statement. Fetched on
+// open rather than joined into every /movements page, which can be 20k rows.
+// null when not derivable; the float shows "—", never a guess. Loaded on
+// use, like lib/stockSession above, so this route file's import graph (which
+// the route harnesses mirror) does not grow for one read.
+app.get('/movements/:id/balance', async (c) => {
+  const id = Number.parseInt(String(c.req.param('id') || ''), 10)
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
+  const { loadMovementStockBalances } = await import('../lib/stockLedgerQuery')
+  const balance = (await loadMovementStockBalances(getDb(c.env), [id])).get(id)
+  return c.json({ id, before_qty: balance ? balance.before_qty : null, after_qty: balance ? balance.after_qty : null })
+})
+
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----
 
 type InventoryReason = { type: string; label: string }

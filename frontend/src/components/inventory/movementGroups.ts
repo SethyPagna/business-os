@@ -182,6 +182,11 @@ function movementSign(type: unknown): -1 | 1 {
   return 1
 }
 
+/** A movement's quantity with the direction its type implies -- the ledger's signed_quantity. */
+export function signedMovementQuantity(type: unknown, quantity: unknown): number {
+  return movementSign(type) * Math.abs(Number(quantity) || 0)
+}
+
 // Semantic stock-movement color map, replacing the old scheme of 13
 // unrelated hand-picked colors (one per raw movement_type, no shared
 // logic between them -- add/remove/sale/purchase/return/supplier_return/

@@ -19,6 +19,7 @@ import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork } from '../../utils/minimizedW
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import Modal from '../shared/Modal.tsx'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { StockLineChange } from '../shared/StockLineChange.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
@@ -592,7 +593,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           {selectedLine.image_path ? <ProductImg src={selectedLine.image_path} alt={selectedLine.product_name} className="h-14 w-14 rounded-lg object-cover sm:h-[4.5rem] sm:w-[4.5rem]" /> : <ProductImagePlaceholder compact className="h-14 w-14 rounded-lg sm:h-[4.5rem] sm:w-[4.5rem]" />}
           <div className="min-w-0 break-all dense-id text-gray-500">{selectedLine.barcode || tr('barcode_not_recorded', 'Barcode not recorded')}{selectedLine.sku ? ` · ${selectedLine.sku}` : ''}</div>
         </div>
-        <StockInLineChange row={selectedLine} canViewCosts={canViewCosts} tr={tr} />
+        <StockLineChange row={selectedLine} signedQuantity={Math.abs(Number(selectedLine.received_quantity ?? selectedLine.quantity) || 0)} canViewCosts={canViewCosts} tr={tr} />
         {/* The quantity leads in the balance block above; these are the line's other facts. */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] sm:grid-cols-4">{canViewCosts ? <div><span className="block text-gray-400">{tr('cost_price', 'Cost price')}</span><b>{formatUsd(selectedLine.unit_cost_usd ?? selectedLine.batch_unit_cost_usd ?? selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</b></div> : null}<div><span className="block text-gray-400">{tr('selling_price', 'Selling price')}</span><b>{formatUsd(selectedLine.selling_price_usd)}</b></div>{canViewCosts ? <div><span className="block text-gray-400">{tr('catalog_cost_price', 'Catalog cost price')}</span><b><button type="button" className="decoration-dotted underline-offset-2 hover:underline" onClick={() => setCostFloatOpen(true)} title={tr('cost_breakdown_title', 'Calculated cost price')}>{formatUsd(selectedLine.cost_price_usd ?? selectedLine.purchase_price_usd)}</button></b></div> : null}<div><span className="block text-gray-400">{tr('brand', 'Brand')}</span><b className="break-words">{selectedLine.brand || '—'}</b></div><div><span className="block text-gray-400">{tr('category', 'Category')}</span><b className="break-words">{selectedLine.category || '—'}</b></div><div><span className="block text-gray-400">{tr('received_date', 'Received date')}</span><b className="dense-id">{selectedLine.batch_id ? batchDisplayLabel({ id: selectedLine.batch_id, lot_code: selectedLine.batch_lot_code, received_at: selectedLine.batch_received_at }, tr('batch', 'Received date')) : '—'}</b></div><div><span className="block text-gray-400">{tr('expiry_date', 'Expiry')}</span><b>{selectedLine.batch_expiry_date ? fmtDate(selectedLine.batch_expiry_date) : '—'}</b></div><div><span className="block text-gray-400">{tr('supplier', 'Supplier')}</span><b className="detail-scroll-text">{supplierDisplay(selectedLine.batch_supplier_name, tr)}</b></div><div><span className="block text-gray-400">{tr('payment', 'Payment')}</span><b>{selectedLine.batch_payment_status === 'credit' ? tr('on_credit', 'Not Yet Paid') : selectedLine.batch_payment_status === 'paid' ? tr('paid', 'Paid') : '—'}</b></div>{/* P3-L2: the reason, revealed on click -- the row shows it truncated. */}<div className="col-span-2 sm:col-span-4"><span className="block text-gray-400">{tr('reason', 'Reason')}</span><b className="break-words">{selectedLine.reason || '—'}</b></div></div>
       </div>
@@ -630,46 +631,3 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   </div>
 }
 
-// Rendering helpers of a line's own float. Kept BELOW the component: the
-// handler region above it (sessionCost .. the component body) is executed
-// as plain TS by tests/stockInLineEditAttempt.test.ts, which has no JSX.
-// A recorded cost, or "—" when none was recorded -- never a $0.00 that
-// Number(null) would make of a missing one.
-function formatRecordedUsd(value: unknown): string {
-  return value == null || value === '' ? '—' : formatUsd(value)
-}
-
-function formatQty(value: unknown, unit?: string | null): string {
-  if (value == null || value === '') return '—'
-  const amount = Number(value)
-  if (!Number.isFinite(amount)) return '—'
-  return unit ? `${amount} ${unit}` : String(amount)
-}
-
-// U-records: the "what did this line change" block of a line's own float.
-// Stock before -> after always; for a line edited after it was saved, each
-// figure as received -> now. Costs only for a cost viewer.
-function StockInLineChange({ row, canViewCosts, tr }: { row: Row; canViewCosts: boolean; tr: (key: string, fallback: string) => string }) {
-  const edited = Number(row.edit_count) > 0
-  const changes: Array<{ label: string; received: string; now: string }> = edited ? [
-    { label: tr('quantity', 'Quantity'), received: formatQty(row.received_quantity, row.unit), now: formatQty(row.quantity, row.unit) },
-    ...(canViewCosts ? [
-      { label: tr('unit_cost', 'Unit Cost'), received: formatRecordedUsd(row.received_unit_cost_usd), now: formatRecordedUsd(row.unit_cost_usd) },
-      { label: tr('total_cost', 'Total cost'), received: formatRecordedUsd(row.received_total_cost_usd), now: formatRecordedUsd(row.total_cost_usd) },
-    ] : []),
-  ] : []
-  return <div className="space-y-2">
-    <div data-testid="stock-in-line-balance" className="grid grid-cols-3 gap-2">
-      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('before_qty', 'Before')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{formatQty(row.before_qty, row.unit)}</div></div>
-      <div className="rounded-xl bg-emerald-50 px-3 py-2 dark:bg-emerald-900/20"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-emerald-700 dark:text-emerald-300">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">+{formatQty(row.received_quantity ?? row.quantity, row.unit)}</div></div>
-      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60"><div className="text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{tr('after_qty', 'After')}</div><div className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">{formatQty(row.after_qty, row.unit)}</div></div>
-    </div>
-    {changes.length ? <div data-testid="stock-in-line-edit-change" className="rounded-xl border border-blue-100 bg-blue-50/55 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
-      <div className="mb-1 text-[11px] font-semibold leading-relaxed text-blue-700 dark:text-blue-300">{tr('stock_in_line_changed_since', 'Edited after it was received')}</div>
-      <dl className="space-y-1">{changes.map((change) => <div key={change.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
-        <dt className="leading-relaxed text-gray-500">{change.label}</dt>
-        <dd className="tabular-nums font-semibold text-gray-800 dark:text-gray-100" aria-label={`${change.label}: ${tr('stock_in_line_as_received', 'As received')} ${change.received}, ${tr('stock_in_line_now', 'Now')} ${change.now}`}>{change.received} → {change.now}</dd>
-      </div>)}</dl>
-    </div> : null}
-  </div>
-}

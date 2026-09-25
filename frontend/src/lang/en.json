@@ -5733,6 +5733,7 @@
   "stock_in_line_changed_since": "Edited after it was received",
   "stock_in_line_as_received": "As received",
   "stock_in_line_now": "Now",
+  "stock_balance_unavailable": "The stock before and after could not be read.",
   "stock_in_line_edit_reason_placeholder": "Optional, e.g. typo on the invoice",
   "stock_in_line_error_quantity": "Enter a quantity between 0 and 1,000,000,000.",
   "stock_in_line_error_cost": "Enter a unit cost of 0 or more.",

@@ -47,6 +47,7 @@ import { STOCK_ADJUST_RESTORE_HOST, stockAdjustDraftKey, type StockAdjustDraft }
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
 const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
+const MovementDetailFloat = lazyRetry(() => import('./MovementDetailFloat'), 'inventory-movement-detail-float') as any
 const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPreviewModal'), 'inventory-product-history-preview-modal') as any
 const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'), 'inventory-export-range-dialog') as any
 
@@ -305,6 +306,7 @@ function getInventoryApi(): InventoryApi {
     getDashboard: async () => (await loadDashboardTransport()).getDashboard(),
     getInventoryBootstrap: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryBootstrap(params),
     getInventoryMovements: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryMovements(params),
+    getInventoryMovementBalance: async (id: string | number) => (await loadInventoryTransport()).getInventoryMovementBalance(id),
     getInventoryReasons: async () => (await loadInventoryTransport()).getInventoryReasons(),
     getInventoryReasonImpact: async (type: string, from: string, to: string) => (await loadInventoryTransport()).getInventoryReasonImpact(type, from, to),
     getInventoryStats: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryStats(params),
@@ -1768,6 +1770,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     }
   }, [tr])
 
+  // U-records: the Movements row whose own record float is open, and the
+  // one-statement read of its stock before -> after.
+  const [movementDetail, setMovementDetail] = useState<InventoryMovement | null>(null)
+  const loadMovementBalance = useCallback((id: string | number) => getInventoryApi().getInventoryMovementBalance(id), [])
+
   const openMovementProductDetail = useCallback(async (movement: InventoryMovement) => {
     const productId = Number(movement?.product_id || 0)
     if (productId && getInventoryApi().getProductsByIds) {
@@ -2955,7 +2962,7 @@ ${inventoryFeesFormulaText}`,
             movementSelectMode={movementSelectMode}
             movementStartDate={movementStartDate}
             onToggleMovementSelectMode={toggleMovementSelectMode}
-            openMovementProductDetail={openMovementProductDetail}
+            openMovementDetail={setMovementDetail}
             selectedMovementGroups={selectedMovementGroups}
             selectedMovementIds={selectedMovementIds}
             setSelectedMovementIds={setSelectedMovementIds}
@@ -3152,6 +3159,21 @@ ${inventoryFeesFormulaText}`,
           />
         </Suspense>
       )}
+
+      {/* U-records: a Movements row's own record float -- before -> after --
+          with the product card one tap away. */}
+      {movementDetail ? (
+        <Suspense fallback={null}>
+          <MovementDetailFloat
+            movement={movementDetail}
+            t={t}
+            fmtTime={fmtTime}
+            loadBalance={loadMovementBalance}
+            onOpenProduct={() => { const movement = movementDetail; setMovementDetail(null); void openMovementProductDetail(movement) }}
+            onClose={() => setMovementDetail(null)}
+          />
+        </Suspense>
+      ) : null}
 
       {historyPreview && (
         <Suspense fallback={null}>

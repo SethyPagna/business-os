@@ -136,7 +136,9 @@ type InventoryMovementsSurfaceProps = {
   movementSelectMode: boolean
   movementStartDate: string
   onToggleMovementSelectMode: () => void
-  openMovementProductDetail: (movement: MovementRecord) => void
+  // U-records: a row opens THAT movement's own record float (before ->
+  // after), not the product card -- Inventory.tsx's MovementDetailFloat.
+  openMovementDetail: (movement: MovementRecord) => void
   selectedMovementGroups: MovementId[]
   selectedMovementIds: Set<MovementId>
   setSelectedMovementIds: Dispatch<SetStateAction<Set<MovementId>>>
@@ -208,7 +210,7 @@ export default function InventoryMovementsSurface({
   movementSelectMode,
   movementStartDate,
   onToggleMovementSelectMode,
-  openMovementProductDetail,
+  openMovementDetail,
   selectedMovementGroups,
   selectedMovementIds,
   setSelectedMovementIds,
@@ -301,7 +303,7 @@ export default function InventoryMovementsSurface({
                     <button
                       type="button"
                       className="min-w-0 max-w-[16rem] text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-white dark:hover:text-blue-300"
-                      onClick={() => openMovementProductDetail(movement)}
+                      onClick={() => openMovementDetail(movement)}
                       title={movement.product_name || ''}
                     >
                       <ProductNameRail name={movement.product_name || (t('product') || 'Product')} />

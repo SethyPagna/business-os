@@ -49,12 +49,14 @@ function hasModalAncestor(node: ts.Node): boolean {
   }
   return false
 }
+// The balance block is shared with the Movements-tab record float.
+const sharedBlock = fs.readFileSync(path.join(here, '..', 'src', 'components', 'shared', 'StockLineChange.tsx'), 'utf8')
 function functionBody(name: string): string {
-  const start = source.indexOf(`function ${name}(`)
+  const start = sharedBlock.indexOf(`function ${name}(`)
   assert.ok(start >= 0, `${name} exists`)
-  const end = /\r?\n\}\r?\n/.exec(source.slice(start))
+  const end = /\r?\n\}\r?\n/.exec(sharedBlock.slice(start))
   assert.ok(end, `${name} has a closing brace`)
-  return source.slice(start, start + end.index)
+  return sharedBlock.slice(start, start + end.index)
 }
 
 const lineModal = jsxElements('Modal').find((element) => titleOf(element).includes('selectedLine.product_name'))
@@ -71,8 +73,9 @@ runTest('the line float is a sibling of the session modal, not inline inside it'
 
 runTest('the float leads with stock before -> after and the as-received -> now change', () => {
   const float = lineModal!.getText()
-  assert.match(float, /<StockInLineChange row=\{selectedLine\}/)
-  const block = functionBody('StockInLineChange')
+  assert.match(float, /<StockLineChange row=\{selectedLine\}/)
+  assert.match(source, /import \{ StockLineChange \} from '\.\.\/shared\/StockLineChange\.tsx'/)
+  const block = functionBody('StockLineChange')
   for (const field of ['row.before_qty', 'row.after_qty', 'row.received_quantity', 'row.received_unit_cost_usd', 'row.received_total_cost_usd']) {
     assert.ok(block.includes(field), `the change block reads ${field}`)
   }
@@ -81,16 +84,16 @@ runTest('the float leads with stock before -> after and the as-received -> now c
 })
 
 runTest('an edited line shows its costs only to a cost viewer', () => {
-  const block = functionBody('StockInLineChange')
+  const block = functionBody('StockLineChange')
   const costs = block.indexOf('received_unit_cost_usd')
   const guard = block.lastIndexOf('canViewCosts ?', costs)
   assert.ok(guard >= 0 && guard < costs, 'the as-received cost rows sit behind canViewCosts')
-  assert.match(source, /<StockInLineChange row=\{selectedLine\} canViewCosts=\{canViewCosts\}/)
+  assert.match(source, /<StockLineChange row=\{selectedLine\} signedQuantity=\{Math\.abs\(Number\(selectedLine\.received_quantity \?\? selectedLine\.quantity\) \|\| 0\)\} canViewCosts=\{canViewCosts\}/)
 })
 
 runTest('a missing balance or cost reads as a dash, never a guessed zero', () => {
   assert.match(functionBody('formatQty'), /value == null \|\| value === ''\) return '—'/)
-  assert.match(functionBody('formatRecordedUsd'), /value == null \|\| value === '' \? '—'/)
+  assert.match(functionBody('formatRecordedUsd'), /value == null \|\| value === ''\) return '—'/)
 })
 
 runTest('both language packs carry the new labels, and km is not English', () => {
