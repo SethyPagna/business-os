@@ -7,7 +7,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { classifyImportUpload, validateUploadedBuffer } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
@@ -805,22 +805,24 @@ app.post('/:id/preflight', async (c) => {
 // import spreadsheet kept can still upload it to Library separately,
 // same as any other file -- the import flow itself just no longer does
 // it FOR them automatically.
+//
+// S-uploads (compliance audit P1-2 / SEC-3): the ZIP container used to land
+// under the PUBLIC uploads/ prefix with the client's File.type and no byte
+// check -- a "zip" declared text/html was stored XSS. Owner direction:
+// public /uploads is images only. The ZIP now joins the CSV as a private,
+// job-scoped object (it only exists to seed this import; its images are
+// extracted and stored individually below), and every kind's stored
+// content-type and extension come from classifyImportUpload -- the bytes
+// for images/ZIP, never the client's claim.
 async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image', file: File, relativePath?: string) {
   const user = c.get('user')
   const originalName = sanitizeOriginalFileName(file.name || 'upload.bin')
-  const storedName = buildUniqueStoredName(originalName)
-  const mimeType = file.type || 'application/octet-stream'
   const bytes = new Uint8Array(await file.arrayBuffer())
-  if (kind === 'image') {
-    try {
-      validateUploadedBuffer(bytes, mimeType, originalName)
-    } catch (error) {
-      if (isImportMaintenanceFenceError(error)) throw error
-      throw new Error((error as Error).message)
-    }
-  }
+  const format = classifyImportUpload(kind, bytes, file.type || '', originalName)
+  const storedName = buildUniqueStoredName(originalName, format.extension)
+  const mimeType = format.contentType
 
-  const addToLibrary = kind !== 'csv'
+  const addToLibrary = format.isPublic
   const key = addToLibrary ? `uploads/${storedName}` : `imports/${jobId}/incoming/${storedName}`
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
   // K3: only library-bound files normalize (imports/... staging keys are
@@ -889,9 +891,9 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
     // (uploadImportJobZip callers fetch each stored image back from this
     // path, recompress it client-side, then POST the smaller bytes to
     // /:id/images/:fileId/recompress below) -- only meaningful for
-    // addToLibrary uploads (zip/image), where the file genuinely lives at
-    // the shared /uploads/ path; a csv upload has no public_path since it
-    // was never added to Library.
+    // addToLibrary uploads (images), where the file genuinely lives at
+    // the shared /uploads/ path; a csv or zip upload has no public_path
+    // since it was never added to Library.
     public_path: addToLibrary ? `/uploads/${storedName}` : null,
   }
 }
@@ -948,9 +950,10 @@ app.post('/:id/zip', async (c) => {
   if (extname(file.name || '') !== '.zip') return c.json({ success: false, error: 'Upload a ZIP file for images' }, 400)
   if (file.size > MAX_ZIP_BYTES) return c.json({ success: false, error: `ZIP is too large (max ${Math.floor(MAX_ZIP_BYTES / (1024 * 1024))}MB)` }, 400)
   try {
-    // Store the ZIP itself first, same as before -- it lands in Library
-    // and import_job_files regardless of what's inside it or whether
-    // unpacking below succeeds for every entry.
+    // Store the ZIP itself first -- a private job-scoped object tracked in
+    // import_job_files (not Library, not /uploads; S-uploads) regardless
+    // of what's inside it or whether unpacking below succeeds for every
+    // entry. Bytes that are not a ZIP are refused here with a 400.
     const stored = await storeUpload(c, id, 'zip', file)
 
     // Unpack: read the central directory once, then extract + store each
@@ -1137,9 +1140,12 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
   if (!IMAGE_EXTENSIONS.has(extname(file.name || ''))) return c.json({ success: false, error: 'Not a supported image type' }, 400)
 
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const mimeType = file.type || IMAGE_MIME_BY_EXT[extname(file.name || '')] || 'application/octet-stream'
+  const claimedMimeType = file.type || IMAGE_MIME_BY_EXT[extname(file.name || '')] || 'application/octet-stream'
+  // S-uploads: the stored type is the one detected from the bytes (the
+  // claim only has to agree on the kind), same as storeUpload.
+  let mimeType: string
   try {
-    validateUploadedBuffer(bytes, mimeType, file.name || 'image')
+    mimeType = validateUploadedBuffer(bytes, claimedMimeType, file.name || 'image').mime
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message }, 400)
