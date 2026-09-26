@@ -18,7 +18,7 @@ import {
   testProviderConfig,
   parseJsonSafe,
 } from '../lib/aiGateway'
-import { encryptSecret } from '../lib/secretCrypto'
+import { encryptSecret, upgradeLegacySecret, MissingEncryptionKeyError } from '../lib/secretCrypto'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -114,6 +114,8 @@ app.post('/providers', async (c) => {
     })
     return c.json({ success: true, item: await serializeProviderRow(created, c.env.APP_ENCRYPTION_KEY) })
   } catch (error: any) {
+    // No usable APP_ENCRYPTION_KEY: the key is refused, not stored in plaintext.
+    if (error instanceof MissingEncryptionKeyError) return c.json({ success: false, error: error.message, code: error.code }, 400)
     return c.json({ success: false, error: error?.message || 'Failed to save AI provider' }, 500)
   }
 })
@@ -127,7 +129,11 @@ app.put('/providers/:id', async (c) => {
     assertUpdatedAtMatch('ai_provider_config', existing, getExpectedUpdatedAt(body))
 
     const payload = normalizeProviderPayload(body)
-    const apiKeyEncrypted = payload.apiKey ? await encryptSecret(payload.apiKey, c.env.APP_ENCRYPTION_KEY) : existing.api_key_encrypted
+    // Kept key: a legacy plaintext value is re-encrypted on this write when a
+    // key exists (upgradeLegacySecret returns null otherwise and never throws).
+    const apiKeyEncrypted = payload.apiKey
+      ? await encryptSecret(payload.apiKey, c.env.APP_ENCRYPTION_KEY)
+      : ((await upgradeLegacySecret(existing.api_key_encrypted, c.env.APP_ENCRYPTION_KEY)) ?? existing.api_key_encrypted)
     const nowIso = new Date().toISOString()
     await getDb(c.env).prepare(`
       UPDATE ai_provider_configs
@@ -175,6 +181,7 @@ app.put('/providers/:id', async (c) => {
       const { body, status } = writeConflictResponse(error)
       return c.json(body, status)
     }
+    if (error instanceof MissingEncryptionKeyError) return c.json({ success: false, error: error.message, code: error.code }, 400)
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to update AI provider' }, 500)
   }
 })

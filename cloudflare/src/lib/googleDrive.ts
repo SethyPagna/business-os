@@ -327,7 +327,10 @@ async function getValidAccessToken(env: Env): Promise<{ token: string } | { erro
   const refreshToken = await decryptSecret(refreshTokenEnc, env.APP_ENCRYPTION_KEY)
   const clientId = trim(env.GOOGLE_DRIVE_CLIENT_ID)
   const clientSecret = trim(env.GOOGLE_DRIVE_CLIENT_SECRET)
-  if (!refreshToken || !clientId || !clientSecret) return { error: 'Google Drive OAuth is not configured.' }
+  // Stored but unreadable: encrypted under an APP_ENCRYPTION_KEY that is now
+  // unset or different. Reconnecting stores a token under the current key.
+  if (!refreshToken) return { error: 'The saved Google Drive token cannot be read (APP_ENCRYPTION_KEY missing or changed). Reconnect Google Drive.' }
+  if (!clientId || !clientSecret) return { error: 'Google Drive OAuth is not configured.' }
 
   const body = new URLSearchParams()
   body.set('client_id', clientId)
