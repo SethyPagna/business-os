@@ -109,6 +109,11 @@ export function differences(src, dst) {
   return diffs
 }
 
+function writtenOutcome(existedBefore, identicalBefore) {
+  if (!existedBefore) return 'copied'
+  return identicalBefore ? 'rewritten' : 'overwritten'
+}
+
 async function streamMd5(bucket, key, etag, deps) {
   const obj = await bucket.get(key, { onlyIf: { etagMatches: etag } })
   if (!obj || !obj.body) return null // gone, or changed since the head
@@ -124,13 +129,17 @@ function errorText(err) {
 }
 
 // Copies one key SOURCE -> DESTINATION and proves the result.
-// outcome: copied | overwritten | skipped-identical | conflict |
+// outcome: copied | overwritten | rewritten | skipped-identical | conflict |
 //          source-missing | mismatch | failed
-export async function copyOne({ source, destination, key, deps, allowOverwrite = false, expectEtag, maxAttempts = 3 }) {
+// force (honoured only with allowOverwrite): re-put an identical object so
+// its destination `uploaded` moves after the objects written before it --
+// the driver's repair of the backup order, which the app sorts by uploaded.
+export async function copyOne({ source, destination, key, deps, allowOverwrite = false, force = false, expectEtag, maxAttempts = 3 }) {
   let problem = 'unknown'
   let lastDiffs
   let lastError
   let existedBefore = null
+  let identicalBefore = false
   let wroteHere = false
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -151,10 +160,12 @@ export async function copyOne({ source, destination, key, deps, allowOverwrite =
         if (!dst.md5 && !dst.ssec) dst.md5 = await streamMd5(destination, key, dst.etag, deps)
         const diffs = differences(src, dst)
         if (!diffs.length) {
-          if (wroteHere) return { key, outcome: existedBefore ? 'overwritten' : 'copied', size: src.size, sourceChanged }
-          return { key, outcome: 'skipped-identical', size: src.size, sourceChanged }
+          if (wroteHere) return { key, outcome: writtenOutcome(existedBefore, identicalBefore), size: src.size, sourceChanged }
+          if (!(force && allowOverwrite)) return { key, outcome: 'skipped-identical', size: src.size, sourceChanged }
+          identicalBefore = true
+        } else if (!allowOverwrite && !wroteHere) {
+          return { key, outcome: 'conflict', diffs }
         }
-        if (!allowOverwrite && !wroteHere) return { key, outcome: 'conflict', diffs }
       }
 
       const body = await source.get(key, { onlyIf: { etagMatches: src.etag } })
@@ -186,7 +197,7 @@ export async function copyOne({ source, destination, key, deps, allowOverwrite =
       if (!after) { problem = 'destination-missing-after-put'; continue }
       if (!after.md5) after.md5 = await streamMd5(destination, key, after.etag, deps)
       const diffs = differences(got, after)
-      if (!diffs.length) return { key, outcome: existedBefore ? 'overwritten' : 'copied', size: got.size, sourceChanged }
+      if (!diffs.length) return { key, outcome: writtenOutcome(existedBefore, identicalBefore), size: got.size, sourceChanged }
       problem = 'mismatch-after-put'
       lastDiffs = diffs
     } catch (err) {

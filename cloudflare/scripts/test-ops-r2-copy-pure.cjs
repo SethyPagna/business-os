@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Offline checks for the temporary R2 copy Worker (ops/r2-copy-worker/): the
 // per-object copy / verify / prune logic and the HTTP surface, driven against
-// an in-memory R2 fake. The fake honours onlyIf.etagMatches, put's md5
-// integrity check, multipart etags (no MD5) and include-limited list pages.
-// No network, no wrangler.
+// the in-memory R2 fake in harness/ops_r2_fake.cjs (onlyIf.etagMatches, put's
+// md5 integrity check, multipart etags without an MD5, include-limited list
+// pages). No network, no wrangler.
 'use strict'
 
 const assert = require('assert')
@@ -25,202 +25,13 @@ async function check(name, fn) {
 }
 
 // ------------------------------------------------------------ R2 fake
-const md5hex = (buf) => crypto.createHash('md5').update(buf).digest('hex')
-const hexToAb = (hex) => Uint8Array.from(Buffer.from(hex, 'hex')).buffer
-const abToHex = (ab) => Buffer.from(ab instanceof ArrayBuffer ? new Uint8Array(ab) : ab).toString('hex')
-
-function cloneHttp(h) {
-  if (!h) return {}
-  const out = {}
-  for (const [k, v] of Object.entries(h)) out[k] = v instanceof Date ? new Date(v.getTime()) : v
-  return out
-}
-
-function streamOf(data) {
-  let offset = 0
-  return new ReadableStream({
-    pull(controller) {
-      if (offset >= data.length) return controller.close()
-      const end = Math.min(offset + 7000, data.length)
-      controller.enqueue(new Uint8Array(data.subarray(offset, end)))
-      offset = end
-    },
-  })
-}
-
-async function readAll(value) {
-  if (value === null || value === undefined) return Buffer.alloc(0)
-  if (typeof value === 'string') return Buffer.from(value)
-  if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value))
-  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
-  const chunks = []
-  for await (const chunk of value) chunks.push(Buffer.from(chunk))
-  return Buffer.concat(chunks)
-}
-
-class FakeR2 {
-  constructor(name, clock) {
-    this.name = name
-    this.clock = clock
-    this.objects = new Map()
-    this.calls = []
-    this.faults = {}
-    this.includePageCap = 0
-  }
-  now() {
-    this.clock.t += 1000
-    return new Date(this.clock.t)
-  }
-  seed(key, content, { httpMetadata, customMetadata, storageClass, multipartParts } = {}) {
-    const data = Buffer.from(content)
-    const md5 = md5hex(data)
-    const multipart = Boolean(multipartParts)
-    this.objects.set(key, {
-      key,
-      data,
-      etag: multipart ? `${md5hex(Buffer.from(`parts:${md5}`))}-${multipartParts}` : md5,
-      checksums: multipart ? {} : { md5: hexToAb(md5) },
-      uploaded: this.now(),
-      httpMetadata: cloneHttp(httpMetadata),
-      customMetadata: { ...(customMetadata || {}) },
-      storageClass: storageClass || 'Standard',
-      version: crypto.randomUUID(),
-    })
-  }
-  view(o, body) {
-    const r = {
-      key: o.key,
-      size: o.data.length,
-      etag: o.etag,
-      httpEtag: `"${o.etag}"`,
-      uploaded: new Date(o.uploaded.getTime()),
-      version: o.version,
-      storageClass: o.storageClass,
-      httpMetadata: cloneHttp(o.httpMetadata),
-      customMetadata: { ...o.customMetadata },
-      checksums: { ...o.checksums },
-    }
-    if (body) r.body = streamOf(o.data)
-    return r
-  }
-  async head(key) {
-    this.calls.push('head')
-    const o = this.objects.get(key)
-    return o ? this.view(o, false) : null
-  }
-  async get(key, options = {}) {
-    this.calls.push('get')
-    if (this.faults.beforeGet) this.faults.beforeGet(key, this)
-    const o = this.objects.get(key)
-    if (!o) return null
-    const want = options.onlyIf && options.onlyIf.etagMatches
-    if (want && want !== o.etag) return this.view(o, false) // precondition failed: no body
-    return this.view(o, true)
-  }
-  async put(key, value, options = {}) {
-    this.calls.push('put')
-    let data = await readAll(value)
-    if (this.faults.corruptInTransit) {
-      data = Buffer.from(data)
-      if (data.length) data[0] ^= 0xff
-    }
-    if (options.md5 !== undefined) {
-      const want = typeof options.md5 === 'string' ? options.md5 : abToHex(options.md5)
-      if (md5hex(data) !== want) throw new Error('put: The Content-MD5 you specified did not match what was received.')
-    }
-    const md5 = md5hex(data)
-    this.objects.set(key, {
-      key,
-      data,
-      etag: md5,
-      checksums: { md5: hexToAb(md5) },
-      uploaded: this.now(),
-      httpMetadata: this.faults.dropHttpField ? (() => { const h = cloneHttp(options.httpMetadata); delete h[this.faults.dropHttpField]; return h })() : cloneHttp(options.httpMetadata),
-      customMetadata: this.faults.lowercaseCustomKeys
-        ? Object.fromEntries(Object.entries(options.customMetadata || {}).map(([k, v]) => [k.toLowerCase(), v]))
-        : { ...(options.customMetadata || {}) },
-      storageClass: options.storageClass || 'Standard',
-      version: crypto.randomUUID(),
-    })
-    return this.view(this.objects.get(key), false)
-  }
-  async delete(keys) {
-    this.calls.push('delete')
-    for (const k of [].concat(keys)) this.objects.delete(k)
-  }
-  async list({ cursor, limit = 1000, include } = {}) {
-    this.calls.push('list')
-    const keys = [...this.objects.keys()].sort()
-    const start = cursor ? Number(cursor) : 0
-    const size = include && this.includePageCap ? Math.min(limit, this.includePageCap) : limit
-    const slice = keys.slice(start, start + size)
-    const truncated = start + size < keys.length
-    return {
-      objects: slice.map((k) => {
-        const v = this.view(this.objects.get(k), false)
-        delete v.checksums // do not rely on list returning checksums
-        if (!include || !include.includes('httpMetadata')) delete v.httpMetadata
-        if (!include || !include.includes('customMetadata')) delete v.customMetadata
-        return v
-      }),
-      truncated,
-      cursor: truncated ? String(start + size) : undefined,
-      delimitedPrefixes: [],
-    }
-  }
-  writes() {
-    return this.calls.filter((c) => c === 'put' || c === 'delete').length
-  }
-}
-
-const nodeDeps = {
-  md5OfStream: async (stream) => {
-    const h = crypto.createHash('md5')
-    for await (const chunk of stream) h.update(chunk)
-    return h.digest('hex')
-  },
-  // Emulates FixedLengthStream: errors unless exactly `size` bytes pass.
-  fixedLength: (stream, size) => {
-    let n = 0
-    return stream.pipeThrough(new TransformStream({
-      transform(chunk, controller) {
-        n += chunk.byteLength
-        if (n > size) controller.error(new Error('stream longer than declared'))
-        else controller.enqueue(chunk)
-      },
-      flush(controller) {
-        if (n !== size) controller.error(new Error('stream shorter than declared'))
-      },
-    }))
-  },
-  capabilities: () => ({ digestStreamMd5: true, fixedLengthStream: true }),
-}
-
-const HTTP = {
-  contentType: 'image/webp',
-  contentLanguage: 'km',
-  contentDisposition: 'inline; filename="x.webp"',
-  contentEncoding: 'identity',
-  cacheControl: 'public, max-age=31536000, immutable',
-  cacheExpiry: new Date('2027-01-02T03:04:05.678Z'),
-}
-const CUSTOM = { lifecycle: 'managed', OriginalName: 'ផលិតផល.webp', 'x-Mixed_Case': 'Value With Spaces' }
-
-function setup() {
-  const clock = { t: Date.parse('2026-09-01T00:00:00Z') }
-  return { clock, source: new FakeR2('source', clock), destination: new FakeR2('destination', clock) }
-}
+const { nodeDeps, md5hex, setup, FIXTURE_HTTP: HTTP, FIXTURE_CUSTOM: CUSTOM } = require('./harness/ops_r2_fake.cjs')
 
 async function main() {
   const core = await import(pathToFileURL(path.join(ROOT, 'ops', 'r2-copy-worker', 'src', 'core.mjs')).href)
   const worker = await import(pathToFileURL(path.join(ROOT, 'ops', 'r2-copy-worker', 'src', 'index.mjs')).href)
 
   const copy = (s, key, extra = {}) => core.copyOne({ source: core.readOnlyBucket(s.source), destination: s.destination, key, deps: nodeDeps, ...extra })
-  const sameObject = (a, b) => {
-    const x = core.describe(a)
-    const y = core.describe(b)
-    assert.deepStrictEqual(core.differences(x, y), [])
-  }
 
   await check('copies bytes and preserves httpMetadata and customMetadata exactly', async () => {
     const s = setup()
@@ -248,6 +59,30 @@ async function main() {
     assert.strictEqual(r.outcome, 'skipped-identical')
     assert.strictEqual(s.destination.writes(), 0)
     assert.strictEqual(s.destination.objects.get('k').version, before)
+  })
+
+  await check('force re-puts an identical object only with overwrite allowed, moving its uploaded time forward', async () => {
+    const s = setup()
+    const meta = { httpMetadata: { contentType: 'application/json' }, customMetadata: { lifecycle: 'managed' } }
+    s.source.seed('backups/cloudflare/a.json', 'doc', meta)
+    s.destination.seed('backups/cloudflare/a.json', 'doc', meta)
+    const before = s.destination.objects.get('backups/cloudflare/a.json')
+    assert.strictEqual((await copy(s, 'backups/cloudflare/a.json', { force: true })).outcome, 'skipped-identical', 'force alone must not write')
+    assert.strictEqual(s.destination.writes(), 0)
+    const r = await copy(s, 'backups/cloudflare/a.json', { force: true, allowOverwrite: true })
+    assert.strictEqual(r.outcome, 'rewritten')
+    const after = s.destination.objects.get('backups/cloudflare/a.json')
+    assert.ok(after.uploaded.getTime() > before.uploaded.getTime(), 'uploaded must move forward')
+    assert.notStrictEqual(after.version, before.version)
+    assert.strictEqual(after.data.toString(), 'doc')
+    assert.deepStrictEqual(after.customMetadata, { lifecycle: 'managed' })
+    assert.deepStrictEqual(after.httpMetadata, { contentType: 'application/json' })
+    s.source.seed('missing', 'm')
+    assert.strictEqual((await copy(s, 'missing', { force: true, allowOverwrite: true })).outcome, 'copied')
+    s.source.seed('changed', 'new bytes')
+    s.destination.seed('changed', 'old bytes')
+    assert.strictEqual((await copy(s, 'changed', { force: true, allowOverwrite: true })).outcome, 'overwritten')
+    assert.strictEqual(s.source.writes(), 0)
   })
 
   await check('a destination that differs is a conflict unless overwrite is allowed; same bytes with different metadata is not identical', async () => {
@@ -490,6 +325,11 @@ async function main() {
     s.source.seed('a', 'A2')
     const conflict = await call(env, 'POST', '/copy', { items: [{ key: 'a' }], allowOverwrite: 'yes' })
     assert.strictEqual(conflict.body.results[0].outcome, 'conflict')
+    // force must be exactly true as well
+    const notForced = await call(env, 'POST', '/copy', { items: [{ key: 'b', force: 'yes' }], allowOverwrite: true })
+    assert.strictEqual(notForced.body.results[0].outcome, 'skipped-identical')
+    const forced = await call(env, 'POST', '/copy', { items: [{ key: 'b', force: true }], allowOverwrite: true })
+    assert.strictEqual(forced.body.results[0].outcome, 'rewritten')
     assert.strictEqual(s.source.writes(), 0, 'the source bucket was written')
   })
 

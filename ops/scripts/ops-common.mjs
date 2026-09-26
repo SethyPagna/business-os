@@ -68,10 +68,11 @@ export function say(template, values) {
   process.stdout.write(`${formatPublic(template, values)}\n`)
 }
 
+// One bullet per line, so the job summary renders as a list.
 export function summary(template, values) {
   const line = formatPublic(template, values)
   const file = process.env.GITHUB_STEP_SUMMARY
-  if (file) fs.appendFileSync(file, `${line}\n`)
+  if (file) fs.appendFileSync(file, `- ${line}\n`)
 }
 
 // ---------------------------------------------------------------- errors
