@@ -58,7 +58,7 @@ This README does not duplicate it.
 ## Tests
 
 - `cd frontend && npm run test:utils && npm run verify:i18n && npm run build`,
-  the frontend gate (typecheck, source checks, every `tests/*.test.ts`).
+  the frontend gate (typecheck, source checks, every `tests/*.test.ts` and `tests/*.test.cjs`).
 - `cd cloudflare && npx tsc --noEmit`, then the pure Worker tests in
   `cloudflare/scripts/test-*.cjs`.
 - `cd frontend && npm run test:e2e`, the Playwright browser suite against the

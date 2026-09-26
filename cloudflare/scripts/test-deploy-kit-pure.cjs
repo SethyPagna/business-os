@@ -371,6 +371,24 @@ check('the release folder is never a working, branch or recovery checkout', () =
   assert.ok(lib.forbiddenReleasePath(path.join(base, 'Worktrees', 'business-os-recovery'), opts))
 })
 
+check('the release runs every test file the package runners discover, frontend .test.cjs included', () => {
+  // The frontend runner's own discovery rule, read from its source so the two cannot drift apart.
+  const chain = read('frontend', 'tests', 'runTestChain.ts')
+  const m = /entry\.isFile\(\) && \/((?:\\.|[^/\\])+)\/\.test\(entry\.name\)/.exec(chain)
+  assert.ok(m, 'could not find the discovery pattern in frontend/tests/runTestChain.ts')
+  const chainRe = new RegExp(m[1])
+  const names = fs.readdirSync(path.join(ROOT, 'frontend', 'tests'), { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name)
+  const discovered = names.filter((n) => chainRe.test(n)).sort()
+  const gated = names.filter((n) => lib.GATE_TEST_FILES.frontend.re.test(`frontend/tests/${n}`)).sort()
+  assert.ok(discovered.some((n) => n.endsWith('.test.cjs')), 'no frontend .test.cjs file exists, so this check cannot tell a .ts-only pattern apart')
+  assert.deepStrictEqual(gated, discovered)
+  const cfNames = fs.readdirSync(path.join(ROOT, 'cloudflare', 'scripts')).filter((n) => /^test-.+\.cjs$/.test(n))
+  assert.ok(cfNames.length > 0 && cfNames.every((n) => lib.GATE_TEST_FILES.cloudflare.re.test(`cloudflare/scripts/${n}`)))
+  const release = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+  assert.ok(!/listAtCommit\(ctx, '[^']*', \//.test(release), 'release.cjs lists test files with its own inline pattern')
+  assert.ok(/lib\.GATE_TEST_FILES\.frontend/.test(release) && /lib\.GATE_TEST_FILES\.cloudflare/.test(release))
+})
+
 // ------------------------- 7. the live step, with the network and Cloudflare stubbed
 
 const ex = require(path.join(KIT, 'exec.cjs'))

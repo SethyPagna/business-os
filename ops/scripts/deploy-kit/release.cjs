@@ -408,12 +408,14 @@ async function stepGates(ctx) {
     return r
   }
   await step('cloudflare: typecheck (tsc --noEmit)', async () => (await ex.npmLocal('typecheck', cf, ctx)).code === 0)
-  const cfRun = await runFiles(ctx, 'cloudflare scripts/test-*.cjs', listAtCommit(ctx, 'cloudflare/scripts', /^cloudflare\/scripts\/test-[^/]+\.cjs$/), cf, 'cloudflare/')
+  const cfFiles = lib.GATE_TEST_FILES.cloudflare
+  const cfRun = await runFiles(ctx, cfFiles.label, listAtCommit(ctx, cfFiles.dir, cfFiles.re), cf, 'cloudflare/')
   red.push(...cfRun.red.map((f) => `cloudflare/${f}`))
   await step('frontend: typecheck', async () => (await ex.npmLocal('typecheck', fe, ctx)).code === 0)
   await step('frontend: verify:i18n', async () => (await ex.npmLocal('verify:i18n', fe, ctx)).code === 0)
   const built = await step('frontend: build', async () => (await ex.npmLocal('build', fe, ctx)).code === 0)
-  const feRun = await runFiles(ctx, 'frontend tests/*.test.ts', listAtCommit(ctx, 'frontend/tests', /^frontend\/tests\/[^/]+\.test\.ts$/), fe, 'frontend/')
+  const feFiles = lib.GATE_TEST_FILES.frontend
+  const feRun = await runFiles(ctx, feFiles.label, listAtCommit(ctx, feFiles.dir, feFiles.re), fe, 'frontend/')
   red.push(...feRun.red.map((f) => `frontend/${f}`))
   if (!(await checkClean(ctx))) red.push('release folder changed while testing')
   ctx.state.gates = { at: new Date().toISOString(), red, dryRun: ctx.dryRun }

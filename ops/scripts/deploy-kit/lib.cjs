@@ -53,6 +53,15 @@ const WRANGLER_SUBCOMMANDS_USED = [
 
 const GATE_RANK = { none: 0, confirm: 1, typeYES: 2, double: 3 }
 
+// The test files the release runs, each in its own process, at the exact
+// commit. frontend/tests/runTestChain.ts discovers *.test.ts AND *.test.cjs,
+// so both are listed here: a .ts-only pattern silently skipped every
+// .test.cjs file, the transfer regression tests among them.
+const GATE_TEST_FILES = {
+  cloudflare: { dir: 'cloudflare/scripts', re: /^cloudflare\/scripts\/test-[^/]+\.cjs$/, label: 'cloudflare scripts/test-*.cjs' },
+  frontend: { dir: 'frontend/tests', re: /^frontend\/tests\/[^/]+\.test\.(?:ts|cjs)$/, label: 'frontend tests/*.test.{ts,cjs}' },
+}
+
 // ---------------------------------------------------------------- arguments
 
 const FLAG_ALIASES = {
@@ -380,7 +389,7 @@ function todayStamp(d = new Date()) {
 
 module.exports = {
   DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
-  DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK,
+  DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, firstCommentLine, tablesTouched,
   parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,

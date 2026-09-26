@@ -32,7 +32,7 @@ Steps:
 
    ```bash
    cd <wt>/frontend && npx tsc --noEmit && npm run build && npm run verify:i18n && \
-     for f in tests/*.test.ts; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
+     for f in tests/*.test.ts tests/*.test.cjs; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
    ```
 
    ```bash

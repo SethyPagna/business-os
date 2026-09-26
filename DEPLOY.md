@@ -150,7 +150,8 @@ command with its confirmation gate). Checked offline by
    `<home>` is `BUSINESS_OS_HOME`, else the folder that holds the main checkout.
 3. **Tests at that commit.** Cloudflare typecheck plus every
    `scripts/test-*.cjs` in its own process; frontend typecheck,
-   `verify:i18n` and build plus every `tests/*.test.ts` in its own process.
+   `verify:i18n` and build plus every `tests/*.test.ts` and
+   `tests/*.test.cjs` in its own process.
    A red file is retried alone up to twice (timeouts, contention). Anything
    still red stops the release and is listed.
    **Skipping the tests** is offered only when Claude has certified the exact
