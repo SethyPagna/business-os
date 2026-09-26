@@ -80,7 +80,8 @@
 //                 BMP, TIFF, camera raw, AVI, MP3, M4A...); and the files of
 //                 imports that are still running;
 //         REVIEW  images with web-page code inside, files stored compressed,
-//                 and files it cannot identify -- kept, and listed for you;
+//                 text that starts like a media file, and files it cannot
+//                 identify -- kept, and listed for you;
 //         PURGE   only files it positively recognises as documents (PDF,
 //                 Word, Excel...), web pages, SVG, XML, text, CSV, JSON,
 //                 scripts, archives (ZIP...), programs or fonts.
@@ -540,7 +541,6 @@ const u16leAt = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8)
 const u16beAt = (bytes, offset) => (bytes[offset] << 8) | bytes[offset + 1]
 const textAt = (bytes, offset, text) => asciiAt(bytes, offset, offset + text.length) === text
 const latin1Head = (bytes, limit) => String.fromCharCode(...bytes.subarray(0, Math.min(bytes.length, limit)))
-const isPrintableAscii = (byte) => byte >= 0x20 && byte <= 0x7e
 const printable = (text) => text.replace(/[^\x20-\x7e]/g, '?')
 
 // The first entry of a ZIP file: its name and, when stored uncompressed,
@@ -585,6 +585,41 @@ function isNetpbm(bytes) {
   return offset < bytes.length && bytes[offset] >= 0x30 && bytes[offset] <= 0x39
 }
 
+// S-uploads3 (2026-09-27): the loose QuickTime and MP3 signatures below
+// kept crafted text as media (R-uploads2: `\0\0\0\x08free` followed by
+// notes, `ID3\x03\x00` followed by notes). Every atom header within the
+// bytes read must be a four-character type with a size that stays inside
+// the file; the last one may run past the bytes read.
+function quickTimeAtomsFit(bytes, totalSize) {
+  let offset = 0
+  for (let atoms = 0; atoms < 64 && offset + 8 <= bytes.length; atoms += 1) {
+    if (!isFourCcAt(bytes, offset + 4)) return false
+    let size = readU32BE(bytes, offset)
+    if (size === 0) return true
+    if (size === 1) {
+      if (offset + 16 > bytes.length) return true
+      size = readU32BE(bytes, offset + 8) * 0x100000000 + readU32BE(bytes, offset + 12)
+      if (size < 16) return false
+    } else if (size < 8) {
+      return false
+    }
+    if (offset + size > totalSize) return false
+    offset += size
+  }
+  return true
+}
+
+// An ID3v2 header: version 2-4, only the flag bits that version defines,
+// a sync-safe size (every byte under 0x80) and a tag that fits in the file.
+const ID3_UNDEFINED_FLAG_BITS = [0x3f, 0x1f, 0x0f]
+function id3TagFits(bytes, totalSize) {
+  if (bytes.length < 10 || bytes[3] < 2 || bytes[3] > 4 || bytes[4] === 0xff) return false
+  if (bytes[5] & ID3_UNDEFINED_FLAG_BITS[bytes[3] - 2]) return false
+  if ([6, 7, 8, 9].some((index) => bytes[index] >= 0x80)) return false
+  const size = bytes[6] * 0x200000 + bytes[7] * 0x4000 + bytes[8] * 0x80 + bytes[9]
+  return 10 + size <= totalSize
+}
+
 // { kind: 'photo' | 'video-audio', format } or null. `totalSize` is the
 // object's size when only its first bytes were read.
 export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
@@ -602,12 +637,9 @@ export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
     if ([ftyp.major, ...ftyp.compatible].some((brand) => OTHER_HEIF_BRANDS.includes(brand))) return photo('HEIC/HEIF')
     return media(`MP4 family (brand ${printable(ftyp.major)})`)
   }
-  // QuickTime atoms that do not chain within the bytes read. Text whose
-  // bytes 4-8 spell an atom name has a printable "size" larger than the file.
-  if (bytes.length >= 8 && QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8))) {
-    const sizeIsText = [0, 1, 2, 3].every((index) => isPrintableAscii(bytes[index]))
-    if (!(sizeIsText && readU32BE(bytes, 0) > totalSize)) return media('QuickTime')
-  }
+  // QuickTime atoms that do not chain within the bytes read, as long as
+  // every atom header that is read fits in the file (see quickTimeAtomsFit).
+  if (bytes.length >= 8 && QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8)) && quickTimeAtomsFit(bytes, totalSize)) return media('QuickTime')
   if (has(0, 'RIFF') || has(0, 'RIFX')) {
     const form = asciiAt(bytes, 8, 12)
     if (form === 'AVI ' || form === 'AVIX') return media('AVI')
@@ -632,7 +664,7 @@ export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
   if (has(0, '.RMF')) return media('RealMedia')
   if (has(0, 'OggS') && bytes[4] === 0) return media('Ogg')
   // Audio. 0xFF 0xFE is a UTF-16 byte order mark, not an MPEG frame.
-  if (has(0, 'ID3') && bytes.length >= 10 && bytes[3] >= 2 && bytes[3] <= 4 && bytes[4] !== 0xff) return media('MP3')
+  if (has(0, 'ID3') && id3TagFits(bytes, totalSize)) return media('MP3')
   if (bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0) return media('AAC')
   if (bytes.length >= 3 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && bytes[1] !== 0xfe && bytes[1] !== 0xff
     && (bytes[1] & 0x18) !== 0x08 && (bytes[1] & 0x06) !== 0 && (bytes[2] >> 4) !== 0x0f && ((bytes[2] >> 2) & 0x03) !== 0x03) return media('MP3')
@@ -754,6 +786,19 @@ export function decodeText(bytes, complete = true) {
     if (byte < 0x80) asciiBytes += 1
   }
   return asciiBytes >= sample.length * 0.75 ? String.fromCharCode(...sample) : null
+}
+
+// Media formats that are plain text by design.
+const TEXT_MEDIA_FORMATS = ['XPM', 'XBM', 'NetPBM', 'Radiance HDR', 'FITS']
+
+// S-uploads3 (2026-09-27): some signatures detectOtherMedia accepts are
+// loose enough for text to meet them -- MPEG transport-stream sync bytes
+// ('G') 188 apart in a CSV, the AC-3 sync word (vertical tab, 'w'). Media of
+// every other format has control bytes within its first bytes, so when the
+// data also decodes as text it is neither kept as media nor purged as text:
+// it goes to review.
+export function otherMediaLooksLikeText(other, bytes, complete = true) {
+  return !TEXT_MEDIA_FORMATS.includes(other.format) && decodeText(bytes, complete) !== null
 }
 
 // The start of the data as text (UTF-16 decoded when it has a BOM).
@@ -930,6 +975,7 @@ export function classifyObject({ key, size, bytes, complete = true, activeJobIds
     return media('images', allowed.mime, checked)
   }
   const other = detectOtherMedia(bytes, total)
+  if (other && otherMediaLooksLikeText(other, bytes, complete)) return verdict('unrecognised', `text that starts like ${other.format}`)
   if (other) return media(other.kind === 'photo' ? 'other-images' : 'other-video-audio', other.format)
   const nonMedia = detectNonMedia(bytes, complete)
   if (nonMedia) return verdict(nonMedia.group, nonMedia.format)
