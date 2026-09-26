@@ -11,6 +11,12 @@
 //   1b. speed: it is ONE statement for 50 lines and for 2000 (a counting
 //      fake D1), and its plan range-seeks the product/created_at index
 //      instead of scanning inventory_movements;
+//   1d. a transfer between branches leaves the TOTAL unchanged on both legs
+//       and on its reversal, a transfer onto another product row still moves
+//       each total, a late-synced ISO-stamped sale is walked by its instant
+//       (not its raw string), and a missing branch_stock row gives a null
+//       branch pair -- each with a negative control that reproduces the
+//       pre-fix walk and fails -- and the ledger's correlated walk agrees;
 //   2. the session line carries its AS-RECEIVED quantity and cost beside the
 //      edit-folded current ones, so an edited line reads "received -> now";
 //   3. the route wires both, with a null fallback (never a guessed number);
@@ -124,8 +130,8 @@ for (const [label, broken] of [
   // (created_at alone is not a usable control: SQLite then happens to walk
   // the index's id DESC order, so it agrees by accident -- which is exactly
   // why the id tiebreak is written out rather than left to the planner.)
-  ['the reversed id tiebreak', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ORDER BY mn.created_at DESC, mn.id DESC', 'ORDER BY mn.created_at DESC, mn.id ASC')],
-  ['the default RANGE frame', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING', '')],
+  ['the reversed id tiebreak', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ORDER BY instant DESC, event_id DESC', 'ORDER BY instant DESC, event_id ASC')],
+  ['the default RANGE frame', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('GROUPS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING', '')],
 ]) {
   assert.notEqual(broken, ledger.MOVEMENT_STOCK_BALANCES_SQL, `${label}: mutation applied`)
   const rows = parity.prepare(broken).bind({ movementIds: JSON.stringify(allIds) }).all()
@@ -179,7 +185,7 @@ ok(JSON.stringify(pairs(both.balances.get(34))) === JSON.stringify([8, 10, 15, 1
 ok(pairs(both.balances.get(40)).slice(0, 2).every((value) => value === null) && both.balances.get(40).after_qty === 5, 'a newer unbranched movement makes the branch pair null; the total still reads')
 ok(both.balances.get(41).branch_after_qty === null, 'a movement with no branch has no branch pair')
 ok(both.activeBranchCount === 2, 'the active-branch count comes from data (2 active, 1 inactive)')
-const brokenBranch = ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('PARTITION BY mn.product_id, mn.branch_id', 'PARTITION BY mn.product_id')
+const brokenBranch = ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('PARTITION BY product_id, branch_id', 'PARTITION BY product_id')
 assert.notEqual(brokenBranch, ledger.MOVEMENT_STOCK_BALANCES_SQL)
 const brokenRow = branched.prepare(brokenBranch).bind({ movementIds: '[32]' }).all()[0]
 ok(Number(brokenRow.branch_after_qty) !== 7, 'negative control: a branch walk that is not partitioned by branch reads the wrong Shop balance here')
@@ -188,6 +194,87 @@ ok(fields.before_qty === 18 && fields.after_qty === 15 && fields.total_before_qt
 ok(Object.values(ledger.movementBalanceFields(undefined)).every((value) => value === null), 'no balance -> every field null')
 branched.exec(`UPDATE branches SET is_active = 0 WHERE id = 2`)
 ok((await ledger.loadMovementStockBalances(asD1(branched), [32])).activeBranchCount === 1, 'after a merge leaves one active branch, the count says 1')
+
+// ---- 1d. transfers, mixed timestamp formats, a missing branch row --------
+// Refuter, 26 Sep. Shop retires into Warehouse through official transfers,
+// so these rows are about to be written for every product.
+//
+// Product 50 (current: Shop 8, Warehouse 8, total 16). #64 is a sale synced
+// late: its id is higher, and its ISO stamp '2026-09-02T02:00:00.000Z' sorts
+// AFTER '2026-09-02 03:00:00' as a raw string ('T' > ' '), although it
+// happened an hour BEFORE the transfer. #65/#66 reverse the transfer (what
+// an undo writes); both legs of each transfer share one timestamp.
+//   #60 add 10        @Shop  09-01 03:00  S  0 -> 10   total  0 -> 10
+//   #61 add 8         @Ware  09-01T04:00Z W  0 -> 8    total 10 -> 18
+//   #64 sale 2        @Shop  09-02T02:00Z S 10 -> 8    total 18 -> 16
+//   #62 transfer_out 3 @Shop 09-02 03:00  S  8 -> 5    total 16 -> 16
+//   #63 transfer_in 3  @Ware 09-02 03:00  W  8 -> 11   total 16 -> 16
+//   #65 transfer_out 3 @Ware 09-03 03:00  W 11 -> 8    total 16 -> 16  (reversal)
+//   #66 transfer_in 3  @Shop 09-03 03:00  S  5 -> 8    total 16 -> 16  (reversal)
+// Products 51 -> 52: a transfer that lands on ANOTHER product row ("Added to
+// existing product", transferOperation.ts) really moves each product's total.
+// Product 53: its Shop row has no branch_stock row -- no branch pair.
+const moved = openDb(loadAll())
+moved.exec(`
+  INSERT INTO branches (id,name,is_active) VALUES (1,'Shop',1), (2,'Warehouse',1);
+  INSERT INTO products (id,name,barcode,unit,stock_quantity,is_active) VALUES
+    (50,'Soap','5050','pcs',16,1), (51,'Gel','5051','pcs',7,1), (52,'Gel B','5052','pcs',3,1), (53,'Wax','5053','pcs',4,1);
+  INSERT INTO branch_stock (product_id,branch_id,quantity) VALUES (50,1,8), (50,2,8), (51,1,7), (52,2,3);
+  INSERT INTO inventory_movements (id,product_id,product_name,branch_id,movement_type,quantity,created_at) VALUES
+    (60,50,'Soap',1,'add',10,'2026-09-01 03:00:00'),
+    (61,50,'Soap',2,'add',8,'2026-09-01T04:00:00.000Z'),
+    (62,50,'Soap',1,'transfer_out',3,'2026-09-02 03:00:00'),
+    (63,50,'Soap',2,'transfer_in',3,'2026-09-02 03:00:00'),
+    (64,50,'Soap',1,'sale',2,'2026-09-02T02:00:00.000Z'),
+    (65,50,'Soap',2,'transfer_out',3,'2026-09-03 03:00:00'),
+    (66,50,'Soap',1,'transfer_in',3,'2026-09-03 03:00:00'),
+    (70,51,'Gel',1,'add',10,'2026-09-01 03:00:00'),
+    (71,51,'Gel',1,'transfer_out',3,'2026-09-02 03:00:00'),
+    (72,52,'Gel B',2,'transfer_in',3,'2026-09-02 03:00:00'),
+    (80,53,'Wax',1,'add',4,'2026-09-01 03:00:00');
+`)
+const movedIds = [60, 61, 62, 63, 64, 65, 66, 70, 71, 72, 80]
+const movedBalances = (await ledger.loadMovementStockBalances(asD1(moved), movedIds)).balances
+const expected = {
+  60: [0, 10, 0, 10], 61: [0, 8, 10, 18], 64: [10, 8, 18, 16],
+  62: [8, 5, 16, 16], 63: [8, 11, 16, 16], 65: [11, 8, 16, 16], 66: [5, 8, 16, 16],
+  70: [0, 10, 0, 10], 71: [10, 7, 10, 7], 72: [0, 3, 0, 3],
+  80: [null, null, 0, 4],
+}
+for (const [id, want] of Object.entries(expected)) {
+  assert.deepEqual(pairs(movedBalances.get(Number(id))), want, `movement ${id}: branch and total pairs (hand-computed)`)
+}
+ok(true, 'a Shop -> Warehouse transfer reads Total 16 -> 16 on BOTH legs, while each branch moves (hand-computed)')
+ok([65, 66].every((id) => movedBalances.get(id).before_qty === 16 && movedBalances.get(id).after_qty === 16), 'the reversal (undo) legs also leave the total unchanged')
+ok(movedBalances.get(71).after_qty === 7 && movedBalances.get(72).after_qty === 3, 'a transfer into ANOTHER product row still moves each product\'s own total')
+ok(JSON.stringify(pairs(movedBalances.get(64))) === JSON.stringify([10, 8, 18, 16]), 'the late-synced ISO sale orders by its instant, not its raw string: Shop 10 -> 8')
+ok(movedBalances.get(80).branch_before_qty === null && movedBalances.get(80).branch_after_qty === null && movedBalances.get(80).after_qty === 4, 'no branch_stock row -> the branch pair is null, never a guessed 0; the total still reads')
+// The Stock Changes ledger (correlated walk + its own total delta) gives the
+// same total for every one of these, so the ledger row and the float agree.
+const movedLedger = new Map(ledger.attachBeforeQty(moved.prepare(ledger.buildStockLedgerQuery({}).rowsSql).bind({ limit: 100, offset: 0 }).all()).map((row) => [row.id, row]))
+for (const id of movedIds) {
+  const row = movedLedger.get(id)
+  assert.deepEqual([row.before_qty, Number(row.after_qty)], [movedBalances.get(id).before_qty, movedBalances.get(id).after_qty], `movement ${id}: ledger row and float agree`)
+}
+ok(true, `the Stock Changes ledger rows agree with the float on all ${movedIds.length} transfer / mixed-format movements`)
+const ledgerPlan = moved.prepare(`EXPLAIN QUERY PLAN ${ledger.buildStockLedgerQuery({}).rowsSql}`).bind({ limit: 100, offset: 0 }).all().map((row) => row.detail)
+ok(ledgerPlan.filter((detail) => detail.includes('SEARCH mn USING INDEX idx_inventory_movements_product_created_pg (product_id=? AND created_at>?)')).length >= 1, 'the ledger\'s correlated walk still range-seeks the product/created_at index')
+for (const [label, broken] of [
+  // the pre-fix walk: raw created_at strings, every transfer leg its own event
+  ['raw created_at ordering', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace(ledger.movementInstantSql('mn') + ' AS instant', 'mn.created_at AS instant')],
+  ['a transfer leg walked as its own event', ledger.MOVEMENT_STOCK_BALANCES_SQL
+    .replace('CASE WHEN transfer_leg = 1 THEN MIN(id) OVER (PARTITION BY product_id, instant, transfer_leg) ELSE id END AS event_id', 'id AS event_id')
+    .replace('CASE WHEN transfer_leg = 1 THEN SUM(signed_quantity) OVER (PARTITION BY product_id, instant, transfer_leg) ELSE signed_quantity END AS total_delta', 'signed_quantity AS total_delta')],
+  ['a guessed 0 for a missing branch_stock row', ledger.MOVEMENT_STOCK_BALANCES_SQL.replace('ELSE bs.quantity - COALESCE', 'ELSE COALESCE(bs.quantity, 0) - COALESCE').replace('OR bs.quantity IS NULL ', '')],
+]) {
+  assert.notEqual(broken, ledger.MOVEMENT_STOCK_BALANCES_SQL, `${label}: mutation applied`)
+  const rows = new Map(ledger.attachBeforeQty(moved.prepare(broken).bind({ movementIds: JSON.stringify(movedIds) }).all()).map((row) => [row.id, row]))
+  ok(Object.entries(expected).some(([id, want]) => {
+    const row = rows.get(Number(id))
+    const branchAfter = row.branch_after_qty == null ? null : Number(row.branch_after_qty)
+    return JSON.stringify([branchAfter == null ? null : branchAfter - Number(row.signed_quantity), branchAfter, row.before_qty, Number(row.after_qty)]) !== JSON.stringify(want)
+  }), `negative control: ${label} reads a wrong balance on this fixture`)
+}
 
 // ---- 2. as received vs now -------------------------------------------------
 const locator = sessions.parseStockInSessionKey('session:300')
