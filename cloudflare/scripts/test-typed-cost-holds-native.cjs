@@ -18,6 +18,12 @@
 // UPDATE of the cost reverts at the sale (so "holds" is not the trigger doing
 // nothing), an import receipt row (override_add with stock) still prices by
 // its lot, and a same-value re-import records nothing.
+// And the import's own edges: a typed-cost row followed in the same chunk by a
+// receipt row for the same product must still apply (the receipt re-checks the
+// override baseline it planned against; an entry in between would abort the
+// chunk), a receipt row followed by a typed-cost row records the typed cost,
+// and blank cost cells (the file states no cost) record nothing while an
+// explicit 0 does.
 //
 // Real Hono routes, real lib code, the full migrated SQLite schema with the
 // 0195 triggers. The "sale" is the stock write every sale makes -- one unit
@@ -158,9 +164,15 @@ function extract(source, startMarker, endMarker) {
   return source.slice(start, end + endMarker.length)
 }
 const engineSource = fs.readFileSync(path.join(src, 'lib/importEngine.ts'), 'utf8').replace(/\r\n/g, '\n')
+// The loop plus the pre-scan in front of it that it reads (which rows of the
+// chunk receive stock). A tree without the pre-scan -- the pre-fix base --
+// extracts the loop alone, so this file still runs there and fails honestly.
+const productLoopStart = '      for (const r of actionable) {\n        const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }'
+const receiptPrescanStart = '      // U-cost: the rows of this chunk that RECEIVE stock into an existing\n'
 const productLoop = extract(engineSource,
-  '      for (const r of actionable) {\n        const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }',
+  engineSource.includes(receiptPrescanStart) ? receiptPrescanStart : productLoopStart,
   '\n        finishProductRowWriteGroup()\n      }\n')
+assert.ok(productLoop.includes(productLoopStart), 'the extracted text contains the product write loop')
 const inventoryLoop = extract(engineSource,
   '      for (const r of actionable) {\n        const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }',
   '\n        guardedGroups.push(group)\n      }\n')
@@ -199,12 +211,30 @@ const importCtx = (rows, extra = {}) => ({
   productSeedBranchIds: [], importCostActor: { id: 1, name: 'admin' }, INVENTORY_RECEIPT_PLAN_VERSION: 99, ...extra,
 })
 // A matched row as classifyProducts leaves it: the full product row, the
-// sheet's values over it, the resolved branch and received date.
+// sheet's values over it, the resolved branch and received date, and the
+// normalizer's "the sheet stated this cost cell" flags (a blank cell is 0).
 function importRow(productId, overrides, rowNumber = 2, plannedMode = undefined) {
   const current = raw.prepare('SELECT * FROM products WHERE id = ?').get(productId)
   return { rowNumber, action: 'update', existingId: productId, plannedMode,
-    data: { ...current, branch_id: 1, branch_id_explicit: 0, stock_quantity: 0, received_date: '2026-09-26', ...overrides } }
+    data: { ...current, branch_id: 1, branch_id_explicit: 0, stock_quantity: 0, received_date: '2026-09-26',
+      __costPriceUsdProvided: 1, __costPriceKhrProvided: 1, ...overrides } }
 }
+// What runImportApply reads at chunk start for its receipt rows: every lot of
+// the product and the latest override baseline -- the same two queries.
+function receiptPlan(productId) {
+  const lots = raw.prepare('SELECT id, variant_product_id, batch_key, received_at, unit_cost_usd FROM product_batches WHERE variant_product_id = ?').all(productId)
+  const baseline = raw.prepare('SELECT baseline_batch_id b FROM product_cost_entries WHERE product_id = ? ORDER BY id DESC LIMIT 1').get(productId)
+  return { receiptLots: new Map([[productId, lots]]), receiptBaselines: new Map(baseline ? [[productId, Number(baseline.b) || 0]] : []) }
+}
+// A receipt row: the sheet adds `quantity` units at `unitCost` to the explicit branch.
+function receiptRow(productId, unitCost, quantity, rowNumber, plannedMode = 'merge_stock') {
+  const row = importRow(productId, { cost_price_usd: unitCost, branch_id_explicit: 1, stock_quantity: quantity }, rowNumber, plannedMode)
+  row.receiptCost = unitCost
+  return row
+}
+// runD1BatchGroupsInChunks packs a chunk's small row groups into ONE
+// db.batch: a guard failure anywhere aborts the whole pack.
+async function runChunk(groups) { await database.batch(groups.flat()) }
 async function runGroups(groups) { for (const group of groups) await database.batch(group) }
 
 async function main() {
@@ -323,6 +353,47 @@ async function main() {
     await runGroups(composeProducts(importCtx([row])))
     assert.equal(entries(p.id).length, 0, 'receipt rows are priced by their lot')
     assert.equal(cost(p.id), 5.6667, '(2 x 3 + 2 x 5 + 2 x 9) / 6 -- the receipt joins the weighted rule')
+  })
+
+  await check('product import: a typed-cost row then a receipt row for the same product in ONE chunk applies; the receipt is the cost record', async () => {
+    const p = seed()
+    const rows = [importRow(p.id, { cost_price_usd: 9 }, 2, 'override_replace'), receiptRow(p.id, 6, 2, 3)]
+    await runChunk(composeProducts(importCtx(rows, receiptPlan(p.id))))
+    assert.equal(entries(p.id).length, 0, 'no override entry ahead of the receipt that re-checks the baseline')
+    assert.equal(raw.prepare('SELECT quantity q FROM branch_stock WHERE product_id = ? AND branch_id = 1').get(p.id).q, 6, 'the receipt landed')
+    assert.equal(cost(p.id), 4.6667, '(2 x 3 + 2 x 5 + 2 x 6) / 6 -- the receipt re-derives, as before U-cost')
+  })
+
+  await check('product import: a receipt row then a typed-cost row for the same product records the typed cost after the lot; it holds past a sale', async () => {
+    const p = seed()
+    const rows = [receiptRow(p.id, 6, 2, 2), importRow(p.id, { cost_price_usd: 9 }, 3, 'override_replace')]
+    await runChunk(composeProducts(importCtx(rows, receiptPlan(p.id))))
+    const [entry] = entries(p.id)
+    assert.ok(entry, 'the typed cost after the receipt is an override')
+    assert.equal(entry.baseline_batch_id, raw.prepare('SELECT MAX(id) m FROM product_batches WHERE variant_product_id = ?').get(p.id).m,
+      'its baseline covers the lot the receipt just made')
+    assert.equal(entry.previous_cost_usd, 4.6667, 'recorded against the figure the receipt re-derived')
+    assert.equal(cost(p.id), 9)
+    sell(p)
+    assert.equal(cost(p.id), 9)
+  })
+
+  await check('product import, override_replace with BLANK cost cells: the 0 written is not a typed cost -- no entry, the rule re-derives at the sale', async () => {
+    const p = seed()
+    await runGroups(composeProducts(importCtx([importRow(p.id,
+      { cost_price_usd: 0, cost_price_khr: 0, __costPriceUsdProvided: 0, __costPriceKhrProvided: 0 }, 2, 'override_replace')])))
+    assert.equal(cost(p.id), 0, 'the replace still writes what the sheet resolved to')
+    assert.equal(entries(p.id).length, 0)
+    sell(p)
+    assert.equal(cost(p.id), 4.3333, 'nothing typed: the rule derives (1 x 3 + 2 x 5) / 3')
+  })
+
+  await check('product import, override_replace with an EXPLICIT 0 cost: stated, so it records the entry and the 0 holds past a sale', async () => {
+    const p = seed()
+    await runGroups(composeProducts(importCtx([importRow(p.id, { cost_price_usd: 0 }, 2, 'override_replace')])))
+    assert.deepEqual(entries(p.id).map((e) => [e.cost_usd, e.previous_cost_usd]), [[0, 4]])
+    sell(p)
+    assert.equal(cost(p.id), 0, 'as a clear in the form: a typed 0 holds')
   })
 
   await check('inventory import (legacy add row with a unit cost): the cost records the entry and holds past a sale', async () => {
