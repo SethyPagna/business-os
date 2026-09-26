@@ -4400,6 +4400,14 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 // ---------------------------------------------------------------------------
 // ANALYZE: preview only, writes summary/error counts, no data-table writes.
 
+// import_job_errors.code of the rows routes/importJobs.ts writes for files a
+// person gave the job that were NOT imported -- a ZIP entry that is HEIC,
+// BMP, a video or not an image, one that failed to extract, one over the
+// per-upload limit (S-uploads2b). They describe the uploads, not the CSV,
+// and the uploads happen BEFORE /start: a fresh analyze wiping every error
+// row would erase the only report of them, so it keeps these.
+export const IMPORT_FILE_SKIPPED_ERROR_CODE = 'import_file_skipped'
+
 // Chunked + resumable (see migration 0011's header and ROWS_PER_IMPORT_CHUNK's
 // comment). One call = one small window's worth of work: ensure the file is
 // materialized (see ensureSourceRowsMaterialized -- a no-op after the first
@@ -4450,7 +4458,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       await db.prepare(`UPDATE import_jobs SET status = 'analyzing', phase = 'analyzing', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
     }
     if (isFreshStart) {
-      await db.prepare(`DELETE FROM import_job_errors WHERE job_id = @id`).run({ id: jobId })
+      // A fresh run replaces the previous run's ROW errors; the report of
+      // skipped upload files (IMPORT_FILE_SKIPPED_ERROR_CODE) stays.
+      await db.prepare(`DELETE FROM import_job_errors WHERE job_id = @id AND COALESCE(code, '') <> @skippedFileCode`).run({ id: jobId, skippedFileCode: IMPORT_FILE_SKIPPED_ERROR_CODE })
       await resetChunkState(db, jobId, 'analyze')
     }
     if (jobRow.cancel_requested) {
