@@ -105,6 +105,43 @@ function canManageOtpTarget(actor: SessionUser | null | undefined, target: OtpTa
   return true
 }
 
+// P1-4. Self-service /otp/setup and /otp/confirm used to need only a live
+// session, so anyone holding a stolen or unattended session could enrol
+// THEIR authenticator on the victim's account (or replace the victim's) and
+// lock the owner out of their own second factor. A self-service change now
+// re-proves the account: the current password on both steps, and -- when an
+// authenticator is already active -- a valid, unspent code from it at setup.
+// (Confirm then proves possession of the NEW secret with its own code; the
+// pending secret it promotes was only ever minted behind that full check.)
+// Admin-for-other-user management is unchanged: canManageOtpTarget still
+// decides it, and it never asks for the target's password.
+const OTP_SELF_REAUTH_LIMIT_MAX = 10
+const OTP_SELF_REAUTH_LIMIT_WINDOW_MS = 15 * 60 * 1000
+
+async function selfOtpReauthFailure(
+  env: Env,
+  actor: SessionUser,
+  target: OtpTargetUser,
+  body: { password?: unknown; currentToken?: unknown },
+  options: { requireCurrentCode: boolean },
+): Promise<{ status: 400 | 401 | 429; error: string; code: string } | null> {
+  if (Number(actor?.id || 0) !== Number(target.id)) return null
+  const limit = await checkRateLimit(env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
+  if (!limit.allowed) return { status: 429, error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }
+  const password = String(body.password ?? '')
+  if (!password.trim()) return { status: 400, error: 'Current password is required', code: 'current_password_required' }
+  if (!bcrypt.compareSync(password, target.password)) return { status: 401, error: 'Incorrect password', code: 'incorrect_password' }
+  if (options.requireCurrentCode && target.otp_enabled && target.otp_secret) {
+    const activeSecret = await decryptSecret(target.otp_secret, env.APP_ENCRYPTION_KEY)
+    const step = activeSecret ? await verifyTotpStep(activeSecret, String(body.currentToken ?? '')) : null
+    if (step === null || await isOtpStepReplayed(env, target.id, step)) {
+      return { status: 401, error: 'Enter the current code from your existing authenticator app.', code: 'current_otp_required' }
+    }
+    await markOtpStepUsed(env, target.id, step)
+  }
+  return null
+}
+
 function requiresSelfOtpDisablePassword(actor: SessionUser | null | undefined, target: OtpTargetUser | null | undefined, password: unknown): boolean {
   const actorId = Number(actor?.id || 0)
   const targetId = Number(target?.id || 0)
@@ -697,10 +734,12 @@ app.post('/session-duration', requireAuth, async (c) => {
 // image containing the enrollment secret.
 app.post('/otp/setup', requireAuth, async (c) => {
   const actor = c.get('user')
-  const body = await c.req.json<{ userId?: number }>().catch(() => ({} as { userId?: number }))
+  const body = await c.req.json<{ userId?: number; password?: string; currentToken?: string }>().catch(() => ({} as { userId?: number; password?: string; currentToken?: string }))
   const target = await getOtpTargetUser(c.env, body.userId || actor.id)
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
+  const reauthFailure = await selfOtpReauthFailure(c.env, actor, target, body, { requireCurrentCode: true })
+  if (reauthFailure) return c.json({ error: reauthFailure.error, code: reauthFailure.code }, reauthFailure.status)
 
   // The issuer is only an authenticator-app label; it does not affect the
   // generated codes. Use the public product name for newly enrolled devices
@@ -719,11 +758,13 @@ app.post('/otp/setup', requireAuth, async (c) => {
 // pending secret and, if it matches, promotes it to the active secret.
 app.post('/otp/confirm', requireAuth, async (c) => {
   const actor = c.get('user')
-  const body = await c.req.json<{ userId?: number; token?: string }>().catch(() => ({} as { userId?: number; token?: string }))
+  const body = await c.req.json<{ userId?: number; token?: string; password?: string }>().catch(() => ({} as { userId?: number; token?: string; password?: string }))
   if (!body.userId || !body.token) return c.json({ error: 'userId and token required' }, 400)
   const target = await getOtpTargetUser(c.env, body.userId)
   if (!target || !target.otp_pending_secret) return c.json({ error: 'OTP not set up' }, 400)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
+  const reauthFailure = await selfOtpReauthFailure(c.env, actor, target, body, { requireCurrentCode: false })
+  if (reauthFailure) return c.json({ error: reauthFailure.error, code: reauthFailure.code }, reauthFailure.status)
 
   const pendingSecret = await decryptSecret(target.otp_pending_secret, c.env.APP_ENCRYPTION_KEY)
   if (!pendingSecret) return c.json({ error: 'OTP setup secret is unavailable. Please start setup again.' }, 400)
