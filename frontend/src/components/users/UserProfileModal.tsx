@@ -18,6 +18,7 @@ import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isT
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import { UserAvatarImage } from './UserAvatar.tsx'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -233,20 +234,17 @@ function parseStoredOrganization(): StoredOrganization | null {
  */
 
 function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
-  if (avatarPath) {
-    return (
-      <img
-        src={avatarPath}
-        alt={name || 'Avatar'}
-        className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
-      />
-    )
-  }
-
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-      {name?.[0]?.toUpperCase() || 'U'}
-    </div>
+    <UserAvatarImage
+      src={avatarPath}
+      alt={name || 'Avatar'}
+      className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
+      fallback={(
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+          {name?.[0]?.toUpperCase() || 'U'}
+        </div>
+      )}
+    />
   )
 }
 
@@ -488,17 +486,16 @@ function AvatarViewerModal({
     <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="flex max-h-[72dvh] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
-          {avatarPath ? (
-            <img
-              src={avatarPath}
-              alt={name || tr('avatar_image', 'Profile photo')}
-              className="max-h-[56dvh] w-full rounded-xl object-contain"
-            />
-          ) : (
-            <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-              {name?.[0]?.toUpperCase() || 'U'}
-            </div>
-          )}
+          <UserAvatarImage
+            src={avatarPath}
+            alt={name || tr('avatar_image', 'Profile photo')}
+            className="max-h-[56dvh] w-full rounded-xl object-contain"
+            fallback={(
+              <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+                {name?.[0]?.toUpperCase() || 'U'}
+              </div>
+            )}
+          />
         </div>
         <div className="-mx-5 -mb-5 mt-3 grid flex-shrink-0 grid-cols-4 gap-2 border-t border-gray-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-700 dark:bg-gray-800 sm:pb-3">
           <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onUpload} disabled={uploading}>

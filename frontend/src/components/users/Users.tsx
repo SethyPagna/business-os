@@ -32,6 +32,7 @@ import {
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import { UserAvatarImage } from './UserAvatar.tsx'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -1210,7 +1211,7 @@ export default function Users() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                            {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-9 w-9 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+                            <UserAvatarImage src={user.avatar_path} alt={user.name} className="h-9 w-9 object-cover" fallback={(user.name?.[0]?.toUpperCase() || 'U')} />
                           </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-white">{user.name}</div>
@@ -1252,7 +1253,7 @@ export default function Users() {
             {(!loading || users.length) ? filteredUsers.map((user) => (
               <div key={user.id} className="card flex items-center gap-3 p-3" onClick={() => { setSelectedUser(user); setModal('userDetail') }}>
                 <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                  {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+                  <UserAvatarImage src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" fallback={(user.name?.[0]?.toUpperCase() || 'U')} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="detail-scroll-text font-semibold text-gray-900 dark:text-white">{user.name}</div>
