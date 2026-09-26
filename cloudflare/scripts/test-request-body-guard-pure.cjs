@@ -192,6 +192,9 @@ async function main() {
     // scope to register the admin-host document handler, and the poisoned proxy
     // is not iterable.
     './lib/adminDocumentIdentity': load('lib/adminDocumentIdentity.ts'),
+    // Real module too: the poisoned proxy would throw as middleware on every
+    // /api request (F4 origin guard, mounted ahead of body admission).
+    './lib/originGuard': load('lib/originGuard.ts'),
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreDataInvariants': { ensureCoreDataInvariantsOnce: async () => { calls.bootstrap++ } },
     './lib/maintenance': { isMaintenanceGatedRequest: () => true, getMaintenance: async () => { calls.maintenance++; return null } },
