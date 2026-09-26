@@ -8,10 +8,11 @@ and their new status, and each item here names the Part that last changed it (e.
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
 |---|---|---|
-| CP-1 | urgent @ `c26ab50c`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [~] full individual sweep running → final check → owner OK to push → owner deploys |
-| CP-2 | S-auth (OTP/2FA, Settings, Drive, AI key, Origin guard), S-uploads (images-only, stored XSS), U-records2, U-cost + 0195 | [~] lanes resumed after the usage limit |
-| CP-3 | U-cost past-sale repair migration (owner approves the remote run), U-print, U-confirm, U-sync, U-broadcast, U-drain + offline removal, S-secrets, K1/K3/K5 caching | [ ] after CP-2 |
-| CP-4 | U-branch (Shop → Store), R2 move to APAC, official-names Excel | [ ] owner-gated |
+| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [~] deploying: run 36227772137 (first run 36222897469 stopped on CI setup, fixed 1e925d8b); owner delegated approvals 26 Sep |
+| CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [ ] deploys right after CP-1 |
+| CP-2 | S-auth (+ shared-login fix), S-uploads (images+videos only, import files temporary, K3 serving), U-records2, U-cost + 0195 (past-sale repair held as 0200), U-profile bugs | [~] refuters running; U-cost + U-profile fixes running |
+| CP-3 | U-cost past-sale repair (held 0200: owner sees the audit, then go), U-print, U-confirm, U-sync, U-broadcast, U-drain + offline removal (K5), S-secrets, K1/K3 caching | [~] refuter for print/confirm/sync/broadcast running; S-secrets resumed |
+| CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC; official-names Excel (needs the product list: VPN blocks the export) | [!] owner-gated |
 
 ### All workstreams — one line each; the details are in the session log and in local Records (`Records/Recovery/LANES.md`)
 - [x] Investigations, read-only: I1 I3 I5 I7 I8 I9, A1–A3, C3 A/B plan, M-offline map, C-cache plan, C-comply gap, A-profile audit, SEC-1 (secrets/history), SEC-2 (authz), SEC-3 (injection/leaks)
