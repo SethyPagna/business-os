@@ -6171,7 +6171,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       const importRowReceives = (row: (typeof actionable)[number]): boolean => {
         const data = row.data as Record<string, unknown>
         return row.action === 'update' && Boolean(row.existingId)
-          && productImportMode !== 'fill_blank' && !(productImportMode === 'replace_columns' && productReplaceColumns.length > 0)
+          // (fill_blank and a column replace never reach the receipt code)
+          && productImportMode !== 'fill_blank' && !(productReplaceColumns.length > 0 && productImportMode === 'replace_columns')
           && (row.plannedMode === 'merge_stock' || row.plannedMode === 'override_add')
           && !appliedRowGuards.has(`row:${row.rowNumber}`)
           && Boolean(data.branch_id_explicit) && data.branch_id != null && (data.stock_quantity as number) > 0
