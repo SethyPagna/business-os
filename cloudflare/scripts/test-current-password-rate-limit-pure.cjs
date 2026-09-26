@@ -105,6 +105,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': { recordFailedLogin: noop, getLoginLockoutState: async () => ({ locked: false }), clearLoginLockout: noop },
   '../lib/deviceTrust': { requiresDeviceApproval: () => false, checkDeviceTrust: async () => ({ status: 'approved' }) },
+  '../lib/otpReplay': { isOtpStepReplayed: async () => false, markOtpStepUsed: noop },
   '../lib/googleOauth': {},
   '../index': {},
 }).default
