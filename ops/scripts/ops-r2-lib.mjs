@@ -7,7 +7,7 @@
 // (ops/r2-copy-worker/src/core.mjs) and are compared with its differences(),
 // so the runner and the Worker share one definition of "identical".
 
-import { differences } from '../r2-copy-worker/src/core.mjs'
+import { destinationIsOlder, differences } from '../r2-copy-worker/src/core.mjs'
 import { OpsError, PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
 
 export { PRODUCTION_WORKER }
@@ -174,6 +174,57 @@ export function planCopy(c) {
   return { regular, ordered, skipped, settledOrdered: settled, prune }
 }
 
+// The top-up after the switch: production writes the destination now, so the
+// destination wins wherever it is as new as the source or newer, and nothing
+// is ever pruned.
+//   regular    - keys missing in the destination, or whose destination copy
+//                is OLDER than the source object (overwritten, conditionally)
+//   ordered    - backup keys among those, oldest first, one at a time
+//   keptNewer  - differing keys whose destination copy is not older: left alone
+//   heldBackups - backup keys NOT written because writing them now would put
+//                them out of the app's backup order: the destination already
+//                has backups the source does not (the app made them after the
+//                switch), or a backup already in place is newer than them.
+//                They stay in the source bucket.
+//   unresolved - keys whose comparison failed; never written
+export function planTopup(c) {
+  const regular = []
+  const sensitiveNeeded = []
+  const keptNewer = []
+  const unresolved = []
+  let skipped = 0
+  let vanished = 0
+  for (const o of c.src.values()) {
+    const s = c.status.get(o.key)
+    const d = c.dst.get(o.key)
+    let needed = false
+    if (s === 'identical') skipped += 1
+    else if (s === 'vanished') vanished += 1
+    else if (s === 'missing') needed = true
+    else if (s === 'different') {
+      if (d && destinationIsOlder(o, d)) needed = true
+      else keptNewer.push(o.key)
+    } else unresolved.push(o.key)
+    if (!needed) continue
+    const item = { key: o.key, expectEtag: o.etag, size: o.size }
+    if (isOrderSensitive(o.key)) sensitiveNeeded.push(o)
+    else regular.push(item)
+  }
+  const destOnlyBackups = c.destinationOnly.filter(isOrderSensitive)
+  const settled = [...c.src.values()].filter((o) => isOrderSensitive(o.key) && c.status.get(o.key) === 'identical')
+  // Each needed backup must come before (be newer than) every settled one in
+  // the app's order, or writing it now would misplace it.
+  const fits = sensitiveNeeded.every((n) => settled.every((s) => appPrecedes(n, s)))
+  let ordered = []
+  let heldBackups = []
+  if (!destOnlyBackups.length && fits) {
+    ordered = appOrder(sensitiveNeeded).reverse().map((o) => ({ key: o.key, expectEtag: o.etag, size: o.size }))
+  } else {
+    heldBackups = appOrder(sensitiveNeeded).map((o) => o.key)
+  }
+  return { regular, ordered, skipped, vanished, keptNewer, heldBackups, unresolved, destinationOnly: c.destinationOnly.length }
+}
+
 // Consecutive groups of at most maxItems items and maxBytes bytes (an item
 // larger than maxBytes travels alone). Order is preserved.
 export function batches(items, { maxItems, maxBytes = Infinity }) {
@@ -199,7 +250,7 @@ export function batches(items, { maxItems, maxBytes = Infinity }) {
 export function emptyCopyTally() {
   return {
     copied: 0, overwritten: 0, rewritten: 0, skippedIdentical: 0,
-    conflicts: 0, vanished: 0, mismatched: 0, failed: 0,
+    conflicts: 0, keptNewer: 0, vanished: 0, mismatched: 0, failed: 0,
     bytes: 0, sourceChanged: 0,
   }
 }
@@ -214,6 +265,7 @@ export function tallyCopy(results, tally = emptyCopyTally()) {
       case 'rewritten': tally.rewritten += 1; tally.bytes += size; break
       case 'skipped-identical': tally.skippedIdentical += 1; break
       case 'conflict': tally.conflicts += 1; break
+      case 'kept-newer-destination': tally.keptNewer += 1; break
       case 'source-missing': tally.vanished += 1; break
       case 'mismatch': tally.mismatched += 1; break
       default: tally.failed += 1

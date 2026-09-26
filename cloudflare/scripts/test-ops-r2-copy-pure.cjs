@@ -224,6 +224,37 @@ async function main() {
     assert.strictEqual(s.source.writes(), 0)
   })
 
+  await check('keepNewerDestination (topup): copies missing keys, replaces only an OLDER destination copy, never a newer or equally new one', async () => {
+    const s = setup()
+    s.source.seed('missing', 'M', { httpMetadata: HTTP })
+    s.destination.seed('dest-newer', 'app wrote this')
+    s.source.seed('dest-newer', 'old bucket')
+    s.source.seed('dest-older', 'old bucket, re-uploaded late')
+    s.source.seed('same', 'S')
+    s.destination.seed('same', 'S')
+    // dest-older: the destination copy predates the source object
+    s.destination.objects.set('dest-older', { ...s.source.objects.get('dest-older'), data: Buffer.from('stale'), etag: md5hex(Buffer.from('stale')), checksums: {}, uploaded: new Date(Date.parse('2026-08-01T00:00:00Z')) })
+    // dest-newer: make the destination strictly newer than the source
+    s.destination.objects.get('dest-newer').uploaded = new Date(s.source.objects.get('dest-newer').uploaded.getTime() + 60000)
+    const topup = (key, extra = {}) => copy(s, key, { allowOverwrite: true, keepNewerDestination: true, ...extra })
+    assert.strictEqual((await topup('missing')).outcome, 'copied')
+    const kept = await topup('dest-newer')
+    assert.strictEqual(kept.outcome, 'kept-newer-destination')
+    assert.strictEqual(s.destination.objects.get('dest-newer').data.toString(), 'app wrote this')
+    assert.strictEqual((await topup('dest-older')).outcome, 'overwritten')
+    assert.strictEqual(s.destination.objects.get('dest-older').data.toString(), 'old bucket, re-uploaded late')
+    assert.strictEqual((await topup('same', { force: true })).outcome, 'skipped-identical', 'force is ignored in topup')
+    // equal upload times: not older, so left alone
+    s.source.seed('tie', 'source side')
+    s.destination.objects.set('tie', { ...s.source.objects.get('tie'), data: Buffer.from('dest side'), etag: md5hex(Buffer.from('dest side')), checksums: {} })
+    assert.strictEqual((await topup('tie')).outcome, 'kept-newer-destination')
+    assert.strictEqual(core.destinationIsOlder({ uploaded: '2026-09-02T00:00:00.000Z' }, { uploaded: null }), false, 'an unknown time is never older')
+    assert.strictEqual(s.source.writes(), 0)
+    // The same differing, older-looking object WITHOUT the flag is simply overwritten (copy mode).
+    s.destination.objects.get('dest-newer').uploaded = new Date(0)
+    assert.strictEqual((await copy(s, 'dest-newer', { allowOverwrite: true })).outcome, 'overwritten')
+  })
+
   await check('the source is structurally read-only: the wrapper exposes head/get/list only', async () => {
     const s = setup()
     const ro = core.readOnlyBucket(s.source)
@@ -330,6 +361,14 @@ async function main() {
     assert.strictEqual(notForced.body.results[0].outcome, 'skipped-identical')
     const forced = await call(env, 'POST', '/copy', { items: [{ key: 'b', force: true }], allowOverwrite: true })
     assert.strictEqual(forced.body.results[0].outcome, 'rewritten')
+    // keepNewerDestination must be exactly true, and then a newer destination object stays
+    s.destination.seed('app', 'written by the app')
+    s.source.objects.set('app', { ...s.destination.objects.get('app'), data: Buffer.from('old'), etag: md5hex(Buffer.from('old')), checksums: {}, uploaded: new Date(0) })
+    const keptByWorker = await call(env, 'POST', '/copy', { items: [{ key: 'app' }], allowOverwrite: true, keepNewerDestination: true })
+    assert.strictEqual(keptByWorker.body.results[0].outcome, 'kept-newer-destination')
+    assert.strictEqual(s.destination.objects.get('app').data.toString(), 'written by the app')
+    const notTopup = await call(env, 'POST', '/copy', { items: [{ key: 'app' }], allowOverwrite: true, keepNewerDestination: 'yes' })
+    assert.strictEqual(notTopup.body.results[0].outcome, 'overwritten')
     assert.strictEqual(s.source.writes(), 0, 'the source bucket was written')
   })
 

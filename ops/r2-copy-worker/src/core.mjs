@@ -16,6 +16,8 @@
 //     keys whose `uploaded` order the app relies on (backups).
 //   - The only delete is pruneOne() on DESTINATION, and only for a key the
 //     source does not have at that moment.
+//   - keepNewerDestination (top-up) never replaces a destination object that
+//     is newer than, or as new as, the source object.
 
 export const MD5_HEX = /^[0-9a-f]{32}$/
 const MULTIPART_ETAG = /^[0-9a-f]{32}-\d+$/
@@ -128,13 +130,26 @@ function errorText(err) {
   return String((err && err.message) || err).slice(0, 300)
 }
 
+// True only when both times are known and the destination copy was uploaded
+// strictly before the source object: the one case a top-up may overwrite.
+export function destinationIsOlder(src, dst) {
+  const s = Date.parse(src && src.uploaded)
+  const d = Date.parse(dst && dst.uploaded)
+  return Number.isFinite(s) && Number.isFinite(d) && d < s
+}
+
 // Copies one key SOURCE -> DESTINATION and proves the result.
 // outcome: copied | overwritten | rewritten | skipped-identical | conflict |
-//          source-missing | mismatch | failed
+//          kept-newer-destination | source-missing | mismatch | failed
 // force (honoured only with allowOverwrite): re-put an identical object so
 // its destination `uploaded` moves after the objects written before it --
 // the driver's repair of the backup order, which the app sorts by uploaded.
-export async function copyOne({ source, destination, key, deps, allowOverwrite = false, force = false, expectEtag, maxAttempts = 3 }) {
+// keepNewerDestination (the top-up after the switch, when the live app writes
+// the destination): a differing destination object is overwritten only when
+// it is OLDER than the source object, and the put is conditional on the
+// destination still being that exact object, so an app write that lands in
+// between is never replaced. force is ignored in this mode.
+export async function copyOne({ source, destination, key, deps, allowOverwrite = false, force = false, keepNewerDestination = false, expectEtag, maxAttempts = 3 }) {
   let problem = 'unknown'
   let lastDiffs
   let lastError
@@ -155,16 +170,20 @@ export async function copyOne({ source, destination, key, deps, allowOverwrite =
 
       const headDst = await destination.head(key)
       if (existedBefore === null) existedBefore = Boolean(headDst)
+      let replaceEtag
       if (headDst) {
         const dst = describe(headDst)
         if (!dst.md5 && !dst.ssec) dst.md5 = await streamMd5(destination, key, dst.etag, deps)
         const diffs = differences(src, dst)
         if (!diffs.length) {
           if (wroteHere) return { key, outcome: writtenOutcome(existedBefore, identicalBefore), size: src.size, sourceChanged }
-          if (!(force && allowOverwrite)) return { key, outcome: 'skipped-identical', size: src.size, sourceChanged }
+          if (!(force && allowOverwrite) || keepNewerDestination) return { key, outcome: 'skipped-identical', size: src.size, sourceChanged }
           identicalBefore = true
         } else if (!allowOverwrite && !wroteHere) {
           return { key, outcome: 'conflict', diffs }
+        } else if (keepNewerDestination && !wroteHere) {
+          if (!destinationIsOlder(src, dst)) return { key, outcome: 'kept-newer-destination', diffs }
+          replaceEtag = headDst.etag
         }
       }
 
@@ -190,8 +209,15 @@ export async function copyOne({ source, destination, key, deps, allowOverwrite =
         md5: hexToBytes(src.md5).buffer, // R2 refuses the put unless the bytes hash to this
       }
       if (body.storageClass) options.storageClass = body.storageClass
+      // Replace only the exact older object judged above; R2 skips the put
+      // (and returns null) when the destination changed since that head.
+      if (replaceEtag !== undefined) options.onlyIf = { etagMatches: replaceEtag }
       wroteHere = true
-      await destination.put(key, value, options)
+      const stored = await destination.put(key, value, options)
+      if (replaceEtag !== undefined && stored === null) {
+        if (value && typeof value.cancel === 'function') await discard(value)
+        return { key, outcome: 'kept-newer-destination', reason: 'destination-changed-before-put' }
+      }
 
       const after = describe(await destination.head(key))
       if (!after) { problem = 'destination-missing-after-put'; continue }

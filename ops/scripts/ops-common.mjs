@@ -28,7 +28,7 @@ export const API_BASE = 'https://api.cloudflare.com/client/v4'
 
 export const PUBLIC_WORDS = new Set([
   'PASS', 'FAIL', 'SKIPPED', 'withheld', 'yes', 'no', 'none',
-  'copy', 'verify-only', 'source', 'destination', 'unknown', 'mixed',
+  'copy', 'verify-only', 'topup', 'source', 'destination', 'unknown', 'mixed',
   'present', 'absent', 'created', 'deleted', 'already-absent', 'still-present',
   'apac', 'eeur', 'weur', 'wnam', 'enam', 'oc', 'default',
   'secret', 'plain-text', 'other-type',

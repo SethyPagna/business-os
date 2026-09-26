@@ -2,7 +2,7 @@
 //
 //   GET  /health                                   -> capabilities
 //   POST /list   { bucket, cursor, limit }         -> one listing page
-//   POST /copy   { items: [{ key, expectEtag, force }], allowOverwrite }
+//   POST /copy   { items: [{ key, expectEtag, force }], allowOverwrite, keepNewerDestination }
 //   POST /verify { keys }                          (read-only)
 //   POST /prune  { keys, confirm: 'destination-only' }
 //
@@ -128,6 +128,7 @@ export async function handle(request, env, deps) {
             key: item.key,
             expectEtag: typeof item.expectEtag === 'string' ? item.expectEtag : undefined,
             allowOverwrite: body.allowOverwrite === true,
+            keepNewerDestination: body.keepNewerDestination === true,
             force: item.force === true,
             deps,
           }))

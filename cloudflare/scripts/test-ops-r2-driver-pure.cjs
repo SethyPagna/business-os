@@ -303,6 +303,140 @@ async function main() {
     assert.ok(s.destination.objects.has('uploads/written-by-the-app-after-the-switch.webp'), 'an app object was pruned')
   })
 
+  // ---------------------------------------------------------------- topup
+  // copy + verify-only PASS, then uploads land in the OLD bucket before the
+  // switch deploy, then the switch, then the live app writes the NEW bucket.
+  const LATE_1 = 'uploads/products/late-upload-1.webp'
+  const LATE_2 = 'uploads/products/late-upload-2.jpg'
+  const BOTH = 'uploads/products/written-on-both-sides.webp'
+  const APP_NEW = 'uploads/products/app-upload-after-switch.webp'
+  async function switched() {
+    const s = fresh()
+    assert.ok((await run(s, 'copy')).ok)
+    assert.ok((await run(s, 'verify-only')).ok)
+    s.source.seed(LATE_1, crypto.randomBytes(2000), { httpMetadata: FIXTURE_HTTP, customMetadata: FIXTURE_CUSTOM })
+    s.source.seed(LATE_2, crypto.randomBytes(900), { httpMetadata: { contentType: 'image/jpeg' } })
+    // Re-uploaded under the same key in the old bucket: the destination copy is now OLDER.
+    const reup = [...s.source.objects.keys()].find((k) => k.startsWith('uploads/products/p'))
+    s.source.seed(reup, crypto.randomBytes(1234), { httpMetadata: { contentType: 'image/webp' } })
+    s.source.seed(BOTH, 'old bucket, before the switch', { httpMetadata: { contentType: 'image/webp' } })
+    // --- the switch deploy; from here on the app writes the destination ---
+    s.destination.seed(APP_NEW, 'written by the app', { httpMetadata: { contentType: 'image/webp' } })
+    s.destination.seed(BOTH, 'written by the app after the switch', { httpMetadata: { contentType: 'image/webp' } })
+    return { s, reup }
+  }
+  const afterSwitch = () => fakeApi('destination').api
+
+  await check('topup after the switch carries late uploads, replaces only OLDER destination copies, keeps newer ones, deletes nothing', async () => {
+    const { s, reup } = await switched()
+    const sourceBefore = s.source.snapshot()
+    const appObjects = [APP_NEW, BOTH].map((k) => s.destination.objects.get(k).version)
+    const destWritesBefore = s.destination.writes()
+    const destCallsBefore = s.destination.calls.length
+    const routes = []
+    const r = await run(s, 'topup', { api: afterSwitch(), record: routes })
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problems))
+    assert.strictEqual(r.production.state, 'destination')
+    assert.deepStrictEqual([r.counts.copied, r.counts.overwritten, r.counts.conflicts], [2, 1, 1])
+    assert.strictEqual(r.counts.skippedIdentical, s.source.objects.size - 4)
+    assert.strictEqual(r.counts.destinationOnly, 1)
+    assert.strictEqual(r.counts.missingAfter + r.counts.mismatched + r.counts.failed, 0)
+    for (const k of [LATE_1, LATE_2, reup]) assert.ok(s.destination.objects.get(k).data.equals(s.source.objects.get(k).data), `${k} not carried`)
+    assert.deepStrictEqual(core.normalizeHttpMetadata(s.destination.objects.get(LATE_1).httpMetadata), core.normalizeHttpMetadata(FIXTURE_HTTP))
+    assert.deepStrictEqual(s.destination.objects.get(LATE_1).customMetadata, FIXTURE_CUSTOM)
+    assert.strictEqual(s.destination.objects.get(BOTH).data.toString(), 'written by the app after the switch', 'a newer destination object was overwritten')
+    assert.deepStrictEqual([APP_NEW, BOTH].map((k) => s.destination.objects.get(k).version), appObjects, 'an app object was rewritten')
+    assert.deepStrictEqual(r.details.keptNewer, [BOTH])
+    assert.ok(!routes.some((x) => /\/prune$/.test(x)), 'topup called /prune')
+    assert.ok(!s.destination.calls.slice(destCallsBefore).includes('delete'), 'topup deleted from the destination')
+    assert.strictEqual(s.destination.writes() - destWritesBefore, 3)
+    assert.strictEqual(s.source.writes(), 0)
+    assert.strictEqual(s.source.snapshot(), sourceBefore, 'the old bucket changed')
+    // Idempotent: a second run writes nothing and still leaves the app object alone.
+    const writes = s.destination.writes()
+    const again = await run(s, 'topup', { api: afterSwitch() })
+    assert.strictEqual(again.ok, true, JSON.stringify(again.problems))
+    assert.deepStrictEqual([again.counts.copied, again.counts.overwritten, again.counts.conflicts], [0, 0, 1])
+    assert.strictEqual(s.destination.writes(), writes)
+  })
+
+  await check('topup: an app write landing between the plan and the put is never replaced', async () => {
+    const { s, reup } = await switched()
+    s.destination.faults.beforePut = (key, bucket) => {
+      if (key === reup) bucket.seed(reup, 'the app wrote this a moment ago', { httpMetadata: { contentType: 'image/webp' } })
+    }
+    const r = await run(s, 'topup', { api: afterSwitch() })
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problems))
+    assert.strictEqual(s.destination.objects.get(reup).data.toString(), 'the app wrote this a moment ago')
+    assert.deepStrictEqual([r.counts.copied, r.counts.overwritten, r.counts.conflicts], [2, 0, 2])
+    assert.ok(r.details.keptNewer.includes(reup))
+  })
+
+  await check('topup refuses before the switch (and in a mixed or unreadable state); copy still refuses after it', async () => {
+    for (const state of ['source', 'mixed', 'other', 'api-down']) {
+      const { s } = await switched()
+      const writes = s.destination.writes()
+      const routes = []
+      const r = await run(s, 'topup', { api: fakeApi(state).api, record: routes })
+      assert.strictEqual(r.ok, false, state)
+      assert.deepStrictEqual(r.problems, ['production-not-on-destination'], state)
+      assert.deepStrictEqual(routes, [], `${state}: the Worker was called`)
+      assert.strictEqual(s.destination.writes(), writes, state)
+    }
+    const { s } = await switched()
+    const writes = s.destination.writes()
+    const routes = []
+    const c = await run(s, 'copy', { api: afterSwitch(), record: routes })
+    assert.deepStrictEqual(c.problems, ['production-not-on-source'])
+    assert.deepStrictEqual(routes, [])
+    assert.strictEqual(s.destination.writes(), writes)
+    assert.ok(s.destination.objects.has(APP_NEW), 'copy after the switch must never prune an app object')
+  })
+
+  await check('topup keeps the backup order: a late backup is appended in order, or held when the app already made newer backups', async () => {
+    const LATE_BACKUP = 'backups/cloudflare/business-os-cloudflare-e.json'
+    const json = { contentType: 'application/json; charset=utf-8' }
+    {
+      const { s } = await switched()
+      s.source.seed(LATE_BACKUP, 'late backup', { httpMetadata: json })
+      const r = await run(s, 'topup', { api: afterSwitch() })
+      assert.strictEqual(r.ok, true, JSON.stringify(r.problems))
+      assert.deepStrictEqual([r.counts.planOrdered, r.counts.heldBackups, r.counts.orderInversions], [1, 0, 0])
+      assert.ok(s.destination.objects.has(LATE_BACKUP))
+      assert.deepStrictEqual(appKeys(s.destination), appKeys(s.source))
+    }
+    {
+      const { s } = await switched()
+      s.source.seed(LATE_BACKUP, 'late backup', { httpMetadata: json })
+      s.destination.seed('backups/cloudflare/business-os-cloudflare-f.json', 'made by the app after the switch', { httpMetadata: json })
+      const r = await run(s, 'topup', { api: afterSwitch() })
+      assert.strictEqual(r.ok, true, JSON.stringify(r.problems))
+      assert.deepStrictEqual([r.counts.planOrdered, r.counts.heldBackups], [0, 1])
+      assert.deepStrictEqual(r.details.heldBackups, [LATE_BACKUP])
+      assert.ok(!s.destination.objects.has(LATE_BACKUP), 'a held backup was written')
+      assert.ok(s.source.objects.has(LATE_BACKUP), 'a held backup stays in the old bucket')
+    }
+  })
+
+  await check('planTopup: the plan itself never schedules a write over a destination copy that is not older', () => {
+    const o = (key, uploaded, etag, md5 = etag) => ({ key, size: 1, etag, md5, uploaded, storageClass: 'Standard', httpMetadata: {}, customMetadata: {} })
+    const src = [o('a', '2026-09-02T00:00:00.000Z', '11111111111111111111111111111111'), o('b', '2026-09-02T00:00:00.000Z', '22222222222222222222222222222222'), o('c', '2026-09-02T00:00:00.000Z', '33333333333333333333333333333333'), o('d', '2026-09-02T00:00:00.000Z', '44444444444444444444444444444444'), o('e', '2026-09-02T00:00:00.000Z', '55555555555555555555555555555555')]
+    const dst = [o('a', '2026-09-01T00:00:00.000Z', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'), o('b', '2026-09-03T00:00:00.000Z', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'), o('c', '2026-09-02T00:00:00.000Z', 'cccccccccccccccccccccccccccccccc'), o('e', '2026-09-09T00:00:00.000Z', '55555555555555555555555555555555'), o('z', '2026-09-09T00:00:00.000Z', 'ffffffffffffffffffffffffffffffff')]
+    const p = lib.planTopup(lib.classify(src, dst))
+    assert.deepStrictEqual(p.regular.map((i) => i.key), ['a', 'd'], 'older destination copy and missing key only')
+    assert.deepStrictEqual(p.keptNewer, ['b', 'c'], 'newer and equally new destination copies are kept')
+    assert.deepStrictEqual([p.skipped, p.destinationOnly, p.ordered.length, p.heldBackups.length], [1, 1, 0, 0])
+    assert.ok(!('prune' in p), 'a top-up plan has no prune list')
+  })
+
+  await check('topup public lines carry counts only', async () => {
+    const { s } = await switched()
+    const r = await run(s, 'topup', { api: afterSwitch() })
+    const text = driver.runLines(r).map(([t, v]) => common.formatPublic(t, v)).join('\n')
+    for (const w of ['late-upload', 'written-on-both-sides', 'app-upload-after-switch', 'image/webp', 'products']) assert.ok(!text.includes(w), `leaks ${w}:\n${text}`)
+    assert.ok(/mode: topup/.test(text) && /conflicts \(destination newer or changed, left alone\): 1/.test(text), text)
+  })
+
   await check('productionAssetsState reads the newest deployment and every version carrying traffic', async () => {
     assert.strictEqual((await lib.productionAssetsState(fakeApi('source').api, ACCOUNT)).state, 'source')
     assert.strictEqual((await lib.productionAssetsState(fakeApi('destination').api, ACCOUNT)).state, 'destination')
@@ -514,6 +648,9 @@ async function main() {
     let w = world({ ...SRC })
     let r = await run(w, 'verify-only')
     assert.deepStrictEqual([r.problems, w.creates.length, r.destination.present], [['destination-bucket-missing'], 0, false], 'verify-only must not create')
+    w = world({ ...SRC })
+    r = await run(w, 'topup')
+    assert.deepStrictEqual([r.problems, w.creates.length, r.destination.present], [['destination-bucket-missing'], 0, false], 'topup must not create')
 
     w = world({ ...SRC })
     r = await run(w, 'copy')

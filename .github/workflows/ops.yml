@@ -14,7 +14,9 @@
 #                 deleted at the end of every run. mode: copy (delta re-runs
 #                 skip identical objects) or verify-only (compares only: no
 #                 object or bucket writes; the temporary Worker still comes
-#                 and goes).
+#                 and goes) BEFORE the switch; topup only AFTER it (carries
+#                 objects that reached the old bucket late; never overwrites
+#                 a newer destination object, never prunes or deletes).
 #   secret-names  which secrets the production Worker has: NAMES and binding
 #                 types only, read with GET requests (Cloudflare never returns
 #                 a secret's value). Changes nothing.
@@ -43,13 +45,14 @@ on:
           - r2-apac-copy
           - secret-names
       mode:
-        description: r2-apac-copy only - copy, or verify-only (compares; writes no objects and creates no bucket)
+        description: r2-apac-copy only - copy or verify-only (compares; writes nothing) before the switch; topup after it (copies only missing or older objects; never overwrites newer, never deletes)
         required: true
         default: copy
         type: choice
         options:
           - copy
           - verify-only
+          - topup
       query:
         description: d1-export only - the name of a file in ops/queries, without .sql (for example migrations-applied)
         required: false

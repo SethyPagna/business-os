@@ -8,12 +8,16 @@
 //   node ops/scripts/ops-r2.mjs delete-worker  always, even after a failure
 //
 // Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, OPS_OUT_DIR, and
-// for `buckets` and `run` OPS_R2_MODE = copy | verify-only.
+// for `buckets` and `run` OPS_R2_MODE = copy | verify-only | topup.
 //
 // Never writes to the source bucket: the Worker only reaches it through a
 // read-only wrapper. `copy` refuses to start unless the live production
 // Worker still binds ASSETS to the source bucket (after the switch the app
 // writes to the destination, and a copy could overwrite or prune its data).
+// `topup` is the opposite: it refuses unless production already binds the
+// destination, then carries objects that reached the source late (missing in
+// the destination, or whose destination copy is older), never overwrites a
+// newer destination object, and never prunes or deletes anything.
 // The public log carries counts, byte totals and verdicts only; keys, diffs
 // and error text go to the encrypted report.
 
@@ -28,12 +32,15 @@ import {
   COPY_WORKER, DEST_BUCKET, DEST_LOCATION, MAX_BYTES_PER_COPY, MAX_BYTES_PER_VERIFY, MAX_ITEMS_PER_COPY,
   MAX_KEYS_PER_PRUNE, MAX_KEYS_PER_VERIFY, SOURCE_BUCKET, applyVerifyResults, batches, classify, emptyCopyTally,
   indexByKey, keysWithStatus, listingTotals, matchResults, metadataObserved, normalizeLocation, orderInversions,
-  planCopy, productionAssetsState, tallyCopy, tallyPrune, verifyVerdict,
+  planCopy, planTopup, productionAssetsState, tallyCopy, tallyPrune, verifyVerdict,
 } from './ops-r2-lib.mjs'
 
 export const WORKER_DIR = path.join(REPO_ROOT, 'ops', 'r2-copy-worker')
 export const WORKER_TOML = path.join(WORKER_DIR, 'wrangler.toml')
-export const MODES = ['copy', 'verify-only']
+// copy        before the switch: mirror the source into the destination
+// verify-only any time: compare only
+// topup       only AFTER the switch: carry what landed in the source late
+export const MODES = ['copy', 'verify-only', 'topup']
 const MAX_LIST_PAGES = 5000
 
 // ------------------------------------------------------------ Worker client
@@ -105,13 +112,16 @@ export async function listAll(client, bucket) {
   throw new OpsError('list-too-many-pages', `The ${bucket} listing did not end.`)
 }
 
-async function copyBatch(client, items) {
+async function copyBatch(client, items, { topup = false } = {}) {
   const body = {
-    items: items.map((i) => (i.force ? { key: i.key, expectEtag: i.expectEtag, force: true } : { key: i.key, expectEtag: i.expectEtag })),
+    items: items.map((i) => (i.force && !topup ? { key: i.key, expectEtag: i.expectEtag, force: true } : { key: i.key, expectEtag: i.expectEtag })),
     // Before the switch the source is authoritative: a destination object
     // that differs is an older copy of it.
     allowOverwrite: true,
   }
+  // After the switch the live app writes the destination: the Worker may
+  // replace only a destination object OLDER than the source one.
+  if (topup) body.keepNewerDestination = true
   try {
     const results = matchResults(items, await client.call('POST', '/copy', body))
     if (results) return results
@@ -139,12 +149,16 @@ async function verifyKeys(client, c, keys, concurrency) {
 // the test drives it end to end against the real Worker code.
 // onProgress(done, total) is told after each copy request (counts only).
 export async function runJob({ mode, client, api, accountId, concurrency = 4, onProgress = () => {} }) {
-  if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'mode must be copy or verify-only.')
+  if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'mode must be copy, verify-only or topup.')
   const out = { mode, ok: false, problems: [], counts: {}, details: {} }
 
   out.production = await productionAssetsState(api, accountId)
   if (mode === 'copy' && out.production.state !== 'source') {
     out.problems.push('production-not-on-source')
+    return out
+  }
+  if (mode === 'topup' && out.production.state !== 'destination') {
+    out.problems.push('production-not-on-destination')
     return out
   }
 
@@ -182,6 +196,8 @@ export async function runJob({ mode, client, api, accountId, concurrency = 4, on
     out.ok = out.problems.length === 0
     return out
   }
+
+  if (mode === 'topup') return topupJob({ out, client, c, sourceObjects, concurrency, onProgress })
 
   // ------------------------------------------------------------- copy
   const plan = planCopy(c)
@@ -260,6 +276,73 @@ export async function runJob({ mode, client, api, accountId, concurrency = 4, on
   return out
 }
 
+// ------------------------------------------------------------ topup
+// After the switch. Writes only keys missing in the destination or whose
+// destination copy is older than the source object; never prunes, never
+// deletes, never calls /prune; the source stays read-only as always.
+async function topupJob({ out, client, c, sourceObjects, concurrency, onProgress }) {
+  const plan = planTopup(c)
+  Object.assign(out.counts, {
+    planCopy: plan.regular.length,
+    planOrdered: plan.ordered.length,
+    planSkipped: plan.skipped,
+    planKeptNewer: plan.keptNewer.length,
+    heldBackups: plan.heldBackups.length,
+    unresolved: plan.unresolved.length,
+    destinationOnly: plan.destinationOnly,
+  })
+  const tally = emptyCopyTally()
+  const results = []
+  const regular = batches(plan.regular, { maxItems: MAX_ITEMS_PER_COPY, maxBytes: MAX_BYTES_PER_COPY })
+  const requests = regular.length + plan.ordered.length
+  let done = 0
+  const tick = (value) => {
+    done += 1
+    onProgress(done, requests)
+    return value
+  }
+  for (const batchResults of await mapLimit(regular, concurrency, async (items) => tick(await copyBatch(client, items, { topup: true })))) results.push(...batchResults)
+  for (const item of plan.ordered) results.push(...tick(await copyBatch(client, [item], { topup: true })))
+  tallyCopy(results, tally)
+  Object.assign(out.counts, tally)
+  out.counts.skippedIdentical = plan.skipped + tally.skippedIdentical
+  out.counts.conflicts = plan.keptNewer.length + tally.keptNewer + tally.conflicts
+  out.counts.vanished = plan.vanished + tally.vanished
+
+  // Fresh destination listing: every key written is there. Keys that were in
+  // the destination before and are gone now were deleted by the live app (its
+  // own backup rotation, for example): this run deletes nothing, so they are
+  // counted for the owner, not failed on.
+  const after = indexByKey(await listAll(client, 'destination'), 'destination')
+  const written = results.filter((r) => ['copied', 'overwritten'].includes(r.outcome)).map((r) => r.key)
+  const missingAfter = written.filter((k) => !after.has(k))
+  const lost = [...c.dst.keys()].filter((k) => !after.has(k))
+  const inversions = orderInversions(sourceObjects, after)
+  out.counts.missingAfter = missingAfter.length
+  out.counts.destinationLost = lost.length
+  out.counts.orderInversions = inversions.length
+
+  if (plan.unresolved.length) out.problems.push('objects-unresolved')
+  if (tally.mismatched) out.problems.push('mismatched')
+  if (tally.failed) out.problems.push('failed')
+  if (missingAfter.length) out.problems.push('missing-after-copy')
+  if (inversions.length) out.problems.push('backup-order-differs')
+
+  out.details = {
+    written,
+    keptNewer: [...plan.keptNewer, ...results.filter((r) => r.outcome === 'kept-newer-destination').map((r) => r.key)],
+    heldBackups: plan.heldBackups,
+    unresolved: plan.unresolved,
+    notCopied: results.filter((r) => !['copied', 'overwritten', 'skipped-identical', 'kept-newer-destination'].includes(r.outcome)),
+    sourceChanged: results.filter((r) => r.sourceChanged).map((r) => r.key),
+    missingAfter,
+    destinationLost: lost,
+    orderInversions: inversions,
+  }
+  out.ok = out.problems.length === 0
+  return out
+}
+
 // ------------------------------------------------------- public log lines
 
 export function runLines(result) {
@@ -289,6 +372,22 @@ export function runLines(result) {
     lines.push(['mismatched: {mismatched}, failed: {failed}, conflicts: {conflicts}', { mismatched: n('mismatched'), failed: n('failed'), conflicts: n('conflicts') }])
     lines.push(['pruned from the destination: {pruned}, prune failures: {failed}', { pruned: n('pruned'), failed: n('pruneFailed') }])
     lines.push(['after the copy: {missing} missing, {inversions} backup order inversions', { missing: n('missingAfter'), inversions: n('orderInversions') }])
+  }
+  if (result.mode === 'topup' && 'planCopy' in result.counts) {
+    lines.push(['plan: {copy} missing or older in the destination, {ordered} backup keys in order, {skipped} already identical', {
+      copy: n('planCopy'), ordered: n('planOrdered'), skipped: n('planSkipped'),
+    }])
+    lines.push(['copied: {copied}, overwritten older destination copies: {overwritten}', { copied: n('copied'), overwritten: n('overwritten') }])
+    lines.push(['skipped-identical: {skipped}', { skipped: n('skippedIdentical') }])
+    lines.push(['conflicts (destination newer or changed, left alone): {conflicts}', { conflicts: n('conflicts') }])
+    lines.push(['backup keys held to keep the backup order: {held}, unresolved: {unresolved}', { held: n('heldBackups'), unresolved: n('unresolved') }])
+    lines.push(['bytes copied: {bytes}', { bytes: n('bytes') }])
+    lines.push(['changed during the run: {changed}, gone from the source: {vanished}', { changed: n('sourceChanged'), vanished: n('vanished') }])
+    lines.push(['mismatched: {mismatched}, failed: {failed}', { mismatched: n('mismatched'), failed: n('failed') }])
+    lines.push(['destination-only objects (never touched): {extra}, gone from the destination during the run (deleted by the app): {lost}', {
+      extra: n('destinationOnly'), lost: n('destinationLost'),
+    }])
+    lines.push(['after the top-up: {missing} written keys missing, {inversions} backup order inversions', { missing: n('missingAfter'), inversions: n('orderInversions') }])
   }
   if (result.mode === 'verify-only' && 'identical' in result.counts) {
     lines.push(['identical: {identical}, different: {different}, missing in destination: {missing}', {
@@ -384,14 +483,18 @@ async function cmdRun() {
   const report = { kind: 'r2-apac-copy', mode, commit: commitId(), runId: runId(), startedAt: new Date().toISOString() }
   let result = { mode: MODES.includes(mode) ? mode : 'unknown', ok: false, problems: [], counts: {} }
   try {
-    if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy or verify-only.')
+    if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy, verify-only or topup.')
     checkWorkerConfig(accountId)
-    // Refuse a post-switch copy before deploying anything.
+    // Refuse a post-switch copy, or a pre-switch top-up, before deploying anything.
     const preflight = await productionAssetsState(api, accountId)
     report.preflight = preflight
     if (mode === 'copy' && preflight.state !== 'source') {
       result.production = preflight
       throw new OpsError('production-not-on-source', 'Production no longer reads the source bucket; copy refused.')
+    }
+    if (mode === 'topup' && preflight.state !== 'destination') {
+      result.production = preflight
+      throw new OpsError('production-not-on-destination', 'Production does not read the destination bucket yet; topup refused.')
     }
     const baseUrl = await workerUrl(accountId)
     const copyToken = randomToken(32)
@@ -435,7 +538,7 @@ async function bucketInfo(apiImpl, accountId, name) {
 }
 
 // The bucket step: reads both buckets and, in copy mode ONLY, creates a
-// missing destination in apac. verify-only changes nothing, so there a
+// missing destination in apac. verify-only and topup create nothing, so there a
 // missing destination just fails the step. create() runs `wrangler r2 bucket
 // create` and resolves to { code, timedOut, stdout, stderr }.
 export async function checkBuckets({ api: apiImpl, accountId, mode, create, pause = sleep }) {
@@ -472,7 +575,7 @@ async function cmdBuckets() {
   let problems = []
   const lines = []
   try {
-    if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy or verify-only.')
+    if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy, verify-only or topup.')
     const create = async () => {
       // From an empty directory, so wrangler finds no config to edit.
       const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-r2-create-'))

@@ -6,6 +6,8 @@
 //   - get() with onlyIf.etagMatches returns the object WITHOUT a body when the
 //     precondition fails (R2's behaviour), not null;
 //   - put() with md5 rejects bytes that do not hash to it;
+//   - put() with onlyIf.etagMatches stores nothing and returns null when the
+//     current object is absent or has another etag;
 //   - a multipart object's etag is "<hex>-<parts>" and carries no MD5;
 //   - list() never returns checksums, drops metadata that was not included,
 //     and may return SHORT pages when metadata is included (includePageCap);
@@ -111,6 +113,12 @@ class FakeR2 {
   async put(key, value, options = {}) {
     this.calls.push('put')
     if (this.faults.beforePut) this.faults.beforePut(key, this)
+    // R2: a put whose onlyIf precondition fails stores nothing and returns null.
+    const want = options.onlyIf && options.onlyIf.etagMatches
+    if (want !== undefined && want !== null) {
+      const current = this.objects.get(key)
+      if (!current || current.etag !== want) return null
+    }
     let data = await readAll(value)
     if (this.faults.corruptInTransit) {
       data = Buffer.from(data)
