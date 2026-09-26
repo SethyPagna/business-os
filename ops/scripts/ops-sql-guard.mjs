@@ -26,9 +26,9 @@
 //   -- ops:max-rows N          fail if more than N rows
 //   -- ops:expect-zero *       every column of every row must be 0
 //   -- ops:expect-zero a,b     the named columns must be 0 in every row
-//   -- ops:public-row-count    the row count may appear in the public log.
-//                              Default: withheld -- a row count is a table
-//                              size, which the public log must not show.
+// There is no directive that prints a row count: a row count is a table size,
+// which the public log must not show, so every query's count stays in the
+// encrypted file.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -130,10 +130,6 @@ function parseDirective(body, rules, seen) {
   switch (name) {
     case 'min-rows': rules.minRows = integer(); break
     case 'max-rows': rules.maxRows = integer(); break
-    case 'public-row-count':
-      if (arg) reject('sql-bad-directive', 'public-row-count takes no value.')
-      rules.publicRowCount = true
-      break
     case 'expect-zero':
       if (arg === '*') rules.expectZero = '*'
       else {
@@ -154,7 +150,7 @@ export function guardSql(input) {
   const raw = String(input)
   if (Buffer.byteLength(raw, 'utf8') > MAX_FILE_BYTES) reject('sql-too-long', 'The query file is too large.')
   const parts = scanSql(raw)
-  const rules = { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false }
+  const rules = { minRows: 1, maxRows: null, expectZero: null }
   const seen = new Set()
   for (const part of parts) {
     if (part.type === 'line-comment' || part.type === 'block-comment') {

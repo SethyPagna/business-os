@@ -57,8 +57,8 @@ async function main() {
     const files = fs.readdirSync(QUERIES)
     for (const f of files) {
       assert.ok(/^[a-z0-9][a-z0-9-]{0,63}\.sql$/.test(f), `unexpected file in ops/queries: ${f}`)
-      // The public log shows no table's size: every row count stays encrypted.
-      assert.strictEqual(guard.loadQuery(f.slice(0, -4)).rules.publicRowCount, false, `${f} must not put its row count in the public log`)
+      // The public log shows no table's size: no rule can let a row count out.
+      assert.ok(!('publicRowCount' in guard.loadQuery(f.slice(0, -4)).rules), `${f}: a row-count rule exists`)
     }
   })
 
@@ -75,14 +75,14 @@ async function main() {
 
   await check('query rules: product-names and migrations-applied withhold their counts, the audit expects all zero', () => {
     const p = guard.loadQuery('product-names')
-    assert.deepStrictEqual(p.rules, { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false })
+    assert.deepStrictEqual(p.rules, { minRows: 1, maxRows: null, expectZero: null })
     assert.ok(/\bFROM products WHERE is_active = 1\b/.test(p.sql))
     for (const col of ['id', 'name', 'brand', 'barcode', 'sku', 'category']) assert.ok(new RegExp(`\\b${col}\\b`).test(p.sql))
     const m = guard.loadQuery('migrations-applied')
     assert.strictEqual(m.sql, 'SELECT name FROM d1_migrations ORDER BY id')
-    assert.deepStrictEqual(m.rules, { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false })
+    assert.deepStrictEqual(m.rules, { minRows: 1, maxRows: null, expectZero: null })
     const a = guard.loadQuery('r2-url-audit')
-    assert.deepStrictEqual(a.rules, { minRows: 1, maxRows: 1, expectZero: '*', publicRowCount: false })
+    assert.deepStrictEqual(a.rules, { minRows: 1, maxRows: 1, expectZero: '*' })
     assert.ok(!/\b(UNION|INTERSECT|EXCEPT)\b/i.test(a.sql), 'the audit must be scalar sub-queries, not a compound SELECT')
     const tables = ['products', 'product_images', 'promotions', 'users', 'file_assets', 'customer_share_submissions', 'import_job_files', 'import_job_image_matches', 'settings']
     for (const t of tables) assert.ok(new RegExp(`FROM ${t} WHERE`).test(a.sql), `the audit lost ${t}`)
@@ -186,16 +186,18 @@ async function main() {
   })
 
   await check('directives: known ones parse; unknown, duplicate, malformed and block-comment ones are refused', () => {
-    const r = guard.guardSql('-- ops:min-rows 0\n-- ops:max-rows 5\n-- ops:expect-zero a, b\n-- ops:public-row-count\nSELECT 0 AS a, 0 AS b').rules
-    assert.deepStrictEqual(r, { minRows: 0, maxRows: 5, expectZero: ['a', 'b'], publicRowCount: true })
-    assert.deepStrictEqual(guard.guardSql('-- a plain comment\nSELECT 1').rules, { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false })
+    const r = guard.guardSql('-- ops:min-rows 0\n-- ops:max-rows 5\n-- ops:expect-zero a, b\nSELECT 0 AS a, 0 AS b').rules
+    assert.deepStrictEqual(r, { minRows: 0, maxRows: 5, expectZero: ['a', 'b'] })
+    assert.deepStrictEqual(guard.guardSql('-- a plain comment\nSELECT 1').rules, { minRows: 1, maxRows: null, expectZero: null })
+    // The row-count opt-in is gone: the old directive is now just unknown.
+    rejects('-- ops:public-row-count\nSELECT 1', 'sql-unknown-directive')
     rejects('-- ops:export-everything\nSELECT 1', 'sql-unknown-directive')
     rejects('-- ops:min-rows 1\n-- ops:min-rows 2\nSELECT 1', 'sql-duplicate-directive')
     rejects('-- ops:min-rows many\nSELECT 1', 'sql-bad-directive')
     rejects('-- ops:max-rows 0\nSELECT 1', 'sql-bad-directive')
     rejects('-- ops:expect-zero a;b\nSELECT 1', 'sql-bad-directive')
-    rejects('/* ops:public-row-count */ SELECT 1', 'sql-bad-directive')
-    rejects('-- ops:public-row-count yes\nSELECT 1', 'sql-bad-directive')
+    rejects('/* ops:min-rows 1 */ SELECT 1', 'sql-bad-directive')
+    rejects('-- ops:public-row-count yes\nSELECT 1', 'sql-unknown-directive')
   })
 
   await check('query names are validated before touching the filesystem', () => {
@@ -220,7 +222,7 @@ async function main() {
   })
 
   // ------------------------------------------------ interpretD1Output
-  const rules = (over = {}) => ({ minRows: 1, maxRows: null, expectZero: null, publicRowCount: false, ...over })
+  const rules = (over = {}) => ({ minRows: 1, maxRows: null, expectZero: null, ...over })
   const out = (results, meta = { rows_read: 3, rows_written: 0, changes: 0, changed_db: false }, extra = {}) =>
     JSON.stringify([{ results, success: true, meta, ...extra }], null, 2)
 
@@ -285,7 +287,7 @@ async function main() {
   // ---------------------------------------------------- public lines
   const render = (lines) => lines.map(([t, v]) => common.formatPublic(t, v)).join('\n')
 
-  await check('public lines never carry row data, and show the row count only when the query allows it', () => {
+  await check('public lines never carry row data or a row count, whatever the rules say', () => {
     const rows = [{ id: 7, name: 'SECRET-PRODUCT', brand: 'BRANDX' }]
     const v = d1.interpretD1Output(out(rows), rules())
     const text = render(d1.publicLines({ name: 'product-names', verdict: v, rules: rules(), bytes: 1234 }))
@@ -293,10 +295,21 @@ async function main() {
     assert.ok(/rows: withheld/.test(text))
     assert.ok(!/rows: 1\b/.test(text))
     assert.ok(/verdict: PASS/.test(text))
-    const pub = rules({ publicRowCount: true })
-    // The mechanism only: no file in ops/queries opts in (checked above).
-    const shown = render(d1.publicLines({ name: 'opted-in-query', verdict: d1.interpretD1Output(out(rows), pub), rules: pub, bytes: 10 }))
-    assert.ok(/rows: 1\b/.test(shown))
+    // Not even a forged rules object can print a count: there is no opt-in any more.
+    const forged = rules({ publicRowCount: true })
+    const many = Array.from({ length: 37 }, (_, i) => ({ id: i }))
+    const shown = render(d1.publicLines({ name: 'forged-query', verdict: d1.interpretD1Output(out(many), forged), rules: forged, bytes: 10 }))
+    assert.ok(/rows: withheld/.test(shown) && !/\b37\b/.test(shown), shown)
+    // Every real query, fed a result, prints no count either.
+    for (const f of fs.readdirSync(QUERIES)) {
+      const q = guard.loadQuery(f.slice(0, -4))
+      const text = render(d1.publicLines({ name: q.name, verdict: d1.interpretD1Output(out(many), q.rules), rules: q.rules, bytes: 10 }))
+      assert.ok(!/\b37\b/.test(text), `${f} printed its row count:\n${text}`)
+    }
+    // And no ops source mentions the retired directive.
+    for (const file of ['ops/scripts/ops-sql-guard.mjs', 'ops/scripts/ops-d1-export.mjs']) {
+      assert.ok(!/public-row-count|publicRowCount/.test(fs.readFileSync(path.join(ROOT, file), 'utf8')), `${file} still knows the row-count opt-in`)
+    }
     const audit = rules({ expectZero: '*', maxRows: 1 })
     const failed = render(d1.publicLines({ name: 'r2-url-audit', verdict: d1.interpretD1Output(out([{ products_image_path_absolute: 4 }]), audit), rules: audit, bytes: 10 }))
     assert.ok(/expect-zero check: FAIL/.test(failed))

@@ -9,8 +9,9 @@
 //
 // Runs: wrangler d1 execute business-os --remote --json --command "<sql>"
 // with the canonical SQL from ops-sql-guard.mjs. Public log: the query name,
-// PASS/FAIL, the encrypted file size, Cloudflare error codes -- and the row
-// count only for a query that declares -- ops:public-row-count.
+// PASS/FAIL, the expect-zero result, the encrypted file size and Cloudflare
+// error codes. Never the row count: that is a table size, and it stays in
+// the encrypted file for every query.
 
 import {
   CLOUDFLARE_DIR, OpsError, codesText, cloudflareErrorCodes, commitId, isMain,
@@ -84,11 +85,7 @@ export function interpretD1Output(stdout, rules) {
 // Pure: the only lines the public log may show for an export.
 export function publicLines({ name, verdict, rules, bytes, errorCodes = [] }) {
   const lines = [['d1-export query {query}', { query: publicToken(name) }]]
-  if (verdict.rowCount !== undefined && rules && rules.publicRowCount && verdict.problems.every((p) => !p.startsWith('d1-'))) {
-    lines.push(['rows: {rows}', { rows: verdict.rowCount }])
-  } else {
-    lines.push(['rows: {rows} (in the encrypted file)', { rows: 'withheld' }])
-  }
+  lines.push(['rows: {rows} (in the encrypted file)', { rows: 'withheld' }])
   if (rules && rules.expectZero) {
     lines.push(['expect-zero check: {result}', { result: verdict.zeroCheck || 'SKIPPED' }])
   }
