@@ -28,7 +28,8 @@ import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, prod
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
-import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
+import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
@@ -5789,6 +5790,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // actor from live users/roles before this invocation changes job/chunk
     // state or composes any catalog, stock, sales, or image write.
     const authority = await assertCurrentImportApplyAuthority(env, job)
+    const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
@@ -6160,6 +6162,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
         let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
+        // U-cost: an imported cost must hold past the next stock movement,
+        // which re-derives cost_price_usd (0195 triggers) and honours only a
+        // cost with a product_cost_entries row -- the same row the product
+        // form records. Pushed IMMEDIATELY BEFORE the UPDATE that writes the
+        // cost (it reads the preimage); writes nothing when the cost is unmoved.
+        const pushImportedCostEntry = (productId: number, next: { usd?: unknown; khr?: unknown }) => {
+          const statement = typedCostEntryBeforeWriteStatement(productId, {
+            ...('usd' in next ? { usd: (next.usd ?? null) as number | null } : {}),
+            ...('khr' in next ? { khr: (next.khr ?? null) as number | null } : {}),
+          }, importCostActor)
+          if (statement) rowWriteGroup.push(statement)
+        }
         let rowWriteGroupFinished = false
         const finishProductRowWriteGroup = () => {
           if (rowWriteGroupFinished) return
@@ -6219,6 +6233,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // column. Contrast with the legacy/default branch further
             // down, which does write branch_stock for an explicit-branch
             // row.
+            pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
@@ -6251,6 +6266,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 if (derived && !allSetColumns.includes(derived)) allSetColumns.push(derived)
               }
               const setClause = allSetColumns.map((col) => `${col}=@${col}`).join(', ')
+              pushImportedCostEntry(Number(r.existingId), {
+                ...(allSetColumns.includes('cost_price_usd') ? { usd: d.cost_price_usd } : {}),
+                ...(allSetColumns.includes('cost_price_khr') ? { khr: d.cost_price_khr } : {}),
+              })
               const params: Record<string, unknown> = { id: r.existingId, updated_at: nowIso }
               for (const col of allSetColumns) params[col] = d[col]
               rowWriteGroup.push({
@@ -6278,6 +6297,11 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // scalar after its receipt already derived the current mean.
           if ((mode === 'merge_stock' || mode === 'override_add') && appliedRowGuards.has(`row:${r.rowNumber}`)) continue
           if (mode !== 'merge_stock') {
+            // An override_add row that carries a receipt prices it as a lot
+            // and re-derives in the same group: the lot is its cost record,
+            // not an override. Every other field write sets the cost as typed.
+            const receiptFollows = mode === 'override_add' && d.branch_id_explicit && d.branch_id != null && (d.stock_quantity as number) > 0
+            if (!receiptFollows) pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
@@ -6652,6 +6676,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         // 'add' rows only -- classifyInventory only ever sets these two
         // fields when a unit cost was actually given in the file.
         if (d.cost_price_usd != null || d.cost_price_khr != null) {
+          // U-cost: recorded like a typed cost so the next stock movement
+          // (0195 triggers) does not re-derive it away.
+          const costEntry = typedCostEntryBeforeWriteStatement(Number(d.product_id), {
+            ...(d.cost_price_usd != null ? { usd: d.cost_price_usd } : {}),
+            ...(d.cost_price_khr != null ? { khr: d.cost_price_khr } : {}),
+          }, importCostActor)
+          if (costEntry) group.push(costEntry)
           group.push({
             sql: `UPDATE products SET ${d.cost_price_usd != null ? 'cost_price_usd = @usd' : ''}${d.cost_price_usd != null && d.cost_price_khr != null ? ', ' : ''}${d.cost_price_khr != null ? 'cost_price_khr = @khr' : ''}, updated_at = @updated_at WHERE id = @id`,
             params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },

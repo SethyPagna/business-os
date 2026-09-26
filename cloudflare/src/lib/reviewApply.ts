@@ -28,6 +28,7 @@ import { getActionTier } from './permissions'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
 import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
   ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
+import { catalogCostRecomputeStatement, typedCostEntryAfterWriteStatement } from './catalogCostRecompute'
 import type { SessionUser } from './auth'
 import type { PendingActionRow } from './pendingActions'
 import type { Env } from '../index'
@@ -191,7 +192,25 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
       omitUnchangedProductImageFields(body)
     }
   }
-  const changes = await updateRow(env, 'products', id, body)
+  // U-cost: the approved cost must hold past the next stock movement, which
+  // re-derives cost_price_usd (0195 triggers) and honours only a cost with a
+  // product_cost_entries row. Record it the way the form does: a planned
+  // edit goes through updateRow's own override path (entry + audit +
+  // recompute in one batch); a plan-less historical queue row records the
+  // same entry right after its write, against the preimage read first. The
+  // actor is whoever typed the cost (the requester), else the reviewer.
+  const costActor = row.requested_by != null || row.requested_by_name != null
+    ? { id: row.requested_by, name: row.requested_by_name }
+    : { id: reviewer.id, name: reviewer.name }
+  const plannedMoney = readProductMoneyPlan(body)
+  const writesCost = { usd: Object.prototype.hasOwnProperty.call(body, 'cost_price_usd'), khr: Object.prototype.hasOwnProperty.call(body, 'cost_price_khr') }
+  const legacyCostBefore = !plannedMoney && (writesCost.usd || writesCost.khr)
+    ? await getDb(env).prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+      .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id })
+    : null
+  const changes = await updateRow(env, 'products', id, body, plannedMoney ? costActor : undefined)
+  const legacyEntry = legacyCostBefore && changes ? typedCostEntryAfterWriteStatement(Number(id), legacyCostBefore, writesCost, costActor) : null
+  if (legacyEntry) await getDb(env).batch([legacyEntry, catalogCostRecomputeStatement(Number(id))])
   const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
   if (appliedGroupRename) await audit(env, reviewer.id, reviewer.name, 'rename', 'product_group', id,
     { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })

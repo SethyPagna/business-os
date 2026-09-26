@@ -30,7 +30,7 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql } from '../lib/catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -1609,11 +1609,25 @@ app.post('/bulk-price-adjust', async (c) => {
     return c.json({ count: row?.n || 0 })
   }
 
-  const statements = fields.map((field) => ({
-    sql: `UPDATE products SET ${field} = MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2})), updated_at = CURRENT_TIMESTAMP
+  const nextValueSql = (field: string) => `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
+    sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
           WHERE is_active = 1 AND (${fieldCondition(field)})`,
     params: { delta },
   }))
+  // U-cost: the 0195 triggers re-derive cost_price_usd at every stock
+  // movement and honour only a cost with a product_cost_entries row, so a
+  // bare adjust held until the next sale. Record the entry the product form
+  // records, for every row whose cost moves, in the same atomic batch and
+  // BEFORE the UPDATEs (it reads the preimage).
+  const costNext = (field: 'cost_price_usd' | 'cost_price_khr') => fields.includes(field)
+    ? `CASE WHEN ${fieldCondition(field)} THEN ${nextValueSql(field)} ELSE ${field} END` : null
+  if (fields.includes('cost_price_usd') || fields.includes('cost_price_khr')) {
+    statements.unshift({
+      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: 'is_active = 1' }),
+      params: { delta, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
+    })
+  }
   // This scope deliberately never materializes ids, so there is no per-row
   // before/after to record and no undo. The honest before/after at this scope
   // is the catalog total per adjusted field: one aggregate read on each side
@@ -1628,7 +1642,7 @@ app.post('/bulk-price-adjust', async (c) => {
   // top level, so the old read was always undefined -> 0: the response said
   // "changed: 0" for every adjustment and the toast quietly fell back to the
   // preview count. Same shape every other reader in this Worker uses.
-  const changed = Math.max(0, ...results.map((r) => Number(
+  const changed = Math.max(0, ...results.slice(statements.length - fields.length).map((r) => Number(
     (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
   ) || 0))
   const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}

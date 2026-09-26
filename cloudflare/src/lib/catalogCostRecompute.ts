@@ -559,6 +559,103 @@ export function planManualCostEntry(
     previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } }
 }
 
+/**
+ * A cost typed or imported through a path OTHER than the product form (the
+ * catalog-wide bulk price adjust, a product/inventory import, an approved
+ * review-queue edit). The 0195 triggers re-derive products.cost_price_usd at
+ * every stock movement, and the derivation only honours a cost that has a
+ * product_cost_entries row -- so a bare `UPDATE products SET cost_price_usd`
+ * holds only until the next sale. This records the SAME row the form's
+ * planManualCostEntry records (source 'manual', the actor, the baseline =
+ * the product's highest lot id right now, previous_cost_usd, cost_khr only
+ * when the write carries KHR, cost_usd NULL -> 0), and only when the write
+ * actually moves a cost column, so a same-value re-import writes nothing.
+ *
+ * Set-based and evaluated against the PREIMAGE: run it in the same atomic
+ * batch IMMEDIATELY BEFORE the UPDATE, with `nextUsdSql`/`nextKhrSql` the
+ * exact expressions (or bound params) that UPDATE writes, or null for a
+ * column it leaves alone. Unqualified columns in them resolve to `products`.
+ * Binds @costEntryUserId / @costEntryUserName (costEntryActorParams).
+ */
+export function typedCostEntriesBeforeWriteSql(input: { nextUsdSql: string | null; nextKhrSql: string | null; whereSql: string }): string {
+  const { nextUsdSql, nextKhrSql, whereSql } = input
+  const moved = [
+    nextUsdSql && `(${nextUsdSql}) IS NOT products.cost_price_usd`,
+    nextKhrSql && `(${nextKhrSql}) IS NOT products.cost_price_khr`,
+  ].filter(Boolean)
+  if (!moved.length) throw new Error('typedCostEntriesBeforeWriteSql needs at least one cost column')
+  return `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
+    SELECT products.id, COALESCE(${nextUsdSql ?? 'products.cost_price_usd'}, 0), ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
+      'manual', @costEntryUserId, @costEntryUserName,
+      (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
+    FROM products
+    WHERE (${whereSql}) AND (${moved.join(' OR ')})`
+}
+
+export function costEntryActorParams(actor: { id: number | null; name: string | null }): Record<string, unknown> {
+  return { costEntryUserId: actor.id ?? null, costEntryUserName: actor.name ?? null }
+}
+
+/**
+ * One product row's form of typedCostEntriesBeforeWriteSql: `usd`/`khr` are
+ * the values the following UPDATE binds (undefined = that UPDATE does not
+ * write the column). Null when neither column is written.
+ */
+export function typedCostEntryBeforeWriteStatement(
+  productId: number,
+  next: { usd?: number | null; khr?: number | null },
+  actor: { id: number | null; name: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  const hasUsd = next.usd !== undefined
+  const hasKhr = next.khr !== undefined
+  if (!hasUsd && !hasKhr) return null
+  return {
+    sql: typedCostEntriesBeforeWriteSql({
+      nextUsdSql: hasUsd ? '@costEntryUsd' : null,
+      nextKhrSql: hasKhr ? '@costEntryKhr' : null,
+      whereSql: 'products.id = @costEntryProductId',
+    }),
+    params: {
+      costEntryProductId: productId,
+      ...(hasUsd ? { costEntryUsd: next.usd } : {}),
+      ...(hasKhr ? { costEntryKhr: next.khr } : {}),
+      ...costEntryActorParams(actor),
+    },
+  }
+}
+
+/**
+ * The after-write form, for a writer that cannot place a statement before its
+ * own UPDATE (updateRow on a plan-less historical review-queue row): compares
+ * the row NOW against the preimage the caller read before writing.
+ */
+export function typedCostEntryAfterWriteStatement(
+  productId: number,
+  before: { cost_price_usd: number | null; cost_price_khr: number | null },
+  written: { usd: boolean; khr: boolean },
+  actor: { id: number | null; name: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  if (!written.usd && !written.khr) return null
+  const moved = [
+    written.usd && 'products.cost_price_usd IS NOT @costEntryBeforeUsd',
+    written.khr && 'products.cost_price_khr IS NOT @costEntryBeforeKhr',
+  ].filter(Boolean)
+  return {
+    sql: `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
+    SELECT products.id, COALESCE(products.cost_price_usd, 0), ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
+      'manual', @costEntryUserId, @costEntryUserName,
+      (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
+    FROM products
+    WHERE products.id = @costEntryProductId AND (${moved.join(' OR ')})`,
+    params: {
+      costEntryProductId: productId,
+      costEntryBeforeUsd: before.cost_price_usd ?? null,
+      costEntryBeforeKhr: before.cost_price_khr ?? null,
+      ...costEntryActorParams(actor),
+    },
+  }
+}
+
 export async function recordManualCostEntry(
   db: D1Compat,
   productId: number,
