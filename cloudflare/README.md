@@ -5,8 +5,12 @@ Worker static assets.
 
 The Worker serves both the API and the built React frontend:
 
-- `https://admin.leangcosmetics.dpdns.org`
-- `https://leangcosmetics.dpdns.org`
+- `https://admin.leangbeauty.com`
+- `https://leangbeauty.com`
+
+`leangcosmetics.dpdns.org` was retired completely on Sep 26 2026; do not
+add a route for it back (the deploy token is scoped to the leangbeauty.com
+zone, so a route on any other zone fails the deploy).
 
 API, upload, and health routes run Worker code first. All other paths fall
 back to the single-page frontend app from `../frontend/dist`.

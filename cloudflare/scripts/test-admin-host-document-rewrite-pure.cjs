@@ -94,8 +94,23 @@ check('an admin navigation is rewritten', () => {
   )
 })
 
+check('the retired leangcosmetics.dpdns.org hosts are not admin hosts (Sep 26 2026)', () => {
+  // The domain was retired completely; nothing routes it. It must not linger
+  // in the exact-match list, and removing it must not have widened the list.
+  for (const hostname of ['admin.leangcosmetics.dpdns.org', 'ADMIN.LEANGCOSMETICS.DPDNS.ORG', 'leangcosmetics.dpdns.org']) {
+    assert.strictEqual(identity.isAdminDocumentHost(hostname), false, hostname)
+  }
+  assert.ok(!identity.ADMIN_DOCUMENT_HOSTS.some((h) => /dpdns|leangcosmetics/i.test(h)), 'retired host still listed')
+  assert.deepStrictEqual(
+    [...identity.ADMIN_DOCUMENT_HOSTS].sort(),
+    ['127.0.0.1', '[::1]', 'admin.leangbeauty.com', 'localhost'],
+    'the admin host list is exactly the live admin host plus local development',
+  )
+  assert.strictEqual(identity.isAdminDocumentHost('admin.leangbeauty.com'), true, 'the live admin host still matches')
+})
+
 check('the storefront host is never rewritten', () => {
-  for (const hostname of ['leangbeauty.com', 'www.leangbeauty.com', 'leangcosmetics.dpdns.org', 'admin.evil.example', 'notadmin.leangbeauty.com', '', null]) {
+  for (const hostname of ['leangbeauty.com', 'www.leangbeauty.com', 'leangcosmetics.dpdns.org', 'admin.leangcosmetics.dpdns.org', 'admin.evil.example', 'notadmin.leangbeauty.com', '', null]) {
     assert.strictEqual(
       identity.shouldRewriteAdminDocument(documentRequest({ hostname })),
       false,
@@ -298,7 +313,8 @@ check('no route is sent to the Worker without a handler', () => {
 check('every admin route this Worker serves is a known admin host', () => {
   const routes = wrangler.slice(wrangler.indexOf('routes = ['), wrangler.indexOf('\n]', wrangler.indexOf('routes = [')))
   const patterns = [...routes.matchAll(/pattern = "([^"]+)"/g)].map((m) => m[1])
-  assert.ok(patterns.length >= 4, 'the route table was read, not missed')
+  assert.ok(patterns.length >= 2, 'the route table was read, not missed')
+  assert.ok(patterns.includes('admin.leangbeauty.com'), 'the admin route was read')
   for (const pattern of patterns) {
     const hostname = pattern.split('/')[0].toLowerCase()
     if (!hostname.startsWith('admin.')) continue

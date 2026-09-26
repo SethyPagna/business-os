@@ -125,7 +125,7 @@ try {
   const testGlobals = globalThis as unknown as { window: Window; document: Document; Event: typeof Event }
   const document = createDocument()
   const window = {
-    location: { hostname: 'leangcosmetics.crane-qilin.ts.net', pathname: '/public' },
+    location: { hostname: 'leangbeauty.com', pathname: '/public' },
     localStorage: createStorage(),
     sessionStorage: createStorage(),
   }

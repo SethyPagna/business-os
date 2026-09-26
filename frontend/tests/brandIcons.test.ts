@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 // Two brands share one index.html, and mixing them up is a silent, purely
 // visual regression that no other test would catch:
 //
-//   Business OS      -> the ADMIN app (admin.leangcosmetics.dpdns.org)
-//   Leang Beauty  -> the PUBLIC storefront (leangcosmetics.dpdns.org),
+//   Business OS      -> the ADMIN app (admin.leangbeauty.com)
+//   Leang Beauty  -> the PUBLIC storefront (leangbeauty.com),
 //                       including its favicon and its "Add to Home Screen"
 //                       PWA icon
 //
@@ -199,14 +199,14 @@ function runBootstrap(hostname: string, pathname: string) {
   return { attributes, elements, document, favicon }
 }
 
-const publicRoot = runBootstrap('leangcosmetics.dpdns.org', '/')
+const publicRoot = runBootstrap('leangbeauty.com', '/')
 assert.equal(publicRoot.attributes.get('data-business-os-initial-route'), 'public')
 assert.equal(publicRoot.document.title, 'Leang Beauty')
 assert.equal(publicRoot.elements.get('manifest')?.attrs.get('href'), '/portal-manifest.json')
 assert.equal(publicRoot.elements.get('apple-icon')?.attrs.get('href'), '/leang-cosmetics-apple-touch-icon-v1.png')
 assert.equal(publicRoot.favicon.attrs.get('href'), '/leang-cosmetics-icon-512.png')
 
-for (const adminHost of ['admin.leangcosmetics.dpdns.org', 'localhost', '127.0.0.1']) {
+for (const adminHost of ['admin.leangbeauty.com', 'localhost', '127.0.0.1']) {
   const adminRoot = runBootstrap(adminHost, '/')
   assert.equal(adminRoot.attributes.get('data-business-os-initial-route'), 'admin', `${adminHost}/ should retain admin branding`)
   assert.equal(adminRoot.document.title, 'Business OS')
@@ -214,6 +214,16 @@ for (const adminHost of ['admin.leangcosmetics.dpdns.org', 'localhost', '127.0.0
   assert.equal(adminRoot.elements.get('apple-icon')?.attrs.get('href'), '/apple-touch-icon.png')
   assert.match(adminRoot.favicon.attrs.get('href') || '', /favicon\.ico/)
 }
+
+// leangcosmetics.dpdns.org was retired completely (Sep 26 2026): no route
+// serves this document there, so the bootstrap's alias-redirect map must not
+// carry it (or any other leangcosmetics.* host), and the live alias must
+// still fold into the canonical host.
+const redirectLiteral = bootstrapMatch![1].match(/var redirectHosts = (\{[\s\S]*?\})/)
+assert.ok(redirectLiteral, 'the alias-redirect map was read, not missed')
+const redirectHosts = vm.runInNewContext('(' + redirectLiteral[1] + ')') as Record<string, string>
+assert.deepEqual({ ...redirectHosts }, { 'www.leangbeauty.com': 'leangbeauty.com' })
+assert.doesNotMatch(bootstrapMatch![1], /dpdns|leangcosmetics\.com/i, 'the retired domain is gone from the bootstrap')
 
 const appleIconBytes = fs.readFileSync(fileURLToPath(new URL('../public/leang-cosmetics-apple-touch-icon-v1.png', import.meta.url)))
 assert.equal(appleIconBytes.readUInt32BE(16), 180, 'iPhone icon should be exactly 180px wide')

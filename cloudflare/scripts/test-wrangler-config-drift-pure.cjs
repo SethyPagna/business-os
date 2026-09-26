@@ -196,6 +196,21 @@ check('the load-bearing identities are byte-identical, not merely present', asyn
   assert.equal(routesBlock(freeText), routesBlock(paidText), 'the free config must serve the same hostnames')
 })
 
+check('every route is on the leangbeauty.com zone (the deploy token cannot reach any other)', async () => {
+  // Owner decision Sep 26 2026: leangcosmetics.dpdns.org is retired. The
+  // deploy API token is scoped to the leangbeauty.com zone only, so a route
+  // on ANY other zone fails the whole deploy -- not just that route.
+  for (const [label, text] of [['wrangler.toml', paidText], ['wrangler.free.toml', freeText]]) {
+    const body = text.replace(/^\s*#.*$/gm, '')
+    const block = body.slice(body.indexOf('routes = ['), body.indexOf(']', body.indexOf('routes = [')) + 1)
+    const patterns = [...block.matchAll(/pattern\s*=\s*"([^"]+)"/g)].map((m) => m[1])
+    assert.deepEqual(patterns.sort(), ['admin.leangbeauty.com', 'leangbeauty.com'], `${label} routes`)
+    const zones = [...block.matchAll(/zone_name\s*=\s*"([^"]+)"/g)].map((m) => m[1])
+    for (const z of zones) assert.equal(z, 'leangbeauty.com', `${label} has a route on foreign zone ${z}`)
+    assert.ok(!/dpdns|leangcosmetics/i.test(block), `${label} still routes the retired domain`)
+  }
+})
+
 check('the free config carries no Paid-only key at all', async () => {
   // [limits] is the only key wrangler rejects on Free (100328). Assert its
   // absence structurally rather than trusting the diff list above.

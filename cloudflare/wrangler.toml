@@ -28,14 +28,13 @@ workers_dev = false
 # A record must be deleted in the Cloudflare DNS dashboard first -- wrangler
 # will not silently overwrite an existing record.
 #
-# The old leangcosmetics.dpdns.org zone routes stay during the transition:
-# existing PWA installs, bookmarks and the Google OAuth redirect URIs
-# registered for the old admin host keep working until the cutover is done.
+# The old leangcosmetics.dpdns.org zone routes were REMOVED (owner decision,
+# Sep 26 2026): that domain is retired completely. Do not re-add a route on
+# any other zone -- the deploy API token is scoped to the leangbeauty.com
+# zone only, so a route on a foreign zone makes the whole deploy fail.
 routes = [
   { pattern = "leangbeauty.com", custom_domain = true },
   { pattern = "admin.leangbeauty.com", custom_domain = true },
-  { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
-  { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
 ]
 
 [assets]

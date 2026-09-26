@@ -190,9 +190,12 @@ export async function loadSettingsMap(env: Env): Promise<SettingsMap> {
   return map
 }
 
-// Hostnames this shop has since migrated AWAY from -- kept in sync with the
-// old-domain redirect map in frontend/index.html (redirectHosts, Aug 28 2026
-// rebrand LeangCosmetics -> LeangBeauty). A stored customer_portal_public_url
+// Hostnames this shop has since migrated AWAY from (Aug 28 2026 rebrand
+// LeangCosmetics -> LeangBeauty; leangcosmetics.dpdns.org retired completely
+// Sep 26 2026 -- no route serves it any more). This is a DENYLIST, not an
+// allowlist: removing a retired host from it would make a stale stored
+// override pointing at a dead domain be honored again, so retired hosts stay
+// here permanently. A stored customer_portal_public_url
 // that still points at one of these is stale: it was almost always FROZEN
 // there by the portal editor round-tripping the then-current RESOLVED url back
 // into the setting (CatalogPage.tsx prefills the override input with

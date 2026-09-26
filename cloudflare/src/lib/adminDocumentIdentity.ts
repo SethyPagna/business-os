@@ -46,7 +46,6 @@ const ADMIN_DOCUMENT_ICONS: Record<string, { href: string; type: string }> = {
 // grows an admin route this list does not carry.
 export const ADMIN_DOCUMENT_HOSTS: readonly string[] = [
   'admin.leangbeauty.com',
-  'admin.leangcosmetics.dpdns.org',
   // Local development serves the admin app, matching
   // frontend/src/app/pathRouting.ts's isAdminHostname().
   'localhost',

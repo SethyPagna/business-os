@@ -4,9 +4,10 @@ Deploys are real, irreversible, outward-facing events: they push the live Cloudf
 can apply migrations to the **remote production D1**. Confirm scope before running, verify against
 current source rather than these notes, and only ever have **one driver** at a time.
 
-Live domain: **leangbeauty.com** / **admin.leangbeauty.com** (rebranded from LeangCosmetics; old
-`*.leangcosmetics.dpdns.org` routes are kept during transition but are **not** the health-check
-target).
+Live domain: **leangbeauty.com** / **admin.leangbeauty.com** (rebranded from LeangCosmetics). The old
+`*.leangcosmetics.dpdns.org` zone routes were **removed** on Sep 26 2026 -- the domain is retired and
+the deploy token is scoped to the leangbeauty.com zone only, so any route on another zone fails the
+deploy.
 
 ## Stage gating
 

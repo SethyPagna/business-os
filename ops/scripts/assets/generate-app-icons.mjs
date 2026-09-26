@@ -3,9 +3,9 @@
 // source logos.
 //
 // Two brands, deliberately kept apart -- see frontend/public's own icons:
-//   Business OS      -> the ADMIN app (admin.leangcosmetics.dpdns.org).
+//   Business OS      -> the ADMIN app (admin.leangbeauty.com).
 //                       Served by index.html + the static manifest.json.
-//   Leang Cosmetics  -> the PUBLIC storefront (leangcosmetics.dpdns.org).
+//   Leang Cosmetics  -> the PUBLIC storefront (leangbeauty.com).
 //                       The route bootstrap and PublicCatalogPage.tsx swap
 //                       to the static portal manifest and these fixed icons.
 //

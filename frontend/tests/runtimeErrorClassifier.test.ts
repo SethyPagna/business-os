@@ -6,18 +6,18 @@ import {
   shouldSuppressSecurityPolicyViolation,
 } from '../src/runtime/runtimeErrorClassifier.ts'
 
-assert.equal(isFirstPartyBuiltAssetSource('https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js'), true)
+assert.equal(isFirstPartyBuiltAssetSource('https://leangbeauty.com/assets/vendor.js'), true)
 assert.equal(isFirstPartyBuiltAssetSource('/assets/vendor-react.js'), true)
 assert.equal(isFirstPartyBuiltAssetSource('VM2289 vendor.js'), false)
 
 assert.equal(isLikelyInjectedRuntimeSource('chrome-extension://abc/content.js'), true)
 assert.equal(isLikelyInjectedRuntimeSource('VM2289 vendor.js'), true)
 assert.equal(isLikelyInjectedRuntimeSource('vendor.js:80'), true)
-assert.equal(isLikelyInjectedRuntimeSource('https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js'), false)
+assert.equal(isLikelyInjectedRuntimeSource('https://leangbeauty.com/assets/vendor.js'), false)
 
 assert.equal(shouldSuppressRuntimeError({
   message: "Cannot read properties of null (reading 'cssRules')",
-  filename: 'https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js',
+  filename: 'https://leangbeauty.com/assets/vendor.js',
 }), false)
 
 assert.equal(shouldSuppressRuntimeError({
@@ -42,13 +42,13 @@ assert.equal(shouldSuppressRuntimeError({
 
 assert.equal(shouldSuppressRuntimeError({
   message: 'Real first-party crash',
-  filename: 'https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js',
+  filename: 'https://leangbeauty.com/assets/vendor.js',
 }), false)
 
 assert.equal(shouldSuppressSecurityPolicyViolation({
   violatedDirective: 'script-src',
   blockedURI: 'eval',
-  sourceFile: 'https://leangcosmetics.crane-qilin.ts.net/assets/vendor.js',
+  sourceFile: 'https://leangbeauty.com/assets/vendor.js',
   sample: 'unsafe-eval',
 }), false)
 

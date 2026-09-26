@@ -2072,7 +2072,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // The public portal used to swap <link rel="manifest"> to a per-portal
   // blob: URL built from the business favicon/logo. Chrome does NOT treat a
   // blob: manifest as installable, so the storefront lost its "Install app"
-  // prompt entirely (reported for leangcosmetics.dpdns.org). Removed: the
+  // prompt entirely (reported on the public storefront). Removed: the
   // static, real /manifest.json is installable, and per the product
   // decision the PWA icon + favicon are DEFAULT app branding, not
   // per-portal-customizable (only the in-page LOGO is).

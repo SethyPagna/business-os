@@ -31,8 +31,10 @@ const indexHtml = read(path.join(REPO, 'frontend', 'index.html'))
 let checks = 0
 const check = (label, fn) => { fn(); checks += 1; process.stdout.write('  ok  ' + label + '\n') }
 
-const PUBLIC_HOSTS = ['leangbeauty.com', 'www.leangbeauty.com', 'leangcosmetics.dpdns.org']
-const ADMIN_HOSTS = ['admin.leangbeauty.com', 'admin.leangcosmetics.dpdns.org', 'localhost', '127.0.0.1']
+// leangcosmetics.dpdns.org was retired completely (Sep 26 2026) and is no
+// longer routed, so it is in neither list.
+const PUBLIC_HOSTS = ['leangbeauty.com', 'www.leangbeauty.com']
+const ADMIN_HOSTS = ['admin.leangbeauty.com', 'localhost', '127.0.0.1']
 
 check('the storefront host is indexable and points at its sitemap', () => {
   for (const host of PUBLIC_HOSTS) {
@@ -117,14 +119,16 @@ check('the document declares its canonical URL on the primary host, so the alias
   const ogUrl = head.match(/<meta property="og:url" content="([^"]*)"/)
   assert.ok(ogUrl, 'the static head carries no og:url')
   assert.equal(ogUrl[1], canonical[1], 'og:url and the canonical must be the same address')
-  // leangcosmetics.dpdns.org serves this exact document. Its own sitemap and
-  // robots stay on the request origin (each host answers for itself), and the
+  // Any alias host (www.) serving this exact document keeps its own sitemap
+  // and robots on the request origin (each host answers for itself), and the
   // canonical above is what folds it into leangbeauty.com -- so the alias must
-  // never appear in the tag.
+  // never appear in the tag. The retired leangcosmetics.dpdns.org must not
+  // appear either.
   for (const host of PUBLIC_HOSTS.filter((candidate) => candidate !== 'leangbeauty.com')) {
     assert.ok(!canonical[1].includes(host), host + ' must canonicalise to the primary host, not to itself')
   }
-  assert.ok(seo.sitemapXml('leangcosmetics.dpdns.org', 'https://leangcosmetics.dpdns.org').includes('https://leangcosmetics.dpdns.org/'), 'the alias still answers for its own URLs')
+  assert.ok(!/dpdns|leangcosmetics/i.test(canonical[1]), 'the retired domain must not be the canonical')
+  assert.ok(seo.sitemapXml('www.leangbeauty.com', 'https://www.leangbeauty.com').includes('https://www.leangbeauty.com/'), 'the alias still answers for its own URLs')
 })
 
 check('the admin host rewrites every preview tag away from the storefront', () => {
