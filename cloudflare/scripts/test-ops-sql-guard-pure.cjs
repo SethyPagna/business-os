@@ -82,11 +82,13 @@ async function main() {
     assert.strictEqual(m.sql, 'SELECT name FROM d1_migrations ORDER BY id')
     assert.deepStrictEqual(m.rules, { minRows: 1, maxRows: null, expectZero: null })
     const a = guard.loadQuery('r2-url-audit')
-    assert.deepStrictEqual(a.rules, { minRows: 1, maxRows: 1, expectZero: '*' })
     assert.ok(!/\b(UNION|INTERSECT|EXCEPT)\b/i.test(a.sql), 'the audit must be scalar sub-queries, not a compound SELECT')
     const tables = ['products', 'product_images', 'promotions', 'users', 'file_assets', 'customer_share_submissions', 'import_job_files', 'import_job_image_matches', 'settings']
     for (const t of tables) assert.ok(new RegExp(`FROM ${t} WHERE`).test(a.sql), `the audit lost ${t}`)
-    assert.strictEqual((a.sql.match(/SELECT COUNT\(\*\)/g) || []).length, 11)
+    // A move count and an external count per table; only the move counts
+    // must be zero (test-ops-r2-url-audit-pure.cjs runs the fixtures).
+    assert.deepStrictEqual(a.rules, { minRows: 1, maxRows: 1, expectZero: tables.map((t) => `${t}_move`) })
+    assert.strictEqual((a.sql.match(/SELECT COUNT\(\*\)/g) || []).length, 18)
   })
 
   await check('accepts legitimate read-only shapes', () => {
@@ -310,10 +312,11 @@ async function main() {
     for (const file of ['ops/scripts/ops-sql-guard.mjs', 'ops/scripts/ops-d1-export.mjs']) {
       assert.ok(!/public-row-count|publicRowCount/.test(fs.readFileSync(path.join(ROOT, file), 'utf8')), `${file} still knows the row-count opt-in`)
     }
-    const audit = rules({ expectZero: '*', maxRows: 1 })
-    const failed = render(d1.publicLines({ name: 'r2-url-audit', verdict: d1.interpretD1Output(out([{ products_image_path_absolute: 4 }]), audit), rules: audit, bytes: 10 }))
+    const audit = guard.loadQuery('r2-url-audit').rules
+    const auditRow = Object.fromEntries(audit.expectZero.map((c) => [c, 0]))
+    const failed = render(d1.publicLines({ name: 'r2-url-audit', verdict: d1.interpretD1Output(out([{ ...auditRow, products_move: 4, users_external: 6 }]), audit), rules: audit, bytes: 10 }))
     assert.ok(/expect-zero check: FAIL/.test(failed))
-    assert.ok(!/products_image_path_absolute|\b4\b/.test(failed), 'the failing column or its count leaked')
+    assert.ok(!/products_move|users_external|\b4\b|\b6\b/.test(failed), 'the failing column or a count leaked')
     assert.ok(/verdict: FAIL/.test(failed))
   })
 
