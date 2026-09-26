@@ -54,6 +54,13 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', planTier
   planTierModuleObj.exports, require, planTierModuleObj, planTier.sourcePath, path.dirname(planTier.sourcePath),
 )
 
+// uploadSecurity.ts is the upload gate the restore re-checks files with -- real.
+const uploadSecurity = transpile('lib/uploadSecurity.ts')
+const uploadSecurityModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', uploadSecurity.outputText)(
+  uploadSecurityModuleObj.exports, require, uploadSecurityModuleObj, uploadSecurity.sourcePath, path.dirname(uploadSecurity.sourcePath),
+)
+
 const backup = transpile('lib/backup.ts')
 const customTableName = transpile('lib/customTableName.ts')
 const customTableNameModule = { exports: {} }
@@ -65,6 +72,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './customTableName') return customTableNameModule.exports
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
   if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
+  if (request === './uploadSecurity') return uploadSecurityModuleObj.exports // real upload gate
   return originalLoad.call(this, request, parent, isMain)
 }
 const backupModuleObj = { exports: {} }
@@ -213,6 +221,8 @@ async function streamToString(stream) {
 }
 async function toStoredBody(data) {
   if (data && typeof data.getReader === 'function') return await streamToString(data)
+  // The restore writes back the bytes it checked (a Uint8Array).
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) return Buffer.from(data instanceof ArrayBuffer ? data : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)).toString('utf8')
   return String(data ?? '')
 }
 
@@ -466,7 +476,8 @@ async function main() {
       settings: { columns: ['key', 'value'], rows: [{ key: 'business_name', value: 'Acme' }] },
       branches: { columns: ['id', 'name'], rows: [{ id: 1, name: 'Main' }] },
     }
-    const backupEnv = makeEnv({ schema: backupSchema, assets: { 'uploads/logo.png': { body: 'LOGO' } } })
+    // An image the upload gate accepts: the restore re-checks what it writes back.
+    const backupEnv = makeEnv({ schema: backupSchema, assets: { 'uploads/logo.png': { body: 'GIF89aLOGO' } } })
     const created = await createCloudflareBackup(backupEnv, 'manual')
 
     // Simulate a live environment that has since diverged: different rows,
@@ -487,7 +498,7 @@ async function main() {
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'business_name', value: 'Acme' }])
     assert.deepStrictEqual(liveSchema.branches.rows, [{ id: 1, name: 'Main' }])
     assert.strictEqual(restoreResult.restoredAssets, 1)
-    assert.strictEqual((await (await liveEnv.ASSETS.get('uploads/logo.png')).text()), 'LOGO', 'asset bytes should be copied back to their original key')
+    assert.strictEqual((await (await liveEnv.ASSETS.get('uploads/logo.png')).text()), 'GIF89aLOGO', 'asset bytes should be copied back to their original key')
   })
 
   // -- Test 4: restore only writes columns that exist in the CURRENT live
