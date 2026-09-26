@@ -397,7 +397,55 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     ${whereSql}
   `
 
+  // The page is ordered by INSTANT (movementInstantSql), then id -- the order
+  // the before/after walk uses -- so each row's "before" is the next older
+  // row's "after". The raw created_at string is not that order: it mixes
+  // 'YYYY-MM-DD HH:MM:SS' and ISO '...T...Z', and within one day every ISO
+  // row sorts after every space-form row ('T' > ' ').
+  //
+  // Sorting the whole filtered history by an expression would give up the
+  // ordered index walk that makes LIMIT/OFFSET cheap, so the page is found
+  // in two index steps instead. Both forms are UTC and share the UTC date as
+  // their first 10 characters, and raw strings order the DATES correctly --
+  // they disagree with the instant only WITHIN a day. So the rows on each
+  // date are the same in both orders, position for position:
+  //   raw_page    the page in raw order, an ordered walk of
+  //               idx_inventory_movements_created_pg -> its dates [lo, hi];
+  //   page        the rows dated lo..hi (a range seek), sorted by instant,
+  //               skipping those that precede the page: @offset minus the
+  //               rows dated after hi (a range count) -- rows dated after hi
+  //               precede the page in both orders.
+  // Only the page's rows then run the correlated walk below.
+  const windowWhere = (extra: string) => `WHERE ${[...whereClauses, extra].join(' AND ')}`
   const rowsSql = `
+    WITH raw_page AS (
+      SELECT m.created_at${LEDGER_FROM}
+      ${whereSql}
+      ORDER BY m.created_at DESC, m.id DESC
+      LIMIT @limit OFFSET @offset
+    ),
+    day_window AS (
+      SELECT MIN(substr(created_at, 1, 10)) AS lo, MAX(substr(created_at, 1, 10)) AS hi,
+             MAX(created_at IS NULL) AS has_null
+      FROM raw_page
+    ),
+    -- two arms, not one OR, so the date range stays a seek; a NULL
+    -- created_at (the column allows it) sorts last in both orders
+    page_rows AS (
+      SELECT m.id, ${movementInstantSql('m')} AS instant${LEDGER_FROM}
+      ${windowWhere(`m.created_at >= (SELECT lo FROM day_window) AND m.created_at < (SELECT hi FROM day_window) || '~'`)}
+      UNION ALL
+      SELECT m.id, NULL AS instant${LEDGER_FROM}
+      ${windowWhere(`m.created_at IS NULL AND (SELECT has_null FROM day_window) = 1`)}
+    ),
+    page AS (
+      SELECT id, instant FROM page_rows
+      ORDER BY instant DESC, id DESC
+      LIMIT @limit OFFSET MAX(0, @offset - (
+        SELECT COUNT(*)${LEDGER_FROM}
+        ${windowWhere(`m.created_at >= (SELECT CASE WHEN hi IS NULL THEN '' ELSE hi || '~' END FROM day_window)`)}
+      ))
+    )
     SELECT
       m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
       m.branch_id, ${movementBranchNameSql('m')} AS branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
@@ -415,10 +463,12 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
        WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       ${movementTotalDeltaSql('m')} AS total_delta,
-      ${movementStockAfterSql('m', 'p')} AS after_qty${LEDGER_FROM}
-    ${whereSql}
-    ORDER BY m.created_at DESC, m.id DESC
-    LIMIT @limit OFFSET @offset
+      ${movementStockAfterSql('m', 'p')} AS after_qty
+    FROM page pg
+    JOIN inventory_movements m ON m.id = pg.id
+    LEFT JOIN products p ON p.id = m.product_id
+    LEFT JOIN product_batches b ON b.id = m.batch_id
+    ORDER BY pg.instant DESC, m.id DESC
   `
 
   // Stats summary: one row carrying the In vs Out record counts and

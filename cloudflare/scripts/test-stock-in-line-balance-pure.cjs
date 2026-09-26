@@ -257,6 +257,49 @@ for (const id of movedIds) {
   assert.deepEqual([row.before_qty, Number(row.after_qty)], [movedBalances.get(id).before_qty, movedBalances.get(id).after_qty], `movement ${id}: ledger row and float agree`)
 }
 ok(true, `the Stock Changes ledger rows agree with the float on all ${movedIds.length} transfer / mixed-format movements`)
+// ---- 1e. the ledger LIST is in the walk's order (refuter, 26 Sep) ----------
+// Newest first by instant, then id -- so on each product every row's
+// "before" is the next older row's "after". Raw created_at put the ISO sale
+// #64 (02:00Z) above the 03:00 transfer, breaking the chain. The expected
+// order is hand-derived from the fixture's instants.
+const ledgerPage = (filters, limit, offset) => moved.prepare(ledger.buildStockLedgerQuery(filters).rowsSql)
+  .bind({ ...ledger.buildStockLedgerQuery(filters).params, limit, offset }).all().map((row) => row.id)
+const byInstant = [66, 65, 72, 71, 63, 62, 64, 61, 80, 70, 60]
+assert.deepEqual(ledgerPage({}, 100, 0), byInstant, 'the ledger lists by instant, then id')
+ok(true, 'the Stock Changes list is ordered by instant, not by the raw created_at string (the ISO sale #64 sits below the 03:00 transfer)')
+const productRows = attach => attach.filter((row) => row.product_id === 50)
+const chain = productRows(ledger.attachBeforeQty(moved.prepare(ledger.buildStockLedgerQuery({}).rowsSql).bind({ limit: 100, offset: 0 }).all()))
+ok(chain.length === 7 && chain.every((row, index) => index === chain.length - 1 || Number(row.before_qty) === Number(chain[index + 1].after_qty)),
+  `each row's before is the next older row's after, all the way down (${chain.map((row) => `#${row.id} ${row.before_qty}->${row.after_qty}`).join(', ')})`)
+// Paging must give the same order: every page size, every offset, with and
+// without filters (the page is found through its raw dates, then re-sorted).
+for (const filters of [{}, { productId: 50 }, { view: 'out' }, { branchId: 1 }]) {
+  const whole = ledgerPage(filters, 100, 0)
+  for (let size = 1; size <= 4; size += 1) {
+    const paged = []
+    for (let offset = 0; offset < whole.length + size; offset += size) paged.push(...ledgerPage(filters, size, offset))
+    assert.deepEqual(paged, whole, `${JSON.stringify(filters)} page size ${size}`)
+  }
+}
+ok(true, 'pages of every size, filtered or not, concatenate to exactly the whole ordered list')
+{
+  // the pre-fix order: the raw string (one page holds all 11 rows here)
+  const rawOrder = ledger.buildStockLedgerQuery({}).rowsSql.replace('ORDER BY pg.instant DESC, m.id DESC', 'ORDER BY m.created_at DESC, m.id DESC')
+  assert.notEqual(rawOrder, ledger.buildStockLedgerQuery({}).rowsSql)
+  const rows = moved.prepare(rawOrder).bind({ limit: 100, offset: 0 }).all().map((row) => row.id)
+  ok(JSON.stringify(rows) !== JSON.stringify(byInstant), 'negative control: ordering by the raw string lists this fixture differently')
+}
+const listPlan = moved.prepare(`EXPLAIN QUERY PLAN ${ledger.buildStockLedgerQuery({}).rowsSql}`).bind({ limit: 50, offset: 0 }).all().map((row) => row.detail)
+console.log(`  ledger list plan (no filter):\n    ${listPlan.join('\n    ')}`)
+ok(listPlan.some((detail) => detail === 'SCAN m USING INDEX idx_inventory_movements_created_pg' || detail === 'SCAN m USING COVERING INDEX idx_inventory_movements_created_pg'), 'the raw page is an ordered walk of idx_inventory_movements_created_pg (LIMIT stops it early)')
+ok(listPlan.some((detail) => /^SEARCH m USING (COVERING )?INDEX idx_inventory_movements_created_pg \(created_at>\? AND created_at<\?\)$/.test(detail)), 'the page is a range seek over its own dates')
+ok(listPlan.some((detail) => /^SEARCH m USING (COVERING )?INDEX idx_inventory_movements_created_pg \(created_at>\?\)$/.test(detail)), 'the rows ahead of the page are a range count')
+ok(!listPlan.some((detail) => /^SCAN (m|mn|inventory_movements)$/.test(detail)), 'no full table scan of inventory_movements')
+const productPlan = moved.prepare(`EXPLAIN QUERY PLAN ${ledger.buildStockLedgerQuery({ productId: 50 }).rowsSql}`).bind({ productId: 50, limit: 50, offset: 0 }).all().map((row) => row.detail)
+console.log(`  ledger list plan (productId):\n    ${productPlan.join('\n    ')}`)
+ok(productPlan.filter((detail) => /^SEARCH m USING (COVERING )?INDEX idx_inventory_movements_product_created_pg \(product_id=\?/.test(detail)).length >= 3
+  && productPlan.includes('SEARCH m USING INDEX idx_inventory_movements_product_created_pg (product_id=? AND created_at>? AND created_at<?)'), 'filtered by product, every step seeks idx_inventory_movements_product_created_pg, the page over its own dates')
+
 const ledgerPlan = moved.prepare(`EXPLAIN QUERY PLAN ${ledger.buildStockLedgerQuery({}).rowsSql}`).bind({ limit: 100, offset: 0 }).all().map((row) => row.detail)
 ok(ledgerPlan.filter((detail) => detail.includes('SEARCH mn USING INDEX idx_inventory_movements_product_created_pg (product_id=? AND created_at>?)')).length >= 1, 'the ledger\'s correlated walk still range-seeks the product/created_at index')
 for (const [label, broken] of [
