@@ -60,6 +60,17 @@ export async function getOrSetJson<T>(kv: KVNamespace, key: string, ttlSeconds: 
   return value
 }
 
+// Per-request metrics (lib/requestMetrics.ts) through the same global hook
+// lib/db.ts uses -- no import, so the pure tests that load this file with a
+// stubbed './db' are unaffected, and an absent hook is a no-op. Key enforced
+// equal to REQUEST_METRICS_HOOK_KEY by scripts/test-request-metrics-pure.cjs.
+const REQUEST_METRICS_HOOK = Symbol.for('business-os.request-metrics.v1')
+
+function noteCacheOutcome(outcome: 'hit' | 'miss'): void {
+  const hook = (globalThis as unknown as Record<symbol, { cache(outcome: 'hit' | 'miss'): void } | undefined>)[REQUEST_METRICS_HOOK]
+  if (hook) hook.cache(outcome)
+}
+
 // cachedJsonResponse: for HIGH-CARDINALITY data keyed by request parameters
 // (product search with arbitrary query/filter/page combinations, catalog
 // listings, anything where a real customer's query string becomes the cache
@@ -91,9 +102,11 @@ export async function cachedJsonResponse<T>(
 
   const cached = await cache.match(cacheKey)
   if (cached) {
+    noteCacheOutcome('hit')
     return cached.json<T>()
   }
 
+  noteCacheOutcome('miss')
   const value = await producer()
   const response = new Response(JSON.stringify(value), {
     headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
