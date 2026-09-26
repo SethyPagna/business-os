@@ -30,6 +30,7 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -3281,10 +3282,15 @@ export async function foldDuplicateProductInto(
       const source = plan.members.find((candidate) => candidate.id === Number(row.id))
       return Boolean(source && Object.entries(source.money).every(([field, value]) => Number(row[field] ?? 0) === Number(value ?? 0)))
     }
+    // U-cost: a resumed cluster's earlier folds moved lots, so the 0195
+    // triggers may have re-derived the keeper's USD cost from its on-hand lots.
+    const keeperDerivedCost = atomicHistory.resumedCluster
+      ? (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId)
+      : null
     const keeperMatches = atomicHistory.reviewedRedo
-      ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore) : reviewedRedoSourceMatches(canonicalBefore))
+      ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore, keeperDerivedCost) : reviewedRedoSourceMatches(canonicalBefore))
       : atomicHistory.resumedCluster
-        ? productMergePlanKeeperMatches(plan, canonicalBefore)
+        ? productMergePlanKeeperMatches(plan, canonicalBefore, keeperDerivedCost)
         : productMergePlanSourceMemberMatches(plan, canonicalBefore)
     const parentEffect = reviewedAuthorityValid ? atomicHistory.reviewedMemberParentEffect : undefined
     // The prepared pricing projection omits parent_id. The reviewed caller
@@ -3845,6 +3851,11 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   statements.push(
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId } },
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
+    // U-cost (owner ruling 2026-09-25, 0195): the keeper's catalog cost is the
+    // quantity-weighted mean of the lots it now holds. Re-pointing a lot fires
+    // no trigger, so without this the plan's merged figure would stand until
+    // the next stock movement. No-op when nothing is derivable.
+    { sql: catalogCostRecomputeIfChangedSql('id = @id', { stampUpdatedAt: false }), params: { id: canonicalId } },
   )
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
@@ -3945,6 +3956,8 @@ type DuplicatePreviewCatalog = {
   complexLinkedProductIds: Set<number>
   appliedPlansByKeeperId: Map<number, ProductMergeClusterPlan[]>
   planHistoryUnavailable: boolean
+  /** U-cost: derived on-hand cost of each keeper with an applied plan; absent on scoped catalogs. */
+  keeperDerivedCostById?: Map<number, number | null>
 }
 
 const MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600
@@ -4141,10 +4154,35 @@ async function readDuplicatePreviewCatalog(
       } catch { planHistoryUnavailable = true }
     }
   }
+  // U-cost: a resumed cluster's keeper holds the derived on-hand cost, not
+  // necessarily its plan's merged figure (productMergePlanKeeperMatches).
+  // Read only for keepers whose stored row matches none of their plans on the
+  // plan figure (usually none), so the preview's read budget is unchanged.
+  const keeperDerivedCostById = await readDerivedCatalogCosts(db, [...appliedPlansByKeeperId.entries()]
+    .filter(([keeperId, plans]) => !plans.some((plan) => productMergePlanKeeperMatches(plan, moneyByProductId.get(keeperId) || {})))
+    .map(([keeperId]) => keeperId))
   return {
     moneyByProductId, cachedStockByProductId, stockByProductId, activeBatchCountByProductId,
-    complexLinkedProductIds, appliedPlansByKeeperId, planHistoryUnavailable,
+    complexLinkedProductIds, appliedPlansByKeeperId, planHistoryUnavailable, keeperDerivedCostById,
   }
+}
+
+/**
+ * U-cost (0195): the catalog USD cost each product's lots derive right now
+ * (CATALOG_COST_DERIVE_SQL; null = nothing derivable, the stored value stands).
+ * A merge keeper's cost is re-derived after every fold, so plan checks accept
+ * this figure as well as the plan's merged one.
+ */
+async function readDerivedCatalogCosts(db: ReturnType<typeof getDb>, ids: readonly number[]): Promise<Map<number, number | null>> {
+  const out = new Map<number, number | null>()
+  if (!ids.length) return out
+  const rows = await selectInChunks([...new Set(ids)], 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`SELECT id, ${CATALOG_COST_DERIVE_SQL} AS derived FROM products WHERE id IN (${sql})`)
+      .all<{ id: number; derived: number | null }>(params)
+  })
+  for (const row of rows) out.set(Number(row.id), row.derived == null ? null : Number(row.derived))
+  return out
 }
 
 type DuplicateProductGroup = Awaited<ReturnType<typeof findDuplicateProductGroups>>[number]
@@ -4573,7 +4611,7 @@ app.get('/merge-duplicates/preview', async (c) => {
       )
       const hasPlanConflict = Boolean(persistedPlan) && (
         [group.canonical.id, ...duplicateIds].some((id) => !persistedPlan!.memberIds.includes(id))
-        || !productMergePlanKeeperMatches(persistedPlan!, canonicalCost)
+        || !productMergePlanKeeperMatches(persistedPlan!, canonicalCost, previewCatalog.keeperDerivedCostById?.get(group.canonical.id))
         || duplicateIds.some((id) => !productMergePlanSourceMemberMatches(persistedPlan!, costById.get(id) || {}))
       )
       const economics = persistedPlan && !hasPlanConflict
@@ -5014,7 +5052,8 @@ app.post('/merge-duplicates', async (c) => {
       const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
       const hasOutsider = ids.some((id) => !approved.plan.memberIds.includes(id))
       const keeperMatches = approved.resumed
-        ? productMergePlanKeeperMatches(approved.plan, currentById.get(canonicalId) || {})
+        ? productMergePlanKeeperMatches(approved.plan, currentById.get(canonicalId) || {},
+          (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId))
         : productMergePlanSourceMemberMatches(approved.plan, currentById.get(canonicalId) || {})
       const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(approved.plan, currentById.get(dup.id) || {}))
       if (hasOutsider || !keeperMatches || !sourcesMatch) {
@@ -5037,7 +5076,8 @@ app.post('/merge-duplicates', async (c) => {
       if (persistedPlan) {
         const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
         const hasOutsider = ids.some((id) => !persistedPlan.memberIds.includes(id))
-        const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {})
+        const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {},
+          (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId))
         const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(persistedPlan, currentById.get(dup.id) || {}))
         if (hasOutsider || !keeperMatches || !sourcesMatch) {
           for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_cluster_plan_conflict', error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member was merged.' })
@@ -7143,9 +7183,13 @@ async function productConflictCommittedParentEffect(
   } catch { throw fail() }
 }
 
-function productConflictKeeperPostFoldMatches(plan: ProductConflictActionFinalPlan, row: Record<string, unknown> | undefined): boolean {
+function productConflictKeeperPostFoldMatches(
+  plan: ProductConflictActionFinalPlan,
+  row: Record<string, unknown> | undefined,
+  derivedCostUsd?: number | null,
+): boolean {
   if (!row || Number(row.id) !== Number(plan.keeper_id) || Number(row.is_active) !== 1) return false
-  return productMergePlanKeeperMatches(plan.cluster_plan, row)
+  return productMergePlanKeeperMatches(plan.cluster_plan, row, derivedCostUsd)
     && String(row.barcode ?? '') === plan.selected.barcode.value
     && String(row.category ?? '') === String(plan.selected.category.value ?? '')
     && String(row.categories ?? '') === String(plan.selected.category.categories ?? '')
@@ -7619,6 +7663,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     throw new ProductConflictActionApplyStop('image_permission_required', 'This reviewed group now changes product images.', 403)
   }
   const firstFold = !group.action_history_id
+  // U-cost: the prior fold's lot moves re-derived the keeper's USD cost.
+  const keeperDerivedCost = firstFold ? null : (await readDerivedCatalogCosts(db, [plan.keeper_id])).get(plan.keeper_id)
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
   if (!firstFold) {
     const prior = [...members].reverse().find((candidate) => candidate.role === 'merged'
@@ -7640,7 +7686,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate, parentEffect)
     || (firstFold
       ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
-      : !productConflictKeeperPostFoldMatches(plan, keeper))
+      : !productConflictKeeperPostFoldMatches(plan, keeper, keeperDerivedCost))
     || !productConflictActionStockMatches(preparedSnapshot.canonicalStockBefore, expectedKeeperStock)) {
     throw new ProductConflictActionApplyStop('merge_state_conflict', 'A reviewed product changed after finalization.', 409)
   }

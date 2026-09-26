@@ -1,5 +1,7 @@
 // U-cost (owner report 2026-09-25, KIKO 3D Lip Gloss 05): a received lot whose
 // remaining quantity is 0 must not take part in the catalog cost average.
+// Owner ruling the same day: the average is QUANTITY-WEIGHTED by what is on
+// hand, SUM(qty x cost) / SUM(qty) -- so a partial sale moves it too.
 //
 // Real migrated SQLite (every migration) and the real
 // lib/catalogCostRecompute.ts. Fixtures tell the old rule from the new one:
@@ -108,6 +110,10 @@ async function main() {
     assert.equal(productRevision(), revisionBefore, 'an unchanged recompute writes nothing (no product revision bump)')
     f.setQty(onHand, 1, 0)
     f.setQty(earliest, 1, 4)
+    assert.equal(f.stored(id).c, 12, 'the 0195 triggers already followed both crossings')
+    // A figure stored before 0195 (or by a trigger-less path): the JS entry
+    // point still moves it, and mirrors purchase_price_usd.
+    f.raw.prepare('UPDATE products SET cost_price_usd = 12.5, purchase_price_usd = 12.5 WHERE id = ?').run(id)
     const moved = await costs.recomputeCatalogCost(f.db, id)
     assert.deepEqual([moved.before.usd, moved.after.usd, moved.changed], [12.5, 12, true])
     assert.equal(f.stored(id).p, 12, 'purchase_price_usd mirrors on the JS path too')
@@ -118,19 +124,19 @@ async function main() {
     const id = f.product(0)
     const b = f.lot(id, 12.5, '2026-09-10', { 1: 15 })
     const c = f.lot(id, 13, '2026-09-20', { 1: 5 })
-    assert.equal(await f.recomputeSql(id), 12.75, '(12.50 + 13.00) / 2')
+    assert.equal(await f.recomputeSql(id), 12.625, '(15 x 12.50 + 5 x 13.00) / 20 -- the distinct mean would say 12.75')
     f.setQty(b, 1, 3)
-    assert.equal(await f.recomputeSql(id), 12.75, 'partial sale: lot B still on hand')
+    assert.equal(await f.recomputeSql(id), 12.8125, 'partial sale re-weights: (3 x 12.50 + 5 x 13.00) / 8')
     f.setQty(b, 1, 0)
     assert.equal(await f.recomputeSql(id), 13, 'sale that empties lot B drops it from the mean')
     assert.equal(await f.recomputeSql(id), 13, 'double-apply: recomputing again changes nothing')
     f.setQty(b, 1, 3)
-    assert.equal(await f.recomputeSql(id), 12.75, 'reversal (void/undo/return restock) restores the earlier figure exactly')
+    assert.equal(await f.recomputeSql(id), 12.8125, 'reversal (void/undo/return restock) restores the earlier figure exactly')
     await f.d1.batch([
       { sql: 'UPDATE branch_batch_stock SET quantity = 0 WHERE batch_id = @lot AND branch_id = 1', params: { lot: c } },
       { sql: 'INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (@lot, 2, 5)', params: { lot: c } },
     ])
-    assert.equal(await f.recomputeSql(id), 12.75, 'a lot moved between branches stays on hand')
+    assert.equal(await f.recomputeSql(id), 12.8125, 'a lot moved between branches stays on hand, same quantity')
     f.raw.prepare('DELETE FROM branch_batch_stock WHERE batch_id = ? AND branch_id = 2').run(c)
     assert.equal(await f.recomputeSql(id), 12.5, 'deleting the last positive row of lot C drops it')
   })
@@ -156,9 +162,9 @@ async function main() {
     f.lot(id, 12, '2026-09-01', { 1: 4 })
     const plan = costs.planManualCostEntry(id, { cost_price_usd: 12, cost_price_khr: 0 }, { cost_price_usd: 10 }, { id: 1, name: 'Owner' })
     f.d1.prepare(plan.sql).run(plan.params)
-    assert.equal(await f.recomputeSql(id), 10, 'override replaces the pre-baseline lot')
+    assert.equal(await f.recomputeSql(id), 10, 'override re-prices the four units of the pre-baseline lot')
     const later = f.lot(id, 14, '2026-09-22', { 1: 2 })
-    assert.equal(await f.recomputeSql(id), 12, '(10 + 14) / 2')
+    assert.equal(await f.recomputeSql(id), 11.3333, '(4 x 10 + 2 x 14) / 6')
     f.setQty(later, 1, 0)
     assert.equal(await f.recomputeSql(id), 10, 'the post-override lot sold out: back to the override alone')
     assert.equal((await costs.getCatalogCostBreakdown(f.db, id)).result_usd, 10)
@@ -169,11 +175,11 @@ async function main() {
     const id = f.product(0)
     const b = f.lot(id, 12.5, '2026-09-10', { 1: 2 })
     f.lot(id, 12, '2026-09-01', { 1: 1 })
-    assert.equal(await f.recomputeSql(id), 12.25)
-    f.raw.prepare('INSERT INTO sale_items(sale_id, product_id, quantity, cost_price_usd) VALUES (1, ?, 1, 12.25)').run(id)
+    assert.equal(await f.recomputeSql(id), 12.3333, '(2 x 12.50 + 1 x 12.00) / 3')
+    f.raw.prepare('INSERT INTO sale_items(sale_id, product_id, quantity, cost_price_usd) VALUES (1, ?, 1, 12.3333)').run(id)
     f.setQty(b, 1, 0)
     assert.equal(await f.recomputeSql(id), 12)
-    assert.equal(f.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE product_id = ?').get(id).c, 12.25)
+    assert.equal(f.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE product_id = ?').get(id).c, 12.3333)
   })
 
   await check('parity: JS breakdown result == stored SQL result on 300 randomized lot sets', async () => {

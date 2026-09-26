@@ -6,6 +6,12 @@
 // that records a new lot cost -- not left pinned to whichever receipt wrote
 // the scalar column last.
 //
+// U-cost (owner ruling, 2026-09-25) supersedes "divide by number of different
+// costs": the catalog cost is the QUANTITY-WEIGHTED mean of the stock on hand,
+// SUM(qty x cost) / SUM(qty), 0 costs still excluded. Receipts here are one
+// unit each, so the distinct-cost cases below still read the same; the cases
+// that differ say so.
+//
 // Real Hono /adjust handler, real lib/catalogCostRecompute.ts, real
 // resolveMergedCostDetail, transactional in-memory SQLite over the actual
 // migrations. Only auth/broadcast/cache/telegram are stubbed.
@@ -127,16 +133,14 @@ async function main() {
     assert.deepEqual(catalogCost(), { usd: 4, khr: 0 })
   })
 
-  await check('a repeated receipt at the SAME cost stays a single distinct value (double-apply does not shift the mean)', async () => {
+  await check('a repeated receipt at the SAME cost is more stock at that cost: it weighs by quantity', async () => {
     fresh()
     await request(addBody({ unitCostUsd: 3, receivedDate: '01/09/2026' }))
     await request(addBody({ unitCostUsd: 3, receivedDate: '02/09/2026' }))
-    // Same distinct cost twice averages to itself, not (3+3)/2 being treated
-    // as two separate lots at different prices -- resolveMergedCostDetail
-    // already dedupes by VALUE, this only proves the writer feeds it that way.
+    // Same cost twice averages to itself.
     assert.deepEqual(catalogCost(), { usd: 3, khr: 0 })
     await request(addBody({ unitCostUsd: 4, receivedDate: '03/09/2026' }))
-    assert.deepEqual(catalogCost(), { usd: 3.5, khr: 0 })
+    assert.deepEqual(catalogCost(), { usd: 3.3333, khr: 0 }, '(2 x 3 + 1 x 4) / 3 -- the distinct mean would say 3.5')
   })
 
   await check('a deactivated (reverted) lot no longer feeds the mean', async () => {
@@ -176,7 +180,7 @@ async function main() {
     const applied = await request(correction)
     assert.equal(applied.status,200,JSON.stringify(applied))
     assert.equal(applied.body.movementType,'adjustment')
-    assert.equal(catalogCost().usd,4)
+    assert.equal(catalogCost().usd,3.6667,'the corrected count re-weights: (2 x 3 + 1 x 5) / 3, at the lot\'s own stored price')
     assert.deepEqual(sqlite.prepare('SELECT * FROM product_batches ORDER BY id').all(),lotsBefore)
     assert.deepEqual(sqlite.prepare('SELECT * FROM inventory_movements ORDER BY id LIMIT ?').all(oldMovements.length),oldMovements)
     assert.deepEqual(sqlite.prepare('SELECT movement_type,unit_cost_usd,total_cost_usd FROM inventory_movements ORDER BY id DESC LIMIT 1').get(),

@@ -2,9 +2,13 @@
 // opens a page that tells us the calculated cost price (n_i + n_{i+1} + ... +
 // n_{i+k}) / i". This pins the pure assembler behind GET
 // /api/products/:id/cost-breakdown (buildCatalogCostBreakdown in
-// lib/catalogCostRecompute.ts) with discriminating fixtures: duplicates and a
-// zero must be excluded from the mean the same way recomputeCatalogCost's own
-// formula excludes them, and widely separated recorded prices still average.
+// lib/catalogCostRecompute.ts) with discriminating fixtures: a zero must be
+// excluded from the mean the same way recomputeCatalogCost's own formula
+// excludes it, and widely separated recorded prices still average.
+//
+// U-cost (owner ruling 2026-09-25): the mean is QUANTITY-WEIGHTED by what is
+// on hand -- SUM(qty x cost) / SUM(qty) -- so a repeated cost is no longer a
+// 'duplicate': every on-hand lot counts with its own quantity.
 //
 // It loads the REAL lib/catalogCostRecompute.ts, lib/productDetailRule.ts and
 // lib/moneyPrecision.ts (transpiled, no D1), so what is asserted is
@@ -70,18 +74,27 @@ const lot = (id, unitCostUsd, overrides = {}) => ({
 // mean 4.00. The repeated 5 and the 0 must both be visibly excluded, not
 // silently dropped.
 // ---------------------------------------------------------------------------
-check('3, 5, 5(dup), 0(zero) -> distinct [3,5], mean 4.00, result 4.00', () => {
+check('3, 5, 5, 0(zero), one unit each -> (3 + 5 + 5) / 3 = 4.3333: a repeated cost counts, 0 does not', () => {
   const lots = [lot(1, 3), lot(2, 5), lot(3, 5), lot(4, 0)]
   const result = buildCatalogCostBreakdown(101, { cost_price_usd: 0, cost_price_khr: 0 }, lots)
   assert.deepEqual(result.distinct_usd, [3, 5])
-  assert.equal(result.mean_usd, 4)
-  assert.equal(result.result_usd, 4)
+  assert.equal(result.mean_usd, 4.3333, 'the distinct mean would say 4')
+  assert.equal(result.result_usd, 4.3333)
   assert.equal(result.outlier_guard.fired, false)
   assert.equal(result.inputs.length, 4)
-  assert.equal(result.inputs[0].excluded, null, 'first 3 counts')
-  assert.equal(result.inputs[1].excluded, null, 'first 5 counts')
-  assert.equal(result.inputs[2].excluded, 'duplicate', 'second 5 is the same distinct cost already counted')
-  assert.equal(result.inputs[3].excluded, 'zero', '0 is not a recorded cost')
+  assert.deepEqual(result.inputs.map((row) => row.excluded), [null, null, null, 'zero'], '0 is not a recorded cost; the second 5 is stock like any other')
+  assert.deepEqual(result.weighted_terms, [{ cost_usd: 3, quantity: 1 }, { cost_usd: 5, quantity: 1 }, { cost_usd: 5, quantity: 1 }])
+  assert.equal(result.weighted_quantity, 3)
+  assert.equal(result.inputs[3].weight_quantity, 0, 'a 0-cost lot weighs nothing')
+})
+
+check("owner's example: 2 left at 12.00 and 8 left at 12.50 -> 12.40, with each row's quantity and share", () => {
+  const lots = [lot(1, 12, { remaining_quantity: 2 }), lot(2, 12.5, { remaining_quantity: 8 }), lot(3, 11, { remaining_quantity: 0 })]
+  const result = buildCatalogCostBreakdown(108, { cost_price_usd: 0, cost_price_khr: 0 }, lots)
+  assert.equal(result.result_usd, 12.4)
+  assert.deepEqual(result.inputs.map((row) => [row.cost_usd, row.weight_quantity, row.share, row.excluded]),
+    [[12, 2, 0.2, null], [12.5, 8, 0.8, null], [11, 0, null, 'depleted']])
+  assert.equal(result.weighted_quantity, 10)
 })
 
 // ---------------------------------------------------------------------------
@@ -198,13 +211,14 @@ check("owner's override sequence: 3,5 -> override 10 -> result 10 (not the mean 
   assert.equal(manualRow.label, 'Manual · sethy')
 })
 
-check('...then add-stock lot 12 (after the override baseline) -> (10+12)/2 = 11', () => {
+check('...then add-stock lot 12 (after the override baseline) -> (2 x 10 + 1 x 12) / 3 = 10.6667', () => {
   const lots = [lot(1, 3, { received_at: '2026-09-01' }), lot(2, 5, { received_at: '2026-09-02' }), lot(3, 12, { received_at: '2026-09-04' })]
   const entries = [manual(9, 10, 2, { created_at: '2026-09-03T00:00:00Z' })]
   const result = buildCatalogCostBreakdown(201, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
   assert.deepEqual(result.distinct_usd, [10, 12])
-  assert.equal(result.mean_usd, 11)
-  assert.equal(result.result_usd, 11)
+  assert.equal(result.mean_usd, 10.6667, 'the override prices the two units it re-priced')
+  assert.equal(result.result_usd, 10.6667)
+  assert.equal(result.inputs.find((row) => row.source === 'manual').weight_quantity, 2)
   assert.equal(result.outlier_guard.fired, false, '12 vs 10 is well within 2x')
   const lot3 = result.inputs.find((row) => row.lot_code === null && row.source === 'lot' && row.cost_usd === 12)
   assert.equal(lot3.excluded, null, 'the new lot, received after the baseline, counts')
@@ -227,7 +241,7 @@ check('...then a SECOND override 4 -> result 4; breakdown shows 3,5,12 overridde
   assert.equal(bySourceCost('manual', 4).excluded, null, 'the second (latest) override counts')
 })
 
-check('...then add-stock lot 6 (after the second override baseline) -> (4+6)/2 = 5', () => {
+check('...then add-stock lot 6 (after the second override baseline) -> (3 x 4 + 1 x 6) / 4 = 4.5', () => {
   const lots = [
     lot(1, 3, { received_at: '2026-09-01' }), lot(2, 5, { received_at: '2026-09-02' }), lot(3, 12, { received_at: '2026-09-04' }),
     lot(4, 6, { received_at: '2026-09-06' }),
@@ -238,21 +252,21 @@ check('...then add-stock lot 6 (after the second override baseline) -> (4+6)/2 =
   ]
   const result = buildCatalogCostBreakdown(201, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
   assert.deepEqual(result.distinct_usd, [4, 6])
-  assert.equal(result.mean_usd, 5)
-  assert.equal(result.result_usd, 5)
+  assert.equal(result.mean_usd, 4.5)
+  assert.equal(result.result_usd, 4.5)
 })
 
-check('an override and later eligible lots use the same distinct mean regardless of ratio', () => {
+check('an override made before any lot re-prices nothing: later lots count at their own cost', () => {
   const lots = [lot(1, 3, { received_at: '2026-09-01' })]
   const entries = [manual(9, 9, 0, { created_at: '2026-09-02T00:00:00Z' })]
-  // baseline=0 -> the lot (id 1) is still eligible (1 > 0), so it and the
-  // override BOTH candidate -- the override is not automatically exclusive
-  // unless the baseline is at/after that lot's id.
+  // baseline=0 -> the lot (id 1) is eligible (1 > 0) and no stock existed for
+  // the override to re-price, so it weighs nothing (the distinct mean said 6).
   const result = buildCatalogCostBreakdown(202, { cost_price_usd: 0, cost_price_khr: 0 }, lots, entries)
-  assert.deepEqual(result.distinct_usd, [3, 9])
+  assert.deepEqual(result.distinct_usd, [3])
   assert.equal(result.outlier_guard.fired, false)
   assert.equal(result.outlier_guard.kept, null)
-  assert.equal(result.result_usd, 6)
+  assert.equal(result.result_usd, 3)
+  assert.equal(result.inputs.find((row) => row.source === 'manual').excluded, 'depleted')
 })
 
 console.log(`${checks} checks passed`)

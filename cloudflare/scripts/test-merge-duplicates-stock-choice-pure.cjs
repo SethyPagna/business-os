@@ -124,8 +124,11 @@ function loadProductsRoute(d1) {
   })
   const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), {})
   const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
+  // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
+  const realCatalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} })
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     './actorSnapshot': realActorSnapshot,
+    './catalogCostRecompute': realCatalogCost,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -143,6 +146,7 @@ function loadProductsRoute(d1) {
     '../lib/productMerge': realProductMerge,
     '../lib/productMergeSnapshot': realProductMergeSnapshot,
     '../lib/sqlBinding': realSqlBinding,
+    '../lib/catalogCostRecompute': realCatalogCost,
   })
   return { mod, adapter, auditCalls, MERGE_REPARENT_TABLES: realUndoAppliers.MERGE_REPARENT_TABLES }
 }

@@ -18,7 +18,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
-import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -1246,8 +1246,10 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
       if (key === 'products' && target) {
         const costSource = direction === 'redo' ? row : original
         // Catalog recomputation also writes the purchase-price mirror. Restore
-        // it from the same durable snapshot, never recalculate history using
-        // today's formula. Older snapshots without a mirror remain untouched.
+        // it from the same durable snapshot. Older snapshots without a mirror
+        // remain untouched. The derived figure is then re-applied after the
+        // loop (U-cost), so this restore only survives where the formula
+        // yields nothing (no eligible lot).
         for (const field of ['purchase_price_usd', 'purchase_price_khr']) {
           if (costSource && Object.prototype.hasOwnProperty.call(costSource, field)) target[field] = costSource[field]
         }
@@ -1275,6 +1277,14 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
         statements.push({ sql: `UPDATE ${table} SET ${columns.map((c, i) => `"${c}"=@v${i}`).join(',')} WHERE id=@rowId`, params: { rowId: row.id, ...Object.fromEntries(columns.map((c, i) => [`v${i}`, target![c]])) } })
       }
     }
+  }
+  // U-cost (supervisor decision, 2026-09-25): the products image above carries
+  // the cost the formula gave WHEN the snapshot was taken. Undo writes it back
+  // after branchBatchStock (whose 0195 triggers already re-derived), so a lot
+  // that sold out since would count again. Re-derive last; the replay-state
+  // capture below records the result, so a later redo/undo still matches.
+  for (const productId of new Set(members.map(m => Number(m.product_id)).filter(id => Number.isInteger(id) && id > 0))) {
+    statements.push(catalogCostRecomputeIfChangedStatement(productId))
   }
   statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
     SELECT m.product_id,p.name,m.branch_id,b.name,@movement,m.quantity*@sign,original.unit_cost_usd,original.unit_cost_khr,

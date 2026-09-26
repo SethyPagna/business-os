@@ -127,6 +127,7 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   for (const [index, cost] of [3, 5, 7, 5, 0].entries()) {
     await subject.applyUnifiedStockAdd(distinct.db, { ...input, rowNumber: index + 1, costPriceUsd: cost, freeGoods: cost === 0 })
   }
+  // U-cost weighted: (2 x 3 + 4 x 5 + 2 x 7) / 8 = 5; the 0-cost units are out of both sums.
   assert.equal(distinct.sqlite.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd, 5)
   assert.equal(distinct.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 4, 'different costs keep separate lot identities on one date')
   assert.equal(distinct.sqlite.prepare('SELECT received_quantity FROM product_batches WHERE unit_cost_usd=5').get().received_quantity, 4)
@@ -134,7 +135,7 @@ function seedLot(sqlite, { supplierName = null, supplierId = null } = {}) {
   const baseline = distinct.sqlite.prepare('SELECT MAX(id) id FROM product_batches').get().id
   distinct.sqlite.prepare(`INSERT INTO product_cost_entries(product_id,cost_usd,source,baseline_batch_id) VALUES(10,9,'manual',@baseline)`).run({ baseline })
   await subject.applyUnifiedStockAdd(distinct.db, { ...input, rowNumber: 20, costPriceUsd: 5 })
-  assert.equal(distinct.sqlite.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd, 7, 'new receipt averages with manual baseline only')
+  assert.equal(distinct.sqlite.prepare('SELECT cost_price_usd FROM products WHERE id=10').get().cost_price_usd, 8.3333, 'U-cost weighted: the override prices the 10 units it covered, (10 x 9 + 2 x 5) / 12')
   assert.equal(distinct.sqlite.prepare('SELECT COUNT(*) n FROM product_batches WHERE unit_cost_usd=5').get().n, 2)
   const atomicCatalog = setup()
   atomicCatalog.sqlite.exec(`CREATE TRIGGER reject_catalog BEFORE UPDATE OF cost_price_usd ON products BEGIN SELECT RAISE(ABORT,'catalog rejected'); END`)

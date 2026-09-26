@@ -128,7 +128,9 @@ new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst)
 // undoAppliers.ts now imports the exact sale money kernel (depends only on
 // moneyPrecision, which loadModule already maps).
 const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
+const catalogCostRecomputeKernel = loadModule('lib/catalogCostRecompute.ts', require)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
+  if (id === './catalogCostRecompute') return catalogCostRecomputeKernel
   if (id === './actorSnapshot') return actorSnapshotKernel
   if (id === './saleMoneyPrecision') return saleMoneyPrecisionKernel
   if (id === './productMerge') return productMergeKernel
@@ -326,9 +328,11 @@ async function productMergeGroupFixture() {
   const db = new Database(':memory:')
   db.exec(`
     CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
-      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL);
+      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL,
+      cost_price_usd REAL,purchase_price_usd REAL); -- U-cost: the merge undo re-derives the catalog cost
+    CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
     CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
     CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,PRIMARY KEY(batch_id,branch_id));
     CREATE TABLE product_images(id INTEGER PRIMARY KEY,product_id INTEGER,image_path TEXT,sort_order INTEGER);
     CREATE TABLE stock_session_members(operation_id TEXT,product_id INTEGER);
@@ -340,9 +344,9 @@ async function productMergeGroupFixture() {
     CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
     CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
   `)
-  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0)").run()
-  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0)").run()
-  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0)").run()
+  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0,NULL,NULL)").run()
+  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0,NULL,NULL)").run()
+  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0,NULL,NULL)").run()
   const reversal = (dupId, label) => ({
     keeperId: 1, keeperName: 'Keeper', dupId, dupName: label, mergeContext: 'group test',
     keeperImagePathBefore: null, dupImagePathBefore: null, keeperBarcodeBefore: 'GROUP-1',

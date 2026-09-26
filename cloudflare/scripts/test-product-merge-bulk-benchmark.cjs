@@ -79,7 +79,10 @@ function loadRealModules(adapter) {
   const snapshot = loadTs('lib/productMergeSnapshot.ts', { './db': {} })
   const actor = loadTs('lib/actorSnapshot.ts')
   const never = () => { throw new Error('unrelated undo branch invoked') }
+  // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
+  const catalogCost = loadTs('lib/catalogCostRecompute.ts', { './db': {} })
   const undo = loadTs('lib/undoAppliers.ts', {
+    './catalogCostRecompute': catalogCost,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' }, './actorSnapshot': actor,
@@ -95,7 +98,7 @@ function loadRealModules(adapter) {
     './saleAmendments': { amendmentEntryStatement: never },
   })
   const route = loadTs('routes/products.ts', {
-    hono: { Hono: FakeHono }, '../lib/db': { getDb: () => adapter }, '../lib/audit': { audit: async () => {} },
+    hono: { Hono: FakeHono }, '../lib/catalogCostRecompute': catalogCost, '../lib/db': { getDb: () => adapter }, '../lib/audit': { audit: async () => {} },
     '../lib/productDetailRule': detail, '../lib/productIdentity': identity, '../lib/productMerge': economics,
     '../lib/productMergeSnapshot': snapshot,
     '../lib/undoAppliers': undo, '../lib/sqlBinding': sqlBinding, '../lib/actorSnapshot': actor,
@@ -172,14 +175,16 @@ async function main() {
     // 21 -> 22: P10-10 added product_cost_entries to MERGE_REPARENT_TABLES
     // (undoAppliers.ts) -- one more reparent UPDATE lands in the same write
     // batch as every other relinked table.
-    [3, 8, 18, 22],
+    // 18 -> 19: U-cost -- the fold ends with the guarded re-derive of the
+    // keeper's on-hand catalog cost (catalogCostRecomputeIfChangedSql).
+    [3, 8, 19, 22],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 18, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 19, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

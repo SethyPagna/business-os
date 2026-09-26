@@ -14,7 +14,8 @@ const sql0175 = fs.readFileSync(path.join(migrationsDir, '0175_catalog_cost_reco
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
-for (const migration of loadAll()) db.exec(migration)
+// The schema 0175 ran on (0195's cost triggers would rewrite the fixture).
+for (const migration of loadAll({ through: 175 })) db.exec(migration)
 
 const P = db.prepare('INSERT INTO products (id, name, is_active, cost_price_usd, purchase_price_usd, cost_price_khr) VALUES (?, ?, ?, ?, 0, ?)')
 const L = db.prepare('INSERT INTO product_batches (id, variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, ?, ?, ?)')

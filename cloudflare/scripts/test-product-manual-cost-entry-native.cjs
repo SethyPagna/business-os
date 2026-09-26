@@ -103,9 +103,14 @@ function seedProduct(name) {
 // U-cost (2026-09-25): only lots still on hand average, so a seeded receipt
 // also carries the unit it received (branch 1).
 function seedLot(productId, unitCostUsd) {
+  // The 0195 triggers re-derive the stored cost as soon as the lot holds
+  // stock. These fixtures model a stored figure that predates its lots (legacy
+  // or manual), so the seeded cost is put back exactly as it was.
+  const stored = raw.prepare('SELECT cost_price_usd, purchase_price_usd FROM products WHERE id = ?').get(productId)
   const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd) VALUES (?, ?, 1, ?)`)
     .run(productId, `k${Math.random()}`, unitCostUsd).lastInsertRowid)
   raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId)
+  if (stored) raw.prepare('UPDATE products SET cost_price_usd = ?, purchase_price_usd = ? WHERE id = ?').run(stored.cost_price_usd, stored.purchase_price_usd, productId)
   return lotId
 }
 // A D1Compat-shaped wrapper (get/all/run, named @params) for lib functions
@@ -166,7 +171,9 @@ async function main() {
     seedLot(id, 12)
     const { recomputeCatalogCost } = load('lib/catalogCostRecompute.ts')
     await recomputeCatalogCost(db, id)
-    assert.equal(row(id).cost_price_usd, 11, '(10+12)/2 = 11')
+    // U-cost (owner, 2026-09-25): quantity-weighted -- the override prices the
+    // two units it re-priced, the new lot its own one.
+    assert.equal(row(id).cost_price_usd, 10.6667, '(2 x 10 + 1 x 12) / 3')
 
     const secondOverride = await request('PUT', `/${id}`, { cost_price_usd: 4 })
     assert.equal(secondOverride.status, 200, JSON.stringify(secondOverride))
@@ -175,7 +182,7 @@ async function main() {
 
     seedLot(id, 6)
     await recomputeCatalogCost(db, id)
-    assert.equal(row(id).cost_price_usd, 5, '(4+6)/2 = 5 -- only the lot received after the SECOND override counts')
+    assert.equal(row(id).cost_price_usd, 4.5, '(3 x 4 + 1 x 6) / 4 -- the lots before the SECOND override count at 4')
   })
 
   await check('resaving the SAME cost writes no second entry', async () => {
@@ -198,8 +205,11 @@ async function main() {
 
   await check('the breakdown lists lots before an override as excluded: overridden, and the override row as included', async () => {
     const id = seedProduct('Breakdown')
-    raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, 'lotA', 1, 3, 'LOTA', '2026-01-01')`).run(id)
-    raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, 'lotB', 1, 5, 'LOTB', '2026-01-02')`).run(id)
+    for (const [key, cost, code, date] of [['lotA', 3, 'LOTA', '2026-01-01'], ['lotB', 5, 'LOTB', '2026-01-02']]) {
+      const lotId = Number(raw.prepare(`INSERT INTO product_batches(variant_product_id, batch_key, is_active, unit_cost_usd, lot_code, received_at) VALUES (?, ?, 1, ?, ?, ?)`).run(id, key, cost, code, date).lastInsertRowid)
+      // On hand, so the override has stock to re-price (U-cost weighting).
+      raw.prepare('INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES (?, 1, 1)').run(lotId)
+    }
     const edit = await request('PUT', `/${id}`, { cost_price_usd: 10 })
     assert.equal(edit.status, 200, JSON.stringify(edit))
     const { getCatalogCostBreakdown } = load('lib/catalogCostRecompute.ts')
@@ -212,6 +222,7 @@ async function main() {
     assert.equal(manualRows.length, 1)
     assert.equal(manualRows[0].user_name, 'sethy')
     assert.equal(manualRows[0].excluded, null, 'the (only, latest) override itself counts')
+    assert.equal(manualRows[0].weight_quantity, 2, 'weighted by the two units it re-priced')
     assert.equal(breakdown.result_usd, 10)
   })
 
@@ -237,7 +248,7 @@ async function main() {
 
     const lot3 = seedLot(id, 12)
     await applyTwin()
-    assert.equal(row(id).cost_price_usd, 11, '(10+12)/2 = 11, lot3 is after the baseline')
+    assert.equal(row(id).cost_price_usd, 10.6667, '(2 x 10 + 1 x 12) / 3, lot3 is after the baseline')
 
     const second = await request('PUT', `/${id}`, { cost_price_usd: 4 })
     assert.equal(second.status, 200, JSON.stringify(second))
@@ -247,7 +258,7 @@ async function main() {
 
     seedLot(id, 6)
     await applyTwin()
-    assert.equal(row(id).cost_price_usd, 5, '(4+6)/2 = 5')
+    assert.equal(row(id).cost_price_usd, 4.5, '(3 x 4 + 1 x 6) / 4')
   })
 
   await check('override product, entry, audit and recompute roll back together at each failure point', async () => {
@@ -310,7 +321,7 @@ async function main() {
     assert.equal(row(id).cost_price_usd,10)
     seedLot(id,12)
     await load('lib/catalogCostRecompute.ts').recomputeCatalogCost(makeDb(),id)
-    assert.equal(row(id).cost_price_usd,11)
+    assert.equal(row(id).cost_price_usd,10.6667,'(2 x 10 + 1 x 12) / 3: the concurrent receipt is re-priced by the override')
     const entriesBefore = costEntries(id)
     beforeBatch = () => { seedLot(id,20); raw.prepare('UPDATE products SET cost_price_usd=14 WHERE id=?').run(id) }
     assert.equal((await request('PUT',`/${id}`,{cost_price_usd:6})).status,409,'changed money rejects stale override entirely')

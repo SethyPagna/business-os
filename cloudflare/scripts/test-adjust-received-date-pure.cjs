@@ -787,8 +787,11 @@ async function main() {
       pricing: { selling_price_usd: 4, cost_usd: 1.23455, cost_khr: 0.00005, barcode: 'B-EXPLICIT' },
     })
     assert.strictEqual(explicit.status, 200, JSON.stringify(explicit.json))
+    // U-cost (0195, 2026-09-25): the new row's USD catalog cost is the one its
+    // lots on hand derive -- here its single $1.00 lot -- not the separately
+    // typed 1.23455; KHR (no per-lot figure) still keeps the normalized entry.
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=?').get([explicit.json.productId]) }, {
-      cost_price_usd: 1.2346, cost_price_khr: 0.0001,
+      cost_price_usd: 1, cost_price_khr: 0.0001,
     })
     const omitted = await req('POST', '/adjust', {
       productId: 1, type: 'add', supplierName: 'Fixture Supplier', unitCostUsd: 1,
@@ -797,7 +800,7 @@ async function main() {
     })
     assert.strictEqual(omitted.status, 200, JSON.stringify(omitted.json))
     assert.deepStrictEqual({ ...rawDb.prepare('SELECT cost_price_usd,cost_price_khr FROM products WHERE id=?').get([omitted.json.productId]) }, {
-      cost_price_usd: 2.345678, cost_price_khr: 123.456789,
+      cost_price_usd: 1, cost_price_khr: 123.456789, // USD: its $1.00 lot (0195); KHR: inherited, unrounded
     })
     const countBefore = rawDb.prepare('SELECT COUNT(*) n FROM products').get().n
     const denied = await req('POST', '/adjust', {
@@ -826,7 +829,7 @@ async function main() {
     assert.strictEqual(second.json.productId, 1)
     assert.strictEqual(second.json.createdSibling, false)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1)
-    assert.strictEqual(rawDb.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 1.75, 'catalog cost is the distinct positive price mean, not last receipt or quantity weighted')
+    assert.strictEqual(rawDb.prepare('SELECT cost_price_usd FROM products WHERE id = 1').get().cost_price_usd, 1.9, 'catalog cost is the on-hand quantity-weighted mean (2 x 1 + 3 x 2.5) / 5, not last receipt and not the distinct mean 1.75 (owner, 2026-09-25)')
     assert.strictEqual(rawDb.prepare('SELECT selling_price_usd FROM products WHERE id = 1').get().selling_price_usd, 4, 'merge keeps the highest selling price')
     const lots = rawDb.prepare('SELECT received_quantity, received_cost_usd, unit_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()
     assert.deepStrictEqual(lots.map(lot => ({ ...lot })), [

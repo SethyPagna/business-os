@@ -94,6 +94,7 @@ const productMergeSnapshot = load('lib/productMergeSnapshot.ts', { './db': {} })
 const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
 const broadcastHub = { broadcast: async () => {} }
+const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
 const undoAppliers = load('lib/undoAppliers.ts', {
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
@@ -107,8 +108,12 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './productIdentity': productIdentity,
   './productDetailRule': detailRule,
   './branchWrites': { branchUpdateStatements: () => [] },
+  // U-cost: merge undo re-derives catalog cost with the real formula.
+  './catalogCostRecompute': catalogCost,
 })
 const products = load('routes/products.ts', {
+  // U-cost: the merge fold re-derives the keeper's catalog cost too.
+  '../lib/catalogCostRecompute': catalogCost,
   '../lib/db': { getDb: () => adapter },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); return next() } },
   '../lib/permissions': permissions,
