@@ -15,7 +15,7 @@ import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
-import { recordFailedLogin, getLoginLockoutState, clearLoginLockout } from '../lib/loginLockout'
+import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
   buildGoogleOauthStartUrl,
@@ -198,6 +198,28 @@ app.post('/login', async (c) => {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
   }
 
+  // P2-1: the typed-identifier bucket and lockout above give every alias of
+  // one account (username in any case, email, phone, display name) its own
+  // allowance, so rotating aliases multiplied the guesses. Once the account
+  // is resolved, the same limiter and lockout are ALSO keyed on its id,
+  // which every alias shares. The answers are the same shapes as above.
+  const resolvedLockoutKey = user ? userIdLockoutKey(user.id) : null
+  if (user && resolvedLockoutKey) {
+    const accountLimit = await checkRateLimit(c.env, 'auth:login_user', `uid:${user.id}`, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
+    if (!accountLimit.allowed) {
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+    }
+    const accountLockout = await getLoginLockoutState(c.env, resolvedLockoutKey)
+    if (accountLockout.locked) {
+      return c.json({
+        error: `Too many failed login attempts. Please wait ${accountLockout.retryAfterSeconds} seconds and try again.`,
+        locked: true,
+        retryAfterSeconds: accountLockout.retryAfterSeconds,
+        failedAttempts: accountLockout.failedCount,
+      }, 429)
+    }
+  }
+
   // Same response whether the user doesn't exist or the password is wrong --
   // ported deliberately from the original, which avoids confirming which
   // usernames exist via response differences (a real, if minor, security
@@ -208,7 +230,10 @@ app.post('/login', async (c) => {
   // password and to a username that doesn't exist, so a probe against
   // unknown usernames can't dodge the counter either.
   const invalidCredentials = async () => {
-    const failure = await recordFailedLogin(c.env, body.username)
+    const typedFailure = await recordFailedLogin(c.env, body.username)
+    const failure = resolvedLockoutKey
+      ? worstLockoutState(typedFailure, await recordFailedLogin(c.env, resolvedLockoutKey))
+      : typedFailure
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
@@ -230,6 +255,7 @@ app.post('/login', async (c) => {
   // an account with no second factor. The OTP code itself has its own,
   // separate rate limiting (OTP_LIMIT_MAX/OTP_IP_LIMIT_MAX below).
   await clearLoginLockout(c.env, body.username)
+  if (resolvedLockoutKey) await clearLoginLockout(c.env, resolvedLockoutKey)
 
   // Device-approval gate -- every non-administrator role must be approved
   // once per device. Administrator-control accounts remain able to manage
@@ -542,8 +568,13 @@ app.post('/otp/verify', async (c) => {
   if (!user) return c.json({ error: 'Invalid request' }, 401)
 
   // Same escalating per-username lockout as /login -- a wrong second factor
-  // counts like a wrong password, and a locked account waits here too.
-  const lockoutState = await getLoginLockoutState(c.env, user.username)
+  // counts like a wrong password, and a locked account waits here too. Also
+  // keyed on the account id (P2-1), the key every sign-in alias shares.
+  const accountLockoutKey = userIdLockoutKey(user.id)
+  const lockoutState = worstLockoutState(
+    await getLoginLockoutState(c.env, user.username),
+    await getLoginLockoutState(c.env, accountLockoutKey),
+  )
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
@@ -556,7 +587,10 @@ app.post('/otp/verify', async (c) => {
   if (!otpSecret) return c.json({ error: 'OTP secret is unavailable. Please set up OTP again.' }, 400)
   const verified = await verifyTotp(otpSecret, String(body.token || ''))
   if (!verified) {
-    const failure = await recordFailedLogin(c.env, user.username)
+    const failure = worstLockoutState(
+      await recordFailedLogin(c.env, user.username),
+      await recordFailedLogin(c.env, accountLockoutKey),
+    )
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
@@ -592,6 +626,7 @@ app.post('/otp/verify', async (c) => {
   }
 
   await clearLoginLockout(c.env, user.username)
+  await clearLoginLockout(c.env, accountLockoutKey)
   await consumeOtpChallenge(c.env, body.otpChallenge)
   await audit(c.env, user.id, user.username, 'login', 'user', user.id, { username: user.username, method: 'otp' })
 
