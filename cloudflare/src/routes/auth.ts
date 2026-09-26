@@ -23,7 +23,10 @@ import {
   exchangeGoogleOauthCode,
   getGoogleLoginPublicConfig,
   getGoogleUserFromTokens,
+  matchGooglePkceVerifier,
   normalizeReturnTarget,
+  setGooglePkceCookie,
+  takeGooglePkceCookie,
   verifyState,
 } from '../lib/googleOauth'
 import type { Env } from '../index'
@@ -871,6 +874,8 @@ app.post('/otp/recover', requireAuth, async (c) => {
     SET otp_enabled = 0, otp_secret = NULL, otp_pending_secret = NULL, otp_pending_created_at = NULL, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run([target.id])
+  // Revoke ALL, no keep: the target is always another user (self is refused
+  // above), and a lost second factor makes every open session suspect.
   await revokeUserSessions(c.env, target.id)
   await audit(c.env, actor.id, actor.username, 'otp_recovery_reset', 'user', target.id, {
     target_user: target.username,
@@ -1052,6 +1057,8 @@ app.post('/oauth/start', async (c) => {
     deviceName: body.deviceName,
   })
   if (!result.success) return c.json({ error: result.error || 'Failed to start OAuth flow' }, 400)
+  // The PKCE verifier stays with this browser (HttpOnly cookie), never in `state`.
+  setGooglePkceCookie(c, result.pkceBinding || '')
   return c.json({ url: result.url, mode: oauthMode })
 })
 
@@ -1102,6 +1109,9 @@ function buildOauthCallbackHtml(opts: { payload: Record<string, unknown>; target
 // HTML page that posts the result back to the opener window (popup flow)
 // or falls back to a full-page redirect, matching Login.tsx's listener.
 app.get('/oauth/callback', async (c) => {
+  // Read and clear the PKCE cookie before anything can return: it is spent
+  // on every outcome, success or failure.
+  const pkceCookie = takeGooglePkceCookie(c)
   const code = c.req.query('code')
   const stateParam = c.req.query('state')
   const stateResult = await verifyState(c.env, stateParam)
@@ -1122,8 +1132,12 @@ app.get('/oauth/callback', async (c) => {
     }), status)
 
   if (!stateResult.success) return fail(400, stateResult.error || 'Google sign-in failed.')
+  // Only the browser that started the flow can finish it: no cookie, or a
+  // cookie from another flow, and the code is never redeemed.
+  const pkce = matchGooglePkceVerifier(pkceCookie, stateResult.payload?.nonce)
+  if (!pkce.success) return fail(400, pkce.error || 'Google sign-in failed.')
 
-  const tokenResult = await exchangeGoogleOauthCode(c.env, code, stateResult.payload || {})
+  const tokenResult = await exchangeGoogleOauthCode(c.env, code, { codeVerifier: pkce.codeVerifier })
   if (!tokenResult.success) return fail(401, tokenResult.error || 'Google sign-in failed.')
 
   const userResult = await getGoogleUserFromTokens(tokenResult.tokens || {})
@@ -1143,7 +1157,19 @@ app.get('/oauth/callback', async (c) => {
 
     if (oauthMode === 'link') {
       const actorId = Number(statePayload.currentUserId || 0)
+      // The signed state names who STARTED the link; the browser finishing it
+      // must still be signed in as that same user. Without this, anyone could
+      // start a link on their own account and hand the Google consent URL to
+      // somebody else -- whose Google identity would then be recorded on the
+      // first person's account, so their later "Sign in with Google" would
+      // silently land in an account someone else controls. The
+      // callback is a top-level GET on the app origin, so the Lax session
+      // cookie is present here.
+      const finishingUser = actorId ? await getSessionUser(c) : null
       if (!actorId) { callbackPayload = { success: false, error: 'A local user session is required to link Google.' } }
+      else if (!finishingUser || Number(finishingUser.id) !== actorId) {
+        callbackPayload = { success: false, error: 'Sign in to Business OS in this browser as the account you are linking, then connect Google again.' }
+      }
       else if (linkedToOtherUser) { callbackPayload = { success: false, error: 'This Google account is already linked to another user.' } }
       else {
         const localUser = await db.prepare('SELECT id, username, name FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get<{ id: number; username: string; name: string }>([actorId])
@@ -1259,7 +1285,16 @@ app.post('/oauth/unlink', requireAuth, async (c) => {
   const db = getDb(c.env)
   const user = await db.prepare('SELECT id, username, name, password FROM users WHERE id = ?').get<{ id: number; username: string; name: string; password: string }>([actorId])
   if (!user) return c.json({ error: 'User not found.' }, 404)
-  if (!body.currentPassword || !bcrypt.compareSync(String(body.currentPassword), user.password)) {
+  if (!body.currentPassword) return c.json({ error: 'Current password is required to unlink Google.' }, 403)
+  // Same failure-only allowance (bucket, key, limit) as routes/users.ts's
+  // refuseWrongCurrentPassword: guesses here and there count together.
+  const unlinkLimitKey = `uid:${actorId}`
+  const unlinkLimit = await peekRateLimit(c.env, 'auth:current_password', unlinkLimitKey, 10, 15 * 60 * 1000)
+  if (!unlinkLimit.allowed) {
+    return c.json({ error: 'Too many wrong current-password attempts. Please try again later.', code: 'current_password_rate_limited', retryAfterSeconds: unlinkLimit.retryAfterSeconds }, 429)
+  }
+  if (!bcrypt.compareSync(String(body.currentPassword), user.password)) {
+    await recordRateLimitEvent(c.env, 'auth:current_password', unlinkLimitKey)
     return c.json({ error: 'Current password is required to unlink Google.' }, 403)
   }
   await db.prepare(`

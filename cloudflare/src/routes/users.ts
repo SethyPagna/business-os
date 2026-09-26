@@ -11,8 +11,9 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -27,11 +28,9 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 //   repairGoogleIdentityForUser, provider-disconnect, auth-methods
 //   provider probing). The Docker backend's own isGoogleAuthConfigured()
 //   always returns false in this build -- every one of those code paths is
-//   already dead in the source we're porting from. Endpoints that only
-//   existed to serve that flow (auth-methods, provider-disconnect) are
-//   kept as honest stubs returning the same "not configured"/local-only
-//   shape the original returns when the feature is off, so the frontend
-//   doesn't 404.
+//   already dead in the source we're porting from. (Superseded: the Worker
+//   has its own Google OAuth link flow in routes/auth.ts, and auth-methods
+//   below now reports it -- see the comment there.)
 // - Avatar upload -- ported below (`POST /users/avatar-upload`), reusing
 //   the same R2 object storage + file_assets bookkeeping as
 //   routes/files.ts's generic upload endpoint, with the same request shape
@@ -76,6 +75,34 @@ function isValidEmail(value: unknown): boolean {
 
 function normalizePhoneLookup(value: unknown): string {
   return String(value || '').replace(/[^\d+]/g, '')
+}
+
+// Re-entering your own current password (change password, self-service
+// profile save; POST /api/auth/oauth/unlink spends the same bucket) is
+// limited per account, counting WRONG passwords only: without it a stolen
+// session is an unlimited password-guessing oracle, and counting successes
+// would lock out someone who simply saves their profile often. Peek before
+// the bcrypt compare, record after a miss. A wrong password answers 400,
+// never 401 -- the client reads a 401 on an authenticated /api path as a
+// possibly dead session and runs its sign-out recovery.
+const CURRENT_PASSWORD_LIMIT_BUCKET = 'auth:current_password'
+const CURRENT_PASSWORD_LIMIT_MAX = 10
+const CURRENT_PASSWORD_LIMIT_WINDOW_MS = 15 * 60 * 1000
+
+async function refuseWrongCurrentPassword(c: Ctx, userId: number | string, currentPassword: string, passwordHash: string): Promise<Response | null> {
+  const clientKey = `uid:${Number(userId)}`
+  const limit = await peekRateLimit(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
+  if (!limit.allowed) {
+    return c.json({
+      success: false,
+      error: 'Too many wrong current-password attempts. Please try again later.',
+      code: 'current_password_rate_limited',
+      retryAfterSeconds: limit.retryAfterSeconds,
+    }, 429)
+  }
+  if (bcrypt.compareSync(currentPassword, passwordHash)) return null
+  await recordRateLimitEvent(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey)
+  return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
 }
 
 function conflictResult(error: unknown) {
@@ -272,9 +299,16 @@ app.get('/users/:id/profile', async (c) => {
   return c.json({ success: true, ...sanitizeUserRow(row) })
 })
 
-// Google/provider auth is permanently disabled in this backend build (see
-// header comment) -- these two report that honestly instead of probing a
-// provider that was never configured.
+// Sign-in methods for My Profile. This used to be a hard-coded stub that
+// always answered "Google not connected, not ready" (and named the flag
+// google_connected while the profile reads google_linked), so the Connect /
+// Disconnect Google buttons could never appear even though the real link
+// flow exists in routes/auth.ts (POST /auth/oauth/start mode:'link' -> signed
+// single-use state carrying the signed-in user id -> GET /auth/oauth/callback
+// records google_subject on that user, refusing a Google identity already
+// linked to another user -> POST /auth/oauth/unlink behind the current
+// password). This now reports the stored link and whether this deployment
+// has everything the round trip needs.
 app.get('/users/:id/auth-methods', async (c) => {
   const actor = c.get('user')
   const targetId = Number(c.req.param('id') || 0)
@@ -282,9 +316,14 @@ app.get('/users/:id/auth-methods', async (c) => {
   if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
   if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
   const user = await getDb(c.env).prepare(
-    'SELECT email, email_verified, otp_enabled, is_active FROM users WHERE id = @id',
-  ).get<{ email: string | null; email_verified: number; otp_enabled: number; is_active: number }>({ id: targetId })
+    'SELECT email, email_verified, otp_enabled, is_active, google_subject, google_email, google_linked_at FROM users WHERE id = @id',
+  ).get<{
+    email: string | null; email_verified: number; otp_enabled: number; is_active: number
+    google_subject: string | null; google_email: string | null; google_linked_at: string | null
+  }>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
+  const googleLinked = !!String(user.google_subject || '').trim()
+  const googleReady = isGoogleLinkReady(c.env)
   return c.json({
     success: true,
     local_password: true,
@@ -292,14 +331,20 @@ app.get('/users/:id/auth-methods', async (c) => {
     email_verified: Number(user.email_verified || 0) === 1,
     otp_enabled: Number(user.otp_enabled || 0) === 1,
     is_active: Number(user.is_active || 0) === 1,
-    google_connected: false,
-    google_ready: false,
-    linked_providers: [],
-    capabilities: { google_auth: false, google_oauth: false, google_email_auth: false, google_mfa_totp: false },
+    google_linked: googleLinked,
+    // Legacy name for the same fact; kept so an older cached client still reads it.
+    google_connected: googleLinked,
+    google_email: googleLinked ? (user.google_email || '') : '',
+    google_linked_at: googleLinked ? (user.google_linked_at || null) : null,
+    google_ready: googleReady,
+    linked_providers: googleLinked ? ['google'] : [],
+    capabilities: { google_auth: googleReady, google_oauth: googleReady, google_email_auth: false, google_mfa_totp: false },
   })
 })
 
-app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Google sign-in is not enabled on this deployment.' }, 400))
+// Google is disconnected through POST /api/auth/oauth/unlink (password
+// re-check, own account only); there is no other provider to disconnect.
+app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Use Disconnect Google in My Profile. No other sign-in provider is supported.' }, 400))
 
 app.post('/users/:id/contact-verification/request', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
 app.post('/users/:id/contact-verification/confirm', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
@@ -364,6 +409,114 @@ app.post('/users/avatar-upload', async (c) => {
   const asset = await db.prepare('SELECT * FROM file_assets WHERE id = ?').get([insert.lastInsertRowid])
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'upload', id: insert.lastInsertRowid }))
   return c.json({ path: publicPath, asset })
+})
+
+// -- Profile photo set / remove --------------------------------------------
+//
+// POST /users/avatar-upload above only STORES the image; nothing wrote it to
+// users.avatar_path except a full "Save profile", which asks a non-admin for
+// their current password. My Profile announced "Avatar uploaded" after the
+// store alone, so the photo silently vanished on the next load unless the
+// person also saved the whole form. These two routes make the photo its own
+// action: the account owner (or an admin who can manage them) sets or
+// removes it directly -- the same trust level as uploading it.
+
+type AvatarAssetRow = { id: number; stored_name: string; public_path: string; source: string | null; media_type: string | null }
+
+function auditAvatarChange(c: Ctx, targetId: number, before: string | null, after: string | null) {
+  const actor = c.get('user')
+  return audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'avatar' }, changedFields(
+    { avatar_path: before },
+    { avatar_path: after },
+  ))
+}
+
+// The ONE rule for dropping a photo's stored object once an account stops
+// using it (DELETE clears it, PUT replaces it). Call it after the account's
+// pointer has moved off `path`. The object is deleted only when it can
+// belong to nobody else: it came from an avatar upload (source 'avatar',
+// never a general library file someone picked) and no user, product, gallery
+// row, promotion or setting still points at it. Anything else is kept.
+async function deleteOrphanAvatarObject(c: Ctx, path: string, reason: 'avatar_removed' | 'avatar_replaced'): Promise<boolean> {
+  const actor = c.get('user')
+  const db = getDb(c.env)
+  const asset = await db.prepare(
+    'SELECT id, stored_name, public_path, source, media_type FROM file_assets WHERE public_path = @path LIMIT 1',
+  ).get<AvatarAssetRow>({ path })
+  if (!asset || asset.source !== 'avatar') return false
+  const refs = await db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM users WHERE avatar_path = @path)
+      + (SELECT COUNT(*) FROM products WHERE image_path = @path)
+      + (SELECT COUNT(*) FROM product_images WHERE image_path = @path)
+      + (SELECT COUNT(*) FROM promotions WHERE instr(image_path, @path) = 1)
+      + (SELECT COUNT(*) FROM settings WHERE instr(value, @path) > 0) AS total
+  `).get<{ total: number }>({ path })
+  if (Number(refs?.total || 0) !== 0) return false
+  await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
+  await db.prepare('DELETE FROM file_assets WHERE id = @id').run({ id: asset.id })
+  await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'delete', 'file', asset.id, { original_path: asset.public_path, reason })
+  c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id: asset.id }))
+  return true
+}
+
+// PUT /users/:id/avatar { avatar_path } -- the path must name a stored IMAGE
+// in the file library (a fresh avatar upload or a picked library image).
+app.put('/users/:id/avatar', async (c) => {
+  const actor = c.get('user')
+  const targetId = Number(c.req.param('id') || 0)
+  if (!targetId) return c.json({ success: false, error: 'Invalid user id' }, 400)
+  const targetSecurity = await getUserSecurityContext(c, targetId)
+  if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
+  if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const avatarPath = String(body.avatar_path || '').trim()
+  if (!avatarPath) return c.json({ success: false, error: 'Choose an image first' }, 400)
+  const db = getDb(c.env)
+  const asset = await db.prepare(
+    "SELECT id FROM file_assets WHERE public_path = @path AND media_type = 'image' LIMIT 1",
+  ).get<{ id: number }>({ path: avatarPath })
+  if (!asset) return c.json({ success: false, error: 'That image is not in the file library.' }, 400)
+  const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
+  if (!current) return c.json({ success: false, error: 'User not found' }, 404)
+  const previousPath = String(current.avatar_path || '').trim()
+  // Re-setting the photo the account already has changes nothing: no write,
+  // no audit row, and above all no cleanup of the file it still uses.
+  if (previousPath === avatarPath) {
+    return c.json({ success: true, changed: false, previousObjectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  }
+  await db.prepare('UPDATE users SET avatar_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ path: avatarPath, id: targetId })
+  await auditAvatarChange(c, targetId, previousPath || null, avatarPath)
+  // The replaced photo is cleaned up under exactly DELETE's rule.
+  const previousObjectDeleted = previousPath ? await deleteOrphanAvatarObject(c, previousPath, 'avatar_replaced') : false
+  c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
+  return c.json({ success: true, changed: true, previousObjectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+})
+
+// DELETE /users/:id/avatar -- clears the photo. The stored object is deleted
+// too, but only when it can belong to nobody else: it came from an avatar
+// upload (source 'avatar', never a general library file someone picked) and
+// no user, product, gallery row, promotion or setting still points at it.
+// Anything else keeps the object and only clears this account's pointer.
+app.delete('/users/:id/avatar', async (c) => {
+  const actor = c.get('user')
+  const targetId = Number(c.req.param('id') || 0)
+  if (!targetId) return c.json({ success: false, error: 'Invalid user id' }, 400)
+  const targetSecurity = await getUserSecurityContext(c, targetId)
+  if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
+  if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
+  const db = getDb(c.env)
+  const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
+  if (!current) return c.json({ success: false, error: 'User not found' }, 404)
+  const previousPath = String(current.avatar_path || '').trim()
+  if (!previousPath) return c.json({ success: true, removed: false, objectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+
+  await db.prepare('UPDATE users SET avatar_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: targetId })
+  await auditAvatarChange(c, targetId, previousPath, null)
+
+  const objectDeleted = await deleteOrphanAvatarObject(c, previousPath, 'avatar_removed')
+  c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
+  return c.json({ success: true, removed: true, objectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 })
 
 // -- User CRUD (admin control) --------------------------------------------
@@ -484,6 +637,8 @@ app.put('/users/:id', async (c) => {
     // an old cookie becomes valid again if the account is re-enabled before
     // that session expires, which defeats the meaning of an admin disable.
     if (Number(nextIsActive) === 0) {
+      // Revoke ALL (no keep): a disabled account keeps no session, even if
+      // an admin somehow deactivates themself.
       await revokeUserSessions(c.env, Number(id))
     }
     // An account edit changes who can do what; recording only "user #4 was
@@ -557,9 +712,9 @@ app.put('/users/:id/profile', async (c) => {
   if (!adminOverride) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    if (!bcrypt.compareSync(currentPassword, String(user.password || ''))) {
-      return c.json({ success: false, error: 'Current password is incorrect' }, 401)
-    }
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, targetId, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
 
   const name = String(body.name || username).trim()
@@ -655,12 +810,19 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   if (options.requireCurrent) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect' }, 401)
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, user.id, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
 
   const hash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
-  await revokeUserSessions(c.env, targetId)
+  // Changing YOUR OWN password keeps the session that made the change and
+  // signs out every other device. Resetting SOMEONE ELSE's password signs out
+  // all of theirs -- the actor's own sessions are a different user_id and are
+  // never touched either way.
+  const changingOwnPassword = Number(actor?.id || 0) === Number(targetId || 0)
+  await revokeUserSessions(c.env, targetId, { keepCurrentSessionOf: changingOwnPassword ? c : null })
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'reset_password', 'user', targetId, {
     mode: adminReset ? 'admin' : 'self_service',
   })

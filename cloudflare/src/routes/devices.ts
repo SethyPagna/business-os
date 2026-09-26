@@ -109,6 +109,8 @@ app.post('/sessions/revoke-user', async (c) => {
   const liveCount = await db.prepare(
     'SELECT COUNT(*) AS count FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL',
   ).get<{ count: number }>({ user_id: userId })
+  // Revoke ALL, no keep: "sign out everywhere" includes this device when an
+  // admin aims it at their own account -- that is what the button promises.
   await revokeUserSessions(c.env, userId)
   await audit(c.env, admin.id, admin.username, 'sessions_revoked_all', 'user', userId, {
     revokedSessions: Number(liveCount?.count || 0),

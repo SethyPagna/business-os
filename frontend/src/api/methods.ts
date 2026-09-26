@@ -990,6 +990,14 @@ export const updateUserProfile = async (id, d) => {
   const { updateUserProfile: updateUserProfileRequest } = await loadUserAdminTransport()
   return updateUserProfileRequest(id, d)
 }
+export const setUserAvatar = async (id, avatarPath) => {
+  const { setUserAvatar: setUserAvatarRequest } = await loadUserAdminTransport()
+  return setUserAvatarRequest(id, avatarPath)
+}
+export const removeUserAvatar = async (id) => {
+  const { removeUserAvatar: removeUserAvatarRequest } = await loadUserAdminTransport()
+  return removeUserAvatarRequest(id)
+}
 export const disconnectUserAuthProvider = async (id, d) => {
   const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadUserAdminTransport()
   return disconnectUserAuthProviderRequest(id, d)

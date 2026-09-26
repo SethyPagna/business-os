@@ -20,7 +20,9 @@ const handler = source.slice(handlerStart, handlerEnd)
 check('self change-password route is self-only and requires the current password', () => {
   assert.match(source, /change-password'[^\n]*requireCurrent: true[^\n]*requireSelf: true[^\n]*allowInactive: false/)
   assert.match(handler, /options\.requireSelf && Number\(actor\?\.id \|\| 0\) !== Number\(targetId \|\| 0\)/)
-  assert.match(handler, /if \(options\.requireCurrent\) \{[\s\S]*?Current password required[\s\S]*?bcrypt\.compareSync/)
+  // The compare lives in refuseWrongCurrentPassword since it became rate limited.
+  assert.match(handler, /if \(options\.requireCurrent\) \{[\s\S]*?Current password required[\s\S]*?refuseWrongCurrentPassword\(c, user\.id, currentPassword/)
+  assert.match(source, /async function refuseWrongCurrentPassword[\s\S]*?bcrypt\.compareSync\(currentPassword, passwordHash\)/)
   assert.doesNotMatch(handler, /body\.adminOverride/)
 })
 

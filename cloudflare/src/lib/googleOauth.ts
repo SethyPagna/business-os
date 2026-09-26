@@ -10,6 +10,8 @@
 // `wrangler secret put GOOGLE_LOGIN_CLIENT_SECRET`), not process.env --
 // there is no process.env in a Worker.
 
+import type { Context } from 'hono'
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import type { Env } from '../index'
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -37,7 +39,11 @@ export type OauthStatePayload = {
   currentUserId?: number | null
   returnOrigin: string
   returnPath: string
-  codeVerifier: string
+  // No PKCE code_verifier here: `state` travels in URLs (Google's consent
+  // URL, the callback URL, browser history, proxy logs), and a verifier next
+  // to the authorization code would let whoever sees that URL redeem the
+  // code. The verifier lives in the HttpOnly PKCE cookie instead, bound to
+  // this nonce -- see setGooglePkceCookie / matchGooglePkceVerifier.
   nonce: string
   createdAt: number
   // Carried through the signed state (rather than looked up again at the
@@ -151,6 +157,42 @@ export async function verifyState(env: Env, state: string | undefined): Promise<
   }
 }
 
+// -- PKCE verifier cookie ----------------------------------------------------
+// The browser that STARTED the flow holds the verifier, not the URL. POST
+// /oauth/start sets this cookie; GET /oauth/callback must present it, its
+// nonce must match the signed state's, and it is cleared on every outcome.
+// HttpOnly (no script reads it), Secure, path-scoped to the callback, and as
+// short-lived as the state itself. SameSite=Lax, not Strict: Google's redirect
+// back to the callback is a cross-site top-level GET, which Strict would drop.
+export const GOOGLE_PKCE_COOKIE_NAME = 'bos_google_pkce'
+const PKCE_COOKIE_OPTIONS = { httpOnly: true, secure: true, sameSite: 'Lax' as const, path: CALLBACK_PATH }
+
+export function setGooglePkceCookie(c: Context, binding: string): void {
+  setCookie(c, GOOGLE_PKCE_COOKIE_NAME, binding, { ...PKCE_COOKIE_OPTIONS, maxAge: OAUTH_STATE_TTL_SECONDS })
+}
+
+// Reads the cookie and clears it on the response in the same step; the
+// callback calls this first, before anything else can return, so the cookie
+// is gone whatever the outcome.
+export function takeGooglePkceCookie(c: Context): string {
+  const raw = trim(getCookie(c, GOOGLE_PKCE_COOKIE_NAME))
+  deleteCookie(c, GOOGLE_PKCE_COOKIE_NAME, PKCE_COOKIE_OPTIONS)
+  return raw
+}
+
+// The verifier, only when the cookie's nonce matches the signed state's
+// nonce (constant-time compare).
+export function matchGooglePkceVerifier(raw: string, stateNonce: string | undefined): { success: boolean; codeVerifier?: string; error?: string } {
+  const restart = 'Please start Google sign-in again from this browser.'
+  if (!raw) return { success: false, error: `This browser did not start this Google sign-in. ${restart}` }
+  const [cookieNonce, codeVerifier, extra] = raw.split('.')
+  const expectedNonce = trim(stateNonce)
+  if (extra !== undefined || !cookieNonce || !codeVerifier || !expectedNonce || !timingSafeEqual(cookieNonce, expectedNonce)) {
+    return { success: false, error: `Google sign-in could not be matched to this browser. ${restart}` }
+  }
+  return { success: true, codeVerifier }
+}
+
 export function getGoogleLoginOrigins(env: Env): string[] {
   return unique([env.BUSINESS_OS_ADMIN_URL, env.BUSINESS_OS_PUBLIC_URL])
 }
@@ -185,6 +227,19 @@ export function normalizeReturnTarget(env: Env, input: string | undefined, mode:
   }
 }
 
+// True only when every piece a link/sign-in round trip needs is present:
+// the client id (consent URL), the client secret (code exchange), a state
+// signing secret and a redirect URI. `getGoogleLoginPublicConfig().enabled`
+// only checks the client id, so a deployment missing the secret would offer a
+// Connect button whose callback can never succeed. My Profile's Google card
+// reads this through GET /users/:id/auth-methods.
+export function isGoogleLinkReady(env: Env): boolean {
+  return !!trim(env.GOOGLE_LOGIN_CLIENT_ID)
+    && !!trim(env.GOOGLE_LOGIN_CLIENT_SECRET)
+    && !!getStateSecret(env)
+    && !!getPrimaryRedirectUri(env)
+}
+
 export function getGoogleLoginPublicConfig(env: Env) {
   const clientId = trim(env.GOOGLE_LOGIN_CLIENT_ID)
   return {
@@ -201,12 +256,13 @@ export function getGoogleLoginPublicConfig(env: Env) {
 export async function buildGoogleOauthStartUrl(
   env: Env,
   options: { mode?: string; organization?: string; currentUserId?: number | null; returnTo?: string; deviceId?: string | null; deviceName?: string | null },
-): Promise<{ success: boolean; error?: string; url?: string; mode?: string }> {
+): Promise<{ success: boolean; error?: string; url?: string; mode?: string; pkceBinding?: string }> {
   const clientId = trim(env.GOOGLE_LOGIN_CLIENT_ID)
   if (!clientId) return { success: false, error: 'Google login client ID is not configured.' }
   if (!getStateSecret(env)) return { success: false, error: 'Google OAuth state signing is not configured.' }
   const mode = trim(options.mode).toLowerCase() === 'link' ? 'link' : 'login'
   const codeVerifier = randomBase64Url(32)
+  const nonce = randomBase64Url(16)
   const redirectUri = getPrimaryRedirectUri(env)
   if (!redirectUri) return { success: false, error: 'Google login redirect URI is not configured.' }
   const returnTarget = normalizeReturnTarget(env, options.returnTo, mode)
@@ -217,14 +273,12 @@ export async function buildGoogleOauthStartUrl(
     currentUserId: Number(options.currentUserId || 0) || null,
     returnOrigin: returnTarget.origin,
     returnPath: returnTarget.path,
-    codeVerifier,
-    nonce: randomBase64Url(16),
+    nonce,
     createdAt: Date.now(),
     deviceId: trim(options.deviceId) || null,
     deviceName: trim(options.deviceName) || null,
   })
-  const statePayload = JSON.parse(new TextDecoder().decode(base64UrlDecodeToBytes(state.split('.')[0]))) as OauthStatePayload
-  await env.CACHE.put(oauthStateKey(statePayload.nonce), state.split('.')[1], { expirationTtl: OAUTH_STATE_TTL_SECONDS })
+  await env.CACHE.put(oauthStateKey(nonce), state.split('.')[1], { expirationTtl: OAUTH_STATE_TTL_SECONDS })
   const url = new URL(GOOGLE_AUTH_URL)
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri)
@@ -235,16 +289,20 @@ export async function buildGoogleOauthStartUrl(
   url.searchParams.set('code_challenge_method', 'S256')
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', mode === 'link' ? 'consent' : 'select_account')
-  return { success: true, url: url.toString(), mode }
+  // The caller must hand pkceBinding to setGooglePkceCookie on its response.
+  return { success: true, url: url.toString(), mode, pkceBinding: `${nonce}.${codeVerifier}` }
 }
 
 export async function exchangeGoogleOauthCode(
   env: Env,
   code: string | undefined,
-  statePayload: Partial<OauthStatePayload>,
+  pkce: { codeVerifier?: string },
 ): Promise<{ success: boolean; error?: string; tokens?: Record<string, unknown> }> {
   const codeValue = trim(code)
   if (!codeValue) return { success: false, error: 'Google OAuth code is required.' }
+  // Every code this app requests is PKCE-bound (S256 challenge at start), so
+  // never attempt a redemption without the verifier.
+  if (!trim(pkce?.codeVerifier)) return { success: false, error: 'Google sign-in verifier is missing. Please start again.' }
   const clientSecret = trim(env.GOOGLE_LOGIN_CLIENT_SECRET)
   if (!clientSecret) return { success: false, error: 'Google login client secret is not configured.' }
   const body = new URLSearchParams()
@@ -253,7 +311,7 @@ export async function exchangeGoogleOauthCode(
   body.set('code', codeValue)
   body.set('grant_type', 'authorization_code')
   body.set('redirect_uri', getPrimaryRedirectUri(env))
-  if (statePayload.codeVerifier) body.set('code_verifier', String(statePayload.codeVerifier))
+  body.set('code_verifier', trim(pkce.codeVerifier))
   const response = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

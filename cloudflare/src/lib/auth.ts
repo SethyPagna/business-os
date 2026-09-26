@@ -368,16 +368,32 @@ export async function revokeSession<E extends { Bindings: Env } = { Bindings: En
   await db.prepare("UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").run([tokenHash])
 }
 
-// Ported from backend/src/sessionAuth.ts's revokeUserSessions(). Called
-// after a password change/reset so every *other* device signed in as this
-// user is forced to log in again with the new password -- not just the
-// device that made the change. Unlike revokeSession above (single current
-// cookie), this revokes every live session row for the given user id.
-export async function revokeUserSessions(env: Env, userId: number | string): Promise<void> {
+// Ported from backend/src/sessionAuth.ts's revokeUserSessions(). Unlike
+// revokeSession above (single current cookie), this revokes every live
+// session row for the given user id.
+//
+// `keepCurrentSessionOf`: pass the request context when the person acting IS
+// the account owner and has just re-proved who they are (self-service
+// password change). Their own session -- the cookie on this request -- is
+// kept; every OTHER device is signed out. Without it, changing your own
+// password revoked the session that made the change, and the very next
+// request bounced you to the login screen. The keep is ignored unless the
+// cookie's session belongs to `userId`, so passing it on an admin action
+// against somebody else can never spare that person's sessions. With no
+// cookie at all it falls back to revoking everything.
+export async function revokeUserSessions<E extends { Bindings: Env } = { Bindings: Env }>(
+  env: Env,
+  userId: number | string,
+  options: { keepCurrentSessionOf?: Context<E> | null } = {},
+): Promise<void> {
   const db = getDb(env)
+  const token = options.keepCurrentSessionOf ? getCookie(options.keepCurrentSessionOf, SESSION_COOKIE_NAME) : undefined
+  const keepTokenHash = token ? await hashToken(token) : null
   await db.prepare(
-    'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = @user_id AND revoked_at IS NULL',
-  ).run({ user_id: userId })
+    `UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+     WHERE user_id = @user_id AND revoked_at IS NULL
+       AND (@keep_token_hash IS NULL OR token_hash != @keep_token_hash)`,
+  ).run({ user_id: userId, keep_token_hash: keepTokenHash })
 }
 
 // Hono middleware -- equivalent to the original's `authToken` Express

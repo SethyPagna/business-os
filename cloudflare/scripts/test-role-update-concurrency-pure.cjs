@@ -98,6 +98,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (actor) => actor?.username || null },
 })
