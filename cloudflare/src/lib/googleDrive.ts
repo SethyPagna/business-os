@@ -22,7 +22,7 @@
 
 import type { Env } from '../index'
 import { getDb } from './db'
-import { encryptSecret, decryptSecret } from './secretCrypto'
+import { encryptSecret, decryptSecret, upgradeLegacySecret } from './secretCrypto'
 import {
   DRIVE_STAGED_BACKUP_PREFIX,
   inspectCloudflareBackupStream,
@@ -279,8 +279,17 @@ export async function completeDriveOauth(env: Env, code: string, codeVerifier: s
     accountEmail = trim(info.email) || null
   } catch (_) { /* non-fatal */ }
 
-  const refreshTokenEnc = await encryptSecret(String(payload.refresh_token), env.APP_ENCRYPTION_KEY)
-  const accessTokenEnc = await encryptSecret(String(payload.access_token || ''), env.APP_ENCRYPTION_KEY)
+  // encryptSecret refuses (throws) without APP_ENCRYPTION_KEY rather than
+  // storing the long-lived refresh token in plaintext. Return that as the
+  // callback's error so the owner sees what to set, not a generic 500.
+  let refreshTokenEnc: string
+  let accessTokenEnc: string
+  try {
+    refreshTokenEnc = await encryptSecret(String(payload.refresh_token), env.APP_ENCRYPTION_KEY)
+    accessTokenEnc = await encryptSecret(String(payload.access_token || ''), env.APP_ENCRYPTION_KEY)
+  } catch (error) {
+    return { success: false, error: (error as Error)?.message || 'Could not encrypt the Google Drive token.' }
+  }
   const expiresAt = new Date(Date.now() + (Number(payload.expires_in || 3600) * 1000)).toISOString()
   await setSettings(env, [
     ['drive_sync_refresh_token', refreshTokenEnc],
@@ -330,12 +339,27 @@ async function getValidAccessToken(env: Env): Promise<{ token: string } | { erro
     await setSettings(env, [['drive_sync_last_error', message]])
     return { error: message }
   }
-  const accessTokenEnc = await encryptSecret(String(payload.access_token), env.APP_ENCRYPTION_KEY)
+  // Caching the short-lived access token is an optimisation. Without
+  // APP_ENCRYPTION_KEY encryptSecret refuses to write it, and that must not
+  // brick the backup of a deployment connected before the key existed: use
+  // the fresh token for this run and cache nothing (the next run refreshes).
+  let accessTokenEnc: string | null = null
+  try {
+    accessTokenEnc = await encryptSecret(String(payload.access_token), env.APP_ENCRYPTION_KEY)
+  } catch (_) {
+    accessTokenEnc = null
+  }
+  if (accessTokenEnc === null) return { token: String(payload.access_token) }
   const newExpiresAt = new Date(Date.now() + (Number(payload.expires_in || 3600) * 1000)).toISOString()
-  await setSettings(env, [
+  const updates: [string, string][] = [
     ['drive_sync_access_token', accessTokenEnc],
     ['drive_sync_access_token_expires_at', newExpiresAt],
-  ])
+  ]
+  // A refresh token stored in plaintext before the key was set is otherwise
+  // never rewritten (it is only written on connect); re-encrypt it now.
+  const upgradedRefreshToken = await upgradeLegacySecret(refreshTokenEnc, env.APP_ENCRYPTION_KEY)
+  if (upgradedRefreshToken) updates.push(['drive_sync_refresh_token', upgradedRefreshToken])
+  await setSettings(env, updates)
   return { token: String(payload.access_token) }
 }
 
