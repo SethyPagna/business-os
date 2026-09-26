@@ -2,12 +2,13 @@
 // business-os-assets-apac, driven from a GitHub runner through the temporary
 // Worker in ops/r2-copy-worker/. Run by .github/workflows/ops.yml:
 //
-//   node ops/scripts/ops-r2.mjs buckets        make sure the destination exists in apac
+//   node ops/scripts/ops-r2.mjs buckets        check both buckets; copy mode creates a
+//                                              missing destination in apac
 //   node ops/scripts/ops-r2.mjs run            deploy the Worker, then copy or verify
 //   node ops/scripts/ops-r2.mjs delete-worker  always, even after a failure
 //
 // Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, OPS_OUT_DIR, and
-// for `run` OPS_R2_MODE = copy | verify-only.
+// for `buckets` and `run` OPS_R2_MODE = copy | verify-only.
 //
 // Never writes to the source bucket: the Worker only reaches it through a
 // read-only wrapper. `copy` refuses to start unless the live production
@@ -426,51 +427,68 @@ async function cmdRun() {
   return result.ok ? 0 : 1
 }
 
-async function bucketInfo(accountId, name) {
-  const r = await api('GET', `/accounts/${accountId}/r2/buckets/${name}`)
+async function bucketInfo(apiImpl, accountId, name) {
+  const r = await apiImpl('GET', `/accounts/${accountId}/r2/buckets/${name}`)
   if (r && r.ok && r.json && r.json.result) return { present: true, location: normalizeLocation(r.json.result.location), status: r.status }
   const missing = r && (r.status === 404 || apiErrorCodes(r).includes(10006))
   return { present: false, missing: Boolean(missing), status: r && r.status, codes: apiErrorCodes(r) }
 }
 
+// The bucket step: reads both buckets and, in copy mode ONLY, creates a
+// missing destination in apac. verify-only changes nothing, so there a
+// missing destination just fails the step. create() runs `wrangler r2 bucket
+// create` and resolves to { code, timedOut, stdout, stderr }.
+export async function checkBuckets({ api: apiImpl, accountId, mode, create, pause = sleep }) {
+  const out = { problems: [], created: false }
+  out.source = await bucketInfo(apiImpl, accountId, SOURCE_BUCKET)
+  if (!out.source.present) out.problems.push('source-bucket-unreadable')
+  let dest = await bucketInfo(apiImpl, accountId, DEST_BUCKET)
+  if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {
+    const r = await create()
+    out.create = { exitCode: r.code, timedOut: r.timedOut, stdout: truncate(r.stdout, 20000), stderr: truncate(r.stderr, 20000) }
+    if (r.code !== 0 || r.timedOut) out.problems.push('destination-create-failed')
+    else out.created = true
+    for (let i = 0; out.created && i < 6; i += 1) {
+      dest = await bucketInfo(apiImpl, accountId, DEST_BUCKET)
+      if (dest.present) break
+      await pause(5000)
+    }
+  }
+  out.destination = { ...dest, created: out.created }
+  if (!dest.present && !out.problems.length) {
+    if (dest.missing && mode !== 'copy') out.problems.push('destination-bucket-missing')
+    else out.problems.push('destination-bucket-unreadable')
+  }
+  if (dest.present && dest.location !== DEST_LOCATION) out.problems.push('destination-not-apac')
+  return out
+}
+
 async function cmdBuckets() {
+  const mode = String(process.env.OPS_R2_MODE || 'copy').trim()
   const outDir = requireEnv('OPS_OUT_DIR')
   requireEnv('CLOUDFLARE_API_TOKEN')
   const accountId = requireEnv('CLOUDFLARE_ACCOUNT_ID').trim()
-  const report = { kind: 'r2-apac-copy-buckets', commit: commitId(), runId: runId(), startedAt: new Date().toISOString() }
-  const problems = []
+  const report = { kind: 'r2-apac-copy-buckets', mode, commit: commitId(), runId: runId(), startedAt: new Date().toISOString() }
+  let problems = []
   const lines = []
   try {
-    const source = await bucketInfo(accountId, SOURCE_BUCKET)
-    report.source = source
-    lines.push(['source bucket: {presence}, location {location}', { presence: source.present ? 'present' : 'absent', location: source.present ? source.location : 'unknown' }])
-    if (!source.present) problems.push('source-bucket-unreadable')
-
-    let dest = await bucketInfo(accountId, DEST_BUCKET)
-    let created = false
-    if (!problems.length && !dest.present && dest.missing) {
+    if (!MODES.includes(mode)) throw new OpsError('bad-mode', 'OPS_R2_MODE must be copy or verify-only.')
+    const create = async () => {
       // From an empty directory, so wrangler finds no config to edit.
       const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-r2-create-'))
       try {
-        const r = await runWrangler(['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION], { cwd: empty, timeoutMs: 2 * 60 * 1000 })
-        report.create = { exitCode: r.code, timedOut: r.timedOut, stdout: truncate(r.stdout, 20000), stderr: truncate(r.stderr, 20000) }
-        if (r.code !== 0 || r.timedOut) problems.push('destination-create-failed')
-        else created = true
+        return await runWrangler(['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION], { cwd: empty, timeoutMs: 2 * 60 * 1000 })
       } finally {
         fs.rmSync(empty, { recursive: true, force: true })
       }
-      for (let i = 0; created && i < 6; i += 1) {
-        dest = await bucketInfo(accountId, DEST_BUCKET)
-        if (dest.present) break
-        await sleep(5000)
-      }
     }
-    report.destination = { ...dest, created }
+    const b = await checkBuckets({ api, accountId, mode, create })
+    Object.assign(report, { source: b.source, destination: b.destination, create: b.create })
+    problems = b.problems
+    lines.push(['source bucket: {presence}, location {location}', { presence: b.source.present ? 'present' : 'absent', location: b.source.present ? b.source.location : 'unknown' }])
     lines.push(['destination bucket: {presence}, newly created: {created}, location {location}', {
-      presence: dest.present ? 'present' : 'absent', created, location: dest.present ? dest.location : 'unknown',
+      presence: b.destination.present ? 'present' : 'absent', created: b.created, location: b.destination.present ? b.destination.location : 'unknown',
     }])
-    if (!dest.present && !problems.length) problems.push('destination-bucket-unreadable')
-    if (dest.present && dest.location !== DEST_LOCATION) problems.push('destination-not-apac')
   } catch (err) {
     report.error = errorRecord(err)
     problems.push(err instanceof OpsError ? err.code : 'internal-error')

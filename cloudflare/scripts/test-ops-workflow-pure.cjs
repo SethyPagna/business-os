@@ -278,7 +278,8 @@ const TASK_STEPS = {
   ],
   'r2-apac-copy': [
     ...PRELUDE,
-    scriptStep('node ops/scripts/ops-r2.mjs buckets'),
+    // The mode decides whether a missing destination is created (copy only).
+    scriptStep('node ops/scripts/ops-r2.mjs buckets', { OPS_R2_MODE: '${{ inputs.mode }}' }),
     scriptStep('node ops/scripts/ops-r2.mjs run', { OPS_R2_MODE: '${{ inputs.mode }}' }, { stepTimeout: true }),
     scriptStep('node ops/scripts/ops-r2.mjs delete-worker', {}, { if: AFTER_CHECKOUT }),
     { kind: 'upload' },
@@ -582,7 +583,11 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.task }}'), ['jobs.gate.steps.N.env.TASK'])
     assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.map((t) => `jobs.${t}.steps.N.env.CONFIRM`)])
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
-    assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
+    assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
+    const r2 = code['ops/scripts/ops-r2.mjs']
+    assert.ok(r2.includes("  if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {\n    const r = await create()") && count(r2, /\bcreate\(\)/g) === 1, 'only copy mode may create the destination bucket')
+    assert.strictEqual(count(r2, /const mode = String\(process\.env\.OPS_R2_MODE \|\| 'copy'\)\.trim\(\)/g), 2, 'buckets and run both take the mode from the workflow input')
+    assert.ok(r2.includes('const b = await checkBuckets({ api, accountId, mode, create })'), 'the bucket step passes on the mode it was given')
   })
 
   await check('ops scripts: write only the encrypted report and the job summary', () => {

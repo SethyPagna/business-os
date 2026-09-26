@@ -485,6 +485,63 @@ async function main() {
     assert.deepStrictEqual(await driver.deleteCopyWorker(api({ ok: false, status: 403, json: null }, { ok: false, status: 403, json: null }).fn, ACCOUNT, { pause }).then((r) => r.ok), false)
   })
 
+  await check('the bucket step: only copy mode creates a missing destination, and only in apac', async () => {
+    // buckets: name -> { location } | 'missing' | 'forbidden'; create() makes the destination (location as R2 spells it).
+    const world = (buckets, { createCode = 0, appearsAfter = 0 } = {}) => {
+      const calls = []
+      const creates = []
+      let reads = 0
+      const api = async (method, p) => {
+        calls.push(`${method} ${p}`)
+        const m = /^\/accounts\/[0-9a-f]{32}\/r2\/buckets\/([a-z0-9-]+)$/.exec(p)
+        if (method !== 'GET' || !m) return { ok: false, status: 405, json: null }
+        if (m[1] === 'business-os-assets-apac' && creates.length && reads++ < appearsAfter) return { ok: false, status: 404, json: { success: false, errors: [{ code: 10006 }] } }
+        const b = buckets[m[1]]
+        if (!b || b === 'missing') return { ok: false, status: 404, json: { success: false, errors: [{ code: 10006 }] } }
+        if (b === 'forbidden') return { ok: false, status: 403, json: { success: false, errors: [{ code: 10000 }] } }
+        return { ok: true, status: 200, json: { success: true, result: { name: m[1], location: b.location } } }
+      }
+      const create = async () => {
+        creates.push(1)
+        if (createCode === 0) buckets['business-os-assets-apac'] = { location: 'APAC' }
+        return { code: createCode, timedOut: false, stdout: '', stderr: createCode ? 'failed' : '' }
+      }
+      return { api, create, calls, creates }
+    }
+    const run = (w, mode) => driver.checkBuckets({ api: w.api, accountId: ACCOUNT, mode, create: w.create, pause: async () => {} })
+    const SRC = { 'business-os-assets': { location: 'EEUR' } }
+
+    let w = world({ ...SRC })
+    let r = await run(w, 'verify-only')
+    assert.deepStrictEqual([r.problems, w.creates.length, r.destination.present], [['destination-bucket-missing'], 0, false], 'verify-only must not create')
+
+    w = world({ ...SRC })
+    r = await run(w, 'copy')
+    assert.deepStrictEqual([r.problems, w.creates.length, r.created, r.destination.location, r.source.location], [[], 1, true, 'apac', 'eeur'])
+
+    w = world({ ...SRC }, { appearsAfter: 2 })
+    r = await run(w, 'copy')
+    assert.deepStrictEqual([r.problems, w.creates.length, r.destination.present], [[], 1, true], 'a new bucket may take a few reads to show')
+
+    w = world({ ...SRC }, { appearsAfter: 99 })
+    assert.deepStrictEqual((await run(w, 'copy')).problems, ['destination-bucket-unreadable'])
+
+    w = world({ ...SRC }, { createCode: 1 })
+    assert.deepStrictEqual((await run(w, 'copy')).problems, ['destination-create-failed'])
+
+    for (const mode of ['copy', 'verify-only']) {
+      w = world({ ...SRC, 'business-os-assets-apac': { location: 'eeur' } })
+      assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['destination-not-apac'], 0], mode)
+      w = world({ ...SRC, 'business-os-assets-apac': { location: 'apac' } })
+      assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [[], 0], mode)
+      w = world({ ...SRC, 'business-os-assets-apac': 'forbidden' })
+      assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['destination-bucket-unreadable'], 0], `${mode}: unreadable is not missing`)
+      w = world({ 'business-os-assets': 'forbidden' })
+      assert.deepStrictEqual([(await run(w, mode)).problems, w.creates.length], [['source-bucket-unreadable'], 0], `${mode}: no source, no create`)
+    }
+    assert.ok(w.calls.every((c) => c.startsWith('GET ')), 'the bucket step reads with GET only')
+  })
+
   await check('waitForHealth polls through 503/401/network until the Worker answers, and gives up at the deadline', async () => {
     let t = 0
     const seq = [{ status: 0 }, { status: 503, json: { error: 'not-configured' } }, { status: 401, json: {} }, { status: 200, json: { ok: true } }]
