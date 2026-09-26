@@ -47,6 +47,7 @@ import { driveSyncScheduleDue } from './lib/googleDrive'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
 import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
+import { sweepStaleImportIncomingFiles } from './lib/importIncomingFiles'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
 import { reapStalledImportJobs } from './routes/importJobs'
@@ -635,6 +636,10 @@ export default {
       await runStep('reap-stalled-imports', () => reapStalledImportJobs(env))
       // K4: import-artifact retention (24h detail / 7d summary).
       await runStep('import-retention', () => maybeRunScheduledImportRetention(env))
+      // S-uploads: import files are temporary. Deletes the CSV/ZIP of jobs
+      // terminal for over 1h, of jobs never started after 24h, and any
+      // imports/ object over 24h old whose job is gone or finished.
+      await runStep('import-incoming-sweep', () => sweepStaleImportIncomingFiles(env))
       // Drain orphan staging automatically (rows whose parent import_jobs row
       // is already gone) -- previously reachable only via a manual, force-only
       // admin endpoint, so orphans accumulated with no automatic drain.

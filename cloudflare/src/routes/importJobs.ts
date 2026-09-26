@@ -15,6 +15,7 @@ import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
 import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
+import { importSourceUnavailableForRetry, purgeImportIncomingFiles, IMPORT_FILE_PURGED_STATUS } from '../lib/importIncomingFiles'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1187,7 +1188,9 @@ app.post('/:id/start', async (c) => {
     return c.json({ success: false, error: 'Import was cancelled. Use Retry before starting it again.' }, 409)
   }
   const db = await getImportFencedDb(c.env)
-  const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv'`).get<{ n: number }>({ id })
+  // A purged CSV (S-uploads: import files are deleted when a job finishes)
+  // is not a CSV to start from.
+  const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv' AND COALESCE(status, '') <> '${IMPORT_FILE_PURGED_STATUS}'`).get<{ n: number }>({ id })
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
   await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
@@ -1325,6 +1328,10 @@ app.post('/:id/cancel', async (c) => {
   // cancelled" two-phase status, which had the same limitation under BullMQ.
   const nextStatus = ['analyzing', 'applying', 'queued'].includes(status) ? 'cancelling' : 'cancelled'
   await db.prepare(`UPDATE import_jobs SET status = @status, cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id, status: nextStatus })
+  // S-uploads: settled straight to 'cancelled', so the temporary import
+  // file goes now. A 'cancelling' job is still running; the engine purges
+  // when it honours the cancel.
+  if (nextStatus === 'cancelled') await purgeImportIncomingFiles(c.env, db, id)
   const cancelled = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_cancel', id, job, cancelled || null, { source: 'api', cancelSource: 'api' })
   return c.json({ success: true, job: serializeJob(cancelled || job) })
@@ -1392,6 +1399,12 @@ app.post('/:id/retry', async (c) => {
   // instead of failing downstream with a missing-file error.
   if (job.details_pruned_at) {
     return c.json({ success: false, error: 'This import\'s staged data was cleaned up by retention (details are kept 24 hours after a job finishes). Upload the file again to re-import.', code: 'import_details_pruned' }, 409)
+  }
+  // S-uploads: the temporary import file is deleted when a job finishes.
+  // A retry still runs from the materialized source rows; only a job that
+  // stopped before its CSV was fully read has nothing to retry from.
+  if (await importSourceUnavailableForRetry(db, id)) {
+    return c.json({ success: false, error: 'The file for this import was deleted when the import stopped (import files are only kept while an import runs). Upload the file again to re-import.', code: 'import_source_deleted' }, 409)
   }
   // Awaiting review is not a failed phase and must never be an alternate
   // route into apply. In particular, stock_actions /approve enforces the

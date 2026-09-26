@@ -60,6 +60,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE
 
 import type { Env } from '../index'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
+import { purgeImportIncomingFiles } from './importIncomingFiles'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
 import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
@@ -4454,6 +4455,8 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     }
     if (jobRow.cancel_requested) {
       await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      // S-uploads: a cancelled job's temporary import file goes now.
+      await purgeImportIncomingFiles(env, db, jobId)
       return
     }
 
@@ -4903,7 +4906,9 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   return groups.length
 }
 
-async function finalizeImportApply(
+// Exported for scripts/test-import-incoming-files-native.cjs.
+export async function finalizeImportApply(
+  env: Env,
   db: D1Compat,
   jobId: string,
   totalUnits: number,
@@ -4958,6 +4963,10 @@ async function finalizeImportApply(
     },
   }
   await db.prepare(`UPDATE import_jobs SET summary_json = @summary WHERE id = @id`).run({ id: jobId, summary: JSON.stringify(summary) })
+  // S-uploads: the job is finished; its temporary CSV/ZIP goes now
+  // (lib/importIncomingFiles.ts). Best-effort -- the scheduled sweep
+  // retries anything this misses.
+  await purgeImportIncomingFiles(env, db, jobId)
   return { applied: totalApplied, failed: totalFailed }
 }
 
@@ -5332,7 +5341,7 @@ async function applyStockActionsSinglePass(
   const stockJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
   const unifiedGroupCount = stockJobRow?.started_at ? await unifyTouchedProductGroups(db, stockJobRow.started_at) : 0
 
-  const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
+  const outcome = await finalizeImportApply(env, db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -5616,7 +5625,7 @@ async function applyStockActionsContinuation(
   // continuation window only, after every created child row exists.
   const contJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
   const unifiedGroupCount = contJobRow?.started_at ? await unifyTouchedProductGroups(db, contJobRow.started_at) : 0
-  const outcome = await finalizeImportApply(db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
+  const outcome = await finalizeImportApply(env, db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -5779,6 +5788,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // write here is the terminal job status itself.
     if (jobRow.cancel_requested) {
       await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      // S-uploads: a cancelled job's temporary import file goes now.
+      await purgeImportIncomingFiles(env, db, jobId)
       return { applied: 0, failed: 0 }
     }
     const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
@@ -6817,7 +6828,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
+    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {

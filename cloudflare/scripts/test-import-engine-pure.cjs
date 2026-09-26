@@ -401,6 +401,8 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './planTier') return planTierModule
   if (request === './db') return { isImportMaintenanceFenceError: () => false }
   if (request === './queueDispatch') return queueDispatchModule
+  // S-uploads: the temporary-import-file purge is R2 work, not engine logic.
+  if (request === './importIncomingFiles') return { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) }
   if (request === './permissions') return permissionsModule
   if (request === './acquisitionCostAccess') return acquisitionCostAccessModule
   if (request === './media') return mediaModule
