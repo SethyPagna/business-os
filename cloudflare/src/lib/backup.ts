@@ -3,7 +3,7 @@ import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
-import { classifyUploadedBuffer, detectUploadFormat, EMBEDDED_MARKUP_MESSAGE, type DetectedUploadFormat } from './uploadSecurity'
+import { containsEmbeddedMarkup, detectOtherMedia, detectUploadFormat, otherMediaContentType, otherMediaLooksLikeText } from './uploadSecurity'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -1237,7 +1237,8 @@ function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlyS
 // S-uploads2a fix 4 (2026-09-27). The restore writes a backup's asset copies
 // back under uploads/, the public prefix /uploads/* serves on the admin
 // origin, so it is one more writer of uploads/ and goes through the gate
-// every upload goes through (uploadSecurity.ts classifyUploadedBuffer).
+// every upload goes through (uploadSecurity.ts classifyUploadedBuffer; since
+// S-uploads3 also the stored-media detection the purge keeps by, below).
 // Before, it copied back whatever bytes a backup held under whatever type
 // they had been stored with: a PDF, a web page or a polyglot image from a
 // backup taken before the allowlist came straight back into uploads/, and
@@ -1255,13 +1256,26 @@ function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlyS
 //     stages the document from outside: only a backup asset folder
 //     (backups/cloudflare/<name>/assets/) is read, and only uploads/ keys
 //     are written.
+// S-uploads3 (2026-09-27): parity with the owner-run purge. The gate for NEW
+// uploads refuses HEIC, BMP, camera raw, MP4 brands off its list (Canon
+// `CAEP`, `mp21`) and audio, but a stored one is somebody's photo or clip:
+// the purge keeps it, /uploads/* serves the photos and videos among it, and
+// a restore used to withhold it as not-media. Now whatever the purge keeps as
+// other media (uploadSecurity.ts detectOtherMedia -- the purge's own code,
+// held token-identical by scripts/test-upload-classifier-parity-pure.cjs) is
+// written back under uploads/ with a plain media type for its format
+// (otherMediaContentType; octet-stream when there is none), never the stored
+// one. Text that merely starts like media (otherMediaLooksLikeText), which
+// the purge lists for review, is withheld as not-media. New uploads stay as
+// strict as before: this is only the restore's judgement of stored bytes.
 // A copy up to RESTORE_ASSET_SCAN_MAX_BYTES is read and checked whole, as an
 // upload is (the embedded-markup scan needs every byte; Library uploads are
 // at most 25 MB). A larger one is judged by its first bytes and streamed,
 // re-read pinned to the etag that was judged, so the bytes written are the
 // bytes checked and never all held in memory. Only a video is written back
-// that way: no Library image is that large, and one that is cannot be
-// checked in memory, so it is withheld.
+// that way, and another media format (judged by its first bytes, as the
+// purge judges a large file): no Library image is that large, and one that
+// is cannot be checked in memory, so it is withheld.
 export const RESTORE_ASSET_SCAN_MAX_BYTES = 32 * 1024 * 1024
 const RESTORE_ASSET_HEAD_BYTES = 64 * 1024
 const RESTORE_QUARANTINE_ROOT = 'quarantine/'
@@ -1312,19 +1326,19 @@ async function readAssetBytes(body: ReadableStream<Uint8Array>, size: number): P
   return bytes
 }
 
-// `whole` false: `bytes` are only the start of a copy too large to check.
-function judgeRestoredAsset(bytes: Uint8Array, whole: boolean): { format: DetectedUploadFormat } | { reason: WithheldAssetReason } {
-  if (!whole) {
-    const format = detectUploadFormat(bytes)
-    if (format?.kind === 'video') return { format }
-    return { reason: format ? 'too-large-to-check' : 'not-media' }
+// `whole` false: `bytes` are only the start of a copy too large to check;
+// `size` is the copy's full size.
+export function judgeRestoredAsset(bytes: Uint8Array, whole: boolean, size: number = bytes.length): { contentType: string } | { reason: WithheldAssetReason } {
+  if (whole && bytes.length === 0) return { reason: 'empty' }
+  const format = detectUploadFormat(bytes)
+  if (format) {
+    if (format.kind === 'video') return { contentType: format.mime }
+    if (!whole) return { reason: 'too-large-to-check' }
+    return containsEmbeddedMarkup(bytes) ? { reason: 'image-with-code' } : { contentType: format.mime }
   }
-  if (bytes.length === 0) return { reason: 'empty' }
-  try {
-    return { format: classifyUploadedBuffer(bytes) }
-  } catch (error) {
-    return { reason: error instanceof Error && error.message === EMBEDDED_MARKUP_MESSAGE ? 'image-with-code' : 'not-media' }
-  }
+  const other = detectOtherMedia(bytes, size)
+  if (other && !otherMediaLooksLikeText(other, bytes, whole)) return { contentType: otherMediaContentType(other) }
+  return { reason: 'not-media' }
 }
 
 async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: string, quarantinePrefix: string): Promise<AssetRestoreOutcome> {
@@ -1332,7 +1346,7 @@ async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: 
   if (!object || !object.body) return { kind: 'missing' }
   const whole = object.size <= RESTORE_ASSET_SCAN_MAX_BYTES
   const bytes = await readAssetBytes(object.body, whole ? object.size : RESTORE_ASSET_HEAD_BYTES)
-  const verdict = judgeRestoredAsset(bytes, whole)
+  const verdict = judgeRestoredAsset(bytes, whole, object.size)
   // What is written: the bytes checked, or the same object streamed again
   // (null when it changed or went away since).
   const content = async (): Promise<Uint8Array | ReadableStream | null> => {
@@ -1340,10 +1354,10 @@ async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: 
     const again = await env.ASSETS.get(backedUpKey, { onlyIf: { etagMatches: object.etag } })
     return again && 'body' in again && again.body ? again.body : null
   }
-  if ('format' in verdict) {
+  if ('contentType' in verdict) {
     const data = await content()
     if (!data) return { kind: 'missing' }
-    await env.ASSETS.put(originalKey, data, { httpMetadata: { contentType: verdict.format.mime } })
+    await env.ASSETS.put(originalKey, data, { httpMetadata: { contentType: verdict.contentType } })
     return { kind: 'restored' }
   }
   const quarantineKey = `${quarantinePrefix}${originalKey}`

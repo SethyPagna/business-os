@@ -534,8 +534,14 @@ export function detectUploadFormat(bytes) {
   return detectQuickTimeAtoms(bytes)
 }
 // =====================================================================
-// END mirror of cloudflare/src/lib/uploadSecurity.ts
+// END mirror of cloudflare/src/lib/uploadSecurity.ts (upload allowlist)
 // =====================================================================
+// ALSO MIRRORED (S-uploads3, 2026-09-27): detectOtherMedia and
+// otherMediaLooksLikeText below, with every declaration they use
+// (zipFirstEntry, isNetpbm, quickTimeAtomsFit, id3TagFits, decodeText...).
+// The Worker judges STORED files -- /uploads/* serving and the backup
+// restore -- with the same code, so a restore puts back exactly what this
+// script keeps. The same parity test holds them token-identical.
 
 const u16leAt = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8)
 const u16beAt = (bytes, offset) => (bytes[offset] << 8) | bytes[offset + 1]
@@ -635,7 +641,7 @@ export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
     if (ftyp.major === 'crx ') return photo('camera raw (CR3)')
     if (ISO_AUDIO_BRANDS.includes(ftyp.major)) return media('M4A/M4B audio')
     if ([ftyp.major, ...ftyp.compatible].some((brand) => OTHER_HEIF_BRANDS.includes(brand))) return photo('HEIC/HEIF')
-    return media(`MP4 family (brand ${printable(ftyp.major)})`)
+    return media('MP4 family (brand ' + printable(ftyp.major) + ')')
   }
   // QuickTime atoms that do not chain within the bytes read, as long as
   // every atom header that is read fits in the file (see quickTimeAtomsFit).
@@ -773,7 +779,7 @@ export function decodeText(bytes, complete = true) {
   const start = bufferStartsWith(sample, [0xef, 0xbb, 0xbf]) ? 3 : 0
   const end = whole ? sample.length : utf8CompleteEnd(sample, start)
   let text = null
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(sample.subarray(start, end)) } catch { text = null }
+  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(sample.subarray(start, end)) } catch { text = null }
   if (text !== null) {
     for (const char of text) if (!isTextCode(char.codePointAt(0))) return null
     return text

@@ -560,6 +560,301 @@ export function isLibraryMediaFormat(format: DetectedUploadFormat | null | undef
   return isPublicImageFormat(format) || (!!format && format.kind === 'video')
 }
 
+// ------------------------------------------------ stored media (legacy)
+// S-uploads3 (2026-09-27). The allowlist above decides NEW uploads. A file
+// already in storage is judged more generously: an iPhone HEIC, a BMP scan,
+// a camera raw, an MP4 whose brand is not on MP4_VIDEO_BRANDS (Canon
+// `CAEP`, `mp21`), an M4A voice note -- somebody's photo, clip or recording.
+// The owner-run purge (ops/scripts/purge-non-media-uploads.mjs) keeps every
+// one of them, and lib/r2.ts serves the photos and videos among them; the
+// backup restore (lib/backup.ts) uses the same detection so that a restore
+// puts back exactly what the purge keeps. detectOtherMedia and
+// otherMediaLooksLikeText, with every declaration they use, are mirrored
+// token for token in the purge script and held equal by
+// scripts/test-upload-classifier-parity-pure.cjs. Edit both together.
+export type OtherMedia = { kind: 'photo' | 'video-audio'; format: string }
+
+const u16leAt = (bytes: Uint8Array, offset: number): number => bytes[offset] | (bytes[offset + 1] << 8)
+const u16beAt = (bytes: Uint8Array, offset: number): number => (bytes[offset] << 8) | bytes[offset + 1]
+const textAt = (bytes: Uint8Array, offset: number, text: string): boolean => asciiAt(bytes, offset, offset + text.length) === text
+const latin1Head = (bytes: Uint8Array, limit: number): string => String.fromCharCode(...bytes.subarray(0, Math.min(bytes.length, limit)))
+const printable = (text: string): string => text.replace(/[^\x20-\x7e]/g, '?')
+
+// The first entry of a ZIP file: its name and, when stored uncompressed,
+// its data (an ODF/EPUB/OpenRaster `mimetype` entry is stored first).
+function zipFirstEntry(bytes: Uint8Array): { name: string; data: Uint8Array | null } | null {
+  if (bytes.length < 30 || !bufferStartsWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return null
+  const method = u16leAt(bytes, 8)
+  const compressedSize = readU32LE(bytes, 18)
+  const nameLength = u16leAt(bytes, 26)
+  const extraLength = u16leAt(bytes, 28)
+  if (30 + nameLength > bytes.length) return null
+  const name = String.fromCharCode(...bytes.subarray(30, 30 + nameLength))
+  const dataStart = 30 + nameLength + extraLength
+  const data = method === 0 ? bytes.subarray(dataStart, Math.min(bytes.length, dataStart + compressedSize)) : null
+  return { name, data }
+}
+
+function zipMimetype(bytes: Uint8Array): string | null {
+  const entry = zipFirstEntry(bytes)
+  if (!entry || entry.name !== 'mimetype' || !entry.data) return null
+  return String.fromCharCode(...entry.data.subarray(0, 100))
+}
+
+// ------------------------------------------- other media: always kept
+// Photos, videos and recordings the upload allowlist does not take (new
+// uploads of these are refused), but a stored one is somebody's photo or
+// clip. Generous on purpose: a wrong match here only keeps a file.
+const OTHER_HEIF_BRANDS: readonly string[] = ['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx', 'mif1', 'msf1', 'mif2', 'mif3', 'miaf', 'heif', 'avif', 'avis', 'avci', 'avcs', 'jpeg', 'jpgs', 'vvic', 'vvis', 'evbi', 'evbs', 'j2ki', 'j2is']
+const ISO_AUDIO_BRANDS: readonly string[] = ['m4a ', 'm4b ', 'm4p ', 'f4a ', 'f4b ']
+const BMP_HEADER_SIZES: readonly number[] = [12, 16, 40, 52, 56, 64, 108, 124]
+
+function isNetpbm(bytes: Uint8Array): boolean {
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] < 0x31 || bytes[1] > 0x37) return false
+  if (bytes[1] === 0x37) return /^P7\s+(WIDTH|HEIGHT|DEPTH|MAXVAL|TUPLTYPE|ENDHDR|#)/.test(latin1Head(bytes, 64))
+  if (![0x09, 0x0a, 0x0d, 0x20].includes(bytes[2])) return false
+  let offset = 2
+  while (offset < bytes.length) {
+    if ([0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20].includes(bytes[offset])) offset += 1
+    else if (bytes[offset] === 0x23) { while (offset < bytes.length && bytes[offset] !== 0x0a) offset += 1 }
+    else break
+  }
+  return offset < bytes.length && bytes[offset] >= 0x30 && bytes[offset] <= 0x39
+}
+
+// S-uploads3 (2026-09-27): the loose QuickTime and MP3 signatures below
+// kept crafted text as media (R-uploads2: `\0\0\0\x08free` followed by
+// notes, `ID3\x03\x00` followed by notes). Every atom header within the
+// bytes read must be a four-character type with a size that stays inside
+// the file; the last one may run past the bytes read.
+function quickTimeAtomsFit(bytes: Uint8Array, totalSize: number): boolean {
+  let offset = 0
+  for (let atoms = 0; atoms < 64 && offset + 8 <= bytes.length; atoms += 1) {
+    if (!isFourCcAt(bytes, offset + 4)) return false
+    let size = readU32BE(bytes, offset)
+    if (size === 0) return true
+    if (size === 1) {
+      if (offset + 16 > bytes.length) return true
+      size = readU32BE(bytes, offset + 8) * 0x100000000 + readU32BE(bytes, offset + 12)
+      if (size < 16) return false
+    } else if (size < 8) {
+      return false
+    }
+    if (offset + size > totalSize) return false
+    offset += size
+  }
+  return true
+}
+
+// An ID3v2 header: version 2-4, only the flag bits that version defines,
+// a sync-safe size (every byte under 0x80) and a tag that fits in the file.
+const ID3_UNDEFINED_FLAG_BITS: readonly number[] = [0x3f, 0x1f, 0x0f]
+function id3TagFits(bytes: Uint8Array, totalSize: number): boolean {
+  if (bytes.length < 10 || bytes[3] < 2 || bytes[3] > 4 || bytes[4] === 0xff) return false
+  if (bytes[5] & ID3_UNDEFINED_FLAG_BITS[bytes[3] - 2]) return false
+  if ([6, 7, 8, 9].some((index) => bytes[index] >= 0x80)) return false
+  const size = bytes[6] * 0x200000 + bytes[7] * 0x4000 + bytes[8] * 0x80 + bytes[9]
+  return 10 + size <= totalSize
+}
+
+// { kind: 'photo' | 'video-audio', format } or null. `totalSize` is the
+// object's size when only its first bytes were read.
+export function detectOtherMedia(bytes: Uint8Array, totalSize: number = bytes ? bytes.length : 0): OtherMedia | null {
+  if (!bytes || bytes.length < 2) return null
+  const photo = (format: string): OtherMedia => ({ kind: 'photo', format })
+  const media = (format: string): OtherMedia => ({ kind: 'video-audio', format })
+  const at = (offset: number, signature: number[]): boolean => bufferStartsWithAt(bytes, offset, signature)
+  const has = (offset: number, text: string): boolean => textAt(bytes, offset, text)
+
+  // ISO BMFF the allowlist refused: HEIC/HEIF, Canon CR3, M4A, any brand.
+  const ftyp = readFtypBrands(bytes)
+  if (ftyp) {
+    if (ftyp.major === 'crx ') return photo('camera raw (CR3)')
+    if (ISO_AUDIO_BRANDS.includes(ftyp.major)) return media('M4A/M4B audio')
+    if ([ftyp.major, ...ftyp.compatible].some((brand) => OTHER_HEIF_BRANDS.includes(brand))) return photo('HEIC/HEIF')
+    return media('MP4 family (brand ' + printable(ftyp.major) + ')')
+  }
+  // QuickTime atoms that do not chain within the bytes read, as long as
+  // every atom header that is read fits in the file (see quickTimeAtomsFit).
+  if (bytes.length >= 8 && QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8)) && quickTimeAtomsFit(bytes, totalSize)) return media('QuickTime')
+  if (has(0, 'RIFF') || has(0, 'RIFX')) {
+    const form = asciiAt(bytes, 8, 12)
+    if (form === 'AVI ' || form === 'AVIX') return media('AVI')
+    if (form === 'CDXA') return media('Video CD')
+    if (form === 'WAVE' || form === 'RMP3') return media('WAV')
+    if (form === 'RMID') return media('MIDI')
+    if (form === 'QLCM') return media('QCELP')
+    if (form === 'ACON') return photo('animated cursor')
+  }
+  if (has(0, 'FORM')) {
+    const form = asciiAt(bytes, 8, 12)
+    if (form === 'AIFF' || form === 'AIFC' || form === '8SVX') return media('AIFF')
+    if (form === 'ILBM' || form === 'PBM ' || form === 'ACBM') return photo('IFF image')
+  }
+  // Video.
+  if (at(0, [0, 0, 1, 0xba]) || at(0, [0, 0, 1, 0xb3])) return media('MPEG')
+  for (const [first, stride] of [[0, 188], [4, 192]]) {
+    if (bytes.length > first + 2 * stride && [0, 1, 2].every((packet) => bytes[first + packet * stride] === 0x47)) return media('MPEG transport stream')
+  }
+  if (has(0, 'FLV') && bytes[3] === 1) return media('Flash video (FLV)')
+  if (at(0, [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11])) return media('Windows Media (WMV/WMA)')
+  if (has(0, '.RMF')) return media('RealMedia')
+  if (has(0, 'OggS') && bytes[4] === 0) return media('Ogg')
+  // Audio. 0xFF 0xFE is a UTF-16 byte order mark, not an MPEG frame.
+  if (has(0, 'ID3') && id3TagFits(bytes, totalSize)) return media('MP3')
+  if (bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0) return media('AAC')
+  if (bytes.length >= 3 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && bytes[1] !== 0xfe && bytes[1] !== 0xff
+    && (bytes[1] & 0x18) !== 0x08 && (bytes[1] & 0x06) !== 0 && (bytes[2] >> 4) !== 0x0f && ((bytes[2] >> 2) & 0x03) !== 0x03) return media('MP3')
+  if (has(0, 'fLaC') && (bytes[4] & 0x7f) === 0) return media('FLAC')
+  if (has(0, 'MThd') && bytes.length >= 8 && readU32BE(bytes, 4) === 6) return media('MIDI')
+  if (has(0, '#!AMR')) return media('AMR')
+  if (has(0, 'caff') && bytes.length >= 6 && u16beAt(bytes, 4) === 1) return media('Core Audio (CAF)')
+  if (has(0, '.snd') && bytes.length >= 8 && readU32BE(bytes, 4) >= 24 && readU32BE(bytes, 4) < 65536) return media('AU')
+  if (has(0, 'MAC ') && bytes.length >= 6 && u16leAt(bytes, 4) >= 3800 && u16leAt(bytes, 4) <= 4200) return media("Monkey's Audio")
+  if (has(0, 'wvpk')) return media('WavPack')
+  if (has(0, 'DSD ') && bytes.length >= 12 && bytes[4] === 28 && [5, 6, 7, 8, 9, 10, 11].every((index) => bytes[index] === 0)) return media('DSD')
+  if (has(0, 'MPCK')) return media('Musepack')
+  if (at(0, [0x0b, 0x77])) return media('AC-3')
+  if (at(0, [0x7f, 0xfe, 0x80, 0x01])) return media('DTS')
+  // Photos and other images.
+  if (has(0, 'BM') && bytes.length >= 18 && BMP_HEADER_SIZES.includes(readU32LE(bytes, 14))) return photo('BMP')
+  if (at(0, [0x49, 0x49, 0x2a, 0x00]) || at(0, [0x4d, 0x4d, 0x00, 0x2a]) || at(0, [0x49, 0x49, 0x2b, 0x00]) || at(0, [0x4d, 0x4d, 0x00, 0x2b])) return photo('TIFF or camera raw')
+  if (has(0, 'IIRO') || has(0, 'IIRS') || has(0, 'MMOR') || at(0, [0x49, 0x49, 0x55, 0x00])) return photo('camera raw')
+  if (has(0, 'FUJIFILMCCD-RAW')) return photo('camera raw (RAF)')
+  if (at(0, [0x49, 0x49, 0x1a, 0, 0, 0]) && has(6, 'HEAPCCDR')) return photo('camera raw (CRW)')
+  if (has(0, 'FOVb')) return photo('camera raw (X3F)')
+  if (at(0, [0x00, 0x4d, 0x52, 0x4d])) return photo('camera raw (MRW)')
+  if ((at(0, [0, 0, 1, 0]) || at(0, [0, 0, 2, 0])) && bytes.length >= 22) {
+    const count = u16leAt(bytes, 4)
+    if (count >= 1 && count <= 256 && bytes[9] === 0 && readU32LE(bytes, 18) >= 6 + 16 * count) return photo('icon (ICO/CUR)')
+  }
+  if (has(0, '8BPS') && bytes.length >= 6 && [1, 2].includes(u16beAt(bytes, 4))) return photo('Photoshop (PSD)')
+  if (at(0, [0, 0, 0, 0x0c, 0x6a, 0x50, 0x20, 0x20, 0x0d, 0x0a, 0x87, 0x0a]) || at(0, [0xff, 0x4f, 0xff, 0x51])) return photo('JPEG 2000')
+  if (at(0, [0xff, 0x0a]) || at(0, [0, 0, 0, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a])) return photo('JPEG XL')
+  if (at(0, [0x49, 0x49, 0xbc])) return photo('JPEG XR')
+  if (has(0, 'gimp xcf ')) return photo('GIMP (XCF)')
+  if (has(0, 'qoif')) return photo('QOI')
+  if (has(0, 'DDS ') && bytes.length >= 8 && readU32LE(bytes, 4) === 124) return photo('DDS')
+  if (at(0, [0x76, 0x2f, 0x31, 0x01])) return photo('OpenEXR')
+  if (has(0, '#?RADIANCE') || has(0, '#?RGBE')) return photo('Radiance HDR')
+  if (at(0, [0x42, 0x50, 0x47, 0xfb])) return photo('BPG')
+  if (has(0, 'icns') && bytes.length >= 8 && readU32BE(bytes, 4) <= totalSize) return photo('Apple icon (ICNS)')
+  if (has(0, 'FLIF')) return photo('FLIF')
+  if (has(0, 'farbfeld')) return photo('farbfeld')
+  if (has(0, 'SIMPLE  =')) return photo('FITS')
+  if (at(0, [0xd7, 0xcd, 0xc6, 0x9a]) || at(0, [1, 0, 9, 0, 0, 3]) || at(0, [2, 0, 9, 0, 0, 3])) return photo('Windows metafile (WMF)')
+  if (at(0, [1, 0, 0, 0]) && has(40, ' EMF')) return photo('Windows metafile (EMF)')
+  if (bytes.length >= 4 && bytes[0] === 0x0a && [0, 2, 3, 4, 5].includes(bytes[1]) && bytes[2] === 1 && [1, 2, 4, 8].includes(bytes[3])) return photo('PCX')
+  if (isNetpbm(bytes)) return photo('NetPBM')
+  if (has(0, '/* XPM */')) return photo('XPM')
+  if (/^#define [A-Za-z0-9_]+_width [0-9]+/.test(latin1Head(bytes, 96))) return photo('XBM')
+  if ((zipMimetype(bytes) || '').startsWith('image/')) return photo('OpenRaster')
+  return null
+}
+
+// -------------------------------------------------------------- text
+const TEXT_SAMPLE_BYTES = 4096
+// Tab, line feed, vertical tab, form feed, carriage return.
+const TEXT_WHITESPACE: readonly number[] = [0x09, 0x0a, 0x0b, 0x0c, 0x0d]
+const isTextCode = (code: number): boolean => TEXT_WHITESPACE.includes(code)
+  || (code >= 0x20 && code !== 0x7f && !(code >= 0x80 && code <= 0x9f) && code !== 0xfffe && code !== 0xffff)
+
+function utf16Units(bytes: Uint8Array, start: number, littleEndian: boolean): number[] {
+  const units: number[] = []
+  for (let offset = start; offset + 1 < bytes.length; offset += 2) {
+    units.push(littleEndian ? bytes[offset] | (bytes[offset + 1] << 8) : (bytes[offset] << 8) | bytes[offset + 1])
+  }
+  return units
+}
+
+// End of the last complete UTF-8 sequence (a read may stop mid-character).
+function utf8CompleteEnd(bytes: Uint8Array, start: number): number {
+  const end = bytes.length
+  for (let back = 1; back <= 3 && end - back >= start; back += 1) {
+    const byte = bytes[end - back]
+    if ((byte & 0xc0) === 0x80) continue
+    const need = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1
+    return need > back ? end - back : end
+  }
+  return end
+}
+
+// The text of `bytes`, or null when they are not text: UTF-8 (optional
+// BOM), UTF-16 with a BOM, or 8-bit text in a legacy code page that is
+// mostly ASCII -- with no control character except tab, line feed,
+// vertical tab, form feed and carriage return (a DOS end-of-file byte may
+// end the file). Binary data, every media format among it, has control
+// bytes within its first few bytes. Only the first 4 KB are examined.
+export function decodeText(bytes: Uint8Array, complete = true): string | null {
+  const whole = complete && bytes.length <= TEXT_SAMPLE_BYTES
+  let sample = bytes.subarray(0, TEXT_SAMPLE_BYTES)
+  if (whole && sample.length && sample[sample.length - 1] === 0x1a) sample = sample.subarray(0, sample.length - 1)
+  if (bufferStartsWith(sample, [0xff, 0xfe]) || bufferStartsWith(sample, [0xfe, 0xff])) {
+    if (whole && sample.length % 2) return null
+    const units = utf16Units(sample, 2, sample[0] === 0xff)
+    for (let index = 0; index < units.length; index += 1) {
+      const unit = units[index]
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        const next = units[index + 1]
+        if (next === undefined && !whole) break
+        if (next === undefined || next < 0xdc00 || next > 0xdfff) return null
+        index += 1
+      } else if ((unit >= 0xdc00 && unit <= 0xdfff) || !isTextCode(unit)) {
+        return null
+      }
+    }
+    return String.fromCharCode(...units)
+  }
+  const start = bufferStartsWith(sample, [0xef, 0xbb, 0xbf]) ? 3 : 0
+  const end = whole ? sample.length : utf8CompleteEnd(sample, start)
+  let text: string | null = null
+  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(sample.subarray(start, end)) } catch { text = null }
+  if (text !== null) {
+    for (const char of text) if (!isTextCode(char.codePointAt(0)!)) return null
+    return text
+  }
+  // Legacy 8-bit text (a Windows-1252 CSV export): no control bytes, and
+  // at least three quarters plain ASCII.
+  let asciiBytes = 0
+  for (const byte of sample) {
+    if ((byte < 0x20 && !TEXT_WHITESPACE.includes(byte)) || byte === 0x7f) return null
+    if (byte < 0x80) asciiBytes += 1
+  }
+  return asciiBytes >= sample.length * 0.75 ? String.fromCharCode(...sample) : null
+}
+
+// Media formats that are plain text by design.
+const TEXT_MEDIA_FORMATS: readonly string[] = ['XPM', 'XBM', 'NetPBM', 'Radiance HDR', 'FITS']
+
+// S-uploads3 (2026-09-27): some signatures detectOtherMedia accepts are
+// loose enough for text to meet them -- MPEG transport-stream sync bytes
+// ('G') 188 apart in a CSV, the AC-3 sync word (vertical tab, 'w'). Media of
+// every other format has control bytes within its first bytes, so when the
+// data also decodes as text it is neither kept as media nor purged as text:
+// it goes to review.
+export function otherMediaLooksLikeText(other: OtherMedia, bytes: Uint8Array, complete = true): boolean {
+  return !TEXT_MEDIA_FORMATS.includes(other.format) && decodeText(bytes, complete) !== null
+}
+
+// Worker only (not mirrored): the content type a stored file of another
+// media format is written back with -- never a type a browser renders as a
+// document. Formats without a plain media type are octet-stream; /uploads/*
+// decides the served type itself (lib/r2.ts) and never replays this one.
+const OTHER_MEDIA_TYPES: Readonly<Record<string, string>> = {
+  'HEIC/HEIF': 'image/heic',
+  BMP: 'image/bmp',
+  'TIFF or camera raw': 'image/tiff',
+  QuickTime: 'video/quicktime',
+  AVI: 'video/x-msvideo',
+  'M4A/M4B audio': 'audio/mp4',
+  MP3: 'audio/mpeg',
+}
+
+export function otherMediaContentType(other: OtherMedia): string {
+  if (other.format.startsWith('MP4 family')) return 'video/mp4'
+  return OTHER_MEDIA_TYPES[other.format] || 'application/octet-stream'
+}
+
 export function detectBufferKind(bytes: Uint8Array): UploadedFileKind {
   return detectUploadFormat(bytes)?.kind ?? 'unknown'
 }
