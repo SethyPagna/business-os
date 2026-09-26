@@ -4,6 +4,10 @@ const path = require('node:path')
 const ts = require('typescript')
 const calls = []
 let branch
+// U-transfer3: inventoryWriteTransport.ts runs saved transfers through
+// transferRunRecovery.ts (records a definitive refusal on the run). Loaded for
+// real, so the capability below is proven through the wrapper Inventory uses.
+const loaded = {}
 function load(name) {
   const module = { exports: {} }
   const source = fs.readFileSync(path.join(__dirname,'../../frontend/src/api',name),'utf8')
@@ -12,6 +16,7 @@ function load(name) {
     if (id === './requestIds.ts') return { ensureClientRequestId: body => ({...body,client_request_id:body.client_request_id || 'capability-test-key'}) }
     if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({device_name:'fixture'}) }
     if (id === './branchTransport.ts') return branch
+    if (['./transferRunRecovery.ts', './transferRunRefusal.ts', './branchRuleErrors.ts'].includes(id)) return loaded[id] ||= load(id.slice(2))
     if (id === '../utils/syncProblemLifecycle.ts') return { dispatchResolvedSyncError: () => {} }
     // P4-B: inventoryWriteTransport.ts's commitFastStockIn() reuses
     // batchesTransport.ts's receive-body conversion; unused by this
