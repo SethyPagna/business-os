@@ -5,14 +5,11 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import {
-  buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName,
-  PRIVATE_LIBRARY_ROUTE, publicPathForStoredName, storageKeyForAsset, storageKeyForStoredName,
-} from '../lib/fileAssets'
+import { buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { sanitizeMediaPath } from '../lib/media'
 import { chunkForBinding } from '../lib/sqlBinding'
-import { classifyUploadedBuffer, extensionForImageMime, isPublicUploadFormat, type DetectedUploadFormat } from '../lib/uploadSecurity'
+import { classifyUploadedBuffer, extensionForImageMime, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -389,11 +386,9 @@ app.post('/upload', async (c) => {
   // allowlist (lib/uploadSecurity.ts) and the stored content-type,
   // extension and media_type all come from the detected format -- /uploads/*
   // serves the stored content-type on the admin origin, so a client-chosen
-  // text/html or .svg would be stored XSS. HTML/SVG/XML/JS/unknown -> 400.
-  // Owner direction: only JPEG/PNG/WebP/GIF/AVIF images (and, pending a
-  // ruling, video -- see isPublicUploadFormat) go to the public uploads/
-  // prefix; PDF/CSV/XLSX go to the private prefix and are read through
-  // GET /api/files/private/:name (auth + attachment + nosniff).
+  // text/html or .svg would be stored XSS. Owner ruling: storage holds only
+  // images (JPEG/PNG/WebP/GIF/AVIF) and videos (MP4/MOV/WebM); PDF, CSV,
+  // XLSX, HTML, SVG, XML, JS and anything unrecognised -> 400.
   const buffer = new Uint8Array(await file.arrayBuffer())
   let detected: DetectedUploadFormat
   try {
@@ -403,7 +398,6 @@ app.post('/upload', async (c) => {
   }
   const mimeType = detected.mime
   const mediaType = detected.kind
-  const isPublic = isPublicUploadFormat(detected)
 
   let storedBuffer = buffer
   let storedMimeType = mimeType
@@ -430,14 +424,14 @@ app.post('/upload', async (c) => {
   }
 
   const storedName = buildUniqueStoredName(originalName, storedExtension)
-  const objectKey = storageKeyForStoredName(storedName, isPublic)
+  const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, storedBuffer, { httpMetadata: { contentType: storedMimeType } })
   // If inline normalization was unavailable, the existing queue gets another
   // chance asynchronously. Do not reject the user's photo merely because a
   // browser codec/provider was unavailable at this moment.
   if (mediaType === 'image' && !normalizedInline) await enqueueImageNormalization(c.env, objectKey)
 
-  const publicPath = publicPathForStoredName(storedName, isPublic)
+  const publicPath = `/uploads/${storedName}`
   const db = getDb(c.env)
   const insert = await db.prepare(`
     INSERT INTO file_assets (
@@ -469,48 +463,6 @@ app.post('/upload', async (c) => {
   return c.json(asset)
 })
 
-// S-uploads: the only read path for private Library files (PDF, CSV, XLSX
-// written after the images-only /uploads rule). Any authenticated
-// user may read, matching Library browsing (GET / above needs no grant);
-// the object is always an attachment with nosniff and a sandbox CSP, so
-// even a hostile byte stream cannot render as a page on this origin. The
-// name must match a registered private file_assets row exactly -- no
-// arbitrary key under the private prefix, no path segments.
-app.get('/private/:name', async (c) => {
-  const storedName = c.req.param('name')
-  if (!storedName || /[\/\\]/.test(storedName) || storedName === '.' || storedName === '..' || storedName.length > 400) {
-    return c.json({ error: 'Invalid file name' }, 400)
-  }
-  const db = getDb(c.env)
-  const asset = await db.prepare(`
-    SELECT stored_name, original_name, mime_type, public_path FROM file_assets WHERE public_path = @publicPath
-  `).get<{ stored_name: string; original_name: string; mime_type: string | null; public_path: string }>({
-    publicPath: `${PRIVATE_LIBRARY_ROUTE}${encodeURIComponent(storedName)}`,
-  })
-  if (!asset || asset.stored_name !== storedName) return c.json({ error: 'File not found' }, 404)
-
-  const object = await c.env.ASSETS.get(storageKeyForAsset(asset), { range: c.req.raw.headers })
-  if (!object) return c.json({ error: 'Stored file object not found' }, 404)
-
-  const downloadName = sanitizeOriginalFileName(asset.original_name || storedName)
-  const asciiFallback = downloadName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download'
-  const headers = new Headers()
-  headers.set('Content-Type', asset.mime_type || 'application/octet-stream')
-  headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`)
-  headers.set('X-Content-Type-Options', 'nosniff')
-  headers.set('Content-Security-Policy', "default-src 'none'; sandbox")
-  headers.set('Cache-Control', 'private, no-store')
-  headers.set('Accept-Ranges', 'bytes')
-  const range = (object as R2ObjectBody & { range?: { offset?: number; length?: number } }).range
-  if (range && c.req.header('range') && typeof range.offset === 'number' && typeof range.length === 'number') {
-    headers.set('Content-Range', `bytes ${range.offset}-${range.offset + range.length - 1}/${object.size}`)
-    headers.set('Content-Length', String(range.length))
-    return new Response(object.body, { status: 206, headers })
-  }
-  headers.set('Content-Length', String(object.size))
-  return new Response(object.body, { headers })
-})
-
 // Streams the one stored object with a caller-selected logical filename.
 // The filename is presentation only (Content-Disposition); R2 is never
 // copied or renamed. Full Library access matches the existing bulk-download
@@ -526,11 +478,11 @@ app.get('/:id/download', async (c) => {
 
   const db = getDb(c.env)
   const asset = await db.prepare(`
-    SELECT stored_name, original_name, mime_type, public_path FROM file_assets WHERE id = @id
-  `).get<{ stored_name: string; original_name: string; mime_type: string | null; public_path: string | null }>({ id })
+    SELECT stored_name, original_name, mime_type FROM file_assets WHERE id = @id
+  `).get<{ stored_name: string; original_name: string; mime_type: string | null }>({ id })
   if (!asset) return c.json({ error: 'File not found' }, 404)
 
-  const object = await c.env.ASSETS.get(storageKeyForAsset(asset))
+  const object = await c.env.ASSETS.get(`uploads/${asset.stored_name}`)
   if (!object) return c.json({ error: 'Stored file object not found' }, 404)
 
   const requestedName = c.req.query('name') || asset.original_name
@@ -763,7 +715,7 @@ app.delete('/:id', async (c) => {
     }
   }
 
-  await c.env.ASSETS.delete(storageKeyForAsset(asset))
+  await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
   await db.prepare('DELETE FROM file_assets WHERE id = ?').run([id])
 
   // `forced` records that the user typed the CONFIRM DELETE override past a

@@ -71,44 +71,17 @@ export function sanitizeOriginalFileName(originalName: string): string {
 // enabled, which for the Workers path is always, since there is no local
 // disk to fall back to).
 //
-// S-uploads (2026-09-26), owner direction: the public /uploads prefix is
-// for IMAGES ONLY. Library PDF, CSV and XLSX files are
-// written under PRIVATE_LIBRARY_PREFIX, which index.ts's public
-// /uploads/* route cannot reach (it only ever reads `uploads/<path>`), and
-// its file_assets.public_path is the authenticated route below instead of
-// an /uploads URL. Rows written before this change keep their /uploads
-// public_path and stay where they are; storageKeyForAsset reads either.
-// (Video stays public pending an owner ruling -- uploadSecurity.ts's
-// isPublicUploadFormat.)
-export const PUBLIC_UPLOADS_PREFIX = 'uploads/'
-export const PRIVATE_LIBRARY_PREFIX = 'private/library/'
-export const PRIVATE_LIBRARY_ROUTE = '/api/files/private/'
-
-export function publicPathForStoredName(storedName: string, isPublic: boolean): string {
-  return isPublic ? `/${PUBLIC_UPLOADS_PREFIX}${storedName}` : `${PRIVATE_LIBRARY_ROUTE}${encodeURIComponent(storedName)}`
-}
-
-export function storageKeyForStoredName(storedName: string, isPublic: boolean): string {
-  return `${isPublic ? PUBLIC_UPLOADS_PREFIX : PRIVATE_LIBRARY_PREFIX}${storedName}`
-}
-
-// The R2 key of an existing file_assets row: private rows are recognised by
-// their public_path, everything else (every pre-existing row) is uploads/.
-export function storageKeyForAsset(asset: { stored_name: string; public_path?: string | null }): string {
-  const isPrivate = String(asset.public_path || '').startsWith(PRIVATE_LIBRARY_ROUTE)
-  return storageKeyForStoredName(String(asset.stored_name || ''), !isPrivate)
-}
-
-//
 // S-uploads (2026-09-26): the extension is never the client's to choose.
 // A caller that classified the bytes passes the detected extension
 // (lib/uploadSecurity.ts's detectUploadFormat); otherwise the client's
 // extension survives only when it is on STORED_EXTENSION_ALLOWLIST, and
 // anything else (.html, .svg, .xml, .js ...) is stored as .bin.
+// Media only (owner ruling: storage holds images and videos), plus the
+// temporary import source types routes/importJobs.ts writes under imports/.
 const STORED_EXTENSION_ALLOWLIST = new Set([
-  ...IMAGE_EXTENSIONS, '.avif', '.heic', '.heif',
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif',
   ...VIDEO_EXTENSIONS,
-  ...DOCUMENT_EXTENSIONS, '.tsv', '.txt', '.xlsx', '.xls', '.xlsm', '.zip', '.json',
+  '.csv', '.tsv', '.zip',
 ])
 
 export function safeStoredExtension(fileName: string): string {

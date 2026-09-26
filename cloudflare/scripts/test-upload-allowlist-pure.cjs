@@ -1,9 +1,8 @@
-// S-uploads (compliance audit P1-2 + owner direction 2026-09-26): uploads
-// are an allowlist classified from the bytes, the stored content-type and
-// extension are server-derived, and the PUBLIC /uploads prefix holds only
-// JPEG/PNG/WebP/GIF/AVIF images. Everything else the Library keeps (PDF,
-// CSV, XLSX, video) is written under a private prefix and read only through
-// the authenticated GET /api/files/private/:name route.
+// S-uploads (compliance audit P1-2 + owner ruling 2026-09-26): uploads are
+// an allowlist classified from the bytes, the stored content-type and
+// extension are server-derived, and storage holds ONLY images
+// (JPEG/PNG/WebP/GIF/AVIF) and videos (MP4/MOV/WebM). PDF, CSV, XLSX and
+// every other type are refused by the Library.
 //
 // Before this lane an `unknown` expected kind skipped validation entirely,
 // files.ts stored the client's File.type as the R2 content-type, the
@@ -13,9 +12,8 @@
 // /uploads/* then served as text/html or image/svg+xml on the admin origin.
 //
 // Fixtures discriminate: each "rejected" case was ACCEPTED by the previous
-// implementation, each "server-derived type" case carries a client claim
-// that differs from the bytes, and each "private" case landed under the
-// public prefix before.
+// implementation, and each "server-derived type" case carries a client
+// claim that differs from the bytes.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -71,6 +69,8 @@ const PDF = bytes('%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n')
 const XLSX = bytes([0x50, 0x4b, 0x03, 0x04, 20, 0, 0, 0], '[Content_Types].xml', new Array(30).fill(0), 'xl/workbook.xml', new Array(30).fill(0))
 const CSV = enc('﻿barcode,name,price\n885001,ទឹកដោះគោ,1.25\n885002,"Rice, 5kg",4.50\n')
 const MP4 = bytes([0, 0, 0, 24], 'ftypisom', new Array(40).fill(0))
+const MOV = bytes([0, 0, 0, 20], 'ftypqt  ', new Array(40).fill(0))
+const WEBM = bytes([0x1a, 0x45, 0xdf, 0xa3], new Array(40).fill(0))
 
 const HTML = enc('<!doctype html><html><body><script>fetch("/api/users",{credentials:"include"})</script></body></html>')
 const HTML_WITH_COMMAS = enc('<html><body onload="alert(1)">a,b,c</body></html>')
@@ -98,15 +98,15 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
     ['webp', WEBP, 'image', 'image/webp', '.webp'],
     ['gif', GIF, 'image', 'image/gif', '.gif'],
     ['avif', AVIF, 'image', 'image/avif', '.avif'],
-    ['pdf', PDF, 'document', 'application/pdf', '.pdf'],
-    ['xlsx', XLSX, 'document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'],
-    ['csv (utf-8 Khmer, BOM, quoted comma)', CSV, 'document', 'text/csv', '.csv'],
     ['mp4', MP4, 'video', 'video/mp4', '.mp4'],
+    ['mov', MOV, 'video', 'video/quicktime', '.mov'],
+    ['webm', WEBM, 'video', 'video/webm', '.webm'],
   ]
   for (const [label, buffer, kind, mime, extension] of accepted) {
     const detected = security.classifyUploadedBuffer(buffer)
     assert.deepEqual(detected, { kind, mime, extension }, `${label} must be allowed with a server-derived type`)
-    assert.equal(security.isPublicImageFormat(detected), kind === 'image', `${label}: only images are public`)
+    assert.equal(security.isPublicImageFormat(detected), kind === 'image', `${label}: image-only writers accept only images`)
+    assert.equal(security.isLibraryMediaFormat(detected), true, `${label}: a Library format`)
   }
 
   const rejected = [
@@ -114,6 +114,8 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
     ['svg with xml prolog', SVG], ['bare svg', SVG_BARE], ['xml', XML], ['javascript', JS],
     ['zip that is not an xlsx', ZIP_NOT_XLSX], ['bmp (not on the public image list)', BMP],
     ['heic (must not fall through to video/mp4)', HEIC], ['empty', new Uint8Array(0)],
+    // Owner ruling: documents are no longer stored at all.
+    ['pdf', PDF], ['xlsx', XLSX], ['csv (utf-8 Khmer, BOM, quoted comma)', CSV], ['text line starting "BM"', BM_TEXT],
   ]
   for (const [label, buffer] of rejected) {
     assert.equal(security.detectUploadFormat(buffer), null, `${label} must be outside the allowlist`)
@@ -126,20 +128,6 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
     assert.throws(() => security.validateUploadedBuffer(buffer, 'image/jpeg', 'photo.jpg'), /embedded web page or script/, `${label} polyglot must be refused by the shared gate too`)
   }
 
-  // "BM" alone is not a bitmap: a text line starting with it is CSV text.
-  assert.equal(security.detectUploadFormat(BM_TEXT).mime, 'text/csv')
-
-  // Zip-bomb probe: XLSX detection only reads names from the head/tail
-  // windows and never inflates. A package whose headers claim 4GB entries,
-  // padded to 20MB, classifies in well under a second and is inert data in
-  // private storage (the server never parses XLSX -- import parses
-  // CSV/TSV only, routes/importJobs.ts).
-  const bomb = new Uint8Array(20 * 1024 * 1024)
-  bomb.set(bytes([0x50, 0x4b, 0x03, 0x04, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff], '[Content_Types].xml'), 0)
-  bomb.set(enc('PK\x01\x02xl/workbook.xml'), bomb.length - 64)
-  const started = Date.now()
-  assert.equal(security.classifyUploadedBuffer(bomb).extension, '.xlsx')
-  assert.ok(Date.now() - started < 1000, `xlsx classification must not scan/inflate a 20MB body (${Date.now() - started}ms)`)
 }
 
 // ------------------------------------- shared gate (products/users/imports)
@@ -162,10 +150,12 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
   assert.equal(security.validateUploadedBuffer(PNG, 'image/jpeg', 'photo.jpg').mime, 'image/png')
   assert.equal(security.validateUploadedBuffer(JPEG, '', 'avatar.jpg').mime, 'image/jpeg')
   assert.equal(security.validateUploadedBuffer(JPEG_WITH_XMP, 'image/jpeg', 'camera.jpg').mime, 'image/jpeg')
-  assert.equal(security.validateUploadedBuffer(CSV, 'application/vnd.ms-excel', 'stock.csv').mime, 'text/csv')
-  assert.equal(security.validateUploadedBuffer(XLSX, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'items.xlsx').extension, '.xlsx')
-  // Kind mismatch is still refused (unchanged behaviour).
-  assert.throws(() => security.validateUploadedBuffer(PDF, 'image/png', 'scan.png'), /do not match/)
+  // Documents are refused whatever they are called (owner ruling).
+  assert.throws(() => security.validateUploadedBuffer(CSV, 'application/vnd.ms-excel', 'stock.csv'), /not supported/)
+  assert.throws(() => security.validateUploadedBuffer(XLSX, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'items.xlsx'), /not supported/)
+  assert.throws(() => security.validateUploadedBuffer(PDF, 'application/pdf', 'invoice.pdf'), /not supported/)
+  // Kind mismatch is still refused: video bytes claimed as an image.
+  assert.throws(() => security.validateUploadedBuffer(MP4, 'image/png', 'scan.png'), /do not match/)
 }
 
 // ------------------------------------ import uploads (routes/importJobs.ts)
@@ -191,7 +181,9 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
   assert.match(fileAssets.buildUniqueStoredName('logo.SVG'), /^logo-\d+-[a-f0-9]{8}\.bin$/)
   assert.match(fileAssets.buildUniqueStoredName('evil.html', '.png'), /^evil-\d+-[a-f0-9]{8}\.png$/)
   assert.match(fileAssets.buildUniqueStoredName('photo.jpg'), /^photo-\d+-[a-f0-9]{8}\.jpg$/)
-  assert.match(fileAssets.buildUniqueStoredName('stock.xlsx'), /^stock-\d+-[a-f0-9]{8}\.xlsx$/)
+  // Documents are not a storable suffix any more.
+  assert.match(fileAssets.buildUniqueStoredName('stock.xlsx'), /^stock-\d+-[a-f0-9]{8}\.bin$/)
+  assert.match(fileAssets.buildUniqueStoredName('invoice.pdf'), /\.bin$/)
   assert.match(fileAssets.buildUniqueStoredName('README'), /^README-\d+-[a-f0-9]{8}\.bin$/)
   // Double extension: only the final, server-chosen extension counts.
   assert.match(fileAssets.buildUniqueStoredName('photo.png.html'), /\.bin$/)
@@ -202,13 +194,8 @@ const POLYGLOT_PNG_JS_URL = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
   for (const hostile of ['../../backups/cloudflare/x.png', '..\\..\\private\\library\\x.png', '/etc/passwd', 'a/../../b.png', '..']) {
     const name = fileAssets.buildUniqueStoredName(hostile, '.png')
     assert.ok(!/[\\/]/.test(name), `stored name must hold no path separator: ${hostile} -> ${name}`)
-    assert.ok(!fileAssets.storageKeyForStoredName(name, true).slice('uploads/'.length).includes('/'), `key stays one segment under uploads/: ${name}`)
+    assert.ok(!('uploads/' + name).slice('uploads/'.length).includes('/'), `key stays one segment under uploads/: ${name}`)
   }
-  // Key/path helpers: private rows are recognised by public_path; every
-  // pre-existing row keeps reading from uploads/.
-  assert.equal(fileAssets.storageKeyForAsset({ stored_name: 'a.pdf', public_path: '/uploads/a.pdf' }), 'uploads/a.pdf')
-  assert.equal(fileAssets.storageKeyForAsset({ stored_name: 'a b.pdf', public_path: '/api/files/private/a%20b.pdf' }), 'private/library/a b.pdf')
-  assert.equal(fileAssets.publicPathForStoredName('a b.pdf', false), '/api/files/private/a%20b.pdf')
 }
 
 // ------------------------------------------------------ files.ts routes
@@ -279,7 +266,6 @@ const filesRoute = loadTs('routes/files.ts', {
 })
 const filesApp = filesRoute.default || filesRoute
 const librarian = { id: 7, username: 'librarian', role_code: 'staff', permissions: JSON.stringify({ library: true }), role_permissions: null }
-const viewer = { id: 8, username: 'viewer', role_code: 'staff', permissions: JSON.stringify({}), role_permissions: null }
 
 async function call(pathname, init, user) {
   const response = await filesApp.request(`http://local${pathname}`, init, { TEST_USER: user, ASSETS }, { waitUntil() {}, passThroughOnException() {} })
@@ -455,9 +441,8 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     assert.deepEqual(enqueued, [puts[0].key], 'public images still get queued normalization')
   }
 
-  // Video: public (the storefront About block plays it to anonymous
-  // visitors; pending an owner ruling -- uploadSecurity.ts's
-  // isPublicUploadFormat), with the DETECTED type/extension so lib/r2.ts's
+  // Video: public (owner ruling -- the storefront About block plays it to
+  // anonymous visitors), with the DETECTED type/extension so lib/r2.ts's
   // extension-based serving never sees a client-chosen suffix.
   {
     const result = await upload(MP4, 'promo.html', 'text/html')
@@ -468,72 +453,32 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     assert.deepEqual(enqueued, [], 'video is not queued for image normalization')
   }
 
-  // Non-images: private prefix, never an /uploads public_path.
-  const privateAssets = {}
-  for (const [buffer, name, claimed, mime, ext, kind] of [
-    [PDF, 'invoice.pdf', 'text/html', 'application/pdf', '.pdf', 'document'],
-    [XLSX, 'items.xlsx', 'application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx', 'document'],
-    [CSV, 'stock list.csv', 'application/vnd.ms-excel', 'text/csv', '.csv', 'document'],
+  // Documents: refused outright (owner ruling -- storage holds only images
+  // and videos). Before, each of these was stored under /uploads.
+  for (const [buffer, name, claimed] of [
+    [PDF, 'invoice.pdf', 'application/pdf'],
+    [XLSX, 'items.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    [CSV, 'stock list.csv', 'text/csv'],
+    [PDF, 'scan.jpg', 'image/jpeg'],
   ]) {
     const result = await upload(buffer, name, claimed)
-    assert.equal(result.status, 200, `${name}: ${JSON.stringify(result.json)}`)
-    assert.equal(puts[0].contentType, mime, `${name} stored type must be derived from bytes`)
-    assert.ok(puts[0].key.startsWith('private/library/'), `${name} must be stored privately: ${puts[0].key}`)
-    assert.ok(puts[0].key.endsWith(ext), `${name} stored extension must be derived from bytes: ${puts[0].key}`)
-    assert.ok(!String(result.json.public_path).startsWith('/uploads/'), `${name} must not be publicly addressable: ${result.json.public_path}`)
-    assert.ok(String(result.json.public_path).startsWith('/api/files/private/'))
-    assert.equal(result.json.mime_type, mime)
-    assert.equal(result.json.media_type, kind)
-    assert.deepEqual(enqueued, [], `${name} is not an image and must not be queued for normalization`)
-    privateAssets[ext] = result.json
+    assert.equal(result.status, 400, name + ': ' + JSON.stringify(result.json))
+    assert.equal(result.json.code, 'unsupported_file_type')
+    assert.match(result.json.error, /only stores images/)
+    assert.equal(puts.length, 0, name + ' must not be stored')
   }
 
-  // Private read route: authenticated, exact registered row only.
+  // Download and delete still address uploads/<stored_name>.
   {
-    const csvAsset = privateAssets['.csv']
-    // The sub-app is mounted at /api/files in index.ts.
-    const privatePath = String(csvAsset.public_path).slice('/api/files'.length)
-    const ok = await call(privatePath, { method: 'GET' }, viewer)
-    assert.equal(ok.status, 200, 'any authenticated user may read a private Library file (Library browsing is ungated)')
-    assert.equal(ok.headers.get('content-type'), 'text/csv')
-    assert.equal(ok.headers.get('x-content-type-options'), 'nosniff')
-    assert.match(ok.headers.get('content-disposition'), /^attachment;/)
-    assert.match(ok.headers.get('content-security-policy'), /sandbox/)
-    assert.equal(ok.headers.get('cache-control'), 'private, no-store')
-    assert.equal(new TextDecoder().decode(new Uint8Array(await ok.arrayBuffer())), new TextDecoder().decode(CSV))
-
-    const anonymous = await call(privatePath, { method: 'GET' }, null)
-    assert.equal(anonymous.status, 401, 'private files are never anonymous')
-
-    gets.length = 0
-    for (const hostile of [
-      '/private/..%2F..%2Fbackups%2Fcloudflare%2Fdb.json',
-      '/private/..%5Cuploads%5Cx.png',
-      '/private/not-a-registered-file.pdf',
-    ]) {
-      const response = await call(hostile, { method: 'GET' }, librarian)
-      assert.ok(response.status === 400 || response.status === 404, `${hostile} -> ${response.status}`)
-    }
-    // '/private/..' and '/private/%2E%2E' are normalised by URL parsing to
-    // '/', the Library list -- they never reach this route, let alone R2.
-    for (const dotted of ['/private/..', '/private/%2E%2E']) {
-      const response = await call(dotted, { method: 'GET' }, librarian)
-      assert.ok(Array.isArray((await response.json()).items), dotted + ' resolves to the list, not a file')
-    }
-    assert.deepEqual(gets, [], 'traversal/unregistered names must never reach R2')
-    // An object planted under the private prefix without a row is unreadable.
-    store.set('private/library/planted.html', { body: HTML, contentType: 'text/html' })
-    assert.equal((await call('/private/planted.html', { method: 'GET' }, librarian)).status, 404)
-
-    // Download and delete follow the row to the private key.
-    const download = await call(`/${csvAsset.id}/download`, { method: 'GET' }, librarian)
+    const result = await upload(PNG, 'keep.png', 'image/png')
+    assert.equal(result.status, 200)
+    const key = puts[0].key
+    assert.ok(store.has(key))
+    const download = await call('/' + result.json.id + '/download', { method: 'GET' }, librarian)
     assert.equal(download.status, 200)
-    const pdfAsset = privateAssets['.pdf']
-    const pdfKey = `private/library/${pdfAsset.stored_name}`
-    assert.ok(store.has(pdfKey))
-    const del = await call(`/${pdfAsset.id}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' }, librarian)
+    const del = await call('/' + result.json.id, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' }, librarian)
     assert.equal(del.status, 200, await del.clone().text())
-    assert.ok(!store.has(pdfKey), 'delete must remove the private object, not a nonexistent uploads/ key')
+    assert.ok(!store.has(key), 'delete must remove the uploads/ object')
   }
 
   // Chunked path: HTML is rejected on the reassembled buffer, nothing
@@ -550,8 +495,8 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     assert.equal(result.status, 400, `${name} via chunks must be rejected`)
     assert.equal(puts.length, 0)
   }
-  // Chunked path: a real PNG with hostile manifest claims is stored public
-  // with the server-derived type and extension; a PDF goes private.
+  // Chunked path: a real PNG with hostile manifest claims is stored with the
+  // server-derived type and extension; a PDF is refused.
   {
     const result = await chunkedUpload(PNG, 'evil.svg', 'text/html')
     assert.equal(result.status, 200, JSON.stringify(result.json))
@@ -562,11 +507,10 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     assert.equal(result.json.asset.public_path, `/${puts[0].key}`)
   }
   {
-    const result = await chunkedUpload(PDF, 'report.html', 'text/html')
-    assert.equal(result.status, 200, JSON.stringify(result.json))
-    assert.equal(puts[0].contentType, 'application/pdf')
-    assert.match(puts[0].key, /^private\/library\/report-\d+-[a-f0-9]{8}\.pdf$/)
-    assert.ok(String(result.json.asset.public_path).startsWith('/api/files/private/'))
+    const result = await chunkedUpload(PDF, 'report.pdf', 'application/pdf')
+    assert.equal(result.status, 400, JSON.stringify(result.json))
+    assert.equal(result.json.code, 'unsupported_file_type')
+    assert.equal(puts.length, 0)
   }
   // Chunked path: an inflated chunk count is refused at init (it would make
   // /complete loop and allocate for chunks that cannot exist).

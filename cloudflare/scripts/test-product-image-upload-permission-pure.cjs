@@ -99,7 +99,7 @@ function loadProductsRoute(state) {
     '../lib/uploadSecurity': {
       validateUploadedBuffer: () => ({ kind: 'image', mime: 'image/png', extension: '.png' }),
       isPublicImageFormat: (format) => !!format && format.kind === 'image',
-      UNSUPPORTED_UPLOAD_MESSAGE: 'This file type is not supported.',
+      UNSUPPORTED_IMAGE_MESSAGE: 'This file type is not supported.',
     },
     '../lib/imageAudit': {
       enqueueImageNormalization: async () => { state.normalizationCalls++ },

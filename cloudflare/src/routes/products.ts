@@ -18,7 +18,7 @@ import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, type
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
-import { isPublicImageFormat, UNSUPPORTED_UPLOAD_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
+import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
@@ -9082,7 +9082,7 @@ app.post('/upload-image', async (c) => {
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
-  if (!isPublicImageFormat(detected)) return c.json({ success: false, error: UNSUPPORTED_UPLOAD_MESSAGE }, 400)
+  if (!isPublicImageFormat(detected)) return c.json({ success: false, error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
   const mimeType = detected.mime
   if (buffer.byteLength > MAX_PRODUCT_IMAGE_UPLOAD_BYTES) {
     return c.json({ success: false, error: 'Image could not be normalized within the upload safety limit.' }, 400)

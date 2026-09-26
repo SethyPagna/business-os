@@ -10,7 +10,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
-import { isPublicImageFormat, UNSUPPORTED_UPLOAD_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
+import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import type { Env } from '../index'
@@ -338,7 +338,7 @@ app.post('/users/avatar-upload', async (c) => {
   } catch (error) {
     return c.json({ error: (error as Error).message }, 400)
   }
-  if (!isPublicImageFormat(detected)) return c.json({ error: UNSUPPORTED_UPLOAD_MESSAGE }, 400)
+  if (!isPublicImageFormat(detected)) return c.json({ error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
   const mimeType = detected.mime
   if (buffer.byteLength > MAX_AVATAR_UPLOAD_BYTES) {
     return c.json({ error: 'Avatar image is too large to save (over 1MB after your browser attempted to compress it). Please try again, or pick a smaller image.' }, 400)

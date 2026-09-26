@@ -1,6 +1,6 @@
 import type { Env } from '../index'
-import { buildUniqueStoredName, publicPathForStoredName, sanitizeOriginalFileName, storageKeyForStoredName } from '../lib/fileAssets'
-import { classifyUploadedBuffer, isPublicUploadFormat, type DetectedUploadFormat } from '../lib/uploadSecurity'
+import { buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { classifyUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { getDb } from '../lib/db'
 
 // Backs the offline "sync file upload" flow, ported from
@@ -210,10 +210,9 @@ export class SyncUploadSession {
     const mimeType = detected.mime
     const mediaType = detected.kind
     const storedName = buildUniqueStoredName(originalName, detected.extension)
-    // Images (and video, see isPublicUploadFormat) on the public prefix;
-    // PDF/CSV/XLSX private -- same rule and helpers as routes/files.ts.
-    const isPublic = isPublicUploadFormat(detected)
-    const objectKey = storageKeyForStoredName(storedName, isPublic)
+    // Only images and videos get this far (owner ruling), same as
+    // routes/files.ts; both live under the public uploads/ prefix.
+    const objectKey = `uploads/${storedName}`
 
     await this.env.ASSETS.put(objectKey, total, { httpMetadata: { contentType: mimeType } })
 
@@ -227,7 +226,7 @@ export class SyncUploadSession {
     `).run({
       original_name: originalName,
       stored_name: storedName,
-      public_path: publicPathForStoredName(storedName, isPublic),
+      public_path: `/uploads/${storedName}`,
       mime_type: mimeType,
       media_type: mediaType,
       byte_size: total.byteLength,
