@@ -427,8 +427,15 @@ app.post('/users/avatar-upload', async (c) => {
 // person also saved the whole form. These two routes make the photo its own
 // action: the account owner (or an admin who can manage them) sets or
 // removes it directly -- the same trust level as uploading it.
-
-type AvatarAssetRow = { id: number; stored_name: string; public_path: string; source: string | null; media_type: string | null }
+//
+// Neither route ever deletes the photo it moves off (U-profile3, 27 Sep
+// 2026). Both used to delete the old R2 object and its file_assets row when
+// their own reference count found no other user; that count missed a
+// promotion, setting, product or other avatar pointing at the same file as
+// `uploads/NAME`, `/uploads/NAME?v=3` or an absolute URL, and deleted a photo
+// still on show. Owner rule: nothing may be lost. The old photo stays in the
+// Library, where an admin can delete it under the Library's in-use check
+// (lib/uploadReferences.ts, the one reference rule).
 
 function auditAvatarChange(c: Ctx, targetId: number, before: string | null, after: string | null) {
   const actor = c.get('user')
@@ -436,35 +443,6 @@ function auditAvatarChange(c: Ctx, targetId: number, before: string | null, afte
     { avatar_path: before },
     { avatar_path: after },
   ))
-}
-
-// The ONE rule for dropping a photo's stored object once an account stops
-// using it (DELETE clears it, PUT replaces it). Call it after the account's
-// pointer has moved off `path`. The object is deleted only when it can
-// belong to nobody else: it came from an avatar upload (source 'avatar',
-// never a general library file someone picked) and no user, product, gallery
-// row, promotion or setting still points at it. Anything else is kept.
-async function deleteOrphanAvatarObject(c: Ctx, path: string, reason: 'avatar_removed' | 'avatar_replaced'): Promise<boolean> {
-  const actor = c.get('user')
-  const db = getDb(c.env)
-  const asset = await db.prepare(
-    'SELECT id, stored_name, public_path, source, media_type FROM file_assets WHERE public_path = @path LIMIT 1',
-  ).get<AvatarAssetRow>({ path })
-  if (!asset || asset.source !== 'avatar') return false
-  const refs = await db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @path)
-      + (SELECT COUNT(*) FROM products WHERE image_path = @path)
-      + (SELECT COUNT(*) FROM product_images WHERE image_path = @path)
-      + (SELECT COUNT(*) FROM promotions WHERE instr(image_path, @path) = 1)
-      + (SELECT COUNT(*) FROM settings WHERE instr(value, @path) > 0) AS total
-  `).get<{ total: number }>({ path })
-  if (Number(refs?.total || 0) !== 0) return false
-  await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
-  await db.prepare('DELETE FROM file_assets WHERE id = @id').run({ id: asset.id })
-  await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'delete', 'file', asset.id, { original_path: asset.public_path, reason })
-  c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id: asset.id }))
-  return true
 }
 
 // PUT /users/:id/avatar { avatar_path } -- the path must name a stored IMAGE
@@ -488,23 +466,20 @@ app.put('/users/:id/avatar', async (c) => {
   if (!current) return c.json({ success: false, error: 'User not found' }, 404)
   const previousPath = String(current.avatar_path || '').trim()
   // Re-setting the photo the account already has changes nothing: no write,
-  // no audit row, and above all no cleanup of the file it still uses.
+  // no audit row.
   if (previousPath === avatarPath) {
-    return c.json({ success: true, changed: false, previousObjectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+    return c.json({ success: true, changed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
   }
   await db.prepare('UPDATE users SET avatar_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ path: avatarPath, id: targetId })
+  // The audit row carries the old path, so the replaced photo -- which stays
+  // in the Library -- can always be found and put back.
   await auditAvatarChange(c, targetId, previousPath || null, avatarPath)
-  // The replaced photo is cleaned up under exactly DELETE's rule.
-  const previousObjectDeleted = previousPath ? await deleteOrphanAvatarObject(c, previousPath, 'avatar_replaced') : false
   c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
-  return c.json({ success: true, changed: true, previousObjectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  return c.json({ success: true, changed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 })
 
-// DELETE /users/:id/avatar -- clears the photo. The stored object is deleted
-// too, but only when it can belong to nobody else: it came from an avatar
-// upload (source 'avatar', never a general library file someone picked) and
-// no user, product, gallery row, promotion or setting still points at it.
-// Anything else keeps the object and only clears this account's pointer.
+// DELETE /users/:id/avatar -- clears this account's pointer only. The photo
+// itself stays in the Library (see the note above PUT).
 app.delete('/users/:id/avatar', async (c) => {
   const actor = c.get('user')
   const targetId = Number(c.req.param('id') || 0)
@@ -516,14 +491,12 @@ app.delete('/users/:id/avatar', async (c) => {
   const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
   if (!current) return c.json({ success: false, error: 'User not found' }, 404)
   const previousPath = String(current.avatar_path || '').trim()
-  if (!previousPath) return c.json({ success: true, removed: false, objectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  if (!previousPath) return c.json({ success: true, removed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 
   await db.prepare('UPDATE users SET avatar_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: targetId })
   await auditAvatarChange(c, targetId, previousPath, null)
-
-  const objectDeleted = await deleteOrphanAvatarObject(c, previousPath, 'avatar_removed')
   c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
-  return c.json({ success: true, removed: true, objectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  return c.json({ success: true, removed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 })
 
 // -- User CRUD (admin control) --------------------------------------------

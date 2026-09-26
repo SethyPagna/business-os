@@ -84,6 +84,7 @@ const route = loadTs('routes/files.ts', {
   '../lib/db': { getDb: () => dbShim },
   '../lib/permissions': permissions,
   '../lib/media': media,
+  '../lib/uploadReferences': loadTs('lib/uploadReferences.ts', {}),
   '../lib/sqlBinding': sqlBinding,
   '../lib/fileAssets': {
     getMediaType: () => 'image',

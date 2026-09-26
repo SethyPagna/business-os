@@ -7,8 +7,9 @@
 // in-memory SQLite with a fake R2 bucket and pins:
 //   - set: persists a library IMAGE path; refuses unknown / non-image paths
 //     and other people's accounts (unless admin);
-//   - remove: clears the pointer; deletes the stored object + file_assets row
-//     ONLY for an avatar-sourced upload nothing else references.
+//   - remove: clears the pointer, audits the old path, and NEVER deletes the
+//     stored object or its file_assets row (U-profile3: nothing may be lost;
+//     the old photo stays in the Library under the Library's in-use check).
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -152,54 +153,32 @@ async function check(name, fn) {
     assert.equal(avatarOf(3), '/uploads/a10.webp')
   })
 
-  await check('removing an unshared avatar upload clears the pointer and deletes the object', async () => {
-    db.prepare("UPDATE users SET avatar_path = '/uploads/a10.webp' WHERE id = 2").run()
-    actor = { id: 2, username: 'cashier' }
-    const { status, body } = await del(2)
-    assert.equal(status, 200, JSON.stringify(body))
-    assert.equal(avatarOf(2), null)
-    assert.equal(body.objectDeleted, true)
-    assert.deepEqual(r2Deleted, ['uploads/a10.webp'])
-    assert.equal(assetExists(10), false)
-  })
-
-  await check('an avatar upload still used by another user keeps its object', async () => {
-    db.prepare("UPDATE users SET avatar_path = '/uploads/a10.webp' WHERE id IN (2, 3)").run()
-    actor = { id: 2, username: 'cashier' }
-    const { body } = await del(2)
-    assert.equal(avatarOf(2), null)
-    assert.equal(avatarOf(3), '/uploads/a10.webp')
-    assert.equal(body.objectDeleted, false)
-    assert.deepEqual(r2Deleted, [])
-    assert.equal(assetExists(10), true)
-  })
-
-  await check('an avatar upload referenced by a product, promotion or setting keeps its object', async () => {
-    actor = { id: 2, username: 'cashier' }
-    for (const seed of [
-      "INSERT INTO products(id,image_path) VALUES(1,'/uploads/a10.webp')",
-      "INSERT INTO product_images(id,image_path) VALUES(1,'/uploads/a10.webp')",
-      "INSERT INTO promotions(id,image_path) VALUES(1,'/uploads/a10.webp?v=2')",
-      "INSERT INTO settings(key,value) VALUES('store_logo','{\"logo\":\"/uploads/a10.webp\"}')",
-    ]) {
+  await check('removing a photo clears the pointer, audits the old path, and keeps the object', async () => {
+    for (const [path, id] of [['/uploads/a10.webp', 10], ['/uploads/lib11.jpg', 11]]) {
       reset()
-      db.prepare("UPDATE users SET avatar_path = '/uploads/a10.webp' WHERE id = 2").run()
-      db.prepare(seed).run()
-      const { body } = await del(2)
-      assert.equal(avatarOf(2), null, seed)
-      assert.equal(body.objectDeleted, false, seed)
-      assert.deepEqual(r2Deleted, [], seed)
+      db.prepare('UPDATE users SET avatar_path = @p WHERE id = 2').run({ p: path })
+      actor = { id: 2, username: 'cashier' }
+      const { status, body } = await del(2)
+      assert.equal(status, 200, JSON.stringify(body))
+      assert.equal(body.removed, true)
+      assert.equal(avatarOf(2), null)
+      assert.deepEqual(r2Deleted, [], path)
+      assert.equal(assetExists(id), true, path)
+      assert.equal(audits.filter((a) => a[4] === 'file').length, 0, 'no file is deleted, so no file-delete audit')
+      const pointer = audits.find((a) => a[3] === 'update' && a[4] === 'user')
+      assert.ok(pointer, 'the pointer change is audited')
+      assert.deepEqual(pointer[7], { before: { avatar_path: path }, after: { avatar_path: null } }, 'the old path is kept for recovery')
     }
   })
 
-  await check('a general library file used as a photo is never deleted, only unlinked', async () => {
-    db.prepare("UPDATE users SET avatar_path = '/uploads/lib11.jpg' WHERE id = 2").run()
-    actor = { id: 2, username: 'cashier' }
-    const { body } = await del(2)
-    assert.equal(avatarOf(2), null)
-    assert.equal(body.objectDeleted, false)
+  await check('an admin removing another account\'s photo keeps the object too', async () => {
+    db.prepare("UPDATE users SET avatar_path = '/uploads/a10.webp' WHERE id = 3").run()
+    actor = { id: 1, username: 'owner', isAdmin: true }
+    const { status } = await del(3)
+    assert.equal(status, 200)
+    assert.equal(avatarOf(3), null)
     assert.deepEqual(r2Deleted, [])
-    assert.equal(assetExists(11), true)
+    assert.equal(assetExists(10), true)
   })
 
   await check('removing when there is no photo is a harmless no-op', async () => {
