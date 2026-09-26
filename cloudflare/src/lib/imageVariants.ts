@@ -137,7 +137,10 @@ export async function serveUpload(env: Env, requestPath: string, request: Reques
  * Deliberately never written to the edge cache under the variant URL.
  */
 function originalAsFallback(variant: ImageVariantRequest, original: R2ObjectBody): Response {
-  const headers = applySafeUploadHeaders(new Headers(), variant.originalKey, original.httpMetadata?.contentType)
+  // Typed by the original's extension alone: a variant source always has an
+  // image extension (isSafeVariantSourceName), and the uploader's stored
+  // type is never an input to the serving policy.
+  const headers = applySafeUploadHeaders(new Headers(), variant.originalKey)
   // Unreachable for a name that passed isSafeVariantSourceName (every source
   // extension is servable), but the serving policy stays the single authority.
   if (!headers) return notFound()

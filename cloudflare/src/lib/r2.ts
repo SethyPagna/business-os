@@ -113,15 +113,18 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
 // replayed:
 //
 //   inline      jpeg / png / webp / gif / avif (and the image variants,
-//               always .webp). The extension wins over whatever type the
-//               uploader stored; with nosniff a browser will not reinterpret
-//               a .jpg as HTML.
+//               always .webp), plus the legacy photo extensions below. The
+//               extension wins over whatever type the uploader stored; with
+//               nosniff a browser will not reinterpret a .jpg as HTML.
+//   sniffed     `.bin` and extensionless keys (SNIFFED_UPLOAD_EXTENSIONS):
+//               the key says nothing, so the object's FIRST BYTES decide.
+//               An allowed image is inline as the detected type; anything
+//               else is a 404. The stored (uploader's) type is never read.
 //   attachment  types a CURRENT flow still serves from /uploads (see
 //               ATTACHMENT_UPLOAD_TYPES). Correct media type so <video>/<img>
 //               keep working, but Content-Disposition: attachment so a
 //               navigation downloads instead of rendering.
-//   404         everything else (.html, .svg, .js, .bin, ...), and an
-//               extensionless key unless its STORED type is an inline image.
+//   404         everything else (.html, .svg, .xml, .js, .exe, ...).
 //
 // Every response also carries nosniff and a sandboxing CSP. A CSP on an image
 // response does not affect embedding it in <img>; it only governs the
@@ -133,6 +136,16 @@ const INLINE_UPLOAD_TYPES: Readonly<Record<string, string>> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
   '.avif': 'image/avif',
+  // Legacy photos. Before S-uploads a stored key kept the uploader's own
+  // extension, so real product photos and avatars exist under the JPEG
+  // aliases and as iPhone HEIC/HEIF. Safari renders HEIC; other browsers
+  // fail that <img> harmlessly, which beats a 404 for every browser.
+  '.jfif': 'image/jpeg',
+  '.jpe': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
+  '.pjp': 'image/jpeg',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
 }
 // TODO(owner: public /uploads is images-only): these are non-images a current
 // flow still reaches through /uploads, kept as attachments until those flows
@@ -149,7 +162,18 @@ const ATTACHMENT_UPLOAD_TYPES: Readonly<Record<string, string>> = {
   '.pdf': 'application/pdf',
   '.csv': 'text/csv',
 }
-const INLINE_STORED_TYPES = new Set(Object.values(INLINE_UPLOAD_TYPES))
+// Keys whose name says nothing about their bytes. lib/fileAssets.ts used to
+// store a file uploaded without an extension as `.bin` (clipboard pastes,
+// camera blobs), and older writers kept no extension at all -- many of these
+// are real photos. They are decided by their first bytes, and served only as
+// one of these image types.
+const SNIFFED_UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['', '.bin'])
+const SNIFFED_INLINE_TYPES: ReadonlySet<string> = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/heic', 'image/heif',
+])
+// Covers every signature detectUploadFormat reads (12 bytes) and an ISO-BMFF
+// ftyp box's compatible-brand list.
+const SNIFF_BYTES = 64
 
 export const UPLOAD_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
 
@@ -165,24 +189,76 @@ function keyExtension(key: string): string {
 }
 
 /**
- * How a stored key may be served. Pass `storedContentType` only once the
- * object has been read; without it an extensionless key is 'deny' for now
- * (callers use policyNeedsStoredType to know whether to look).
+ * How a stored key may be served. For a sniffed key (`.bin`, no extension)
+ * pass `sniffedContentType`, the type its BYTES were detected as (see
+ * sniffServedImageType) -- never the uploader's stored type; without it a
+ * sniffed key is 'deny'. Every other key is decided by its extension alone.
  */
-export function uploadServePolicy(key: string, storedContentType?: string | null): UploadServePolicy {
+export function uploadServePolicy(key: string, sniffedContentType?: string | null): UploadServePolicy {
   const ext = keyExtension(key)
-  if (ext) {
-    if (INLINE_UPLOAD_TYPES[ext]) return { kind: 'inline', contentType: INLINE_UPLOAD_TYPES[ext] }
-    if (ATTACHMENT_UPLOAD_TYPES[ext]) return { kind: 'attachment', contentType: ATTACHMENT_UPLOAD_TYPES[ext] }
-    return { kind: 'deny' }
+  if (SNIFFED_UPLOAD_EXTENSIONS.has(ext)) {
+    const sniffed = String(sniffedContentType || '').split(';')[0].trim().toLowerCase()
+    return SNIFFED_INLINE_TYPES.has(sniffed) ? { kind: 'inline', contentType: sniffed } : { kind: 'deny' }
   }
-  const stored = String(storedContentType || '').split(';')[0].trim().toLowerCase()
-  return INLINE_STORED_TYPES.has(stored) ? { kind: 'inline', contentType: stored } : { kind: 'deny' }
+  if (INLINE_UPLOAD_TYPES[ext]) return { kind: 'inline', contentType: INLINE_UPLOAD_TYPES[ext] }
+  if (ATTACHMENT_UPLOAD_TYPES[ext]) return { kind: 'attachment', contentType: ATTACHMENT_UPLOAD_TYPES[ext] }
+  return { kind: 'deny' }
 }
 
-/** True when the policy cannot be decided from the key alone. */
-function policyNeedsStoredType(key: string): boolean {
-  return keyExtension(key) === ''
+/** True when the policy is decided by the object's bytes, not its key. */
+function policyNeedsSniff(key: string): boolean {
+  return SNIFFED_UPLOAD_EXTENSIONS.has(keyExtension(key))
+}
+
+// HEIF-family photos (iPhone HEIC) are not on uploadSecurity's upload
+// allowlist, but a legacy one is still a real photo. Also recognises an AVIF
+// whose major brand is the generic `mif1` with `avif` among its compatible
+// brands, which detectUploadFormat reads as HEIF.
+const HEIC_BRANDS: ReadonlySet<string> = new Set(['heic', 'heix', 'heim', 'heis', 'hevc', 'hevx'])
+const HEIF_BRANDS: ReadonlySet<string> = new Set(['mif1', 'msf1', 'heif'])
+
+function isoBmffImageType(bytes: Uint8Array): string | null {
+  if (bytes.length < 12) return null
+  const fourcc = (at: number) => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]).toLowerCase()
+  if (fourcc(4) !== 'ftyp') return null
+  const boxEnd = Math.min(bytes.length, ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0)
+  // The major brand, then the compatible brands after the 4-byte minor version.
+  const brands = [fourcc(8)]
+  for (let at = 16; at + 4 <= boxEnd; at += 4) brands.push(fourcc(at))
+  if (brands.some((brand) => brand === 'avif' || brand === 'avis')) return 'image/avif'
+  if (brands.some((brand) => HEIC_BRANDS.has(brand))) return 'image/heic'
+  if (brands.some((brand) => HEIF_BRANDS.has(brand))) return 'image/heif'
+  return null
+}
+
+/**
+ * What a sniffed key's object may be served as, from its first bytes: an
+ * allowlisted image (uploadSecurity's own detection), a legacy HEIC/HEIF
+ * photo, or null (404). `found: false` when the key does not exist. One
+ * small ranged read, paid only by sniffed keys -- every extension-typed key
+ * (the image hot path) never comes here.
+ */
+async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ found: boolean; contentType: string | null }> {
+  let bytes: Uint8Array
+  try {
+    const peek = await bucket.get(key, { range: { offset: 0, length: SNIFF_BYTES } })
+    if (peek === null) return { found: false, contentType: null }
+    bytes = new Uint8Array(await new Response(peek.body).arrayBuffer()).subarray(0, SNIFF_BYTES)
+  } catch {
+    // An empty object has no first bytes (R2 refuses the range), and an
+    // object that cannot be read is not served either.
+    return { found: true, contentType: null }
+  }
+  try {
+    // Lazy: keeps this module free of load-time imports for the callers and
+    // tests that load it standalone. Fails closed if it cannot load.
+    const { detectUploadFormat, isPublicImageFormat } = await import('./uploadSecurity')
+    const detected = detectUploadFormat(bytes)
+    if (detected && isPublicImageFormat(detected)) return { found: true, contentType: detected.mime }
+  } catch {
+    return { found: true, contentType: null }
+  }
+  return { found: true, contentType: isoBmffImageType(bytes) }
 }
 
 /**
@@ -190,10 +266,11 @@ function policyNeedsStoredType(key: string): boolean {
  * REPLACING any content-type/content-disposition already there. Used for
  * fresh R2 reads, for edge-cache hits (entries cached before this guard
  * existed still hold the replayed type) and for image variants. Returns
- * null when the key must not be served at all.
+ * null when the key must not be served at all. `sniffedContentType` only
+ * matters for a sniffed key; see uploadServePolicy.
  */
-export function applySafeUploadHeaders(headers: Headers, key: string, storedContentType?: string | null): Headers | null {
-  const policy = uploadServePolicy(key, storedContentType)
+export function applySafeUploadHeaders(headers: Headers, key: string, sniffedContentType?: string | null): Headers | null {
+  const policy = uploadServePolicy(key, sniffedContentType)
   if (policy.kind === 'deny') return null
   headers.set('content-type', policy.contentType)
   if (policy.kind === 'inline') {
@@ -236,7 +313,7 @@ export async function serveObject(
   request: Request,
   ctx?: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<Response> {
-  return (await serveStoredObject(bucket, key, request, ctx)) || new Response('Not found', { status: 404 })
+  return (await serveStoredObject(bucket, key, request, ctx)) || deniedUpload()
 }
 
 // Strong-or-weak ETag comparison (RFC 9110 13.1.2: If-None-Match uses the
@@ -278,12 +355,16 @@ export async function serveStoredObject(
   // runtime, so referencing it unconditionally would break every caller.
   // Refused by extension before any cache or R2 read: a denied type costs
   // nothing and can never be served from a pre-guard cache entry either.
-  if (!policyNeedsStoredType(key) && uploadServePolicy(key).kind === 'deny') return deniedUpload()
+  const sniffed = policyNeedsSniff(key)
+  if (!sniffed && uploadServePolicy(key).kind === 'deny') return deniedUpload()
   const cache = ctx ? caches.default : null
   const cacheKey = ctx ? new Request(new URL(request.url).toString(), { method: 'GET' }) : null
   if (cache && cacheKey) {
     const cached = await cache.match(cacheKey)
-    if (cached) {
+    // A sniffed key's entry is reused only when it holds an image type: one
+    // this code cached holds the type its bytes were detected as, and an
+    // older entry with any other type is re-judged from the bytes below.
+    if (cached && (!sniffed || uploadServePolicy(key, cached.headers.get('content-type')).kind !== 'deny')) {
       // Still honor a conditional request against the cached ETag -- the
       // cache entry replaces the R2 read, not the conditional-request
       // contract this route already had.
@@ -300,14 +381,24 @@ export async function serveStoredObject(
       return new Response(cached.body, { status: cached.status, headers: cachedHeaders })
     }
   }
+  // A sniffed key is typed from its bytes BEFORE the conditional read, so a
+  // 304 is only ever sent for an object that is an allowed image.
+  let sniffedType: string | null = null
+  if (sniffed) {
+    const sniff = await sniffServedImageType(bucket, key)
+    if (!sniff.found) return null
+    if (!sniff.contentType) return deniedUpload()
+    sniffedType = sniff.contentType
+  }
   const object = await bucket.get(key, {
     onlyIf: request.headers,
   })
   if (object === null) return null
   const headers = new Headers()
-  // Deliberately NOT object.writeHttpMetadata(headers): that replays the
-  // uploader-supplied content-type/disposition. See applySafeUploadHeaders.
-  if (!applySafeUploadHeaders(headers, key, object.httpMetadata?.contentType)) return deniedUpload()
+  // Deliberately NOT object.writeHttpMetadata(headers) or the stored
+  // httpMetadata type: that replays the uploader-supplied content-type /
+  // disposition. See applySafeUploadHeaders.
+  if (!applySafeUploadHeaders(headers, key, sniffedType)) return deniedUpload()
   headers.set('etag', object.httpEtag)
   headers.set('cache-control', 'public, max-age=31536000, immutable')
   if (!('body' in object)) {
