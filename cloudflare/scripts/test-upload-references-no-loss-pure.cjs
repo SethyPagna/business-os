@@ -84,6 +84,7 @@ const common = {
   '../lib/fileAssets': fileAssets,
   '../lib/uploadSecurity': uploadSecurity,
   '../lib/uploadReferences': uploadReferences,
+  '../lib/r2': { UPLOAD_CONTENT_SECURITY_POLICY: "sandbox; default-src 'none'" },
   '../lib/rateLimit': {
     checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0, slot: 'x' }),
     releaseRateLimitSlot: noop,

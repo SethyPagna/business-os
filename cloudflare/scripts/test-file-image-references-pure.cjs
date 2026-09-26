@@ -81,6 +81,7 @@ const route = loadTs('routes/files.ts', {
   '../lib/permissions': permissions,
   '../lib/media': media,
   '../lib/uploadReferences': loadTs('lib/uploadReferences.ts', {}),
+  '../lib/r2': { UPLOAD_CONTENT_SECURITY_POLICY: "sandbox; default-src 'none'" },
   '../lib/sqlBinding': sqlBinding,
   '../lib/fileAssets': {
     getMediaType: () => 'image',

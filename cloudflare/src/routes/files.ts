@@ -9,6 +9,7 @@ import { buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOrigina
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { sanitizeMediaPath } from '../lib/media'
 import { findUploadReferences } from '../lib/uploadReferences'
+import { UPLOAD_CONTENT_SECURITY_POLICY } from '../lib/r2'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { classifyUploadedBuffer, extensionForImageMime, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
@@ -495,6 +496,10 @@ app.get('/:id/download', async (c) => {
   headers.set('Content-Length', String(object.size))
   headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`)
   headers.set('X-Content-Type-Options', 'nosniff')
+  // The stored mime_type can be text/html or SVG on legacy rows. Attachment
+  // alone is a browser convention; the same sandbox CSP /uploads/* serves
+  // with (lib/r2.ts applySafeUploadHeaders) keeps it inert if one renders.
+  headers.set('Content-Security-Policy', UPLOAD_CONTENT_SECURITY_POLICY)
   headers.set('Cache-Control', 'private, no-store')
   return new Response(object.body, { headers })
 })
