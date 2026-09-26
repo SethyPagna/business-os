@@ -8,7 +8,7 @@
 //
 // Drives the REAL routes/auth.ts (harness/load_auth_route.cjs), and source
 // locks the frontend so OtpModal asks for the password and sends it.
-// Fails on a04da325.
+// Fails on a04da325; the confirm-replay check also fails on 968fe273.
 //
 // Run: node scripts/test-otp-self-enrolment-reauth-pure.cjs
 
@@ -69,6 +69,22 @@ async function main() {
     const confirm = await h.request('/otp/confirm', 'POST', { userId: 801, token: code, password: 'staff-password' }, { actorId: 801 })
     assert.equal(confirm.status, 200)
     assert.equal(h.userRow(801).otp_enabled, 1)
+  })
+
+  await check('the code spent on confirm cannot be reused as currentToken for another re-enrolment', async () => {
+    const h = seeded()
+    const setup = await h.request('/otp/setup', 'POST', { userId: 801, password: 'staff-password' }, { actorId: 801 })
+    const code = await h.codeAt(setup.body.secret)
+    const confirm = await h.request('/otp/confirm', 'POST', { userId: 801, token: code, password: 'staff-password' }, { actorId: 801 })
+    assert.equal(confirm.status, 200)
+    const activeSecret = h.userRow(801).otp_secret
+    // The confirmed secret is now the active one, so without the replay
+    // record the same six digits would pass as the current code.
+    const again = await h.request('/otp/setup', 'POST', { userId: 801, password: 'staff-password', currentToken: code }, { actorId: 801 })
+    assert.equal(again.status, 400, JSON.stringify(again.body))
+    assert.equal(again.body.code, 'current_otp_required')
+    assert.equal(h.userRow(801).otp_pending_secret, null, 'no replacement secret was minted')
+    assert.equal(h.userRow(801).otp_secret, activeSecret)
   })
 
   await check('replacing an active authenticator also needs a valid current code from it', async () => {

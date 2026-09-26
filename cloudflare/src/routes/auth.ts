@@ -6,7 +6,7 @@ import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
 import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
-import { generateTotpSecret, verifyTotp, verifyTotpStep } from '../lib/totp'
+import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
@@ -776,8 +776,15 @@ app.post('/otp/confirm', requireAuth, async (c) => {
 
   const pendingSecret = await decryptSecret(target.otp_pending_secret, c.env.APP_ENCRYPTION_KEY)
   if (!pendingSecret) return c.json({ error: 'OTP setup secret is unavailable. Please start setup again.' }, 400)
-  const verified = await verifyTotp(pendingSecret, String(body.token || ''))
-  if (!verified) return c.json({ error: 'Invalid code. Check your authenticator app time sync.' }, 400)
+  // Same per-user replay store as /otp/verify, /password-reset/otp and the
+  // self re-auth currentToken: the pending secret becomes the active one
+  // below, so an unspent confirm code would otherwise still be good as the
+  // next login code or as currentToken for another re-enrolment.
+  const confirmStep = await verifyTotpStep(pendingSecret, String(body.token || ''))
+  if (confirmStep === null || await isOtpStepReplayed(c.env, target.id, confirmStep)) {
+    return c.json({ error: 'Invalid code. Check your authenticator app time sync.' }, 400)
+  }
+  await markOtpStepUsed(c.env, target.id, confirmStep)
 
   const db = getDb(c.env)
   await db.prepare(`
