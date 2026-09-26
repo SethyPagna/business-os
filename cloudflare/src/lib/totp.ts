@@ -98,13 +98,22 @@ async function totpAt(secretBase32: string, counter: number): Promise<string> {
  * window for a deliberately stricter flow.
  */
 export async function verifyTotp(secretBase32: string, token: string, window = 2): Promise<boolean> {
+  return (await verifyTotpStep(secretBase32, token, window)) !== null
+}
+
+/**
+ * Same check as verifyTotp, but returns the 30-second step (counter) the
+ * token matched, or null. Callers that must refuse a replayed code (see
+ * lib/otpReplay.ts) record the step and reject any step at or below it.
+ */
+export async function verifyTotpStep(secretBase32: string, token: string, window = 2): Promise<number | null> {
   const cleanToken = String(token || '').replace(/\s/g, '')
-  if (!/^\d{6}$/.test(cleanToken)) return false
-  if (!secretBase32) return false
+  if (!/^\d{6}$/.test(cleanToken)) return null
+  if (!secretBase32) return null
   const counter = Math.floor(Date.now() / 1000 / STEP_SECONDS)
   for (let errorWindow = -window; errorWindow <= window; errorWindow++) {
     const candidate = await totpAt(secretBase32, counter + errorWindow)
-    if (candidate === cleanToken) return true
+    if (candidate === cleanToken) return counter + errorWindow
   }
-  return false
+  return null
 }
