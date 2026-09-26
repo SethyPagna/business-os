@@ -236,14 +236,17 @@ function isoBmffImageType(bytes: Uint8Array): string | null {
  * allowlisted image (uploadSecurity's own detection), a legacy HEIC/HEIF
  * photo, or null (404). `found: false` when the key does not exist. One
  * small ranged read, paid only by sniffed keys -- every extension-typed key
- * (the image hot path) never comes here.
+ * (the image hot path) never comes here. `meta` is that read's object
+ * metadata (full size, ETag), enough to answer a HEAD without another read.
  */
-async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ found: boolean; contentType: string | null }> {
+async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ found: boolean; contentType: string | null; meta?: R2Object }> {
   let bytes: Uint8Array
+  let meta: R2Object
   try {
     const peek = await bucket.get(key, { range: { offset: 0, length: SNIFF_BYTES } })
     if (peek === null) return { found: false, contentType: null }
     bytes = new Uint8Array(await new Response(peek.body).arrayBuffer()).subarray(0, SNIFF_BYTES)
+    meta = peek
   } catch {
     // An empty object has no first bytes (R2 refuses the range), and an
     // object that cannot be read is not served either.
@@ -254,11 +257,11 @@ async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ fo
     // tests that load it standalone. Fails closed if it cannot load.
     const { detectUploadFormat, isPublicImageFormat } = await import('./uploadSecurity')
     const detected = detectUploadFormat(bytes)
-    if (detected && isPublicImageFormat(detected)) return { found: true, contentType: detected.mime }
+    if (detected && isPublicImageFormat(detected)) return { found: true, contentType: detected.mime, meta }
   } catch {
     return { found: true, contentType: null }
   }
-  return { found: true, contentType: isoBmffImageType(bytes) }
+  return { found: true, contentType: isoBmffImageType(bytes), meta }
 }
 
 /**
@@ -291,9 +294,153 @@ function deniedUpload(): Response {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Byte ranges (RFC 9110 section 14).
+//
+// Owner decision: storefront About videos are public and visitors play and
+// pause them. iOS/Safari <video> will not play a source that ignores Range
+// (it probes with `Range: bytes=0-1` and expects a 206). One `bytes=` range is
+// honoured through R2's ranged get -- `a-b`, `a-` and `-n`. A multi-range or
+// malformed header is ignored (a full 200, which RFC 9110 allows), and HEAD
+// never takes a range (14.2: GET is the only method with range handling).
+export type ByteRangeSpec =
+  | { kind: 'bounded'; first: number; last: number }
+  | { kind: 'open'; first: number }
+  | { kind: 'suffix'; length: number }
+
+export function parseByteRange(header: string | null | undefined): ByteRangeSpec | null {
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(String(header || '').trim())
+  if (!match || (match[1] === '' && match[2] === '')) return null
+  if (match[1] === '') return { kind: 'suffix', length: Number(match[2]) }
+  const first = Number(match[1])
+  if (match[2] === '') return { kind: 'open', first }
+  const last = Number(match[2])
+  // last < first is an INVALID range-spec (ignored), not an unsatisfiable one.
+  return last < first ? null : { kind: 'bounded', first, last }
+}
+
+/**
+ * The inclusive byte span a range selects from an object of `size` bytes, or
+ * null when it is unsatisfiable (starts at/after the end, `bytes=-0`, or the
+ * object is empty).
+ */
+export function resolveByteRange(range: ByteRangeSpec, size: number): { start: number; end: number } | null {
+  if (!(size > 0)) return null
+  if (range.kind === 'suffix') {
+    if (!(range.length > 0)) return null
+    return { start: Math.max(0, size - range.length), end: size - 1 }
+  }
+  if (range.first >= size) return null
+  return { start: range.first, end: range.kind === 'bounded' ? Math.min(range.last, size - 1) : size - 1 }
+}
+
+function r2RangeFor(range: ByteRangeSpec): R2Range {
+  if (range.kind === 'suffix') return { suffix: range.length }
+  if (range.kind === 'open') return { offset: range.first }
+  return { offset: range.first, length: range.last - range.first + 1 }
+}
+
+// If-Range (RFC 9110 13.1.5) is compared STRONGLY. A weak tag, or a date
+// (this route sends no Last-Modified), can never match: the client gets the
+// whole current object instead of a piece of something it may not have.
+function ifRangeCanMatch(ifRange: string | null): boolean {
+  const value = String(ifRange || '').trim()
+  return !value || value.startsWith('"')
+}
+
+function rangeNotSatisfiable(size: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      'content-range': `bytes */${size}`,
+      'accept-ranges': 'bytes',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': UPLOAD_CONTENT_SECURITY_POLICY,
+    },
+  })
+}
+
+const SERVED_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+
+function servedObjectHeaders(key: string, sniffedType: string | null, etag: string): Headers | null {
+  const headers = new Headers()
+  // Deliberately NOT object.writeHttpMetadata(headers) or the stored
+  // httpMetadata type: that replays the uploader-supplied content-type /
+  // disposition. See applySafeUploadHeaders.
+  if (!applySafeUploadHeaders(headers, key, sniffedType)) return null
+  headers.set('etag', etag)
+  headers.set('cache-control', SERVED_CACHE_CONTROL)
+  headers.set('accept-ranges', 'bytes')
+  return headers
+}
+
+/**
+ * One `bytes=` range of a servable object: 206 with Content-Range, 304 when
+ * the conditional matched, 416 when unsatisfiable, null when absent, or
+ * 'whole' when a strong If-Range no longer matches (the caller serves 200).
+ */
+async function serveByteRange(
+  bucket: R2Bucket,
+  key: string,
+  request: Request,
+  range: ByteRangeSpec,
+  sniffedType: string | null,
+): Promise<Response | null | 'whole'> {
+  let object: R2ObjectBody | R2Object | null
+  try {
+    object = await bucket.get(key, { onlyIf: request.headers, range: r2RangeFor(range) })
+  } catch {
+    // R2 refuses a range that starts at or past the end (and `bytes=-0`).
+    // The object's size tells that apart from a real failure, which the
+    // retry below surfaces as before.
+    const meta = await bucket.head(key)
+    if (!meta) return null
+    const span = resolveByteRange(range, meta.size)
+    if (!span) return rangeNotSatisfiable(meta.size)
+    // Satisfiable after all (say, a last-pos past the end that was not
+    // clamped): ask again for exactly that span.
+    object = await bucket.get(key, { onlyIf: request.headers, range: { offset: span.start, length: span.end - span.start + 1 } })
+  }
+  if (object === null) return null
+  const headers = servedObjectHeaders(key, sniffedType, object.httpEtag)
+  if (!headers) return deniedUpload()
+  if (!('body' in object)) return new Response(null, { status: 304, headers })
+  const ifRange = request.headers.get('if-range')
+  if (ifRange && ifRange.trim() !== object.httpEtag) {
+    await object.body.cancel().catch(() => undefined)
+    return 'whole'
+  }
+  const span = resolveByteRange(range, object.size)
+  if (!span) {
+    await object.body.cancel().catch(() => undefined)
+    return rangeNotSatisfiable(object.size)
+  }
+  headers.set('content-range', `bytes ${span.start}-${span.end}/${object.size}`)
+  headers.set('content-length', String(span.end - span.start + 1))
+  return new Response(object.body, { status: 206, headers })
+}
+
+// HEAD: the whole object's headers from its metadata -- no body read. The
+// validators a browser revalidates with are honoured (If-None-Match, else
+// If-Modified-Since).
+function headObjectResponse(key: string, meta: R2Object, sniffedType: string | null, request: Request): Response {
+  const headers = servedObjectHeaders(key, sniffedType, meta.httpEtag)
+  if (!headers) return deniedUpload()
+  const ifNoneMatch = request.headers.get('if-none-match')
+  const ifModifiedSince = Date.parse(request.headers.get('if-modified-since') || '')
+  const notModified = ifNoneMatch
+    ? ifNoneMatchMatches(ifNoneMatch, meta.httpEtag)
+    : Number.isFinite(ifModifiedSince) && meta.uploaded instanceof Date
+      && Math.floor(meta.uploaded.getTime() / 1000) <= Math.floor(ifModifiedSince / 1000)
+  if (notModified) return new Response(null, { status: 304, headers })
+  headers.set('content-length', String(meta.size))
+  return new Response(null, { status: 200, headers })
+}
+
 // Serves an R2 object as an HTTP response, honoring conditional requests
 // (If-None-Match / If-Modified-Since) so browsers and CDNs can cache
-// uploaded assets without re-downloading them.
+// uploaded assets without re-downloading them, a single byte range (206 /
+// 416, see above) and HEAD.
 //
 // `ctx` is optional and, when passed, turns on a `caches.default` (the free
 // Workers edge cache, same primitive lib/cache.ts's cachedJsonResponse
@@ -357,9 +504,14 @@ export async function serveStoredObject(
   // nothing and can never be served from a pre-guard cache entry either.
   const sniffed = policyNeedsSniff(key)
   if (!sniffed && uploadServePolicy(key).kind === 'deny') return deniedUpload()
+  const isHead = String(request.method || 'GET').toUpperCase() === 'HEAD'
+  let range = isHead ? null : parseByteRange(request.headers.get('range'))
+  // A weak/date If-Range can never match: skip straight to the whole object.
+  if (range && !ifRangeCanMatch(request.headers.get('if-range'))) range = null
   const cache = ctx ? caches.default : null
   const cacheKey = ctx ? new Request(new URL(request.url).toString(), { method: 'GET' }) : null
-  if (cache && cacheKey) {
+  // The edge cache holds whole 200s; a range is always answered from R2.
+  if (cache && cacheKey && !range) {
     const cached = await cache.match(cacheKey)
     // A sniffed key's entry is reused only when it holds an image type: one
     // this code cached holds the type its bytes were detected as, and an
@@ -373,38 +525,48 @@ export async function serveStoredObject(
       // would otherwise keep serving the uploader's type for a year.
       const cachedHeaders = applySafeUploadHeaders(new Headers(cached.headers), key, cached.headers.get('content-type'))
       if (!cachedHeaders) return deniedUpload()
+      cachedHeaders.set('accept-ranges', 'bytes')
       const etag = cached.headers.get('etag')
       const ifNoneMatch = request.headers.get('if-none-match')
       if (ifNoneMatchMatches(ifNoneMatch, etag)) {
+        cachedHeaders.delete('content-length')
         return new Response(null, { status: 304, headers: cachedHeaders })
       }
-      return new Response(cached.body, { status: cached.status, headers: cachedHeaders })
+      return new Response(isHead ? null : cached.body, { status: cached.status, headers: cachedHeaders })
     }
   }
   // A sniffed key is typed from its bytes BEFORE the conditional read, so a
   // 304 is only ever sent for an object that is an allowed image.
   let sniffedType: string | null = null
+  let sniffedMeta: R2Object | undefined
   if (sniffed) {
     const sniff = await sniffServedImageType(bucket, key)
     if (!sniff.found) return null
     if (!sniff.contentType) return deniedUpload()
     sniffedType = sniff.contentType
+    sniffedMeta = sniff.meta
+  }
+  if (isHead) {
+    const meta = sniffedMeta ?? (await bucket.head(key))
+    if (!meta) return null
+    return headObjectResponse(key, meta, sniffedType, request)
+  }
+  if (range) {
+    const partial = await serveByteRange(bucket, key, request, range, sniffedType)
+    if (partial !== 'whole') return partial
+    // A strong If-Range that no longer matches: the whole object below.
   }
   const object = await bucket.get(key, {
     onlyIf: request.headers,
   })
   if (object === null) return null
-  const headers = new Headers()
-  // Deliberately NOT object.writeHttpMetadata(headers) or the stored
-  // httpMetadata type: that replays the uploader-supplied content-type /
-  // disposition. See applySafeUploadHeaders.
-  if (!applySafeUploadHeaders(headers, key, sniffedType)) return deniedUpload()
-  headers.set('etag', object.httpEtag)
-  headers.set('cache-control', 'public, max-age=31536000, immutable')
+  const headers = servedObjectHeaders(key, sniffedType, object.httpEtag)
+  if (!headers) return deniedUpload()
   if (!('body' in object)) {
     // Conditional request matched -- object unchanged.
     return new Response(null, { status: 304, headers })
   }
+  if (typeof object.size === 'number') headers.set('content-length', String(object.size))
   const response = new Response(object.body as ReadableStream, { headers })
   if (cache && cacheKey) {
     // Don't make the caller wait for the cache write -- same fire-and-forget
