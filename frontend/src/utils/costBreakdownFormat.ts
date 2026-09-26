@@ -21,6 +21,11 @@
 
 // U-cost (owner, 2026-09-25): a lot with nothing left on hand ('depleted')
 // no longer counts; the Worker lists those rows after the on-hand ones.
+// Same day: the catalog cost is QUANTITY-WEIGHTED -- each counted row carries
+// the quantity it weighs (weight_quantity) and its share of the total, and the
+// payload carries the weighted terms, so this module renders
+// "(2 × 12.00 + 8 × 12.50) / 10 = 12.40". Still no arithmetic of its own
+// beyond the reading: every number comes from the Worker.
 export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | 'depleted' | null
 
 const EXCLUSION_REASONS: ReadonlySet<string> = new Set(['zero', 'duplicate', 'inactive', 'superseded', 'overridden', 'depleted'])
@@ -39,12 +44,21 @@ export type CostBreakdownInput = {
   cost_khr: number | null
   /** A lot's remaining on-hand quantity across branches; null on a manual row or an older payload. */
   remaining_quantity?: number | null
+  /** The quantity this row weighs in the average (0 when it does not count). */
+  weight_quantity: number
+  /** weight_quantity / total weight, 0..1; null when the row does not weigh in or on an older payload. */
+  share: number | null
+  /** Nothing is on hand: this (newest received) lot's cost stands in. */
+  fallback: boolean
   excluded: CostBreakdownExclusionReason
 }
 
 export type CostBreakdown = {
   product_id: number
   inputs: CostBreakdownInput[]
+  /** SUM(quantity x cost_usd) / SUM(quantity); empty on an older payload. */
+  weighted_terms: Array<{ cost_usd: number; quantity: number }>
+  weighted_quantity: number
   distinct_usd: number[]
   distinct_khr: number[]
   mean_usd: number
@@ -68,6 +82,40 @@ export function formatCostFormula(distinctUsd: number[], meanUsd: number): strin
   if (!distinctUsd.length) return ''
   const sum = distinctUsd.map(fixed2).join(' + ')
   return `(${sum}) / ${distinctUsd.length} = ${fixed2(meanUsd)}`
+}
+
+/** A quantity as the shelf counts it: whole units bare, fractions to at most 3dp. */
+function quantityText(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)))
+}
+
+/**
+ * The weighted reading: "(2 × 12.00 + 8 × 12.50) / 10 = 12.40". Empty when
+ * nothing is on hand (the float then names the fallback lot instead).
+ */
+export function formatWeightedCostFormula(terms: Array<{ cost_usd: number; quantity: number }>, totalQuantity: number, resultUsd: number): string {
+  if (!terms.length || !(totalQuantity > 0)) return ''
+  const sum = terms.map((term) => `${quantityText(term.quantity)} × ${fixed2(term.cost_usd)}`).join(' + ')
+  return `(${sum}) / ${quantityText(totalQuantity)} = ${fixed2(resultUsd)}`
+}
+
+/** The formula line for any payload: weighted when the Worker sent terms, the legacy distinct mean otherwise. */
+export function formatBreakdownFormula(breakdown: CostBreakdown): string {
+  return breakdown.weighted_terms.length
+    ? formatWeightedCostFormula(breakdown.weighted_terms, breakdown.weighted_quantity, breakdown.result_usd)
+    : formatCostFormula(breakdown.distinct_usd, breakdown.mean_usd)
+}
+
+/** A row's share of the on-hand total as a percentage ("80%", "33.3%"); '' when it does not weigh in. */
+export function formatCostShare(share: number | null | undefined): string {
+  if (share == null || !Number.isFinite(share) || share <= 0) return ''
+  const rounded = Number((share * 100).toFixed(1))
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`
+}
+
+/** "8" -- the on-hand quantity a counted row weighs; '' when it does not weigh in. */
+export function formatCostWeight(input: Pick<CostBreakdownInput, 'weight_quantity'>): string {
+  return input.weight_quantity > 0 ? quantityText(input.weight_quantity) : ''
 }
 
 /** i18n key for a lot's exclusion reason -- callers translate with their own `t`. */
@@ -133,11 +181,21 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
     cost_usd: entry.cost_usd == null ? null : Number(entry.cost_usd),
     cost_khr: entry.cost_khr == null ? null : Number(entry.cost_khr),
     remaining_quantity: entry.remaining_quantity == null ? null : Number(entry.remaining_quantity),
+    weight_quantity: typeof entry.weight_quantity === 'number' && Number.isFinite(entry.weight_quantity) && entry.weight_quantity > 0 ? entry.weight_quantity : 0,
+    share: typeof entry.share === 'number' && Number.isFinite(entry.share) ? entry.share : null,
+    fallback: entry.fallback === true,
     excluded: typeof entry.excluded === 'string' && EXCLUSION_REASONS.has(entry.excluded) ? entry.excluded as CostBreakdownExclusionReason : null,
   }))
   return {
     product_id: Number(raw.product_id) || 0,
     inputs,
+    weighted_terms: Array.isArray(raw.weighted_terms)
+      ? (raw.weighted_terms as Array<Record<string, unknown>>).flatMap((term) => {
+        const cost = Number(term?.cost_usd), quantity = Number(term?.quantity)
+        return Number.isFinite(cost) && Number.isFinite(quantity) && quantity > 0 ? [{ cost_usd: cost, quantity }] : []
+      })
+      : [],
+    weighted_quantity: Number(raw.weighted_quantity) > 0 ? Number(raw.weighted_quantity) : 0,
     distinct_usd: Array.isArray(raw.distinct_usd) ? raw.distinct_usd.map(Number) : [],
     distinct_khr: Array.isArray(raw.distinct_khr) ? raw.distinct_khr.map(Number) : [],
     mean_usd: Number(raw.mean_usd) || 0,
