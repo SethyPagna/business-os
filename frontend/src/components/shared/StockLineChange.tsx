@@ -101,6 +101,8 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
     ] : []),
   ] : []
   const balance = (value: unknown) => pending ? '…' : formatQty(value, row.unit)
+  const beforeLabel = tr('before_qty', 'Before')
+  const afterLabel = tr('after_qty', 'After')
   const lines = stockBalanceLines(row, branchName, activeBranchCount, { branch: tr('branch', 'Branch'), total: tr('stock_balance_total', 'Total') })
   const moved = signedQuantity == null || !Number.isFinite(signedQuantity)
     ? formatQty(row.quantity, row.unit)
@@ -114,20 +116,26 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
     {/* leading-relaxed on every label: Khmer glyphs need the vertical room. */}
     <div data-testid="stock-record-balance" aria-busy={pending || undefined} className="grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-2">
       <div className={`rounded-xl px-3 py-2 ${movedTone}`}><div className="text-[11px] uppercase leading-relaxed tracking-wide opacity-80">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums">{moved}</div></div>
-      {/* Branch line first, then the total across branches (owner, 26 Sep). */}
-      <dl className="min-w-0 rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 text-[11px] uppercase leading-relaxed tracking-wide text-gray-400"><span /><span>{tr('before_qty', 'Before')} → {tr('after_qty', 'After')}</span></div>
-        {lines.map((line) => <div key={line.scope} data-testid="stock-balance-line" data-scope={line.scope} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
-          <dt className="break-words leading-relaxed text-gray-500 dark:text-gray-400">{line.label}</dt>
-          <dd className="text-sm font-semibold tabular-nums leading-relaxed text-gray-800 dark:text-gray-100" aria-label={`${line.label}: ${tr('before_qty', 'Before')} ${balance(line.before)}, ${tr('after_qty', 'After')} ${balance(line.after)}`}>{balance(line.before)} → {balance(line.after)}</dd>
-        </div>)}
-      </dl>
+      {/* Branch line first, then the total across branches (owner, 26 Sep).
+          The column caption sits OUTSIDE the <dl> (a <dl> holds only dt/dd
+          groups) and is hidden from assistive tech; each <dd> instead
+          carries its own screen-reader words, so its visible text is what
+          is read -- no aria-label overriding it. */}
+      <div className="min-w-0 rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
+        <div aria-hidden="true" className="text-right text-[11px] uppercase leading-relaxed tracking-wide text-gray-400">{beforeLabel} → {afterLabel}</div>
+        <dl>
+          {lines.map((line) => <div key={line.scope} data-testid="stock-balance-line" data-scope={line.scope} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
+            <dt className="break-words leading-relaxed text-gray-500 dark:text-gray-400">{line.label}</dt>
+            <dd className="text-sm font-semibold tabular-nums leading-relaxed text-gray-800 dark:text-gray-100"><span className="sr-only">{beforeLabel} </span>{balance(line.before)}<span aria-hidden="true"> → </span><span className="sr-only">, {afterLabel} </span>{balance(line.after)}</dd>
+          </div>)}
+        </dl>
+      </div>
     </div>
     {changes.length ? <div data-testid="stock-in-line-edit-change" className="rounded-xl border border-blue-100 bg-blue-50/55 px-3 py-2 dark:border-blue-900/60 dark:bg-blue-950/20">
       <div className="mb-1 text-[11px] font-semibold leading-relaxed text-blue-700 dark:text-blue-300">{tr('stock_in_line_changed_since', 'Edited after it was received')}</div>
       <dl className="space-y-1">{changes.map((change) => <div key={change.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2">
         <dt className="leading-relaxed text-gray-500">{change.label}</dt>
-        <dd className="tabular-nums font-semibold text-gray-800 dark:text-gray-100" aria-label={`${change.label}: ${tr('stock_in_line_as_received', 'As received')} ${change.received}, ${tr('stock_in_line_now', 'Now')} ${change.now}`}>{change.received} → {change.now}</dd>
+        <dd className="tabular-nums font-semibold text-gray-800 dark:text-gray-100"><span className="sr-only">{tr('stock_in_line_as_received', 'As received')} </span>{change.received}<span aria-hidden="true"> → </span><span className="sr-only">, {tr('stock_in_line_now', 'Now')} </span>{change.now}</dd>
       </div>)}</dl>
     </div> : null}
   </div>

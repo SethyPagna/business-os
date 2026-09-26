@@ -79,7 +79,10 @@ const balanceBlock = (html: string) => {
   const block = html.slice(start)
   const moved = /tabular-nums">([^<]*)</.exec(block)
   assert.ok(moved, 'the movement renders')
-  const lines = [...block.matchAll(/data-scope="(branch|total)"[^>]*><dt[^>]*>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((match) => [match[1], match[2], match[3]])
+  // what a sighted reader sees in each <dd>: the screen-reader-only words
+  // dropped, the arrow kept
+  const visible = (dd: string) => dd.replace(/<span class="sr-only">[^<]*<\/span>/g, '').replace(/<[^>]+>/g, '')
+  const lines = [...block.matchAll(/data-scope="(branch|total)"[^>]*><dt[^>]*>([^<]*)<\/dt><dd[^>]*>(.*?)<\/dd>/g)].map((match) => [match[1], match[2], visible(match[3])])
   return { moved: moved[1], lines }
 }
 
@@ -134,6 +137,22 @@ runTest('an underivable or failed balance reads "—", never a guessed number, a
 runTest('one active branch and no branch pair: the float says Total, not the branch name', () => {
   const html = renderFloat({ ...sale, branch_name: 'Store' }, { id: 77, value: { before_qty: 18, after_qty: 15, branch_before_qty: null, branch_after_qty: null, active_branch_count: 1 }, failed: false })
   assert.deepEqual(balanceBlock(html).lines, [['total', 'Total', '18 pcs → 15 pcs']])
+})
+
+runTest('the balance list is valid <dl> markup, read by its own words (no aria-label override)', () => {
+  const html = renderFloat(sale, { id: 77, value: twoBranches, failed: false })
+  const block = html.slice(html.indexOf('data-testid="stock-record-balance"'))
+  const dl = /<dl>(.*?)<\/dl>/.exec(block)
+  assert.ok(dl, 'the balance lines are a <dl>')
+  // every direct child is a <div> holding exactly one <dt> then one <dd>
+  const groups = [...dl[1].matchAll(/<div [^>]*>(<dt[^>]*>.*?<\/dt>)(<dd[^>]*>.*?<\/dd>)<\/div>/g)]
+  assert.equal(groups.map((group) => group[0]).join(''), dl[1], 'nothing but dt/dd groups inside the <dl>')
+  assert.equal(groups.length, 2)
+  assert.doesNotMatch(block, /<dd[^>]*aria-label/, 'no <dd> hides its text behind an aria-label')
+  assert.match(block, /<div aria-hidden="true"[^>]*>Before → After<\/div><dl>/, 'the column caption sits outside the list, hidden from assistive tech')
+  // what a screen reader reads for the branch line
+  const spoken = groups[0][2].replace(/<span aria-hidden="true">[^<]*<\/span>/g, '').replace(/<[^>]+>/g, '')
+  assert.equal(spoken, 'Before 10 pcs, After 7 pcs')
 })
 
 runTest('stockBalanceLines: branch first, total second, and the one-branch collapse', () => {
