@@ -5436,6 +5436,7 @@
   "upload_complete": "Upload complete",
   "upload_csv": "Upload CSV",
   "upload_file": "Upload file",
+  "library_upload_media_hint": "Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only.",
   "upload_image": "Upload Image",
   "upload_no_image_path": "Upload did not return an image path",
   "uploaded": "uploaded",

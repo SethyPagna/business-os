@@ -1523,8 +1523,13 @@ export default function FilesPage() {
               <label htmlFor="library-upload-file" className={`btn-primary inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap px-4 text-sm${canWireImages ? '' : ' ml-auto'}`}>
                 <Upload className="h-4 w-4" />
                 {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
+                {/* Owner ruling 2026-09-26: the Library stores only images and
+                    videos; the Worker refuses documents (lib/uploadSecurity.ts). */}
+                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
               </label>
+              <p className="basis-full text-right text-xs text-slate-500 dark:text-slate-400">
+                {tr('library_upload_media_hint', 'Images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM) only.')}
+              </p>
             </div>
           ) : (
             <div className="mb-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
