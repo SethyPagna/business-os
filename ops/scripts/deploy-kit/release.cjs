@@ -584,7 +584,9 @@ async function stepDeploy(ctx) {
   if (!['paid', 'free'].includes(plan)) { log.say('STOP: type paid or free.'); return false }
   const approval = await ex.confirm(ctx, 'typeYES', `Publish ${ctx.sha.slice(0, 12)} "${ctx.subject}" to PRODUCTION on the ${plan} plan?`)
   if (!approval.ok) { log.say('Stopped. Nothing was published.'); return false }
-  const r = await ex.runSpec(lib.commandCatalog.deploy(plan), ctx, approval)
+  // tee, not plain: the version id below is parsed from this output, and an
+  // uncaptured run returns none, so no release ever recorded what it published.
+  const r = await ex.runSpec(lib.commandCatalog.deploy(plan), ctx, approval, { tee: true })
   ctx.state.deploy = { at: new Date().toISOString(), plan, exitCode: r.code, dryRun: ctx.dryRun }
   const version = /Current Version ID:\s*([0-9a-f-]{36})/i.exec(r.out || '')
   if (version) ctx.state.deploy.versionId = version[1]
@@ -612,9 +614,15 @@ async function stepLive(ctx) {
   } while (Date.now() < deadline)
   const health = await ex.httpGet(`${ctx.site}/health`, ctx)
   const admin = await ex.httpGet(`${ctx.site}/`, ctx)
+  const siteChallenged = !!(version && version.challenged)
+  // Without a confirmed live version the release is unverified: in CI that is
+  // a problem (a red run), at a keyboard a warning the owner reads.
+  const unconfirmed = (message) => (ctx.ci ? problems : warnings).push(message)
   if (!ctx.dryRun) {
-    if (version && version.challenged) {
-      warnings.push(`the site showed this computer a bot challenge, so the live version could not be read. ${VPN_ADVICE}`)
+    if (siteChallenged) {
+      warnings.push(ctx.ci
+        ? "the site showed GitHub's runner a bot challenge (Cloudflare challenges data-centre addresses), so the live version is read through the Cloudflare API instead"
+        : `the site showed this computer a bot challenge, so the live version is read through the Cloudflare API instead. ${VPN_ADVICE}`)
     } else {
       const v = lib.checkVersion(version, ctx.sha, plan)
       if (!v.ok) problems.push(`/api/runtime/version: ${v.problems.join('; ')}`)
@@ -630,9 +638,32 @@ async function stepLive(ctx) {
     else if (admin.status !== 200 || !/id="root"/.test(admin.body)) problems.push(`the admin page did not load (HTTP ${admin.status})`)
     else log.say('  admin page loads')
   }
-  const approval = await ex.confirm(ctx, 'confirm', 'Read the production row counts again to compare? (This changes nothing.)')
+  const approval = await ex.confirm(ctx, 'confirm', 'Read production again (the live Worker version and the row counts) to compare? (This changes nothing.)')
   let comparison = null
+  let apiVersion = ''
   if (approval.ok) {
+    // The Cloudflare API is not behind the site's bot challenge, so this works
+    // from GitHub's runner too. Compare with the version this release published.
+    const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+    if (!dep.dry) {
+      apiVersion = lib.liveVersionId(dep.json)
+      const published = (ctx.state.deploy && ctx.state.deploy.versionId) || ''
+      const before = (ctx.state.snapshot && ctx.state.snapshot.previousVersionId) || ''
+      if (!dep.ok || !apiVersion) {
+        if (siteChallenged) unconfirmed('the live version could not be confirmed: the site was challenged and the Cloudflare API did not answer')
+        else warnings.push('could not read the live Worker version from the Cloudflare API')
+      } else if (published && apiVersion !== published) {
+        problems.push(`Cloudflare serves Worker version ${apiVersion}, not ${published} that this release published`)
+      } else if (published) {
+        log.say(`  Cloudflare serves Worker version ${apiVersion}, the one this release published - matches`)
+      } else if (before && apiVersion === before) {
+        problems.push(`Cloudflare still serves Worker version ${apiVersion}, the one from before this release`)
+      } else if (siteChallenged) {
+        unconfirmed(`Cloudflare serves Worker version ${apiVersion}, but this release did not record the version it published, so the two could not be compared`)
+      } else {
+        log.say(`  Cloudflare serves Worker version ${apiVersion}`)
+      }
+    }
     const c = await readCounts(ctx, approval)
     if (!c.ok) problems.push('could not read the row counts after the release')
     else if (c.counts) {
@@ -647,18 +678,19 @@ async function stepLive(ctx) {
     }
   } else {
     warnings.push('row counts were not compared')
+    if (siteChallenged && !ctx.dryRun) unconfirmed('the live version could not be confirmed: the site was challenged and the Cloudflare API was not read')
   }
-  ctx.state.live = { at: new Date().toISOString(), problems, warnings, version, comparison }
+  ctx.state.live = { at: new Date().toISOString(), problems, warnings, version, apiVersion, comparison }
   saveState(ctx)
   writeRecord(ctx, 'live-check.json', ctx.state.live)
   for (const w of warnings) log.say(`  WARNING: ${w}`)
   for (const p of problems) log.say(`  PROBLEM: ${p}`)
-  summary(ctx, `### Live checks: ${problems.length ? 'PROBLEMS' : 'OK'}\n\n${[...problems.map((p) => `- PROBLEM: ${p}`), ...warnings.map((w) => `- warning: ${w}`)].join('\n')}`)
+  summary(ctx, `### Live checks: ${problems.length ? 'PROBLEMS' : warnings.length ? 'OK with warnings' : 'OK'}\n\n${[...problems.map((p) => `- PROBLEM: ${p}`), ...warnings.map((w) => `- warning: ${w}`)].join('\n')}`)
   if (problems.length) {
     log.say('The release has problems. Send the log to Claude. To undo it, choose "Undo a release" in the menu.')
     return false
   }
-  log.say(ctx.dryRun ? '[dry-run] live checks printed.' : 'Live checks passed.')
+  log.say(ctx.dryRun ? '[dry-run] live checks printed.' : warnings.length ? `Live checks passed with ${warnings.length} warning(s); read them above.` : 'Live checks passed.')
   return true
 }
 

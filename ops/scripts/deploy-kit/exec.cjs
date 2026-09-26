@@ -204,7 +204,8 @@ async function runSpec(spec, ctx, approval, opts = {}) {
     return { code: 0, out: '', dry: true }
   }
   log.say(`$ ${ctx.ci && opts.capture ? `(in ${inv.cwd}) ${spec.kind} ${spec.args[0]} ... (output kept out of the public log)` : shown}`)
-  return spawnTee(inv.cmd, inv.args, { cwd: inv.cwd, capture: !!opts.capture, quiet: !!opts.quiet, interactive: !ctx.ci && !opts.capture, timeoutMs: opts.timeoutMs || 0 })
+  // tee: show the output as usual AND return it (capture alone hides it).
+  return spawnTee(inv.cmd, inv.args, { cwd: inv.cwd, capture: !!(opts.capture || opts.tee), echo: !!opts.tee, quiet: !!opts.quiet, interactive: !ctx.ci && !opts.capture, timeoutMs: opts.timeoutMs || 0 })
 }
 
 // Local, non-production commands (git, npm scripts that only build/test,

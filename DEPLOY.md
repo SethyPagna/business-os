@@ -179,7 +179,13 @@ command with its confirmation gate). Checked offline by
    are not synced: they already live on Cloudflare.
 8. **Live checks.** `/api/runtime/version` must report the commit with a
    clean stamp, and the plan. `/health` must say ok (it carries an app label,
-   not the commit). The admin page must load. Then the row counts again: a
+   not the commit). The admin page must load. Then, through the Cloudflare
+   API (which the site's bot challenge does not cover), the live Worker
+   version must be the one this release published. When the site challenges
+   the caller (GitHub's runner always is), that API read is the only proof:
+   in CI an unconfirmed version fails the run; at a keyboard it is a warning.
+   Any warning ends the step with "passed with N warning(s)", never a bare
+   pass. Then the row counts again: a
    table that shrank with no migration touching it fails; tables a migration
    changes, and till tables that only grew during the release, are warnings.
 9. **Undo** (each asks YES, then a second word). `wrangler rollback` to the
@@ -201,8 +207,9 @@ reviewer), `concurrency: production-deploy` and `contents: read`. The
 `confirm` input must be `DEPLOY`. It runs the same kit with `-CI`: the same
 tests (with no Cloudflare secret in that step), the snapshot, the migrations
 (unless `run_migrations` is off), the deploy and the live checks. The
-repository is public, so the job summary holds counts, bookmarks and ids
-only, and the output of the production reads stays out of the log. Secrets
+repository is public, so the job summary holds bookmarks, ids and row-count
+verdicts only (never table sizes), and the output of the production reads
+stays out of the log. Secrets
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are passed through `env:`
 only. With no saved token file, `with-wrangler-auth.cjs` passes the
 environment token through. To undo, use `.github/workflows/deploy-rollback.yml`

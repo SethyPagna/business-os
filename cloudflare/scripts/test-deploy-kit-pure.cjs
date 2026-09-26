@@ -8,7 +8,9 @@
 //   3. the kit never reads or copies the credential files itself;
 //   4. the challenge detector classifies the challenge and normal fixtures;
 //   5. the workflows are manual-only, gated, and never echo a secret;
-//   6. the pure helpers (counts comparison, certificates, release folder).
+//   6. the pure helpers (counts comparison, certificates, release folder);
+//   7. the live step confirms the published version through the Cloudflare API
+//      when the site challenges the runner (network and Cloudflare stubbed).
 'use strict'
 
 const assert = require('assert')
@@ -369,8 +371,145 @@ check('the release folder is never a working, branch or recovery checkout', () =
   assert.ok(lib.forbiddenReleasePath(path.join(base, 'Worktrees', 'business-os-recovery'), opts))
 })
 
-if (process.exitCode) {
-  console.error(`test-deploy-kit-pure: FAILED (${passed} passed)`)
-} else {
-  console.log(`test-deploy-kit-pure: ${passed} checks passed`)
+// ------------------------- 7. the live step, with the network and Cloudflare stubbed
+
+const ex = require(path.join(KIT, 'exec.cjs'))
+const { COMMANDS } = require(path.join(KIT, 'release.cjs'))
+
+async function checkAsync(name, fn) {
+  try {
+    await fn()
+    passed += 1
+  } catch (err) {
+    console.error(`FAIL ${name}\n  ${err.message}`)
+    process.exitCode = 1
+  }
 }
+
+// Swaps the kit's side-effect layer for the duration of fn; always restores it.
+async function withStubs(stubs, fn) {
+  const saved = Object.fromEntries(Object.keys(stubs).map((k) => [k, ex[k]]))
+  const said = []
+  const write = process.stdout.write
+  const env = { GITHUB_STEP_SUMMARY: process.env.GITHUB_STEP_SUMMARY, RELEASE_CONFIRM: process.env.RELEASE_CONFIRM }
+  const summaryFile = path.join(os.tmpdir(), `test-deploy-kit-summary-${process.pid}.md`)
+  fs.writeFileSync(summaryFile, '')
+  Object.assign(ex, stubs)
+  ex.log.say = (t = '') => { said.push(String(t)) }
+  process.stdout.write = () => true
+  process.env.GITHUB_STEP_SUMMARY = summaryFile
+  process.env.RELEASE_CONFIRM = 'DEPLOY'
+  try {
+    const result = await fn()
+    return { result, text: said.join('\n'), summary: fs.readFileSync(summaryFile, 'utf8') }
+  } finally {
+    Object.assign(ex, saved)
+    delete ex.log.say
+    process.stdout.write = write
+    for (const [k, v] of Object.entries(env)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+    fs.rmSync(summaryFile, { force: true })
+  }
+}
+
+const SHA = 'c64eced5c2311ed361aa1cad25a83bca5811aafe'
+const V_BEFORE = 'aaaaaaaa-0000-4000-8000-000000000001'
+const V_PUBLISHED = 'bbbbbbbb-0000-4000-8000-000000000002'
+const V_OTHER = 'cccccccc-0000-4000-8000-000000000003'
+const CHALLENGE = { status: 403, headers: { 'cf-mitigated': 'challenge', 'content-type': 'text/html' }, body: '<!DOCTYPE html><title>Just a moment...</title>' }
+
+// One live step. challenged: the site answers every request with a bot challenge
+// (what GitHub's runner gets). api: the version `deployments status` reports,
+// or 'fail' when the Cloudflare API does not answer.
+function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED }) {
+  const counts = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 10 + i]))
+  const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan: 'paid', ciConfirmWord: 'DEPLOY', recordDir: '', args: {},
+    state: { deploy: published ? { versionId: published } : {}, snapshot: { previousVersionId: V_BEFORE, preCounts: counts } } }
+  const stubs = {
+    httpGet: async (url) => {
+      if (challenged) return CHALLENGE
+      if (url.endsWith('/api/runtime/version')) return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revision: SHA.slice(0, 12), tier: 'paid' }) }
+      if (url.endsWith('/health')) return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'ok', version: '1' }) }
+      return { status: 200, headers: { 'content-type': 'text/html' }, body: '<!doctype html><div id="root"></div>' }
+    },
+    runSpec: async (spec, _ctx, approval) => {
+      lib.assertApproved(spec, approval)
+      if (spec.id === 'deployments-status') {
+        return api === 'fail' ? { code: 1, out: 'Authentication error [code: 10000]' }
+          : { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: api, percentage: 100 }] }) }
+      }
+      if (spec.id === 'counts') return { code: 0, out: JSON.stringify([{ results: [counts], success: true }]) }
+      throw new Error(`unexpected command ${spec.id}`)
+    },
+    // CI uses the real confirm (RELEASE_CONFIRM); a keyboard run would read stdin.
+    ...(ci ? {} : { confirm: async () => ({ ok: true, gate: 'confirm' }) }),
+  }
+  return withStubs(stubs, () => COMMANDS.live(ctx))
+}
+
+;(async () => {
+  await checkAsync('live, CI, site challenged: the Cloudflare API confirms the published version, and it says "with warnings"', async () => {
+    const r = await runLive({})
+    assert.strictEqual(r.result, true)
+    assert.ok(r.text.includes(`Cloudflare serves Worker version ${V_PUBLISHED}, the one this release published - matches`), 'the version must be confirmed through the API')
+    assert.ok(/Live checks passed with 3 warning\(s\)/.test(r.text), 'a challenged run must not end with a bare "Live checks passed."')
+    assert.ok(!/^Live checks passed\.$/m.test(r.text))
+    assert.ok(r.text.includes("GitHub's runner") && !/VPN/.test(r.text), 'CI wording, never the laptop VPN advice')
+    assert.ok(r.summary.includes('### Live checks: OK with warnings'))
+  })
+  await checkAsync('live, CI, site challenged: another version live is a problem', async () => {
+    const r = await runLive({ api: V_OTHER })
+    assert.strictEqual(r.result, false)
+    assert.ok(r.text.includes(`PROBLEM: Cloudflare serves Worker version ${V_OTHER}, not ${V_PUBLISHED} that this release published`))
+    assert.ok(r.summary.includes('### Live checks: PROBLEMS'))
+  })
+  await checkAsync('live, CI, site challenged and the API silent: unconfirmed is a problem, not a pass', async () => {
+    const r = await runLive({ api: 'fail' })
+    assert.strictEqual(r.result, false)
+    assert.ok(r.text.includes('PROBLEM: the live version could not be confirmed'))
+  })
+  await checkAsync('live, CI, no recorded version: the version from before the release still live is a problem', async () => {
+    const r = await runLive({ api: V_BEFORE, published: '' })
+    assert.strictEqual(r.result, false)
+    assert.ok(r.text.includes(`PROBLEM: Cloudflare still serves Worker version ${V_BEFORE}, the one from before this release`))
+  })
+  await checkAsync('live, keyboard run, challenged and the API silent: a warning with the VPN advice, never a bare pass', async () => {
+    const r = await runLive({ ci: false, api: 'fail' })
+    assert.strictEqual(r.result, true)
+    assert.ok(/turn the VPN off/.test(r.text))
+    assert.ok(r.text.includes('WARNING: the live version could not be confirmed'))
+    assert.ok(!/^Live checks passed\.$/m.test(r.text))
+  })
+  await checkAsync('live, CI, site readable: both the site and the API confirm, and it passes cleanly', async () => {
+    const r = await runLive({ challenged: false })
+    assert.strictEqual(r.result, true)
+    assert.ok(r.text.includes(`/api/runtime/version reports ${SHA.slice(0, 12)} (paid) - matches`))
+    assert.ok(r.text.includes(`Cloudflare serves Worker version ${V_PUBLISHED}, the one this release published - matches`))
+    assert.ok(/^Live checks passed\.$/m.test(r.text))
+    assert.ok(r.summary.includes('### Live checks: OK\n'))
+  })
+  await checkAsync('runSpec tee shows AND returns the output; a plain run returns none, so the deploy step must tee', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-deploy-kit-tee-'))
+    try {
+      const bin = path.join(tmp, 'cloudflare', 'node_modules', 'wrangler', 'bin')
+      fs.mkdirSync(bin, { recursive: true })
+      fs.writeFileSync(path.join(bin, 'wrangler.js'), `console.log('Current Version ID: ${V_PUBLISHED}')\n`)
+      const ctx = { ci: true, dryRun: false, releaseDir: tmp, authWrapper: '' }
+      const spec = { id: 'probe', kind: 'wrangler', args: ['whoami'], gate: 'none' }
+      const { result } = await withStubs({}, async () => [await ex.runSpec(spec, ctx, null), await ex.runSpec(spec, ctx, null, { tee: true })])
+      const [plain, tee] = result
+      assert.strictEqual(plain.code, 0)
+      assert.strictEqual(plain.out, '', 'a plain run returns no output: why no release ever recorded the version it published')
+      assert.ok(tee.out.includes(`Current Version ID: ${V_PUBLISHED}`), 'tee returns the output')
+      const src = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+      assert.ok(/ex\.runSpec\(lib\.commandCatalog\.deploy\(plan\), ctx, approval, \{ tee: true \}\)/.test(src), 'the deploy step must tee its output')
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  if (process.exitCode) {
+    console.error(`test-deploy-kit-pure: FAILED (${passed} passed)`)
+  } else {
+    console.log(`test-deploy-kit-pure: ${passed} checks passed`)
+  }
+})()
