@@ -722,6 +722,15 @@ function manualChunks(id: string): string | undefined {
     ) return 'notification-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
+    // The saved-transfer-run refusal/recovery helpers wrap branchTransport and
+    // serve only the admin transfer surfaces (TransferModal, Inventory). Left
+    // to the /src/api/ catch-all they land in app-api-methods, which the
+    // public storefront loads, and drag branch-api in with them (U-transfer3:
+    // +8 KB, past performanceBudgets' catalog-products budget).
+    if (
+      normalized.endsWith('/src/api/transferRunRecovery.ts')
+      || normalized.endsWith('/src/api/transferRunRefusal.ts')
+    ) return 'branch-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
     if (normalized.endsWith('/src/components/inventory/inventoryExport.ts')) return 'inventory-export'
