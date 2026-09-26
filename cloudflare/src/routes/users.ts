@@ -484,6 +484,8 @@ app.put('/users/:id', async (c) => {
     // an old cookie becomes valid again if the account is re-enabled before
     // that session expires, which defeats the meaning of an admin disable.
     if (Number(nextIsActive) === 0) {
+      // Revoke ALL (no keep): a disabled account keeps no session, even if
+      // an admin somehow deactivates themself.
       await revokeUserSessions(c.env, Number(id))
     }
     // An account edit changes who can do what; recording only "user #4 was
@@ -660,7 +662,12 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
 
   const hash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
-  await revokeUserSessions(c.env, targetId)
+  // Changing YOUR OWN password keeps the session that made the change and
+  // signs out every other device. Resetting SOMEONE ELSE's password signs out
+  // all of theirs -- the actor's own sessions are a different user_id and are
+  // never touched either way.
+  const changingOwnPassword = Number(actor?.id || 0) === Number(targetId || 0)
+  await revokeUserSessions(c.env, targetId, { keepCurrentSessionOf: changingOwnPassword ? c : null })
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'reset_password', 'user', targetId, {
     mode: adminReset ? 'admin' : 'self_service',
   })

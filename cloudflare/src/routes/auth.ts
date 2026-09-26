@@ -753,6 +753,8 @@ app.post('/otp/recover', requireAuth, async (c) => {
     SET otp_enabled = 0, otp_secret = NULL, otp_pending_secret = NULL, otp_pending_created_at = NULL, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run([target.id])
+  // Revoke ALL, no keep: the target is always another user (self is refused
+  // above), and a lost second factor makes every open session suspect.
   await revokeUserSessions(c.env, target.id)
   await audit(c.env, actor.id, actor.username, 'otp_recovery_reset', 'user', target.id, {
     target_user: target.username,
