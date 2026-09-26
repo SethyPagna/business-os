@@ -55,6 +55,8 @@ assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
   // free_goods is OPTIONAL (N14-D): the operator's explicit "these goods
   // were free" declaration for a $0.00 cost_price row.
   'free_goods',
+  // store is OPTIONAL (U-branch): the consolidated survivor by its own name.
+  'store',
 ])
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"reconcile"}'), 'reconcile')
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'), 'direct')
@@ -174,7 +176,10 @@ const searchMatch = loadCompiled('searchMatch.ts', {})
 // productIdentity for real too: it holds identityBarcodeKeySql, the ONE SQL
 // spelling of the fold this bridge narrows the catalog with.
 const productIdentity = loadCompiled('productIdentity.ts', { './db': {}, './sqlBinding': sqlBinding, './productDetailRule': productDetailRule })
+const branchRoles = loadCompiled('branchRoles.ts', {})
+const importBranchAuthority = loadCompiled('importBranchAuthority.ts', { './branchRoles': branchRoles })
 const catalog = loadCompiled('stockActionCatalog.ts', {
+  './importBranchAuthority': importBranchAuthority,
   './db': {},
   './sqlBinding': sqlBinding,
   './searchMatch': searchMatch,
@@ -207,7 +212,10 @@ const fakeDb = {
   assert.strictEqual(classified[0].data.plan.kind, 'add')
   assert.strictEqual(classified[1].action, 'error')
   assert.ok(seenSql.some((sql) => /FROM branch_stock/.test(sql)))
-  assert.ok(seenSql.every((sql) => !/SELECT \*/.test(sql)), 'catalog reads stay narrow')
+  // The branches read is the one SELECT *: a handful of rows, and it is how
+  // the held role/canonical_key/successor columns are read without a schema
+  // probe. The product/batch/stock reads must stay narrow.
+  assert.ok(seenSql.every((sql) => !/SELECT \*/.test(sql) || /^SELECT \* FROM branches ORDER BY id ASC$/.test(sql.trim())), 'catalog reads stay narrow')
   console.log('PASS unified stock catalog classification uses bounded narrow reads and blocks invalid rows')
 })().catch((error) => {
   console.error(error)

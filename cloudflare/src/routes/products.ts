@@ -3,6 +3,7 @@ import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite 
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
+import { posBootstrapBranches, readBranchDirectory } from '../lib/branchSuccession'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -1119,10 +1120,13 @@ app.get('/bootstrap', async (c) => {
   const [products, filters, branchRows] = await Promise.all([
     searchProductsWithIndexFallback(c.env, query),
     includeFilterMetadata ? loadProductFilters(c.env, query) : Promise.resolve(null),
-    // POS only consumes these four fields. Keeping this bootstrap projection
-    // narrow avoids shipping location/phone/manager/notes/timestamps on every
-    // first catalog window.
-    db.prepare('SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all(),
+    // POS only consumes these four fields, plus the explicit role once the
+    // held branch schema exists (the renamed Store sells by role). Keeping
+    // this bootstrap projection narrow avoids shipping location/phone/
+    // manager/notes/timestamps on every first catalog window; the one read
+    // is tolerant of the held columns being absent, and the projection is
+    // done in posBootstrapBranches.
+    readBranchDirectory(db).then((directory) => posBootstrapBranches(directory)),
   ])
   const restrictedProducts = isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(products as { items?: unknown }, user) : products
   return c.json({

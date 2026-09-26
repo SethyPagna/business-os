@@ -52,7 +52,7 @@ const REAL = new Set([
   'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
-  'branchRoles', 'branchRoleGuards',
+  'branchRoles', 'branchRoleGuards', 'branchSuccession', 'importBranchAuthority', 'canonicalBranchIdentity',
   'actorSnapshot', 'saleCreationSnapshot',
   'moneyPrecision', 'saleMoneyPrecision',
   // planTier carries the per-tier unit/row/concurrency ceilings the apply

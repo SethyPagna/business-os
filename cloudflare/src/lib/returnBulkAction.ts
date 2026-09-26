@@ -5,6 +5,7 @@ import { getActionTier } from './permissions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
+import { branchRedirectStatements, inactiveBranchErrorBody, readBranchDirectory, resolveStockBranch, type StockBranchResolution } from './branchSuccession'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents'
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
@@ -445,7 +446,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     saleStatuses: exactStatuses }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {
+async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[]; returnBulkRedirects: Map<number, StockBranchResolution[]> }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
@@ -474,6 +475,29 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
 
   const members: Member[] = []
   const guards: Statement[] = []
+  // Stock a return's cancel/restore moves for a return recorded at a
+  // since-retired branch moves at its successor (where the stock and the
+  // re-pointed damaged lots now are); the redirect is recorded. A retired
+  // branch with no successor refuses the member that would move its stock.
+  const returnBulkDirectory = await readBranchDirectory(db)
+  const returnBulkRedirects = new Map<number, StockBranchResolution[]>()
+  const bulkBranchFor = (memberId: number, raw: unknown): number => {
+    const id = Number(raw) || 0
+    if (!id) return 0
+    try {
+      const resolution = resolveStockBranch(returnBulkDirectory, id)
+      if (resolution.originBranchId != null) {
+        const list = returnBulkRedirects.get(memberId) || []
+        if (!list.some((entry) => entry.originBranchId === resolution.originBranchId)) list.push(resolution)
+        returnBulkRedirects.set(memberId, list)
+      }
+      return resolution.branchId
+    } catch (error) {
+      const refused = inactiveBranchErrorBody(error)
+      if (!refused) throw error
+      fail(`Return ${memberId}: ${refused.error}`, 409)
+    }
+  }
   for (const expected of request.items) {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) {
@@ -529,18 +553,19 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
         const quantity = Number(item.quantity) || 0
         if (!(quantity > 0)) continue
         const productId = Number(item.product_id) || 0
-        const branchId = Number(item.branch_id || row.branch_id) || 0
-        if (!productId || !branchId) fail(`Return ${expected.id} has a stock-moving line without a product or branch.`, 400)
+        const storedBranchId = Number(item.branch_id || row.branch_id) || 0
+        if (!productId || !storedBranchId) fail(`Return ${expected.id} has a stock-moving line without a product or branch.`, 400)
         const stockAction = normalize(item.stock_action, Number(item.return_to_stock) === 1 ? 'restock' : 'none')
         if (scope === 'customer' && stockAction === 'none') continue
+        const branchId = bulkBranchFor(expected.id, storedBranchId)
         if (scope === 'customer' && stockAction === 'damaged') {
           const damagedGroup = `${productId}:${branchId}`
           if (handledDamagedGroups.has(damagedGroup)) continue
           handledDamagedGroups.add(damagedGroup)
           const groupedItems = ownItems.filter((candidate) => Number(candidate.product_id) === productId
-            && Number(candidate.branch_id || row.branch_id) === branchId
+            && bulkBranchFor(expected.id, candidate.branch_id || row.branch_id) === branchId
             && normalize(candidate.stock_action, Number(candidate.return_to_stock) === 1 ? 'restock' : 'none') === 'damaged')
-          const lots = damaged.filter((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && Number(lot.branch_id) === branchId)
+          const lots = damaged.filter((lot) => Number(lot.return_id) === expected.id && Number(lot.product_id) === productId && bulkBranchFor(expected.id, lot.branch_id) === branchId)
           if (!lots.length) fail(`Return ${expected.id} has no damaged-stock provenance and cannot change status safely.`, 400)
           const itemQuantity = groupedItems.reduce((sum, candidate) => sum + (Number(candidate.quantity) || 0), 0)
           const lotQuantity = lots.reduce((sum, lot) => sum + (Number(lot.quantity) || 0), 0)
@@ -559,7 +584,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
           const allocated = ownAllocations.reduce((sum, allocation) => sum + Number(allocation.quantity || 0), 0)
           if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete lot provenance.`, 400)
           for (const allocation of ownAllocations) {
-            if (Number(allocation.branch_id) !== branchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
+            if (bulkBranchFor(expected.id, allocation.branch_id) !== branchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
           }
         } else if (item.batch_id) {
@@ -573,7 +598,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
     }
     members.push(member)
   }
-  return { members, guards }
+  return { members, guards, returnBulkRedirects }
 }
 
 export async function notifyReturnBulkAction(env: Env): Promise<void> {
@@ -593,7 +618,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return JSON.parse(String(previous.receipt_json)) as Row
   }
-  const { members, guards } = await buildMembers(db, request)
+  const { members, guards, returnBulkRedirects } = await buildMembers(db, request)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
@@ -644,6 +669,12 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   statements.push({ sql: "UPDATE return_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } })
   for (const member of members.filter((candidate) => candidate.changed)) {
     statements.push({ sql: `INSERT INTO return_bulk_members(operation_id,return_id,revision,sale_id,sale_revision,stock_fingerprint) VALUES(@operation,@id,COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=@id),0),@saleId,CASE WHEN @saleId IS NULL THEN NULL ELSE COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0) END,${movementFingerprint('@id')})`, params: { operation: operationId, id: member.id, saleId: member.saleId } })
+  }
+  for (const member of members.filter((candidate) => candidate.changed && candidate.stock.length > 0)) {
+    statements.push(...branchRedirectStatements((returnBulkRedirects.get(member.id) || []).map((resolution) => ({
+      entityType: 'return_bulk', entityKey: `${member.id}:${operationId}`, resolution,
+      actorId: user.id, actorName: actorSnapshot(user), context: `${request.field}:${request.source}->${request.target}`,
+    }))))
   }
   statements.push(auditStatement(user, operationId, 'return_fields_bulk', changedIds.length))
   statements.push({ sql: 'DELETE FROM return_bulk_guards', params: {} })

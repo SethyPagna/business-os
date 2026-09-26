@@ -4,6 +4,7 @@ import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import { BRANCH_INACTIVE_ERROR } from './branchSuccession'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { catalogCostRecomputeStatement } from './catalogCostRecompute'
@@ -537,11 +538,15 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   // parameter ceiling.
   const branchIds = [...new Set(lines.map((line) => line.branchId))]
   const branchParams = Object.fromEntries(branchIds.map((branchId, index) => [`branchId${index}`, branchId]))
+  // SELECT *: the explicit role (held schema) is what lets the renamed Store
+  // sell. A retired branch never takes a new sale line (the classifier has
+  // already moved a retired column onto its successor).
   const branchRows = await db.prepare(`
-    SELECT id, name FROM branches
+    SELECT * FROM branches
     WHERE id IN (${branchIds.map((_, index) => `@branchId${index}`).join(', ')})
-  `).all<{ id: number; name: string | null }>(branchParams)
+  `).all<{ id: number; name: string | null; role?: string | null; is_active?: number | null }>(branchParams)
   if (branchRows.length !== branchIds.length) throw new Error('Sale branch does not exist')
+  if (branchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)) throw new Error(BRANCH_INACTIVE_ERROR)
   const unsellableBranch = firstUnsellableBranch(branchRows)
   if (unsellableBranch) throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   const branchNameById = new Map(branchRows.map((branch) => [Number(branch.id), String(branch.name || '').trim()]))

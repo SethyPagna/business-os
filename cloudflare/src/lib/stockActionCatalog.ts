@@ -12,7 +12,13 @@ import {
   resolveUnifiedStockImportRows,
   type UnifiedStockCatalogProduct,
   type UnifiedStockResolvedRow,
+  type UnifiedStockSlotResolver,
 } from './stockActionImport'
+import {
+  indexCanonicalImportBranches,
+  resolveCanonicalImportBranchWithOrigin,
+  type CanonicalImportBranchRow,
+} from './importBranchAuthority'
 
 export type StockActionImportResult = {
   rowNumber: number
@@ -114,11 +120,24 @@ export async function classifyUnifiedStockActions(
   policyJson?: string | null,
 ): Promise<StockActionImportResult[]> {
   const products = await readCatalogProducts(db, rows)
-  const branches = await db.prepare(`
-    SELECT id, name FROM branches
-    WHERE is_active = 1 AND LOWER(TRIM(name)) IN ('shop', 'warehouse')
-    ORDER BY id ASC
-  `).all<{ id: number; name: string }>()
+  // Every branch row (SELECT * reads the held canonical_key / successor
+  // columns when present). Sheet columns resolve through the same canonical
+  // identity + successor rule as every other import: 'shop' / 'warehouse' as
+  // always while both branches are active; after the consolidation 'shop'
+  // follows the retired Shop to its successor and records that origin.
+  const branchRows = await db.prepare(`SELECT * FROM branches ORDER BY id ASC`).all<CanonicalImportBranchRow>()
+  const branchIndex = indexCanonicalImportBranches(branchRows)
+  const slotResolver: UnifiedStockSlotResolver = (slot) => {
+    const resolved = resolveCanonicalImportBranchWithOrigin(branchIndex, slot)
+    if (!resolved) return null
+    return {
+      branch: { id: Number(resolved.branch.id), name: String(resolved.branch.name ?? '') },
+      origin: resolved.origin ? { id: Number(resolved.origin.id), name: String(resolved.origin.name ?? '') } : null,
+    }
+  }
+  // Only the branches a column can land on (active canonical identities).
+  const branches = [...branchIndex.byRole.values()].flatMap((matches) => matches.length === 1 ? [matches[0]] : [])
+    .map((branch) => ({ id: Number(branch.id), name: String(branch.name ?? '') }))
 
   const productIds = products.map((product) => Number(product.id)).filter((id) => Number.isFinite(id) && id > 0)
   const branchIds = branches.map((branch) => Number(branch.id)).filter((id) => Number.isFinite(id) && id > 0)
@@ -138,6 +157,6 @@ export async function classifyUnifiedStockActions(
     }
   }
 
-  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock)
+  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock, slotResolver)
     .map(resultFromResolved)
 }

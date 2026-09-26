@@ -116,6 +116,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   '../lib/returnCreateAction': returnCreateActionKernel,

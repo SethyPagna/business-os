@@ -55,6 +55,10 @@ const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
   if (id === './branchRoles') return roles
   throw new Error(`unexpected branch guard import ${id}`)
 })
+const branchSuccession = loadModule('lib/branchSuccession.ts', (id) => {
+  if (id === './branchRoles') return roles
+  throw new Error(`unexpected branch succession import ${id}`)
+})
 const canonicalIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
   if (id === './db') return { toDbBool: (value, fallback = 0) => {
     if (value == null || value === '') return fallback
@@ -120,6 +124,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/cache') return { bumpVersion: asyncNoop }
   if (id === '../lib/productBatches') return { ...productBatches, attachBatchCounts: asyncNoop, receiveBatchStock: asyncNoop, removeStockFromBatch: asyncNoop, removeStockAcrossBatches: asyncNoop, InsufficientBatchStockError: class extends Error {} }
   if (id === '../lib/branchRoleGuards') return branchGuards
+  if (id === '../lib/branchSuccession') return branchSuccession
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)

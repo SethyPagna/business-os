@@ -242,6 +242,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // move through this guard, so the fixtures here run through the rejection
   // instead of opting out of it.
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,

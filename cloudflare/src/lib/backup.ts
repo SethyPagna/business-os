@@ -174,6 +174,9 @@ export const BACKUP_TABLES = [
   'loyalty_point_adjustments',
   'inventory_movements',
   'stock_transfers',
+  // 0198: where a record addressed to a retired branch actually landed.
+  // Provenance only (no FK); a backup without it restores as empty.
+  'branch_redirects',
   'stock_row_moves',
   'import_jobs',
   'import_job_files',

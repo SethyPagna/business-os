@@ -849,7 +849,7 @@ console.log('PASS resolveRowImagePath matches explicit filenames and falls back 
   const newProductBlockEnd = source.indexOf("} else if (job.type === 'customers'", newProductBlockStart)
   const block = source.slice(newProductBlockStart, newProductBlockEnd)
 
-  assert.ok(/SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
+  assert.ok(/SELECT \* FROM branches WHERE is_active = 1/.test(source), 'runImportApply should fetch active branch identities before deciding which canonical branches need a 0 row seeded')
   assert.ok(/productSeedBranchIds = \[\.\.\.index\.byRole\.values\(\)\]/.test(source), 'zero-row seeding is limited to one unambiguous active Shop/Warehouse identity, never an arbitrary legacy branch')
 
   const chosenBranchInsertIdx = block.indexOf('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@id, @branchId, @qty)')

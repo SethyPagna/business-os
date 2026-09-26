@@ -8,7 +8,7 @@ const root = path.join(__dirname, '..')
 const cache = new Map()
 const actual = new Set(['saleStatusResolution','actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
-  'customerReturnEntitlement', 'returnBulkAction'])
+  'customerReturnEntitlement', 'returnBulkAction', 'branchSuccession', 'branchRoles'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

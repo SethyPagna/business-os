@@ -9,6 +9,7 @@ import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
+import { BRANCH_INACTIVE_CODE, BRANCH_INACTIVE_ERROR, branchRedirectStatements, inactiveBranchErrorBody, readBranchDirectory, resolveStockBranch, sellingBranchSql, type StockBranchResolution } from './branchSuccession';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
@@ -347,6 +348,43 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
+    // Stock a hold releases (or re-takes) after its branch was retired moves
+    // at the successor; stored rows keep their branch, the typed deltas the
+    // undo replays carry the branch the units really moved at, and the
+    // redirect is recorded. A retired branch with no successor refuses only a
+    // member whose transition would move its stock.
+    const bulkBranchDirectory = await readBranchDirectory(db);
+    const bulkRefusals = new Map<number, ReturnType<typeof inactiveBranchErrorBody>>();
+    const bulkRedirectsBySale = new Map<number, StockBranchResolution[]>();
+    const resolveBulkBranch = (branchId: number) => {
+        try {
+            return resolveStockBranch(bulkBranchDirectory, branchId);
+        }
+        catch (error) {
+            if (!inactiveBranchErrorBody(error))
+                throw error;
+            return null;
+        }
+    };
+    for (const item of items) {
+        if (item.branch_id == null)
+            continue;
+        const resolution = resolveBulkBranch(Number(item.branch_id));
+        if (!resolution) {
+            bulkRefusals.set(Number(item.id), { error: BRANCH_INACTIVE_ERROR, code: BRANCH_INACTIVE_CODE, branch_id: Number(item.branch_id) });
+            continue;
+        }
+        if (resolution.originBranchId != null)
+            bulkRedirectsBySale.set(Number(item.sale_id), [...(bulkRedirectsBySale.get(Number(item.sale_id)) || []), resolution]);
+        item.branch_id = resolution.branchId;
+    }
+    for (const allocation of allocations) {
+        if (allocation.branch_id == null)
+            continue;
+        const resolution = resolveBulkBranch(Number(allocation.branch_id));
+        if (resolution)
+            allocation.branch_id = resolution.branchId;
+    }
     const returns = await rowsIn<{
         sale_id: number;
         sale_item_id: number | null;
@@ -379,11 +417,18 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         const itemCancel = expected.cancel;
         const createsCancellationFee = changed && request.target_status === 'cancelled' && !!itemCancel
             && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
+        // The lost fee is booked where the business now sells: a sale rung up at
+        // a since-retired branch books it at the successor.
+        let feeBranchId = Number(sale.branch_id);
         if (createsCancellationFee) {
-            const branchId = Number(sale.branch_id);
-            if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
+            const feeResolution = resolveBulkBranch(feeBranchId);
+            const feeBranch = feeResolution?.branch;
+            if (!feeResolution || !feeBranch || !Number.isSafeInteger(feeResolution.branchId) || feeResolution.branchId <= 0 || !branchCanSell(feeBranch))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
-            guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
+            feeBranchId = feeResolution.branchId;
+            if (feeResolution.originBranchId != null)
+                bulkRedirectsBySale.set(expected.id, [...(bulkRedirectsBySale.get(expected.id) || []), feeResolution]);
+            guards.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s WHERE s.id=@id AND s.branch_id=@stored) AND EXISTS(SELECT 1 FROM branches b WHERE b.id=@branch AND b.is_active=1 AND ${sellingBranchSql(bulkBranchDirectory, 'b')})`, { id: expected.id, stored: Number(sale.branch_id), branch: feeBranchId }));
         }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;
@@ -422,7 +467,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
                 fee_date: stamp.slice(0, 10),
                 sale_id: expected.id,
-                branch_id: sale.branch_id ?? null,
+                branch_id: feeBranchId,
                 delivery_contact_id: null,
                 notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
                 created_by: user.id,
@@ -460,6 +505,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 const delta = heldQuantity(old, item.quantity, returned.get(item.id) || 0) - heldQuantity(request.target_status, item.quantity, returned.get(item.id) || 0);
                 if (!delta)
                     continue;
+                const refusal = bulkRefusals.get(Number(item.id));
+                if (refusal)
+                    throw new SaleBulkError(refusal.error, 409, { code: refusal.code, branch_id: refusal.branch_id });
                 if (!item.product_id || !item.branch_id)
                     fail('A stock-moving line has no product or branch.');
                 if (item.damaged_lot_id)
@@ -492,6 +540,8 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     statements.push({ sql: "UPDATE sale_bulk_operations SET history_id=last_insert_rowid(),receipt_json=json_set(receipt_json,'$.actionHistoryId',last_insert_rowid()) WHERE id=@id", params: { id: operationId } });
     for (const m of members.filter(member => member.changed))
         statements.push({ sql: `INSERT INTO sale_bulk_members(operation_id,sale_id,revision,movement_fingerprint) VALUES(@op,@id,COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@id),0),${saleMovementFingerprint('@id')})`, params: { op: operationId, id: m.id } });
+    for (const m of members.filter(member => member.changed && (member.stock.length > 0 || member.createdFee)))
+        statements.push(...branchRedirectStatements((bulkRedirectsBySale.get(m.id) || []).map(resolution => ({ entityType: 'sale_status_bulk', entityKey: `${m.id}:${operationId}`, resolution, actorId: user.id, actorName: actorSnapshot(user), context: String(request.target_status) }))));
     statements.push(auditStatement(user, operationId, 'sale_status_bulk', changedIds.length), { sql: 'DELETE FROM sale_bulk_guards', params: {} });
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {

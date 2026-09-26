@@ -228,6 +228,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './branchWrites': branchWrites,
   './canonicalBranchIdentity': canonicalBranchIdentity,
   './branchRoleGuards': branchRoleGuards,
+  './branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   './permissions': permissions,
   './productImagePermission': productImagePermission,
   './cache': { bumpVersion: async () => {} },
@@ -246,6 +247,7 @@ const feesRoute = loadReal('routes/fees.ts', {
   '../lib/feeOperationReceipt': feeOperationReceiptKernel,
   '../lib/reviewGate': reviewGate,
   '../lib/branchRoles': branchRoles,
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': branchRoles }),
   // fee_date is a TYPED date now, read day-first through the shared kernel,
   // so routes/fees.ts imports batchCode.ts too -- the same real transpiled
   // module loaded above, not a stub, so the order under test is the real one.

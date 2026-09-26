@@ -18,6 +18,8 @@ function load(name) {
     // transfer-capability test, but the module graph still imports it.
     if (id === './batchesTransport.ts') return { receiveBatchWireBody: payload => payload }
     if (id === './query.ts') return {}
+    // U-branch: getBranches() feeds the branch directory; unused by transfers.
+    if (id === '../utils/branchDirectory.ts') return { rememberBranchRows: () => {} }
     throw new Error(`Unexpected dependency ${id}`)
   },module)
   return module.exports

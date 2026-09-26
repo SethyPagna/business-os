@@ -32,6 +32,17 @@ import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSet
 // offline replay, direct API caller, or stale client cannot bypass it.
 import { firstUnsellableBranch } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
+// Where each stock write lands: an active branch as asked, a retired one's
+// additive writes at its successor (with the redirect recorded), else refused.
+import {
+  branchRedirectStatements,
+  effectiveBranchId,
+  inactiveBranchErrorBody,
+  readBranchDirectory,
+  resolveStockBranch,
+  sellingBranchSql,
+  type StockBranchResolution,
+} from '../lib/branchSuccession'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
@@ -560,11 +571,25 @@ app.post('/', async (c) => {
   // a future status that does NOT deduct cannot join the resolver silently.
   const shouldDeductStock = STOCK_DEDUCTED_STATUSES.has(saleStatus)
 
-  // ---- 1. Normalize + validate input shape (no DB access yet) ----
-  const saleHeaderBranchId = Number(body.branch_id)
+  // ---- 1. Normalize + validate input shape ----
+  // A sale queued offline against a branch that has since been retired is
+  // still a real sale: its stock comes off the successor branch and the
+  // sale records the branch it was rung up at (branch_redirects). While
+  // every branch is active this resolves each id to itself.
+  const saleBranchDirectory = await readBranchDirectory(db)
+  let saleHeaderResolution: StockBranchResolution
+  try {
+    saleHeaderResolution = resolveStockBranch(saleBranchDirectory, body.branch_id)
+  } catch (error) {
+    const refused = inactiveBranchErrorBody(error)
+    if (refused) return c.json(refused, 409)
+    throw error
+  }
+  const saleHeaderBranchId = saleHeaderResolution.branchId
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
+  const requestedHeaderBranchId = Number(body.branch_id)
   const normalized: NormalizedItem[] = []
   for (let index = 0; index < body.items.length; index += 1) {
     const item = body.items[index]
@@ -579,7 +604,10 @@ app.post('/', async (c) => {
     if (item.unlotted_stock !== undefined && typeof item.unlotted_stock !== 'boolean') {
       return c.json({ error: `Sale item #${index + 1} has an invalid unlotted_stock flag` }, 400)
     }
-    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    // A line naming the same (possibly retired) branch as the header follows
+    // the header's resolution; any other branch must itself be the header's.
+    const requestedLineBranchId = Number(item.branch_id ?? requestedHeaderBranchId)
+    const lineBranchId = requestedLineBranchId === requestedHeaderBranchId ? saleHeaderBranchId : requestedLineBranchId
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)
     }
@@ -595,9 +623,11 @@ app.post('/', async (c) => {
   // A line may name its own branch, so this checks the DISTINCT set the cart
   // actually resolved to rather than trusting body.branch_id alone.
   const saleBranchIds = [saleHeaderBranchId]
+  // SELECT *: the explicit role column, when the held schema has added it,
+  // is what makes a renamed selling branch sell.
   const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+    .prepare(`SELECT * FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null; role?: string | null }>(chunk))
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
@@ -1415,7 +1445,7 @@ app.post('/', async (c) => {
                 LEFT JOIN current_batch cb ON 1 = 1
                 WHERE b.id = @branch_id
                   AND COALESCE(b.is_active, 1) = 1
-                  AND lower(trim(b.name)) = 'shop'
+                  AND ${sellingBranchSql(saleBranchDirectory, 'b')}
                   AND (@batch_id IS NULL OR cb.batch_id IS NOT NULL)
                 LIMIT 1
               )
@@ -1499,7 +1529,7 @@ app.post('/', async (c) => {
                     JOIN branches b
                       ON b.id = bbs.branch_id
                      AND COALESCE(b.is_active, 1) = 1
-                     AND lower(trim(b.name)) = 'shop'
+                     AND ${sellingBranchSql(saleBranchDirectory, 'b')}
                     WHERE pb.id = @batch_id
                       AND pb.variant_product_id = @product_id
                       AND pb.is_active = 1
@@ -1645,10 +1675,15 @@ app.post('/', async (c) => {
           totalUsd,
           saleStatus,
           origin: clientCreatedAt ? 'offline_replay' : 'pos',
+          ...(saleHeaderResolution.originBranchId != null ? { addressedBranchId: saleHeaderResolution.originBranchId } : {}),
         }),
         sale_write_key: saleWriteKey,
       },
     })
+    statements.push(...branchRedirectStatements([{
+      entityType: 'sale', entityKey: receiptNumber, resolution: saleHeaderResolution,
+      actorId: actorId(user), actorName: actorSnapshot(user), context: clientCreatedAt ? 'offline_replay' : 'pos',
+    }]))
     statements.push(ordinaryBusinessMaintenanceGuard)
     await db.batch(statements)
     const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
@@ -2122,6 +2157,28 @@ app.patch('/:id/status', async (c) => {
   }
 
   const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null }>([id])
+  // A hold released (or re-taken) after its branch was retired moves its
+  // units at the successor branch; the sale's rows keep the branch they were
+  // rung up at and the redirect is recorded. A line whose branch is retired
+  // with no successor is refused below only if this transition moves it.
+  const statusBranchDirectory = await readBranchDirectory(db)
+  const statusRedirects: StockBranchResolution[] = []
+  const statusItemRedirects: StockBranchResolution[] = []
+  const statusRefusedItemIds = new Set<number>()
+  let statusRefusal: ReturnType<typeof inactiveBranchErrorBody> = null
+  for (const item of items) {
+    if (item.branch_id == null) continue
+    try {
+      const resolution = resolveStockBranch(statusBranchDirectory, item.branch_id)
+      if (resolution.originBranchId != null) statusItemRedirects.push(resolution)
+      item.branch_id = resolution.branchId
+    } catch (error) {
+      const refused = inactiveBranchErrorBody(error)
+      if (!refused) throw error
+      statusRefusal = refused
+      statusRefusedItemIds.add(Number(item.id))
+    }
+  }
 
   // How much of each line already came back through real returns
   // (non-cancelled, customer scope; return_to_stock does NOT matter here:
@@ -2208,6 +2265,16 @@ app.patch('/:id/status', async (c) => {
     skipStock,
   })
   const totalSkippedUnits = plan.skippedUnits + skippedDamagedUnits
+  if (statusRefusal) {
+    const refusedPlan = planSaleStockTransition({
+      saleId: id, oldStatus, newStatus: saleStatus,
+      items: regularItems.filter((item) => statusRefusedItemIds.has(Number(item.id))),
+      returnedByItem, reason: movementReason, userId: user?.id ?? null, userName: actorSnapshot(user), skipStock,
+    })
+    const refusedDamaged = damagedTransitionOps.some((op) => op.delta !== 0
+      && items.some((item) => statusRefusedItemIds.has(Number(item.id)) && Number(item.damaged_lot_id) === op.lotId))
+    if (refusedPlan.statements.length > 0 || refusedDamaged) return c.json(statusRefusal, 409)
+  }
 
   // Pre-flight availability for anything the plan TAKES (plain read; the
   // CHECK(quantity >= 0) constraints below remain the real race guard,
@@ -2409,14 +2476,25 @@ app.patch('/:id/status', async (c) => {
   // exactly. last_insert_rowid() is consumed by the immediately following
   // sale UPDATE in this one D1 batch.
   if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
-    const cancellationBranchId = Number(sale.branch_id)
+    // The fee is booked where the business now sells: a sale rung up at a
+    // since-retired branch books it at the successor.
+    let cancellationBranchId = Number(sale.branch_id)
+    try {
+      const resolution = resolveStockBranch(statusBranchDirectory, cancellationBranchId)
+      if (resolution.originBranchId != null) statusRedirects.push(resolution)
+      cancellationBranchId = resolution.branchId
+    } catch (error) {
+      const refused = inactiveBranchErrorBody(error)
+      if (refused) return c.json(refused, 409)
+      throw error
+    }
     if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
     const cancellationBranch = await db.prepare(
-      'SELECT id,name FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
-    ).get<{ id: number; name: string | null }>({ id: cancellationBranchId })
-    if (!cancellationBranch || !branchCanSell(cancellationBranch.name)) {
+      'SELECT * FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
+    ).get<{ id: number; name: string | null; role?: string | null }>({ id: cancellationBranchId })
+    if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
     statements.push({
@@ -2610,6 +2688,13 @@ app.patch('/:id/status', async (c) => {
     })
   }
 
+  // Recorded only when units actually moved at the successor (or a fee was
+  // booked there) -- a status change that moves nothing redirected nothing.
+  if (plan.statements.length > 0 || damagedTransitionOps.some((op) => op.delta !== 0)) statusRedirects.push(...statusItemRedirects)
+  statements.push(...branchRedirectStatements(statusRedirects.map((resolution) => ({
+    entityType: 'sale_status', entityKey: `${id}:${mutationStamp}`, resolution,
+    actorId: user?.id ?? null, actorName: actorSnapshot(user), context: `${oldStatus}->${saleStatus}`,
+  }))))
   statements.push({ sql: 'DELETE FROM sale_bulk_guards', params: {} })
   if (settlementSnapshot) statements.push({ sql: 'DELETE FROM sale_mutation_guards', params: {} })
   statements.push(ordinaryBusinessMaintenanceGuard)
@@ -3138,7 +3223,20 @@ app.post('/:id/items', async (c) => {
     batchExpiryDate: string | null
     unlottedStock: boolean
   }> = []
-  const saleHeaderBranchId = Number(sale.branch_id)
+  // A sale rung up at a branch since retired keeps that branch on its
+  // header; the lines added now come off its successor's shelf, and the
+  // redirect is recorded against the sale.
+  const addItemsBranchDirectory = await readBranchDirectory(db)
+  const requestedHeaderBranchId = Number(sale.branch_id)
+  let addItemsResolution: StockBranchResolution
+  try {
+    addItemsResolution = resolveStockBranch(addItemsBranchDirectory, requestedHeaderBranchId)
+  } catch (error) {
+    const refused = inactiveBranchErrorBody(error)
+    if (refused) return c.json(refused, 409)
+    throw error
+  }
+  const saleHeaderBranchId = addItemsResolution.branchId
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
@@ -3159,7 +3257,8 @@ app.post('/:id/items', async (c) => {
       return c.json({ error: `Added item #${index + 1} has an invalid quantity` }, 400)
     }
     const rawPrice = Number(item.applied_price_usd)
-    const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
+    const requestedLineBranchId = Number(item.branch_id ?? requestedHeaderBranchId)
+    const lineBranchId = requestedLineBranchId === requestedHeaderBranchId ? saleHeaderBranchId : requestedLineBranchId
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and every added line must use the same Shop branch.' }, 400)
     }
@@ -3184,8 +3283,8 @@ app.post('/:id/items', async (c) => {
   // same selling-branch rule.
   const addedBranchIds = [saleHeaderBranchId]
   const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+    .prepare(`SELECT * FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; is_active: number | null; role?: string | null }>(chunk))
   if (addedBranchRows.length !== addedBranchIds.length
     || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(addedBranchRows)) {
@@ -3547,6 +3646,10 @@ app.post('/:id/items', async (c) => {
               VALUES(@userId,@userName,'update','sale',@saleId,@details,'sale',@saleId,@details)`,
         params: { userId: user.id, userName: actorSnapshot(user), saleId: String(saleId), details: auditDetails },
       },
+      ...branchRedirectStatements([{
+        entityType: 'sale_add_items', entityKey: `${saleId}:${addItemsOperationId}`, resolution: addItemsResolution,
+        actorId: user.id, actorName: actorSnapshot(user), context: 'add_items',
+      }]),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       ordinaryBusinessMaintenanceGuard,
@@ -3927,12 +4030,26 @@ app.post('/:id/amendments', async (c) => {
   }>([c.req.param('id')])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
-  const saleHeaderBranchId = Number(sale.branch_id)
+  // Stock an amendment moves on a sale rung up at a since-retired branch
+  // lands on (or comes off) that branch's successor; the sale's own rows keep
+  // the branch they were recorded at. Identity everywhere while every branch
+  // is active.
+  const amendmentBranchDirectory = await readBranchDirectory(db)
+  const storedHeaderBranchId = Number(sale.branch_id)
+  let amendmentResolution: StockBranchResolution
+  try {
+    amendmentResolution = resolveStockBranch(amendmentBranchDirectory, storedHeaderBranchId)
+  } catch (error) {
+    const refused = inactiveBranchErrorBody(error)
+    if (refused) return c.json(refused, 409)
+    throw error
+  }
+  const saleHeaderBranchId = amendmentResolution.branchId
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
-  const amendmentBranch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
-    .get<{ id: number; name: string | null; is_active: number | null }>([saleHeaderBranchId])
+  const amendmentBranch = await db.prepare('SELECT * FROM branches WHERE id = ?')
+    .get<{ id: number; name: string | null; is_active: number | null; role?: string | null }>([saleHeaderBranchId])
   if (!amendmentBranch
     || Number(amendmentBranch.is_active ?? 1) !== 1
     || firstUnsellableBranch([amendmentBranch])) {
@@ -4423,16 +4540,21 @@ app.post('/:id/amendments', async (c) => {
     FROM sale_items WHERE id = ? AND sale_id = ?
   `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null; base_price_usd?: number; base_price_khr?: number; product_discount_usd?: number; product_discount_khr?: number; manual_discount_type?: string | null; manual_discount_value?: number; manual_discount_usd?: number; manual_discount_khr?: number; price_mode?: string | null; total_usd?: number; total_khr?: number }>([lineId, saleId])
   if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
-  if (Number(line.branch_id) !== saleHeaderBranchId) {
+  if (Number(line.branch_id) !== storedHeaderBranchId && Number(line.branch_id) !== saleHeaderBranchId) {
     return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
   }
+  // The stock kernel writes to line.branch_id / allocation.branch_id; hand it
+  // the branch the stock now lives at (the stored rows are not rewritten).
+  if (line.branch_id != null) line.branch_id = effectiveBranchId(amendmentBranchDirectory, line.branch_id)
 
   // Draw order (id ASC) -- the decrease walk relies on it to hand units back
   // to the lots they came from, last-drawn first.
-  const allocations = await db.prepare(`
+  const allocations = (await db.prepare(`
     SELECT id, batch_id, branch_id, quantity, released_quantity
     FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
-  `).all<LineAllocation>([lineId])
+  `).all<LineAllocation>([lineId])).map((allocation) => (
+    allocation.branch_id == null ? allocation : { ...allocation, branch_id: effectiveBranchId(amendmentBranchDirectory, allocation.branch_id) }
+  ))
 
   const statements: StatementList = []
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
@@ -4658,7 +4780,8 @@ app.post('/:id/amendments', async (c) => {
       .get<Record<string,unknown> & { id: number; name: string; selling_price_usd: number; cost_price_usd: number; cost_price_khr: number }>([productId])
     if (!product) return c.json({ error: `Product #${productId} no longer exists.` }, 400)
 
-    const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
+    const requestedReplacementBranchId = Number(replacement.branch_id ?? saleHeaderBranchId)
+    const branchId = requestedReplacementBranchId === storedHeaderBranchId ? saleHeaderBranchId : requestedReplacementBranchId
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
       return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
     }
@@ -4863,6 +4986,10 @@ app.post('/:id/amendments', async (c) => {
       ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
         (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
         params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
+      ...(unitsMoved !== 0 ? branchRedirectStatements([{
+        entityType: 'sale_amendment', entityKey: `${saleId}:${mutationOperationId}`, resolution: amendmentResolution,
+        actorId: Number(user.id), actorName: actorSnapshot(user), context: 'amendment',
+      }]) : []),
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       ordinaryBusinessMaintenanceGuard,

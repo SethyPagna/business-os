@@ -156,6 +156,9 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../index') return {}
+  // U-branch: the admin-only consolidation preview; its read path is covered by
+  // test-branch-consolidation-native.cjs, and these branch writes never call it.
+  if (id === '../lib/branchConsolidationPreview') return { readConsolidationPreview: async () => { throw new Error('not used') } }
   // REAL guard statement: it is appended to every branch write batch and its
   // SQL is what the route ships, so it is not stubbed.
   if (id === '../lib/businessMaintenanceGuard') return loadModule('lib/businessMaintenanceGuard.ts', (request) => { throw new Error(`unexpected guard import ${request}`) })

@@ -457,6 +457,8 @@ export const FACTORY_RESET_TABLES = [
   'inventory_movements',
   'stock_row_moves',
   'stock_transfers',
+  // 0198 redirect provenance names branch ids that the reseed replaces.
+  'branch_redirects',
   'branch_batch_stock',
   'branch_stock',
   'product_batches',
@@ -550,7 +552,7 @@ export const PRODUCTS_RESET_TABLES = [
  * dropped from the list when absent -- there is nothing in them to clear.
  * Every other reset table stays mandatory: a missing one is a real defect.
  */
-export const MIGRATION_GATED_RESET_TABLES: readonly string[] = ['stock_lot_adjustment_operations']
+export const MIGRATION_GATED_RESET_TABLES: readonly string[] = ['stock_lot_adjustment_operations', 'branch_redirects']
 
 export async function presentResetTables(
   db: { prepare(sql: string): { all<T>(params?: Record<string, unknown>): Promise<T[]> } },

@@ -26,6 +26,7 @@ function compileSubject() {
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
+    if (request === './branchSuccession') return compileLib('branchSuccession', localRequire)
     // The REAL receipt-number module, not a stub: an imported sale's receipt
     // id and its legacy-label routing are exactly what this test checks.
     if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
@@ -78,6 +79,7 @@ function setup() {
     prepare(sql) {
       return {
         get(params) { return Promise.resolve(sqlite.prepare(sql).get(filterParams(sql, params))) },
+        all(params) { return Promise.resolve(sqlite.prepare(sql).all(filterParams(sql, params))) },
       }
     },
     batch(statements) {

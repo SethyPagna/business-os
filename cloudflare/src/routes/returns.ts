@@ -50,6 +50,53 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
+// A return against a sale rung up at a since-retired branch restocks the
+// successor and records where it was addressed; a retired branch with no
+// successor refuses any return that would move its stock.
+import {
+  branchRedirectStatements,
+  inactiveBranchErrorBody,
+  readBranchDirectory,
+  resolveStockBranch,
+  type BranchDirectory,
+  type StockBranchResolution,
+} from '../lib/branchSuccession'
+
+type ReturnBranchRouting = {
+  effective: (branchId: unknown) => number | null
+  redirects: StockBranchResolution[]
+  refusal: ReturnType<typeof inactiveBranchErrorBody>
+}
+// Resolves each branch a return touches once. An id that resolves is mapped
+// to where its stock now lives; one that is refused keeps its id and sets
+// `refusal`, which the caller raises only if that branch's stock would move.
+function returnBranchRouting(directory: BranchDirectory): ReturnBranchRouting & { refusedIds: Set<number> } {
+  const cache = new Map<number, number>()
+  const refusedIds = new Set<number>()
+  const routing: ReturnBranchRouting & { refusedIds: Set<number> } = {
+    redirects: [], refusal: null, refusedIds,
+    effective(branchId: unknown) {
+      const id = Number(branchId)
+      if (!Number.isSafeInteger(id) || id <= 0) return null
+      const known = cache.get(id)
+      if (known !== undefined) return known
+      try {
+        const resolution = resolveStockBranch(directory, id)
+        if (resolution.originBranchId != null) routing.redirects.push(resolution)
+        cache.set(id, resolution.branchId)
+        return resolution.branchId
+      } catch (error) {
+        const refused = inactiveBranchErrorBody(error)
+        if (!refused) throw error
+        routing.refusal = refused
+        refusedIds.add(id)
+        cache.set(id, id)
+        return id
+      }
+    },
+  }
+  return routing
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -1505,16 +1552,29 @@ app.post('/', async (c) => {
   }
   const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
 
-  const branchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
-  let branch: { id: number; name: string | null; is_active: number | null } | null = null
+  const returnRouting = returnBranchRouting(await readBranchDirectory(db))
+  const requestedReturnBranchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
+  const branchId = returnRouting.effective(requestedReturnBranchId)
+  returnItems = returnItems.map((item) => (item.branch_id ? { ...item, branch_id: returnRouting.effective(item.branch_id) ?? item.branch_id } : item))
+  {
+    const movesStockAt = new Set<number>()
+    for (const item of returnItems) {
+      if (normalizeStockAction(item) !== 'none') movesStockAt.add(Number(item.branch_id || branchId))
+    }
+    for (const line of replacementInputs) movesStockAt.add(Number(returnRouting.effective(line.branch_id || requestedReturnBranchId)))
+    if (returnRouting.refusal && [...movesStockAt].some((id) => returnRouting.refusedIds.has(id))) {
+      return c.json(returnRouting.refusal, 409)
+    }
+  }
+  let branch: { id: number; name: string | null; is_active: number | null; role?: string | null } | null = null
   if (branchId) {
-    branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=? LIMIT 1')
-      .get<{ id: number; name: string | null; is_active: number | null }>([branchId]) || null
+    branch = await db.prepare('SELECT * FROM branches WHERE id=? LIMIT 1')
+      .get<{ id: number; name: string | null; is_active: number | null; role?: string | null }>([branchId]) || null
   }
   let branchName = branch?.name || saleMeta?.branch_name || null
   if (replacementInputs.length) {
-    if (!branch || Number(branch.is_active || 0) !== 1 || !branchCanSell(branch.name)
-      || replacementInputs.some((line) => Number(line.branch_id || branchId) !== branchId)) {
+    if (!branch || Number(branch.is_active || 0) !== 1 || !branchCanSell(branch)
+      || replacementInputs.some((line) => returnRouting.effective(line.branch_id || requestedReturnBranchId) !== branchId)) {
       return c.json({ error: WAREHOUSE_NOT_SELLABLE_ERROR }, 400)
     }
     branchName = branch.name
@@ -1547,7 +1607,7 @@ app.post('/', async (c) => {
     const meta = productMap.get(productId)
     const quantity = Number(input.quantity)
     if (!meta || !(quantity > 0)) throw new Error('Each replacement line needs an active product and positive quantity')
-    const lineBranchId = Number(input.branch_id || branchId)
+    const lineBranchId = Number(returnRouting.effective(input.branch_id || requestedReturnBranchId) || branchId)
     const priceUsd = input.applied_price_usd != null ? toNumber(input.applied_price_usd) : toNumber(meta.selling_price_usd)
     const priceKhr = input.applied_price_khr != null ? toNumber(input.applied_price_khr) : toNumber(meta.selling_price_khr)
     return {
@@ -2221,7 +2281,14 @@ app.post('/', async (c) => {
     return c.json({ error: (error as Error).message, code: 'return_too_large' }, 400)
   }
   try {
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    await db.batch([
+      ...statements,
+      ...branchRedirectStatements(returnRouting.redirects.map((resolution) => ({
+        entityType: 'return', entityKey: returnNumber, resolution,
+        actorId: authenticatedActorId, actorName: actorSnapshot(user), context: 'customer_return',
+      }))),
+      ordinaryBusinessMaintenanceGuard,
+    ])
   } catch (error) {
     try {
       const receipt = await readReceipt()
@@ -2311,6 +2378,16 @@ app.post('/supplier', async (c) => {
   const settlement = ['refund', 'credit', 'replacement', 'writeoff'].includes(String(body.settlement || '').toLowerCase())
     ? String(body.settlement).toLowerCase()
     : 'refund'
+
+  // Goods sent back from a since-retired branch (a queued offline entry) are
+  // taken off its successor's shelf -- that is where the stock was moved --
+  // and the redirect is recorded; no successor refuses.
+  const supplierRouting = returnBranchRouting(await readBranchDirectory(db))
+  if (body.branch_id) body.branch_id = supplierRouting.effective(body.branch_id) ?? body.branch_id
+  for (const item of body.items) {
+    if (item?.branch_id) item.branch_id = supplierRouting.effective(item.branch_id) ?? item.branch_id
+  }
+  if (supplierRouting.refusal) return c.json(supplierRouting.refusal, 409) // every supplier-return line moves stock
 
   // Stock check first (plain read, before any writes -- same shape as
   // sales.ts's POST /).
@@ -2541,7 +2618,14 @@ app.post('/supplier', async (c) => {
         params: { productId },
       })
     }
-    await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
+    await db.batch([
+      ...statements,
+      ...branchRedirectStatements(supplierRouting.redirects.map((resolution) => ({
+        entityType: 'supplier_return', entityKey: returnNumber, resolution,
+        actorId: user?.id ?? null, actorName: actorSnapshot(user), context: 'supplier_return',
+      }))),
+      ordinaryBusinessMaintenanceGuard,
+    ])
     const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
@@ -2677,6 +2761,26 @@ app.patch('/:id', async (c) => {
     return_to_stock: number; stock_action: string | null; branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     batch_id: number | null
   }>([id])
+  // An edit reverses and re-applies stock. For a return recorded at a
+  // since-retired branch both halves happen at its successor (where that
+  // stock now is); the return's stored rows are rewritten only for the lines
+  // the edit replaces, and the redirect is recorded.
+  const editRouting = returnBranchRouting(await readBranchDirectory(db))
+  for (const row of existingItems) {
+    if (row.branch_id != null) row.branch_id = editRouting.effective(row.branch_id)
+  }
+  if (body.branch_id) body.branch_id = editRouting.effective(body.branch_id) ?? body.branch_id
+  if (Array.isArray(body.items)) {
+    body.items = body.items.map((item) => (item?.branch_id ? { ...item, branch_id: editRouting.effective(item.branch_id) ?? item.branch_id } : item))
+  }
+  if (editRouting.refusal) {
+    const editMovesAt = [
+      ...existingItems.filter((row) => (row.stock_action ? normalizeStockAction(row) !== 'none' : !!row.return_to_stock)).map((row) => Number(row.branch_id)),
+      ...(Array.isArray(body.items) ? body.items : []).filter((item) => normalizeStockAction(item) !== 'none')
+        .map((item) => Number(item.branch_id || editRouting.effective(existing.branch_id))),
+    ]
+    if (editMovesAt.some((branchId) => editRouting.refusedIds.has(branchId))) return c.json(editRouting.refusal, 409)
+  }
   let newItems: ReturnItemInput[] = Array.isArray(body.items) ? body.items : existingItems
   if (Array.isArray(body.items)) {
     const sourceRows = existing.sale_id
@@ -2950,7 +3054,7 @@ app.patch('/:id', async (c) => {
     const totalKhr = Math.round(refundUnitKhr * quantity)
     const stockAction = normalizeStockAction(item)
     const returnToStock = stockAction === 'restock'
-    const itemBranchId = item.branch_id || existing.branch_id || null
+    const itemBranchId = item.branch_id || editRouting.effective(existing.branch_id) || null
     totalRefundUsd += totalUsd
     totalRefundKhr += totalKhr
 
@@ -3168,6 +3272,10 @@ app.patch('/:id', async (c) => {
     },
   })
   assertSaleRecordBatchBounds(statements.length, canonicalIntent, eventBytes)
+  statements.push(...branchRedirectStatements(editRouting.redirects.map((resolution) => ({
+    entityType: 'return_edit', entityKey: `${existing.return_number}:${receiptId}`, resolution,
+    actorId: authenticatedActorId, actorName: actorSnapshot(user), context: 'return_edit',
+  }))))
 
   await db.batch(statements)
 

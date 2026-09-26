@@ -20,7 +20,8 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { getActionTier } from '../lib/permissions'
+import { getActionTier, isAdminControlUser } from '../lib/permissions'
+import { readConsolidationPreview } from '../lib/branchConsolidationPreview'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -216,6 +217,18 @@ app.get('/stock-integrity', async (c) => {
     },
     preview_token: preview.previewToken,
   })
+})
+
+// GET /api/branches/consolidation-preview -- U-branch. Read-only: what the
+// held Shop -> Store consolidation would move, and every reason its preflight
+// would stop. Administrators only; it names stock at both branches and the
+// open holds, and it is the go/no-go read before the owner applies the file.
+app.get('/consolidation-preview', async (c) => {
+  if (!isAdminControlUser(c.get('user'))) {
+    return c.json({ success: false, error: 'Administrator only', code: 'forbidden' }, 403)
+  }
+  const preview = await readConsolidationPreview(getDb(c.env))
+  return c.json({ success: true, ...preview })
 })
 
 // POST /api/branches/stock-integrity/repair -- repairs only the objective
@@ -1005,8 +1018,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<BranchInput & Record<string, unknown>>()
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT id, name, is_active, updated_at FROM branches WHERE id = ?')
-    .get<{ id: number; name: string; is_active: number; updated_at: string }>([id])
+  const current = await db.prepare('SELECT * FROM branches WHERE id = ?')
+    .get<{ id: number; name: string; is_active: number; updated_at: string; canonical_key?: string | null }>([id])
   try {
     assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   } catch (error) {

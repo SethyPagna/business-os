@@ -184,8 +184,10 @@ runTest('every path that writes a sale line asks the guard first', () => {
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
-  assert.match(returnsSource, /!branchCanSell\(branch\.name\)/)
-  assert.match(salesImportSource, /!branchCanSell\(saleBranch\.name\)/)
+  // U-branch: the branch ROW decides (explicit role, name fallback), so the
+  // renamed Store sells and the retired Shop does not.
+  assert.match(returnsSource, /!branchCanSell\(branch\)/)
+  assert.match(salesImportSource, /!branchCanSell\(saleBranch\)/)
   assert.match(salesImportSource, /throw new Error\(WAREHOUSE_NOT_SELLABLE_ERROR\)/)
 })
 
@@ -197,9 +199,11 @@ runTest('sale writers require one real active Shop header and identical line bra
   assert.match(salesSource, /branchId !== saleHeaderBranchId/)
   assert.match(salesSource, /COALESCE\(is_active,1\)=1/)
   assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
-  assert.match(salesSource, /branchCanSell\(cancellationBranch\.name\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
-  assert.match(returnsSource, /replacementInputs\.some\(\(line\) => Number\(line\.branch_id \|\| branchId\) !== branchId\)/)
-  assert.match(returnsSource, /const lineBranchId = Number\(input\.branch_id \|\| branchId\)/)
+  assert.match(salesSource, /branchCanSell\(cancellationBranch\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
+  // U-branch: each replacement line's branch goes through the successor
+  // rule first, then must equal the (effective) return branch.
+  assert.match(returnsSource, /replacementInputs\.some\(\(line\) => returnRouting\.effective\(line\.branch_id \|\| requestedReturnBranchId\) !== branchId\)/)
+  assert.match(returnsSource, /const lineBranchId = Number\(returnRouting\.effective\(input\.branch_id \|\| requestedReturnBranchId\) \|\| branchId\)/)
   assert.match(salesImportSource, /branchId !== saleHeaderBranchId/)
   assert.match(salesImportSource, /branch_id: saleHeaderBranchId/)
 })

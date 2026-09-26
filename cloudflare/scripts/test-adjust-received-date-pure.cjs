@@ -194,6 +194,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // move through this guard, so the fixtures here run through the rejection
   // instead of opting out of it.
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/movementBranchName': movementBranchNameKernel,
@@ -212,6 +213,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': branchRoles }),
   // Migration 0192: runAdjustAction wraps its kernel in the per-line receipt
   // guard, so the real module joins the stub map like every other real
   // dependency. These bodies carry no client_request_id, so the guard hands
@@ -304,6 +306,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': branchRoles }),
   // Migration 0192: runAdjustAction wraps its kernel in the per-line receipt
   // guard, so the real module joins the stub map like every other real
   // dependency. These bodies carry no client_request_id, so the guard hands

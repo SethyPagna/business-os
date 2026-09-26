@@ -7,6 +7,8 @@ export type BranchIdentitySnapshot = {
   id: number | string
   name: unknown
   is_active: unknown
+  // Held branch successor/role schema. Absent until it is applied.
+  canonical_key?: unknown
 }
 
 export type BranchIdentityFields = {
@@ -59,6 +61,21 @@ export function canonicalBranchName(value: unknown): CanonicalBranchName | null 
   if (role === 'shop') return 'Shop'
   if (role === 'warehouse') return 'Warehouse'
   return null
+}
+
+/**
+ * The canonical identity of a branch ROW: its explicit canonical_key when the
+ * held schema has given it one (the consolidated survivor is renamed "Store"
+ * but keeps canonical_key 'warehouse'), otherwise its name.
+ */
+export function canonicalBranchIdentityOf(row: { name?: unknown; canonical_key?: unknown } | null | undefined): CanonicalBranchName | null {
+  if (!row) return null
+  return canonicalBranchName(row.canonical_key) ?? canonicalBranchName(row.name)
+}
+
+function sameStoredSpelling(a: unknown, b: unknown): boolean {
+  const left = String(a ?? '').trim().toLowerCase()
+  return left !== '' && left === String(b ?? '').trim().toLowerCase()
 }
 
 export function isCanonicalBranchName(value: unknown): boolean {
@@ -161,7 +178,7 @@ export function prepareCanonicalBranchUpdate(
   current: BranchIdentitySnapshot,
   requested: BranchIdentityFields,
 ): { name: string; is_active: number; canonicalName: CanonicalBranchName } {
-  const currentCanonicalName = canonicalBranchName(current.name)
+  const currentCanonicalName = canonicalBranchIdentityOf(current)
   const currentActive = toDbBool(current.is_active, 0)
   if (!currentCanonicalName || currentActive !== 1) throw new CanonicalBranchIdentityError()
 
@@ -169,7 +186,11 @@ export function prepareCanonicalBranchUpdate(
   const requestedActive = requested.is_active == null || requested.is_active === ''
     ? currentActive
     : toDbBool(requested.is_active, currentActive)
-  if (canonicalBranchName(requestedName) !== currentCanonicalName || requestedActive !== currentActive) {
+  // The stored name (modulo case/whitespace) is always the same identity --
+  // that is what keeps an ordinary edit of the renamed survivor possible.
+  const sameIdentity = sameStoredSpelling(requestedName, current.name)
+    || canonicalBranchName(requestedName) === currentCanonicalName
+  if (!sameIdentity || requestedActive !== currentActive) {
     throw new CanonicalBranchIdentityError()
   }
 

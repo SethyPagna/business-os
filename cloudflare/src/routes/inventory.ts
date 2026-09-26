@@ -67,6 +67,9 @@ import {
   readOpenTaggedLots, readTaggedLotGroups,
 } from '../lib/damagedLotActions'
 import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
+// Interactive stock writers never redirect: a retired branch in a picker is a
+// stale screen. "Set to N" at a retired branch is refused as replacing.
+import { inactiveStockBranchRefusal } from '../lib/branchSuccession'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1625,7 +1628,16 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
-  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+  const branch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = @id').get<{ id: number; name: string; is_active: number | null }>({ id: branchId })
+  // U-branch: a retired branch in the picker is a stale screen. Decided from
+  // the row this handler already reads, so the per-line D1 budget (planTier
+  // / test-stock-in-commit-d1-budget) does not grow; the directory is read
+  // only to word the refusal. (The scoped Set above is guarded inside
+  // lib/stockLotAdjustment.ts.)
+  if (branch && Number(branch.is_active ?? 1) === 0) {
+    const refusal = await inactiveStockBranchRefusal(db, [branchId], type === 'set' ? 'replacing' : 'interactive')
+    if (refusal) return c.json(refusal, 409)
+  }
 
   // 'set' ("Set stock to X") is a UI convenience only -- it has never had
   // its own real movement semantics (no batch concept, see the old
@@ -2621,6 +2633,10 @@ app.post('/move-row', async (c) => {
 
   const branchId = requestedBranchId || (await defaultBranchId(c.env))
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be moved' }, 400)
+  {
+    const refusal = await inactiveStockBranchRefusal(db, [branchId])
+    if (refusal) return c.json(refusal, 409)
+  }
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
   const available = await branchStockQty(c.env, sourceProductId, branchId)
@@ -2682,6 +2698,12 @@ app.post('/movements/:id/revert', async (c) => {
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
+  // A movement recorded at a since-retired branch was folded into its
+  // successor by the consolidation; its exact inverse no longer exists.
+  {
+    const refusal = await inactiveStockBranchRefusal(db, [mv.branch_id])
+    if (refusal) return c.json(refusal, 409)
+  }
   const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
   if (!result.ok) return c.json({ error: result.error }, result.status)
   const productId = Number(mv.product_id) || 0
@@ -2704,6 +2726,14 @@ app.post('/stock-in-lines/:movementId/edit', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
   const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
+  {
+    const lineDb = getDb(c.env)
+    const line = Number.isSafeInteger(movementId) && movementId > 0
+      ? await lineDb.prepare('SELECT branch_id FROM inventory_movements WHERE id=@id').get<{ branch_id: number | null }>({ id: movementId })
+      : null
+    const refusal = await inactiveStockBranchRefusal(lineDb, [line?.branch_id])
+    if (refusal) return c.json(refusal, 409)
+  }
   const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body)
   if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
   return c.json(result.body, result.status as 200)
@@ -2789,6 +2819,10 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
   const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
+  {
+    const refusal = await inactiveStockBranchRefusal(db, [branchId])
+    if (refusal) return c.json(refusal, 409)
+  }
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
   const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })

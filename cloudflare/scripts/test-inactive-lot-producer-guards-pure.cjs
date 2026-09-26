@@ -97,6 +97,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
   '../lib/batchCode': batchCode,
   '../lib/conflictControl': conflictControl,
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/stockReceiptGate': { appendReceiptNotes: (value) => value, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: () => null, stockReceiptGateMessage: () => '' },
   // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
   // the per-line receipt guard. REAL, not a stub: a body without a
@@ -118,6 +119,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './db': { getDb: () => routeFixture.db },
   './permissions': { getActionTier: () => 'full' },
   './actorSnapshot': { actorSnapshot: () => 'Tester' },
+  './branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
   './damagedLotActions': { planHoldAsTagged: () => { throw new Error('not used') } },
@@ -128,6 +130,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
 const baseModuleLoad = Module._load
 Module._load = function stockLotAdjustmentHook(request, parent, isMain) {
   if (request === '../lib/stockLotAdjustment') return stockLotAdjustment
+  if (request === '../lib/branchSuccession') return branchSuccession
   return baseModuleLoad.call(this, request, parent, isMain)
 }
 
@@ -145,6 +148,7 @@ const searchMatch = loadReal('lib/searchMatch.ts')
 const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
+const branchSuccession = loadReal('lib/branchSuccession.ts', { './branchRoles': branchRoles })
 const actorSnapshot = loadReal('lib/actorSnapshot.ts')
 const saleCreationSnapshot = loadReal('lib/saleCreationSnapshot.ts', {
   './actorSnapshot': actorSnapshot,
@@ -156,6 +160,7 @@ const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  './branchSuccession': branchSuccession,
   './saleCreationSnapshot': saleCreationSnapshot,
   './productBatches': loadReal('lib/productBatches.ts', {
     './batchCode': batchCode,

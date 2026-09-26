@@ -17,6 +17,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 import { recomputeCatalogCost, catalogCostRecomputeStatement } from '../lib/catalogCostRecompute'
+import { inactiveStockBranchRefusal } from '../lib/branchSuccession'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -274,6 +275,12 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   })
   if (receiptGate) return c.json({ error: stockReceiptGateMessage(receiptGate), code: receiptGate }, 400)
 
+  // A retired branch (Shop/Warehouse consolidation) is a stale picker: refused
+  // after the request's own validation, before anything is read or written.
+  {
+    const refusal = await inactiveStockBranchRefusal(db, [branchId])
+    if (refusal) return c.json(refusal, 409)
+  }
   const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])

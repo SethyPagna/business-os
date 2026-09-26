@@ -496,7 +496,7 @@ async function run() {
   //    or the ordinary fix-and-retry loop would be broken by the fix.
   {
     const db = freshDb()
-    const c = makeContext(faultyDb(db, 'SELECT id, name FROM branches'))
+    const c = makeContext(faultyDb(db, 'SELECT id, name, is_active FROM branches'))
     let threw = false
     try { await runAdjustAction(c, addBody('stockline_77777777-beef')) } catch { threw = true }
     assert.equal(threw, true, 'the kernel died before writing')
@@ -517,7 +517,7 @@ async function run() {
     // A crash mid-kernel, BEFORE any write, whose release never ran: exactly
     // the row a killed isolate leaves behind. Same body as the retry below,
     // so this is a stale claim and not a conflict.
-    const crashedCtx = makeContext(noReleaseDb(faultyDb(db, 'SELECT id, name FROM branches')))
+    const crashedCtx = makeContext(noReleaseDb(faultyDb(db, 'SELECT id, name, is_active FROM branches')))
     let crashed = false
     try { await runAdjustAction(crashedCtx, addBody('stockline_88888888-stale')) } catch { crashed = true }
     assert.equal(crashed, true, 'the first attempt died mid-kernel')

@@ -35,6 +35,7 @@ import {
   type FeeCreateIntent,
 } from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
+import { effectiveBranchId, isInactiveBranchError, readBranchDirectory } from '../lib/branchSuccession'
 
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
 // records (tax, delivery, change, other) that can optionally be matched to
@@ -171,25 +172,28 @@ async function resolveFeeLink(
     throw new Error('INVALID_BRANCH')
   }
 
+  // A fee on a sale rung up at a since-retired branch is booked where the
+  // business now sells (its successor). Unlinked fees name a live branch.
+  const directory = await readBranchDirectory(db)
+  const liveBranch = (id: number | null) => {
+    try { return effectiveBranchId(directory, id) } catch (error) { if (isInactiveBranchError(error)) return null; throw error }
+  }
   if (saleId != null) {
-    const sale = await db.prepare(`
-      SELECT s.id, s.branch_id, b.name AS branch_name, b.is_active AS branch_active
-      FROM sales s LEFT JOIN branches b ON b.id=s.branch_id
-      WHERE s.id=@saleId
-    `).get<{ id: number; branch_id: number | null; branch_name: string | null; branch_active: number | null }>({ saleId })
-    const saleBranchId = Number(sale?.branch_id)
-    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0
-      || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name)) {
+    const sale = await db.prepare('SELECT s.id, s.branch_id FROM sales s WHERE s.id=@saleId')
+      .get<{ id: number; branch_id: number | null }>({ saleId })
+    const storedBranchId = Number(sale?.branch_id)
+    const saleBranchId = Number.isSafeInteger(storedBranchId) && storedBranchId > 0 ? liveBranch(storedBranchId) : null
+    const saleBranch = saleBranchId == null ? null : directory.byId.get(saleBranchId) || null
+    if (!sale || saleBranchId == null || !saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch)) {
       throw new Error('INVALID_SALE')
     }
-    if (requestedBranchId != null && requestedBranchId !== saleBranchId) throw new Error('SALE_BRANCH_MISMATCH')
+    if (requestedBranchId != null && requestedBranchId !== saleBranchId && requestedBranchId !== storedBranchId) throw new Error('SALE_BRANCH_MISMATCH')
     return { saleId, branchId: saleBranchId }
   }
 
   if (requestedBranchId == null) throw new Error('BRANCH_REQUIRED')
-  const branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=@id')
-    .get<{ id: number; name: string | null; is_active: number | null }>({ id: requestedBranchId })
-  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch.name)) throw new Error('INVALID_BRANCH')
+  const branch = directory.byId.get(requestedBranchId) || null
+  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch)) throw new Error('INVALID_BRANCH')
   return { saleId: null, branchId: requestedBranchId }
 }
 

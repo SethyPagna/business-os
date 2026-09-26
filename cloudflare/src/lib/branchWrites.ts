@@ -28,13 +28,17 @@ export interface BranchWriteFields {
 // Preserve the existing snapshot repair behavior. Identity enforcement keeps
 // the stored name unchanged, so these are normally no-ops for new edits while
 // still repairing a stale snapshot that predates this contract.
+// Only a blank snapshot or a spelling variant (case/whitespace) of the
+// current name is repaired. A snapshot carrying a DIFFERENT name is history:
+// after the consolidation renames Warehouse to Store, editing Store must not
+// relabel every old Warehouse sale/movement (owner ruling: never relabel).
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
   const params = { id }
   return [
-    { sql: `UPDATE sales SET branch_name=(SELECT name FROM branches WHERE id=@id), updated_at=CURRENT_TIMESTAMP WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE inventory_movements SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE returns SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE stock_row_moves SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
+    { sql: `UPDATE sales SET branch_name=(SELECT name FROM branches WHERE id=@id), updated_at=CURRENT_TIMESTAMP WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id) AND (TRIM(COALESCE(branch_name,''))='' OR LOWER(TRIM(branch_name))=(SELECT LOWER(TRIM(name)) FROM branches WHERE id=@id))`, params },
+    { sql: `UPDATE inventory_movements SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id) AND (TRIM(COALESCE(branch_name,''))='' OR LOWER(TRIM(branch_name))=(SELECT LOWER(TRIM(name)) FROM branches WHERE id=@id))`, params },
+    { sql: `UPDATE returns SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id) AND (TRIM(COALESCE(branch_name,''))='' OR LOWER(TRIM(branch_name))=(SELECT LOWER(TRIM(name)) FROM branches WHERE id=@id))`, params },
+    { sql: `UPDATE stock_row_moves SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id) AND (TRIM(COALESCE(branch_name,''))='' OR LOWER(TRIM(branch_name))=(SELECT LOWER(TRIM(name)) FROM branches WHERE id=@id))`, params },
   ]
 }
 

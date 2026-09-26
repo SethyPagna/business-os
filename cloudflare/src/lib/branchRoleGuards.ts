@@ -14,7 +14,9 @@ import { branchCanTransferBetween, branchCanSell } from './branchRoles'
 export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Only allow Shop sale. Please transfer to Shop first.'
 export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between Shop and Warehouse.'
 
-export type BranchNameRow = { id: number; name: string | null }
+// `role` is present once the held branch successor/role migration has run
+// and the route read the row with SELECT *; it outranks the name.
+export type BranchNameRow = { id: number; name: string | null; role?: string | null }
 
 /**
  * The first branch on this write that may not carry a sale line, or null
@@ -26,7 +28,7 @@ export type BranchNameRow = { id: number; name: string | null }
  */
 export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNameRow | null {
   for (const row of rows) {
-    if (!branchCanSell(row?.name)) return row
+    if (!branchCanSell(row ?? null)) return row
   }
   return null
 }

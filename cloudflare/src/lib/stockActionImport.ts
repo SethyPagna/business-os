@@ -28,6 +28,13 @@ export const UNIFIED_STOCK_COLUMNS = [
   // the gate's free_goods_required message used to point the operator at a
   // control this sheet had no column for.
   'free_goods',
+  // Optional: the surviving branch after the Shop/Warehouse consolidation,
+  // by its own name. Before a Store exists it reads as Shop (the sheets'
+  // long-standing 'store' alias); after, it is the Store. Old sheets with
+  // only shop/warehouse keep working -- see UnifiedStockSlotResolver. Last,
+  // so every existing column keeps its position. Mirrors
+  // frontend unifiedStockImport.ts UNIFIED_STOCK_HEADERS.
+  'store',
 ] as const
 
 export interface UnifiedStockCatalogProduct {
@@ -45,6 +52,19 @@ export interface UnifiedStockBranch {
   id: number
   name: string
 }
+
+export type UnifiedStockSlot = 'shop' | 'warehouse' | 'store'
+
+/**
+ * Which branch a sheet column lands on. `origin` is the retired branch the
+ * column addressed when its stock now lands at that branch's successor.
+ * The DB-backed resolver (stockActionCatalog.ts) answers through
+ * importBranchAuthority's canonical identity + successor rule.
+ */
+export type UnifiedStockSlotResolver = (slot: UnifiedStockSlot) => {
+  branch: UnifiedStockBranch
+  origin: UnifiedStockBranch | null
+} | null
 
 export interface UnifiedStockCurrent {
   productId: number
@@ -79,7 +99,22 @@ export interface UnifiedStockResolvedRow {
   supplier: string
   /** The sheet's optional free_goods column, parsed to a boolean (N14-D). */
   freeGoods: boolean
-  branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
+  /**
+   * One entry per EFFECTIVE branch. Sheet columns that land on the same
+   * branch (shop + warehouse after the consolidation, or shop + store before
+   * it) are summed into one entry; `slots` lists them, and
+   * originBranchId/Name records a retired branch a column addressed.
+   */
+  branchRefs: Array<{
+    slot: UnifiedStockSlot
+    branchId: number
+    branchName: string
+    pending: boolean
+    value: number
+    slots?: UnifiedStockSlot[]
+    originBranchId?: number | null
+    originBranchName?: string | null
+  }>
   plan: StockActionPlan | null
   conflicts: string[]
   errors: string[]
@@ -193,9 +228,15 @@ export function resolveUnifiedStockImportRows(
   products: UnifiedStockCatalogProduct[],
   branches: UnifiedStockBranch[],
   currentStock: UnifiedStockCurrent[],
+  slotResolver?: UnifiedStockSlotResolver,
 ): UnifiedStockResolvedRow[] {
   const branchByName = new Map(branches.map((branch) => [key(branch.name), branch]))
-  const branchForSlot = (slot: 'shop' | 'warehouse') => branchByName.get(slot) || null
+  // Without a resolver: the exact-name rule this file always used, plus the
+  // 'store' column reading as Shop until a branch named Store exists.
+  const resolveSlot: UnifiedStockSlotResolver = slotResolver || ((slot) => {
+    const branch = branchByName.get(slot) || (slot === 'store' ? branchByName.get('shop') || null : null)
+    return branch ? { branch, origin: null } : null
+  })
   const stockRows: StockActionRow[] = []
   const provisional: UnifiedStockResolvedRow[] = []
   const newBatchIdentityByKey = new Map<string, string>()
@@ -218,6 +259,7 @@ export function resolveUnifiedStockImportRows(
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
+    const store = optionalNumber(raw.store, 'store quantity')
     const selling = optionalMoney(raw.selling_price, 'selling price', true)
     // Wholesale price -- the sheet column renamed from vip_price by migration
     // 0111. The legacy vip_price / special_price spellings still resolve here:
@@ -229,10 +271,10 @@ export function resolveUnifiedStockImportRows(
     // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
     const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price', true)
     const cost = optionalMoney(raw.cost_price, 'cost price')
-    const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
+    const errors = [shop.error, warehouse.error, store.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
     if (!date) errors.push('Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.')
-    if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
+    if (shop.value == null && warehouse.value == null && store.value == null) errors.push('Enter a shop or warehouse quantity.')
 
     const batchLabel = text(raw.batch)
     const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
@@ -264,18 +306,50 @@ export function resolveUnifiedStockImportRows(
     }
     const conflicts = matched.conflict ? [matched.conflict] : []
     const branchRefs: UnifiedStockResolvedRow['branchRefs'] = []
-    ;(['shop', 'warehouse'] as const).forEach((slot, slotIndex) => {
-      const parsed = slot === 'shop' ? shop.value : warehouse.value
+    // Every column lands on its EFFECTIVE branch; columns that land on the
+    // same branch are summed into one entry, because the resolver below
+    // plans one action per (product, branch) and two entries for one branch
+    // would apply two deltas (or, when counting, two conflicting targets).
+    const redirectedOnly = new Map<number, boolean>()
+    ;(['shop', 'warehouse', 'store'] as const).forEach((slot, slotIndex) => {
+      const parsed = slot === 'shop' ? shop.value : slot === 'warehouse' ? warehouse.value : store.value
       if (parsed == null) return
-      const branch = branchForSlot(slot)
+      const resolvedSlot = resolveSlot(slot)
+      const branch = resolvedSlot?.branch || null
+      const branchId = branch?.id ?? -(slotIndex + 1)
+      const existing = branch ? branchRefs.find((ref) => ref.branchId === branchId) : undefined
+      const origin = resolvedSlot?.origin || null
+      if (existing) {
+        existing.value += parsed
+        existing.slots = [...(existing.slots || [existing.slot]), slot]
+        if (origin && existing.originBranchId == null) {
+          existing.originBranchId = origin.id
+          existing.originBranchName = origin.name
+        }
+        redirectedOnly.set(branchId, (redirectedOnly.get(branchId) ?? true) && !!origin)
+        return
+      }
       branchRefs.push({
         slot,
-        branchId: branch?.id ?? -(slotIndex + 1),
-        branchName: branch?.name || (slot === 'shop' ? 'Shop' : 'Warehouse'),
+        branchId,
+        branchName: branch?.name || (slot === 'warehouse' ? 'Warehouse' : slot === 'store' ? 'Store' : 'Shop'),
         pending: !branch,
         value: parsed,
+        ...(origin ? { originBranchId: origin.id, originBranchName: origin.name } : {}),
       })
+      if (branch) redirectedOnly.set(branchId, !!origin)
     })
+    // A counting (reconcile) sheet states the figure a branch should hold. A
+    // column addressed to a retired branch is not the figure of the branch
+    // its stock moved into, so a count carried ONLY by such a column is
+    // refused rather than allowed to overwrite the survivor's quantity.
+    if (mode === 'reconcile') {
+      for (const ref of branchRefs) {
+        if (ref.originBranchId != null && redirectedOnly.get(ref.branchId)) {
+          errors.push(`${ref.originBranchName || 'That branch'} has moved into ${ref.branchName}. This sheet sets counts, so enter the ${ref.branchName} count in the store or warehouse column.`)
+        }
+      }
+    }
 
     const resolved: UnifiedStockResolvedRow = {
       rowNumber,

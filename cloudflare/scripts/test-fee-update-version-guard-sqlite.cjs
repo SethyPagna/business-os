@@ -106,6 +106,7 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
   '../lib/branchRoles': { branchCanSell: () => true },
+  '../lib/branchSuccession': loadReal('lib/branchSuccession.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../index': {},
 })

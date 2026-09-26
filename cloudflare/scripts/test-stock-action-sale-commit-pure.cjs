@@ -35,6 +35,7 @@ const subject = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  './branchSuccession': compile('branchSuccession.ts', { './branchRoles': branchRoles }),
   './saleCreationSnapshot': saleCreationSnapshot,
   // P10-4: not exercised (this file only drives applyUnifiedStockSale), but
   // the module-level import must still resolve.

@@ -147,6 +147,9 @@ const CHILD_SCOPED = {
   // existing imported row; it never deletes one). Pinned by
   // test-migration-0181-receivables-paid-repair-pure.cjs.
   'customer_receivables_paid_multiple_repair.receivable_id': 'customer_receivables',
+  // 0198: the retired branch a redirected record was addressed to. Branches
+  // are never deleted (they are retired), so it always names a live row.
+  'branch_redirects.origin_branch_id': 'branches',
 }
 
 function resolveOwner(base, known) {

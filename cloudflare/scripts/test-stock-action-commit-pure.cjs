@@ -38,6 +38,7 @@ const subject = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  './branchSuccession': compile('branchSuccession.ts', { './branchRoles': branchRoles }),
   './saleCreationSnapshot': saleCreationSnapshot,
   // P10-4: the unified-import add writer re-derives products.cost_price_usd
   // from the DISTINCT non-zero active-lot costs after every applied add --

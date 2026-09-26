@@ -64,6 +64,7 @@ import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
+import { inactiveStockBranchRefusal } from './branchSuccession'
 
 export const STOCK_LOT_SET_KIND = 'stock.quantity_set'
 export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
@@ -311,6 +312,12 @@ export async function applyStockLotSet(
   if (recordOperation && requestId) {
     const existing = await previous()
     if (existing) return replay(existing)
+  }
+  // "Set to N" is a replacing write: never at a retired branch (its stock was
+  // folded into the successor, whose figure is not the one being corrected).
+  {
+    const refusal = await inactiveStockBranchRefusal(db, [request.branchId], 'replacing')
+    if (refusal) return { status: 409, body: refusal }
   }
 
   const facts = await db.prepare(`SELECT

@@ -63,11 +63,22 @@ assert.doesNotMatch(
   /\n\s*loadProductFilters\(c\.env, query\),/,
   'bootstrap must not retain an unconditional filter metadata read',
 )
+// U-branch: one directory read (tolerant of the held role/successor columns
+// being absent) projected by posBootstrapBranches to the four fields POS
+// consumes plus the explicit role -- the renamed Store sells by role.
 assert.match(
   bootstrapSource,
-  /SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1/,
-  'bootstrap branch metadata must stay limited to the four fields POS consumes',
+  /readBranchDirectory\(db\)\.then\(\(directory\) => posBootstrapBranches\(directory\)\)/,
+  'bootstrap branch metadata must stay one read, projected to the fields POS consumes',
 )
+{
+  const successionSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'branchSuccession.ts'), 'utf8')
+  const projection = successionSource.slice(successionSource.indexOf('export function posBootstrapBranches'))
+  const body = projection.slice(0, projection.indexOf('\n}\n'))
+  assert.match(body, /\.filter\(\(row\) => isBranchRowActive\(row\)\)/, 'bootstrap ships active branches only')
+  assert.match(body, /id: row\.id,\s*name: row\.name,\s*is_default: row\.is_default,\s*is_active: row\.is_active,\s*\.\.\.\(row\.role \? \{ role: row\.role \} : \{\}\),\s*\}\)\)/,
+    'bootstrap branch rows carry exactly id/name/is_default/is_active (+role)')
+}
 assert.doesNotMatch(bootstrapSource, /SELECT \* FROM branches/, 'bootstrap must not ship unused branch profile fields')
 
 assert.match(posSource, /metadata: '0'/, 'POS must explicitly request the fast bootstrap path')

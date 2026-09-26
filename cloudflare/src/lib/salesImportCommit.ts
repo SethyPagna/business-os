@@ -2,6 +2,7 @@ import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
+import { readBranchDirectory, sellingBranchSql, singleActiveSellingBranchSql, type BranchDirectory } from './branchSuccession'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
@@ -49,20 +50,18 @@ const currentBatchReferencesGuard = `NOT EXISTS (
 // and the global Shop identity inside the same D1 transaction as every sale,
 // stock, movement, and idempotency-ledger write. This also protects receipts
 // with no batch/lot reference, where currentBatchReferencesGuard is vacuous.
-const currentSaleBranchGuard = `EXISTS (
+// The selling role is read the way this request's branch directory saw it:
+// the explicit role column once the held schema exists (the renamed Store
+// sells), else the name -- the SQL this guard always was.
+const currentSaleBranchGuard = (directory: BranchDirectory) => `EXISTS (
   SELECT 1
   FROM branches selected_shop
   WHERE selected_shop.id = @branch_id
     AND selected_shop.is_active = 1
-    AND lower(trim(selected_shop.name)) = 'shop'
-) AND (
-  SELECT COUNT(*)
-  FROM branches active_shop
-  WHERE active_shop.is_active = 1
-    AND lower(trim(active_shop.name)) = 'shop'
-) = 1`
+    AND ${sellingBranchSql(directory, 'selected_shop')}
+) AND ${singleActiveSellingBranchSql(directory, 'active_shop')}`
 
-const currentImportReferencesGuard = `(${currentSaleBranchGuard}) AND (${currentBatchReferencesGuard})`
+const currentImportReferencesGuard = (directory: BranchDirectory) => `(${currentSaleBranchGuard(directory)}) AND (${currentBatchReferencesGuard})`
 
 // Exact SQL equivalent of phone.ts canonicalizePhone(). The classifier uses
 // that helper in JavaScript; the commit guard must independently reconstruct
@@ -124,13 +123,10 @@ export async function applyHistoricalSaleImport(
     || lineBranchIds.some((branchId) => !Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId)) {
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
-  const saleBranch = await db.prepare(`
-    SELECT id, name, is_active,
-      (SELECT COUNT(*) FROM branches active_shop
-       WHERE active_shop.is_active = 1 AND lower(trim(active_shop.name)) = 'shop') AS active_shop_count
-    FROM branches WHERE id = @branchId LIMIT 1
-  `).get<{ id: number; name: string | null; is_active: number | null; active_shop_count: number }>({ branchId: saleHeaderBranchId })
-  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch.name) || Number(saleBranch.active_shop_count) !== 1) {
+  const saleBranchDirectory = await readBranchDirectory(db)
+  const saleBranch = saleBranchDirectory.byId.get(saleHeaderBranchId) || null
+  const activeSellingCount = saleBranchDirectory.rows.filter((row) => row.is_active !== 0 && branchCanSell(row)).length
+  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch) || activeSellingCount !== 1) {
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
   const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))
@@ -306,7 +302,7 @@ export async function applyHistoricalSaleImport(
         )=1
         ELSE 0
       END`
-  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})`
+  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard(saleBranchDirectory)}) AND (${currentCustomerReferenceGuard})`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)

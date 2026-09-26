@@ -34,7 +34,7 @@ import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
-import { indexCanonicalImportBranches, resolveCanonicalImportBranch } from './importBranchAuthority'
+import { indexCanonicalImportBranches, resolveCanonicalImportBranchWithOrigin, type CanonicalImportBranchRow } from './importBranchAuthority'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -85,7 +85,7 @@ export interface ResolvedDatedCountRow {
   }
 }
 
-export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'branch_not_found' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
+export type UnresolvedReason = 'invalid_date' | 'invalid_count' | 'missing_branch' | 'branch_not_found' | 'branch_retired' | 'missing_identifier' | 'product_not_found' | 'ambiguous_barcode' | 'ambiguous_name'
 
 export interface UnresolvedDatedCountRow {
   rowNumber: number
@@ -153,9 +153,8 @@ export async function resolveDatedStockCountRows(
   if (!candidates.length) return { resolved: [], unresolved, branchesCreated: [] }
 
   // ---- Branch resolution (read-only canonical identity) ----
-  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<{
-    id: number; name: string; is_default: number | null; is_active: number | null
-  }>()
+  // SELECT *: the held canonical_key / successor columns when present.
+  const branches = await db.prepare(`SELECT * FROM branches`).all<CanonicalImportBranchRow>()
   const canonicalBranches = indexCanonicalImportBranches(branches)
 
   // ---- Product resolution: sku -> barcode -> exact name, same priority
@@ -216,7 +215,15 @@ export async function resolveDatedStockCountRows(
   const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number }[] = []
   for (const row of candidates) {
     const requestedBranchName = lower(row.branchName)
-    const branch = resolveCanonicalImportBranch(canonicalBranches, requestedBranchName)
+    const branchResolution = resolveCanonicalImportBranchWithOrigin(canonicalBranches, requestedBranchName)
+    // A count is an absolute figure for the branch it names. A retired
+    // branch's count is not its successor's figure, so it is never applied
+    // there: the row is left for the operator to re-address.
+    if (branchResolution?.origin) {
+      unresolved.push({ rowNumber: row.rowNumber, reason: 'branch_retired', raw: row, suggestedActions: [] })
+      continue
+    }
+    const branch = branchResolution?.branch ?? null
     if (!branch) {
       unresolved.push({
         rowNumber: row.rowNumber,

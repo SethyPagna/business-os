@@ -57,6 +57,7 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  './branchSuccession': compile('branchSuccession.ts', { './branchRoles': branchRoles }),
   './saleCreationSnapshot': saleCreationSnapshot,
   './moneyPrecision': moneyPrecision,
   // P10-4: REAL, not stubbed -- db is passed as a runtime argument to

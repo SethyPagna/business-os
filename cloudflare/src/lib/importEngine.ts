@@ -99,7 +99,9 @@ import { branchCanSell } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import {
   indexCanonicalImportBranches,
-  resolveCanonicalImportBranch,
+  resolveCanonicalImportBranchWithOrigin,
+  importBranchRedirectStatements,
+  stockSheetRedirectStatements,
   validateCanonicalImportBranchIds,
   withCanonicalImportBranchWriteGuard,
   type CanonicalImportBranchRow,
@@ -1566,7 +1568,10 @@ export async function classifyProducts(
   // POS/Inventory view -- resolve a branch for every row up front (matching
   // classifyInventory's lookup below) so runImportApply always has one to
   // write, instead of leaving new products branchless the way this used to.
-  const branchRows = await db.prepare(`SELECT id, name, is_default FROM branches WHERE is_active = 1`).all<{ id: number; name: string; is_default: number }>()
+  // Every row (the index keeps only active ones addressable, and needs the
+  // retired ones to follow a successor); SELECT * reads the held columns
+  // when they exist.
+  const branchRows = await db.prepare(`SELECT * FROM branches`).all<CanonicalImportBranchRow>()
   const canonicalImportBranches = indexCanonicalImportBranches(branchRows)
 
   const results: ImportRowResult[] = []
@@ -1819,7 +1824,8 @@ export async function classifyProducts(
       if (resolvedImage) data.image_path = resolvedImage
     }
     const importBranchName = str(row.branch_name || row.branch)
-    const importBranch = resolveCanonicalImportBranch(canonicalImportBranches, importBranchName)
+    const importBranchResolution = resolveCanonicalImportBranchWithOrigin(canonicalImportBranches, importBranchName)
+    const importBranch = importBranchResolution?.branch ?? null
     if (!importBranch) {
       results.push({
         rowNumber: row._rowNumber,
@@ -1836,6 +1842,12 @@ export async function classifyProducts(
     }
     data.branch_id = Number(importBranch.id)
     data.branch_id_explicit = importBranchName ? 1 : 0
+    // Addressed to a retired branch: lands at its successor, and the import
+    // records where the sheet sent it.
+    if (importBranchResolution?.origin) {
+      data.branch_origin_id = Number(importBranchResolution.origin.id)
+      data.branch_origin_name = importBranchResolution.origin.name
+    }
 
     const skuMatch = sku ? bySku.get(lower(sku)) || null : null
     const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(identityBarcodeKey(barcode)) || null : null
@@ -2840,7 +2852,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
-  const branches = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<CanonicalImportBranchRow>()
+  const branches = await db.prepare(`SELECT * FROM branches`).all<CanonicalImportBranchRow>()
   // Identity rule (same shape as classifyProducts): an sku/barcode can be
   // legitimately reused across DIFFERENT-name products, so these maps hold
   // every candidate instead of last-write-wins, and a row that names its
@@ -2984,7 +2996,22 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     }
 
     const branchName = str(row.branch_name || row.branch)
-    const matchedBranch = resolveCanonicalImportBranch(canonicalImportBranches, branchName)
+    const matchedResolution = resolveCanonicalImportBranchWithOrigin(canonicalImportBranches, branchName)
+    const matchedBranch = matchedResolution?.branch ?? null
+    // "Set to N" names an absolute figure for the branch it addresses; a
+    // retired branch's figure is not its successor's, so it is refused.
+    if (matchedResolution?.origin && inventoryAction === 'set') {
+      results.push({
+        rowNumber: row._rowNumber,
+        action: 'error',
+        identifier: sku || barcode || rowName,
+        existingId: product.id,
+        message: `${matchedResolution.origin.name} has moved into ${matchedResolution.branch.name}. Set the ${matchedResolution.branch.name} quantity instead.`,
+        changes: {},
+        data: row,
+      })
+      continue
+    }
     if (!matchedBranch) {
       results.push({
         rowNumber: row._rowNumber,
@@ -3019,6 +3046,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       product_name: product.name,
       branch_id: matchedBranchId,
       branch_name: matchedBranch.name,
+      ...(matchedResolution?.origin ? { branch_origin_id: Number(matchedResolution.origin.id), branch_origin_name: matchedResolution.origin.name } : {}),
       movement_type: movementType,
       quantity: Math.abs(signedQuantity),
       signedQuantity,
@@ -3214,14 +3242,16 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     return null
   }
 
-  const branches = await db.prepare(`SELECT id, name, is_active FROM branches`).all<{ id: number; name: string; is_active?: number | null }>()
+  // SELECT *: the explicit role (held schema) decides which branch sells.
+  const branches = await db.prepare(`SELECT * FROM branches`).all<CanonicalImportBranchRow & { role?: string | null }>()
   const branchByName = new Map<string, Array<(typeof branches)[number]>>()
   for (const branch of branches) {
     if (Number(branch.is_active ?? 1) !== 1) continue
     const key = lower(branch.name)
     branchByName.set(key, [...(branchByName.get(key) || []), branch])
   }
-  const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch.name))
+  const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch))
+  const saleImportBranchIndex = indexCanonicalImportBranches(branches)
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
   // stores a real customer_id whenever the cashier picked a customer at
@@ -3380,8 +3410,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // the one active canonical Shop; any explicit value is authoritative and
     // must match that same Shop rather than being guessed or auto-created.
     const namedBranchMatches = branchName ? branchByName.get(lower(branchName)) || [] : []
+    // A receipt addressed to a since-retired Shop is imported at its
+    // successor (the Store), recording that the sheet said Shop; an exact
+    // active name match keeps working as before.
+    const retiredShopResolution = branchName && !namedBranchMatches.length
+      ? resolveCanonicalImportBranchWithOrigin(saleImportBranchIndex, branchName)
+      : null
     const matchedBranch = branchName
-      ? namedBranchMatches.length === 1 ? namedBranchMatches[0] : null
+      ? namedBranchMatches.length === 1
+        ? namedBranchMatches[0]
+        : retiredShopResolution?.branch
+          ? branches.find((branch) => Number(branch.id) === Number(retiredShopResolution.branch.id)) || null
+          : null
       : activeShopBranches.length === 1 ? activeShopBranches[0] : null
     const matchedBranchId = matchedBranch?.id ?? null
     // Historical receipts are still real sales: every line must belong to
@@ -3390,7 +3430,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // function is still read-only. Previously an unknown name became
     // branch_name_pending, so runImportApply created and backfilled a branch
     // before applyHistoricalSaleImport later rejected the receipt.
-    if (!matchedBranch || Number(matchedBranch.is_active ?? 1) !== 1 || !branchCanSell(matchedBranch.name)) {
+    if (!matchedBranch || Number(matchedBranch.is_active ?? 1) !== 1 || !branchCanSell(matchedBranch)) {
       results.push({
         rowNumber: first._rowNumber,
         action: 'error',
@@ -3666,7 +3706,8 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       cashier_id: matchedCashierId,
       cashier_name: str(first.cashier_name) || null,
       branch_id: matchedBranchId,
-      branch_name: matchedBranchId ? branchName : null,
+      branch_name: matchedBranchId ? (retiredShopResolution?.origin ? matchedBranch.name : branchName) : null,
+      ...(retiredShopResolution?.origin ? { branch_origin_id: Number(retiredShopResolution.origin.id), branch_origin_name: retiredShopResolution.origin.name } : {}),
       customer_id: matchedCustomerId,
       customer_name: explicitlyAnonymous ? null : str(first.customer_name) || null,
       customer_phone: explicitlyAnonymous ? null : str(first.customer_phone) || null,
@@ -5313,6 +5354,12 @@ async function applyStockActionsSinglePass(
     }
   }
   sw.lap('buildAndWriteStatementsMs')
+  // Sheet columns that addressed a retired branch record where their stock
+  // landed (empty while every branch is active).
+  {
+    const redirects = stockSheetRedirectStatements(jobId, results)
+    if (redirects.length) await db.batch(redirects)
+  }
 
   await persistChunkResults(db, jobId, 'apply', results)
 
@@ -5595,7 +5642,11 @@ async function applyStockActionsContinuation(
 
   await flushAdds()
   stock.dispatchAfterRow = after
-  if (touched.length) await persistChunkResults(db, jobId, 'apply', touched, touchedGroupIndex)
+  if (touched.length) {
+    const redirects = stockSheetRedirectStatements(jobId, touched)
+    if (redirects.length) await db.batch(redirects)
+    await persistChunkResults(db, jobId, 'apply', touched, touchedGroupIndex)
+  }
   sw.lap('buildAndWriteStatementsMs')
 
   if (moreRows) {
@@ -5943,6 +5994,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     sw.lap('resolveBranchesMs')
 
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    // Rows a sheet addressed to a retired branch (now landing at its
+    // successor) record that origin. Idempotent per (job,row), so a queue
+    // redelivery of this chunk does not duplicate them.
+    if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
+      statements.push(...importBranchRedirectStatements(jobId, job.type, actionable.map((result) => ({ rowNumber: result.rowNumber, data: result.data }))))
+    }
     // Redelivery guard for the ADDITIVE apply writes (Part-77, pipelines
     // audit): the queue is at-least-once and this chunk is NOT one atomic
     // transaction (runD1BatchInChunks splits it), so a redelivered or
@@ -6028,7 +6085,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // called it). Fetched once per chunk, after the selected canonical
       // branch ids have been revalidated.
       if (createRows.length) {
-        const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches WHERE is_active = 1`).all<CanonicalImportBranchRow>()
+        const rows = await db.prepare(`SELECT * FROM branches WHERE is_active = 1`).all<CanonicalImportBranchRow>()
         const index = indexCanonicalImportBranches(rows)
         productSeedBranchIds = [...index.byRole.values()]
           .flatMap((matches) => matches.length === 1 ? [Number(matches[0].id)] : [])

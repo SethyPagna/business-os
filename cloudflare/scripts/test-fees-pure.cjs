@@ -155,9 +155,15 @@ check('fees route delegates app-entered dates to the shared typed-date kernel', 
 
 check('manual expenses require an active exact Shop and linked expenses derive the branch from a real sale', () => {
   assert.match(source, /if \(requestedBranchId == null\) throw new Error\('BRANCH_REQUIRED'\)/)
-  assert.match(source, /Number\(branch\.is_active \?\? 0\) !== 1 \|\| !branchCanSell\(branch\.name\)/)
-  assert.match(source, /FROM sales s LEFT JOIN branches b ON b\.id=s\.branch_id/)
-  assert.match(source, /requestedBranchId !== saleBranchId\) throw new Error\('SALE_BRANCH_MISMATCH'\)/)
+  // U-branch: the branch ROW decides (the renamed Store sells by role), read
+  // from the fresh branch directory; a sale rung up at a retired branch is
+  // booked at its successor, and naming either the stored or the effective
+  // branch is not a mismatch.
+  assert.match(source, /Number\(branch\.is_active \?\? 0\) !== 1 \|\| !branchCanSell\(branch\)/)
+  assert.match(source, /const directory = await readBranchDirectory\(db\)/)
+  assert.match(source, /SELECT s\.id, s\.branch_id FROM sales s WHERE s\.id=@saleId/)
+  assert.match(source, /liveBranch\(storedBranchId\)/)
+  assert.match(source, /requestedBranchId !== saleBranchId && requestedBranchId !== storedBranchId\) throw new Error\('SALE_BRANCH_MISMATCH'\)/)
   assert.match(source, /return \{ saleId, branchId: saleBranchId \}/)
   assert.equal((source.match(/await resolveFeeLink\(/g) || []).length, 2, 'create and edit must enforce the same link contract')
 })

@@ -67,6 +67,7 @@ check('the other silently-dropped business tables are covered too', () => {
     'dated_stock_count_batch_actions', 'rfid_tags', 'ai_provider_configs',
     'import_auto_merges', 'import_sales_commits', 'import_stock_action_commits',
     'import_stock_action_groups', 'import_stock_action_guards',
+    'branch_redirects',
   ]) {
     assert.ok(BACKUP_TABLES.includes(table), `${table} must be backed up`)
   }
