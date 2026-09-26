@@ -722,6 +722,8 @@ function loadQrComponent(): unknown {
     if (id === 'react' || id === 'react/jsx-runtime') return require(id)
     // Real: the tiles read their session cache synchronously on first render.
     if (id.includes('receiptQrCache')) return require('../src/utils/receiptQrCache.ts')
+    // Real: each tile announces its print readiness through these attributes (Q13).
+    if (id.includes('receiptQrReadiness')) return require('../src/utils/receiptQrReadiness.ts')
     return { normalizeSocialQrUrl: (url: string) => ({ url }) }
   }, mod, mod.exports)
   return mod.exports.default

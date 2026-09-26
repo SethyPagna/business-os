@@ -316,6 +316,71 @@ try {
       assert.equal(missing.style.visibility, 'hidden')
       assert.match(banner.attrs.style, /background-image:none;/)
     })
+    // Q13 (owner, 27 Sep 2026): the ABA payment QR is the exception to the 5 s
+    // rule. Slow is waited for; only a real failure drops it, and then the
+    // whole block goes and the caller is told once.
+    class TreeElement extends FakeElement {
+      parent: TreeElement | null = null
+      constructor(attrs: Record<string, string> = {}, children: TreeElement[] = []) {
+        super(attrs, children)
+        for (const child of children) child.parent = this
+      }
+      closest(selector: string): TreeElement | null {
+        const payment = selector === '[data-receipt-qr="payment"]'
+        for (let node: TreeElement | null = this; node; node = node.parent) {
+          if (payment && node.attrs['data-receipt-qr'] === 'payment') return node
+        }
+        return null
+      }
+      remove() {
+        if (!this.parent) return
+        this.parent.children = this.parent.children.filter((child) => child !== this)
+        this.parent = null
+      }
+    }
+    const paymentReceipt = () => {
+      const image = new TreeElement({ tag: 'img', src: '/aba.png' })
+      const block = new TreeElement({ tag: 'div', 'data-receipt-qr': 'payment', 'data-receipt-qr-state': 'ready' }, [image])
+      const logo = new TreeElement({ tag: 'img', src: '/logo.png' })
+      const root = new TreeElement({ tag: 'div' }, [logo, block])
+      return { root, block, image, logo }
+    }
+    await check('a payment QR slower than the asset deadline is waited for and kept', async () => {
+      let calls = 0
+      globalThis.fetch = async (url) => {
+        calls++
+        if (String(url).includes('aba')) await sleep(120)
+        return response()
+      }
+      const { root, block, image } = paymentReceipt()
+      let omitted = 0
+      await inlineReceiptAssets(root, { baseUrl, budgetMs: 40, paymentQrBudgetMs: 2000, onPaymentQrOmitted: () => { omitted++ } })
+      assert.match(String(image.attrs.src), /^data:image\/png/, 'the slow payment QR is embedded, not hidden')
+      assert.notEqual(image.style.visibility, 'hidden')
+      assert.ok(root.children.includes(block), 'its block stays')
+      assert.equal(omitted, 0)
+      assert.equal(calls, 2)
+    })
+    await check('a payment QR that errors takes its block out and is reported once', async () => {
+      globalThis.fetch = async (url) => String(url).includes('aba') ? new Response('', { status: 404 }) : response()
+      const { root, block, logo } = paymentReceipt()
+      let omitted = 0
+      await inlineReceiptAssets(root, { baseUrl, onPaymentQrOmitted: () => { omitted++ } })
+      assert.ok(!root.children.includes(block), 'the block is removed, not left as a hidden gap')
+      assert.equal(omitted, 1)
+      assert.match(String(logo.attrs.src), /^data:image\/png/, 'the rest of the receipt is unaffected')
+    })
+    await check('a cancelled print is not reported as an omitted payment QR', async () => {
+      globalThis.fetch = async (url) => String(url).includes('aba') ? held<Response>() : response()
+      const { root } = paymentReceipt()
+      const controller = new AbortController()
+      let omitted = 0
+      const done = inlineReceiptAssets(root, { baseUrl, signal: controller.signal, onPaymentQrOmitted: () => { omitted++ } })
+      await sleep(20)
+      controller.abort()
+      await done
+      assert.equal(omitted, 0)
+    })
     await check('printReceipt uses the bounded inliner and never rethrows an asset error', async () => {
       const source = readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
       assert.equal((source.match(/await inlineReceiptAssets\(/g) || []).length, 2, 'both the print markup and the raster clone')

@@ -13,7 +13,7 @@ import { receiptTotalsFigures } from '../../utils/receiptTotals'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { RECEIPT_LANGUAGE_OPTIONS } from '../receipt-settings/constants'
 import { buildAppliedReceiptConfig, isReceiptCardPaper, receiptRenditionPrintSettings } from '../../utils/receiptAppliedConfig.ts'
-import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
+import ReceiptQrCodes, { ReceiptPaymentQr, normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import InfoHint from '../shared/InfoHint.tsx'
 import { RECEIPT_CONTRAST_ATTR, normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
@@ -28,6 +28,7 @@ import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 import { customerDisplayName as displayCustomerName, isAnonymousCustomerIdentity } from '../../utils/customerIdentity.ts'
 import { openPrintPreviewWindow, printFrameReleased } from '../../utils/printSurface.ts'
 import { scheduleIdleWarmup } from '../../utils/idleWarmup.ts'
+import { isReceiptQrError, type ReceiptQrError } from '../../utils/receiptQrReadiness.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
 // PDF is a deterministic physical-size artifact. Unlike the HTML Print
@@ -168,6 +169,7 @@ const useApp = useAppHook as () => {
   fmtKHR: MoneyFormatter
   khrSymbol: string
   t?: TranslateFn
+  notify?: (message: unknown, type?: string) => void
 }
 
 let receiptPrintModulePromise: Promise<ReceiptPrintModule> | null = null
@@ -353,7 +355,7 @@ function Row({ label, value, subValue, bold = false, tone = '', breakAll = false
 }
 
 export default function Receipt({ sale, settings = {}, onClose, onReturn, returnLabel, returnDisabledReason = '', _previewMode }: ReceiptProps) {
-  const { fmtUSD, fmtKHR, khrSymbol, t } = useApp()
+  const { fmtUSD, fmtKHR, khrSymbol, t, notify } = useApp()
   const printRef = useRef<HTMLDivElement | null>(null)
   const compactPrintRef = useRef<HTMLDivElement | null>(null)
   const appliedConfig = useMemo(() => buildAppliedReceiptConfig({ settings }), [settings])
@@ -386,6 +388,11 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const fullReceiptWidthMm = getReceiptPaperWidthMm(fullPrintSettings, tpl.width || 80)
   const [lang, setLang] = useState<LanguageMode>((tpl.receipt_language as LanguageMode) || 'en')
   const [pdfBusy, setPdfBusy] = useState<ReceiptExportMode | ''>('')
+  // Q13: true while the running export waits for a QR code; the busy control
+  // then says so and offers Cancel, which aborts this controller.
+  const [waitingForQr, setWaitingForQr] = useState(false)
+  const exportAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => exportAbortRef.current?.abort(), [])
 
   useEffect(() => {
     if (_previewMode) setLang((tpl.receipt_language as LanguageMode) || 'en')
@@ -906,7 +913,13 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     ...(tpl.qr_show_social ? normalizeQrSocialLinksForReceipt(tpl.qr_social_links) : []),
   ] : []
   const qrBlock = qrEntries.length ? (
-    <ReceiptQrCodes key="qr_codes" entries={qrEntries} scanLabel={t?.('qr_scan_to_visit') || 'Scan to visit'} />
+    <ReceiptQrCodes
+      key="qr_codes"
+      entries={qrEntries}
+      scanLabel={t?.('qr_scan_to_visit') || 'Scan to visit'}
+      failedLabel={t?.('receipt_qr_tile_failed') || 'QR code failed'}
+      retryLabel={t?.('retry') || 'Retry'}
+    />
   ) : null
   const compactReceiptBlock = compactSalesReceipt ? (
     <div className="space-y-1 text-[10px] leading-snug">
@@ -926,7 +939,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
           {tpl.sales_receipt_aba_account_number ? <div>{tpl.sales_receipt_aba_account_number}</div> : null}
         </div>
       ) : null}
-      {tpl.sales_receipt_aba_qr_image ? <div className="flex justify-center pt-1"><img src={tpl.sales_receipt_aba_qr_image} alt="ABA payment QR" className="h-16 w-16 object-contain" /></div> : null}
+      {tpl.sales_receipt_aba_qr_image ? <ReceiptPaymentQr key={tpl.sales_receipt_aba_qr_image} src={tpl.sales_receipt_aba_qr_image} alt="ABA payment QR" /> : null}
       {tpl.sales_receipt_note === 'received_payment' ? <div className="text-center font-semibold">Received payment</div> : null}
     </div>
   ) : null
@@ -941,7 +954,54 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const defaultVariant: ReceiptVariant = 'full'
   const variantTitle = (variant: ReceiptVariant) => `${receiptTitle} - ${variant === 'compact' ? '80x50mm' : `${fullReceiptWidthMm}mm`}`
 
-  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, previewWindow?: Window | null) => {
+  // Q13: every export waits for the receipt's QR codes inside printReceipt.ts.
+  // What the cashier sees of that wait is wired here: the label, Cancel, the
+  // refusal message, and the warning when the payment QR had to be left out.
+  type QrExportHooks = { signal: AbortSignal; onWaitingForQr: (waiting: boolean) => void; onPaymentQrOmitted: () => void }
+  const startQrExport = () => {
+    exportAbortRef.current?.abort()
+    const controller = new AbortController()
+    exportAbortRef.current = controller
+    let paymentQrOmitted = false
+    const hooks: QrExportHooks = {
+      signal: controller.signal,
+      onWaitingForQr: (waiting) => { if (!controller.signal.aborted) setWaitingForQr(waiting) },
+      onPaymentQrOmitted: () => { paymentQrOmitted = true },
+    }
+    return {
+      hooks,
+      // Warn only after the receipt really went out without the payment QR.
+      afterSuccess: () => {
+        if (paymentQrOmitted) notify?.(t?.('receipt_payment_qr_omitted') || 'Payment QR image could not be loaded — printed without it', 'warning')
+      },
+      finish: () => {
+        if (exportAbortRef.current === controller) exportAbortRef.current = null
+        setWaitingForQr(false)
+      },
+    }
+  }
+  const cancelQrWait = () => exportAbortRef.current?.abort()
+  // null: the cashier cancelled, so there is nothing to report.
+  const qrRefusalMessage = (error: ReceiptQrError): string | null => {
+    if (error.code === 'cancelled') return null
+    if (error.code === 'generation-timeout') return t?.('receipt_qr_still_generating') || 'The QR codes are still being generated. Try printing again.'
+    return t?.('receipt_qr_generation_failed') || 'A QR code could not be generated, so nothing was printed. Tap Retry on the QR code, then print again.'
+  }
+  const reportExportFailure = (error: unknown) => {
+    const message = isReceiptQrError(error)
+      ? qrRefusalMessage(error)
+      : getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF')
+    if (message) window.alert(message)
+  }
+
+  // The running export's control reads "Waiting for QR codes..." while the
+  // print is held for one, so a disabled button never looks like a hang.
+  const exportLabel = (mode: ReceiptExportMode, idle: string, busy: string): string => {
+    if (pdfBusy !== mode) return idle
+    return waitingForQr ? (t?.('receipt_qr_waiting') || 'Waiting for QR codes...') : busy
+  }
+
+  const exportReceiptVariant = async (printTools: ReceiptPrintModule, mode: ReceiptExportMode, variant: ReceiptVariant, qrHooks: QrExportHooks, previewWindow?: Window | null) => {
     const target = variant === 'compact' ? compactPrintRef.current : printRef.current
     const variantSettings = variant === 'compact' ? compactPrintSettings : fullPrintSettings
     if (!target) {
@@ -952,6 +1012,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     const title = variantTitle(variant)
     if (mode === 'image') {
       await printTools.downloadReceiptImage(target, {
+        ...qrHooks,
         title,
         fileName: title,
         printSettings: variantSettings,
@@ -963,12 +1024,14 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       })
     } else if (mode === 'pdf') {
       await printTools.downloadReceiptPdf(target, {
+        ...qrHooks,
         title,
         fileName: title,
         printSettings: variantSettings,
       })
     } else {
       await printTools.printReceipt(target, {
+        ...qrHooks,
         title,
         printSettings: variantSettings,
         previewTranslate: t,
@@ -985,15 +1048,18 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
     // then prints from a hidden iframe in this document instead.
     const previewWindow = mode === 'print' ? openPrintPreviewWindow() : null
     setPdfBusy(mode)
+    const qrExport = startQrExport()
     try {
       const printTools = await loadReceiptPrintModule()
-      await exportReceiptVariant(printTools, mode, variant, previewWindow)
+      await exportReceiptVariant(printTools, mode, variant, qrExport.hooks, previewWindow)
+      qrExport.afterSuccess()
     } catch (error) {
       // printReceipt closes the window on ITS failures; a failed module load
       // happens before it ever sees the window, so close it here.
       try { previewWindow?.close?.() } catch { /* already closed */ }
-      window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
+      reportExportFailure(error)
     } finally {
+      qrExport.finish()
       setPdfBusy('')
     }
   }
@@ -1004,6 +1070,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
   const exportBothSeparately = async (mode: ReceiptExportMode) => {
     if (!compactPrintRef.current || !printRef.current) return
     setPdfBusy(mode)
+    const qrExport = startQrExport()
     try {
       const printTools = await loadReceiptPrintModule()
       // One after the other: only one print frame exists at a time
@@ -1012,20 +1079,24 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
       // one of the two and left Print disabled (Sep 23 2026). The full receipt
       // also waits until the card's print sheet has closed: its print replaces
       // the card's frame, and on iOS that cancels a sheet still on screen.
-      // A failed rendition still lets the other one through.
+      // A failed rendition still lets the other one through -- but Cancel
+      // stops both.
       let failure: unknown = null
       for (const variant of ['compact', 'full'] as const) {
+        if (qrExport.hooks.signal.aborted) break
         try {
           if (mode === 'print' && variant === 'full') await printFrameReleased()
-          await exportReceiptVariant(printTools, mode, variant)
+          await exportReceiptVariant(printTools, mode, variant, qrExport.hooks)
         } catch (error) {
           failure = failure ?? error
         }
       }
+      qrExport.afterSuccess()
       if (failure) throw failure
     } catch (error) {
-      window.alert(getErrorMessage(error, t?.('unable_generate_receipt_pdf') || 'Unable to generate receipt PDF'))
+      reportExportFailure(error)
     } finally {
+      qrExport.finish()
       setPdfBusy('')
     }
   }
@@ -1132,6 +1203,17 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         ) : null}
         </div>
         <div className="ml-auto flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
+        {waitingForQr ? (
+          // Only while an export is held for a QR (Q13): a slow payment QR is
+          // waited for up to 30 s, and the cashier may stop waiting instead.
+          // Always labelled, even on a phone: it is the one way out of the wait.
+          <span className="inline-flex shrink-0 items-center gap-1.5" role="status" aria-live="polite">
+            <span className="sr-only">{t?.('receipt_qr_waiting') || 'Waiting for QR codes...'}</span>
+            <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm leading-normal sm:px-3" onClick={cancelQrWait}>
+              {t?.('cancel') || 'Cancel'}
+            </button>
+          </span>
+        ) : null}
         {compactSalesReceipt ? (
           // The 80x50 card and the full receipt are two print FORMATS. Rather
           // than two dimension-labeled Print buttons (the old B5 layout),
@@ -1155,7 +1237,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
               >
                 <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
                   <Printer className="h-4 w-4 shrink-0" />
-                  <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+                  <span className="hidden truncate sm:inline">{exportLabel('print', t?.('print') || 'Print', t?.('preparing_pdf') || 'Preparing PDF...')}</span>
                   <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" />
                 </span>
               </button>
@@ -1177,7 +1259,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
         >
           <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
             <Printer className="h-4 w-4 shrink-0" />
-            <span className="hidden truncate sm:inline">{pdfBusy === 'print' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('print') || 'Print')}</span>
+            <span className="hidden truncate sm:inline">{exportLabel('print', t?.('print') || 'Print', t?.('preparing_pdf') || 'Preparing PDF...')}</span>
           </span>
         </button>
         )}
@@ -1189,7 +1271,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             menuClassName="min-w-[11rem]"
             trigger={(
               <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('download_pdf') || 'Download PDF'} title={t?.('download_pdf') || 'Download PDF'}>
-                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{exportLabel('pdf', t?.('download_pdf') || 'Download PDF', t?.('preparing_pdf') || 'Preparing PDF...')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
               </button>
             )}
             items={[
@@ -1207,7 +1289,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             title={t?.('download_pdf') || 'Download PDF'}
             aria-label={t?.('download_pdf') || 'Download PDF'}
           >
-            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'pdf' ? (t?.('preparing_pdf') || 'Preparing PDF...') : (t?.('download_pdf') || 'Download PDF')}</span></span>
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><FileText className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{exportLabel('pdf', t?.('download_pdf') || 'Download PDF', t?.('preparing_pdf') || 'Preparing PDF...')}</span></span>
           </button>
         )}
         {compactSalesReceipt ? (
@@ -1218,7 +1300,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             menuClassName="min-w-[11rem]"
             trigger={(
               <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 py-2 text-sm sm:px-3" disabled={pdfBusy !== ''} aria-haspopup="true" aria-label={t?.('receipt_image_short') || 'Image'} title={t?.('receipt_image_short') || 'Image'}>
-                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
+                <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{exportLabel('image', t?.('receipt_image_short') || 'Image', t?.('saving_image') || 'Saving image...')}</span><ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" /></span>
               </button>
             )}
             items={[
@@ -1236,7 +1318,7 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
             title={t?.('receipt_image_short') || 'Image'}
             aria-label={t?.('receipt_image_short') || 'Image'}
           >
-            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{pdfBusy === 'image' ? (t?.('saving_image') || 'Saving image...') : (t?.('receipt_image_short') || 'Image')}</span></span>
+            <span className="inline-flex min-w-0 items-center justify-center gap-1.5"><ImageDown className="h-4 w-4 shrink-0" /><span className="hidden truncate sm:inline">{exportLabel('image', t?.('receipt_image_short') || 'Image', t?.('saving_image') || 'Saving image...')}</span></span>
           </button>
         )}
         </div>

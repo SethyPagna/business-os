@@ -17,8 +17,22 @@
 // Origin: the deadline loader, de-duplication and the negative-control test
 // are Codex's perf-print work (Worktrees/perf-print-20260925). Codex's version
 // failed the whole print on any asset error; this one degrades instead.
+//
+// ONE EXCEPTION, the ABA payment QR (owner, 27 Sep 2026, Q13): it is not
+// decoration, so the 5 s deadline must not hide it. An image inside a
+// `data-receipt-qr="payment"` block is inlined FIRST, with its own generous
+// deadline (RECEIPT_PAYMENT_QR_BUDGET_MS), and a slow one is waited for. Only
+// when it really cannot be had is the WHOLE block removed -- collapsed, not a
+// hidden gap -- and the caller told through onPaymentQrOmitted, so it can warn
+// that the receipt printed without it.
+
+import { RECEIPT_QR_ATTR, RECEIPT_QR_WAIT_CEILING_MS } from './receiptQrReadiness.ts'
 
 export const RECEIPT_ASSET_BUDGET_MS = 5000
+export const RECEIPT_PAYMENT_QR_BUDGET_MS = RECEIPT_QR_WAIT_CEILING_MS
+// Only a payment QR that is actually slow switches the caller's label to
+// "waiting"; a cached one inlines well inside this and never flickers it.
+const PAYMENT_QR_WAITING_NOTICE_MS = 300
 export const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
 
 export type ReceiptAssetFailure = 'timeout' | 'aborted' | 'http' | 'network' | 'reader' | 'invalid-url'
@@ -202,18 +216,87 @@ async function inlineStyleAssetUrls(root: HTMLElement, assets: ReceiptAssetLoade
   })
 }
 
+export type InlineReceiptAssetOptions = {
+  budgetMs?: number
+  paymentQrBudgetMs?: number
+  baseUrl?: string
+  signal?: AbortSignal
+  /** Called once when at least one payment QR block was left out of this print. */
+  onPaymentQrOmitted?: () => void
+  /** true while a payment QR is slow to inline, false once it is settled. */
+  onPaymentQrWaiting?: (waiting: boolean) => void
+}
+
+function paymentQrBlockOf(image: HTMLElement): Element | null {
+  return typeof image.closest === 'function' ? image.closest(`[${RECEIPT_QR_ATTR}="payment"]`) : null
+}
+
+/**
+ * Stage one: every payment QR image, with its own generous deadline. A slow
+ * one is waited for; one that cannot be had takes its whole block out of the
+ * clone. Returns the data: URLs it inlined, keyed by source, so the general
+ * stage never fetches the same image a second time.
+ */
+async function inlinePaymentQrImages(
+  root: HTMLElement,
+  options: InlineReceiptAssetOptions,
+  skipped: ReceiptAssetError[],
+): Promise<{ inlined: Map<string, string>; omitted: number }> {
+  const inlined = new Map<string, string>()
+  let omitted = 0
+  const paymentImages = Array.from(root.querySelectorAll('img')).filter((image) => paymentQrBlockOf(image))
+  if (!paymentImages.length) return { inlined, omitted }
+  const paymentAssets = createReceiptAssetLoader({
+    budgetMs: options.paymentQrBudgetMs ?? RECEIPT_PAYMENT_QR_BUDGET_MS,
+    baseUrl: options.baseUrl,
+    signal: options.signal,
+  })
+  let waitingShown = false
+  const waitingNotice = setTimeout(() => { waitingShown = true; options.onPaymentQrWaiting?.(true) }, PAYMENT_QR_WAITING_NOTICE_MS)
+  try {
+    await mapReceiptAssets(paymentImages, async (image) => {
+      const src = String(image.getAttribute('src') || '').trim()
+      if (/^data:/i.test(src)) return
+      const dataUrl = src ? await tryLoad(paymentAssets, src, skipped) : null
+      if (dataUrl) {
+        image.setAttribute('src', dataUrl)
+        inlined.set(src, dataUrl)
+      } else {
+        paymentQrBlockOf(image)?.remove()
+        omitted += 1
+      }
+    })
+  } finally {
+    clearTimeout(waitingNotice)
+    if (waitingShown) options.onPaymentQrWaiting?.(false)
+    paymentAssets.dispose()
+  }
+  return { inlined, omitted }
+}
+
 /**
  * Inlines every <img> and style url() under `root` as a data: URL, within one
  * shared deadline. Always resolves: an asset that cannot be had in time is
  * left out and reported in the returned list (for logging), never thrown.
+ * Payment QR images are the exception described at the top of this file.
  */
 export async function inlineReceiptAssets(
   root: unknown,
-  options: { budgetMs?: number; baseUrl?: string; signal?: AbortSignal } = {},
+  options: InlineReceiptAssetOptions = {},
 ): Promise<ReceiptAssetError[]> {
   const skipped: ReceiptAssetError[] = []
   if (typeof HTMLElement === 'undefined' || !(root instanceof HTMLElement)) return skipped
-  const assets = createReceiptAssetLoader(options)
+  const payment = await inlinePaymentQrImages(root, options, skipped)
+  // A cancelled print is not an omitted payment QR: nothing is printed.
+  if (payment.omitted && !options.signal?.aborted) options.onPaymentQrOmitted?.()
+  const general = createReceiptAssetLoader(options)
+  const assets: ReceiptAssetLoader = {
+    load: (src) => {
+      const known = payment.inlined.get(src)
+      return known ? Promise.resolve(known) : general.load(src)
+    },
+    dispose: general.dispose,
+  }
   try {
     await inlineImageNodeSources(root, assets, skipped)
     await inlineStyleAssetUrls(root, assets, skipped)
