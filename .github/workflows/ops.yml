@@ -45,7 +45,7 @@ on:
           - copy
           - verify-only
       query:
-        description: d1-export only - a file name in ops/queries without .sql (product-names, r2-url-audit, migrations-applied)
+        description: d1-export only - the name of a file in ops/queries, without .sql (for example migrations-applied)
         required: false
         default: ''
         type: string
