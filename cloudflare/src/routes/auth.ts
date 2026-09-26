@@ -813,8 +813,15 @@ app.post('/otp/disable', requireAuth, async (c) => {
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
   if (requiresSelfOtpDisablePassword(actor, target, body.password)) return c.json({ error: 'Password required' }, 400)
-  if (Number(actor.id) === Number(target.id) && !bcrypt.compareSync(String(body.password || ''), target.password)) {
-    return c.json({ error: 'Incorrect password' }, 401)
+  if (Number(actor.id) === Number(target.id)) {
+    // The same allowance as the other self 2FA re-auth steps, so a stolen
+    // session is not an unlimited password-guessing oracle; 400, not 401, as
+    // a 401 on an authenticated path signs the frontend out.
+    const limit = await checkRateLimit(c.env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
+    if (!limit.allowed) return c.json({ error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }, 429)
+    if (!bcrypt.compareSync(String(body.password || ''), target.password)) {
+      return c.json({ error: 'Incorrect password', code: 'incorrect_password' }, 400)
+    }
   }
 
   const db = getDb(c.env)
@@ -847,7 +854,7 @@ app.post('/otp/recover', requireAuth, async (c) => {
 
   const actorRecord = await getOtpTargetUser(c.env, actor.id)
   if (!actorRecord || !bcrypt.compareSync(String(body.password || ''), actorRecord.password)) {
-    return c.json({ error: 'Your current password is incorrect.' }, 401)
+    return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
   }
   const target = await getOtpTargetUser(c.env, targetId)
   if (!target) return c.json({ error: 'User not found' }, 404)

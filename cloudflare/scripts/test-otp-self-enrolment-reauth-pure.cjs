@@ -40,6 +40,39 @@ function seeded() {
 }
 
 async function main() {
+  await check('self 2FA disable: a wrong password answers 400 (not a sign-out 401) and 2FA stays on', async () => {
+    const h = seeded()
+    const res = await h.request('/otp/disable', 'POST', { userId: 802, password: 'guess' }, { actorId: 802 })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.code, 'incorrect_password')
+    assert.equal(h.userRow(802).otp_enabled, 1)
+  })
+
+  await check('self 2FA disable: password guesses share the capped re-auth allowance', async () => {
+    const h = seeded()
+    for (let i = 0; i < 10; i++) {
+      assert.equal((await h.request('/otp/disable', 'POST', { userId: 802, password: `guess${i}` }, { actorId: 802 })).status, 400, `guess ${i + 1}`)
+    }
+    const res = await h.request('/otp/disable', 'POST', { userId: 802, password: 'enrolled-password' }, { actorId: 802 })
+    assert.equal(res.status, 429, 'a stolen session must not be an unlimited password oracle')
+    assert.equal(h.userRow(802).otp_enabled, 1)
+  })
+
+  await check('control: self 2FA disable with the right password turns it off', async () => {
+    const h = seeded()
+    const res = await h.request('/otp/disable', 'POST', { userId: 802, password: 'enrolled-password' }, { actorId: 802 })
+    assert.equal(res.status, 200)
+    assert.equal(h.userRow(802).otp_enabled, 0)
+  })
+
+  await check('admin 2FA recovery: a wrong administrator password answers 400 and the target keeps 2FA', async () => {
+    const h = seeded()
+    const res = await h.request('/otp/recover', 'POST', { userId: 802, password: 'guess', confirmation: 'RESET 2FA' }, { actorId: 803 })
+    assert.equal(res.status, 400)
+    assert.equal(res.body.code, 'incorrect_password')
+    assert.equal(h.userRow(802).otp_enabled, 1)
+  })
+
   await check('self setup with only a session is refused, and nothing is written', async () => {
     const h = seeded()
     const res = await h.request('/otp/setup', 'POST', { userId: 801 }, { actorId: 801 })
