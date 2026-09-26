@@ -112,7 +112,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/deviceTrust': { requiresDeviceApproval: () => false, checkDeviceTrust: async () => ({ status: 'approved' }) },
   '../lib/googleOauth': {
     ...googleOauth,
-    verifyState: async () => ({ success: true, payload: { provider: 'google', mode: 'link', currentUserId: stateUserId, returnOrigin: 'https://admin.example', returnPath: '/profile' } }),
+    verifyState: async () => ({ success: true, payload: { provider: 'google', mode: 'link', currentUserId: stateUserId, nonce: 'n1', returnOrigin: 'https://admin.example', returnPath: '/profile' } }),
     exchangeGoogleOauthCode: async () => ({ success: true, tokens: {} }),
     getGoogleUserFromTokens: async () => ({ success: true, user: googleUser }),
     normalizeReturnTarget: () => ({ origin: 'https://admin.example', path: '/profile', url: 'https://admin.example/profile' }),
@@ -139,7 +139,11 @@ function reset() {
 const googleSubjectOf = (id) => db.prepare('SELECT google_subject FROM users WHERE id = @id').get({ id }).google_subject
 
 async function callback(cookieToken) {
-  const headers = cookieToken ? { Cookie: `bos_session=${cookieToken}` } : {}
+  // The browser that started the link also holds its PKCE cookie (bound to
+  // the state's nonce) -- see test-google-oauth-pkce-cookie-pure.cjs.
+  const cookies = ['bos_google_pkce=n1.test-verifier']
+  if (cookieToken) cookies.push(`bos_session=${cookieToken}`)
+  const headers = { Cookie: cookies.join('; ') }
   const res = await authRoute.request('/oauth/callback?code=c&state=s', { headers }, { ...READY_ENV, DB: db }, ctx)
   return { status: res.status, html: await res.text() }
 }

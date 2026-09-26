@@ -22,7 +22,10 @@ import {
   exchangeGoogleOauthCode,
   getGoogleLoginPublicConfig,
   getGoogleUserFromTokens,
+  matchGooglePkceVerifier,
   normalizeReturnTarget,
+  setGooglePkceCookie,
+  takeGooglePkceCookie,
   verifyState,
 } from '../lib/googleOauth'
 import type { Env } from '../index'
@@ -892,6 +895,8 @@ app.post('/oauth/start', async (c) => {
     deviceName: body.deviceName,
   })
   if (!result.success) return c.json({ error: result.error || 'Failed to start OAuth flow' }, 400)
+  // The PKCE verifier stays with this browser (HttpOnly cookie), never in `state`.
+  setGooglePkceCookie(c, result.pkceBinding || '')
   return c.json({ url: result.url, mode: oauthMode })
 })
 
@@ -942,6 +947,9 @@ function buildOauthCallbackHtml(opts: { payload: Record<string, unknown>; target
 // HTML page that posts the result back to the opener window (popup flow)
 // or falls back to a full-page redirect, matching Login.tsx's listener.
 app.get('/oauth/callback', async (c) => {
+  // Read and clear the PKCE cookie before anything can return: it is spent
+  // on every outcome, success or failure.
+  const pkceCookie = takeGooglePkceCookie(c)
   const code = c.req.query('code')
   const stateParam = c.req.query('state')
   const stateResult = await verifyState(c.env, stateParam)
@@ -962,8 +970,12 @@ app.get('/oauth/callback', async (c) => {
     }), status)
 
   if (!stateResult.success) return fail(400, stateResult.error || 'Google sign-in failed.')
+  // Only the browser that started the flow can finish it: no cookie, or a
+  // cookie from another flow, and the code is never redeemed.
+  const pkce = matchGooglePkceVerifier(pkceCookie, stateResult.payload?.nonce)
+  if (!pkce.success) return fail(400, pkce.error || 'Google sign-in failed.')
 
-  const tokenResult = await exchangeGoogleOauthCode(c.env, code, stateResult.payload || {})
+  const tokenResult = await exchangeGoogleOauthCode(c.env, code, { codeVerifier: pkce.codeVerifier })
   if (!tokenResult.success) return fail(401, tokenResult.error || 'Google sign-in failed.')
 
   const userResult = await getGoogleUserFromTokens(tokenResult.tokens || {})
