@@ -6,8 +6,9 @@
 //
 // Drives the REAL routes/auth.ts against the full migrated schema
 // (harness/load_auth_route.cjs). Fails on a04da325: six failures spread
-// two-per-alias never locked the account there, and nine successful
-// sign-ins spread the same way never met the per-user ceiling.
+// two-per-alias never locked the account there, and eight failures spread
+// the same way never met the per-account ceiling. The ceiling counts only
+// FAILED attempts (test-login-success-not-throttled-pure.cjs).
 //
 // Run: node scripts/test-login-account-id-lockout-pure.cjs
 
@@ -47,16 +48,25 @@ async function main() {
     assert.equal(fresh.body.locked, true)
   })
 
-  await check('the per-user limiter counts every alias against one account', async () => {
+  await check('the per-account limiter counts failures on every alias against one account', async () => {
     const h = createAuthHarness()
     h.addUser({ id: 602, username: 'dara', name: 'Dara Sok', email: 'dara@shop.test', password: 'right-password' })
-    const statuses = []
-    for (let i = 0; i < 9; i++) {
-      const res = await h.request('/login', 'POST', { username: ALIASES[i % 3], password: 'right-password' }, { ip: freshIp() })
-      statuses.push(res.status)
+    // Five failures (the lockout's free allowance), then a success, which
+    // clears the lockout but not the sliding window, then three more.
+    for (let i = 0; i < 5; i++) {
+      const res = await h.request('/login', 'POST', { username: ALIASES[i % 3], password: 'wrong' }, { ip: freshIp() })
+      assert.equal(res.status, 401)
     }
-    assert.deepEqual(statuses.slice(0, 8), Array(8).fill(200), 'eight sign-ins fit the existing per-user ceiling')
-    assert.equal(statuses[8], 429, 'the ninth sign-in to one account inside the window is refused whichever alias is typed')
+    assert.equal((await h.request('/login', 'POST', { username: 'dara', password: 'right-password' }, { ip: freshIp() })).status, 200)
+    for (let i = 0; i < 3; i++) {
+      const res = await h.request('/login', 'POST', { username: ALIASES[i % 3], password: 'wrong' }, { ip: freshIp() })
+      assert.equal(res.status, 401, `failure ${6 + i} after the reset is a plain wrong-password answer`)
+    }
+    // Eight failures on one account, at most three per typed alias: only the
+    // account-id bucket is full, and the lockout was cleared by the success.
+    const res = await h.request('/login', 'POST', { username: 'DARA@SHOP.TEST', password: 'right-password' }, { ip: freshIp() })
+    assert.equal(res.status, 429, 'the account-id ceiling holds whichever alias is typed')
+    assert.notEqual(res.body.locked, true, 'answered by the limiter, not the lockout')
   })
 
   await check('a successful sign-in clears the account-id counter too', async () => {

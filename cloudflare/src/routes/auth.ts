@@ -10,7 +10,7 @@ import { generateTotpSecret, verifyTotp, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
@@ -55,12 +55,14 @@ const OTP_RESET_INVALID_ERROR = 'Invalid account or authenticator code.'
 // Brute-force / credential-stuffing protection on POST /login. Previously
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
 // /password-reset/*, which both already used checkRateLimit. Two buckets:
-// a per-IP ceiling (catches distributed low-and-slow guessing across many
-// usernames from one source) and a tighter per-username ceiling (catches
-// focused guessing at one account, even if the attacker rotates IPs).
-// Both are only counted on a *failed* attempt (see the route below), so a
-// legitimate user mistyping their password a couple of times never gets
-// close to either limit in practice.
+// - a per-IP ceiling (catches distributed low-and-slow guessing across many
+//   usernames from one source). It is a REQUEST ceiling, checked before any
+//   DB work, so it counts every attempt from that IP, successes included.
+// - a tighter per-account ceiling (catches focused guessing at one account,
+//   even if the attacker rotates IPs), keyed on the typed identifier and,
+//   once resolved, on the account id. It counts only FAILED attempts
+//   (peekRateLimit before, recordRateLimitEvent in invalidCredentials), so
+//   a till login shared by a whole shift can sign in any number of times.
 const LOGIN_IP_LIMIT_MAX = 20
 const LOGIN_IP_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_USER_LIMIT_MAX = 8
@@ -241,7 +243,7 @@ app.post('/login', async (c) => {
   }
 
   const userLimitKey = `user:${body.username.trim().toLowerCase()}`
-  const userLimit = await checkRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
+  const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
   }
@@ -252,8 +254,9 @@ app.post('/login', async (c) => {
   // is resolved, the same limiter and lockout are ALSO keyed on its id,
   // which every alias shares. The answers are the same shapes as above.
   const resolvedLockoutKey = user ? userIdLockoutKey(user.id) : null
-  if (user && resolvedLockoutKey) {
-    const accountLimit = await checkRateLimit(c.env, 'auth:login_user', `uid:${user.id}`, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
+  const accountLimitKey = user ? `uid:${user.id}` : null
+  if (user && resolvedLockoutKey && accountLimitKey) {
+    const accountLimit = await peekRateLimit(c.env, 'auth:login_user', accountLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
     if (!accountLimit.allowed) {
       return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
     }
@@ -278,6 +281,9 @@ app.post('/login', async (c) => {
   // password and to a username that doesn't exist, so a probe against
   // unknown usernames can't dodge the counter either.
   const invalidCredentials = async () => {
+    // Only a failure spends the per-account allowance (see LOGIN_USER_LIMIT_MAX).
+    await recordRateLimitEvent(c.env, 'auth:login_user', userLimitKey)
+    if (accountLimitKey) await recordRateLimitEvent(c.env, 'auth:login_user', accountLimitKey)
     const typedFailure = await recordFailedLogin(c.env, body.username)
     const failure = resolvedLockoutKey
       ? worstLockoutState(typedFailure, await recordFailedLogin(c.env, resolvedLockoutKey))
