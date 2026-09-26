@@ -19,6 +19,10 @@ import type { StockMode } from '../inventory/FastStockInModal'
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
+// U-records: a ledger row's float shows the SAME balance block, from the SAME
+// read, as the Movements tab's record float -- branch line, then total.
+import { MovementBalance } from '../inventory/MovementDetailFloat.tsx'
+import { getInventoryMovementBalance } from '../../api/inventoryTransport.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -256,6 +260,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
+  // The open row's before -> after: one read per opened record, the same
+  // endpoint and block as the Movements float (see MovementBalance).
+  const loadDetailBalance = useCallback((id: string | number) => getInventoryMovementBalance(id), [])
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
@@ -1123,18 +1130,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   {detail.unit ? <span className="ml-1 break-words font-normal opacity-80">{detail.unit}</span> : null}
                 </div>
               </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
-                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-                  {detail.before_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
-                </div>
-              </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{afterLabel}</div>
-                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-                  {detail.after_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
-                </div>
-              </div>
+            </div>
+            {/* Stock before -> after: the movement's branch line, then the
+                total across branches -- the shared block the Movements float
+                renders, fed by the same read, so one movement reads the same
+                on both screens (owner, 26 Sep). */}
+            <div className="text-xs">
+              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} />
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">

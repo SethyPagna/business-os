@@ -185,6 +185,35 @@ runTest('the balance is the Worker\'s one-statement read, the same helper as the
   assert.match(read('components/inventory/Inventory.tsx'), /getInventoryApi\(\)\.getInventoryMovementBalance\(id\)/)
 })
 
+runTest('the Stock Changes ledger float shows the same balance block, from the same read, as the Movements float', () => {
+  const ledger = read('components/products/StockChangeSection.tsx')
+  const detailModal = ledger.slice(ledger.indexOf('<Modal title={`${detail.product_name}`}'))
+  assert.ok(detailModal.length > 0, 'the ledger row float exists')
+  assert.match(ledger, /import \{ MovementBalance \} from '\.\.\/inventory\/MovementDetailFloat\.tsx'/)
+  assert.match(ledger, /const loadDetailBalance = useCallback\(\(id: string \| number\) => getInventoryMovementBalance\(id\), \[\]\)/)
+  assert.match(detailModal, /<MovementBalance movement=\{detail\} tr=\{\(key, fallback\) => tr\(t, key, fallback\)\} loadBalance=\{loadDetailBalance\} \/>/)
+  // the old unlabelled total-only tiles are gone
+  assert.doesNotMatch(detailModal, /\{detail\.before_qty\}|\{detail\.after_qty\}/)
+  const float = read('components/inventory/MovementDetailFloat.tsx')
+  assert.match(float, /<MovementBalance movement=\{movement\} tr=\{tr\} loadBalance=\{loadBalance\} \/>/, 'the Movements float renders the same block')
+  // rendered: one movement, one balance -> byte-identical block in both
+  const exports = transpile('components/inventory/MovementDetailFloat.tsx', (id) => {
+    if (id === 'react') return { ...React, useState: () => [{ id: 77, value: twoBranches, failed: false }, () => {}], useEffect: () => {} }
+    if (id === 'react/jsx-runtime') return require(id)
+    if (id.includes('StockLineChange')) return stockLineChange
+    if (id.includes('movementGroups')) return movementGroups
+    if (id.includes('historyRowModel')) return historyRowModel
+    if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
+    throw new Error(`Unexpected dependency: ${id}`)
+  })
+  // a ledger row as the Stock Changes list carries it (quantity is a magnitude)
+  const ledgerRow = { id: 77, product_id: 5, product_name: 'Cream', movement_type: 'sale', quantity: 3, signed_quantity: -3, unit: 'pcs', branch_name: 'Shop', before_qty: 18, after_qty: 15, created_at: '2026-09-20 10:00:00' }
+  const inLedger = renderToStaticMarkup(React.createElement(exports.MovementBalance, { movement: ledgerRow, tr: (_key: string, fallback: string) => fallback, loadBalance: () => Promise.resolve(null) }))
+  const inMovements = renderFloat(sale, { id: 77, value: twoBranches, failed: false })
+  assert.deepEqual(balanceBlock(inLedger), balanceBlock(inMovements))
+  assert.deepEqual(balanceBlock(inLedger).lines, [['branch', 'Shop', '10 pcs → 7 pcs'], ['total', 'Total', '18 pcs → 15 pcs']])
+})
+
 runTest('the float is its own modal, beside the others, and both packs carry its string', () => {
   const inventory = read('components/inventory/Inventory.tsx')
   const file = ts.createSourceFile('Inventory.tsx', inventory, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)

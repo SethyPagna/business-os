@@ -32,7 +32,7 @@ export type MovementDetailRecord = {
 
 // before_qty/after_qty are the TOTAL across branches; the branch pair is the
 // movement's own branch (owner, 26 Sep: both, branch first).
-type Balance = {
+export type MovementBalanceValue = {
   before_qty: number | null
   after_qty: number | null
   branch_before_qty?: number | null
@@ -41,16 +41,20 @@ type Balance = {
 }
 type Translator = (key: string) => string | undefined
 
-export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance, onOpenProduct, onClose }: {
+/**
+ * The balance block of ANY stock record float that shows one movement: the
+ * Movements tab's record float (below) and the Stock Changes ledger's row
+ * float (products/StockChangeSection.tsx). One component, one read (GET
+ * /api/inventory/movements/:id/balance through `loadBalance`), so the same
+ * movement reads the same branch line and total line on both screens.
+ * Pending while it is read; "—" when it cannot be.
+ */
+export function MovementBalance({ movement, tr, loadBalance }: {
   movement: MovementDetailRecord
-  t: Translator
-  fmtTime: (value: unknown) => string
-  loadBalance: (id: string | number) => Promise<Balance | null>
-  onOpenProduct?: () => void
-  onClose: () => void
+  tr: (key: string, fallback: string) => string
+  loadBalance: (id: string | number) => Promise<MovementBalanceValue | null>
 }) {
-  const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
-  const [balance, setBalance] = useState<{ id: string | number; value: Balance | null; failed: boolean } | null>(null)
+  const [balance, setBalance] = useState<{ id: string | number; value: MovementBalanceValue | null; failed: boolean } | null>(null)
   useEffect(() => {
     let live = true
     loadBalance(movement.id)
@@ -60,6 +64,36 @@ export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance,
   }, [movement.id, loadBalance])
   // A balance read for a previous record never labels this one.
   const current = balance && balance.id === movement.id ? balance : null
+  return <>
+    <StockLineChange
+      row={{
+        before_qty: current?.value?.before_qty ?? null,
+        after_qty: current?.value?.after_qty ?? null,
+        branch_before_qty: current?.value?.branch_before_qty ?? null,
+        branch_after_qty: current?.value?.branch_after_qty ?? null,
+        quantity: movement.quantity,
+        unit: movement.unit,
+      }}
+      branchName={typeof movement.branch_name === 'string' ? movement.branch_name : null}
+      activeBranchCount={current?.value?.active_branch_count ?? null}
+      signedQuantity={signedMovementQuantity(movement.movement_type, movement.quantity)}
+      canViewCosts={false}
+      tr={tr}
+      pending={!current}
+    />
+    {current?.failed ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
+  </>
+}
+
+export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance, onOpenProduct, onClose }: {
+  movement: MovementDetailRecord
+  t: Translator
+  fmtTime: (value: unknown) => string
+  loadBalance: (id: string | number) => Promise<MovementBalanceValue | null>
+  onOpenProduct?: () => void
+  onClose: () => void
+}) {
+  const tr = (key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }
   const model = buildHistoryRowModel(movement)
   const receipt = formatHistoryReference(model.reference, { sale: tr('sale', 'Sale'), return: tr('return', 'Return') })
   const facts: Array<[string, string]> = [
@@ -72,23 +106,7 @@ export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance,
   ]
   return <Modal title={movement.product_name || tr('movement', 'Movement')} onClose={onClose} size="md" unsavedChanges="read-only">
     <div className="space-y-3 text-xs">
-      <StockLineChange
-        row={{
-          before_qty: current?.value?.before_qty ?? null,
-          after_qty: current?.value?.after_qty ?? null,
-          branch_before_qty: current?.value?.branch_before_qty ?? null,
-          branch_after_qty: current?.value?.branch_after_qty ?? null,
-          quantity: movement.quantity,
-          unit: movement.unit,
-        }}
-        branchName={typeof movement.branch_name === 'string' ? movement.branch_name : null}
-        activeBranchCount={current?.value?.active_branch_count ?? null}
-        signedQuantity={signedMovementQuantity(movement.movement_type, movement.quantity)}
-        canViewCosts={false}
-        tr={tr}
-        pending={!current}
-      />
-      {current?.failed ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
+      <MovementBalance movement={movement} tr={tr} loadBalance={loadBalance} />
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
         {facts.map(([label, value]) => <div key={label} className="min-w-0">
           <dt className="leading-relaxed text-gray-400">{label}</dt>
