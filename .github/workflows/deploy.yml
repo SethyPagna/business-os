@@ -78,6 +78,9 @@ jobs:
           ref: ${{ inputs.ref }}
           path: release
           persist-credentials: false
+          # Full history: some safety tests compare against an older version of a
+          # file with `git show <old commit>:<path>`, which a shallow clone lacks.
+          fetch-depth: 0
 
       - name: Show the commit
         working-directory: release
@@ -103,6 +106,11 @@ jobs:
       - name: Install packages (frontend)
         working-directory: release/frontend
         run: npm ci --no-audit --no-fund
+
+      # The service-worker safety tests drive a real Chromium.
+      - name: Install the test browser (frontend)
+        working-directory: release/frontend
+        run: npx playwright install chromium
 
       - name: Record the release
         run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
