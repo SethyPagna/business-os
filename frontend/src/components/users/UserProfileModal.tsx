@@ -35,6 +35,10 @@ type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
 type OtpMode = 'setup' | 'disable' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
+// PUT /users/:id/profile's __rename_cascade: 'carry' also rewrites the live
+// user-name snapshots (sales, returns, movements, transfers...); 'record_only'
+// renames only the account.
+type UserRenameScope = 'carry' | 'record_only'
 type ProfileFilePickerModalProps = {
   open: boolean
   onClose: () => void
@@ -573,6 +577,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const [savedProfile, setSavedProfile] = useState<ProfileUser | null>(null)
   const [removingAvatar, setRemovingAvatar] = useState(false)
   const [avatarRemoveConfirmOpen, setAvatarRemoveConfirmOpen] = useState(false)
+  const [renameChoiceOpen, setRenameChoiceOpen] = useState(false)
+  // The shared Modal has no Escape handling; this dialog promises Escape
+  // aborts, so it wires its own (abort only -- never a save).
+  useEffect(() => {
+    if (!renameChoiceOpen) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saveProfileInFlightRef.current) setRenameChoiceOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [renameChoiceOpen])
   const profileDirty = !!profile && !!savedProfile
     && isDirtySince(stableSnapshot(editableProfileFields(savedProfile)), editableProfileFields(profile))
   const avatarFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -696,6 +711,8 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
    * 4.2 Password update.
    * 4.3 Session-duration preference update.
    */
+  const profileUsernameChanged = String(user?.username || '').trim() !== String(profile?.username || '').trim()
+
   const handleProfileSave = async () => {
     if (savingProfile || saveProfileInFlightRef.current) return
     if (!profile?.name?.trim() || !profile?.username?.trim()) {
@@ -706,13 +723,31 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       notify(tr('current_password_required_save', 'Current password is required to save account changes'), 'error')
       return
     }
+    // A username change asks what else follows the new name, in the shared
+    // review dialog: both behaviours are explicit buttons, and dismissing it
+    // (Cancel, X, Escape) saves nothing.
+    if (profileUsernameChanged) {
+      setRenameChoiceOpen(true)
+      return
+    }
+    await commitProfileSave(null)
+  }
 
+  const commitProfileSave = async (renameScope: UserRenameScope | null) => {
+    if (savingProfile || saveProfileInFlightRef.current) return
+    if (!profile) return
+    const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
+    // Never send a rename without the user's explicit choice.
+    if (usernameChanged && !renameScope) {
+      setRenameChoiceOpen(true)
+      return
+    }
+    setRenameChoiceOpen(false)
     saveProfileInFlightRef.current = true
     setSavingProfile(true)
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
       const userId = requireCurrentUserId()
-      const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
       const result = await withLoaderTimeout(() => getProfileApi().updateUserProfile(userId, {
         name: profile.name,
         username: profile.username,
@@ -724,11 +759,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         adminOverride: canAdminOverride,
         userId,
         userName: user?.name,
-        ...(usernameChanged ? {
-          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
-            ? 'carry'
-            : 'record_only',
-        } : {}),
+        ...(usernameChanged && renameScope ? { __rename_cascade: renameScope } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
         notify(result.error || 'Failed to save profile', 'error')
@@ -1513,6 +1544,37 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           onClose={() => { if (!removingAvatar) setAvatarRemoveConfirmOpen(false) }}
           t={t}
         />
+      ) : null}
+      {renameChoiceOpen && profile ? (
+        <ConfirmDialog
+          title={tr('rename_user_choice_title', 'Rename this user?')}
+          items={[
+            { label: tr('rename_user_from', 'Current username'), value: String(user?.username || '').trim() },
+            { label: tr('rename_user_to', 'New username'), value: String(profile.username || '').trim() },
+          ]}
+          note={tr('rename_user_history_note', 'Point-in-time audit history keeps the old name either way.')}
+          confirmLabel={tr('rename_user_carry', 'Rename and update linked records')}
+          cancelLabel={tr('cancel', 'Cancel')}
+          working={savingProfile}
+          workingLabel={tr('saving', 'Saving...')}
+          layer="nested"
+          onConfirm={() => { void commitProfileSave('carry') }}
+          onClose={() => { if (!savingProfile) setRenameChoiceOpen(false) }}
+          t={t}
+        >
+          <div className="space-y-2 text-xs text-gray-500 dark:text-gray-400">
+            <p>{tr('rename_user_carry_desc', 'Live sales, returns, stock movements, transfers and other screens that show this user name switch to the new name.')}</p>
+            <button
+              type="button"
+              disabled={savingProfile}
+              onClick={() => { void commitProfileSave('record_only') }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/40"
+            >
+              {tr('rename_user_record_only', 'Rename this user only')}
+              <span className="mt-0.5 block text-xs font-normal text-gray-500 dark:text-gray-400">{tr('rename_user_record_only_desc', 'Only the account changes; records that already show the old name keep it.')}</span>
+            </button>
+          </div>
+        </ConfirmDialog>
       ) : null}
       {filePickerOpen ? (
         <Suspense fallback={null}>

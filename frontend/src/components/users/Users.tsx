@@ -393,6 +393,20 @@ export default function Users() {
   const passwordInFlightRef = useRef(false)
   const saveRoleInFlightRef = useRef(false)
   const deleteRoleInFlightRef = useRef(false)
+  // The role waiting on the shared delete confirmation (was native confirm()).
+  const [roleDeleteTarget, setRoleDeleteTarget] = useState<RoleRecord | null>(null)
+  // The shared Modal has no Escape handling; these two review dialogs promise
+  // Escape aborts, so they wire their own (abort only -- never a write).
+  useEffect(() => {
+    if (!userConfirmOpen && !roleDeleteTarget) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (userConfirmOpen && !saveUserInFlightRef.current) setUserConfirmOpen(false)
+      if (roleDeleteTarget && !deleteRoleInFlightRef.current) setRoleDeleteTarget(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [userConfirmOpen, roleDeleteTarget])
   const [profileOpen, setProfileOpen] = useState(false)
   const [otpRecoveryTarget, setOtpRecoveryTarget] = useState<UserRecord | null>(null)
   const [loading, setLoading] = useState(false)
@@ -775,12 +789,18 @@ export default function Users() {
     setUserConfirmOpen(true)
   }
 
-  const commitSaveUser = async () => {
+  // A username change is decided in the review dialog: 'carry' also updates
+  // the linked live records, 'record_only' renames only this account. Without
+  // an explicit choice a rename is never sent.
+  const userFormRenamesUser = Boolean(selectedUser) && String(selectedUser?.username || '').trim() !== userForm.username.trim()
+
+  const commitSaveUser = async (renameScope?: 'carry' | 'record_only') => {
+    const usernameChanged = userFormRenamesUser
+    if (usernameChanged && !renameScope) return
     if (!beginSingleAction(saveUserInFlightRef, { blocked: saving })) return
     setUserConfirmOpen(false)
     setSaving(true)
     try {
-      const usernameChanged = Boolean(selectedUser) && String(selectedUser?.username || '').trim() !== userForm.username.trim()
       const payload: UserWritePayload = {
         name: userForm.name.trim(),
         username: userForm.username.trim(),
@@ -792,11 +812,7 @@ export default function Users() {
         expectedUpdatedAt: selectedUser?.updated_at || undefined,
         userId: currentUser?.id,
         userName: currentUser?.name,
-        ...(usernameChanged ? {
-          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
-            ? 'carry'
-            : 'record_only',
-        } : {}),
+        ...(usernameChanged && renameScope ? { __rename_cascade: renameScope } : {}),
       }
 
       const result = selectedUser
@@ -840,9 +856,12 @@ export default function Users() {
   }
 
   const buildUserReviewItems = (): ConfirmReviewItem[] => {
-    const items: ConfirmReviewItem[] = [
-      { label: tr('username', 'Username'), value: userForm.username.trim() },
-    ]
+    const items: ConfirmReviewItem[] = userFormRenamesUser
+      ? [
+        { label: tr('rename_user_from', 'Current username'), value: String(selectedUser?.username || '').trim() },
+        { label: tr('rename_user_to', 'New username'), value: userForm.username.trim() },
+      ]
+      : [{ label: tr('username', 'Username'), value: userForm.username.trim() }]
     const roleName = roles.find((role) => Number(role.id) === Number(userForm.role_id))?.name
     if (roleName || userForm.role_id) items.push({ label: tr('role', 'Role'), value: roleName || String(userForm.role_id) })
     const phone = userForm.phone.trim()
@@ -1016,12 +1035,14 @@ export default function Users() {
       notify(tr('users_assigned_count', '{n} user(s) still assigned').replace('{n}', String(assignedCount)), 'error')
       return
     }
-    if (!beginSingleAction(deleteRoleInFlightRef, { blocked: deletingRoleId != null, value: role.id })) return
-    if (!window.confirm(`Delete role "${role.name}"?`)) {
-      finishSingleAction(deleteRoleInFlightRef)
-      return
-    }
+    if (deletingRoleId != null) return
+    // Confirmed in the shared review dialog; commitDeleteRole runs on confirm.
+    setRoleDeleteTarget(role)
+  }
 
+  const commitDeleteRole = async (role: RoleRecord): Promise<void> => {
+    if (!beginSingleAction(deleteRoleInFlightRef, { blocked: deletingRoleId != null, value: role.id })) return
+    setRoleDeleteTarget(null)
     setDeletingRoleId(role.id)
     try {
       const snapshot = cloneHistorySnapshot(role)
@@ -1398,20 +1419,64 @@ export default function Users() {
             </div>
           </div>
           {userConfirmOpen ? (
-            <ConfirmDialog
-              t={t}
-              title={selectedUser ? tr('edit_user', 'Edit User') : tr('add_user', 'Add User')}
-              message={userForm.name.trim()}
-              items={buildUserReviewItems()}
-              confirmLabel={selectedUser ? (t('save') || 'Save') : tr('add_user', 'Add User')}
-              cancelLabel={t('cancel') || 'Cancel'}
-              working={saving}
-              workingLabel={t('loading') || 'Saving...'}
-              onConfirm={commitSaveUser}
-              onClose={() => { if (!saving) setUserConfirmOpen(false) }}
-            />
+            userFormRenamesUser ? (
+              <ConfirmDialog
+                t={t}
+                title={tr('rename_user_choice_title', 'Rename this user?')}
+                message={userForm.name.trim()}
+                items={buildUserReviewItems()}
+                note={tr('rename_user_history_note', 'Point-in-time audit history keeps the old name either way.')}
+                confirmLabel={tr('rename_user_carry', 'Rename and update linked records')}
+                cancelLabel={t('cancel') || 'Cancel'}
+                working={saving}
+                workingLabel={t('loading') || 'Saving...'}
+                onConfirm={() => { void commitSaveUser('carry') }}
+                onClose={() => { if (!saving) setUserConfirmOpen(false) }}
+              >
+                <div className="space-y-2 text-xs text-gray-500 dark:text-gray-400">
+                  <p>{tr('rename_user_carry_desc', 'Live sales, returns, stock movements, transfers and other screens that show this user name switch to the new name.')}</p>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => { void commitSaveUser('record_only') }}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/40"
+                  >
+                    {tr('rename_user_record_only', 'Rename this user only')}
+                    <span className="mt-0.5 block text-xs font-normal text-gray-500 dark:text-gray-400">{tr('rename_user_record_only_desc', 'Only the account changes; records that already show the old name keep it.')}</span>
+                  </button>
+                </div>
+              </ConfirmDialog>
+            ) : (
+              <ConfirmDialog
+                t={t}
+                title={selectedUser ? tr('edit_user', 'Edit User') : tr('add_user', 'Add User')}
+                message={userForm.name.trim()}
+                items={buildUserReviewItems()}
+                confirmLabel={selectedUser ? (t('save') || 'Save') : tr('add_user', 'Add User')}
+                cancelLabel={t('cancel') || 'Cancel'}
+                working={saving}
+                workingLabel={t('loading') || 'Saving...'}
+                onConfirm={() => { void commitSaveUser() }}
+                onClose={() => { if (!saving) setUserConfirmOpen(false) }}
+              />
+            )
           ) : null}
         </Modal>
+      ) : null}
+
+      {roleDeleteTarget ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('delete_role_title', 'Delete role?')}
+          message={roleDeleteTarget.name}
+          danger
+          confirmLabel={t('delete') || 'Delete'}
+          cancelLabel={t('cancel') || 'Cancel'}
+          working={deletingRoleId != null}
+          workingLabel={t('loading') || 'Deleting...'}
+          onConfirm={() => { void commitDeleteRole(roleDeleteTarget) }}
+          onClose={() => { if (deletingRoleId == null) setRoleDeleteTarget(null) }}
+        />
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
