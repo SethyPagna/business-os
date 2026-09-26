@@ -464,7 +464,8 @@ await check('real route race rolls back without Telegram; same request retries a
   beforeBatch = db => db.exec('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=101 AND branch_id=1; UPDATE branch_stock SET quantity=9 WHERE product_id=1 AND branch_id=1')
   const body = { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 8, reason: 'race retry', client_request_id: 'metadata-race-retry' }
   const failed = await routeRequest(body)
-  assert.strictEqual(failed.status, 500, JSON.stringify(failed.json))
+  assert.strictEqual(failed.status, 409, JSON.stringify(failed.json))
+  assert.strictEqual(failed.json.code, 'transfer_stock_changed')
   await Promise.all(routeWaits)
   assert.strictEqual(telegramInputs.length, 0)
   assert.strictEqual(stockQty(routeDb, 1), 9); assert.strictEqual(stockQty(routeDb, 2), 0)
