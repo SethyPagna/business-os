@@ -175,9 +175,12 @@ const tests = [
     delete globalThis.caches
   }],
   ['the policy never serves a script-capable type, and inlines only the five image types', async () => {
-    for (const [key, stored] of [['a.html', 'text/html'], ['a.htm', 'text/html'], ['a.svg', 'image/svg+xml'], ['a.xml', 'text/xml'], ['a.js', 'text/javascript'], ['a.json', 'application/json'], ['noext', 'image/svg+xml'], ['noext', 'application/xhtml+xml'], ['noext', 'video/mp4']]) {
+    for (const [key, stored] of [['a.html', 'text/html'], ['a.htm', 'text/html'], ['a.svg', 'image/svg+xml'], ['a.xml', 'text/xml'], ['a.js', 'text/javascript'], ['a.json', 'application/json'], ['noext', 'image/svg+xml'], ['noext', 'application/xhtml+xml'], ['noext', 'audio/mpeg'], ['noext', 'text/plain']]) {
       assert.deepStrictEqual(uploadServePolicy(key, stored), { kind: 'deny' }, `${key} (${stored})`)
     }
+    // S-uploads3: a sniffed legacy video is served like a .mp4 -- an
+    // attachment, never inline (test-upload-legacy-video-sniff-pure.cjs).
+    assert.deepStrictEqual(uploadServePolicy('noext', 'video/mp4'), { kind: 'attachment', contentType: 'video/mp4' }, 'noext (video/mp4)')
     const inline = ['a.jpg', 'a.jpeg', 'a.png', 'a.webp', 'a.gif', 'a.avif'].map((k) => uploadServePolicy(k, 'text/html'))
     assert.deepStrictEqual(inline.map((p) => p.kind), Array(6).fill('inline'))
     assert.deepStrictEqual(inline.map((p) => p.contentType), ['image/jpeg', 'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'])
