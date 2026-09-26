@@ -55,6 +55,7 @@ import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMon
 import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
+import { originGuard } from './lib/originGuard'
 
 export type Env = {
   DB: D1Database
@@ -248,6 +249,7 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
 })
+app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, seeding or DB work
 
 // G4: the app document itself, for the SPA routes wrangler.toml's
 // run_worker_first sends here.
