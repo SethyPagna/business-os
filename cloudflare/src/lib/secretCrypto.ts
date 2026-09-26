@@ -78,6 +78,22 @@ export function hasEncryptionKey(encryptionKey: string | undefined | null): bool
   return normalizeEncryptionKeyBytes(encryptionKey) !== null
 }
 
+// Health readout for the owner (integration doctor, admin only). A boolean
+// and a fixed message -- never the key, its length, or anything derived
+// from it. "Invalid" (set but not 32 bytes) reports the same as missing:
+// either way no secret can be written.
+export function secretEncryptionStatus(encryptionKey: string | undefined | null) {
+  const configured = hasEncryptionKey(encryptionKey)
+  return {
+    ok: configured,
+    status: configured ? 'ok' : 'needs_attention',
+    configured,
+    message: configured
+      ? 'APP_ENCRYPTION_KEY is configured; stored API keys and tokens are encrypted.'
+      : 'APP_ENCRYPTION_KEY is missing or invalid; saving AI provider keys, connecting Google Drive and enrolling two-factor sign-in are refused until it is set.',
+  }
+}
+
 export function isEncryptedSecret(value: string | null | undefined): boolean {
   return String(value || '').startsWith(`${ENC_PREFIX}:`)
 }
