@@ -31,7 +31,8 @@ function check(name, fn) {
     process.exitCode = 1
   }
 }
-const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8')
+// Normalise CRLF: Windows checkouts (core.autocrlf=true) must read the same text as CI.
+const read = (...p) => fs.readFileSync(path.join(ROOT, ...p), 'utf8').replace(/\r\n/g, '\n')
 const pkg = (name) => JSON.parse(read(name, 'package.json')).scripts
 
 // ------------------------------------------------------------- 1. exists
