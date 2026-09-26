@@ -186,7 +186,7 @@ const EXCLUDED = new Map([
   ['sale_not_paid_repair_0173.product_id', 'provenance: repair receipt of migration 0173 (before-values per line)'],
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
   ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],
-  ['sale_cost_repair_0199.product_id', 'provenance: backup of migration 0199 (sale line cost before/after; recovery keys on sale_item_id)'],
+  ['sale_cost_repair_0200.product_id', 'provenance: backup of held migration 0200 (sale line cost before/after; recovery keys on sale_item_id)'],
   // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
   // stock_session_members included. It is excluded instead, and refused rather
   // than reparented, because the column is the replay DRIVER and not a link:

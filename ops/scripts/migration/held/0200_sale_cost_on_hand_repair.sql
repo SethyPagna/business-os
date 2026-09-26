@@ -1,5 +1,48 @@
--- 0199: past sale lines whose recorded cost came from the buggy catalog
+-- 0200: past sale lines whose recorded cost came from the buggy catalog
 -- average get the cost the stock on hand actually had when they were sold.
+--
+-- ============================== HELD =====================================
+-- This file is HELD in ops/scripts/migration/held/, deliberately OUTSIDE
+-- cloudflare/migrations, so no deploy applies it (release.cjs stepMigrations
+-- and deploy.yml run_migrations apply every waiting file in the chain).
+-- Moving it into cloudflare/migrations -- keeping this file name, 0200 -- is
+-- itself the "apply" decision and needs the owner's explicit go for THIS
+-- migration at that time. It needs 0195 (catalog_cost_on_hand) applied first.
+--
+-- ============================== OWNER-RUN AUDIT ==========================
+-- Read-only. Run AFTER 0195 is live and BEFORE deciding to apply this file,
+-- from the cloudflare/ directory in Git Bash. Always --command, never --file
+-- (wrangler d1 execute --file returns no rows). Statements 1-3 are cut from
+-- ops/scripts/audit/sale-cost-on-hand-audit.sql, its comment lines dropped.
+--
+-- A. 0195 is live (one row named 0195_catalog_cost_on_hand.sql; era_end not
+--    NULL -- it is the moment the buggy average stopped writing sale costs):
+--   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "SELECT id, name, applied_at FROM d1_migrations WHERE name LIKE '0195%' OR name LIKE '0200%'" --json
+--   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "SELECT MIN(created_at) AS era_end, COUNT(*) AS products FROM catalog_cost_repair_0195_backup" --json
+--
+-- B. Bucket summary (one row per bucket):
+--   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "$(sed -n '/^-- 1\. /,/;$/p' ../ops/scripts/audit/sale-cost-on-hand-audit.sql | grep -v '^--')" --json
+--   Read: bucket 'repair' -> lines = R, the sale lines this file rewrites;
+--         cost_delta_usd = D, the total cost change SUM(qty x (correct -
+--         recorded)) in USD (positive = COGS goes up, profit goes down).
+--         bucket 'ledger_unverified' -> lines = candidates NOT repaired
+--         because a lot of the product does not reconcile (left as recorded).
+--         'already_correct' and 'no_derivable_cost' are informational.
+--         No rows at all = nothing to repair; do not apply.
+--
+-- C. Every candidate line (for spot checks; its per-bucket counts equal B):
+--   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "$(sed -n '/^-- 2\. /,/;$/p' ../ops/scripts/audit/sale-cost-on-hand-audit.sql | grep -v '^--')" --json
+--   Read: receipt_number, recorded_cost_usd -> on_hand_cost_usd per line.
+--
+-- D. Report effect of the repair bucket:
+--   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "$(sed -n '/^-- 3\. /,/;$/p' ../ops/scripts/audit/sale-cost-on-hand-audit.sql | grep -v '^--')" --json
+--   Read: sold_cost_delta_usd = COGS change on recognized (not cancelled)
+--         sales; returned_cost_delta_usd over return_lines copied return
+--         lines = the restocked-return cost COGS subtracts. Net report COGS
+--         change = sold_cost_delta_usd - returned_cost_delta_usd; profit moves
+--         by minus that.
+-- Record R, D, the ledger_unverified count and D's net figure with the
+-- owner's go; the POST ASSERTIONS below compare against them.
 --
 -- Owner decision (2026-09-26): past sales whose recorded cost came from the
 -- buggy average must be corrected so reports and profit are right. This is a
@@ -79,7 +122,7 @@
 --
 -- ============================== AUDIT ====================================
 -- ops/scripts/audit/sale-cost-on-hand-audit.sql (SELECT-only) carries the
--- same plan text (pinned by test-migration-0199-sale-cost-repair-pure.cjs)
+-- same plan text (pinned by cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs)
 -- and lists every bucket: repair, ledger_unverified, already_correct,
 -- no_derivable_cost.
 --
@@ -94,35 +137,35 @@
 --   delta D = SUM(quantity x (correct - recorded)).
 --
 -- ============================== POST ASSERTIONS ==========================
---   SELECT COUNT(*) FROM sale_cost_repair_0199;                                  -- R
+--   SELECT COUNT(*) FROM sale_cost_repair_0200;                                  -- R
 --   SELECT ROUND(SUM(quantity * (new_cost_price_usd - old_cost_price_usd)), 4)
---     FROM sale_cost_repair_0199;                                                -- D
+--     FROM sale_cost_repair_0200;                                                -- D
 --   S again: every figure equal EXCEPT the last, which moved by exactly D
 --     (sale_items.cost_price_usd * quantity).
 --   RI again: count, quantity and total_usd equal; the cost sum moved by
 --     SELECT ROUND(SUM(ri.quantity * (x.new_cost_price_usd - x.old_cost_price_usd)), 4)
---       FROM sale_cost_repair_0199_return_items x JOIN return_items ri ON ri.id = x.return_item_id;
+--       FROM sale_cost_repair_0200_return_items x JOIN return_items ri ON ri.id = x.return_item_id;
 --   SA and RE again: identical (revenue, refunds, statuses untouched).
 --   The audit's first statement again: no 'repair' bucket (a repaired line no
 --   longer matches the buggy average, so a second run finds nothing).
 --
 -- ============================== RECOVERY =================================
--- Owner-approved only. Puts back the pre-0199 cost of every line that still
--- holds the figure 0199 wrote (a line changed since is left alone and shows
+-- Owner-approved only. Puts back the pre-0200 cost of every line that still
+-- holds the figure 0200 wrote (a line changed since is left alone and shows
 -- in the preview). Preview:
---   SELECT COUNT(*) FROM sale_items si JOIN sale_cost_repair_0199 r ON r.sale_item_id = si.id
+--   SELECT COUNT(*) FROM sale_items si JOIN sale_cost_repair_0200 r ON r.sale_item_id = si.id
 --     WHERE si.cost_price_usd IS NOT r.new_cost_price_usd;
 -- Statements:
---   UPDATE sale_items SET cost_price_usd = (SELECT r.old_cost_price_usd FROM sale_cost_repair_0199 r WHERE r.sale_item_id = sale_items.id)
---     WHERE id IN (SELECT r.sale_item_id FROM sale_cost_repair_0199 r WHERE r.new_cost_price_usd IS sale_items.cost_price_usd);
---   UPDATE return_items SET cost_price_usd = (SELECT x.old_cost_price_usd FROM sale_cost_repair_0199_return_items x WHERE x.return_item_id = return_items.id)
---     WHERE id IN (SELECT x.return_item_id FROM sale_cost_repair_0199_return_items x WHERE x.new_cost_price_usd IS return_items.cost_price_usd);
+--   UPDATE sale_items SET cost_price_usd = (SELECT r.old_cost_price_usd FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id)
+--     WHERE id IN (SELECT r.sale_item_id FROM sale_cost_repair_0200 r WHERE r.new_cost_price_usd IS sale_items.cost_price_usd);
+--   UPDATE return_items SET cost_price_usd = (SELECT x.old_cost_price_usd FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id)
+--     WHERE id IN (SELECT x.return_item_id FROM sale_cost_repair_0200_return_items x WHERE x.new_cost_price_usd IS return_items.cost_price_usd);
 -- The backup tables are never dropped by code; they are the audit trail.
 -- D1 applies the migration transactionally. No explicit transaction statements.
 -- If the plan exceeds D1's statement limits the migration fails as a whole
 -- and nothing is written; run the audit first to size it.
 
-CREATE TABLE sale_cost_repair_0199 (
+CREATE TABLE sale_cost_repair_0200 (
   sale_item_id INTEGER PRIMARY KEY,
   sale_id INTEGER NOT NULL,
   product_id INTEGER,
@@ -135,7 +178,7 @@ CREATE TABLE sale_cost_repair_0199 (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE sale_cost_repair_0199_return_items (
+CREATE TABLE sale_cost_repair_0200_return_items (
   return_item_id INTEGER PRIMARY KEY,
   sale_item_id INTEGER NOT NULL,
   old_cost_price_usd,
@@ -143,7 +186,7 @@ CREATE TABLE sale_cost_repair_0199_return_items (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO sale_cost_repair_0199 (sale_item_id, sale_id, product_id, quantity, old_cost_price_usd, new_cost_price_usd, buggy_mean_usd, ledger_position, on_hand_units)
+INSERT INTO sale_cost_repair_0200 (sale_item_id, sale_id, product_id, quantity, old_cost_price_usd, new_cost_price_usd, buggy_mean_usd, ledger_position, on_hand_units)
 -- plan:begin
 WITH
 params AS (
@@ -286,13 +329,13 @@ classified AS (
 SELECT sale_item_id, sale_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units
 FROM classified WHERE bucket = 'repair';
 
-INSERT INTO sale_cost_repair_0199_return_items (return_item_id, sale_item_id, old_cost_price_usd, new_cost_price_usd)
+INSERT INTO sale_cost_repair_0200_return_items (return_item_id, sale_item_id, old_cost_price_usd, new_cost_price_usd)
 SELECT ri.id, ri.sale_item_id, ri.cost_price_usd, r.new_cost_price_usd
-FROM return_items ri JOIN sale_cost_repair_0199 r ON r.sale_item_id = ri.sale_item_id
+FROM return_items ri JOIN sale_cost_repair_0200 r ON r.sale_item_id = ri.sale_item_id
 WHERE ri.cost_price_usd IS NOT NULL AND ABS(ri.cost_price_usd - r.old_cost_price_usd) < 0.00006;
 
-UPDATE sale_items SET cost_price_usd = (SELECT r.new_cost_price_usd FROM sale_cost_repair_0199 r WHERE r.sale_item_id = sale_items.id)
-WHERE id IN (SELECT sale_item_id FROM sale_cost_repair_0199);
+UPDATE sale_items SET cost_price_usd = (SELECT r.new_cost_price_usd FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id)
+WHERE id IN (SELECT sale_item_id FROM sale_cost_repair_0200);
 
-UPDATE return_items SET cost_price_usd = (SELECT x.new_cost_price_usd FROM sale_cost_repair_0199_return_items x WHERE x.return_item_id = return_items.id)
-WHERE id IN (SELECT return_item_id FROM sale_cost_repair_0199_return_items);
+UPDATE return_items SET cost_price_usd = (SELECT x.new_cost_price_usd FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id)
+WHERE id IN (SELECT return_item_id FROM sale_cost_repair_0200_return_items);

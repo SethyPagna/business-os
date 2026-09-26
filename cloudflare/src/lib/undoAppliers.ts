@@ -361,7 +361,7 @@ export type ProductMergeKeeperChoice = {
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
 //   sale_not_paid_repair_0173, catalog_cost_recompute_0175,
-//   catalog_cost_repair_0195_backup, sale_cost_repair_0199 -- repair receipts of
+//   catalog_cost_repair_0195_backup, sale_cost_repair_0200 (held) -- repair receipts of
 //     a data migration (before-values and applied flags per product id); the
 //     same provenance rule as stock_row_moves: they say what was repaired, they
 //     are not a live link.

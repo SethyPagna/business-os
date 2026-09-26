@@ -1,18 +1,19 @@
--- Sale line cost audit for migration 0199 (U-cost, owner decision 2026-09-26).
+-- Sale line cost audit for held migration 0200 (U-cost, owner decision 2026-09-26).
 -- READ-ONLY: every statement is a single SELECT. Run it AFTER migration 0195
 -- is applied: the era of the buggy average ends at 0195's apply time
 -- (catalog_cost_repair_0195_backup.created_at), and before 0195 that table
 -- does not exist, so every statement fails with "no such table" by design.
 -- Run each statement on its
--- own with --command (wrangler d1 execute --file returns no rows), e.g.
---   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --json --command "<statement>"
+-- own with --command (wrangler d1 execute --file returns no rows); the exact
+-- owner-run commands, and which numbers to read, are in the header of
+-- ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql (OWNER-RUN AUDIT).
 -- The plan text between plan:begin and plan:stop is byte-identical to
--- cloudflare/migrations/0199_sale_cost_on_hand_repair.sql (pinned by
--- cloudflare/scripts/test-migration-0199-sale-cost-repair-pure.cjs); the
+-- ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql (pinned by
+-- cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs); the
 -- method, guard and limits are documented in that migration's header.
 --
 -- Buckets:
---   repair             -- 0199 rewrites the line cost (and copied return lines)
+--   repair             -- 0200 rewrites the line cost (and copied return lines)
 --   ledger_unverified  -- came from the buggy average, but a lot of the product
 --                         does not reconcile; left alone, owner decision
 --   already_correct    -- came from the buggy average, which equalled the

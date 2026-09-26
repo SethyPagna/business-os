@@ -1,11 +1,11 @@
-// Companion for cloudflare/migrations/0199_sale_cost_on_hand_repair.sql and
+// Companion for ops/scripts/migration/held/0200_sale_cost_on_hand_repair.sql and
 // ops/scripts/audit/sale-cost-on-hand-audit.sql (U-cost Part B, owner decision
 // 2026-09-26: past sale lines whose recorded cost came from the buggy catalog
 // average get the cost of the stock on hand when they were sold).
 //
 // Real migrated SQLite (node:sqlite via harness/d1compat.cjs): the chain
 // through 0194, a pre-0195 history seeded with the writers' statement shapes,
-// then 0195 and 0199 exactly as shipped. Fixtures distinguish the method from
+// then 0195 and the held 0200 exactly as written. Fixtures distinguish the method from
 // the two plausible wrong ones -- today's corrected catalog average, and
 // weighting by TODAY's on-hand quantities -- and each transition is checked
 // for double-apply and reversal:
@@ -20,9 +20,16 @@
 //      audit's D.
 //   4. Double-apply: the plan finds nothing left to repair.
 //   5. Recovery (the header's statements, verbatim): byte-identical cost
-//      columns, and a line edited after 0199 is left alone.
+//      columns, and a line edited after 0200 is left alone.
+//   6. Held: the file is NOT in cloudflare/migrations (a deploy applies every
+//      waiting file there); its number sorts after 0195 and after every file
+//      in the chain, so moving it in unchanged applies it last; the whole
+//      chain plus it applies to a fresh database.
+//   7. Owner-run audit: every command in the header is --command (never
+//      --file), and each one cut from the audit file is exactly that audit
+//      statement and runs, returning the numbers the header says to read.
 //
-// Run (from cloudflare/): node scripts/test-migration-0199-sale-cost-repair-pure.cjs
+// Run (from cloudflare/): node scripts/test-held-0200-sale-cost-repair-pure.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -30,7 +37,9 @@ const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const migrationsDir = path.resolve(__dirname, '../migrations')
-const migrationText = fs.readFileSync(path.join(migrationsDir, '0199_sale_cost_on_hand_repair.sql'), 'utf8')
+const heldDir = path.resolve(__dirname, '../../ops/scripts/migration/held')
+const heldName = '0200_sale_cost_on_hand_repair.sql'
+const migrationText = fs.readFileSync(path.join(heldDir, heldName), 'utf8')
 const migration0195 = fs.readFileSync(path.join(migrationsDir, '0195_catalog_cost_on_hand.sql'), 'utf8')
 const auditText = fs.readFileSync(path.resolve(__dirname, '../../ops/scripts/audit/sale-cost-on-hand-audit.sql'), 'utf8')
 
@@ -218,9 +227,9 @@ check('text: LF-only, one plan shared verbatim by the migration and every audit 
     assert.match(body.trim(), /^WITH\b/)
     assert.doesNotMatch(body, /\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i, 'no writes')
   }
-  const create = migrationText.search(/\nCREATE TABLE sale_cost_repair_0199 /)
+  const create = migrationText.search(/\nCREATE TABLE sale_cost_repair_0200 /)
   const firstUpdate = migrationText.search(/\nUPDATE /)
-  assert.ok(create > 0 && create < migrationText.indexOf('\nINSERT INTO sale_cost_repair_0199 ') && migrationText.indexOf('\nINSERT INTO sale_cost_repair_0199_return_items') < firstUpdate, 'backups before any UPDATE')
+  assert.ok(create > 0 && create < migrationText.indexOf('\nINSERT INTO sale_cost_repair_0200 ') && migrationText.indexOf('\nINSERT INTO sale_cost_repair_0200_return_items') < firstUpdate, 'backups before any UPDATE')
   const updates = [...migrationText.matchAll(/\nUPDATE (\w+) SET (\w+) =/g)].map((m) => `${m[1]}.${m[2]}`)
   assert.deepEqual(updates, ['sale_items.cost_price_usd', 'return_items.cost_price_usd'], 'the only writes are the two cost columns')
 })
@@ -268,7 +277,7 @@ check('apply: backup first, only the two cost columns move, revenue and everythi
   const s1 = sums()
   assert.deepEqual([s1.n, s1.q, s1.t, s1.p, s1.k], [s0.n, s0.q, s0.t, s0.p, s0.k], 'count, quantity, revenue, price, KHR cost unchanged')
   assert.equal(Math.round((s1.c - s0.c) * 10000) / 10000, D, 'the cost total moved by exactly D')
-  assert.equal(raw.prepare('SELECT ROUND(SUM(quantity * (new_cost_price_usd - old_cost_price_usd)), 4) d FROM sale_cost_repair_0199').get().d, D)
+  assert.equal(raw.prepare('SELECT ROUND(SUM(quantity * (new_cost_price_usd - old_cost_price_usd)), 4) d FROM sale_cost_repair_0200').get().d, D)
   for (const t of tables) assertIdentical(dump(raw, t), before[t], `${t} byte-identical`)
   assertIdentical(dump(raw, 'sale_items', { without: ['cost_price_usd', 'cost_type'] }), itemsBefore.map(({ cost_price_usd, cost_type, ...r }) => r), 'sale_items: every other column identical')
   assertIdentical(dump(raw, 'return_items', { without: ['cost_price_usd', 'cost_type'] }), returnItemsBefore.map(({ cost_price_usd, cost_type, ...r }) => r), 'return_items: every other column identical')
@@ -277,14 +286,14 @@ check('apply: backup first, only the two cost columns move, revenue and everythi
     [12.0769, 12.4, 12.4444, 6, 7, 3.5, 9.99, 11.5, 8, 9.5, 7, 4], 'only the repair bucket moved')
   assert.equal(cost('return_items', ids.returnCopied), 12.4, 'copied return line follows its sale line')
   assert.equal(cost('return_items', ids.returnTyped), 9.5, 'typed return cost untouched')
-  assert.deepEqual(raw.prepare('SELECT sale_item_id, old_cost_price_usd o, new_cost_price_usd n FROM sale_cost_repair_0199 ORDER BY sale_item_id').all().map((r) => [r.sale_item_id, r.o, r.n]),
+  assert.deepEqual(raw.prepare('SELECT sale_item_id, old_cost_price_usd o, new_cost_price_usd n FROM sale_cost_repair_0200 ORDER BY sale_item_id').all().map((r) => [r.sale_item_id, r.o, r.n]),
     [[ids.s0.lineId, 11.8333, 12.0769], [ids.s1.lineId, 11.8333, 12.4], [ids.s2.lineId, 11.8333, 12.4444], [ids.s4.lineId, 6, 7], [ids.s8.lineId, 7, 8]])
   // Double-apply: the plan finds nothing further to repair.
   assert.equal(Object.values(buckets(raw)).filter((b) => b.bucket === 'repair').length, 0, 'second run: nothing to repair')
   assert.equal(raw.prepare(auditStatements()[0]).all().filter((r) => r.bucket === 'repair').length, 0, 'audit after: no repair bucket')
 })
 
-check('recovery: the header statements restore both cost columns byte-identical; a line changed after 0199 is left alone', () => {
+check('recovery: the header statements restore both cost columns byte-identical; a line changed after 0200 is left alone', () => {
   const { raw, ids } = seed()
   const itemsBefore = dump(raw, 'sale_items'), returnItemsBefore = dump(raw, 'return_items')
   raw.exec(migrationText)
@@ -302,6 +311,64 @@ check('recovery: the header statements restore both cost columns byte-identical;
   again.raw.exec(recoverySql())
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s2.lineId).c, 99, 'a later edit is not reverted')
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s1.lineId).c, 11.8333, 'the rest is restored')
+})
+
+check('held: not in cloudflare/migrations; sorts after 0195 and after every chain file; the chain plus it applies to a fresh database', () => {
+  const chain = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+  assert.ok(!chain.some((f) => /sale_cost_on_hand_repair/.test(f)), 'the repair must not sit in the deploy chain')
+  assert.ok(!chain.some((f) => f.startsWith('0200_')), 'slot 0200 is this held file, not a chain file')
+  assert.ok(chain.includes('0195_catalog_cost_on_hand.sql'), '0195 stays in the chain')
+  assert.ok(!loadAll().some((sql) => /CREATE TABLE sale_cost_repair_/.test(sql)), 'the full chain creates no repair table')
+  assert.match(heldName, /^\d{4}_[a-z0-9_]+\.sql$/, 'wrangler migration file name shape')
+  // Moved in unchanged, it sorts after 0195 and after the whole current chain.
+  const movedIn = [...chain, heldName].sort()
+  assert.ok(movedIn.indexOf(heldName) > movedIn.indexOf('0195_catalog_cost_on_hand.sql'))
+  assert.equal(movedIn[movedIn.length - 1], heldName, 'applied last')
+  const fresh = openDb(loadAll()).db
+  fresh.exec(migrationText)
+  assert.equal(fresh.prepare('SELECT COUNT(*) n FROM sale_cost_repair_0200').get().n, 0, 'fresh database: nothing to repair')
+  assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
+})
+
+check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
+  const header = migrationText.split('\n-- ============================== OWNER-RUN AUDIT')[1].split('\n-- Owner decision')[0]
+  const commands = header.split('\n').filter((l) => /^--\s+node .*wrangler d1 execute/.test(l)).map((l) => l.replace(/^--\s+/, ''))
+  assert.equal(commands.length, 5, 'A (two), B, C, D')
+  for (const c of commands) {
+    assert.match(c, /^node scripts\/with-wrangler-auth\.cjs wrangler d1 execute business-os --remote --command "/)
+    assert.doesNotMatch(c, /--file/)
+  }
+  for (const read of ["bucket 'repair' -> lines = R", 'cost_delta_usd = D', "bucket 'ledger_unverified' -> lines"]) {
+    assert.ok(header.includes(read), `header says to read ${read}`)
+  }
+  const { raw } = seed()
+  // A: the literal SELECT (d1_migrations is wrangler's own table, absent here).
+  const eraEnd = commands.map((c) => c.match(/--command "(SELECT [^"]*catalog_cost_repair_0195_backup)"/)).find(Boolean)
+  assert.ok(eraEnd, 'A names the 0195 backup')
+  assert.equal(raw.prepare(eraEnd[1]).get().era_end, '2026-09-26 00:00:00')
+  // B, C, D: emulate  sed -n '/^-- N\. /,/;$/p' <audit> | grep -v '^--'
+  const auditLines = auditText.split('\n')
+  const cut = (n) => {
+    const start = auditLines.findIndex((l) => l.startsWith(`-- ${n}. `))
+    const end = auditLines.findIndex((l, i) => i > start && /;$/.test(l))
+    return auditLines.slice(start, end + 1).filter((l) => !l.startsWith('--')).join('\n')
+  }
+  const sedCut = /sed -n '\/\^-- (\d)\\\. \/,\/;\$\/p' \.\.\/ops\/scripts\/audit\/sale-cost-on-hand-audit\.sql \| grep -v '\^--'\)" --json$/
+  const cuts = commands.map((c) => c.match(sedCut)).filter(Boolean).map((m) => Number(m[1]))
+  assert.deepEqual(cuts, [1, 2, 3], 'B, C, D cut statements 1, 2, 3 from the audit file')
+  const strip = (s) => s.split('\n').filter((l) => !l.startsWith('--')).join('\n')
+  for (const n of cuts) {
+    assert.equal(cut(n), strip(auditStatements()[n - 1]), `statement ${n} cut verbatim`)
+    // Survives a shell that flattens newlines: no comment left to swallow the rest.
+    assert.doesNotMatch(cut(n), /--/, `statement ${n} carries no comment`)
+  }
+  const summary = Object.fromEntries(raw.prepare(cut(1).replace(/\n/g, ' ')).all().map((r) => [r.bucket, r]))
+  assert.equal(summary.repair.lines, 5, 'R')
+  assert.equal(summary.ledger_unverified.lines, Object.values(buckets(raw)).filter((b) => b.bucket === 'ledger_unverified').length, 'ledger_unverified count')
+  assert.ok(summary.ledger_unverified.lines >= 4, 'the four seeded unverified lines at least')
+  assert.equal(typeof summary.repair.cost_delta_usd, 'number', 'D')
+  assert.equal(raw.prepare(cut(2)).all().length, Object.values(summary).reduce((n, r) => n + r.lines, 0), 'C lists every line B counts')
+  assert.deepEqual(Object.keys(raw.prepare(cut(3)).get()), ['sold_cost_delta_usd', 'returned_cost_delta_usd', 'return_lines'])
 })
 
 console.log(`${checks} checks passed`)
