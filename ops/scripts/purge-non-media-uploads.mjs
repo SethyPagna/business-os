@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// purge-non-media-uploads.mjs -- OWNER-RUN. Removes stored files that are
-// not images or videos (owner ruling 2026-09-26: "delete them all").
+// purge-non-media-uploads.mjs -- OWNER-RUN. Moves stored files that are
+// not images or videos out of the website's storage (owner ruling
+// 2026-09-26: "delete them all"; everything must stay recoverable). They go
+// to quarantine/ in the same bucket, from where --restore puts them back.
 //
 // =====================================================================
 //  HOW TO RUN IT (step by step, from YOUR OWN terminal)
 // =====================================================================
 //  Before you start: you need Node.js 18 or newer. Check with `node -v`.
-//  Nothing is deleted unless you add --delete in step 5.
+//  Nothing is changed unless you add --move in step 5 and type MOVE.
+//  `node ops/scripts/purge-non-media-uploads.mjs --help` shows the options.
 //
 //  1. Make a Cloudflare API token (one time).
 //     - Open https://dash.cloudflare.com/profile/api-tokens
@@ -31,20 +34,35 @@
 //
 //  4. Read what it printed. It shows, per kind, how many files it KEEPS,
 //     how many it keeps but wants you to REVIEW, and how many it would
-//     PURGE, and the folder where it saved the full list (manifest.json).
+//     PURGE, and the folder where it saved the full list (listing.json).
 //     If the numbers look wrong, STOP and send the printout.
 //
-//  5. Delete for real:
-//         node ops/scripts/purge-non-media-uploads.mjs --delete
-//     Paste the token again. It saves a fresh list first, then asks you
-//     to type DELETE to confirm. Type DELETE (capitals) and press Enter.
-//     Deleted files cannot be brought back; the saved list records them.
+//  5. Move the PURGE files to quarantine:
+//         node ops/scripts/purge-non-media-uploads.mjs --move
+//     Paste the token again. It checks everything again, prints the same
+//     summary, then asks you to type MOVE. Type MOVE (capitals) and press
+//     Enter. Each file is copied to quarantine/<time>/, the copy is checked
+//     byte for byte, and only then is the original removed.
 //
-//  6. When it prints "Done", send the last lines of the printout. You can
-//     then delete the token on the API tokens page (it is not needed again).
+//  6. When it prints "Done", send the last lines of the printout. KEEP the
+//     folder it names: its manifest.json is the record of what moved where
+//     and of the database rows it changed, and --restore needs it. You can
+//     then delete the token on the API tokens page.
 //
-//  If anything prints "FAILED", nothing further is changed; send the
-//  printout. Running it again is safe: it starts over from what is left.
+//  To put everything back (any time before the quarantine is deleted):
+//         node ops/scripts/purge-non-media-uploads.mjs --restore "<the manifest.json path it printed>"
+//     Type RESTORE when asked. Running it again is safe.
+//
+//  If anything prints "FAILED", it stops; files not yet removed stay where
+//  they are. Send the printout; --restore undoes whatever was done.
+//
+//  Deleting the quarantine for good (only when you are sure, for example a
+//  month later -- after this, --restore cannot bring those files back):
+//  this script never does it. In the Cloudflare dashboard open R2 >
+//  business-os-assets > Settings > Object lifecycle rules > Add rule; set
+//  the prefix to the quarantine folder it printed (quarantine/<time>/),
+//  choose to delete objects 1 day after upload, and save. Remove the rule
+//  once the folder is empty.
 // =====================================================================
 //
 // What it does
@@ -66,23 +84,47 @@
 //         PURGE   only files it positively recognises as documents (PDF,
 //                 Word, Excel...), web pages, SVG, XML, text, CSV, JSON,
 //                 scripts, archives (ZIP...), programs or fonts.
-//   (c) Writes manifest.json first: key, size, decision, group, format, and
-//       the matching file_assets / import_job_files row ids.
-//   (d) Without --delete: dry run, prints counts only. With --delete: after
-//       you type DELETE, deletes the PURGE files, then updates D1 through a
-//       SQL file (d1-changes.sql, saved next to the manifest) whose guard
-//       statements refuse to run unless the row counts are exactly what the
-//       manifest expects, and checks the counts again afterwards:
-//         - file_assets rows of purged Library files are removed (their
-//           import_job_files links are cleared first) -- never a row that
-//           also points at a file that is kept;
-//         - import_job_files rows of purged files are marked 'purged'.
+//   (c) Saves listing.json: every file's key, size, decision, group, format
+//       and matching file_assets / import_job_files row ids. A dry run stops
+//       here.
+//   (d) --move, after you type MOVE, in this order, so that a failure at
+//       any point leaves nothing --restore cannot undo:
+//         1. writes manifest.json (the recovery record) before anything else;
+//         2. per PURGE file: reads it whole, re-checks the whole file is
+//            still a PURGE file, copies it to quarantine/<time>/<its key>,
+//            reads the copy back and compares SHA-256 and size, and records
+//            key, quarantine key, size, SHA-256 and content type. Originals
+//            are untouched in this step; a file that cannot be copied
+//            exactly stays where it is;
+//         3. records every column of every database row it will change in
+//            manifest.json, then changes them in guarded batches: a guard
+//            refuses a batch unless the rows are exactly the recorded ones,
+//            and the counts are read back afterwards --
+//              - file_assets rows of moved Library files are removed (their
+//                import_job_files links are cleared first) -- never a row
+//                that also points at a file that is kept;
+//              - import_job_files rows of moved files are marked 'purged';
+//            if the database refuses anything, it stops here and removes no
+//            original;
+//         4. removes each original, only if it is still byte for byte the
+//            file that was copied.
+//   (e) --restore <manifest.json or its folder>, after you type RESTORE:
+//       puts every recorded file back under its key (SHA-256 checked before
+//       and after), removes its quarantine copy, removes quarantine copies a
+//       stopped run did not record when their original is in place, then
+//       puts the Library rows back with every recorded column and the import
+//       rows' status, file_asset_id and updated_at. It never overwrites a
+//       different file, and running it again changes nothing. It writes
+//       restore-<time>.json next to the manifest.
 //
 // Read-only on anything else. It never touches objects outside the three
-// prefixes (backups, exports, etc.). Written for the owner's terminal
-// because Claude-launched processes cannot reach the Cloudflare API
-// reliably through the VPN.
+// prefixes (backups, exports, etc.) and its own quarantine/<time>/ folder.
+// The website never serves quarantine/: /uploads/* always reads the key
+// uploads/<path> (cloudflare/scripts/test-quarantine-unreachable-pure.cjs).
+// Written for the owner's terminal because Claude-launched processes cannot
+// reach the Cloudflare API reliably through the VPN.
 
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -994,9 +1036,14 @@ const chunk = (items, size) => {
 const guard = (label, countSql, expected) =>
   `-- guard: ${label} must be ${expected}\nSELECT CASE WHEN (${countSql}) = ${expected} THEN 1 ELSE json('guard failed: ${label}') END AS guard;`
 
-export function buildD1Sql({ fileAssetIds, importFileIds }) {
+// The guarded SQL for one batch of row changes. `linkedImportFileIds`, when
+// given, are the import rows linked to these Library rows as recorded in
+// manifest.json: a guard refuses the batch unless they are exactly the rows
+// the first UPDATE touches, so --restore can put every changed row back.
+export function buildD1Sql({ fileAssetIds, importFileIds, linkedImportFileIds = null }) {
   const assets = safeIds(fileAssetIds)
   const importFiles = safeIds(importFileIds)
+  const linked = linkedImportFileIds === null ? null : safeIds(linkedImportFileIds)
   const inList = (ids) => ids.join(', ')
   const lines = ['-- purge-non-media-uploads.mjs D1 changes. Generated; do not edit.']
   const assetCount = (ids) => `SELECT COUNT(*) FROM file_assets WHERE id IN (${inList(ids)})`
@@ -1004,6 +1051,11 @@ export function buildD1Sql({ fileAssetIds, importFileIds }) {
   const pre = []
   const change = []
   const post = []
+  if (linked && assets.length) {
+    const linkedCount = `SELECT COUNT(*) FROM import_job_files WHERE file_asset_id IN (${inList(assets)})`
+    pre.push(guard('import_job_files rows linked before', linkedCount, linked.length))
+    if (linked.length) pre.push(guard('import_job_files linked rows are the recorded ones', `${linkedCount} AND id IN (${inList(linked)})`, linked.length))
+  }
   for (const ids of chunk(assets, 400)) {
     pre.push(guard('file_assets rows present before', assetCount(ids), ids.length))
     change.push(`UPDATE import_job_files SET file_asset_id = NULL, status = 'purged', updated_at = CURRENT_TIMESTAMP WHERE file_asset_id IN (${inList(ids)});`)
@@ -1017,6 +1069,155 @@ export function buildD1Sql({ fileAssetIds, importFileIds }) {
   }
   if (!change.length) return null
   return [...lines, '-- pre-assertions', ...pre, '-- changes', ...change, '-- post-assertions', ...post, ''].join('\n')
+}
+
+// The row changes as batches small enough for one D1 request each, built
+// from the recorded rows: every Library row and every import row a batch
+// touches is in `snapshot`.
+export function planD1Batches(snapshot, importFileIds, size = 100) {
+  const batches = []
+  const assetIds = safeIds(snapshot.file_assets.map((row) => Number(row.id)))
+  for (const ids of chunk(assetIds, size)) {
+    const inBatch = new Set(ids)
+    const linked = snapshot.import_job_files.filter((row) => inBatch.has(Number(row.file_asset_id))).map((row) => Number(row.id))
+    batches.push({ fileAssetIds: ids, importFileIds: [], linkedImportFileIds: safeIds(linked) })
+  }
+  const recorded = new Set(snapshot.import_job_files.map((row) => Number(row.id)))
+  const linkedToRemoved = new Set(snapshot.import_job_files.filter((row) => assetIds.includes(Number(row.file_asset_id))).map((row) => Number(row.id)))
+  const importIds = safeIds(importFileIds).filter((id) => recorded.has(id) && !linkedToRemoved.has(id))
+  for (const ids of chunk(importIds, size)) batches.push({ fileAssetIds: [], importFileIds: ids, linkedImportFileIds: null })
+  return batches
+}
+
+// ------------------------------------------------------------ quarantine
+// Where --move puts files: quarantine/<time>/<the file's own key>. Nothing
+// the website serves can reach it (/uploads/* always reads uploads/<path>;
+// see cloudflare/scripts/test-quarantine-unreachable-pure.cjs), and this
+// script never lists it as a purge candidate.
+export const QUARANTINE_ROOT = 'quarantine/'
+// The API moves a file in one request; a larger file stays where it is.
+export const MOVE_MAX_BYTES = 300 * 1024 * 1024
+const R2_KEY_MAX_BYTES = 1024
+export const MANIFEST_TOOL = 'purge-non-media-uploads'
+export const MANIFEST_FORMAT = 2
+const STAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}Z$/
+const COLUMN_PATTERN = /^[a-z_][a-z0-9_]*$/
+// The HTTP metadata R2 keeps with a file and the request header for each.
+const HTTP_METADATA_HEADERS = [
+  ['contentType', 'content-type'], ['contentDisposition', 'content-disposition'],
+  ['contentLanguage', 'content-language'], ['cacheControl', 'cache-control'],
+]
+
+export const stampOf = (date) => date.toISOString().replace(/[:.]/g, '-')
+export const quarantineKeyFor = (stamp, key) => `${QUARANTINE_ROOT}${stamp}/${key}`
+// Each segment of a key is percent-encoded; the slashes between them stay.
+export const objectPath = (key) => String(key).split('/').map((segment) => encodeURIComponent(segment)).join('/')
+export const sha256Hex = (bytes) => createHash('sha256').update(bytes).digest('hex')
+
+function normalizeHttpMetadata(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const out = {}
+  for (const [field, header] of HTTP_METADATA_HEADERS) {
+    const value = source[field] ?? source[header.replace('-', '_')] ?? source[header]
+    if (typeof value === 'string' && value) out[field] = value
+  }
+  return out
+}
+
+// Problems that make a manifest unusable for --restore (empty when fine).
+// Keys, quarantine keys, hashes and row columns are all checked, so an
+// edited file cannot make --restore write anywhere else.
+export function validateManifest(manifest) {
+  const problems = []
+  if (!manifest || manifest.tool !== MANIFEST_TOOL) return ['it was not written by this script']
+  if (manifest.format !== MANIFEST_FORMAT) problems.push(`format ${manifest.format} is not ${MANIFEST_FORMAT}`)
+  if (manifest.bucket !== BUCKET) problems.push(`it is for bucket ${manifest.bucket}, not ${BUCKET}`)
+  if (manifest.mode !== 'move') problems.push('it records a dry run, so nothing was moved')
+  const stamp = String(manifest.stamp || '')
+  if (!STAMP_PATTERN.test(stamp)) problems.push('its time stamp is malformed')
+  if (manifest.quarantinePrefix !== quarantineKeyFor(stamp, '')) problems.push('its quarantine folder does not match its time stamp')
+  if (!Array.isArray(manifest.moves)) problems.push('it has no list of moved files')
+  for (const move of Array.isArray(manifest.moves) ? manifest.moves : []) {
+    const key = String(move?.key ?? '')
+    if (!PREFIXES.some((prefix) => key.startsWith(prefix)) || key.length <= 0) problems.push(`a file outside ${PREFIXES.join(', ')}: ${printable(key)}`)
+    else if (move.quarantineKey !== quarantineKeyFor(stamp, key)) problems.push(`the quarantine name of ${printable(key)} does not match`)
+    if (!/^[0-9a-f]{64}$/.test(String(move?.sha256 ?? ''))) problems.push(`no SHA-256 for ${printable(key)}`)
+    if (!Number.isSafeInteger(move?.size) || move.size < 0) problems.push(`no size for ${printable(key)}`)
+  }
+  const rows = manifest.rows && typeof manifest.rows === 'object' ? manifest.rows : {}
+  for (const [table, list] of Object.entries(rows)) {
+    if (table !== 'file_assets' && table !== 'import_job_files') { problems.push(`an unexpected table ${printable(table)}`); continue }
+    for (const row of Array.isArray(list) ? list : []) {
+      if (!Number.isSafeInteger(row?.id)) problems.push(`a ${table} row without a numeric id`)
+      for (const [column, value] of Object.entries(row || {})) {
+        if (!COLUMN_PATTERN.test(column)) problems.push(`a ${table} column named ${printable(column)}`)
+        if (value !== null && typeof value !== 'string' && typeof value !== 'number') problems.push(`a ${table} value that is not text or a number`)
+      }
+    }
+  }
+  return [...new Set(problems)].slice(0, 12)
+}
+
+// Writes JSON so that a crash leaves either the old file or the new one,
+// never half of each, and refuses to write the token.
+async function writeJsonAtomic(file, value, secret) {
+  const text = `${JSON.stringify(value, null, 2)}\n`
+  if (secret && text.includes(secret)) throw new Error(`refusing to write ${path.basename(file)}: it would contain the API token`)
+  const temporary = `${file}.tmp`
+  const handle = fs.openSync(temporary, 'w')
+  try {
+    fs.writeSync(handle, text)
+    fs.fsyncSync(handle)
+  } finally {
+    fs.closeSync(handle)
+  }
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.renameSync(temporary, file)
+      return
+    } catch (error) {
+      // Windows: another program may hold the file open for a moment.
+      if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 200 * attempt))
+    }
+  }
+}
+
+// One save at a time, in order, even when called from parallel work.
+function makeSaver(file, value, secret) {
+  let chain = Promise.resolve()
+  return () => {
+    chain = chain.then(() => writeJsonAtomic(file, value(), secret))
+    return chain
+  }
+}
+
+// Runs `worker` over `items`, `limit` at a time. The first error stops the
+// remaining work and is thrown once every running item has finished.
+async function mapLimit(items, limit, worker) {
+  let next = 0
+  let failure = null
+  const runner = async () => {
+    while (!failure && next < items.length) {
+      const index = next
+      next += 1
+      try { await worker(items[index], index) } catch (error) { failure = failure || error }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, runner))
+  if (failure) throw failure
+}
+
+// Files larger than this are handled one at a time: each is held in memory
+// whole, twice while its copy is checked.
+export const LARGE_FILE_BYTES = 32 * 1024 * 1024
+// mapLimit for files: the small ones `limit` at a time, then the large ones
+// one by one. `worker` gets each item with its index in `items`.
+async function mapBySize(items, sizeOf, limit, largeFileBytes, worker) {
+  const indexed = items.map((item, index) => ({ item, index }))
+  const large = (entry) => Number(sizeOf(entry.item)) > largeFileBytes
+  await mapLimit(indexed.filter((entry) => !large(entry)), limit, (entry) => worker(entry.item, entry.index))
+  await mapLimit(indexed.filter(large), 1, (entry) => worker(entry.item, entry.index))
 }
 
 // ------------------------------------------------------------ Cloudflare
@@ -1046,17 +1247,44 @@ function prompt(question) {
   })
 }
 
-function makeClient(token, accountId, databaseId) {
+// The Cloudflare API with the token. Error messages name the method and
+// the path, never a header, so the token cannot appear in one.
+export function makeClient({ token, accountId, databaseId, fetchImpl = globalThis.fetch }) {
   const headers = { Authorization: `Bearer ${token}` }
   const r2Base = `${API}/accounts/${accountId}/r2/buckets/${BUCKET}/objects`
+  const objectUrl = (key) => `${r2Base}/${objectPath(key)}`
+  const call = (url, init = {}) => fetchImpl(url, { ...init, headers: { ...headers, ...(init.headers || {}) } })
+  const refusalOf = (body, status, method, url) => {
+    const reason = body?.errors?.map((error) => `${error.code}: ${error.message}`).join('; ') || `HTTP ${status}`
+    return new Error(`Cloudflare API refused ${method} ${url.replace(API, '')}: ${reason}`)
+  }
+  const refusal = async (response, method, url) => refusalOf(await response.json().catch(() => null), response.status, method, url)
   async function json(url, init = {}) {
-    const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers || {}) } })
+    const response = await call(url, init)
     const body = await response.json().catch(() => null)
-    if (!response.ok || body?.success === false) {
-      const reason = body?.errors?.map((error) => `${error.code}: ${error.message}`).join('; ') || `HTTP ${response.status}`
-      throw new Error(`Cloudflare API refused ${init.method || 'GET'} ${url.replace(API, '')}: ${reason}`)
-    }
+    if (!response.ok || body?.success === false) throw refusalOf(body, response.status, init.method || 'GET', url)
     return body
+  }
+  async function readBody(response, limit) {
+    const reader = response.body.getReader()
+    const parts = []
+    let total = 0
+    while (total < limit) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+      total += value.length
+    }
+    await reader.cancel().catch(() => {})
+    const out = new Uint8Array(Math.min(total, limit))
+    let offset = 0
+    for (const part of parts) {
+      const slice = part.subarray(0, Math.min(part.length, out.length - offset))
+      out.set(slice, offset)
+      offset += slice.length
+      if (offset >= out.length) break
+    }
+    return out
   }
   return {
     async listObjects(prefix) {
@@ -1067,7 +1295,12 @@ function makeClient(token, accountId, databaseId) {
         if (cursor) query.set('cursor', cursor)
         const body = await json(`${r2Base}?${query}`)
         const page = Array.isArray(body.result) ? body.result : body.result?.objects || []
-        for (const object of page) objects.push({ key: object.key, size: Number(object.size || 0), uploaded: object.last_modified || object.uploaded || null })
+        for (const object of page) {
+          objects.push({
+            key: object.key, size: Number(object.size || 0), uploaded: object.last_modified || object.uploaded || null,
+            etag: object.etag || '', httpMetadata: normalizeHttpMetadata(object.http_metadata || object.httpMetadata),
+          })
+        }
         const info = body.result_info || {}
         cursor = info.cursor || body.result?.cursor || ''
         const truncated = info.is_truncated ?? body.result?.truncated ?? Boolean(cursor && page.length)
@@ -1078,31 +1311,38 @@ function makeClient(token, accountId, databaseId) {
     // First `limit` bytes of an object (the stream is cancelled after), and
     // its content-encoding (fetch decodes compressed bodies on the way in).
     async readHead(key, limit) {
-      const response = await fetch(`${r2Base}/${encodeURIComponent(key)}`, { headers: { ...headers, Range: `bytes=0-${limit - 1}` } })
-      if (!response.ok) throw new Error(`could not read ${key}: HTTP ${response.status}`)
+      const url = objectUrl(key)
+      const response = await call(url, { headers: { Range: `bytes=0-${limit - 1}` } })
+      if (!response.ok) throw await refusal(response, 'GET', url)
       const contentEncoding = response.headers.get('content-encoding') || ''
-      const reader = response.body.getReader()
-      const parts = []
-      let total = 0
-      while (total < limit) {
-        const { done, value } = await reader.read()
-        if (done) break
-        parts.push(value)
-        total += value.length
-      }
-      await reader.cancel().catch(() => {})
-      const out = new Uint8Array(Math.min(total, limit))
-      let offset = 0
-      for (const part of parts) {
-        const slice = part.subarray(0, Math.min(part.length, out.length - offset))
-        out.set(slice, offset)
-        offset += slice.length
-        if (offset >= out.length) break
-      }
-      return { bytes: out, contentEncoding }
+      return { bytes: await readBody(response, limit), contentEncoding }
     },
+    // The whole object, or null when there is none under `key`.
+    async getObject(key) {
+      const url = objectUrl(key)
+      const response = await call(url)
+      if (response.status === 404) { await response.body?.cancel().catch(() => {}); return null }
+      if (!response.ok) throw await refusal(response, 'GET', url)
+      return {
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        contentType: response.headers.get('content-type') || '',
+        contentEncoding: response.headers.get('content-encoding') || '',
+        etag: response.headers.get('etag') || '',
+      }
+    },
+    async putObject(key, bytes, httpMetadata = {}) {
+      const extra = {}
+      for (const [field, header] of HTTP_METADATA_HEADERS) if (httpMetadata[field]) extra[header] = String(httpMetadata[field])
+      await json(objectUrl(key), { method: 'PUT', headers: extra, body: bytes })
+    },
+    // True when an object was there; false when there was none.
     async deleteObject(key) {
-      await json(`${r2Base}/${encodeURIComponent(key)}`, { method: 'DELETE' })
+      const url = objectUrl(key)
+      const response = await call(url, { method: 'DELETE' })
+      if (response.status === 404) { await response.body?.cancel().catch(() => {}); return false }
+      const body = await response.json().catch(() => null)
+      if (!response.ok || body?.success === false) throw refusalOf(body, response.status, 'DELETE', url)
+      return true
     },
     async d1(sql, params = []) {
       const body = await json(`${API}/accounts/${accountId}/d1/database/${databaseId}/query`, {
@@ -1115,27 +1355,140 @@ function makeClient(token, accountId, databaseId) {
 
 const rowsOf = (result) => (Array.isArray(result) ? result.flatMap((statement) => statement?.results || []) : [])
 
-// ------------------------------------------------------------------ main
-async function main() {
-  const doDelete = process.argv.includes('--delete')
-  const fromToml = (() => { try { return readWranglerIds() } catch { return {} } })()
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || fromToml.accountId
-  const databaseId = process.env.BUSINESS_OS_D1_DATABASE_ID || fromToml.databaseId
-  if (!accountId || !databaseId) {
-    console.error('FAILED: could not read the account id / database id from cloudflare/wrangler.toml. Run this from the business-os-v1 folder.')
-    process.exit(1)
-  }
-  const token = process.env.CLOUDFLARE_API_TOKEN || await promptHidden('Cloudflare API token: ')
-  if (!token) { console.error('FAILED: no token given.'); process.exit(1) }
-  const cf = makeClient(token, accountId, databaseId)
-
-  console.log(doDelete ? 'Mode: DELETE (asks before changing anything)' : 'Mode: DRY RUN (changes nothing)')
-  console.log('Reading the database (read-only)...')
-  const activeJobIds = new Set(rowsOf(await cf.d1(
+async function readActiveJobIds(cf) {
+  return new Set(rowsOf(await cf.d1(
     `SELECT id FROM import_jobs WHERE status IN (${ACTIVE_JOB_STATUSES.map(() => '?').join(', ')})`, ACTIVE_JOB_STATUSES,
   )).map((row) => String(row.id)))
+}
+
+async function readRowIndex(cf) {
   const assetRows = rowsOf(await cf.d1('SELECT id, stored_name, public_path FROM file_assets'))
   const jobFileRows = rowsOf(await cf.d1("SELECT id, job_id, stored_path, file_asset_id FROM import_job_files WHERE stored_path LIKE 'uploads/%' OR stored_path LIKE 'private/%' OR stored_path LIKE 'imports/%'"))
+  return { assetRows, jobFileRows }
+}
+
+// Every column of every row the change will touch, read just before it.
+async function snapshotRows(cf, plan) {
+  const fileAssets = []
+  for (const ids of chunk(safeIds(plan.fileAssetIds), 100)) {
+    fileAssets.push(...rowsOf(await cf.d1(`SELECT * FROM file_assets WHERE id IN (${ids.join(', ')}) ORDER BY id`)))
+  }
+  const importRows = new Map()
+  for (const ids of chunk(safeIds(fileAssets.map((row) => Number(row.id))), 100)) {
+    for (const row of rowsOf(await cf.d1(`SELECT * FROM import_job_files WHERE file_asset_id IN (${ids.join(', ')}) ORDER BY id`))) importRows.set(Number(row.id), row)
+  }
+  for (const ids of chunk(safeIds(plan.importFileIds), 100)) {
+    for (const row of rowsOf(await cf.d1(`SELECT * FROM import_job_files WHERE id IN (${ids.join(', ')}) ORDER BY id`))) importRows.set(Number(row.id), row)
+  }
+  return { file_assets: fileAssets, import_job_files: [...importRows.values()].sort((a, b) => Number(a.id) - Number(b.id)) }
+}
+
+// ------------------------------------------------------------------ help
+export const HELP = `purge-non-media-uploads.mjs -- keeps images and videos, moves everything
+else out of the website's storage into quarantine/, where it can be put back.
+
+  node ops/scripts/purge-non-media-uploads.mjs
+      Dry run (the default): lists and checks every file, prints what it
+      would keep and move, saves listing.json. Changes nothing.
+
+  node ops/scripts/purge-non-media-uploads.mjs --move
+      Asks you to type MOVE, then for each PURGE file: copies it to
+      quarantine/<time>/<its name> in the same bucket, reads the copy back
+      and compares it byte for byte (SHA-256), records it in manifest.json,
+      records the database rows it will change (with all their old values),
+      changes those rows, and only then removes the original. Files it cannot
+      copy exactly stay where they are.
+
+  node ops/scripts/purge-non-media-uploads.mjs --restore <manifest.json or its folder>
+      Asks you to type RESTORE, then puts every file that --move moved back
+      under its old name (checked byte for byte), removes its quarantine
+      copy, and puts the database rows back. Never overwrites a different
+      file. Safe to run again.
+
+  --help   shows this.
+
+There is no --delete: the quarantine copies stay until you delete them
+yourself, which this script never does (see "Deleting the quarantine for
+good" at the top of the script). Until then --restore can undo a --move.
+
+The token is read from CLOUDFLARE_API_TOKEN or asked for (hidden). It is
+never printed and never written to any file.`
+
+function parseArgs(argv) {
+  const options = { mode: 'dry-run', restorePath: '', help: false, errors: [] }
+  const setMode = (mode) => {
+    if (options.mode !== 'dry-run' && options.mode !== mode) options.errors.push('Use either --move or --restore, not both.')
+    options.mode = mode
+  }
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = String(argv[index])
+    if (arg === '--help' || arg === '-h') options.help = true
+    else if (arg === '--move') setMode('move')
+    else if (arg === '--restore' || arg.startsWith('--restore=')) {
+      setMode('restore')
+      options.restorePath = arg === '--restore' ? String(argv[++index] ?? '') : arg.slice('--restore='.length)
+      if (!options.restorePath) options.errors.push('--restore needs the manifest.json path (or its folder) that --move printed.')
+    } else if (arg === '--delete') {
+      options.errors.push('There is no --delete any more: --move moves the files to quarantine/ so that --restore can put them back.')
+    } else options.errors.push(`Unknown option: ${printable(arg)}`)
+  }
+  return options
+}
+
+// ------------------------------------------------------------------- run
+// The whole program; everything outside it is passed in, so it can run
+// against a mocked API. Returns the exit code.
+export async function run({
+  argv = [], env = {}, fetchImpl = globalThis.fetch, prompts = { hidden: promptHidden, visible: prompt }, out = console,
+  homeDir = os.homedir(), now = () => new Date(), concurrency = 4, moveMaxBytes = MOVE_MAX_BYTES, largeFileBytes = LARGE_FILE_BYTES,
+} = {}) {
+  let token = ''
+  const redact = (text) => (token ? String(text).split(token).join('[token]') : String(text))
+  const log = (line = '') => out.log(redact(line))
+  const fail = (line) => { out.error(redact(`FAILED: ${line}`)); return 1 }
+  const options = parseArgs(argv)
+  if (options.help) { log(HELP); return 0 }
+  if (options.errors.length) {
+    for (const error of options.errors) out.error(error)
+    out.error('Run with --help to see how to use it.')
+    return 1
+  }
+  let manifest = null
+  let manifestPath = ''
+  if (options.mode === 'restore') {
+    manifestPath = path.resolve(options.restorePath)
+    if (fs.existsSync(manifestPath) && fs.statSync(manifestPath).isDirectory()) manifestPath = path.join(manifestPath, 'manifest.json')
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) } catch (error) { return fail(`could not read ${manifestPath}: ${error.message}`) }
+    const problems = validateManifest(manifest)
+    if (problems.length) return fail(`${manifestPath} cannot be used: ${problems.join('; ')}.`)
+  }
+  let accountId = env.CLOUDFLARE_ACCOUNT_ID
+  let databaseId = env.BUSINESS_OS_D1_DATABASE_ID
+  if (!accountId || !databaseId) {
+    const fromToml = (() => { try { return readWranglerIds() } catch { return {} } })()
+    accountId = accountId || fromToml.accountId
+    databaseId = databaseId || fromToml.databaseId
+  }
+  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the business-os-v1 folder.')
+  token = String(env.CLOUDFLARE_API_TOKEN || await prompts.hidden('Cloudflare API token: ') || '').trim()
+  if (!token) return fail('no token given.')
+  const context = {
+    cf: makeClient({ token, accountId, databaseId, fetchImpl }), log, fail, prompts, homeDir, now, token,
+    concurrency: Math.max(1, Math.floor(concurrency) || 1), moveMaxBytes, largeFileBytes,
+  }
+  try {
+    if (options.mode === 'restore') return await restoreRun({ ...context, manifest, manifestPath })
+    return await purgeRun({ ...context, move: options.mode === 'move' })
+  } catch (error) {
+    return fail(String(error?.message || error))
+  }
+}
+
+async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, moveMaxBytes, largeFileBytes, move }) {
+  log(move ? 'Mode: MOVE to quarantine (asks before changing anything)' : 'Mode: DRY RUN (changes nothing)')
+  log('Reading the database (read-only)...')
+  const activeJobIds = await readActiveJobIds(cf)
+  const { assetRows, jobFileRows } = await readRowIndex(cf)
   const assetsByKey = new Map()
   for (const row of assetRows) {
     for (const key of assetKeys(row)) {
@@ -1150,84 +1503,347 @@ async function main() {
     jobFilesByKey.get(key).push(Number(row.id))
   }
 
-  console.log('Listing and checking stored files...')
-  const entries = []
-  for (const prefix of PREFIXES) {
-    const objects = await cf.listObjects(prefix)
-    for (const object of objects) {
-      let read = object.size > 0 ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
-      // An image the app accepts is read whole, so hidden markup anywhere
-      // in it is found.
-      if (!read.contentEncoding && read.bytes.length < object.size && object.size <= FULL_SCAN_MAX_BYTES && detectUploadFormat(read.bytes)?.kind === 'image') {
-        read = await cf.readHead(object.key, object.size)
+  log('Listing and checking stored files...')
+  const objects = []
+  for (const prefix of PREFIXES) objects.push(...await cf.listObjects(prefix))
+  const entries = new Array(objects.length)
+  let checked = 0
+  await mapLimit(objects, concurrency * 2, async (object, index) => {
+    let read = object.size > 0 ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
+    // An image the app accepts is read whole, so hidden markup anywhere
+    // in it is found.
+    if (!read.contentEncoding && read.bytes.length < object.size && object.size <= FULL_SCAN_MAX_BYTES && detectUploadFormat(read.bytes)?.kind === 'image') {
+      read = await cf.readHead(object.key, object.size)
+    }
+    const verdict = classifyObject({
+      key: object.key, size: object.size, bytes: read.bytes, complete: read.bytes.length >= object.size, activeJobIds, contentEncoding: read.contentEncoding,
+    })
+    entries[index] = {
+      key: object.key, size: object.size, uploaded: object.uploaded, etag: object.etag, httpMetadata: object.httpMetadata, ...verdict,
+      file_asset_ids: assetsByKey.get(object.key) || [],
+      import_job_file_ids: jobFilesByKey.get(object.key) || [],
+    }
+    checked += 1
+    if (checked % 200 === 0) log(`  ...${checked} checked`)
+  })
+
+  const stamp = stampOf(now())
+  const outDir = path.join(homeDir, 'business-os-purge', stamp)
+  fs.mkdirSync(outDir, { recursive: true })
+  const listPath = path.join(outDir, 'listing.json')
+  await writeJsonAtomic(listPath, { tool: MANIFEST_TOOL, bucket: BUCKET, prefixes: PREFIXES, mode: move ? 'move' : 'dry-run', stamp, createdAt: now().toISOString(), entries }, token)
+  const rowPlan = planRowChanges(entries, assetRows, jobFileRows)
+  for (const line of formatReport(entries, { purgeTitle: 'PURGE -- moved to quarantine/ with --move (can be put back with --restore)', rowPlan, manifestPath: listPath })) log(line)
+
+  if (!move) {
+    log('\nDry run finished. Nothing was changed. To move the PURGE files to quarantine/, run again with --move.')
+    return 0
+  }
+  const candidates = entries.filter((entry) => entry.action === 'purge')
+  if (!candidates.length) { log('\nNothing to move. Done.'); return 0 }
+  const totalBytes = candidates.reduce((sum, entry) => sum + entry.size, 0)
+  const answer = String(await prompts.visible(`\nType MOVE to move ${candidates.length} files (${megabytes(totalBytes)} MB) to ${quarantineKeyFor(stamp, '')} -- --restore can put them back: `) || '').trim()
+  if (answer !== 'MOVE') { log('Not confirmed. Nothing was changed.'); return 0 }
+  return moveToQuarantine({ cf, log, now, token, concurrency, moveMaxBytes, largeFileBytes, entries, candidates, stamp, outDir })
+}
+
+// Copies one file to quarantine and checks the copy. The original is not
+// touched here. Returns { move } when a copy was attempted, else { skip }.
+async function copyToQuarantine(cf, entry, stamp, moveMaxBytes) {
+  const quarantineKey = quarantineKeyFor(stamp, entry.key)
+  const skip = (reason) => ({ skip: { key: entry.key, reason } })
+  if (Buffer.byteLength(quarantineKey, 'utf8') > R2_KEY_MAX_BYTES) return skip('its name is too long to put under quarantine/')
+  if (entry.size > moveMaxBytes) return skip(`larger than ${Math.round(moveMaxBytes / 1048576)} MB; move it by hand if it must go`)
+  const original = await cf.getObject(entry.key)
+  if (!original) return skip('it is no longer there')
+  if (original.contentEncoding && original.contentEncoding.trim().toLowerCase() !== 'identity') return skip(`it is stored compressed (${printable(original.contentEncoding)})`)
+  if (original.bytes.length !== entry.size) return skip('its size changed since the listing')
+  // The whole file must still be a purge candidate, not just its start.
+  const recheck = classifyObject({ key: entry.key, size: original.bytes.length, bytes: original.bytes, complete: true })
+  if (recheck.action !== 'purge') return skip(`the whole file checks as ${recheck.group}`)
+  const httpMetadata = { ...(entry.httpMetadata || {}) }
+  if (!httpMetadata.contentType && original.contentType) httpMetadata.contentType = original.contentType
+  const move = {
+    key: entry.key, quarantineKey, size: original.bytes.length, sha256: sha256Hex(original.bytes),
+    contentType: httpMetadata.contentType || '', httpMetadata, etag: original.etag || entry.etag || '',
+    group: entry.group, format: entry.format, state: 'copying',
+  }
+  try {
+    await cf.putObject(quarantineKey, original.bytes, httpMetadata)
+    const copy = await cf.getObject(quarantineKey)
+    if (!copy) throw new Error('the copy is not there after writing it')
+    if (copy.bytes.length !== move.size || sha256Hex(copy.bytes) !== move.sha256) throw new Error('the copy is not identical to the original')
+    move.state = 'copied'
+  } catch (error) {
+    move.state = 'copy-failed'
+    move.error = String(error?.message || error)
+    move.copyRemoved = await cf.deleteObject(quarantineKey).then(() => true, () => false)
+  }
+  return { move }
+}
+
+async function moveToQuarantine({ cf, log, now, token, concurrency, moveMaxBytes, largeFileBytes, entries, candidates, stamp, outDir }) {
+  const manifestPath = path.join(outDir, 'manifest.json')
+  const manifest = {
+    tool: MANIFEST_TOOL, format: MANIFEST_FORMAT, bucket: BUCKET, mode: 'move', stamp,
+    quarantinePrefix: quarantineKeyFor(stamp, ''), createdAt: now().toISOString(), updatedAt: '', phase: 'copying',
+    restoreWith: `node ops/scripts/purge-non-media-uploads.mjs --restore "${manifestPath}"`,
+    moves: [], skipped: [], rows: { file_assets: [], import_job_files: [] },
+    database: { state: 'not started', batches: [] },
+  }
+  const writeManifest = makeSaver(manifestPath, () => ({ ...manifest, updatedAt: now().toISOString() }), token)
+  const save = async (phase) => { if (phase) manifest.phase = phase; await writeManifest() }
+  // The recovery record exists before the first copy.
+  await save()
+  const stop = async (message) => {
+    await save('stopped')
+    log(`FAILED: ${message}`)
+    log('Every file not yet removed is still where it was. To undo what was done:')
+    log(`  node ops/scripts/purge-non-media-uploads.mjs --restore "${manifestPath}"`)
+    return 1
+  }
+
+  // 1. Copy and check. No original is touched in this step.
+  const activeAtStart = await readActiveJobIds(cf)
+  const work = []
+  for (const entry of candidates) {
+    const jobId = jobIdOfImportKey(entry.key)
+    if (jobId && activeAtStart.has(jobId)) manifest.skipped.push({ key: entry.key, reason: 'its import is running again' })
+    else work.push(entry)
+  }
+  log(`Copying ${work.length} files to ${manifest.quarantinePrefix} and checking each copy...`)
+  let copiedCount = 0
+  await mapBySize(work, (entry) => entry.size, concurrency, largeFileBytes, async (entry) => {
+    const result = await copyToQuarantine(cf, entry, stamp, moveMaxBytes)
+    if (result.skip) manifest.skipped.push(result.skip)
+    if (result.move) manifest.moves.push(result.move)
+    copiedCount += 1
+    if (copiedCount % 50 === 0) {
+      log(`  ...${copiedCount} of ${work.length}`)
+      await save()
+    }
+  })
+  manifest.moves.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+  await save('copied')
+  const copied = manifest.moves.filter((move) => move.state === 'copied')
+  const copyFailures = manifest.moves.filter((move) => move.state === 'copy-failed')
+  if (copyFailures.length) log(`  ${copyFailures.length} files could not be copied exactly; they stay where they are (listed in manifest.json).`)
+  if (!copied.length) {
+    await save('done')
+    log('No file was copied, so nothing else was changed.')
+    return copyFailures.length ? 1 : 0
+  }
+
+  // 2. The database rows: recorded in full, then changed in guarded batches.
+  log('Recording the database rows of these files...')
+  const copiedKeys = new Set(copied.map((move) => move.key))
+  const outcome = entries.map((entry) => ({ key: entry.key, action: entry.action === 'purge' && !copiedKeys.has(entry.key) ? 'keep' : entry.action }))
+  const fresh = await readRowIndex(cf)
+  const plan = planRowChanges(outcome, fresh.assetRows, fresh.jobFileRows)
+  manifest.rows = await snapshotRows(cf, plan)
+  manifest.database = { state: 'applying', batches: planD1Batches(manifest.rows, plan.importFileIds).map((batch) => ({ ...batch, state: 'pending' })) }
+  // The old values are on disk before any row changes.
+  await save('database')
+  for (const batch of manifest.database.batches) {
+    try {
+      await cf.d1(buildD1Sql(batch))
+      batch.state = 'applied'
+    } catch (error) {
+      batch.state = 'failed'
+      batch.error = String(error?.message || error)
+      manifest.database.state = 'failed'
+      return stop(`the database refused a change (${batch.error}). No original file was removed.`)
+    }
+    await save()
+  }
+  // Read back, independently of the guards inside each batch.
+  const removedIds = manifest.database.batches.flatMap((batch) => batch.fileAssetIds)
+  const purgedIds = manifest.database.batches.flatMap((batch) => [...batch.importFileIds, ...(batch.linkedImportFileIds || [])])
+  let leftAssets = 0
+  for (const ids of chunk(removedIds, 100)) leftAssets += Number(rowsOf(await cf.d1(`SELECT COUNT(*) AS n FROM file_assets WHERE id IN (${ids.join(', ')})`))[0]?.n || 0)
+  let purgedRows = 0
+  for (const ids of chunk(purgedIds, 100)) purgedRows += Number(rowsOf(await cf.d1(`SELECT COUNT(*) AS n FROM import_job_files WHERE id IN (${ids.join(', ')}) AND status = 'purged'`))[0]?.n || 0)
+  if (leftAssets !== 0 || purgedRows !== purgedIds.length) {
+    manifest.database.state = 'failed'
+    return stop(`the database does not show the expected changes (${leftAssets} Library rows still there, ${purgedRows} of ${purgedIds.length} import rows purged). No original file was removed.`)
+  }
+  manifest.database.state = 'applied'
+  await save('deleting')
+
+  // 3. Remove each original, only if it is still exactly the copied file.
+  log(`Removing the ${copied.length} originals...`)
+  const activeNow = await readActiveJobIds(cf)
+  let removedCount = 0
+  await mapBySize(copied, (move) => move.size, concurrency, largeFileBytes, async (move) => {
+    const jobId = jobIdOfImportKey(move.key)
+    try {
+      if (jobId && activeNow.has(jobId)) {
+        move.state = 'original-kept'
+        move.note = 'its import is running again'
+      } else {
+        const current = await cf.getObject(move.key)
+        if (!current) {
+          move.state = 'moved'
+          move.note = 'the original was already gone'
+        } else if (sha256Hex(current.bytes) !== move.sha256) {
+          move.state = 'original-kept'
+          move.note = 'the original changed after it was copied'
+        } else {
+          await cf.deleteObject(move.key)
+          move.state = 'moved'
+        }
       }
-      const verdict = classifyObject({
-        key: object.key, size: object.size, bytes: read.bytes, complete: read.bytes.length >= object.size, activeJobIds, contentEncoding: read.contentEncoding,
-      })
-      entries.push({
-        key: object.key, size: object.size, uploaded: object.uploaded, ...verdict,
-        file_asset_ids: assetsByKey.get(object.key) || [],
-        import_job_file_ids: jobFilesByKey.get(object.key) || [],
-      })
-      if (entries.length % 200 === 0) console.log(`  ...${entries.length} checked`)
+    } catch (error) {
+      move.state = 'delete-failed'
+      move.error = String(error?.message || error)
+    }
+    removedCount += 1
+    if (removedCount % 50 === 0) {
+      log(`  ...${removedCount} of ${copied.length}`)
+      await save()
+    }
+  })
+  await save('done')
+
+  const moved = manifest.moves.filter((move) => move.state === 'moved')
+  const notMoved = manifest.moves.length - moved.length + manifest.skipped.length
+  log('')
+  log(`Moved ${moved.length} files (${megabytes(moved.reduce((sum, move) => sum + move.size, 0))} MB) to ${manifest.quarantinePrefix}`)
+  if (notMoved) log(`Not moved, still in place: ${notMoved} (see "skipped" and each "state" in manifest.json)`)
+  log(`Library rows removed: ${removedIds.length}. Import rows marked purged: ${purgedIds.length}.`)
+  log(`Recovery record: ${manifestPath}`)
+  log('To put everything back:')
+  log(`  node ops/scripts/purge-non-media-uploads.mjs --restore "${manifestPath}"`)
+  log('Done.')
+  return manifest.moves.some((move) => move.state === 'delete-failed' || move.state === 'copy-failed') ? 1 : 0
+}
+
+// ---------------------------------------------------------------- restore
+async function restoreObject(cf, move) {
+  const result = { key: move.key, quarantineKey: move.quarantineKey }
+  const current = await cf.getObject(move.key)
+  if (current) {
+    // The original is there (never removed, or already restored). A copy
+    // that failed its check is never trusted over it.
+    if (sha256Hex(current.bytes) === move.sha256 || move.state === 'copy-failed') {
+      const removed = await cf.deleteObject(move.quarantineKey)
+      return { ...result, outcome: 'in place', quarantineCopyRemoved: removed }
+    }
+    return { ...result, outcome: 'conflict', note: 'a different file is stored under this name now; the quarantine copy was left' }
+  }
+  const copy = await cf.getObject(move.quarantineKey)
+  if (!copy) return { ...result, outcome: 'missing', note: 'neither the file nor its quarantine copy exists' }
+  if (copy.bytes.length !== move.size || sha256Hex(copy.bytes) !== move.sha256) {
+    return { ...result, outcome: 'failed', note: 'the quarantine copy does not match manifest.json; it was left' }
+  }
+  const httpMetadata = { ...normalizeHttpMetadata(move.httpMetadata) }
+  if (!httpMetadata.contentType && move.contentType) httpMetadata.contentType = move.contentType
+  await cf.putObject(move.key, copy.bytes, httpMetadata)
+  const back = await cf.getObject(move.key)
+  if (!back || back.bytes.length !== move.size || sha256Hex(back.bytes) !== move.sha256) {
+    // What was just written is removed again, so the next --restore starts
+    // from the quarantine copy instead of meeting a "different file".
+    const removed = await cf.deleteObject(move.key).then(() => true, () => false)
+    return {
+      ...result, outcome: 'failed',
+      note: `the restored file did not read back identical${removed ? ', so it was removed again' : ' and could not be removed'}; the quarantine copy was left`,
     }
   }
+  await cf.deleteObject(move.quarantineKey)
+  return { ...result, outcome: 'restored' }
+}
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const outDir = path.join(os.homedir(), 'business-os-purge', stamp)
-  fs.mkdirSync(outDir, { recursive: true })
-  const manifestPath = path.join(outDir, 'manifest.json')
-  fs.writeFileSync(manifestPath, JSON.stringify({ bucket: BUCKET, prefixes: PREFIXES, mode: doDelete ? 'delete' : 'dry-run', createdAt: new Date().toISOString(), entries }, null, 2))
-
-  const toPurge = entries.filter((entry) => entry.action === 'purge')
-  const rowPlan = planRowChanges(entries, assetRows, jobFileRows)
-  for (const line of formatReport(entries, { purgeTitle: 'PURGE -- deleted with --delete', rowPlan, manifestPath })) console.log(line)
-
-  if (!doDelete) {
-    console.log('\nDry run finished. Nothing was changed. To delete, run again with --delete.')
-    return
+// Library rows go back with every recorded column (a row that is already
+// there is left alone); import rows get back the three columns --move
+// changed, only while they still say 'purged'.
+async function restoreRows(cf, rows) {
+  const result = { fileAssets: { recorded: 0, present: 0, failed: [] }, importFiles: { recorded: 0, restored: 0, failed: [] } }
+  const fileAssets = rows.file_assets || []
+  const importFiles = rows.import_job_files || []
+  result.fileAssets.recorded = fileAssets.length
+  result.importFiles.recorded = importFiles.length
+  for (const row of fileAssets) {
+    const columns = Object.keys(row)
+    const sql = `INSERT INTO file_assets (${columns.join(', ')}) SELECT ${columns.map(() => '?').join(', ')} WHERE NOT EXISTS (SELECT 1 FROM file_assets WHERE id = ?)`
+    try { await cf.d1(sql, [...columns.map((column) => row[column]), row.id]) } catch (error) { result.fileAssets.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
-  if (!toPurge.length) { console.log('\nNothing to delete. Done.'); return }
-  const answer = await prompt(`\nType DELETE to permanently delete ${toPurge.length} files: `)
-  if (answer !== 'DELETE') { console.log('Not confirmed. Nothing was changed.'); return }
-
-  const deleted = []
-  const failed = []
-  for (const entry of toPurge) {
-    try { await cf.deleteObject(entry.key); deleted.push(entry) } catch (error) { failed.push({ key: entry.key, error: String(error.message || error) }) }
-    if ((deleted.length + failed.length) % 100 === 0) console.log(`  ...${deleted.length + failed.length} of ${toPurge.length}`)
+  for (const row of importFiles) {
+    const sql = "UPDATE import_job_files SET status = ?, file_asset_id = ?, updated_at = ? WHERE id = ? AND status = 'purged'"
+    try { await cf.d1(sql, [row.status ?? null, row.file_asset_id ?? null, row.updated_at ?? null, row.id]) } catch (error) { result.importFiles.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
-  fs.writeFileSync(path.join(outDir, 'deleted.json'), JSON.stringify({ deleted: deleted.map((entry) => entry.key), failed }, null, 2))
-  console.log(`Deleted ${deleted.length} files${failed.length ? `; FAILED to delete ${failed.length} (listed in deleted.json)` : ''}.`)
-
-  // D1: only rows whose file really was deleted (a failed delete counts as kept).
-  const deletedKeys = new Set(deleted.map((entry) => entry.key))
-  const outcome = entries.map((entry) => (entry.action === 'purge' && !deletedKeys.has(entry.key) ? { ...entry, action: 'keep' } : entry))
-  const { fileAssetIds, importFileIds } = planRowChanges(outcome, assetRows, jobFileRows)
-  const sql = buildD1Sql({ fileAssetIds, importFileIds })
-  if (!sql) { console.log('No database rows to change. Done.'); return }
-  const sqlPath = path.join(outDir, 'd1-changes.sql')
-  fs.writeFileSync(sqlPath, sql)
-  console.log(`Database changes saved: ${sqlPath}`)
-  try {
-    await cf.d1(sql)
-  } catch (error) {
-    console.error(`FAILED: the database changes were refused (${error.message}).`)
-    console.error('The files above are already deleted; the database was not changed by the refused step. Send this printout.')
-    process.exit(1)
+  // Read back what is there now.
+  for (const ids of chunk(safeIds(fileAssets.map((row) => row.id)), 100)) {
+    result.fileAssets.present += Number(rowsOf(await cf.d1(`SELECT COUNT(*) AS n FROM file_assets WHERE id IN (${ids.join(', ')})`))[0]?.n || 0)
   }
-  // Post-check read back independently of the file's own guards.
-  const leftAssets = fileAssetIds.length ? rowsOf(await cf.d1(`SELECT COUNT(*) AS n FROM file_assets WHERE id IN (${fileAssetIds.join(', ')})`))[0]?.n : 0
-  if (Number(leftAssets || 0) !== 0) { console.error(`FAILED: ${leftAssets} Library rows are still present.`); process.exit(1) }
-  console.log(`Removed ${fileAssetIds.length} Library rows; marked ${importFileIds.length} import rows purged.`)
-  console.log('Done.')
+  const wanted = new Map(importFiles.map((row) => [Number(row.id), row]))
+  for (const ids of chunk([...wanted.keys()], 100)) {
+    for (const row of rowsOf(await cf.d1(`SELECT id, status, file_asset_id, updated_at FROM import_job_files WHERE id IN (${ids.join(', ')})`))) {
+      const recorded = wanted.get(Number(row.id))
+      if ((row.status ?? null) === (recorded.status ?? null) && (row.file_asset_id ?? null) === (recorded.file_asset_id ?? null)) result.importFiles.restored += 1
+    }
+  }
+  return result
+}
+
+async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFileBytes, manifest, manifestPath }) {
+  const moves = manifest.moves
+  const rows = manifest.rows || {}
+  log(`Restore from ${manifestPath}`)
+  log(`  files recorded: ${moves.length}; Library rows: ${(rows.file_assets || []).length}; import rows: ${(rows.import_job_files || []).length}`)
+  const answer = String(await prompts.visible('Type RESTORE to put them back: ') || '').trim()
+  if (answer !== 'RESTORE') { log('Not confirmed. Nothing was changed.'); return 0 }
+
+  // Files first, so a restored row never points at a missing file.
+  const objects = new Array(moves.length)
+  await mapBySize(moves, (move) => move.size, concurrency, largeFileBytes, async (move, index) => {
+    try { objects[index] = await restoreObject(cf, move) } catch (error) {
+      objects[index] = { key: move.key, quarantineKey: move.quarantineKey, outcome: 'failed', note: String(error?.message || error) }
+    }
+  })
+  // Copies a run made but never recorded (it stopped before saving): each
+  // one is removed when its original is there and identical, else left.
+  const recorded = new Set(moves.map((move) => move.quarantineKey))
+  const strays = []
+  for (const object of await cf.listObjects(manifest.quarantinePrefix)) {
+    if (recorded.has(object.key)) continue
+    const key = object.key.slice(manifest.quarantinePrefix.length)
+    const stray = { quarantineKey: object.key, key }
+    try {
+      const [original, copy] = [await cf.getObject(key), await cf.getObject(object.key)]
+      if (PREFIXES.some((prefix) => key.startsWith(prefix)) && original && copy && sha256Hex(original.bytes) === sha256Hex(copy.bytes)) {
+        await cf.deleteObject(object.key)
+        stray.outcome = 'removed (the original is in place)'
+      } else stray.outcome = 'left (no identical original)'
+    } catch (error) { stray.outcome = `left (${String(error?.message || error)})` }
+    strays.push(stray)
+  }
+  const rowResult = await restoreRows(cf, rows)
+
+  const count = (outcome) => objects.filter((object) => object.outcome === outcome).length
+  const reportPath = path.join(path.dirname(manifestPath), `restore-${stampOf(now())}.json`)
+  await writeJsonAtomic(reportPath, { tool: MANIFEST_TOOL, manifest: manifestPath, restoredAt: now().toISOString(), objects, strays, rows: rowResult }, token)
+  log('')
+  log(`Files put back: ${count('restored')}; already in place: ${count('in place')}; conflicts: ${count('conflict')}; missing: ${count('missing')}; failed: ${count('failed')}.`)
+  const leftStrays = strays.filter((stray) => stray.outcome.startsWith('left'))
+  if (strays.length) log(`Unrecorded quarantine copies: ${strays.length} (${leftStrays.length} left).`)
+  log(`Library rows present: ${rowResult.fileAssets.present} of ${rowResult.fileAssets.recorded}. Import rows back as they were: ${rowResult.importFiles.restored} of ${rowResult.importFiles.recorded}.`)
+  for (const object of objects.filter((item) => item.outcome !== 'restored' && item.outcome !== 'in place').slice(0, 20)) log(`  ${object.outcome}: ${printable(object.key)} -- ${object.note}`)
+  log(`Report saved: ${reportPath}`)
+  const clean = count('conflict') + count('missing') + count('failed') + leftStrays.length === 0
+    && rowResult.fileAssets.failed.length === 0 && rowResult.importFiles.failed.length === 0
+    && rowResult.fileAssets.present === rowResult.fileAssets.recorded && rowResult.importFiles.restored === rowResult.importFiles.recorded
+  log(clean ? 'Done.' : 'FAILED: not everything could be put back; see above and the report. Running --restore again retries it and never overwrites a different file.')
+  return clean ? 0 : 1
 }
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (invokedDirectly) {
-  main().catch((error) => {
-    // Never echo the token: error messages here come from the API or fs.
-    console.error(`FAILED: ${String(error?.message || error)}`)
-    process.exit(1)
-  })
+  run({ argv: process.argv.slice(2), env: process.env }).then(
+    (code) => { process.exitCode = code },
+    (error) => {
+      // Never echo the token: error messages here come from the API or fs.
+      console.error(`FAILED: ${String(error?.message || error)}`)
+      process.exitCode = 1
+    },
+  )
 }
