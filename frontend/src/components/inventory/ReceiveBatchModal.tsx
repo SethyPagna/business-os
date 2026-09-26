@@ -396,16 +396,24 @@ export default function ReceiveBatchModal({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-              <AppSelect
-                value={branchId}
-                onChange={setBranchId}
-                ariaLabel={t('branch') || 'Branch'}
-                className="w-full"
-                buttonClassName="h-10 w-full text-sm"
-                menuClassName="min-w-[13rem]"
-                optionClassName="text-sm"
-                options={branchSelectOptions}
-              />
+              {branchSelectOptions.length === 1 ? (
+                // One branch to receive into (callers pass active branches
+                // only): nothing to choose.
+                <div className="flex min-h-10 w-full items-center break-words rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200" aria-label={t('branch') || 'Branch'}>
+                  {String(branchSelectOptions[0].label ?? branchSelectOptions[0].value)}
+                </div>
+              ) : (
+                <AppSelect
+                  value={branchId}
+                  onChange={setBranchId}
+                  ariaLabel={t('branch') || 'Branch'}
+                  className="w-full"
+                  buttonClassName="h-10 w-full text-sm"
+                  menuClassName="min-w-[13rem]"
+                  optionClassName="text-sm"
+                  options={branchSelectOptions}
+                />
+              )}
             </label>
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">

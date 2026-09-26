@@ -244,7 +244,7 @@ export default function CartItem({
                 ...branches.map((branch) => ({
                   value: branch.id,
                   label: `${branch.name}${branch.is_default ? ' *' : ''}`,
-                  disabled: !branchCanSell(branch.name),
+                  disabled: !branchCanSell(branch),
                 })),
               ]}
             />

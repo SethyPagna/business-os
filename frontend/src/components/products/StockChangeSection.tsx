@@ -51,6 +51,7 @@ import { STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
+import { activeBranches } from '../../utils/activeBranches.ts'
 import {
   isRevertibleStockMovement,
   isStockSetMovement,
@@ -191,7 +192,7 @@ function recordedCostLabel(usd: number | null, khr: number | null, notRecorded: 
   return values.length ? values.join(' · ') : notRecorded
 }
 
-type BranchOption = { id: number; name: string }
+type BranchOption = { id: number; name: string; is_active?: boolean | number | null }
 
 // The Stock Changes section's header-row actions, registered UP to Products.tsx
 // so its "Adjust" menu and ledger export render on the page header row beside
@@ -396,7 +397,9 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         if (cancelled || !Array.isArray(rows)) return
         setBranches(rows
           .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
-          .map((row) => ({ id: Number(row.id) || 0, name: String(row.name || '') }))
+          // Every branch, retired ones included: the history filter must still
+          // find records addressed to them. New stock-ins use activeBranches.
+          .map((row) => ({ id: Number(row.id) || 0, name: String(row.name || ''), is_active: row.is_active as BranchOption['is_active'] }))
           .filter((row) => row.id > 0))
       })
       .catch(() => { /* filter row simply stays branch-less */ })
@@ -1355,7 +1358,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       {fastStockInOpen ? (
         <Suspense fallback={null}>
           <FastStockInModal
-            branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
+            branchOptions={activeBranches(branches).map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
             defaultBranchId={branchId || null}
             initialMode={fastStockInMode}
             tr={(key: string, fallback = key) => tr(t, key, fallback)}

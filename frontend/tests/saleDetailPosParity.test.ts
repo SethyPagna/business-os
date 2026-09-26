@@ -303,7 +303,10 @@ assert.match(detail, /t\('no_stock_in_branch'\)/)
 assert.doesNotMatch(detail, /'No Stock'/)
 assert.match(backend, /batchId: Number\(item\.batch_id\) \|\| null/)
 assert.match(backend, /allocateNewSaleLines\(/)
-assert.match(backend, /const lineBranchId = Number\(item\.branch_id \?\? saleHeaderBranchId\)/)
+// A line naming the header's (possibly retired) branch follows the header's
+// successor resolution; any other branch id is compared as sent.
+assert.match(backend, /const requestedLineBranchId = Number\(item\.branch_id \?\? requestedHeaderBranchId\)/)
+assert.match(backend, /const lineBranchId = requestedLineBranchId === requestedHeaderBranchId \? saleHeaderBranchId : requestedLineBranchId/)
 assert.match(backend, /lineBranchId !== saleHeaderBranchId/)
 assert.match(backend, /branchId: lineBranchId/)
 assert.match(saleLineAdditionBackend, /if \(!line\.branchId\) \{[\s\S]{0,160}cannot use a batch without a branch/)

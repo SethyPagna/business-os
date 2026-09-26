@@ -100,7 +100,10 @@ test('Export follows the visible branch section and transfer remains icon plus l
 
 test('Transfer is permission gated and available from both hub-controlled branch views', () => {
   assert.match(source, /const canTransferStock = can\('branches', 'transfer'\)/)
-  assert.match(source, /\{canTransferStock \? \([\s\S]{0,900}onClick=\{\(\) => setModal\('transfer'\)\}/)
+  // U-branch: also hidden when fewer than two active branches exist (after the
+  // Shop -> Store consolidation there is nothing to transfer between).
+  assert.match(source, /\{canTransferStock && transferAvailable \? \([\s\S]{0,900}onClick=\{\(\) => setModal\('transfer'\)\}/)
+  assert.match(source, /const transferAvailable = useMemo\(\(\) => canTransferBetweenActiveBranches\(branches\), \[branches\]\)/)
   assert.doesNotMatch(source, /tab === 'branches'[\s\S]{0,160}canTransferStock/)
   assert.ok((hubSource.match(/<BranchesSection/g) || []).length >= 2)
 })

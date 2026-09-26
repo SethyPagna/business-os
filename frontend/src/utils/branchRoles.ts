@@ -1,8 +1,8 @@
 // The two canonical branch roles, in one place.
 //
 // A branch's role comes from its explicit `branches.role` column when the
-// row has one (added, seeded from the names, by the held migration
-// ops/scripts/migration/held/branch_successor_role_schema.sql), and otherwise
+// row has one (added, seeded from the names, by migration
+// cloudflare/migrations/0198_branch_successor_role.sql), and otherwise
 // from its NAME, matched case-insensitively after trimming -- the rule this
 // lineage has always used (stockActionCatalog.ts's
 // `LOWER(TRIM(name)) IN ('shop', 'warehouse')`). `is_default` is NOT a

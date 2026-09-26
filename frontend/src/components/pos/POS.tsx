@@ -90,6 +90,8 @@ import { buildProductSupplierOptions } from '../products/helpers/productSupplier
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSell } from '../../utils/branchRoles.ts'
+import { activeBranches as selectActiveBranches } from '../../utils/activeBranches.ts'
+import { rememberBranchRows } from '../../utils/branchDirectory.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
@@ -1338,7 +1340,11 @@ export default function POS() {
   }, [])
 
   const applyBranchMetadata = useCallback((brs: BranchRecord[]) => {
-    const activeBranches = Array.isArray(brs) ? brs.filter((branch) => branch?.is_active) : []
+    const activeBranches = selectActiveBranches(Array.isArray(brs) ? brs.filter(Boolean) : [])
+    // The bootstrap rows carry the explicit role once the held branch schema
+    // exists; product payloads carry only branch names. The directory lets
+    // the product sheet ask the row (the renamed Store sells by role).
+    rememberBranchRows(activeBranches)
     setBranches(activeBranches)
     setDefaultBranchId((current) => {
       if (current && activeBranches.some((branch) => Number(branch.id) === Number(current))) {
@@ -2872,7 +2878,7 @@ export default function POS() {
     const product = productsById.get(Number(item?.id))
     if (!item || !product) return
     const targetBranch = nextBranchId == null ? null : branchesById.get(nextBranchId)
-    if (!targetBranch || !branchCanSell(targetBranch.name)) {
+    if (!targetBranch || !branchCanSell(targetBranch)) {
       notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
       return
     }

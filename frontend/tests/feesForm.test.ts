@@ -35,12 +35,13 @@ assert.equal(formHelpers.feeFormInteractionLocked(false, { client_request_id: 'p
 
 assert.match(formSource, /mod\.getSales\(\{ search: query, limit: 8 \}\)/, 'linked sales use the existing searchable sales endpoint')
 assert.match(formSource, /receipt, customer, phone, product, SKU or barcode/, 'the picker tells staff which real sale fields are searchable')
-assert.match(formSource, /rows\.filter\(\(sale\) => sale\.branch_id != null && branchCanSell\(sale\.branch_name\)\)/, 'only real Shop sales appear as link candidates')
+assert.match(formSource, /rows\.filter\(\(sale\) => sale\.branch_id != null && \(allBranches[\s\S]{0,80}\? branchCanSell\(effectiveBranchRow\(allBranches, sale\.branch_id\)\)[\s\S]{0,40}: branchCanSell\(sale\.branch_name\)\)\)\)/, 'only real selling-branch sales appear as link candidates; a retired Shop sale resolves through its successor')
 assert.match(formSource, /set\('sale_id', String\(sale\.id\)\)[\s\S]*set\('branch_id', String\(sale\.branch_id\)\)/, 'choosing a sale carries its exact id and branch together')
 assert.match(formSource, /Sale ID #\{selectedSale\.id\}/, 'the selected sale keeps its database id visible')
 assert.match(formSource, /role="listbox"[\s\S]*role="option"/, 'the search results expose listbox semantics')
 assert.doesNotMatch(formSource, /id="fee-sale-id"/, 'staff are not asked to type an unverified numeric sale id')
-assert.match(formSource, /filter\(\(row\) => row\.is_active !== false && branchCanSell\(row\.name\)\)/, 'manual expenses offer only active exact Shop branches')
+assert.match(formSource, /const shops = activeSellingBranches\(\(rows \|\| \[\]\) as FeeBranchOption\[\]\)/, 'manual expenses offer only active selling branches (by role; is_active 0 excluded, see activeBranches.test.ts)')
+assert.doesNotMatch(formSource, /row\.is_active !== false/, 'the Worker reports is_active as 0\/1; a boolean compare would admit a retired branch')
 assert.match(formSource, /return \[\{ value: '', label: t\('select_branch'\) \|\| 'Select Shop' \}, \.\.\.options\]/, 'manual expenses cannot save an unassigned branch from the picker')
 assert.match(formSource, /if \(!pendingCreate && \(amountsInvalid \|\| dateInvalid \|\| !form\.branch_id\.trim\(\)\)\) return/, 'new edits validate amounts/date/Shop; frozen retries are not rebuilt by new input policy')
 

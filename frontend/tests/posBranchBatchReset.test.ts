@@ -18,13 +18,13 @@ function test(name: string, fn: () => void): void {
 }
 
 test('the cart branch selector shows Warehouse but disables every non-selling branch', () => {
-  assert.match(cartItem, /\.\.\.branches\.map\(\(branch\) => \(\{[^]*?label: `\$\{branch\.name\}[^]*?disabled: !branchCanSell\(branch\.name\)/)
+  assert.match(cartItem, /\.\.\.branches\.map\(\(branch\) => \(\{[^]*?label: `\$\{branch\.name\}[^]*?disabled: !branchCanSell\(branch\)/)
   assert.match(cartItem, /import \{ branchCanSell \} from '\.\.\/\.\.\/utils\/branchRoles\.ts'/)
 })
 
 test('the branch handler rejects non-selling targets even if invoked outside the selector', () => {
   assert.match(pos, /const targetBranch = nextBranchId == null \? null : branchesById\.get\(nextBranchId\)/)
-  assert.match(pos, /if \(!targetBranch \|\| !branchCanSell\(targetBranch\.name\)\) \{[^]*?pos_warehouse_not_sellable[^]*?return\n    \}/)
+  assert.match(pos, /if \(!targetBranch \|\| !branchCanSell\(targetBranch\)\) \{[^]*?pos_warehouse_not_sellable[^]*?return\n    \}/)
 })
 
 test('a batch-tracked line revalidates the same batch by product and target branch before changing', () => {

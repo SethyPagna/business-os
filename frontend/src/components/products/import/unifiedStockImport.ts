@@ -39,6 +39,12 @@ export const UNIFIED_STOCK_HEADERS = [
   // row was refused with a message asking to "tick Free goods" -- a control
   // that lived nowhere on this sheet, so the row could never be corrected.
   'free_goods',
+  // Optional (U-branch): the branch the Shop/Warehouse consolidation keeps,
+  // by its own name. Before a Store exists the Worker reads it as Shop (the
+  // long-standing 'store' spelling); after, as the Store. Last, so every
+  // existing column keeps its position. Mirrors the Worker's
+  // lib/stockActionImport.ts UNIFIED_STOCK_COLUMNS.
+  'store',
 ] as const
 
 export type UnifiedStockHeader = typeof UNIFIED_STOCK_HEADERS[number]
@@ -50,6 +56,7 @@ export interface UnifiedStockParsedRow {
   barcode: string
   shop: number | null
   warehouse: number | null
+  store: number | null
   date: string
   action: string
   sellingPrice: number | null
@@ -78,8 +85,11 @@ export interface UnifiedStockParseResult {
 const HEADER_ALIASES: Record<UnifiedStockHeader, readonly string[]> = {
   name: ['name', 'product', 'productname', 'item', 'itemname'],
   barcode: ['barcode', 'upc', 'ean'],
-  shop: ['shop', 'shopquantity', 'shopqty', 'store', 'storequantity', 'storeqty'],
+  shop: ['shop', 'shopquantity', 'shopqty'],
   warehouse: ['warehouse', 'warehousequantity', 'warehouseqty'],
+  // Its own column since U-branch: after the consolidation a 'store' figure
+  // belongs to the Store, not to the retired Shop it used to alias.
+  store: ['store', 'storequantity', 'storeqty'],
   date: ['date', 'transactiondate', 'stockdate', 'receiveddate', 'saledate'],
   action: ['action', 'stockaction', 'movement', 'movementtype', 'salegroup'],
   selling_price: ['sellingprice', 'sellingpriceusd', 'price', 'priceusd'],
@@ -170,14 +180,16 @@ export function parseUnifiedStockRows(
     const barcode = clean(read('barcode'))
     const shop = parseOptionalNumber(read('shop'))
     const warehouse = parseOptionalNumber(read('warehouse'))
+    const store = parseOptionalNumber(read('store'))
     const date = normalizeUnifiedStockDate(read('date'))
     const sellingPrice = parseOptionalNumber(read('selling_price'))
     const wholesalePrice = parseOptionalNumber(read('wholesale_price'))
     const costPrice = parseOptionalNumber(read('cost_price'))
 
     if (!name && !barcode) issues.push({ rowNumber, code: 'missing_identity', message: 'Name or barcode is required.' })
-    if (shop === null && warehouse === null) issues.push({ rowNumber, code: 'missing_quantity', message: 'Enter a shop or warehouse quantity.' })
-    if (shop === 'invalid' || warehouse === 'invalid' || (typeof shop === 'number' && shop < 0) || (typeof warehouse === 'number' && warehouse < 0)) {
+    if (shop === null && warehouse === null && store === null) issues.push({ rowNumber, code: 'missing_quantity', message: 'Enter a shop or warehouse quantity.' })
+    const quantities = [shop, warehouse, store]
+    if (quantities.some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))) {
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
     if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.' })
@@ -205,7 +217,7 @@ export function parseUnifiedStockRows(
     const action = clean(read('action'))
     const freeGoods = parseFreeGoodsFlag(read('free_goods'))
     const putsStockIn = mode === 'direct' && !priceInvalid && !SHEET_SALE_ACTION.test(action)
-      && ((typeof shop === 'number' && shop > 0) || (typeof warehouse === 'number' && warehouse > 0))
+      && quantities.some((value) => typeof value === 'number' && value > 0)
     if (putsStockIn) {
       // An explicit CREATE/NEW action has no lot to inherit a supplier from --
       // there is nothing on the catalog for it yet, so a blank supplier cell
@@ -236,6 +248,7 @@ export function parseUnifiedStockRows(
       barcode,
       shop: typeof shop === 'number' && shop >= 0 ? shop : null,
       warehouse: typeof warehouse === 'number' && warehouse >= 0 ? warehouse : null,
+      store: typeof store === 'number' && store >= 0 ? store : null,
       date: date || '',
       action,
       sellingPrice: typeof sellingPrice === 'number' && sellingPrice >= 0 ? sellingPrice : null,

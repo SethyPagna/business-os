@@ -26,10 +26,18 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
     'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',
     'canonical_branch_configuration_invalid',
   ],
+  // cloudflare/src/lib/branchSuccession.ts BRANCH_INACTIVE_ERROR: a write
+  // addressed to a closed branch with no successor.
+  ['This branch is closed. Refresh the app and choose an open branch.', 'branch_inactive_refresh'],
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
+  // lib/branchSuccession.ts: a picker write to a retired branch (the English
+  // names the successor; the pack sentence is the generic form).
+  branch_inactive: 'branch_inactive_refresh',
+  // lib/branchSuccession.ts: an absolute "set" addressed to a retired branch.
+  branch_retired_set_refused: 'branch_retired_set_refused',
 }
 
 type BranchRuleErrorLike = {

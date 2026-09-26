@@ -26,6 +26,7 @@ import {
 } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { branchCanSell } from '../../utils/branchRoles.ts'
+import { activeSellingBranches, effectiveBranchRow } from '../../utils/activeBranches.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -271,6 +272,10 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   }, [draftKey, form])
   const [touched, setTouched] = useState(false)
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
+  // Every branch row, retired ones included, once loaded: a sale rung up at
+  // a since-retired branch is fee-linkable when its successor sells (the
+  // Worker books the fee there). Null until loaded -- then the name rule.
+  const allBranchRowsRef = useRef<FeeBranchOption[] | null>(null)
   // Saved labels from the server (every distinct label ever used, with its
   // dominant fee type) -- the page-derived `labelSuggestions` prop stays as
   // the instant seed / offline fallback until this arrives.
@@ -336,7 +341,10 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         .then((result) => {
           if (saleSearchSeq.current !== seq) return
           const rows = (Array.isArray(result) ? result : (result as { sales?: unknown[] })?.sales || []) as SaleSearchRow[]
-          setSaleResults(rows.filter((sale) => sale.branch_id != null && branchCanSell(sale.branch_name)))
+          const allBranches = allBranchRowsRef.current
+          setSaleResults(rows.filter((sale) => sale.branch_id != null && (allBranches
+            ? branchCanSell(effectiveBranchRow(allBranches, sale.branch_id))
+            : branchCanSell(sale.branch_name))))
         })
         .catch(() => { if (saleSearchSeq.current === seq) setSaleResults([]) })
         .finally(() => { if (saleSearchSeq.current === seq) setSaleSearching(false) })
@@ -366,8 +374,10 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
       .then((mod) => mod.getBranches())
       .then((rows) => {
         if (cancelled) return
-        const shops = ((rows || []) as FeeBranchOption[])
-          .filter((row) => row.is_active !== false && branchCanSell(row.name))
+        allBranchRowsRef.current = (rows || []) as FeeBranchOption[]
+        // Active selling branches by ROLE (the renamed Store sells), never a
+        // retired one -- the Worker reports is_active as 0/1, not a boolean.
+        const shops = activeSellingBranches((rows || []) as FeeBranchOption[])
         setBranches(shops)
         if (!fee && shops.length === 1) {
           setForm((current) => current.branch_id ? current : { ...current, branch_id: String(shops[0].id) })

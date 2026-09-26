@@ -12,7 +12,8 @@
 // which cannot tell you that a flat product's stock reads 0 while its
 // branch_stock says 28.
 import { sortBatchesForPicker } from './posCore.ts'
-import { branchRoleFromName, branchCanSell, type BranchRole } from '../../utils/branchRoles.ts'
+import { branchRole, type BranchRole } from '../../utils/branchRoles.ts'
+import { branchIdCanSell, knownBranchRow } from '../../utils/branchDirectory.ts'
 
 export type BranchStockRow = {
   branch_id?: string | number | null
@@ -199,7 +200,10 @@ export function branchNameFromProduct(product: SheetProductLike | null | undefin
  */
 export function branchAllowsSale(product: SheetProductLike | null | undefined, branchId: unknown): boolean {
   const name = branchNameFromProduct(product, branchId)
-  return name != null && branchCanSell(name)
+  // The payload must still name the branch; whether it SELLS is the branch
+  // row's role when this tab has read it (the renamed Store sells), else
+  // the name, exactly as before.
+  return name != null && branchIdCanSell(branchId, name)
 }
 
 // `blocked` means: there is stock, but only where a sale may not be rung.
@@ -377,8 +381,8 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
 
   const branchOptions: SheetBranchOption[] = branchIds.map((id) => {
     const name = String(branchNames.get(id) ?? id)
-    const role = branchRoleFromName(name)
-    const sellable = intent !== 'sell' || branchCanSell(name)
+    const role = branchRole(knownBranchRow(id) ?? name)
+    const sellable = intent !== 'sell' || branchIdCanSell(id, name)
     return {
       id,
       name,

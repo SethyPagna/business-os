@@ -11,8 +11,12 @@ assert.doesNotMatch(branches, /branches-select-all|selectedIds|handleBulkDelete|
   'fixed branch identities must not expose the obsolete bulk-delete selection mode')
 assert.doesNotMatch(branches, /branchApi\.(createBranch|deleteBranch)\(|tr\('add_branch'|title=\{tr\('delete'/,
   'the branch page must not advertise create/delete actions rejected by the server')
-assert.match(branches, /canEditBranch && branchRoleFromName\(branch\.name\) !== 'other' && !!branch\.is_active/,
+assert.match(branches, /canEditBranch && branchRole\(branch\) !== 'other' && !!branch\.is_active/,
   'only an active canonical row may expose metadata editing')
+// The ROW's role, not its name: after the consolidation the survivor is named
+// Store (role shop), and a name-only check would hide its edit action.
+assert.doesNotMatch(branches, /branchRoleFromName\((branch|currentBranch)\.name\)/,
+  'branch edit gates must read the row role, not the bare name')
 assert.match(form, /id="branch-name"[\s\S]*?readOnly[\s\S]*?aria-readonly="true"/,
   'branch name must be presented as a read-only identity')
 assert.doesNotMatch(form, /id="branch-active"/,

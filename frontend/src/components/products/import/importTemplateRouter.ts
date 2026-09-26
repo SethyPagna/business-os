@@ -114,9 +114,11 @@ export function classifyImportHeader(headerCells: string[]): ImportTemplateDetec
     return { type: 'sales', header, signals: pick('receipt_number', 'sale_date', 'payment_method') }
   }
   // §12 unified stock: an `action` column plus the per-branch quantity
-  // columns. (The products template has neither.)
-  if (has('action') && (has('shop') || has('warehouse'))) {
-    return { type: 'stock_actions', header, signals: pick('action', 'shop', 'warehouse', 'cost_price') }
+  // columns. (The products template has neither.) 'store' is the column the
+  // Shop/Warehouse consolidation added; a sheet that uses only it is still
+  // a stock-action sheet.
+  if (has('action') && (has('shop') || has('warehouse') || has('store'))) {
+    return { type: 'stock_actions', header, signals: pick('action', 'shop', 'warehouse', 'store', 'cost_price') }
   }
   // Products: pricing/stock/batch/image columns straight from the template.
   // BOTH batch headers are signals. The downloaded template ships

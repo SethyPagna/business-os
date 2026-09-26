@@ -29,6 +29,7 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
+import { isSingleBranchMode, type BranchActivityRow } from '../../utils/activeBranches.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -868,6 +869,24 @@ export default function Dashboard() {
   const [topProductsListOpen, setTopProductsListOpen] = useState(false)
   const [topCustomersListOpen, setTopCustomersListOpen] = useState(false)
   const [branchPerformanceListOpen, setBranchPerformanceListOpen] = useState(false)
+  // One active branch (after the Shop/Warehouse consolidation): a per-branch
+  // comparison has nothing to compare, so the card collapses. Read after
+  // first paint so the dashboard's own requests are not delayed; an empty or
+  // failed read keeps the card.
+  const [singleActiveBranch, setSingleActiveBranch] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      import('../../api/branchTransport.ts')
+        .then((mod) => mod.getBranches())
+        .then((rows) => {
+          if (cancelled || !Array.isArray(rows) || rows.length === 0) return
+          setSingleActiveBranch(isSingleBranchMode(rows as BranchActivityRow[]))
+        })
+        .catch(() => {})
+    }, 1500)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [])
   const [expiryAlertsListOpen, setExpiryAlertsListOpen] = useState(false)
   const [bestHourListOpen, setBestHourListOpen] = useState(false)
   const [recentImportsListOpen, setRecentImportsListOpen] = useState(false)
@@ -2420,7 +2439,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         </div>
 
         {/* Expiring Products */}
-        <BranchPerformanceCard
+        {singleActiveBranch ? null : <BranchPerformanceCard
           analytics={analytics}
           analyticsPending={analyticsPending}
           analyticsUnavailable={analyticsUnavailable}
@@ -2430,7 +2449,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           fmtUSD={fmtUSD}
           onOpen={openBranchDetail}
           onViewMore={() => setBranchPerformanceListOpen(true)}
-        />
+        />}
 
         {/* Recent imports -- a general list of the last few imported files
             (any type, any outcome), so it's discoverable and clickable the

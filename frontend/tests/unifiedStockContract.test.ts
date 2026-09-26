@@ -19,13 +19,28 @@ import {
 // keep importing unchanged.
 assert.deepEqual(UNIFIED_STOCK_HEADERS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
-  'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier', 'free_goods',
+  'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier', 'free_goods', 'store',
 ])
 assert.equal(buildUnifiedStockTemplateCsv(), `﻿${UNIFIED_STOCK_HEADERS.join(',')}\r\n`)
 assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code', 'Vendor Name', 'Free']), {
   name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
   selling_price: 'Price USD', wholesale_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name', free_goods: 'Free',
+  store: null,
 })
+// U-branch: 'store' is its own column. It used to alias shop, which after
+// the consolidation would book a Store figure as addressed to the retired
+// Shop. A sheet with only a store column is a valid quantity sheet.
+{
+  const storeMap = mapUnifiedStockHeaders(['name', 'Store Qty', 'Shop', 'date'])
+  assert.equal(storeMap.store, 'Store Qty')
+  assert.equal(storeMap.shop, 'Shop')
+  const storeOnly = parseUnifiedStockRows([{ name: 'A', store: '4', date: '08/27/2026', action: 'sale1' }])
+  assert.equal(storeOnly.rows[0].store, 4)
+  assert.equal(storeOnly.rows[0].shop, null, 'a store figure is never read as the shop figure')
+  assert.equal(storeOnly.issues.filter((issue) => issue.code === 'missing_quantity').length, 0)
+  const negativeStore = parseUnifiedStockRows([{ name: 'A', store: '-1', date: '08/27/2026', action: 'sale1' }])
+  assert.ok(negativeStore.issues.some((issue) => issue.code === 'invalid_quantity'))
+}
 // A ten-column file (no supplier or free_goods header) still maps cleanly —
 // both just resolve to nothing.
 const tenColumnMap = mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch'])

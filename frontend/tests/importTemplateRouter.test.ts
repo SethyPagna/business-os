@@ -74,6 +74,8 @@ runTest('deferred-ledger detection cannot swallow a routable template', () => {
   // run first, so prove none of their signal pairs appear in the templates.
   assert.equal(classifyImportHeader([...SALES_IMPORT_COLUMNS]).type, 'sales')
   assert.equal(classifyImportContent('name,barcode,shop,warehouse,date,action,selling_price,vip_price,cost_price,batch,supplier\n').type, 'stock_actions')
+  // U-branch: a store-only stock sheet is still a stock-action sheet.
+  assert.equal(classifyImportContent('name,barcode,store,date,action,cost_price\n').type, 'stock_actions')
   assert.equal(classifyImportContent('name,sku,barcode,category,selling_price_usd,stock_quantity,batch(mm/dd/yyyy),branch,image_filename_1\n').type, 'products')
   assert.equal(classifyImportHeader(['name', 'membership_number', 'phone']).type, 'customers')
 })

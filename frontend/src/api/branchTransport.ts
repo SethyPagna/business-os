@@ -3,6 +3,7 @@ import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { dispatchResolvedSyncError, type SyncProblemReference } from '../utils/syncProblemLifecycle.ts'
+import { rememberBranchRows } from '../utils/branchDirectory.ts'
 
 type BranchPayload = Record<string, unknown>
 const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
@@ -104,6 +105,16 @@ function encodeId(id: string | number): string {
 }
 
 export function getBranches(): Promise<unknown> {
+  // Every read (online or the offline mirror) refreshes the tab's branch
+  // directory, which lets name-only product payloads ask the row whether it
+  // sells (utils/branchDirectory.ts).
+  return getBranchRows().then((rows) => {
+    rememberBranchRows(rows)
+    return rows
+  })
+}
+
+function getBranchRows(): Promise<unknown> {
   return route(
     'branches:get',
     async () => {

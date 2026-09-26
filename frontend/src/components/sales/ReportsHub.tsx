@@ -65,6 +65,7 @@ import {
   type ReportViewId,
 } from './reports/reportModel.ts'
 import type { DrillPatch, ReportViewProps } from './reports/reportTypes.ts'
+import { isSingleBranchMode, type BranchActivityRow } from '../../utils/activeBranches.ts'
 
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
@@ -202,7 +203,10 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
           if (id) acc.push({ id, name: String(rec.name || rec.branch_name || id) })
           return acc
         }, [])
-        setBranches(list)
+        // One active branch (after the Shop/Warehouse consolidation): the
+        // filter collapses -- "All branches" is the only meaningful choice,
+        // and it still includes history recorded at the retired branch.
+        setBranches(isSingleBranchMode((Array.isArray(raw) ? raw : []) as BranchActivityRow[]) ? [] : list)
       })
       .catch(() => {})
     return () => { cancelled = true }

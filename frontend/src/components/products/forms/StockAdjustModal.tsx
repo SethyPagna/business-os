@@ -15,6 +15,7 @@ import { getProductsByIds, searchProducts } from '../../../api/productReadTransp
 import { adjustStock } from '../../../api/inventoryWriteTransport.ts'
 import { createClientRequestId } from '../../../api/requestIds.ts'
 import { getBranches } from '../../../api/branchTransport.ts'
+import { activeBranches } from '../../../utils/activeBranches.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
@@ -141,6 +142,7 @@ type Branch = {
   id: InventoryId
   name?: string
   is_default?: boolean | number | null
+  is_active?: boolean | number | null
 }
 
 type StockAdjustModalProps = {
@@ -271,7 +273,10 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   useEffect(() => {
     let cancelled = false
     getBranches()
-      .then((raw) => { if (!cancelled) setBranches(Array.isArray(raw) ? (raw as Branch[]) : []) })
+      // Only branches a new adjustment may name: a retired branch (after the
+      // Shop/Warehouse consolidation) is refused by the Worker, and with one
+      // active branch the picker collapses (branchCount <= 1).
+      .then((raw) => { if (!cancelled) setBranches(Array.isArray(raw) ? activeBranches(raw as Branch[]) : []) })
       .catch(() => { if (!cancelled) setBranches([]) })
     return () => { cancelled = true }
   }, [])

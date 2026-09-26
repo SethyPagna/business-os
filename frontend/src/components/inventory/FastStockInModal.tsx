@@ -262,6 +262,15 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     scannedBarcode: '',
   })
   const [branchId, setBranchId] = useState<string>(draft?.branchId || initialHeader?.branchId || (defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || '')))
+  // A restored draft or an "add more" session may name a branch that is no
+  // longer offered (retired by the Shop/Warehouse consolidation). The header
+  // moves to an offered branch -- the default, else the first -- rather than
+  // submitting to one the Worker refuses; the header shows which.
+  useEffect(() => {
+    if (!branchOptions.length || branchOptions.some((option) => option.value === branchId)) return
+    const fallback = branchOptions.find((option) => option.value === String(defaultBranchId ?? '')) || branchOptions[0]
+    setBranchId(fallback.value)
+  }, [branchOptions, branchId, defaultBranchId])
   // Received date defaults to TODAY (business day) rather than empty (user,
   // Sep 3 2026): nearly every fast stock-in is for stock that just arrived,
   // so the date the batch code derives from should already be filled in and
@@ -1246,14 +1255,21 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('branch', 'Branch')}</span>
-                <AppSelect
-                  value={branchId}
-                  onChange={(next) => setBranchId(next)}
-                  ariaLabel={tr('branch', 'Branch')}
-                  buttonClassName="h-9 w-full text-sm"
-                  optionClassName="text-sm"
-                  options={branchOptions}
-                />
+                {branchOptions.length === 1 ? (
+                  // One branch to receive into: nothing to choose.
+                  <div className="flex h-9 w-full items-center truncate rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200" aria-label={tr('branch', 'Branch')}>
+                    {branchOptions[0].label}
+                  </div>
+                ) : (
+                  <AppSelect
+                    value={branchId}
+                    onChange={(next) => setBranchId(next)}
+                    ariaLabel={tr('branch', 'Branch')}
+                    buttonClassName="h-9 w-full text-sm"
+                    optionClassName="text-sm"
+                    options={branchOptions}
+                  />
+                )}
               </label>
               {receiptFieldsRelevant ? <>
               <label className="block">

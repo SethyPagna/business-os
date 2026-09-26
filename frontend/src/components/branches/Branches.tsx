@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { activeBranches as selectActiveBranches, canTransferBetweenActiveBranches } from '../../utils/activeBranches.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
@@ -38,7 +39,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
-import { branchRoleFromName } from '../../utils/branchRoles.ts'
+import { branchRole } from '../../utils/branchRoles.ts'
 import {
   RESTORE_WORK_EVENT,
   consumePendingRestore,
@@ -417,7 +418,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('branch_not_found', 'Branch not found'), 'warning')
         return false
       }
-      if (branchRoleFromName(currentBranch.name) === 'other' || !currentBranch.is_active) {
+      if (branchRole(currentBranch) === 'other' || !currentBranch.is_active) {
         reparkDeniedRestore(entry)
         notify(tr('access_denied', 'Access denied'), 'warning')
         return false
@@ -695,7 +696,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   /**
    * 4. Derived State
    */
-  const activeBranches = useMemo(() => branches.filter((branch) => branch.is_active), [branches])
+  const activeBranches = useMemo(() => selectActiveBranches(branches), [branches])
+  // No transfer entry point while there is nowhere to transfer to (a single
+  // active branch after the consolidation). Inert while Shop and Warehouse
+  // are both active.
+  const transferAvailable = useMemo(() => canTransferBetweenActiveBranches(branches), [branches])
   const transferBranchOptions = useMemo(
     () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}` })),
     [activeBranches],
@@ -1190,7 +1195,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               </button>
             ))}
           </div> : null}
-          {canTransferStock ? (
+          {canTransferStock && transferAvailable ? (
             <button
               className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
               onClick={() => setModal('transfer')}
@@ -1332,7 +1337,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Warehouse className="h-3.5 w-3.5" />
                           </button>
-                          {canEditBranch && branchRoleFromName(branch.name) !== 'other' && !!branch.is_active ? <button
+                          {canEditBranch && branchRole(branch) !== 'other' && !!branch.is_active ? <button
                             onClick={() => { setSelected(branch); setModal('form') }}
                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                             title={tr('edit', 'Edit')}
@@ -1373,9 +1378,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                               {' | '}
                               {tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
                             </span>
-                            <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
-                              {tr('transfer_stock_link', 'Transfer stock')}
-                            </button>
+                            {transferAvailable ? (
+                              <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
+                                {tr('transfer_stock_link', 'Transfer stock')}
+                              </button>
+                            ) : null}
                           </div>
 
                           {/* Per-branch product search (user, Aug 30: "search
@@ -1704,7 +1711,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             <p className="text-xs text-slate-500 dark:text-slate-400">{tr('transfer_immutable_hint', 'Posted transfers stay unchanged for stock and audit accuracy. Use a new transfer to correct the movement.')}</p>
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setTransferDetail(null)}>{tr('close', 'Close')}</button>
-              {canTransferStock ? <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={() => { setTransferDetail(null); setModal('transfer') }}><ArrowRightLeft className="mr-1 inline h-4 w-4" />{tr('new_transfer', 'New transfer')}</button> : null}
+              {canTransferStock && transferAvailable ? <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={() => { setTransferDetail(null); setModal('transfer') }}><ArrowRightLeft className="mr-1 inline h-4 w-4" />{tr('new_transfer', 'New transfer')}</button> : null}
             </div>
           </div>
         </Modal>

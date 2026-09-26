@@ -84,6 +84,7 @@ import { createClientRequestId } from '../../api/requestIds.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
+import { activeBranches as selectActiveBranches, canTransferBetweenActiveBranches } from '../../utils/activeBranches.ts'
 import type { QueryParams } from '../../api/query.ts'
 import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
 import {
@@ -1028,7 +1029,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
           }
         }
         if (needsRfidData && rfid?.item) setRfidStatus(rfid.item)
-        if (Array.isArray(brs)) setBranches(brs.filter((branch) => branch.is_active))
+        if (Array.isArray(brs)) setBranches(selectActiveBranches(brs))
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, 'Failed to load inventory'))
         }
@@ -3150,7 +3151,7 @@ ${inventoryFeesFormulaText}`,
             product={detailProduct}
             onClose={() => setDetailProduct(null)}
             onAdjust={canAdjustStock ? openAdjust : undefined}
-            onTransfer={canTransferStock ? openTransfer : undefined}
+            onTransfer={canTransferStock && canTransferBetweenActiveBranches(branches) ? openTransfer : undefined}
             onViewHistory={fetchProductHistoryPreview}
             onManageBatches={openManageBatches}
             fmtUSD={fmtUSD}

@@ -565,8 +565,9 @@ await runTest('canonical branch metadata edits and transfers use shared guards',
   assert.match(branches, /if \(!beginSingleAction\(saveInFlightRef\)\) return/)
   assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.updateBranch\(selected\.id, payload\), 'Update branch'\)/)
   assert.match(branches, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)/)
-  assert.match(branches, /branchRoleFromName\(currentBranch\.name\) === 'other' \|\| !currentBranch\.is_active/)
-  assert.match(branches, /canEditBranch && branchRoleFromName\(branch\.name\) !== 'other' && !!branch\.is_active/)
+  // Row role (explicit role column, name fallback): the renamed Store stays editable.
+  assert.match(branches, /branchRole\(currentBranch\) === 'other' \|\| !currentBranch\.is_active/)
+  assert.match(branches, /canEditBranch && branchRole\(branch\) !== 'other' && !!branch\.is_active/)
   assert.doesNotMatch(branches, /branchApi\.(createBranch|deleteBranch)\(/)
   assert.doesNotMatch(branches, /canAddBranch|handleBulkDelete|handleDelete|bulkDeleteBusy|selectedIds/)
   assert.doesNotMatch(branches, /tr\('add_branch'|title=\{tr\('delete'/)

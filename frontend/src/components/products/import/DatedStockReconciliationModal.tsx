@@ -137,6 +137,7 @@ const REASON_LABEL: Record<string, { key: string; en: string }> = {
   product_not_found: { key: 'dated_count_reason_product_not_found', en: 'No matching product found' },
   ambiguous_barcode: { key: 'dated_count_reason_ambiguous_barcode', en: 'Multiple products share this barcode' },
   ambiguous_name: { key: 'dated_count_reason_ambiguous_name', en: 'Multiple products share this name' },
+  branch_retired: { key: 'dated_count_reason_branch_retired', en: 'This branch has moved into another branch. Enter the count for the branch the stock is in now.' },
 }
 
 const ACTION_LABEL: Record<string, { key: string; en: string }> = {
