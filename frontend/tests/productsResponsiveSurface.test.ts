@@ -226,7 +226,13 @@ assert.match(retryRun, /saveTransferRun\(completed\.actorId, null\)[\s\S]*setSav
 const retryCatch = retryRun.slice(retryRun.indexOf('} catch (error)'), retryRun.indexOf('} finally'))
 assert.doesNotMatch(retryCatch, /setSavedRun\(null\)|onDone\(\)/, 'partial completion must remain retryable instead of being treated as full completion')
 assert.match(transfer, /savedRun\.transferred > 0[\s\S]*transfer_bulk_partial[\s\S]*onClick=\{\(\) => \{ void runPendingTransfer\(null\) \}\}/, 'the partial state tells the operator what landed and retries the frozen remainder')
-assert.doesNotMatch(transfer, /const discardSavedTransfer|onClick=\{discardSavedTransfer\}/, 'an unresolved transfer cannot be discarded and lose its exact retry identity')
+// U-transfer3: a saved run the server refused for good locked the form
+// forever, so a saved run can now be discarded -- but never in one tap: the
+// retry identity is dropped only from the shared review dialog, and a run
+// whose result is unknown is told it may already have been applied.
+assert.doesNotMatch(transfer, /onClick=\{discardSavedTransfer\}/, 'an unresolved transfer is never discarded without the review dialog')
+assert.match(transfer, /onClick=\{\(\) => setDiscardingRun\(true\)\}/, 'Discard opens the review dialog first')
+assert.match(transfer, /<ConfirmDialog[\s\S]{0,200}transfer_run_discard_title[\s\S]{0,600}transfer_run_discard_unknown[\s\S]{0,1500}onConfirm=\{discardSavedTransfer\}/, 'the unknown-result warning and the discard live in one review dialog')
 assert.match(transfer, /if \(!savedRun\) draftFinishedRef.current = discardTransferDraft/, 'closing may discard only a draft with no unresolved transfer')
 
 // The write path: one confirmed entry point, on-brand, translated. Starting a

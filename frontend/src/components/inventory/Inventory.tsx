@@ -86,6 +86,7 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
 import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
+import { inventoryTransferEditForm, isRefusedTransferRun, localizeTransferRefusal, transferRefusalFromError } from '../../api/transferRunRefusal.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -593,6 +594,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [pendingTransfer, setPendingTransfer] = useState<PendingInventoryTransfer | null>(null)
   const [transferRetryError, setTransferRetryError] = useState('')
   const [transferRetryReady, setTransferRetryReady] = useState(false)
+  // Discarding a saved transfer always goes through the shared review dialog.
+  const [discardingInventoryTransfer, setDiscardingInventoryTransfer] = useState(false)
   const [showImport, setShowImport] = useState(false)
   // F2 (Part 419): the fast per-shipment stock-in flow -- see
   // FastStockInModal.tsx; writes ride the same receive kernel as every
@@ -1814,7 +1817,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [t])
 
 
-  const transferErrorMessage = (error: unknown) => localizeBranchRuleError(
+  // A definitive refusal is translated even when the Worker sent plain English
+  // ("Insufficient stock in source branch"); anything else as before.
+  const transferErrorMessage = (error: unknown) => localizeTransferRefusal(transferRefusalFromError(error), (key) => tr(key, '')) || localizeBranchRuleError(
     error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), (key) => tr(key, ''),
   ) || tr('stock_transfer_failed', 'Stock transfer failed')
 
@@ -1860,6 +1865,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       throw new Error(tr('access_denied', 'Access denied'))
     }
     setTransferSaving(true)
+    let unlocked = false
     try {
       const api = await loadInventoryWriteTransport()
       const saved = api.loadInventoryTransfer(actorId)
@@ -1870,9 +1876,22 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       api.saveInventoryTransfer(actorId, run)
       setPendingTransfer(run)
       if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
-      await completeInventoryTransfer(run)
+      try { await completeInventoryTransfer(run) }
+      catch (error) {
+        // U-transfer3: the server REFUSED it (recorded on the saved run), so
+        // nothing moved and the open form still holds every value. Clear the
+        // saved run here so the form unlocks for the operator to fix the
+        // number, instead of locking it behind a Retry that answers the same.
+        const refused = api.loadInventoryTransfer(actorId)
+        if (refused?.refusal && refused.requests[0].body.client_request_id === run.requests[0].body.client_request_id) {
+          api.saveInventoryTransfer(actorId, null)
+          if (transferAuthorityRef.current.actorId === actorId) setPendingTransfer(null)
+          unlocked = true
+        }
+        throw error
+      }
     } catch (error) {
-      if (transferAuthorityRef.current.actorId === actorId) setTransferRetryError(transferErrorMessage(error))
+      if (transferAuthorityRef.current.actorId === actorId) setTransferRetryError(unlocked ? '' : transferErrorMessage(error))
       throw new Error(transferErrorMessage(error), { cause: error })
     } finally {
       finishSingleAction(transferStockInFlightRef)
@@ -1888,6 +1907,66 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     try { await completeInventoryTransfer(run) }
     catch (error) { setTransferRetryError(transferErrorMessage(error)) }
     finally { finishSingleAction(transferStockInFlightRef); setTransferSaving(false) }
+  }
+
+  // U-transfer3: a saved transfer the server REFUSED (a definitive 4xx that
+  // api/transferRunRecovery.ts recorded on the run) answers the same on every
+  // Retry, and while it is saved no transfer form can open. Edit reopens the
+  // form with the product, branches, quantity, reason and received date it
+  // carried and clears the saved run; sending again is a new transfer. A
+  // received date the source no longer offers falls back to Automatic in
+  // InventoryStockModals' lot load. The run is cleared only after the
+  // product's current stock loaded, so a failed reload loses nothing.
+  const editInventoryTransfer = async () => {
+    const run = pendingTransfer
+    if (!run || !isRefusedTransferRun(run) || run.context.kind !== 'submit' || transferSaving || transferStockInFlightRef.current || !canTransferStock) return
+    const actorId = run.actorId
+    const form = inventoryTransferEditForm(run)
+    try {
+      const result = await getInventoryApi().getProductsByIds([form.productId], { include: 'branch_stock' })
+      if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) return
+      const product = result?.items?.find((row: InventoryProduct) => String(row.id) === form.productId)
+      if (!product) throw new Error(tr('product_not_found', 'Product not found'))
+      const api = await loadInventoryWriteTransport()
+      const saved = api.loadInventoryTransfer(actorId)
+      // Only the run that was refused; anything newer is left alone.
+      if (!saved || saved.requests[0].body.client_request_id !== run.requests[0].body.client_request_id) return
+      api.saveInventoryTransfer(actorId, null)
+      setPendingTransfer(null)
+      setTransferRetryError('')
+      transferDraftOwnerRef.current = { key: transferDraftKey('inventory_transfer'), actorId }
+      setTransferRestoredDirty(true)
+      void ensureInventoryReasonsLoaded()
+      setTransferForm({
+        from_branch_id: form.from_branch_id,
+        to_branch_id: form.to_branch_id,
+        quantity: form.quantity,
+        reason: form.reason,
+        batch_id: form.batch_id,
+        batch_quantity: form.batch_quantity,
+      })
+      setTransferModal(product)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr('failed_to_load_data', 'Failed to load data'), 'error')
+    }
+  }
+
+  // Discard, after the shared review dialog. A refused run moved nothing; any
+  // other saved run may already have been applied, and the dialog says so.
+  const discardInventoryTransfer = async () => {
+    const run = pendingTransfer
+    setDiscardingInventoryTransfer(false)
+    if (!run || transferSaving || transferStockInFlightRef.current) return
+    try {
+      const api = await loadInventoryWriteTransport()
+      api.saveInventoryTransfer(run.actorId, null)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : tr('save_failed', 'Save failed'), 'error')
+      return
+    }
+    if (transferAuthorityRef.current.actorId !== run.actorId) return
+    setPendingTransfer(null)
+    setTransferRetryError('')
   }
 
   const handleTransferStock = async () => {
@@ -2676,13 +2755,22 @@ ${inventoryFeesFormulaText}`,
     if (['products', 'movements', 'rfid'].includes(nextSection)) setTab(nextSection)
   }
 
+  const refusedInventoryTransfer = pendingTransfer && isRefusedTransferRun(pendingTransfer) ? pendingTransfer : null
   const transferRetryPanel = pendingTransfer || transferRetryError ? (
     <section role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/30 dark:border-amber-800">
-      <p className="font-semibold">{tr('sale_bulk_pending', 'Pending operation')}</p>
+      <p className="font-semibold">{refusedInventoryTransfer ? tr('transfer_run_refused', 'The server refused this transfer. Nothing in the refused part was moved.') : tr('sale_bulk_pending', 'Pending operation')}</p>
       {pendingTransfer ? <p className="mt-1 break-words text-sm">{pendingTransfer.context.productName} · {String(pendingTransfer.requests[0].body.fromBranchId)} → {String(pendingTransfer.requests[0].body.toBranchId)} · {String(pendingTransfer.requests[0].body.quantity)} · {String(pendingTransfer.requests[0].body.reason)}</p> : null}
+      {/* A refused run shows its reason read from the run, so it survives a
+          reload and is translated even when the Worker sent plain English. */}
+      {refusedInventoryTransfer ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{tr('transfer_run_refused_reason', 'Reason: {reason}').replace('{reason}', localizeTransferRefusal(refusedInventoryTransfer.refusal, (key) => tr(key, '')))}</p> : <>
       {transferRetryError ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{transferRetryError}</p> : null}
+      </>}
       {pendingTransfer ? <div className="mt-2 flex flex-wrap gap-2">
-        <button type="button" className="btn-primary h-10" disabled={transferSaving || !canTransferStock} onClick={() => { void retryInventoryTransfer() }}>{transferSaving ? tr('loading', 'Loading...') : tr('retry', 'Retry')}</button>
+        {refusedInventoryTransfer && refusedInventoryTransfer.context.kind === 'submit' ? (
+          <button type="button" className="btn-primary h-10" disabled={transferSaving || !canTransferStock} onClick={() => { void editInventoryTransfer() }}>{tr('transfer_run_edit', 'Edit transfer')}</button>
+        ) : null}
+        <button type="button" className={`${refusedInventoryTransfer ? 'btn-secondary' : 'btn-primary'} h-10`} disabled={transferSaving || !canTransferStock} onClick={() => { void retryInventoryTransfer() }}>{transferSaving ? tr('loading', 'Loading...') : tr('retry', 'Retry')}</button>
+        <button type="button" className="btn-secondary h-10" disabled={transferSaving} onClick={() => setDiscardingInventoryTransfer(true)}>{tr('discard', 'Discard')}</button>
       </div> : null}
     </section>
   ) : null
@@ -3059,6 +3147,26 @@ ${inventoryFeesFormulaText}`,
           workingLabel={tr('saving', 'Saving...')}
           onConfirm={() => void commitAdjust()}
           onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
+        />
+      ) : null}
+
+      {discardingInventoryTransfer && pendingTransfer ? (
+        <ConfirmDialog
+          t={t}
+          title={tr('transfer_run_discard_title', 'Discard saved transfer?')}
+          message={refusedInventoryTransfer
+            ? tr('transfer_run_discard_refused', 'The server refused this transfer, so the refused part moved no stock. Discarding removes it and its lines are not sent.')
+            : tr('transfer_run_discard_unknown', 'The result of this transfer is unknown: it may already have been applied. Check Stock Changes before sending it again. Discarding removes the saved retry, so it cannot be resumed.')}
+          items={[
+            { label: tr('product', 'Product'), value: pendingTransfer.context.productName },
+            { label: tr('quantity', 'Quantity'), value: String(pendingTransfer.requests[0].body.quantity) },
+            { label: tr('from_branch', 'From Branch'), value: `${branchesById.get(String(pendingTransfer.requests[0].body.fromBranchId))?.name || String(pendingTransfer.requests[0].body.fromBranchId)} → ${branchesById.get(String(pendingTransfer.requests[0].body.toBranchId))?.name || String(pendingTransfer.requests[0].body.toBranchId)}` },
+          ]}
+          danger={!refusedInventoryTransfer}
+          confirmLabel={tr('discard', 'Discard')}
+          working={transferSaving}
+          onConfirm={() => { void discardInventoryTransfer() }}
+          onClose={() => setDiscardingInventoryTransfer(false)}
         />
       ) : null}
 

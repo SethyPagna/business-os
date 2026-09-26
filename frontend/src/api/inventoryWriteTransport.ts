@@ -1,12 +1,15 @@
 import { apiFetch, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { executeTransferRun, loadTransferRun, prepareTransferRun, saveTransferRun, type PendingTransferRun } from './branchTransport.ts'
+import { loadTransferRun, prepareTransferRun, saveTransferRun, type PendingTransferRun } from './branchTransport.ts'
+// Records a definitive server refusal on the saved run (Edit/Discard in Inventory).
+import { executeTransferRun, type TransferRunRefusal } from './transferRunRecovery.ts'
 import { receiveBatchWireBody, type ReceiveBatchPayload } from './batchesTransport.ts'
 
 type InventoryPayload = Record<string, unknown>
 
 export type PendingInventoryTransfer = PendingTransferRun & {
+  refusal?: TransferRunRefusal
   context: { kind: 'submit' | 'undo' | 'redo'; original: InventoryPayload; productName: string; entryId: string; serverId?: string | number | null }
 }
 
