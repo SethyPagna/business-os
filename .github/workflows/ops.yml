@@ -1,0 +1,284 @@
+# Owner-approved production operations, run on GitHub's runners because the
+# owner's VPN exit gets Cloudflare bot challenges (wrangler cannot run there).
+#
+# Runs ONLY when someone presses "Run workflow" on main, waits for the
+# `production` environment's required reviewer, and refuses to start unless
+# the confirm box repeats the chosen task name exactly.
+#
+#   d1-export     one read-only query from ops/queries/<query>.sql against
+#                 the production D1 database (adding a query = adding a file
+#                 there; the guard in ops/scripts/ops-sql-guard.mjs admits a
+#                 single SELECT / WITH ... SELECT and nothing else).
+#   r2-apac-copy  zero-loss copy of the business-os-assets bucket into
+#                 business-os-assets-apac through a temporary Worker that is
+#                 deleted at the end of every run. mode: copy (delta re-runs
+#                 skip identical objects) or verify-only (compares only: no
+#                 object or bucket writes; the temporary Worker still comes
+#                 and goes) BEFORE the switch; topup only AFTER it (carries
+#                 objects that reached the old bucket late; never overwrites
+#                 a newer destination object, never prunes or deletes).
+#                 Prune is mirror-only: copy mode, before the switch, and it
+#                 deletes only destination keys the old bucket no longer has.
+#                 No task writes to or deletes the old bucket; deleting it
+#                 later is a manual owner step outside this workflow.
+#   secret-names  which secrets the production Worker has: NAMES and binding
+#                 types only, read with GET requests (Cloudflare never returns
+#                 a secret's value). Changes nothing.
+#
+# THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and
+# artifacts. The log and summary carry counts, byte totals, pass/fail and
+# commit ids only. Everything else is encrypted on the runner for the owner's
+# key (ops/keys/ops-export-public.pem) and uploaded as *.enc.json, kept 3
+# days. Decrypt on the owner's machine:
+#   node ops/scripts/ops-decrypt.mjs <file>.enc.json <private-key-file> <out>.json
+#
+# Shares the production-deploy concurrency group with Deploy and Deploy
+# rollback, so nothing here runs during a release. A newer queued run replaces
+# an older queued one: start the next run only after the previous finished.
+name: Ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to run
+        required: true
+        type: choice
+        options:
+          - d1-export
+          - r2-apac-copy
+          - secret-names
+      mode:
+        description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
+        required: true
+        default: copy
+        type: choice
+        options:
+          - copy
+          - verify-only
+          - topup
+      query:
+        description: d1-export only - the name of a file in ops/queries, without .sql (for example migrations-applied)
+        required: false
+        default: ''
+        type: string
+      confirm:
+        description: Type the task name again, exactly, to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+# The confirm checks compare ordinally (byte for byte). PowerShell's -cne
+# compares by culture and lets a word with an invisible soft hyphen or
+# zero-width joiner through; test-ops-workflow-pure.cjs runs every check
+# below under PowerShell to hold that line.
+jobs:
+  # Fails fast on a wrong confirm word, before anyone is asked to approve.
+  gate:
+    name: Check the confirm word
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          TASK: ${{ inputs.task }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:CONFIRM) -or -not [string]::Equals($env:CONFIRM, $env:TASK, [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type the task name, exactly as chosen, in the confirm box.'
+            exit 1
+          }
+
+  d1-export:
+    name: d1-export
+    needs: gate
+    if: inputs.task == 'd1-export'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'd1-export', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type d1-export in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      # Logs only verdicts, problem and Cloudflare error codes, and the
+      # encrypted file's size; the rows and their count go into that file.
+      - name: Export (one read-only query, encrypted on the runner)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_QUERY: ${{ inputs.query }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-d1-export.mjs
+
+      # Nothing runs after a wrong confirm word: this step and the other
+      # always() steps also need the checkout, which that stops.
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-d1-export
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  r2-apac-copy:
+    name: r2-apac-copy
+    needs: gate
+    if: inputs.task == 'r2-apac-copy'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'r2-apac-copy', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type r2-apac-copy in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Buckets (copy mode creates the apac destination if missing)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+          OPS_R2_MODE: ${{ inputs.mode }}
+        run: node ops/scripts/ops-r2.mjs buckets
+
+      # Deploys business-os-r2-copy with a bearer secret generated in this
+      # step's memory (set through stdin, never printed), then copies or
+      # verifies page by page. The source bucket is only ever read.
+      - name: Copy or verify through the temporary Worker
+        timeout-minutes: 150
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+          OPS_R2_MODE: ${{ inputs.mode }}
+        run: node ops/scripts/ops-r2.mjs run
+
+      # Runs after a failure, a timeout or a cancel too. The copy step's own
+      # timeout is shorter than the job's, so a slow copy fails that step and
+      # still leaves this one time to run.
+      - name: Delete the temporary Worker
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-r2.mjs delete-worker
+
+      - name: Upload the encrypted reports
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-r2-apac-copy
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  secret-names:
+    name: secret-names
+    needs: gate
+    if: inputs.task == 'secret-names'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'secret-names', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type secret-names in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # REST calls only: no wrangler, so no package install.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Logs counts only (expected, present, absent, unreadable) and the
+      # verdict; every name and its state is in the encrypted file.
+      - name: Read the secret names (GET only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-secret-names.mjs
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-secret-names
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
