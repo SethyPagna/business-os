@@ -590,6 +590,21 @@ async function main() {
     assert.ok(r2.includes('const b = await checkBuckets({ api, accountId, mode, create })'), 'the bucket step passes on the mode it was given')
   })
 
+  await check('prune is mirror-only and says so: one /prune call, gated on copy mode before the switch; the old bucket is never deleted', () => {
+    const r2 = code['ops/scripts/ops-r2.mjs']
+    assert.strictEqual(count(r2, /'\/prune'/g), 1, 'exactly one /prune call site')
+    const fn = r2.indexOf('async function pruneDestination(client, mode, productionState, keys) {\n  if (!pruneAllowed(mode, productionState)) return []\n')
+    assert.ok(fn > 0 && r2.indexOf("'/prune'") > fn && r2.indexOf("'/prune'") < r2.indexOf('\n}\n', fn), 'the /prune call lives in pruneDestination, behind pruneAllowed')
+    assert.ok(r2.includes("export function pruneAllowed(mode, productionState) {\n  return mode === 'copy' && productionState === 'source'\n}"), 'pruneAllowed: copy mode, production on the source')
+    assert.strictEqual(count(r2, /pruneDestination\(/g), 2, 'one definition, one caller')
+    // No bucket is ever deleted: the only REST DELETE is the copy Worker's and the only wrangler commands are fixed (checked below).
+    const mode = WF.on.workflow_dispatch.inputs.mode.description
+    for (const phrase of ['prune deletes only DESTINATION keys the old bucket lacks', 'topup (copies missing or older objects; never overwrites newer, never prunes or deletes)', 'No mode writes or deletes the old bucket.']) {
+      assert.ok(mode.includes(phrase), `the mode help must say: ${phrase}`)
+    }
+    assert.ok(/deleting it\n#\s+later is a manual owner step outside this workflow\./.test(WF_TEXT), 'ops.yml must say deleting the old bucket is a manual owner step')
+  })
+
   await check('ops scripts: write only the encrypted report and the job summary', () => {
     const WRITES = /\b(writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|copyFileSync|copyFile|cpSync|renameSync|symlinkSync|linkSync|openSync|writeSync|truncateSync|ftruncateSync)\s*\(/g
     for (const [file, text] of Object.entries(code)) {

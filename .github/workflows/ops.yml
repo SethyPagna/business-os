@@ -17,6 +17,10 @@
 #                 and goes) BEFORE the switch; topup only AFTER it (carries
 #                 objects that reached the old bucket late; never overwrites
 #                 a newer destination object, never prunes or deletes).
+#                 Prune is mirror-only: copy mode, before the switch, and it
+#                 deletes only destination keys the old bucket no longer has.
+#                 No task writes to or deletes the old bucket; deleting it
+#                 later is a manual owner step outside this workflow.
 #   secret-names  which secrets the production Worker has: NAMES and binding
 #                 types only, read with GET requests (Cloudflare never returns
 #                 a secret's value). Changes nothing.
@@ -45,7 +49,7 @@ on:
           - r2-apac-copy
           - secret-names
       mode:
-        description: r2-apac-copy only - copy or verify-only (compares; writes nothing) before the switch; topup after it (copies only missing or older objects; never overwrites newer, never deletes)
+        description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
         required: true
         default: copy
         type: choice

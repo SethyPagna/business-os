@@ -429,6 +429,42 @@ async function main() {
     assert.ok(!('prune' in p), 'a top-up plan has no prune list')
   })
 
+  await check('prune is mirror-only: copy mode before the switch, DESTINATION keys only, never the source', async () => {
+    for (const mode of driver.MODES) {
+      for (const state of ['source', 'destination', 'mixed', 'unknown']) {
+        assert.strictEqual(driver.pruneAllowed(mode, state), mode === 'copy' && state === 'source', `${mode} / ${state}`)
+      }
+    }
+    const s = fresh()
+    assert.ok((await run(s, 'copy')).ok)
+    // The app rotates a backup in the source; the destination gains a key of its own.
+    s.source.objects.delete('backups/cloudflare/drive-staged-zz.json')
+    s.destination.seed('uploads/destination-extra.webp', 'x', { httpMetadata: { contentType: 'image/webp' } })
+    const destOnly = ['backups/cloudflare/drive-staged-zz.json', 'uploads/destination-extra.webp']
+    const sourceBefore = s.source.snapshot()
+    for (const [mode, api] of [['verify-only', fakeApi('source').api], ['verify-only', afterSwitch()], ['topup', afterSwitch()]]) {
+      const routes = []
+      await run(s, mode, { api, record: routes })
+      assert.ok(!routes.includes('POST /prune'), `${mode} called /prune`)
+      for (const k of destOnly) assert.ok(s.destination.objects.has(k), `${mode} removed ${k}`)
+    }
+    const routes = []
+    const r = await run(s, 'copy', { api: fakeApi('source').api, record: routes })
+    assert.strictEqual(r.ok, true, JSON.stringify(r.problems))
+    assert.strictEqual(r.counts.pruned, 2)
+    for (const k of destOnly) assert.ok(!s.destination.objects.has(k), `copy did not prune ${k}`)
+    assert.ok(!s.source.calls.includes('delete') && !s.source.calls.includes('put'), 'the source was written')
+    assert.strictEqual(s.source.snapshot(), sourceBefore)
+    // The Worker's /prune itself: a key only the SOURCE has is never deleted anywhere.
+    s.source.seed('uploads/source-only.webp', 'keep me', { httpMetadata: { contentType: 'image/webp' } })
+    const env = { SOURCE: s.source, DESTINATION: s.destination, COPY_TOKEN: TOKEN }
+    const res = await worker.handle(new Request('https://x.example/prune', {
+      method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify({ keys: ['uploads/source-only.webp'], confirm: 'destination-only' }),
+    }), env, nodeDeps)
+    assert.deepStrictEqual((await res.json()).results.map((x) => x.outcome), ['kept-source-present'])
+    assert.ok(s.source.objects.has('uploads/source-only.webp') && !s.source.calls.includes('delete'))
+  })
+
   await check('topup public lines carry counts only', async () => {
     const { s } = await switched()
     const r = await run(s, 'topup', { api: afterSwitch() })

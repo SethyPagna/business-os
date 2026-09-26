@@ -131,6 +131,36 @@ async function copyBatch(client, items, { topup = false } = {}) {
   }
 }
 
+// PRUNE IS MIRROR-ONLY. It exists so that, BEFORE the switch, the
+// destination is an exact mirror of the source (keys the app deleted from the
+// source after they were copied go from the destination too). It:
+//   - runs only in copy mode, and only while production still reads the
+//     source bucket (re-read right before pruning);
+//   - deletes only DESTINATION keys, through the Worker's /prune, which
+//     re-checks each key is absent from the source and reaches the source
+//     through a read-only wrapper (no delete exists on it);
+//   - never runs in verify-only or topup.
+// No task ever deletes the old bucket or anything in it. Deleting the old
+// bucket, once the owner no longer wants it, is a manual owner step outside
+// this workflow.
+export function pruneAllowed(mode, productionState) {
+  return mode === 'copy' && productionState === 'source'
+}
+
+// The only /prune caller. Returns one result per key.
+async function pruneDestination(client, mode, productionState, keys) {
+  if (!pruneAllowed(mode, productionState)) return []
+  const results = []
+  for (const group of batches(keys.map((key) => ({ key })), { maxItems: MAX_KEYS_PER_PRUNE })) {
+    let r = null
+    try {
+      r = matchResults(group, await client.call('POST', '/prune', { keys: group.map((g) => g.key), confirm: 'destination-only' }))
+    } catch { /* counted as failed */ }
+    results.push(...(r || group.map((g) => ({ key: g.key, outcome: 'failed' }))))
+  }
+  return results
+}
+
 async function verifyKeys(client, c, keys, concurrency) {
   const items = keys.map((key) => ({ key, size: c.src.get(key).size }))
   const groups = batches(items, { maxItems: MAX_KEYS_PER_VERIFY, maxBytes: MAX_BYTES_PER_VERIFY })
@@ -232,16 +262,10 @@ export async function runJob({ mode, client, api, accountId, concurrency = 4, on
   const pruneResults = []
   if (pruneKeys.length) {
     out.productionBeforePrune = await productionAssetsState(api, accountId)
-    if (out.productionBeforePrune.state !== 'source') {
+    if (!pruneAllowed(mode, out.productionBeforePrune.state)) {
       out.problems.push('production-changed-during-run')
     } else {
-      for (const group of batches(pruneKeys.map((key) => ({ key })), { maxItems: MAX_KEYS_PER_PRUNE })) {
-        let r = null
-        try {
-          r = matchResults(group, await client.call('POST', '/prune', { keys: group.map((g) => g.key), confirm: 'destination-only' }))
-        } catch { /* counted as failed */ }
-        pruneResults.push(...(r || group.map((g) => ({ key: g.key, outcome: 'failed' }))))
-      }
+      pruneResults.push(...await pruneDestination(client, mode, out.productionBeforePrune.state, pruneKeys))
       prune = tallyPrune(pruneResults)
     }
   }
