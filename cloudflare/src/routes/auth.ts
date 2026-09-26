@@ -9,7 +9,7 @@ import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
 import { generateTotpSecret, verifyTotp } from '../lib/totp'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
@@ -1111,7 +1111,16 @@ app.post('/oauth/unlink', requireAuth, async (c) => {
   const db = getDb(c.env)
   const user = await db.prepare('SELECT id, username, name, password FROM users WHERE id = ?').get<{ id: number; username: string; name: string; password: string }>([actorId])
   if (!user) return c.json({ error: 'User not found.' }, 404)
-  if (!body.currentPassword || !bcrypt.compareSync(String(body.currentPassword), user.password)) {
+  if (!body.currentPassword) return c.json({ error: 'Current password is required to unlink Google.' }, 403)
+  // Same failure-only allowance (bucket, key, limit) as routes/users.ts's
+  // refuseWrongCurrentPassword: guesses here and there count together.
+  const unlinkLimitKey = `uid:${actorId}`
+  const unlinkLimit = await peekRateLimit(c.env, 'auth:current_password', unlinkLimitKey, 10, 15 * 60 * 1000)
+  if (!unlinkLimit.allowed) {
+    return c.json({ error: 'Too many wrong current-password attempts. Please try again later.', code: 'current_password_rate_limited', retryAfterSeconds: unlinkLimit.retryAfterSeconds }, 429)
+  }
+  if (!bcrypt.compareSync(String(body.currentPassword), user.password)) {
+    await recordRateLimitEvent(c.env, 'auth:current_password', unlinkLimitKey)
     return c.json({ error: 'Current password is required to unlink Google.' }, 403)
   }
   await db.prepare(`

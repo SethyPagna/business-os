@@ -11,7 +11,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
@@ -75,6 +75,34 @@ function isValidEmail(value: unknown): boolean {
 
 function normalizePhoneLookup(value: unknown): string {
   return String(value || '').replace(/[^\d+]/g, '')
+}
+
+// Re-entering your own current password (change password, self-service
+// profile save; POST /api/auth/oauth/unlink spends the same bucket) is
+// limited per account, counting WRONG passwords only: without it a stolen
+// session is an unlimited password-guessing oracle, and counting successes
+// would lock out someone who simply saves their profile often. Peek before
+// the bcrypt compare, record after a miss. A wrong password answers 400,
+// never 401 -- the client reads a 401 on an authenticated /api path as a
+// possibly dead session and runs its sign-out recovery.
+const CURRENT_PASSWORD_LIMIT_BUCKET = 'auth:current_password'
+const CURRENT_PASSWORD_LIMIT_MAX = 10
+const CURRENT_PASSWORD_LIMIT_WINDOW_MS = 15 * 60 * 1000
+
+async function refuseWrongCurrentPassword(c: Ctx, userId: number | string, currentPassword: string, passwordHash: string): Promise<Response | null> {
+  const clientKey = `uid:${Number(userId)}`
+  const limit = await peekRateLimit(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
+  if (!limit.allowed) {
+    return c.json({
+      success: false,
+      error: 'Too many wrong current-password attempts. Please try again later.',
+      code: 'current_password_rate_limited',
+      retryAfterSeconds: limit.retryAfterSeconds,
+    }, 429)
+  }
+  if (bcrypt.compareSync(currentPassword, passwordHash)) return null
+  await recordRateLimitEvent(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey)
+  return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
 }
 
 function conflictResult(error: unknown) {
@@ -667,11 +695,9 @@ app.put('/users/:id/profile', async (c) => {
   if (!adminOverride) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    // 400, never 401: the client reads a 401 on an authenticated /api path
-    // as a possibly dead session and runs its sign-out recovery.
-    if (!bcrypt.compareSync(currentPassword, String(user.password || ''))) {
-      return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
-    }
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, targetId, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
 
   const name = String(body.name || username).trim()
@@ -767,8 +793,9 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   if (options.requireCurrent) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    // 400, never 401 -- see the same check in PUT /users/:id/profile.
-    if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, user.id, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
 
   const hash = bcrypt.hashSync(newPassword, 10)

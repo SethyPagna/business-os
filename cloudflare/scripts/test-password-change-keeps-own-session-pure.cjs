@@ -67,7 +67,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
-  '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
+  '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, getClientIp: () => '127.0.0.1' },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
