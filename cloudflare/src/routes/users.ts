@@ -11,7 +11,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
-import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
@@ -77,31 +78,25 @@ function normalizePhoneLookup(value: unknown): string {
   return String(value || '').replace(/[^\d+]/g, '')
 }
 
-// Re-entering your own current password (change password, self-service
-// profile save; POST /api/auth/oauth/unlink spends the same bucket) is
-// limited per account, counting WRONG passwords only: without it a stolen
-// session is an unlimited password-guessing oracle, and counting successes
-// would lock out someone who simply saves their profile often. Peek before
-// the bcrypt compare, record after a miss. A wrong password answers 400,
-// never 401 -- the client reads a 401 on an authenticated /api path as a
-// possibly dead session and runs its sign-out recovery.
-const CURRENT_PASSWORD_LIMIT_BUCKET = 'auth:current_password'
-const CURRENT_PASSWORD_LIMIT_MAX = 10
-const CURRENT_PASSWORD_LIMIT_WINDOW_MS = 15 * 60 * 1000
-
+// Re-entering a current password (change password, profile save; Google
+// unlink in routes/auth.ts) goes through lib/currentPasswordGuard.ts: an
+// atomic reserve-then-release allowance that counts wrong passwords only,
+// keyed per session (own account) or per actor+target (an admin on someone
+// else), so nobody else can lock a user out of their own password change.
+// A wrong password answers 400, never 401 -- the client reads a 401 on an
+// authenticated /api path as a possibly dead session and signs out.
 async function refuseWrongCurrentPassword(c: Ctx, userId: number | string, currentPassword: string, passwordHash: string): Promise<Response | null> {
-  const clientKey = `uid:${Number(userId)}`
-  const limit = await peekRateLimit(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
-  if (!limit.allowed) {
+  const actor = c.get('user')
+  const verdict = await verifyCurrentPassword(c, { actorId: actor?.id ?? userId, targetId: userId }, currentPassword, passwordHash)
+  if (verdict.ok) return null
+  if (verdict.rateLimited) {
     return c.json({
       success: false,
-      error: 'Too many wrong current-password attempts. Please try again later.',
+      error: CURRENT_PASSWORD_RATE_LIMITED_ERROR,
       code: 'current_password_rate_limited',
-      retryAfterSeconds: limit.retryAfterSeconds,
+      retryAfterSeconds: verdict.retryAfterSeconds,
     }, 429)
   }
-  if (bcrypt.compareSync(currentPassword, passwordHash)) return null
-  await recordRateLimitEvent(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey)
   return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
 }
 

@@ -89,6 +89,7 @@ const common = {
     releaseRateLimitSlot: noop,
     getClientIp: () => '127.0.0.1',
   },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (false ? { ok: true } : { ok: false, rateLimited: false }) },
   '../index': {},
   '../lib/actorSnapshot': load('lib/actorSnapshot.ts'),
 }

@@ -90,6 +90,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/permissions': { isAdminControlUser: () => false },
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: noop, getClientIp: () => '127.0.0.1' },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
