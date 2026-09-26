@@ -430,6 +430,8 @@ async function main() {
     const tie = new Map(same)
     tie.set('backups/cloudflare/a.json', d('backups/cloudflare/a.json', '2026-09-01T12:00:00.000Z'))
     assert.strictEqual(lib.orderInversions(src, tie).length, 1)
+    assert.deepStrictEqual(['APAC', 'apac', ' Apac ', 'EEUR', 'auto', '', null, 'apac-2'].map(lib.normalizeLocation), ['apac', 'apac', 'apac', 'eeur', 'unknown', 'unknown', 'unknown', 'unknown'])
+    for (const l of lib.KNOWN_LOCATIONS) assert.strictEqual(common.formatPublic('{l}', { l }), l, 'every location word must be printable')
     assert.ok(lib.isOrderSensitive('backups/cloudflare/drive-staged-x.json'))
     assert.ok(!lib.isOrderSensitive('backups/cloudflare/name/state.json'))
     assert.ok(!lib.isOrderSensitive('uploads/backups/cloudflare/x.json'))
@@ -501,6 +503,11 @@ async function main() {
     assert.doesNotThrow(() => driver.checkWorkerConfig(ACCOUNT, good))
     assert.throws(() => driver.checkWorkerConfig(ACCOUNT, { ...good, bindings: [['SOURCE', 'business-os-assets-apac'], ['DESTINATION', 'business-os-assets']] }), (e) => e.code === 'worker-config-mismatch')
     assert.throws(() => driver.checkWorkerConfig(ACCOUNT, { ...good, bindings: [...good.bindings, ['OTHER', 'x']] }), (e) => e.code === 'worker-config-mismatch')
+    // the Windows runner checks out with CRLF: same reading
+    const text = require('fs').readFileSync(driver.WORKER_TOML, 'utf8')
+    const lf = driver.parseWorkerToml(text.replace(/\r\n/g, '\n'))
+    assert.deepStrictEqual(driver.parseWorkerToml(text.replace(/\r?\n/g, '\r\n')), lf)
+    assert.deepStrictEqual(lf, { accountId: '743e5b727d139e85ed11679097f6f99e', bindings: [['SOURCE', 'business-os-assets'], ['DESTINATION', 'business-os-assets-apac']] })
   })
 
   if (process.exitCode) console.error(`test-ops-r2-driver-pure: FAILED (${passed} passed)`)

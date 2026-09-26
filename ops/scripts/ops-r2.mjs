@@ -312,7 +312,11 @@ function emit(lines) {
 // --------------------------------------------------------- the commands
 
 function readWorkerToml() {
-  const text = fs.readFileSync(WORKER_TOML, 'utf8')
+  return parseWorkerToml(fs.readFileSync(WORKER_TOML, 'utf8'))
+}
+
+// Tolerates CRLF: the Windows runner checks files out with autocrlf.
+export function parseWorkerToml(text) {
   const account = /^account_id\s*=\s*"([0-9a-f]{32})"\s*$/m.exec(text)
   const bindings = [...text.matchAll(/\[\[r2_buckets\]\]\s*\nbinding\s*=\s*"([A-Z_]+)"\s*\nbucket_name\s*=\s*"([a-z0-9-]+)"/g)].map((m) => [m[1], m[2]])
   return { accountId: account ? account[1] : null, bindings }

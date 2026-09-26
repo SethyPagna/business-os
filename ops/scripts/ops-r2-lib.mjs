@@ -331,8 +331,10 @@ export async function productionAssetsState(api, accountId) {
   return { state: 'mixed', buckets }
 }
 
-// Location hints come back in either case; compare lowercased.
+// Location hints may come back in either case; anything outside R2's known
+// set reads as unknown (and is never apac).
+export const KNOWN_LOCATIONS = ['apac', 'eeur', 'enam', 'weur', 'wnam', 'oc']
 export function normalizeLocation(value) {
   const s = String(value || '').trim().toLowerCase()
-  return /^[a-z]{2,8}$/.test(s) ? s : 'unknown'
+  return KNOWN_LOCATIONS.includes(s) ? s : 'unknown'
 }
