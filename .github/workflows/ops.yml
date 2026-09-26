@@ -128,8 +128,8 @@ jobs:
         working-directory: cloudflare
         run: npm ci --no-audit --no-fund
 
-      # Logs only the verdict (and a row count only for queries marked
-      # public-row-count); the rows go into the encrypted file.
+      # Logs only verdicts, problem and Cloudflare error codes, and the
+      # encrypted file's size; the rows and their count go into that file.
       - name: Export (one read-only query, encrypted on the runner)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

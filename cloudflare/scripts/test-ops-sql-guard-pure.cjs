@@ -57,7 +57,8 @@ async function main() {
     const files = fs.readdirSync(QUERIES)
     for (const f of files) {
       assert.ok(/^[a-z0-9][a-z0-9-]{0,63}\.sql$/.test(f), `unexpected file in ops/queries: ${f}`)
-      guard.loadQuery(f.slice(0, -4))
+      // The public log shows no table's size: every row count stays encrypted.
+      assert.strictEqual(guard.loadQuery(f.slice(0, -4)).rules.publicRowCount, false, `${f} must not put its row count in the public log`)
     }
   })
 
@@ -72,14 +73,14 @@ async function main() {
     }
   })
 
-  await check('query rules: product-names withholds its count, migrations-applied may show it, the audit expects all zero', () => {
+  await check('query rules: product-names and migrations-applied withhold their counts, the audit expects all zero', () => {
     const p = guard.loadQuery('product-names')
     assert.deepStrictEqual(p.rules, { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false })
     assert.ok(/\bFROM products WHERE is_active = 1\b/.test(p.sql))
     for (const col of ['id', 'name', 'brand', 'barcode', 'sku', 'category']) assert.ok(new RegExp(`\\b${col}\\b`).test(p.sql))
     const m = guard.loadQuery('migrations-applied')
     assert.strictEqual(m.sql, 'SELECT name FROM d1_migrations ORDER BY id')
-    assert.strictEqual(m.rules.publicRowCount, true)
+    assert.deepStrictEqual(m.rules, { minRows: 1, maxRows: null, expectZero: null, publicRowCount: false })
     const a = guard.loadQuery('r2-url-audit')
     assert.deepStrictEqual(a.rules, { minRows: 1, maxRows: 1, expectZero: '*', publicRowCount: false })
     assert.ok(!/\b(UNION|INTERSECT|EXCEPT)\b/i.test(a.sql), 'the audit must be scalar sub-queries, not a compound SELECT')
@@ -293,7 +294,8 @@ async function main() {
     assert.ok(!/rows: 1\b/.test(text))
     assert.ok(/verdict: PASS/.test(text))
     const pub = rules({ publicRowCount: true })
-    const shown = render(d1.publicLines({ name: 'migrations-applied', verdict: d1.interpretD1Output(out(rows), pub), rules: pub, bytes: 10 }))
+    // The mechanism only: no file in ops/queries opts in (checked above).
+    const shown = render(d1.publicLines({ name: 'opted-in-query', verdict: d1.interpretD1Output(out(rows), pub), rules: pub, bytes: 10 }))
     assert.ok(/rows: 1\b/.test(shown))
     const audit = rules({ expectZero: '*', maxRows: 1 })
     const failed = render(d1.publicLines({ name: 'r2-url-audit', verdict: d1.interpretD1Output(out([{ products_image_path_absolute: 4 }]), audit), rules: audit, bytes: 10 }))
