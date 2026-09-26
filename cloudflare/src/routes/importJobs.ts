@@ -825,13 +825,22 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
 
   const addToLibrary = format.isPublic
   const key = addToLibrary ? `uploads/${storedName}` : `imports/${jobId}/incoming/${storedName}`
+  const db = await getImportFencedDb(c.env)
+  // S-uploads2b: attaching a file is activity on the job, and it is recorded
+  // BEFORE the object exists. The stale-file sweep (lib/importIncomingFiles.ts)
+  // used to judge a never-started job by updated_at alone, which no upload
+  // moved: a CSV attached to a job created 25h earlier was deleted by the
+  // next tick and /start then refused "Upload a CSV before starting the
+  // import". The sweep now also ages every file by its own upload time; this
+  // touch keeps the job's idle clock honest too (and the 20-minute reaper
+  // off a job that is still being filled).
+  await db.prepare(`UPDATE import_jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
   // K3: only library-bound files normalize (imports/... staging keys are
   // transient and outside the uploads/ audit scope); the helper's own
   // image-extension gate filters CSVs and other non-images.
   if (addToLibrary) await enqueueImageNormalization(c.env, key)
 
-  const db = await getImportFencedDb(c.env)
   let fileAssetId: number | null = null
   if (addToLibrary) {
     const mediaType = getMediaType(mimeType, originalName)
