@@ -20495,3 +20495,24 @@ conflict / Records / stock-in edit asks N1-N6.
 - the deploy (owner's machine);
 - the branch deletions;
 - the Windows unpushed-work check.
+
+## Part 633 (26 Sep 2026, coordinator) — CP-1 and the transfer fix deployed through GitHub Actions; the uploads purge refuted before it ever ran
+
+**Ask:** deploy, with approvals delegated ("i want you to just do it without my need to approve it. i give permission"); fix the client's transfer bug; fix everything else while Shop → Store stays paused.
+
+**IDs moved:** CP-1 [x] · CP-1b [x] · CP-1c [~] (new) · CP-2 [~] · U-transfer [x] · K-deploykit [x] · S-auth certified · U-records2 certified · S-uploads [!] refuted → S-uploads2a/2b [~] · U-profile [~] refuting → U-profile2 [~] · U-transfer2 [~] (new)
+
+**What changed:**
+- Deploy kit (`c64eced5`): the safety snapshot counted rows with one UNION ALL term per table, and D1 caps compound SELECTs, so run 36227772137 stopped there. It now reads one row of scalar sub-counts. The rollback target is the Worker version id, not the deployment id. Row counts no longer reach the public Actions log.
+- CP-1 + CP-1b deployed from `main` = `claude/urgent-20260925` = `c64eced5` (run 36237752796): 0196 and 0197 applied, key-table counts unchanged, `/api/runtime/version` reports `c64eced5c231`, `Cf-Placement: remote-SIN`.
+- S-auth `5d1db8e0` (not deployed yet): a wrong password on self 2FA disable answered 401, which signs the app out, and was not rate limited. It now answers 400 and spends the self re-auth allowance. Admin 2FA recovery with a wrong password answers 400.
+
+**Found:**
+- The uploads purge script (`7437b308`) would have deleted real photos and videos stored under old names (`.jfif`, `.jpe`, `.bin`, no extension, `.m4v`, some `.mov`). It never ran. It is being rebuilt to judge by file contents, keep every photo and video, and move the rest into a recoverable quarantine instead of deleting.
+- K3's serving change would have stopped serving those legacy photos, and videos had no byte-range support (needed for iPhone playback).
+- Transfers still fail for any product whose lots add up to more than its branch stock: the Worker guard checks untracked stock even when none is needed. A saved draft plus a failed lot load dead-ends.
+- GitHub's runner is shown the site's bot challenge, so the kit skips its own live read in CI; the live version was read from outside instead.
+
+**Verified:** individual sweep at `c64eced5`, 1,107 files (2 load flakes green alone); CI gates green; live version and placement read after the deploy.
+
+**Not done:** CP-1c, CP-2, CP-3; R2 move, official-names Excel and cost audit (U-ops running); Shop → Store paused by the owner.

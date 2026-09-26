@@ -8,9 +8,10 @@ and their new status, and each item here names the Part that last changed it (e.
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
 |---|---|---|
-| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [~] deploying: run 36227772137 (first run 36222897469 stopped on CI setup, fixed 1e925d8b); owner delegated approvals 26 Sep |
-| CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [ ] deploys right after CP-1 |
-| CP-2 | S-auth (+ shared-login fix), S-uploads (images+videos only, import files temporary, K3 serving), U-records2, U-cost + 0195 (past-sale repair held as 0200), U-profile bugs | [~] refuters running; U-cost + U-profile fixes running |
+| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [x] deployed 26 Sep 11:35 UTC as `c64eced5` (Deploy run 36237752796, approved under the owner's delegation): 0196 + 0197 applied, key-table counts unchanged, live revision `c64eced5c231` → Part 633 |
+| CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [x] deployed with CP-1 (`c64eced5`) → Part 633 |
+| CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock cannot be transferred at all (generic "Something went wrong"); a saved draft plus a failed lot load dead-ends | [~] fixing as a hotfix from `c64eced5` → Part 633 |
+| CP-2 | S-auth (+ shared-login fix, 2FA-disable 400 + limit), S-uploads (images+videos only, import files temporary, K3 serving), U-records2, U-cost + 0195 (past-sale repair held as 0200), U-profile bugs | [~] S-auth + U-records2 certified; S-uploads refuted (its purge would delete real photos — never run) → S-uploads2a/2b fixing; U-profile refuter + U-profile2 follow-ups running; U-cost running → Part 633 |
 | CP-3 | U-cost past-sale repair (held 0200: owner sees the audit, then go), U-print, U-confirm, U-sync, U-broadcast, U-drain + offline removal (K5), S-secrets, K1/K3 caching | [~] refuter for print/confirm/sync/broadcast running; S-secrets resumed |
 | CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC; official-names Excel (needs the product list: VPN blocks the export) | [!] owner-gated |
 
@@ -28,7 +29,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 ### Location (everything as close to Cambodia as possible)
 - [x] D1 `business-os` and `business-os-import` already run in APAC (read-only `d1 info`).
 - [x] Worker placement pinned to Singapore (`aws:ap-southeast-1`); Smart Placement had left calls at the requesting edge (`local-MRS`) — `3b8d37a9`
-- [ ] Verify live `cf-placement` after deploy (expect `remote-SIN`-style value) and D1 round trips
+- [x] Live `Cf-Placement: remote-SIN` verified after CP-1 (26 Sep) → Part 633
 - [~] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): zero-loss move plan + scripts being prepared (nothing run); execution after the first deploy
 
 ### Owner decisions (25 Sep 2026)
@@ -43,7 +44,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - (26 Sep) Offline mode is cancelled for good, and the app is optimized as online-only. The next build uploads any sales or actions still queued on a till exactly once, then removes offline data. Without internet, a clear "No connection" banner appears, Save/Checkout are blocked, and the cart stays on screen. The app stays installable, keeps the "Restart now" bar, and caches app code only. The dashboard may be up to 20 s stale. Anonymous A/B comparison telemetry (hashes, counts, timings) goes to Analytics Engine.
 
 ### Data safety (nothing lost or corrupted)
-- [ ] Before any remote migration: record the D1 Time Travel bookmark (restore point) and pre-migration counts/totals in the deploy record
+- [x] Before any remote migration: the release kit records the D1 Time Travel restore point and key-table counts (kept in local Records, never in the public Actions log) → Part 633
 - [ ] Every data-changing migration writes a backup table first and carries tested recovery SQL (round-trip test: migrate → recover → byte-identical)
 - [ ] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
 - [x] Recovery checkout and Codex worktrees untouched; no force pushes; exact-path commits only
@@ -56,7 +57,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [x] U-load (integrated; refuter certified: KM pack 205→148 KB gz, icons −28% lossless): language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
 - [x] U-db (integrated; refuter certified): search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
 - [x] Live-update hub moved to an APAC-hinted Durable Object; 12 route handlers no longer wait on it — dc2e4596
-- [!] Deploy blocked: this laptop exits through a German datacenter proxy/VPN and the Cloudflare API answers wrangler with a bot challenge; owner to switch network
+- [x] Deploy path: the GitHub Actions Deploy workflow (owner's secrets) replaces this laptop, whose VPN gets a Cloudflare bot challenge; CP-1 shipped that way → Part 633
 - [~] U-branch-prep (plan in local Records; build lane claude/u-branch-20260926): retire Shop into Store (every branch reference, lots keep batch identity, dry-run, backup, recovery, single-branch UI); execution is owner-gated
 - [~] U-confirm: remaining native confirm() → shared review dialog (files owned by running lanes excluded)
 - [~] CERT: every test file individually at the deploy-branch tip + hygiene list (a stale Telegram pin was found and fixed, 19013909)
