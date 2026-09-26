@@ -97,6 +97,7 @@ function fakeApi(s) {
 }
 
 const statuses = (result) => Object.fromEntries(Object.entries(result.expected).map(([n, s]) => [n, `${s.live}/${s.listed}`]))
+const HEADER = 'secret-names: the production Worker, counts only (names and states are in the encrypted file)'
 const ALL_SET = Object.fromEntries(EXPECTED.map((n) => [n, /_CLIENT_ID$/.test(n) ? 'plain-text/absent' : 'secret/present']))
 
 async function main() {
@@ -147,20 +148,24 @@ async function main() {
     for (const e of r.secretList.entries) assert.deepStrictEqual(Object.keys(e).sort(), ['name', 'type'])
   })
 
-  await check('the public lines: fixed names, fixed words, counts; never another name or a value', async () => {
+  await check('the public lines: counts and the verdict only; no secret name at all, not even an expected one', async () => {
     const r = await sn.readSecretNames(fakeApi(scenario()).api, ACCOUNT)
     const lines = format(r, 1234)
     assert.deepStrictEqual(lines, [
-      'secret-names: the production Worker, names and binding types only',
-      ...EXPECTED.map((n) => `${n}: live versions ${ALL_SET[n].split('/')[0]}, secret list ${ALL_SET[n].split('/')[1]}`),
-      'live versions read: 1',
-      'bound as a secret in every live version: 6 of 8',
-      'other secret names: 1 (the names are in the encrypted file)',
-      'names the live versions and the secret list disagree on: 0',
+      HEADER,
+      'expected: 8, present: 8, absent: 0, unreadable: 0',
       'encrypted file: 1234 bytes',
       'secret-names verdict: PASS',
     ])
     assert.ok(!lines.join('\n').includes('CANARY') && !lines.join('\n').includes('canary'))
+    for (const n of EXPECTED) assert.ok(!lines.join('\n').includes(n), `${n} is in the public lines`)
+    // Every state is counted exactly once.
+    const mixed = await sn.readSecretNames(fakeApi(scenario({
+      deployments: [{ id: 'new', created_on: '2026-09-25T00:00:00Z', versions: [{ version_id: V1, percentage: 50 }, { version_id: V2, percentage: 50 }] }],
+      versions: { [V1]: versionBindings(), [V2]: versionBindings({ drop: ['APP_ENCRYPTION_KEY', 'TELEGRAM_BOT_TOKEN'] }) },
+    })).api, ACCOUNT)
+    assert.deepStrictEqual(sn.presenceCounts(mixed), { expected: 8, present: 6, absent: 2, unreadable: 0 })
+    assert.deepStrictEqual(['secret', 'plain-text', 'other-type', 'absent', 'mixed', 'unknown'].map(sn.presence), ['present', 'present', 'present', 'absent', 'absent', 'unreadable'])
   })
 
   await check('a missing APP_ENCRYPTION_KEY reads absent in both places; the read itself still PASSES', async () => {
@@ -172,7 +177,7 @@ async function main() {
     assert.deepStrictEqual(statuses(r), { ...ALL_SET, APP_ENCRYPTION_KEY: 'absent/absent' })
     assert.strictEqual(r.secretsInEveryLiveVersion, 5)
     assert.strictEqual(r.ok, true)
-    assert.ok(format(r).includes('APP_ENCRYPTION_KEY: live versions absent, secret list absent'))
+    assert.ok(format(r).includes('expected: 8, present: 7, absent: 1, unreadable: 0'), format(r).join('\n'))
   })
 
   await check('a gradual deployment: a secret in only one live version reads mixed and counts as a disagreement', async () => {
@@ -298,12 +303,8 @@ async function main() {
     const bytes = /^encrypted file: (\d+) bytes$/.exec(lines[lines.length - 2])
     assert.ok(bytes, lines.join('\n'))
     assert.deepStrictEqual(lines, [
-      'secret-names: the production Worker, names and binding types only',
-      ...EXPECTED.map((n) => `${n}: live versions ${ALL_SET[n].split('/')[0]}, secret list ${ALL_SET[n].split('/')[1]}`),
-      'live versions read: 1',
-      'bound as a secret in every live version: 6 of 8',
-      'other secret names: 1 (the names are in the encrypted file)',
-      'names the live versions and the secret list disagree on: 0',
+      HEADER,
+      'expected: 8, present: 8, absent: 0, unreadable: 0',
       `encrypted file: ${bytes[1]} bytes`,
       'secret-names verdict: PASS',
     ])
@@ -312,7 +313,11 @@ async function main() {
     assert.strictEqual(Buffer.byteLength(r.report), Number(bytes[1]))
     for (const needle of [CANARY_NAME, CANARY_VALUE, 'APP_ENCRYPTION_KEY', 'secret_text']) {
       assert.ok(!r.report.includes(needle), `${needle} is readable in the uploaded file`)
-      assert.ok(!r.summary.includes(needle) || EXPECTED.includes(needle), `${needle} reached the summary`)
+      assert.ok(!r.summary.includes(needle), `${needle} reached the summary`)
+    }
+    for (const n of EXPECTED) {
+      assert.ok(!r.stdout.includes(n), `the expected secret name ${n} reached the public stdout`)
+      assert.ok(!r.summary.includes(n), `the expected secret name ${n} reached the job summary`)
     }
     assert.ok(!r.stdout.includes(CANARY_NAME) && !r.stdout.includes(CANARY_VALUE))
     const header = JSON.parse(JSON.parse(r.report).header)
@@ -331,7 +336,8 @@ async function main() {
     const lines = r.stdout.trimEnd().split('\n')
     assert.ok(lines.includes('problem: secret-list-unreadable'), r.stdout)
     assert.strictEqual(lines[lines.length - 1], 'secret-names verdict: FAIL')
-    assert.ok(lines.includes('APP_ENCRYPTION_KEY: live versions secret, secret list unknown'))
+    assert.ok(lines.includes('expected: 8, present: 8, absent: 0, unreadable: 0'), r.stdout)
+    for (const n of EXPECTED) assert.ok(!r.stdout.includes(n), `${n} reached the public stdout`)
     assert.deepStrictEqual(r.files, ['secret-names-4242.enc.json'])
   })
 

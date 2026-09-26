@@ -14,15 +14,17 @@
 //   .../workers/scripts/business-os/versions/<id>  the bindings of each version
 //                                                  carrying traffic
 //
-// Public log: for each name in EXPECTED_SECRETS (a constant of this public
-// repository) how the live versions bind it -- secret, plain-text,
-// other-type, absent, mixed (the live versions differ) or unknown -- and
-// whether the secret list shows it; how many OTHER secret names exist (the
-// names themselves go only into the encrypted file); PASS when every read
-// succeeded and saw the ASSETS binding (the positive control).
+// Public log: COUNTS only -- how many names are expected, and how many of
+// them the live versions bind (present), do not bind in every live version
+// (absent), or could not be read (unreadable) -- plus problem codes and
+// PASS/FAIL. PASS means every read succeeded and saw the ASSETS binding (the
+// positive control); it does not mean every secret exists. Which name is in
+// which state, the secret list, and any OTHER secret names go only into the
+// encrypted file: even the expected names, and whether each is set, stay out
+// of the public log.
 
 import {
-  OpsError, PRODUCTION_WORKER, apiErrorCodes, cfApi, commitId, isMain, liveVersionBindings, publicToken,
+  OpsError, PRODUCTION_WORKER, apiErrorCodes, cfApi, commitId, isMain, liveVersionBindings,
   requireEnv, runId, runMain, say, summary, writeEncryptedReport,
 } from './ops-common.mjs'
 
@@ -117,16 +119,28 @@ export async function readSecretNames(api, accountId) {
   }
 }
 
-// Pure: the only lines the public log may show.
+// One word per expected name, from how the live versions bind it:
+//   present     bound (secret, plain-text var or another type) in every live version
+//   absent      missing from at least one live version (absent or mixed)
+//   unreadable  the live versions could not be read
+export function presence(live) {
+  if (live === 'unknown') return 'unreadable'
+  if (live === 'absent' || live === 'mixed') return 'absent'
+  return 'present'
+}
+
+export function presenceCounts(result) {
+  const counts = { expected: EXPECTED_SECRETS.length, present: 0, absent: 0, unreadable: 0 }
+  for (const name of EXPECTED_SECRETS) counts[presence(result.expected[name].live)] += 1
+  return counts
+}
+
+// Pure: the only lines the public log may show. Counts, problem codes and the
+// verdict -- never a name, not even an expected one.
 export function publicLines({ result, bytes }) {
-  const lines = [['secret-names: the production Worker, names and binding types only', {}]]
-  for (const name of EXPECTED_SECRETS) {
-    lines.push(['{name}: live versions {live}, secret list {listed}', { name: publicToken(name), live: result.expected[name].live, listed: result.expected[name].listed }])
-  }
-  lines.push(['live versions read: {n}', { n: result.liveVersionCount }])
-  lines.push(['bound as a secret in every live version: {n} of {total}', { n: result.secretsInEveryLiveVersion, total: EXPECTED_SECRETS.length }])
-  lines.push(['other secret names: {n} (the names are in the encrypted file)', { n: result.otherSecretNames.length }])
-  lines.push(['names the live versions and the secret list disagree on: {n}', { n: result.disagreements }])
+  const lines = [['secret-names: the production Worker, counts only (names and states are in the encrypted file)', {}]]
+  const c = presenceCounts(result)
+  lines.push(['expected: {expected}, present: {present}, absent: {absent}, unreadable: {unreadable}', c])
   for (const problem of result.problems) lines.push(['problem: {code}', { code: new OpsError(problem) }])
   if (bytes !== undefined) lines.push(['encrypted file: {bytes} bytes', { bytes }])
   lines.push(['secret-names verdict: {verdict}', { verdict: result.ok ? 'PASS' : 'FAIL' }])
@@ -151,6 +165,9 @@ async function main() {
     startedAt,
     finishedAt: new Date().toISOString(),
     ...result,
+    // The per-name lines the public log no longer shows.
+    perName: EXPECTED_SECRETS.map((name) => ({ name, presence: presence(result.expected[name].live), ...result.expected[name] })),
+    counts: presenceCounts(result),
   }
   const report = writeEncryptedReport(outDir, `secret-names-${run}`, payload, {
     kind: 'secret-names', name: PRODUCTION_WORKER, commit, runId: run, createdAt: payload.finishedAt,

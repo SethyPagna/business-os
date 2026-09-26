@@ -671,13 +671,10 @@ async function main() {
       'ops/scripts/ops-common.mjs: value',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
-      'ops/scripts/ops-secret-names.mjs: name',
-    ], 'publicToken() only for the query FILE name, Cloudflare error-code numbers and the expected secret NAMES')
-    // The secret names printed are this file's own constant list, never what the API returned.
+    ], 'publicToken() only for the query FILE name and Cloudflare error-code numbers')
+    // secret-names prints counts only: no secret's name, not even an expected one.
     const sn = code['ops/scripts/ops-secret-names.mjs']
-    const loop = sn.indexOf("  for (const name of EXPECTED_SECRETS) {\n    lines.push(['{name}: ")
-    const token = sn.indexOf('publicToken(name)')
-    assert.ok(loop > 0 && token > loop && token < sn.indexOf('\n  }\n', loop), 'publicToken(name) only inside the loop over EXPECTED_SECRETS')
+    assert.ok(!/publicToken/.test(sn), 'secret-names must not vet any name for the public log')
     assert.ok(/\nexport const EXPECTED_SECRETS = Object\.freeze\(\[\n(  '[A-Z][A-Z0-9_]*',\n)+\]\)\n/.test(sn), 'EXPECTED_SECRETS is a frozen list of literals')
     assert.ok(Object.isFrozen(secretNames.EXPECTED_SECRETS) && secretNames.EXPECTED_SECRETS.length === 8)
     const d = code['ops/scripts/ops-d1-export.mjs']

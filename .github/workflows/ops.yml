@@ -265,8 +265,8 @@ jobs:
         with:
           node-version: 24
 
-      # Logs, per expected name, how the live versions bind it and whether
-      # the secret list shows it; any other secret names are only counted.
+      # Logs counts only (expected, present, absent, unreadable) and the
+      # verdict; every name and its state is in the encrypted file.
       - name: Read the secret names (GET only)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
