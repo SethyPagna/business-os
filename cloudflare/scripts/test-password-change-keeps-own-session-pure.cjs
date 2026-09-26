@@ -130,8 +130,12 @@ async function check(name, fn) {
   await check('a wrong current password changes nothing and revokes nothing', async () => {
     actor = { id: 2, username: 'cashier', name: 'Cashier' }
     const res = await post('/users/2/change-password', { currentPassword: 'nope', newPassword: 'new-cashier-pass' }, 'cashier-till')
-    assert.notEqual(res.status, 200)
+    // 400, not 401: the client treats a 401 on /api as a possibly dead
+    // session and runs its sign-out recovery over a typo.
+    assert.equal(res.status, 400)
+    assert.equal((await res.json()).code, 'incorrect_password')
     assert.deepEqual(live(), [11, 12, 21, 22])
+    assert.equal(db.prepare('SELECT password FROM users WHERE id = 2').get({}).password, 'hash:old-cashier')
   })
 
   await check('revokeUserSessions without a keep still revokes every session (deactivation / sign-out-everywhere / OTP recovery)', async () => {

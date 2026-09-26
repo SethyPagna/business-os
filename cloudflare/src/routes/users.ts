@@ -667,8 +667,10 @@ app.put('/users/:id/profile', async (c) => {
   if (!adminOverride) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
+    // 400, never 401: the client reads a 401 on an authenticated /api path
+    // as a possibly dead session and runs its sign-out recovery.
     if (!bcrypt.compareSync(currentPassword, String(user.password || ''))) {
-      return c.json({ success: false, error: 'Current password is incorrect' }, 401)
+      return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
     }
   }
 
@@ -765,7 +767,8 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   if (options.requireCurrent) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect' }, 401)
+    // 400, never 401 -- see the same check in PUT /users/:id/profile.
+    if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
   }
 
   const hash = bcrypt.hashSync(newPassword, 10)
