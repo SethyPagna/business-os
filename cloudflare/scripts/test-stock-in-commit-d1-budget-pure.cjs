@@ -134,6 +134,9 @@ async function fixture(tier, productCount) {
   const env = {
     DB: makeD1(raw),
     PLAN_TIER: tier,
+    // The admin this fixture signs in as is seeded only from a configured
+    // password; there is no hardcoded fallback any more.
+    BUSINESS_OS_ADMIN_PASSWORD: 'fixture-admin-password',
     // A live KV version key per namespace, as production has.
     CACHE: {
       async get(key) { return kv.has(key) ? kv.get(key) : '1' },

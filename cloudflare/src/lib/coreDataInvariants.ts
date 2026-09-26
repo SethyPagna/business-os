@@ -82,6 +82,39 @@ export type CoreDataInvariants = {
   adminPassword: string | null
 }
 
+// The password a first-run admin is seeded with, or null for "do not seed".
+//
+//   - BUSINESS_OS_ADMIN_PASSWORD, when non-blank, exactly as given.
+//   - Otherwise the demo password 'admin123', ONLY in local development:
+//     BUSINESS_OS_LOCAL_DEV=1/true (an opt-in that belongs in the gitignored
+//     .dev.vars, which only `wrangler dev` reads) AND an unstamped build
+//     (scripts/deploy.cjs stamps every production deploy, lib/buildStamp.ts).
+//     Both are required: a stray var on a real deploy, or a bare unstamped
+//     `wrangler deploy`, each fall through to null.
+//   - Otherwise null. Production never seeds a known password. A generated
+//     random one was rejected: nothing would ever show it, and once an admin
+//     exists seeding never runs again, so the account could not be recovered
+//     by setting the secret afterwards. Skipping keeps that recovery path.
+export const LOCAL_DEV_ADMIN_PASSWORD = 'admin123'
+
+// The same esbuild define lib/buildStamp.ts reads (scripts/deploy.cjs sets it
+// from git for every production deploy). Read directly rather than imported
+// so this module keeps its small dependency set; absent or blank = unstamped.
+declare const __WORKER_BUILD_REVISION__: string | undefined
+function isUnstampedBuild(): boolean {
+  const revision = typeof __WORKER_BUILD_REVISION__ !== 'undefined' ? String(__WORKER_BUILD_REVISION__ ?? '').trim() : ''
+  return !revision || revision === 'dev'
+}
+
+export function resolveSeedAdminPassword(env: Env): string | null {
+  const vars = env as unknown as { BUSINESS_OS_ADMIN_PASSWORD?: string; BUSINESS_OS_LOCAL_DEV?: string }
+  const configured = vars.BUSINESS_OS_ADMIN_PASSWORD
+  if (typeof configured === 'string' && configured.trim()) return configured
+  const localFlag = String(vars.BUSINESS_OS_LOCAL_DEV ?? '').trim().toLowerCase()
+  if ((localFlag === '1' || localFlag === 'true') && isUnstampedBuild()) return LOCAL_DEV_ADMIN_PASSWORD
+  return null
+}
+
 // Read-only pre-check for ensureCoreDataInvariants(). Every request on a
 // fresh Worker isolate runs ensureCoreDataInvariants() once (see
 // ensureCoreDataInvariantsOnce() below) -- and until this fast path
@@ -305,16 +338,33 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
     }
   }
 
-  const adminRole = await db.prepare(`SELECT id FROM roles WHERE code = 'admin' LIMIT 1`).get<{ id: number }>()
+  const adminRole = await db.prepare(`SELECT id FROM roles WHERE code = 'admin' ORDER BY id ASC LIMIT 1`).get<{ id: number }>()
   const existingAdmin = await db.prepare(`
     SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1
   `).get<{ id: number }>()
+  // Seeding is keyed on "no active user holds the admin role", NEVER on the
+  // literal username 'admin' (security review, 26 Sep 2026). Keying on the
+  // username meant renaming or soft-deleting the admin account made every
+  // cold isolate re-create `admin` with a password printed in this public
+  // repository: a remote takeover.
+  const activeAdmin = await db.prepare(`
+    SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+    WHERE r.code = 'admin' AND u.is_active = 1 AND u.deleted_at IS NULL
+    ORDER BY u.id ASC LIMIT 1
+  `).get<{ id: number }>()
 
-  let adminUserId: number | null = existingAdmin?.id ?? null
+  let adminUserId: number | null = existingAdmin?.id ?? activeAdmin?.id ?? null
   let adminUserCreated = false
   let adminPassword: string | null = null
-  if (!existingAdmin?.id) {
-    adminPassword = (env as unknown as { BUSINESS_OS_ADMIN_PASSWORD?: string }).BUSINESS_OS_ADMIN_PASSWORD || 'Admin123456!'
+  const seedPassword = !activeAdmin?.id && !existingAdmin?.id ? resolveSeedAdminPassword(env) : null
+  if (!activeAdmin?.id && existingAdmin?.id) {
+    // An 'admin' row exists but no one active holds the role. Never create a
+    // second 'admin' or touch that row's password from here.
+    console.warn('[core-invariants] No active admin-role user exists, but a user named "admin" does. Not seeding; restore an administrator deliberately.')
+  } else if (!activeAdmin?.id && !seedPassword) {
+    console.warn('[core-invariants] No active admin-role user exists and BUSINESS_OS_ADMIN_PASSWORD is not set, so no admin was seeded. Set it (wrangler secret put BUSINESS_OS_ADMIN_PASSWORD) and the next cold start seeds the admin.')
+  } else if (!activeAdmin?.id && seedPassword) {
+    adminPassword = seedPassword
     const passwordHash = bcrypt.hashSync(adminPassword, 10)
     const inserted = await db.prepare(`
       INSERT INTO users (
