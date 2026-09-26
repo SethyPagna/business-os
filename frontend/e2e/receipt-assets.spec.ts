@@ -7,6 +7,11 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 // are substituted. Never reaches production; installed-PWA routing is simulated.
 // Origin: Codex perf-print (Worktrees/perf-print-20260925), adapted so every
 // asset failure prints without the asset instead of failing the print.
+// Q13 (owner, 27 Sep 2026): the "Payment QR fixture" images sit in a payment
+// QR block, the way ReceiptPaymentQr renders the ABA QR, so they follow the
+// payment rule: a slow one is waited for and printed VISIBLE; only an error
+// (or the 30 s ceiling) leaves the block out, with the warning toast. The
+// style background shares their URL and keeps the plain asset rule.
 test.use({ serviceWorkers: 'block' })
 const EN = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
 async function stubPrinting(context: BrowserContext): Promise<void> {
@@ -88,8 +93,12 @@ async function prepare(page: Page, context: BrowserContext, frame: boolean) {
     // below decides whether that succeeds, hangs, is refused or 404s.
     const root = document.querySelector('[data-receipt-rendition="full"]')!
     for (let n = 0; n < 2; n++) {
+      // Loaded on screen, so the block is ready; the print re-fetches it.
+      const block = document.createElement('div')
+      block.setAttribute('data-receipt-qr', 'payment')
+      block.setAttribute('data-receipt-qr-state', 'ready')
       const image = new Image(); image.src = url; image.alt = 'Payment QR fixture'; image.width = 24; image.height = 24
-      root.appendChild(image); await image.decode()
+      block.appendChild(image); root.appendChild(block); await image.decode()
     }
     const style = document.createElement('div'); style.style.cssText = `width:24px;height:24px;background-image:url("${url}")`
     root.appendChild(style)
@@ -98,6 +107,10 @@ async function prepare(page: Page, context: BrowserContext, frame: boolean) {
       w.__assetCalls++
       init?.signal?.addEventListener('abort', () => { w.__assetAborts++ }, { once: true })
       if (w.__assetMode === 'headers') return new Promise<Response>(() => {})
+      if (w.__assetMode === 'slow') {
+        await new Promise((resolve) => setTimeout(resolve, 6500))
+        return realFetch(input, init)
+      }
       if (w.__assetMode === 'cors') throw new TypeError('Failed to fetch (fixture CORS refusal)')
       if (w.__assetMode === '404') return new Response('', { status: 404 })
       if (w.__assetMode === 'body') return { ok: true, blob: () => new Promise<Blob>(() => {}) } as Response
@@ -153,27 +166,56 @@ for (const frame of [false, true]) {
     await page.evaluate(() => { for (const win of (window as any).__e2ePrintViews || []) win?.dispatchEvent(new Event('afterprint')) })
     if (frame) await expect(page.locator('iframe[title="Print document"]')).toHaveCount(0)
   })
-  // Owner rule: an image never blocks a print and never turns it into an error.
-  // Every failure -- a host that never answers, a body that never ends, a CORS
-  // refusal, a 404 -- prints the receipt once WITHOUT that asset, within the
-  // shared deadline, and with no alert.
-  for (const mode of ['headers', 'body', 'cors', '404']) {
-    test(`${frame ? 'iframe' : 'popup'} ${mode} failure still prints once, without that asset`, async ({ page, context }, info) => {
+  // Q13: a payment QR slower than the old 5 s asset deadline is waited for and
+  // printed visible, with no warning. Before Q13 it printed hidden.
+  test(`${frame ? 'iframe' : 'popup'} slow payment QR is waited for and printed visible`, async ({ page, context }, info) => {
+    test.setTimeout(90_000)
+    await prepare(page, context, frame)
+    await page.evaluate(() => { (window as any).__assetMode = 'slow' })
+    const dialogs: string[] = []
+    page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss() })
+    const start = Date.now()
+    await print(page)
+    await expect.poll(async () => (await calls(page)).length, { timeout: 40000 }).toBe(1)
+    const elapsedMs = Date.now() - start
+    expect(elapsedMs).toBeGreaterThan(6000)
+    const printed = (await calls(page))[0]
+    const content = await page.evaluate(html => {
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      return Array.from(doc.querySelectorAll<HTMLImageElement>('img[alt="Payment QR fixture"]')).map(i => ({ src: i.getAttribute('src'), visibility: i.style.visibility }))
+    }, printed.html)
+    expect(content).toHaveLength(2)
+    expect(content.every(image => image.src?.startsWith('data:image/png') && image.visibility !== 'hidden')).toBe(true)
+    expect(dialogs).toEqual([])
+    await expect(page.getByText(EN.receipt_payment_qr_omitted)).toHaveCount(0)
+    expect(await page.evaluate(() => (window as any).__assetCalls)).toBe(1)
+    await info.attach('payment-qr-slow-timing', { body: JSON.stringify({ elapsedMs }), contentType: 'application/json' })
+    await page.evaluate(() => { for (const win of (window as any).__e2ePrintViews || []) win?.dispatchEvent(new Event('afterprint')) })
+  })
+  // An error still never blocks the print or raises a dialog: the receipt prints
+  // once WITHOUT the payment QR block (no hidden gap, no broken image), the
+  // cashier gets the warning toast, and the background keeps the plain asset
+  // rule (dropped). A host that never answers is waited for up to the 30 s
+  // ceiling and then treated the same way.
+  for (const mode of ['cors', '404', 'headers', 'body']) {
+    test(`${frame ? 'iframe' : 'popup'} ${mode} failure prints once without the payment QR, and warns`, async ({ page, context }, info) => {
+      const hangs = mode === 'headers' || mode === 'body'
+      test.setTimeout(hangs ? 120_000 : 60_000)
       await prepare(page, context, frame)
       await page.evaluate(value => { (window as any).__assetMode = value }, mode)
       const dialogs: string[] = []
       page.on('dialog', dialog => { dialogs.push(dialog.message()); void dialog.dismiss() })
       const start = Date.now()
-      // Carried into the failure message so a red names what the page did.
       const logs: string[] = []
       page.on('console', message => { logs.push(`${Date.now() - start}ms ${message.type()}: ${message.text()}`) })
       await print(page)
-      // The discriminating assertion: the old inliner never printed at all in
-      // the headers/body modes. Elapsed time is attached, not asserted -- WebKit
-      // under 4 workers took 15.9 s for the 5 s deadline plus the existing 4 s
-      // frame wait, so a wall-clock bound only measured machine load. The
-      // deadline itself is pinned in tests/receiptAssetLoader.test.ts.
-      await expect.poll(async () => (await calls(page)).length, { timeout: 30000, message: `no print within 30 s (${mode})` }).toBe(1)
+      if (hangs) {
+        // Still waiting well past the old 5 s deadline, and saying so.
+        await page.waitForTimeout(8000)
+        expect((await calls(page)).length).toBe(0)
+        await expect(page.getByRole('button', { name: EN.receipt_qr_waiting, exact: true })).toBeVisible()
+      }
+      await expect.poll(async () => (await calls(page)).length, { timeout: hangs ? 60000 : 30000, message: `no print (${mode})` }).toBe(1)
         .catch(async (error: Error) => {
           const probe = await page.evaluate(() => ({ calls: (window as any).__assetCalls, aborts: (window as any).__assetAborts, taps: (window as any).__printTaps })).catch(() => null)
           throw new Error(`${error.message}\nprobe: ${JSON.stringify(probe)} pages=${context.pages().length}\nconsole:\n${logs.join('\n')}`)
@@ -184,18 +226,20 @@ for (const frame of [false, true]) {
       const content = await page.evaluate(html => {
         const doc = new DOMParser().parseFromString(html, 'text/html')
         return {
-          images: Array.from(doc.querySelectorAll<HTMLImageElement>('img[alt="Payment QR fixture"]')).map(i => ({ src: i.getAttribute('src'), visibility: i.style.visibility })),
+          images: doc.querySelectorAll('img[alt="Payment QR fixture"]').length,
+          blocks: doc.querySelectorAll('[data-receipt-qr="payment"]').length,
           text: doc.querySelector('.receipt-frame')?.textContent,
           backgrounds: Array.from(doc.querySelectorAll<HTMLElement>('.receipt-frame *')).map(el => el.style.backgroundImage).filter(Boolean),
         }
       }, printed.html)
-      expect(content.images).toHaveLength(2)
-      expect(content.images.every(image => image.src === null && image.visibility === 'hidden')).toBe(true)
+      expect(content.images).toBe(0)
+      expect(content.blocks).toBe(0)
       expect(content.backgrounds.some(css => css.includes('receipt-asset-probe'))).toBe(false)
       expect(content.text).toMatch(/[ក-៿]/)
-      expect(await page.evaluate(() => (window as any).__assetCalls)).toBe(1)
-      expect(await page.evaluate(() => (window as any).__assetAborts)).toBe(1)
-      await info.attach('local-failure-timing', { body: JSON.stringify({ mode, elapsedMs }), contentType: 'application/json' })
+      await expect(page.getByText(EN.receipt_payment_qr_omitted)).toBeVisible()
+      // One fetch for the payment stage, one for the background's own stage.
+      expect(await page.evaluate(() => (window as any).__assetCalls)).toBe(2)
+      await info.attach('payment-qr-failure-timing', { body: JSON.stringify({ mode, elapsedMs }), contentType: 'application/json' })
       await page.evaluate(() => { for (const win of (window as any).__e2ePrintViews || []) win?.dispatchEvent(new Event('afterprint')) })
       if (frame) await expect(page.locator('iframe[title="Print document"]')).toHaveCount(0)
     })
