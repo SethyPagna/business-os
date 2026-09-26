@@ -158,6 +158,12 @@ export type Env = {
   // HMAC secret for signing the Google OAuth `state` param. Falls back to
   // GOOGLE_LOGIN_CLIENT_SECRET if unset (see lib/googleOauth.ts).
   AUTH_SESSION_SECRET?: string
+  // Dedicated secret for the login and Drive OAuth `state` HMAC; takes
+  // precedence over AUTH_SESSION_SECRET and the client-secret fallback.
+  OAUTH_STATE_SECRET?: string
+  // Initial password for the seeded 'admin' user, read only when that user
+  // does not exist yet (lib/coreDataInvariants.ts).
+  BUSINESS_OS_ADMIN_PASSWORD?: string
   // Google Drive OAuth (backup mirror) -- see lib/googleDrive.ts. Separate
   // OAuth client from the login one above, matching the legacy backend's
   // own separation of "sign-in with Google" vs "Drive sync" credentials.

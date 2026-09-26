@@ -98,8 +98,10 @@ function driveOauthStateKey(nonce: string): string {
   return `oauth-state:google-drive:${nonce}`
 }
 
+// Same key order as lib/googleOauth.ts's getStateSecret: the dedicated
+// OAUTH_STATE_SECRET first, the pre-existing fallbacks after it.
 function driveOauthStateSecret(env: Env): string {
-  return trim(env.AUTH_SESSION_SECRET || env.GOOGLE_DRIVE_CLIENT_SECRET)
+  return trim(env.OAUTH_STATE_SECRET) || trim(env.AUTH_SESSION_SECRET || env.GOOGLE_DRIVE_CLIENT_SECRET)
 }
 
 function normalizeDriveReturnTarget(env: Env, returnOrigin: unknown, returnPath: unknown): { origin: string; path: string; url: string } {

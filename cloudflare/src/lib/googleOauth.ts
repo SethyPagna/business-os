@@ -106,8 +106,12 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
+// OAUTH_STATE_SECRET is the dedicated HMAC key for the `state` param; the
+// owner should set it (wrangler secret / sync-secrets.cjs). The fallbacks keep
+// deployments that predate it signing exactly as before -- the last one
+// reuses the OAuth client secret as an HMAC key, which is why it is last.
 function getStateSecret(env: Env): string {
-  return trim(env.AUTH_SESSION_SECRET || env.GOOGLE_LOGIN_CLIENT_SECRET)
+  return trim(env.OAUTH_STATE_SECRET) || trim(env.AUTH_SESSION_SECRET || env.GOOGLE_LOGIN_CLIENT_SECRET)
 }
 
 async function signState(env: Env, payload: OauthStatePayload): Promise<string> {
