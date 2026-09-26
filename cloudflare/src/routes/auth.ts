@@ -983,7 +983,19 @@ app.get('/oauth/callback', async (c) => {
 
     if (oauthMode === 'link') {
       const actorId = Number(statePayload.currentUserId || 0)
+      // The signed state names who STARTED the link; the browser finishing it
+      // must still be signed in as that same user. Without this, anyone could
+      // start a link on their own account and hand the Google consent URL to
+      // somebody else -- whose Google identity would then be recorded on the
+      // first person's account, so their later "Sign in with Google" would
+      // silently land in an account someone else controls. The
+      // callback is a top-level GET on the app origin, so the Lax session
+      // cookie is present here.
+      const finishingUser = actorId ? await getSessionUser(c) : null
       if (!actorId) { callbackPayload = { success: false, error: 'A local user session is required to link Google.' } }
+      else if (!finishingUser || Number(finishingUser.id) !== actorId) {
+        callbackPayload = { success: false, error: 'Sign in to Business OS in this browser as the account you are linking, then connect Google again.' }
+      }
       else if (linkedToOtherUser) { callbackPayload = { success: false, error: 'This Google account is already linked to another user.' } }
       else {
         const localUser = await db.prepare('SELECT id, username, name FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get<{ id: number; username: string; name: string }>([actorId])

@@ -185,6 +185,19 @@ export function normalizeReturnTarget(env: Env, input: string | undefined, mode:
   }
 }
 
+// True only when every piece a link/sign-in round trip needs is present:
+// the client id (consent URL), the client secret (code exchange), a state
+// signing secret and a redirect URI. `getGoogleLoginPublicConfig().enabled`
+// only checks the client id, so a deployment missing the secret would offer a
+// Connect button whose callback can never succeed. My Profile's Google card
+// reads this through GET /users/:id/auth-methods.
+export function isGoogleLinkReady(env: Env): boolean {
+  return !!trim(env.GOOGLE_LOGIN_CLIENT_ID)
+    && !!trim(env.GOOGLE_LOGIN_CLIENT_SECRET)
+    && !!getStateSecret(env)
+    && !!getPrimaryRedirectUri(env)
+}
+
 export function getGoogleLoginPublicConfig(env: Env) {
   const clientId = trim(env.GOOGLE_LOGIN_CLIENT_ID)
   return {

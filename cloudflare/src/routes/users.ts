@@ -13,6 +13,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -27,11 +28,9 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 //   repairGoogleIdentityForUser, provider-disconnect, auth-methods
 //   provider probing). The Docker backend's own isGoogleAuthConfigured()
 //   always returns false in this build -- every one of those code paths is
-//   already dead in the source we're porting from. Endpoints that only
-//   existed to serve that flow (auth-methods, provider-disconnect) are
-//   kept as honest stubs returning the same "not configured"/local-only
-//   shape the original returns when the feature is off, so the frontend
-//   doesn't 404.
+//   already dead in the source we're porting from. (Superseded: the Worker
+//   has its own Google OAuth link flow in routes/auth.ts, and auth-methods
+//   below now reports it -- see the comment there.)
 // - Avatar upload -- ported below (`POST /users/avatar-upload`), reusing
 //   the same R2 object storage + file_assets bookkeeping as
 //   routes/files.ts's generic upload endpoint, with the same request shape
@@ -272,9 +271,16 @@ app.get('/users/:id/profile', async (c) => {
   return c.json({ success: true, ...sanitizeUserRow(row) })
 })
 
-// Google/provider auth is permanently disabled in this backend build (see
-// header comment) -- these two report that honestly instead of probing a
-// provider that was never configured.
+// Sign-in methods for My Profile. This used to be a hard-coded stub that
+// always answered "Google not connected, not ready" (and named the flag
+// google_connected while the profile reads google_linked), so the Connect /
+// Disconnect Google buttons could never appear even though the real link
+// flow exists in routes/auth.ts (POST /auth/oauth/start mode:'link' -> signed
+// single-use state carrying the signed-in user id -> GET /auth/oauth/callback
+// records google_subject on that user, refusing a Google identity already
+// linked to another user -> POST /auth/oauth/unlink behind the current
+// password). This now reports the stored link and whether this deployment
+// has everything the round trip needs.
 app.get('/users/:id/auth-methods', async (c) => {
   const actor = c.get('user')
   const targetId = Number(c.req.param('id') || 0)
@@ -282,9 +288,14 @@ app.get('/users/:id/auth-methods', async (c) => {
   if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
   if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
   const user = await getDb(c.env).prepare(
-    'SELECT email, email_verified, otp_enabled, is_active FROM users WHERE id = @id',
-  ).get<{ email: string | null; email_verified: number; otp_enabled: number; is_active: number }>({ id: targetId })
+    'SELECT email, email_verified, otp_enabled, is_active, google_subject, google_email, google_linked_at FROM users WHERE id = @id',
+  ).get<{
+    email: string | null; email_verified: number; otp_enabled: number; is_active: number
+    google_subject: string | null; google_email: string | null; google_linked_at: string | null
+  }>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
+  const googleLinked = !!String(user.google_subject || '').trim()
+  const googleReady = isGoogleLinkReady(c.env)
   return c.json({
     success: true,
     local_password: true,
@@ -292,14 +303,20 @@ app.get('/users/:id/auth-methods', async (c) => {
     email_verified: Number(user.email_verified || 0) === 1,
     otp_enabled: Number(user.otp_enabled || 0) === 1,
     is_active: Number(user.is_active || 0) === 1,
-    google_connected: false,
-    google_ready: false,
-    linked_providers: [],
-    capabilities: { google_auth: false, google_oauth: false, google_email_auth: false, google_mfa_totp: false },
+    google_linked: googleLinked,
+    // Legacy name for the same fact; kept so an older cached client still reads it.
+    google_connected: googleLinked,
+    google_email: googleLinked ? (user.google_email || '') : '',
+    google_linked_at: googleLinked ? (user.google_linked_at || null) : null,
+    google_ready: googleReady,
+    linked_providers: googleLinked ? ['google'] : [],
+    capabilities: { google_auth: googleReady, google_oauth: googleReady, google_email_auth: false, google_mfa_totp: false },
   })
 })
 
-app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Google sign-in is not enabled on this deployment.' }, 400))
+// Google is disconnected through POST /api/auth/oauth/unlink (password
+// re-check, own account only); there is no other provider to disconnect.
+app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Use Disconnect Google in My Profile. No other sign-in provider is supported.' }, 400))
 
 app.post('/users/:id/contact-verification/request', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
 app.post('/users/:id/contact-verification/confirm', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
