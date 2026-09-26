@@ -220,6 +220,8 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   '../index': {},
 })
 const reviewApply = loadReal('lib/reviewApply.ts', {
+  // Real module: an approved plan-less cost edit records its typed-cost entry (U-cost).
+  './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   ...dbStub,
   ...auditStub,
   ...broadcastStub,

@@ -123,6 +123,8 @@ function loadReviewApply(state, updateChanges = 1) {
     seedInitialBatchForNewProduct: async () => {},
   }
   return loadTs('lib/reviewApply.ts', {
+    // Real module: an approved plan-less cost edit records its typed-cost entry (U-cost).
+    './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
     './db': { ...dbLib, getDb: () => db },
     './audit': { audit: async () => { state.audits++ } },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
