@@ -167,7 +167,10 @@ async function main() {
     const f = await setup()
     const child = f.d1.db.prepare("SELECT id,payload_json FROM undo_snapshots WHERE kind='product.merge.group.child' ORDER BY id DESC LIMIT 1").get()
     const reversal = JSON.parse(child.payload_json)
-    reversal.keeperPricingBefore.cost_price_usd = 999
+    // U-cost (0195): the USD cost columns are re-derived from the restored lots
+    // after the snapshot is applied, so a wrong USD snapshot is corrected, not
+    // rejected. Tamper a column the derivation does not own.
+    reversal.keeperPricingBefore.cost_price_khr = 999
     f.d1.db.prepare('UPDATE undo_snapshots SET payload_json=? WHERE id=?').run(JSON.stringify(reversal), child.id)
     const before = f.state()
     await assert.rejects(() => f.run('undo', 0), /changed concurrently/)

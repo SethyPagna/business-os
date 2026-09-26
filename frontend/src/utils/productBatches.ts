@@ -38,6 +38,25 @@ function normalizeBranchId(branchId: BranchId): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+/** A lot with nothing left on hand (remaining quantity 0 or less). */
+export function isDepletedLot(quantity: unknown): boolean {
+  return !(Number(quantity) > 0)
+}
+
+/**
+ * Received-lot lists show lots that still hold stock first and sold-out lots
+ * after them, each group keeping the order it arrived in (owner, 2026-09-25:
+ * a sold-out lot stays viewable, greyed, below the ones on the shelf). The
+ * Worker's cost breakdown orders its rows the same way
+ * (buildCatalogCostBreakdown in cloudflare/src/lib/catalogCostRecompute.ts).
+ */
+export function orderLotsOnHandFirst<T>(lots: readonly T[], quantityOf: (lot: T) => unknown): T[] {
+  return [
+    ...lots.filter((lot) => !isDepletedLot(quantityOf(lot))),
+    ...lots.filter((lot) => isDepletedLot(quantityOf(lot))),
+  ]
+}
+
 // `includeEmpty` (default false) keeps every existing caller's behavior
 // unchanged -- compact row/list previews (Inventory.tsx, ProductRowParts.tsx)
 // only want lots that actually have stock, since "what's sellable here" is
@@ -55,7 +74,7 @@ function normalizeBranchId(branchId: BranchId): number | null {
 export function getVisibleProductBatches(product: ProductWithBatches, branchId: BranchId = 'all', { includeEmpty = false }: VisibleBatchesOptions = {}): VisibleProductBatch[] {
   const items = Array.isArray(product?.batches) ? product.batches : []
   const normalizedBranchId = normalizeBranchId(branchId)
-  return items
+  const visible = items
     .map((batch) => {
       const branchStock: BranchStockEntry[] = Array.isArray(batch?.branch_stock)
         ? batch.branch_stock as BranchStockEntry[]
@@ -70,7 +89,10 @@ export function getVisibleProductBatches(product: ProductWithBatches, branchId: 
         quantity,
       }
     })
-    .filter((batch) => includeEmpty || Number(batch?.quantity || 0) > 0)
+    .filter((batch) => includeEmpty || !isDepletedLot(batch.quantity))
+  // Only the detail views (includeEmpty) ever keep a sold-out lot; they list
+  // it after the lots that still hold stock (owner, 2026-09-25).
+  return orderLotsOnHandFirst(visible, (batch) => batch.quantity)
 }
 
 export function buildBatchPreview(product: ProductWithBatches, branchId: BranchId = 'all', { limit = 3, includeEmpty = false }: BatchPreviewOptions = {}) {

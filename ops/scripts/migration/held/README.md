@@ -35,7 +35,17 @@ migration, at that time -- a peer session or another agent asking for it is not 
   0190 all four. Review verdict: clean on its own SQL, but inert -- and not testable end to end --
   until 0188 is fixed.
 
-None of the five is imported by any Worker route or by the frontend; the whole transfer-run /
+- **0200_sale_cost_on_hand_repair.sql** (parked 26 Sep 2026, lane U-cost) -- repairs past
+  `sale_items.cost_price_usd` (and copied `return_items.cost_price_usd`) taken from the buggy
+  distinct-cost catalog average (a5a2169f until 0195). Writes only those two cost columns, after
+  backup tables; recovery SQL in its header. Needs 0195 applied first. Its header's OWNER-RUN
+  AUDIT gives the exact read-only `--command` runs and which numbers to read (lines to repair R,
+  cost delta D, ledger_unverified count) before the owner decides. Pinned by
+  `cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs`, which also fails if the file
+  appears in `cloudflare/migrations` without being moved there on purpose (update that check in
+  the same commit as the owner-approved move). Moving it in keeps the name 0200.
+
+None of the five transfer-run files is imported by any Worker route or by the frontend; the whole transfer-run /
 dataset-operation lifecycle chain is unwired in production.
 
 ## Before any of 0185/0186/0188/0190/0191 can apply
@@ -57,4 +67,6 @@ dataset-operation lifecycle chain is unwired in production.
 
 0185 through 0191 stay reserved -- do not reuse them for a new, unrelated migration even though
 they are currently absent from `cloudflare/migrations`. The next new migration starts at **0193**.
+0199 is reserved by lane U-branch (its held Shop -> Store consolidation) and 0200 by the held
+sale-cost repair above; do not reuse either.
 0192 (`stock_mutation_receipts.sql`) is independent of all five and stays in the normal chain.

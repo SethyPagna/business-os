@@ -20,6 +20,7 @@ import {
   costRowMeta,
   normalizeCostBreakdown,
 } from '../src/utils/costBreakdownFormat.ts'
+import * as costBreakdownFormat from '../src/utils/costBreakdownFormat.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcRoot = path.join(here, '..', 'src')
@@ -75,28 +76,28 @@ await runTest('costExclusionLabelKey maps every reason to its own key', () => {
 // reads as something concrete.
 // ---------------------------------------------------------------------------
 await runTest('costRowPrimaryText prefers the lot code over the legacy label', () => {
-  const input = { source: 'lot' as const, label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null }
+  const input = { source: 'lot' as const, label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null, weight_quantity: 0, share: null, fallback: false }
   assert.equal(costRowPrimaryText(input, '04/09/2026'), 'L-0904')
 })
 
 await runTest('costRowPrimaryText falls back to the formatted received date, then the batch number, then the legacy label', () => {
-  const noLot = { source: 'lot' as const, label: '1 · Shop', lot_code: null, batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null }
+  const noLot = { source: 'lot' as const, label: '1 · Shop', lot_code: null, batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null, weight_quantity: 0, share: null, fallback: false }
   assert.equal(costRowPrimaryText(noLot, '04/09/2026'), '04/09/2026')
   const noDate = { ...noLot, received_at: null }
   assert.equal(costRowPrimaryText(noDate, null), '#1')
-  const olderPayload = { source: 'lot' as const, label: '1 · Shop', lot_code: null, batch_number: null, received_at: null, branch_name: null, user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null }
+  const olderPayload = { source: 'lot' as const, label: '1 · Shop', lot_code: null, batch_number: null, received_at: null, branch_name: null, user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null, weight_quantity: 0, share: null, fallback: false }
   assert.equal(costRowPrimaryText(olderPayload, null), '1 · Shop')
 })
 
 await runTest('costRowMeta shows branch for a lot row, drops the date it already used as the primary text', () => {
-  const withLotCode = { source: 'lot' as const, label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null }
+  const withLotCode = { source: 'lot' as const, label: '1 · Shop', lot_code: 'L-0904', batch_number: 1, received_at: '2026-09-04', branch_name: 'Shop', user_name: null, recorded_at: null, cost_usd: 3, cost_khr: null, excluded: null, weight_quantity: 0, share: null, fallback: false }
   assert.equal(costRowMeta(withLotCode, '04/09/2026'), '04/09/2026 · Shop')
   const noLotCode = { ...withLotCode, lot_code: null }
   assert.equal(costRowMeta(noLotCode, '04/09/2026'), 'Shop')
 })
 
 await runTest('costRowMeta shows date + username for a manual row', () => {
-  const manual = { source: 'manual' as const, label: 'Manual', lot_code: null, batch_number: null, received_at: null, branch_name: null, user_name: 'sokha', recorded_at: '2026-09-16', cost_usd: 4.5, cost_khr: null, excluded: null }
+  const manual = { source: 'manual' as const, label: 'Manual', lot_code: null, batch_number: null, received_at: null, branch_name: null, user_name: 'sokha', recorded_at: '2026-09-16', cost_usd: 4.5, cost_khr: null, excluded: null, weight_quantity: 0, share: null, fallback: false }
   assert.equal(costRowMeta(manual, '16/09/2026'), '16/09/2026 · sokha')
 })
 
@@ -189,7 +190,7 @@ function renderBreakdown(payload: unknown, canViewCosts = true): string {
     if (id === 'react/jsx-runtime') return require(id)
     if (id.includes('AppContext')) return { useApp: () => ({ user: { role: 'admin' } }) }
     if (id.includes('acquisitionCostAccess')) return { canViewAcquisitionCosts: () => canViewCosts }
-    if (id.includes('costBreakdownFormat')) return { formatCostFormula, costExclusionLabelKey, costRowPrimaryText, costRowMeta, normalizeCostBreakdown }
+    if (id.includes('costBreakdownFormat')) return costBreakdownFormat
     if (id.includes('formatters')) return { fmtDate: (value: string) => value }
     if (id.includes('productReadTransport')) return { getProductCostBreakdown: () => { throw new Error('render must not fetch') } }
     if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
@@ -256,6 +257,50 @@ await runTest('catalog float renders distinct-positive means and never the legac
     }
     assert.ok(renderBreakdown({ ...payload, result_usd: 17 }).includes('>$17.00<'), 'result remains server-authoritative, not locally recomputed')
   }
+})
+
+await runTest('U-cost: the float reads the quantity-weighted cost -- each on-hand row\'s quantity and share, sold-out rows greyed and not counted', () => {
+  // The Worker's payload for the owner's example: 2 left at 12.00, 8 at 12.50,
+  // plus a sold-out lot and an unrecorded (0) cost lot.
+  const payload = {
+    product_id: 42,
+    inputs: [
+      { source: 'lot', label: 'A', lot_code: 'L-A', cost_usd: 12, remaining_quantity: 2, weight_quantity: 2, share: 0.2, fallback: false, excluded: null },
+      { source: 'lot', label: 'B', lot_code: 'L-B', cost_usd: 12.5, remaining_quantity: 8, weight_quantity: 8, share: 0.8, fallback: false, excluded: null },
+      { source: 'lot', label: 'Z', lot_code: 'L-Z', cost_usd: 0, remaining_quantity: 4, weight_quantity: 0, share: null, fallback: false, excluded: 'zero' },
+      { source: 'lot', label: 'S', lot_code: 'L-S', cost_usd: 11, remaining_quantity: 0, weight_quantity: 0, share: null, fallback: false, excluded: 'depleted' },
+    ],
+    weighted_terms: [{ cost_usd: 12, quantity: 2 }, { cost_usd: 12.5, quantity: 8 }],
+    weighted_quantity: 10,
+    distinct_usd: [12, 12.5], mean_usd: 12.4, result_usd: 12.4,
+  }
+  const normalized = normalizeCostBreakdown(payload)!
+  assert.deepEqual(normalized.inputs.map((row) => [row.weight_quantity, row.share]), [[2, 0.2], [8, 0.8], [0, null], [0, null]])
+  assert.equal(costBreakdownFormat.formatBreakdownFormula(normalized), '(2 × 12.00 + 8 × 12.50) / 10 = 12.40')
+  assert.notEqual(costBreakdownFormat.formatBreakdownFormula(normalized), formatCostFormula([12, 12.5], 12.25), 'not the unweighted reading')
+  const html = renderBreakdown(payload)
+  assert.ok(html.includes('(2 × 12.00 + 8 × 12.50) / 10 = 12.40'), 'the weighted formula')
+  assert.ok(html.includes('2 on hand · 20%') && html.includes('8 on hand · 80%'), 'each counted row shows its quantity and share')
+  assert.ok(html.includes('>$12.40<'), 'the result')
+  const soldOut = html.slice(html.indexOf('L-S'))
+  assert.ok(soldOut.includes('cost_breakdown_excluded_depleted'), 'the sold-out row says it is not counted')
+  const soldOutRow = html.slice(html.lastIndexOf('<li', html.indexOf('L-S')), html.indexOf('</li>', html.indexOf('L-S')))
+  assert.match(soldOutRow, /opacity-50/, 'the sold-out row is greyed')
+  assert.doesNotMatch(soldOutRow, /on hand/, 'the sold-out row carries no weight')
+
+  // Nothing on hand: the newest received lot stands in and says so.
+  const fallbackHtml = renderBreakdown({
+    product_id: 42,
+    inputs: [{ source: 'lot', label: 'N', lot_code: 'L-N', cost_usd: 13, remaining_quantity: 0, weight_quantity: 0, share: null, fallback: true, excluded: null }],
+    weighted_terms: [], weighted_quantity: 0, distinct_usd: [13], mean_usd: 13, result_usd: 13,
+  })
+  assert.ok(fallbackHtml.includes('Nothing on hand - newest received cost'))
+  assert.ok(fallbackHtml.includes('>$13.00<'))
+
+  // An older Worker's payload (no weighted terms) still reads its own formula.
+  assert.equal(costBreakdownFormat.formatBreakdownFormula(normalizeCostBreakdown({ inputs: [], distinct_usd: [3, 5], mean_usd: 4, result_usd: 4 })!), '(3.00 + 5.00) / 2 = 4.00')
+  assert.equal(costBreakdownFormat.formatCostShare(1 / 3), '33.3%')
+  assert.equal(costBreakdownFormat.formatCostShare(0), '')
 })
 
 // ---------------------------------------------------------------------------

@@ -119,14 +119,19 @@ function loadProductsRoute(d1) {
   const realSqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'), {})
   const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), { './moneyPrecision': realMoneyPrecision })
   const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
+  const realCatalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './moneyPrecision': realMoneyPrecision })
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+    // U-cost: merge undo re-derives catalog cost with the real formula.
+    './catalogCostRecompute': realCatalogCost,
   })
   const mod = loadTs(path.join('routes', 'products.ts'), {
     hono: { Hono: FakeHono },
+    // U-cost: the merge fold re-derives the keeper's catalog cost too.
+    '../lib/catalogCostRecompute': realCatalogCost,
     '../lib/db': { getDb: () => adapter },
     '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': realUndoAppliers,
@@ -180,6 +185,8 @@ const EXCLUDED = new Map([
   ['sale_amendments.product_id', 'SNAPSHOT, declared as such in migration 0115'],
   ['sale_not_paid_repair_0173.product_id', 'provenance: repair receipt of migration 0173 (before-values per line)'],
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
+  ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],
+  ['sale_cost_repair_0200.product_id', 'provenance: backup of held migration 0200 (sale line cost before/after; recovery keys on sale_item_id)'],
   // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
   // stock_session_members included. It is excluded instead, and refused rather
   // than reparented, because the column is the replay DRIVER and not a link:

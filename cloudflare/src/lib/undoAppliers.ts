@@ -1,6 +1,7 @@
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getDb } from './db'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -359,7 +360,8 @@ export type ProductMergeKeeperChoice = {
 //   stock_row_moves, import_auto_merges, legacy_* -- these record what a PAST
 //     operation did to a specific product id; repointing them would rewrite
 //     provenance rather than move a live link.
-//   sale_not_paid_repair_0173, catalog_cost_recompute_0175 -- repair receipts of
+//   sale_not_paid_repair_0173, catalog_cost_recompute_0175,
+//   catalog_cost_repair_0195_backup, sale_cost_repair_0200 (held) -- repair receipts of
 //     a data migration (before-values and applied flags per product id); the
 //     same provenance rule as stock_row_moves: they say what was repaired, they
 //     are not a live link.
@@ -1427,6 +1429,16 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @keeperId), updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId', params: { keeperId } })
   stmts.push({ sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @dupId), updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
 
+  // 8. U-cost (supervisor decision, 2026-09-25): the keeper's cost restored in
+  //    step 1 is a snapshot, and re-pointing lots (step 6) fires no 0195
+  //    trigger. Re-derive both rows from the lots they now hold, so a lot that
+  //    sold out since the merge never counts again. No-op when already right.
+  //    A group undo's intermediate step lands on its predecessor's post-merge
+  //    row; productMergeGroupPredecessorTimestamps accepts the derived figure
+  //    for the two cost columns (the lot restores above fire the triggers anyway).
+  stmts.push(catalogCostRecomputeIfChangedStatement(keeperId))
+  stmts.push(catalogCostRecomputeIfChangedStatement(dupId))
+
   return stmts
 }
 
@@ -2005,6 +2017,17 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
     }
     return rows
   }
+  // U-cost (0195): the on-hand triggers own a product's two USD cost columns.
+  // Restoring a fold's lots re-derives them, so the post-undo check accepts
+  // either the saved figure or the one derived from the lots now held (a
+  // legacy after-image recorded the plan's merged cost, not the derivation).
+  const derivedCostColumns = new Set(['cost_price_usd', 'purchase_price_usd'])
+  const fieldGuard = (table: string, field: string, derivedCost: boolean) => {
+    const saved = `json_extract(saved.value,'$.${field}')`
+    return derivedCost && table === 'products' && derivedCostColumns.has(field)
+      ? `(live."${field}" IS ${saved} OR live."${field}" IS (SELECT ${CATALOG_COST_DERIVE_SQL} FROM products WHERE products.id = live.id))`
+      : `live."${field}" IS ${saved}`
+  }
   const rowGuards = (table: string, rows: Record<string, unknown>[], omitTimestamp: boolean): AtomicMergeStatement[] => {
     const shapes = new Map<string, Record<string, unknown>[]>()
     for (const row of rows) {
@@ -2016,7 +2039,7 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
     return [...shapes].map(([shape, values]) => ({
       sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@rows) saved WHERE NOT EXISTS(
         SELECT 1 FROM ${table} live WHERE ${(JSON.parse(shape) as string[])
-          .map((field) => `live."${field}" IS json_extract(saved.value,'$.${field}')`).join(' AND ')}
+          .map((field) => fieldGuard(table, field, omitTimestamp)).join(' AND ')}
       )) THEN 1 ELSE json_extract('', '$') END AS product_merge_group_timestamp_guard`,
       params: { rows: JSON.stringify(values) },
     }))

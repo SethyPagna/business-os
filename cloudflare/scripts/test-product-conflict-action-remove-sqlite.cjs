@@ -57,7 +57,10 @@ async function main() {
       INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(99001,2,3);
       UPDATE products SET stock_quantity=5 WHERE id=10000;
       UPDATE product_batches SET received_at='2026-08-17',expiry_date='2028-08-17',unit_cost_usd=4.25,
-        received_quantity=5,received_cost_usd=21.25 WHERE id=99001;`)
+        received_quantity=5,received_cost_usd=21.25 WHERE id=99001;
+      -- U-cost 0195: the lot-cost editors re-derive the catalog cost; keep the
+      -- seeded product consistent with its on-hand lot, as the app would.
+      UPDATE products SET cost_price_usd=4.25,purchase_price_usd=4.25 WHERE id=10000;`)
     const source = productGraph(fixture.d1)
     const removed = await remove(fixture.app,10000,{reason:'Multi-branch replay',client_request_id:'multi_branch_replay'})
     assert.equal(removed.status,200,JSON.stringify(removed.body))

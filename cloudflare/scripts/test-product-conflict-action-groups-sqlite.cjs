@@ -116,6 +116,8 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
     './productDelete': productDelete,
+    // U-cost: merge undo re-derives both rows' catalog cost with the real formula.
+    './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './db': {} }),
     './saleBulkStatus': { replaySaleBulkStatus: never },
     './saleBulkUpdate': { BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', replaySaleBulkUpdate: never },
     './returnBulkAction': { RETURN_BULK_ACTION_KIND: 'return.fields.bulk', replayReturnBulkAction: never },
@@ -132,6 +134,8 @@ function loadRoute(d1, realMergeRuntime = false) {
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
+    // U-cost: the post-fold keeper check reads the on-hand cost derivation.
+    '../lib/catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './db': {} }),
     '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },

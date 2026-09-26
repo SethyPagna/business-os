@@ -319,7 +319,10 @@ async function main() {
     const keeper = { ...fixture.d1.db.prepare(`SELECT barcode,category,brand,unit,cost_price_usd,selling_price_usd,
       wholesale_price_usd,stock_quantity FROM products WHERE id=10000`).get() }
     assert.deepEqual(keeper, { barcode: '700000', category: 'C', brand: 'Two', unit: 'pack',
-      cost_price_usd: 6, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
+      // U-cost (owner ruling 2026-09-25): the keeper's catalog cost is the quantity-weighted
+      // mean of the lots it now holds -- 2 @ 4 in LOT-A, and LOT-C's 4 units folded into
+      // LOT-B's 3 @ 6: (2 x 4 + 7 x 6) / 9 = 5.5556. The plan's distinct mean said 6.
+      cost_price_usd: 5.5556, selling_price_usd: 10, wholesale_price_usd: 9, stock_quantity: 9 })
     assert.deepEqual(fixture.d1.db.prepare('SELECT id,is_active FROM products WHERE id IN (10001,10002) ORDER BY id').all().map((row) => ({ ...row })), [
       { id: 10001, is_active: 0 }, { id: 10002, is_active: 0 },
     ])

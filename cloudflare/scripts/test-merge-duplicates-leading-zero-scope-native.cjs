@@ -95,7 +95,10 @@ function loadRoute(db) {
   })
   const productMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
   const conflictBatch = loadTs(path.join('lib', 'productConflictMergeBatch.ts'))
+  // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
+  const catalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} })
   const undoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
+    './catalogCostRecompute': catalogCost,
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -113,6 +116,7 @@ function loadRoute(db) {
     '../lib/sqlBinding': sqlBinding,
     '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': undoAppliers,
+    '../lib/catalogCostRecompute': catalogCost,
   }).default
 }
 

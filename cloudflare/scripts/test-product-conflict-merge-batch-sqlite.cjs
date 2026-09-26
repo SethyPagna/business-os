@@ -105,7 +105,10 @@ function loadRoute(d1) {
       : action === 'image' && user.noImages ? 'none' : 'full',
     getPermissionTier: () => 'full', hasPermission: () => true, getMergedPermissions: () => ({}), isAdminControlUser: () => true,
   }
+  // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
+  const catalogCost = loadTs('lib/catalogCostRecompute.ts', { './db': {} })
   const undo = loadTs('lib/undoAppliers.ts', {
+    './catalogCostRecompute': catalogCost,
     './actorSnapshot': actor, '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions,
@@ -115,6 +118,7 @@ function loadRoute(d1) {
     '../lib/actorSnapshot': actor, '../lib/productDetailRule': detail, '../lib/sqlBinding': binding,
     '../lib/productIdentity': identity, '../lib/productMerge': merge, '../lib/productMergeSnapshot': snapshot,
     '../lib/productConflictMergeBatch': selected, '../lib/undoAppliers': undo, '../lib/permissions': permissions,
+    '../lib/catalogCostRecompute': catalogCost,
     '../lib/audit': { audit: async () => {} }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
   })

@@ -113,7 +113,7 @@ function setup() {
   wide.receiptBaselines.set(1, baseline)
   await wide.db.batch(wide.plan(2))
   assert.equal(wide.sqlite.prepare('SELECT COUNT(*) n FROM product_batches WHERE unit_cost_usd=2').get().n, 2, 'same old price after override is a new receipt lot')
-  assert.equal(wide.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 5.5)
+  assert.equal(wide.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 6.6667, 'U-cost weighted: the override prices the 2 units it covered, (2 x 9 + 1 x 2) / 3')
   assert.equal(wide.sqlite.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n, 1, 'receipts never mint manual overrides')
 
   const stale = setup()

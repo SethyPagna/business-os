@@ -169,12 +169,24 @@ export function productMergePlanSourceMemberMatches(plan: ProductMergeClusterPla
   return ALL_MERGE_MONEY_FIELDS.every((field) => samePlanMoney(member.money[field], row[field]))
 }
 
-export function productMergePlanKeeperMatches(plan: ProductMergeClusterPlan, row: Record<string, unknown>): boolean {
+// U-cost (migration 0195): once a fold lands, the on-hand triggers re-derive
+// the keeper's catalog USD cost as the quantity-weighted mean of its on-hand
+// lots, which need not equal the plan's merged figure. A caller that has read
+// that derivation (CATALOG_COST_DERIVE_SQL, same instant) passes it; the
+// keeper's USD cost then matches when it equals EITHER the plan figure (no
+// derivable lots, stored value kept) OR the derived figure. Every other money
+// field, and the KHR cost the triggers never write, still pins to the plan.
+export function productMergePlanKeeperMatches(
+  plan: ProductMergeClusterPlan,
+  row: Record<string, unknown>,
+  derivedCostUsd?: number | null,
+): boolean {
   if (Number(row.id) !== plan.keeperId) return false
   const economics = resolveProductMergeClusterPlanEconomics(plan)
   const source = plan.members.find((member) => member.id === plan.keeperId)
   if (!source || economics.issues.length) return false
-  return ALL_MERGE_MONEY_FIELDS.every((field) => samePlanMoney(economics.merged[field] ?? source.money[field], row[field]))
+  return ALL_MERGE_MONEY_FIELDS.every((field) => samePlanMoney(economics.merged[field] ?? source.money[field], row[field])
+    || (field === 'cost_price_usd' && derivedCostUsd != null && samePlanMoney(derivedCostUsd, row[field])))
 }
 
 export function productMergeNumericError(issues: ProductMergeNumericIssue[]): string {

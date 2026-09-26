@@ -724,7 +724,10 @@ async function main() {
     assert.equal(receipt.createdCount, 1)
     assert.equal(receipt.items[0].createdProduct, true)
     const created = f.sql.prepare("SELECT id,stock_quantity,cost_price_usd,purchase_price_usd FROM products WHERE name='New Cream'").get()
-    assert.deepEqual(created, { id: 2, stock_quantity: 3, cost_price_usd: 4.1235, purchase_price_usd: 0 })
+    // U-cost (owner ruling 2026-09-25, migration 0195 triggers): the catalog cost is
+    // derived from the lots on hand, so the new lot (3 @ 4) sets both cost columns;
+    // the typed product-form figure 4.12345 is not a manual entry and does not survive.
+    assert.deepEqual(created, { id: 2, stock_quantity: 3, cost_price_usd: 4, purchase_price_usd: 4 })
     assert.equal(f.sql.prepare("SELECT cost_price_khr FROM products WHERE name='New Cream'").get().cost_price_khr, 5.0001)
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=2 AND branch_id=1').get().quantity, 3)
     assert.equal(f.sql.prepare('SELECT received_quantity FROM product_batches WHERE variant_product_id=2').get().received_quantity, 3)

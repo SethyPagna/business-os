@@ -1,4 +1,7 @@
 // Real migrated SQLite, D1Compat, stock-session planner/replay and batch route.
+// U-cost (owner ruling 2026-09-25): the catalog cost is the QUANTITY-WEIGHTED
+// mean of stock on hand, so a repeated same-price receipt reuses its lot (lot
+// identity is unchanged) but the extra units now weigh in the mean.
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user, receiveRequest } = require('./test-stock-session-atomic.cjs')
 
@@ -46,14 +49,14 @@ async function main() {
   assert.equal(lotRows(f)[1].id, second.items[0].batchId)
   const third = await api.commitStockSession(f.env, user, request('receipt-three-again', 3))
   assert.equal(third.items[0].batchId, first.items[0].batchId)
-  assert.equal(productCost(f), 4)
+  assert.equal(productCost(f), 3.6667, '(2 x 3 + 1 x 5) / 3 -- the distinct mean would say 4')
   const zero = await api.commitStockSession(f.env, user, request('receipt-zero-free', 0))
   assert.notEqual(zero.items[0].batchId, first.items[0].batchId)
-  assert.equal(productCost(f), 4)
+  assert.equal(productCost(f), 3.6667, 'a 0-cost unit is not a recorded cost: neither numerator nor denominator')
   const beforeRejected = snapshots(f)
   await assert.rejects(api.commitStockSession(f.env, user, request('receipt-wrong-picked', 5, { batch_id:first.items[0].batchId })), e => e.code === 'batch_cost_mismatch')
   assert.equal(snapshots(f), beforeRejected)
-  console.log('PASS same-day3/5->4; repeat3 unchanged; explicit zero separate; mismatched picker fails; exact retry/undo/redo')
+  console.log('PASS same-day3/5->4; repeat3 re-weights to 3.6667; explicit zero separate; mismatched picker fails; exact retry/undo/redo')
 
   const oldLots = lotRows(f)
   const historyBeforeOverride = snapshots(f)
@@ -63,12 +66,11 @@ async function main() {
   assert.equal(snapshots(f), historyBeforeOverride, 'manual catalog override leaves historical money records unchanged')
   const afterOverride = await api.commitStockSession(f.env, user, request('receipt-after-override', 3))
   assert.ok(afterOverride.items[0].batchId > Math.max(...oldLots.map(row => row.id)))
-  assert.equal(productCost(f), 6.5)
+  assert.equal(productCost(f), 8.6, 'the override re-prices the 4 units it covered: (4 x 10 + 1 x 3) / 5')
   assert.deepEqual(lotRows(f).slice(0,oldLots.length), oldLots)
-  const beforeSecond = productCost(f)
   const sameAfter = await api.commitStockSession(f.env, user, request('receipt-after-repeat', 3))
   assert.equal(sameAfter.items[0].batchId, afterOverride.items[0].batchId)
-  assert.equal(productCost(f), beforeSecond)
+  assert.equal(productCost(f), 7.6667, '(4 x 10 + 2 x 3) / 6: the reused lot carries one more unit')
   console.log('PASS override baseline forces fresh same-day lot; subsequent same-price receipt reuses only post-override lot')
 
   const wide = fixture()
@@ -84,10 +86,10 @@ async function main() {
   for (const [index, cost] of [3, 5, 7, 3].entries()) {
     await api.commitStockSession(distinct.env, user, request(`distinct-mean-${index}`, cost))
   }
-  assert.equal(productCost(distinct), 5, '3/5 then7 averages all distinct receipt costs, never the previous mean')
-  assert.equal((await costs.getCatalogCostBreakdown(getDb(distinct.env), 1)).result_usd, 5)
-  assert.equal(lotRows(distinct).length, 3, 'repeated3 reuses its lot and cannot reweight the mean')
-  console.log('PASS distinct3/5/7->5 and repeated3 retains5; not mean-of-means5.5')
+  assert.equal(productCost(distinct), 4.5, '(2 x 3 + 5 + 7) / 4 from the lots, never the previous mean')
+  assert.equal((await costs.getCatalogCostBreakdown(getDb(distinct.env), 1)).result_usd, 4.5)
+  assert.equal(lotRows(distinct).length, 3, 'repeated3 reuses its lot; its two units weigh 2')
+  console.log('PASS 3/5/7/3 -> 4.5 weighted; not mean-of-means and not the distinct mean 5')
 
   const legacy = fixture()
   const input = {productId:1,branchId:1,quantity:1,receivedDate:'2026-09-05',unitCostUsd:3,supplierName:'Fixture'}
@@ -204,14 +206,14 @@ async function nativeD1() {
     await api.replayStockSession(env,user,'redo',b.actionHistoryId,1,JSON.parse(row.undo_payload))
     assert.equal(await readCost(),4)
     assert.equal((await api.commitStockSession(env,user,request('native-cost-repeat',3))).items[0].batchId,a.items[0].batchId)
-    assert.equal(await readCost(),4)
+    assert.equal(await readCost(),3.6667,'(2 x 3 + 1 x 5) / 3')
     await costs.recordManualCostEntry(getDb(env),1,{cost_price_usd:4,cost_price_khr:0},{cost_price_usd:10},{id:7,name:'Fixture'})
     await costs.recomputeCatalogCost(getDb(env),1)
     const c = await api.commitStockSession(env,user,request('native-override-new',2))
     assert.notEqual(c.items[0].batchId,a.items[0].batchId)
-    assert.equal(await readCost(),6)
-    assert.equal((await costs.getCatalogCostBreakdown(getDb(env),1)).result_usd,6)
-    console.log('PASS actual workerd D1 same-day distinct/repeated prices, override, SQL/JS mean and undo/redo')
+    assert.equal(await readCost(),8,'(3 x 10 + 1 x 2) / 4: the override prices the 3 units it covered')
+    assert.equal((await costs.getCatalogCostBreakdown(getDb(env),1)).result_usd,8)
+    console.log('PASS actual workerd D1 same-day distinct/repeated prices, override, SQL/JS weighted mean and undo/redo')
   } finally { await mf.dispose() }
 }
 main().then(nativeD1).catch(error => {console.error(error);process.exitCode=1})
