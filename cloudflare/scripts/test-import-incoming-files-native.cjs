@@ -170,6 +170,10 @@ ${stubs[args.path]}`,
       await test('mark-failed', { jobId: 'chunkfail' })
       assert.equal(await jobStatus('chunkfail'), 'failed')
       await assertKept(files, 'failed chunk, retry still possible')
+      // The files were uploaded before the run, so before it failed: the
+      // sweep ages each file as well as the job (S-uploads2b; a file younger
+      // than the grace is kept -- test-import-incoming-files-race-native.cjs).
+      await db.prepare(`UPDATE import_job_files SET created_at = datetime('now', '-3 hours') WHERE job_id = 'chunkfail'`).run()
       await db.prepare(`UPDATE import_jobs SET finished_at = datetime('now', '-30 minutes'), updated_at = datetime('now', '-30 minutes') WHERE id = 'chunkfail'`).run()
       await test('sweep', { nowMs: Date.now() })
       await assertKept(files, 'failed 30 minutes ago (inside the 1h grace)')
@@ -232,6 +236,7 @@ ${stubs[args.path]}`,
     {
       const idleOld = await seedJob('idle-old', 'pending')
       await db.prepare(`UPDATE import_jobs SET updated_at = datetime('now', '-25 hours') WHERE id = 'idle-old'`).run()
+      await db.prepare(`UPDATE import_job_files SET created_at = datetime('now', '-25 hours') WHERE job_id = 'idle-old'`).run()
       const idleNew = await seedJob('idle-new', 'pending')
       const running = await seedJob('running', 'applying')
       await db.prepare(`UPDATE import_jobs SET updated_at = datetime('now', '-3 days') WHERE id = 'running'`).run()

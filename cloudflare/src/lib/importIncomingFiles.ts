@@ -26,6 +26,19 @@ import { buildInClause, selectInChunks } from './sqlBinding'
 // rows (import_job_source_rows, kept 24h by lib/importRetention.ts); only a
 // job that failed before materialization finished is refused, with a clear
 // message, by routes/importJobs.ts's /:id/retry.
+//
+// The sweep judges every FILE by its own upload time, not only the job by
+// its timestamps (S-uploads2b). A job's clock says nothing about a file
+// attached later: a CSV uploaded to a job created 25h earlier (or to a
+// failed job, which accepts a corrected CSV) sat on a job that still looked
+// idle, the next tick deleted it, and /start then answered "Upload a CSV
+// before starting the import". Now no file younger than the threshold its
+// job is judged by (1h terminal grace / 24h never started) is removed:
+// registered rows by created_at, unregistered objects under the job's
+// prefix by R2's `uploaded`. storeUpload also touches the job on every
+// attach, so an attach counts as activity -- but that is the liveness half;
+// the per-file age is what holds even when a tick lands between the R2 put
+// and the row insert.
 
 export const IMPORT_INCOMING_PREFIX = 'imports/'
 // import_job_files.status once the object behind the row has been deleted.
@@ -45,9 +58,23 @@ export const STALE_INCOMING_MAX_AGE_HOURS = 24
 // Per-tick bound so one scheduled invocation stays small.
 const SWEEP_MAX_JOBS = 25
 const SWEEP_MAX_LIST_PAGES = 3
+const HOUR_MS = 60 * 60 * 1000
 
+// When a terminal job last moved: the later of finished_at and updated_at.
+// finished_at alone goes stale -- a reaped job that is retried and then
+// fails inside a chunk (markJobFailed stamps only updated_at) still carries
+// the first run's finished_at, which would cut the 1h grace short. SQLite's
+// two-argument MAX() is NULL when either side is, hence the COALESCEs.
+const TERMINAL_SINCE_SQL = `MAX(COALESCE(j.finished_at, j.updated_at), COALESCE(j.updated_at, j.finished_at))`
+
+// SQLite CURRENT_TIMESTAMP form ('YYYY-MM-DD HH:MM:SS', UTC), so cutoffs
+// compare correctly against created_at/updated_at as text.
 function sqliteTimestamp(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function uploadedMs(object: R2Object): number {
+  return object.uploaded instanceof Date ? object.uploaded.getTime() : Date.parse(String(object.uploaded || ''))
 }
 
 export function jobIdFromIncomingKey(key: string): string | null {
@@ -60,36 +87,58 @@ export interface IncomingPurgeResult {
   errors: string[]
 }
 
-// Deletes every temporary import object of one job: the registered
-// csv/zip rows that were never linked into the Library (file_asset_id IS
-// NULL) plus anything else under imports/<jobId>/, then marks the rows
-// purged. Never throws except for the restore-maintenance fence: a job's
-// terminal write must not fail because R2 blinked -- the sweep retries.
-export async function purgeImportIncomingFiles(env: Env, db: D1Compat, jobId: string): Promise<IncomingPurgeResult> {
+export interface IncomingPurgeOptions {
+  // Sweep mode: delete only files uploaded before this instant -- rows by
+  // their created_at, unregistered objects by R2's `uploaded`; a younger
+  // file (and its row) is left exactly as it is. Omitted at the terminal
+  // points (commit, cancel, dead letter), which remove everything the job
+  // has.
+  uploadedBeforeMs?: number
+}
+
+// Deletes the temporary import objects of one job: the registered csv/zip
+// rows that were never linked into the Library (file_asset_id IS NULL) plus
+// anything else under imports/<jobId>/, then marks the rows purged. Never
+// throws except for the restore-maintenance fence: a job's terminal write
+// must not fail because R2 blinked -- the sweep retries.
+export async function purgeImportIncomingFiles(env: Env, db: D1Compat, jobId: string, options: IncomingPurgeOptions = {}): Promise<IncomingPurgeResult> {
   try {
+    const cutoffMs = options.uploadedBeforeMs
+    const cutoff = cutoffMs === undefined ? null : sqliteTimestamp(cutoffMs)
     const rows = await db.prepare(`
-      SELECT id, stored_path FROM import_job_files
+      SELECT id, stored_path, created_at FROM import_job_files
       WHERE job_id = @id AND file_asset_id IS NULL AND stored_path LIKE 'imports/%'
         AND COALESCE(status, '') <> '${IMPORT_FILE_PURGED_STATUS}'
-    `).all<{ id: number; stored_path: string }>({ id: jobId })
-    const keys = new Set(rows.map((row) => String(row.stored_path || '')).filter(Boolean))
+    `).all<{ id: number; stored_path: string; created_at: string | null }>({ id: jobId })
+    // A row with no created_at cannot be aged; it counts as old, as before.
+    const isDue = (row: { created_at: string | null }) => cutoff === null || String(row.created_at || '') < cutoff
+    const dueRows = rows.filter(isDue)
+    const youngKeys = new Set(rows.filter((row) => !isDue(row)).map((row) => String(row.stored_path || '')))
+    const keys = new Set(dueRows.map((row) => String(row.stored_path || '')).filter((key) => key && !youngKeys.has(key)))
     // Anything under the job's own prefix, registered or not (a crash
-    // between R2 put and the row insert leaves an unregistered object).
+    // between R2 put and the row insert leaves an unregistered object) --
+    // except a younger file's object, or, in sweep mode, an unregistered
+    // object uploaded after the cutoff (its row may be about to land).
     const prefix = `${IMPORT_INCOMING_PREFIX}${jobId}/`
     let cursor: string | undefined
     for (let page = 0; page < SWEEP_MAX_LIST_PAGES; page += 1) {
       const listed = await env.ASSETS.list({ prefix, cursor, limit: 1000 })
-      for (const object of listed.objects) keys.add(object.key)
+      for (const object of listed.objects) {
+        if (keys.has(object.key) || youngKeys.has(object.key)) continue
+        if (cutoffMs !== undefined && !(uploadedMs(object) < cutoffMs)) continue
+        keys.add(object.key)
+      }
       if (!listed.truncated) break
       cursor = listed.cursor
     }
-    if (!keys.size && !rows.length) return { deleted: 0, errors: [] }
+    if (!keys.size && !dueRows.length) return { deleted: 0, errors: [] }
     const result = keys.size ? await deleteObjectsBulk(env.ASSETS, [...keys]) : { deleted: 0, errors: [] }
-    if (!result.errors.length && rows.length) {
+    if (!result.errors.length && dueRows.length) {
       await db.prepare(`
         UPDATE import_job_files SET status = '${IMPORT_FILE_PURGED_STATUS}', updated_at = CURRENT_TIMESTAMP
         WHERE job_id = @id AND file_asset_id IS NULL AND stored_path LIKE 'imports/%'
-      `).run({ id: jobId })
+          ${cutoff === null ? '' : `AND COALESCE(created_at, '') < @cutoff`}
+      `).run(cutoff === null ? { id: jobId } : { id: jobId, cutoff })
     }
     return result
   } catch (error) {
@@ -125,41 +174,50 @@ export interface IncomingSweepResult {
 //      STALE_INCOMING_MAX_AGE_HOURS;
 //   3. objects under imports/ older than STALE_INCOMING_MAX_AGE_HOURS whose
 //      job no longer exists or is terminal.
-// Jobs that are running or awaiting a person's review keep their file.
+// In cases 1 and 2 the file itself must also be older than the same cutoff
+// (see the header): a file attached after the job went quiet waits out its
+// own grace. Jobs that are running or awaiting a person's review keep their
+// file.
 export async function sweepStaleImportIncomingFiles(env: Env, nowMs: number = Date.now()): Promise<IncomingSweepResult> {
   const db = getDb(env)
   let jobsPurged = 0
   let orphanObjectsDeleted = 0
   let errors = 0
-  const terminalCutoff = sqliteTimestamp(nowMs - TERMINAL_INCOMING_GRACE_HOURS * 60 * 60 * 1000)
-  const staleCutoff = sqliteTimestamp(nowMs - STALE_INCOMING_MAX_AGE_HOURS * 60 * 60 * 1000)
+  const terminalCutoffMs = nowMs - TERMINAL_INCOMING_GRACE_HOURS * HOUR_MS
+  const staleCutoffMs = nowMs - STALE_INCOMING_MAX_AGE_HOURS * HOUR_MS
+  const terminalCutoff = sqliteTimestamp(terminalCutoffMs)
+  const staleCutoff = sqliteTimestamp(staleCutoffMs)
 
   const jobs = await db.prepare(`
-    SELECT DISTINCT j.id FROM import_jobs j
+    SELECT DISTINCT j.id, j.status FROM import_jobs j
     JOIN import_job_files f ON f.job_id = j.id
     WHERE f.file_asset_id IS NULL AND f.stored_path LIKE 'imports/%'
       AND COALESCE(f.status, '') <> '${IMPORT_FILE_PURGED_STATUS}'
       AND (
-        (j.status IN ${TERMINAL_STATUS_SQL} AND COALESCE(j.finished_at, j.updated_at) < @terminalCutoff)
-        OR (j.status IN ('pending', 'created') AND j.updated_at < @staleCutoff)
+        (j.status IN ${TERMINAL_STATUS_SQL} AND ${TERMINAL_SINCE_SQL} < @terminalCutoff
+          AND COALESCE(f.created_at, '') < @terminalCutoff)
+        OR (j.status IN ('pending', 'created') AND j.updated_at < @staleCutoff
+          AND COALESCE(f.created_at, '') < @staleCutoff)
       )
     LIMIT ${SWEEP_MAX_JOBS}
-  `).all<{ id: string }>({ terminalCutoff, staleCutoff })
+  `).all<{ id: string; status: string }>({ terminalCutoff, staleCutoff })
   for (const job of jobs) {
-    const result = await purgeImportIncomingFiles(env, db, String(job.id))
+    const terminal = (IMPORT_TERMINAL_STATUSES as readonly string[]).includes(String(job.status))
+    const result = await purgeImportIncomingFiles(env, db, String(job.id), {
+      uploadedBeforeMs: terminal ? terminalCutoffMs : staleCutoffMs,
+    })
     if (result.errors.length) errors += 1
     else jobsPurged += 1
   }
 
   // Orphans: R2 objects under imports/ with no live job behind them.
-  const staleBeforeMs = nowMs - STALE_INCOMING_MAX_AGE_HOURS * 60 * 60 * 1000
   const candidates: { key: string; jobId: string }[] = []
   let cursor: string | undefined
   for (let page = 0; page < SWEEP_MAX_LIST_PAGES; page += 1) {
     const listed = await env.ASSETS.list({ prefix: IMPORT_INCOMING_PREFIX, cursor, limit: 1000 })
     for (const object of listed.objects) {
-      const uploadedMs = object.uploaded instanceof Date ? object.uploaded.getTime() : Date.parse(String(object.uploaded || ''))
-      if (!Number.isFinite(uploadedMs) || uploadedMs >= staleBeforeMs) continue
+      const objectUploadedMs = uploadedMs(object)
+      if (!Number.isFinite(objectUploadedMs) || objectUploadedMs >= staleCutoffMs) continue
       const jobId = jobIdFromIncomingKey(object.key)
       candidates.push({ key: object.key, jobId: jobId || '' })
     }

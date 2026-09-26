@@ -104,6 +104,56 @@ type AvatarUploadPayload = {
   fileName?: string
 }
 
+// S-uploads2b: an avatar is an image. When the Worker refuses a file for its
+// type, its message was written for the Library ("images ... and videos
+// (MP4, MOV, WebM)") or is plain English. On the avatar surface the person
+// gets its own images-only message, in their language, instead. The set
+// holds the Worker's exact sentences: cloudflare/src/lib/uploadSecurity.ts's
+// UNSUPPORTED_UPLOAD_MESSAGE (what the Library's POST /api/files/upload
+// answers), UNSUPPORTED_IMAGE_MESSAGE and MISMATCHED_UPLOAD_MESSAGE, and
+// routes/users.ts's POST /avatar-upload refusal of a non-image claim.
+// tests/imageOnlyUploadMessages.test.ts feeds each one through this
+// transport, so a reworded Worker message fails there. A refusal for what an
+// image CONTAINS (embedded markup) keeps its own message, and so does every
+// other failure. The Library page's own uploads keep the Library message.
+const AVATAR_TYPE_REFUSALS: ReadonlySet<string> = new Set([
+  'This file type is not supported. The Library only stores images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM).',
+  'This file type is not supported. Upload a JPEG, PNG, WebP, GIF or AVIF image.',
+  'Uploaded file contents do not match the selected file type. Please choose a valid image or video file.',
+  'Avatar must be an image file',
+])
+
+// English only when the language pack cannot be loaded; equal to en.json's
+// value (the test pins it).
+const AVATAR_UNSUPPORTED_TYPE_ENGLISH = 'Avatars must be JPEG, PNG, WebP, GIF or AVIF images. Choose another image.'
+
+// The message in the UI language AppContext applies to <html lang>, read from
+// the same language pack the screens use. Callers show error.message as is.
+// productImageUploadTransport.ts's productImageTypeRefusal is the product
+// surface's twin (that transport may not import this one).
+async function avatarTypeRefusal(): Promise<Error> {
+  let message = AVATAR_UNSUPPORTED_TYPE_ENGLISH
+  try {
+    const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
+    const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
+    const value = pack['avatar_unsupported_type']
+    if (typeof value === 'string' && value.trim()) message = value
+  } catch {
+    // Keep the English.
+  }
+  return Object.assign(new Error(message), { code: 'unsupported_image_type' })
+}
+
+function isAvatarTypeRefusal(serverMessage: unknown): boolean {
+  return typeof serverMessage === 'string' && AVATAR_TYPE_REFUSALS.has(serverMessage.trim())
+}
+
+// Video or audio is never an avatar. The Library endpoint the avatar uses
+// stores videos, so this is where one is turned away.
+function isVideoOrAudioFile(file: Blob): boolean {
+  return /^(?:video|audio)\//i.test(String(file.type || ''))
+}
+
 function normalizeFileListResult(result: unknown, params: FileListParams): unknown[] | FileListMeta {
   const response = result as FileListResponse | null
   const items = Array.isArray(response?.items) ? response.items : (Array.isArray(result) ? result : [])
@@ -237,7 +287,9 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
       const parsed = parseJsonResponse(xhr.responseText)
       if (xhr.status < 200 || xhr.status >= 300) {
         const message = parsed?.error || parsed?.message || xhr.responseText || xhr.status
-        finish(reject, new Error(`File upload failed: ${message}`))
+        // serverMessage: the Worker's own sentence, so a surface that is not
+        // the Library (uploadUserAvatar) can tell a type refusal apart.
+        finish(reject, Object.assign(new Error(`File upload failed: ${message}`), { serverMessage: String(parsed?.error || parsed?.message || '') }))
         return
       }
       finish(resolve, parsed?.data || parsed)
@@ -320,8 +372,18 @@ export function renameFileAsset(id: string | number, originalName: string): Prom
 export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploadPayload): Promise<unknown> {
   const scope = captureActorReadScope('users')
   if (file instanceof File) {
+    if (isVideoOrAudioFile(file)) throw await avatarTypeRefusal()
     const { userId, userName } = getCurrentUserContext()
-    const asset = await uploadFileAsset({ file, userId, userName }) as { public_path?: string } | null
+    let asset: { public_path?: string; media_type?: string } | null
+    try {
+      asset = await uploadFileAsset({ file, userId, userName }) as { public_path?: string; media_type?: string } | null
+    } catch (error) {
+      if (isAvatarTypeRefusal((error as { serverMessage?: unknown } | null)?.serverMessage)) throw await avatarTypeRefusal()
+      throw error
+    }
+    // The Library keeps videos, and judges by the bytes: a video that
+    // claimed to be an image is stored as one. It is not an avatar.
+    if (asset?.media_type && asset.media_type !== 'image') throw await avatarTypeRefusal()
     return {
       path: asset?.public_path || '',
       asset,
@@ -336,6 +398,7 @@ export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploa
 
   const sourceBlob = dataUrlToBlob(filePath)
   const sourceFile = new File([sourceBlob], fileName || 'avatar.jpg', { type: sourceBlob.type })
+  if (isVideoOrAudioFile(sourceFile)) throw await avatarTypeRefusal()
   const compressed = isCompressibleImageFile(sourceFile) ? await compressImageFile(sourceFile) : sourceFile
 
   const form = new FormData()
@@ -351,7 +414,11 @@ export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploa
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`Avatar upload failed: ${text || res.status}`)
+    const parsed = parseJsonResponse(text)
+    const serverMessage = String(parsed?.error || parsed?.message || '').trim()
+    if (isAvatarTypeRefusal(serverMessage)) throw await avatarTypeRefusal()
+    // The Worker's sentence, not its raw JSON body.
+    throw new Error(`Avatar upload failed: ${serverMessage || text || res.status}`)
   }
   return res.json()
 }

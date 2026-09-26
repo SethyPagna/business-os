@@ -7,9 +7,9 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
-import { classifyImportUpload, validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
-import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
+import { classifyImportUpload, validateUploadedBuffer, EMBEDDED_MARKUP_MESSAGE, MISMATCHED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE, UNSUPPORTED_UPLOAD_MESSAGE } from '../lib/uploadSecurity'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, runD1BatchInChunks, IMPORT_FILE_SKIPPED_ERROR_CODE, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
+import { readCentralDirectory, extractZipEntry, ZipFormatError, type ZipEntry } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -34,7 +34,17 @@ app.onError((error, c) => {
 app.use('*', acquisitionCostResponses)
 
 const ALLOWED_TYPES = new Set(['products', 'customers', 'suppliers', 'delivery_contacts', 'inventory', 'sales', 'stock_actions'])
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
+// The image formats the Library stores (lib/uploadSecurity.ts's
+// PUBLIC_IMAGE_MIMES: JPEG, PNG, WebP, GIF, AVIF), under every extension a
+// camera, phone or browser gives them. The name only decides what is TRIED;
+// storeUpload still decides by the bytes. BMP used to be listed here although
+// the byte check refuses it, so each BMP was extracted only to fail with the
+// Library's "images and videos" message; .avif and the JPEG aliases were not
+// listed, so a ZIP's AVIF photos were dropped without a word (S-uploads2b).
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.jpe', '.jfif', '.pjpeg', '.pjp', '.png', '.webp', '.gif', '.avif'])
+// A name that says nothing about the contents is judged by its bytes, as the
+// Library judges every upload.
+const BYTE_JUDGED_EXTENSIONS = new Set(['', '.bin'])
 const MAX_CSV_BYTES = 80 * 1024 * 1024
 const MAX_ZIP_BYTES = 2048 * 1024 * 1024
 const MAX_IMAGES_PER_REQUEST = 200
@@ -47,10 +57,154 @@ function extname(name: string): string {
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.jpe': 'image/jpeg',
+  '.jfif': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
+  '.pjp': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
-  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+}
+
+// --- Files a products import was given but did not import -----------------
+//
+// S-uploads2b: nothing a person put in an import is dropped without a word.
+// Every such file is reported BY NAME AND REASON where the import's other
+// problems already show: an import_job_errors row (row_number NULL, code
+// IMPORT_FILE_SKIPPED_ERROR_CODE) that the import report (ImportReportModal,
+// GET /:id/report) and errors.csv list, counted in import_jobs.failed_images
+// -- the tracker's and the import screen's issue count -- and returned in the
+// upload's own response (failed_images), which the upload toast counts.
+// Before this a ZIP's .heic/.avif/.txt/.mp4 entries, every image past the
+// 200th, and any per-file upload with such a name vanished silently.
+type ImportFileSkipReason =
+  | 'heic' | 'bmp' | 'tiff' | 'svg' | 'video' | 'not_image' | 'empty'
+  | 'refused' | 'failed' | 'extract_failed' | 'over_limit' | 'zip_unreadable'
+
+type SkippedImportFile = { name: string; reason: ImportFileSkipReason; message: string }
+
+// Refused by name, without extracting: formats the byte check never stores.
+const REFUSED_EXTENSION_REASONS: Record<string, ImportFileSkipReason> = {
+  '.heic': 'heic', '.heif': 'heic', '.hif': 'heic',
+  '.bmp': 'bmp', '.dib': 'bmp',
+  '.tif': 'tiff', '.tiff': 'tiff',
+  '.svg': 'svg', '.svgz': 'svg',
+  '.mp4': 'video', '.m4v': 'video', '.mov': 'video', '.qt': 'video', '.webm': 'video', '.mkv': 'video',
+  '.avi': 'video', '.wmv': 'video', '.3gp': 'video', '.mpg': 'video', '.mpeg': 'video',
+}
+
+const SKIP_REASON_MESSAGES: Partial<Record<ImportFileSkipReason, string>> = {
+  heic: 'HEIC/HEIF photos are not supported. Export them as JPEG (on an iPhone: Settings > Camera > Formats > Most Compatible) and add them again.',
+  bmp: 'BMP images are not supported. Save it as JPEG or PNG and add it again.',
+  tiff: 'TIFF images are not supported. Save it as JPEG or PNG and add it again.',
+  svg: 'SVG images are not supported. Export it as PNG and add it again.',
+  video: 'Videos cannot be product images. Add videos in the Library instead.',
+  not_image: 'Not an image. Product images must be JPEG, PNG, WebP, GIF or AVIF.',
+  empty: 'The file is empty.',
+  over_limit: `Not imported: one upload adds at most ${MAX_IMAGES_PER_REQUEST} images. Add the rest in another upload.`,
+}
+
+function skippedFile(name: string, reason: ImportFileSkipReason, message?: string): SkippedImportFile {
+  return { name, reason, message: message || SKIP_REASON_MESSAGES[reason] || UNSUPPORTED_IMAGE_MESSAGE }
+}
+
+// null = try it (storeUpload judges the bytes); otherwise why it is refused.
+function refusedImageNameReason(name: string): ImportFileSkipReason | null {
+  const extension = extname(name)
+  if (IMAGE_EXTENSIONS.has(extension) || BYTE_JUDGED_EXTENSIONS.has(extension)) return null
+  return REFUSED_EXTENSION_REASONS[extension] || 'not_image'
+}
+
+// storeUpload's byte check speaks for the Library ("images ... and videos
+// (MP4, MOV, WebM)"); an import image is images only.
+function importImageRefusal(name: string, error: unknown): SkippedImportFile {
+  const message = error instanceof Error ? error.message : String(error || '')
+  if (message === UNSUPPORTED_UPLOAD_MESSAGE || message === MISMATCHED_UPLOAD_MESSAGE || message === UNSUPPORTED_IMAGE_MESSAGE) {
+    return skippedFile(name, 'refused', UNSUPPORTED_IMAGE_MESSAGE)
+  }
+  if (message === EMBEDDED_MARKUP_MESSAGE) return skippedFile(name, 'refused', message)
+  return skippedFile(name, 'failed', message || 'Could not be imported.')
+}
+
+// zipReader's messages quote the entry name, which the report line already
+// leads with.
+function zipExtractFailure(name: string, error: unknown): SkippedImportFile {
+  const raw = error instanceof Error ? error.message : String(error || '')
+  const detail = raw.split(`"${name}" data`).join('its data').split(`"${name}"`).join('it').trim()
+  return skippedFile(name, 'extract_failed', `Could not be extracted from the ZIP${detail ? `: ${detail.replace(/\.$/, '')}` : ''}.`)
+}
+
+// OS bookkeeping a zipper adds on its own, never something the person chose
+// to import, so it is passed over without a report line: directories,
+// dotfiles (.DS_Store, ._ AppleDouble shadows), __MACOSX/, and Windows'
+// hidden Thumbs.db / desktop.ini. (zipReader's isRealFileEntry also drops
+// zero-byte entries; an empty photo.jpg IS reported.)
+const ZIP_NOISE_BASENAMES = new Set(['thumbs.db', 'ehthumbs.db', 'ehthumbs_vista.db', 'desktop.ini'])
+
+function isZipNoiseEntry(entry: ZipEntry): boolean {
+  if (entry.isDirectory) return true
+  if (entry.fileName.startsWith('__MACOSX/')) return true
+  const base = entry.fileName.split(/[\\/]/).pop() || entry.fileName
+  return base.startsWith('.') || ZIP_NOISE_BASENAMES.has(base.toLowerCase())
+}
+
+// Per upload, at most this many report lines name a file; the rest are one
+// line with their count. Bounds the D1 work of one request the way
+// MAX_IMAGES_PER_REQUEST bounds the stored images.
+const MAX_SKIPPED_FILES_LISTED = 200
+
+// Writes the report lines and recounts import_jobs.failed_images from them.
+// A line already on the job (the same ZIP uploaded again) is not repeated.
+// Best effort: the upload itself has succeeded by now, and failing it here
+// would have the person upload again and store every image twice -- the
+// upload's own response still lists each skipped file. The one exception is
+// the maintenance fence, which propagates here as from every write in this
+// file: nothing may be written while it is up.
+async function recordSkippedImportFiles(env: Env, jobId: string, skipped: SkippedImportFile[], source: 'zip' | 'images', container: string | null): Promise<void> {
+  if (!skipped.length) return
+  const code = IMPORT_FILE_SKIPPED_ERROR_CODE
+  const listed = skipped.slice(0, MAX_SKIPPED_FILES_LISTED)
+  const lines: Array<{ fileName: string; message: string; raw: Record<string, unknown> }> = listed.map((file) => ({
+    fileName: file.name,
+    message: `${file.name}: ${file.message}`,
+    raw: { source, container, file: file.name, reason: file.reason, files: 1 },
+  }))
+  const unlisted = skipped.length - listed.length
+  if (unlisted > 0) {
+    lines.push({
+      fileName: container || '',
+      message: `${container || 'This upload'}: ${unlisted} more file${unlisted === 1 ? ' was' : 's were'} not imported (only the first ${MAX_SKIPPED_FILES_LISTED} are listed by name).`,
+      raw: { source, container, reason: 'unlisted', files: unlisted },
+    })
+  }
+  try {
+    const db = await getImportFencedDb(env)
+    const existing = new Set((await db.prepare(`SELECT message FROM import_job_errors WHERE job_id = @id AND code = @code`)
+      .all<{ message: string }>({ id: jobId, code })).map((row) => row.message))
+    const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
+    for (const line of lines) {
+      if (existing.has(line.message)) continue
+      existing.add(line.message)
+      statements.push({
+        sql: `INSERT INTO import_job_errors (job_id, row_number, file_name, code, message, raw_json) VALUES (@job_id, NULL, @file_name, @code, @message, @raw_json)`,
+        params: { job_id: jobId, file_name: line.fileName, code, message: line.message, raw_json: JSON.stringify(line.raw) },
+      })
+    }
+    if (!statements.length) return
+    // A count line stands for `files` files; every other line for one.
+    statements.push({
+      sql: `UPDATE import_jobs SET failed_images = (
+              SELECT COALESCE(SUM(CASE WHEN json_valid(raw_json) THEN COALESCE(json_extract(raw_json, '$.files'), 1) ELSE 1 END), 0)
+              FROM import_job_errors WHERE job_id = @id AND code = @code
+            ) WHERE id = @id`,
+      params: { id: jobId, code },
+    })
+    await runD1BatchInChunks(db, statements)
+  } catch (error) {
+    if (isImportMaintenanceFenceError(error)) throw error
+    console.error('[import] could not record the files an upload skipped', jobId, error)
+  }
 }
 
 function permissionForType(type: string): string {
@@ -825,13 +979,22 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
 
   const addToLibrary = format.isPublic
   const key = addToLibrary ? `uploads/${storedName}` : `imports/${jobId}/incoming/${storedName}`
+  const db = await getImportFencedDb(c.env)
+  // S-uploads2b: attaching a file is activity on the job, and it is recorded
+  // BEFORE the object exists. The stale-file sweep (lib/importIncomingFiles.ts)
+  // used to judge a never-started job by updated_at alone, which no upload
+  // moved: a CSV attached to a job created 25h earlier was deleted by the
+  // next tick and /start then refused "Upload a CSV before starting the
+  // import". The sweep now also ages every file by its own upload time; this
+  // touch keeps the job's idle clock honest too (and the 20-minute reaper
+  // off a job that is still being filled).
+  await db.prepare(`UPDATE import_jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
   // K3: only library-bound files normalize (imports/... staging keys are
   // transient and outside the uploads/ audit scope); the helper's own
   // image-extension gate filters CSVs and other non-images.
   if (addToLibrary) await enqueueImageNormalization(c.env, key)
 
-  const db = await getImportFencedDb(c.env)
   let fileAssetId: number | null = null
   if (addToLibrary) {
     const mediaType = getMediaType(mimeType, originalName)
@@ -976,22 +1139,45 @@ app.post('/:id/zip', async (c) => {
       zipError = error instanceof ZipFormatError ? error.message : 'Failed to read ZIP contents'
     }
 
-    const imageEntries = entries.filter((entry) => isRealFileEntry(entry) && IMAGE_EXTENSIONS.has(extname(entry.fileName))).slice(0, MAX_IMAGES_PER_REQUEST)
+    // Every entry the person could have put there is either imported or
+    // reported (see recordSkippedImportFiles); only zipper bookkeeping is
+    // passed over. Refused formats are judged by name and never extracted.
+    const skipped: SkippedImportFile[] = []
+    const candidates: ZipEntry[] = []
+    for (const entry of entries) {
+      if (isZipNoiseEntry(entry)) continue
+      const refused = refusedImageNameReason(entry.fileName)
+      if (refused) skipped.push(skippedFile(entry.fileName, refused))
+      else if (entry.uncompressedSize === 0) skipped.push(skippedFile(entry.fileName, 'empty'))
+      else candidates.push(entry)
+    }
     const extractedImages: unknown[] = []
-    const failedImages: { file_name: string; error_message: string }[] = []
 
-    for (const entry of imageEntries) {
+    for (const entry of candidates.slice(0, MAX_IMAGES_PER_REQUEST)) {
+      let bytes: Uint8Array
       try {
-        const bytes = await extractZipEntry(zipBytes, entry)
-        const baseName = entry.fileName.split('/').pop() || entry.fileName
+        bytes = await extractZipEntry(zipBytes, entry)
+      } catch (error) {
+        if (isImportMaintenanceFenceError(error)) throw error
+        skipped.push(zipExtractFailure(entry.fileName, error))
+        continue
+      }
+      try {
+        const baseName = entry.fileName.split(/[\\/]/).pop() || entry.fileName
         const mimeType = IMAGE_MIME_BY_EXT[extname(baseName)] || 'application/octet-stream'
         const imageFile = new File([bytes], baseName, { type: mimeType })
         extractedImages.push(await storeUpload(c, id, 'image', imageFile, entry.fileName))
       } catch (error) {
         if (isImportMaintenanceFenceError(error)) throw error
-        failedImages.push({ file_name: entry.fileName, error_message: (error as Error).message || 'Failed to extract' })
+        skipped.push(importImageRefusal(entry.fileName, error))
       }
     }
+    for (const entry of candidates.slice(MAX_IMAGES_PER_REQUEST)) skipped.push(skippedFile(entry.fileName, 'over_limit'))
+    if (zipError) {
+      skipped.push(skippedFile(stored.original_name, 'zip_unreadable', `The ZIP could not be opened, so none of its images were imported (${zipError.replace(/\.$/, '')}).`))
+    }
+    await recordSkippedImportFiles(c.env, id, skipped, 'zip', stored.original_name)
+    const failedImages = skipped.map((entry) => ({ file_name: entry.name, error_message: entry.message, reason: entry.reason }))
 
     const after = await getJob(c.env, id)
     await auditImportEvent(c, 'import_job_upload', id, job, after || null, {
@@ -1002,9 +1188,11 @@ app.post('/:id/zip', async (c) => {
       imagesFailed: failedImages.length,
     })
 
+    // BulkImportModal shows this note only when it says "could not be read"
+    // (the whole ZIP is unusable); otherwise it counts failed_images.
     const note = zipError
       ? `ZIP stored, but could not be read: ${zipError}`
-      : `${extractedImages.length} image${extractedImages.length === 1 ? '' : 's'} extracted from ZIP and matched by filename, same as per-file image upload.${failedImages.length ? ` ${failedImages.length} entr${failedImages.length === 1 ? 'y' : 'ies'} could not be extracted.` : ''}`
+      : `${extractedImages.length} image${extractedImages.length === 1 ? '' : 's'} extracted from ZIP and matched by filename, same as per-file image upload.${failedImages.length ? ` ${failedImages.length} file${failedImages.length === 1 ? '' : 's'} in the ZIP ${failedImages.length === 1 ? 'was' : 'were'} not imported; the import report lists each one with the reason.` : ''}`
 
     return c.json({
       success: true,
@@ -1028,7 +1216,7 @@ app.post('/:id/images', async (c) => {
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
   const form = await c.req.formData()
-  const files = form.getAll('files').filter((f): f is File => f instanceof File).slice(0, MAX_IMAGES_PER_REQUEST)
+  const files = form.getAll('files').filter((f): f is File => f instanceof File)
   let relativePaths: string[] = []
   try {
     relativePaths = JSON.parse(String(form.get('relative_paths') || form.get('relativePaths') || '[]'))
@@ -1036,17 +1224,33 @@ app.post('/:id/images', async (c) => {
   } catch (_) {
     relativePaths = []
   }
+  // Same rule as a ZIP's entries: a file with a refused name (it used to be
+  // skipped with no trace), past the per-request limit, or refused by the
+  // byte check is reported by name and reason, never just left out.
   const saved = []
+  const skipped: SkippedImportFile[] = []
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index]
-    if (!IMAGE_EXTENSIONS.has(extname(file.name || ''))) continue
+    const reportName = String(relativePaths[index] || file.name || 'image')
+    const refused = index >= MAX_IMAGES_PER_REQUEST
+      ? 'over_limit'
+      : refusedImageNameReason(file.name || '') || (file.size === 0 ? 'empty' : null)
+    if (refused) {
+      const skip = skippedFile(reportName, refused)
+      skipped.push(skip)
+      saved.push({ original_name: file.name, status: 'rejected', error_message: skip.message })
+      continue
+    }
     try {
       saved.push(await storeUpload(c, id, 'image', file, relativePaths[index] || file.name))
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) throw error
-      saved.push({ original_name: file.name, status: 'rejected', error_message: (error as Error).message })
+      const skip = importImageRefusal(reportName, error)
+      skipped.push(skip)
+      saved.push({ original_name: file.name, status: 'rejected', error_message: skip.message })
     }
   }
+  await recordSkippedImportFiles(c.env, id, skipped, 'images', null)
   const after = await getJob(c.env, id)
   if (saved.length) {
     await auditImportEvent(c, 'import_job_upload', id, job, after || null, { source: 'api', fileKind: 'image', fileName: saved.length === 1 ? saved[0].original_name : `${saved.length} images` })
@@ -1149,7 +1353,7 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
     mimeType = validateUploadedBuffer(bytes, claimedMimeType, file.name || 'image').mime
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) throw error
-    return c.json({ success: false, error: (error as Error).message }, 400)
+    return c.json({ success: false, error: importImageRefusal(file.name || 'image', error).message }, 400)
   }
 
   // Defense in depth: this endpoint only ever exists to make a stored

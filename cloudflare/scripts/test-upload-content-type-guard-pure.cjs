@@ -20,16 +20,24 @@ const path = require('path')
 const ts = require('typescript')
 const assert = require('assert')
 
-function loadR2() {
-  const sourcePath = path.join(__dirname, '..', 'src', 'lib', 'r2.ts')
+function transpile(file, shim) {
+  const sourcePath = path.join(__dirname, '..', 'src', 'lib', file)
   const { outputText } = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
     fileName: sourcePath,
   })
   const moduleObj = { exports: {} }
-  new Function('exports', 'require', 'module', outputText)(moduleObj.exports, require, moduleObj)
+  new Function('exports', 'require', 'module', outputText)(moduleObj.exports, shim || require, moduleObj)
   return moduleObj.exports
 }
+
+// r2.ts lazily loads uploadSecurity to sniff `.bin` / extensionless keys.
+function loadR2() {
+  const uploadSecurity = transpile('uploadSecurity.ts')
+  return transpile('r2.ts', (request) => (request === './uploadSecurity' ? uploadSecurity : require(request)))
+}
+
+const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d])
 
 function makeBucket(seed) {
   return {
@@ -70,7 +78,10 @@ const bucket = makeBucket({
   'uploads/doc.pdf': { body: 'pdf', contentType: 'application/pdf' },
   'uploads/old.bmp': { body: 'bmp', contentType: 'image/bmp' },
   'uploads/noext': { body: '<script>1</script>', contentType: 'text/html' },
-  'uploads/noext-image': { body: 'png', contentType: 'image/png' },
+  // Extensionless keys are judged by their bytes (lib/r2.ts sniffing), so
+  // this one holds real PNG bytes; test-upload-legacy-extensions-pure.cjs
+  // covers the sniffing itself.
+  'uploads/noext-image': { body: PNG_BYTES, contentType: 'image/png' },
   'uploads/liar.jpg': { body: '<script>1</script>', contentType: 'text/html', contentDisposition: 'inline' },
   'uploads/photo.jpg': { body: 'jpg', contentType: 'image/jpeg' },
   'uploads/photo.PNG': { body: 'png', contentType: 'image/png' },
@@ -128,7 +139,7 @@ const tests = [
     assertAttachment(await serveObject(bucket, 'uploads/doc.pdf', get('/uploads/doc.pdf')), 'application/pdf', 'pdf')
     assertAttachment(await serveObject(bucket, 'uploads/old.bmp', get('/uploads/old.bmp')), 'image/bmp', 'bmp')
   }],
-  ['extensionless key with an allowlisted stored type stays inline', async () => {
+  ['extensionless key holding an allowlisted image stays inline', async () => {
     assertInline(await serveObject(bucket, 'uploads/noext-image', get('/uploads/noext-image')), 'image/png', 'noext-image')
   }],
   ['the extension wins over a hostile stored type and disposition', async () => {

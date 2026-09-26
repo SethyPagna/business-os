@@ -55,6 +55,39 @@ function QuickPreferenceTogglesFallback() {
   )
 }
 
+// The account avatar. A stored avatar that fails to load (deleted from the
+// Library, a legacy file the server no longer serves, offline) shows the
+// same initials the sidebar shows when there is no avatar at all -- never a
+// broken-image icon. Mirrors ProductImage: onError remembers the URL as
+// broken for a while, so the other avatar spots skip it too, and a new URL
+// (a changed avatar) is tried afresh.
+const BROKEN_AVATAR_RETRY_MS = 5 * 60 * 1000
+const brokenAvatarUrls = new Map<string, number>()
+
+function isRecentlyBrokenAvatar(src: string): boolean {
+  const lastFailedAt = Number(brokenAvatarUrls.get(src) || 0)
+  return lastFailedAt > 0 && Date.now() - lastFailedAt < BROKEN_AVATAR_RETRY_MS
+}
+
+function AccountAvatarImage({ src, alt, className, fallback }: { src?: string | null; alt: string; className: string; fallback: ReactNode }) {
+  const safeSrc = String(src || '').trim()
+  const [failedSrc, setFailedSrc] = useState('')
+  if (!safeSrc || failedSrc === safeSrc || isRecentlyBrokenAvatar(safeSrc)) return <>{fallback}</>
+  return (
+    <img
+      src={safeSrc}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      decoding="async"
+      onError={() => {
+        brokenAvatarUrls.set(safeSrc, Date.now())
+        setFailedSrc(safeSrc)
+      }}
+    />
+  )
+}
+
 type TranslateFn = (key: string) => string
 type IntentSource = 'focus' | 'pointer' | 'touch'
 
@@ -519,13 +552,16 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             style={textStyle}
           >
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{ background: 'var(--ui-accent)22' }}>
-              {user?.avatar_path ? (
-                <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 rounded-full object-cover" loading="lazy" decoding="async" />
-              ) : (
-                <span className="text-sm font-bold" style={{ color: 'var(--ui-accent)' }}>
-                  {user?.name?.[0]?.toUpperCase()}
-                </span>
-              )}
+              <AccountAvatarImage
+                src={user?.avatar_path}
+                alt={user?.name || 'User'}
+                className="h-8 w-8 rounded-full object-cover"
+                fallback={(
+                  <span className="text-sm font-bold" style={{ color: 'var(--ui-accent)' }}>
+                    {user?.name?.[0]?.toUpperCase()}
+                  </span>
+                )}
+              />
             </div>
             <div className="min-w-0 flex-1">
               <div className={`detail-scroll-text text-sm font-medium ${textClass || 'text-gray-900 dark:text-white'}`} style={textStyle}>
@@ -603,13 +639,16 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           <div className="relative z-50 flex-shrink-0">
             <button type="button" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-label={t('account') || 'Account'} className="bos-nav-avatar flex h-11 w-11 items-center justify-center rounded-full p-0.5">
               <div className="bos-nav-avatar-face flex h-10 w-10 items-center justify-center overflow-hidden rounded-full">
-                {user?.avatar_path ? (
-                  <img src={user.avatar_path} alt={user?.name || 'User'} className="h-10 w-10 object-cover" loading="lazy" decoding="async" />
-                ) : (
-                  <span className="text-base font-bold">
-                    {user?.name?.[0]?.toUpperCase()}
-                  </span>
-                )}
+                <AccountAvatarImage
+                  src={user?.avatar_path}
+                  alt={user?.name || 'User'}
+                  className="h-10 w-10 object-cover"
+                  fallback={(
+                    <span className="text-base font-bold">
+                      {user?.name?.[0]?.toUpperCase()}
+                    </span>
+                  )}
+                />
               </div>
             </button>
             {accountOpen ? (
@@ -618,11 +657,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                 <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-gray-700 dark:bg-gray-800">
                   <div className="mb-1 flex items-center gap-2.5 border-b border-gray-100 px-2.5 py-2 dark:border-gray-700">
                     <div className="bos-nav-avatar-face flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
-                      {user?.avatar_path ? (
-                        <img src={user.avatar_path} alt={user?.name || 'User'} className="h-8 w-8 object-cover" loading="lazy" decoding="async" />
-                      ) : (
-                        <span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>
-                      )}
+                      <AccountAvatarImage
+                        src={user?.avatar_path}
+                        alt={user?.name || 'User'}
+                        className="h-8 w-8 object-cover"
+                        fallback={<span className="text-sm font-bold">{user?.name?.[0]?.toUpperCase()}</span>}
+                      />
                     </div>
                     <div className="min-w-0">
                       <div className="detail-scroll-text text-sm font-medium text-gray-900 dark:text-white">{user?.name}</div>
