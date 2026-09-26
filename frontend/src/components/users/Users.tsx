@@ -33,6 +33,7 @@ import {
 import DeviceApprovals from './DeviceApprovals.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
+import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -134,17 +135,6 @@ interface MutationResult {
   id?: EntityId
   data?: { id?: EntityId } | null
   item?: { id?: EntityId } | null
-}
-
-type UserWritePayload = Record<string, unknown> & {
-  name: string
-  username: string
-  phone: string
-  email: string
-  avatar_path: string
-  role_id: EntityId | null
-  is_active: boolean | number
-  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface UsersApi {
@@ -741,20 +731,6 @@ export default function Users() {
       .join(', ')
   }
 
-  const buildUserWritePayload = useCallback((account: Partial<UserRecord> = {}, overrides: Partial<UserRecord> & { delete_user?: boolean | number } = {}): UserWritePayload => ({
-    name: String(overrides.name ?? account.name ?? '').trim(),
-    username: String(overrides.username ?? account.username ?? '').trim(),
-    phone: String(overrides.phone ?? account.phone ?? '').trim(),
-    email: String(overrides.email ?? account.email ?? '').trim(),
-    avatar_path: String(overrides.avatar_path ?? account.avatar_path ?? '').trim(),
-    role_id: overrides.role_id ?? account.role_id ?? null,
-    is_active: overrides.is_active ?? account.is_active ?? 1,
-    userId: currentUser?.id,
-    userName: currentUser?.name,
-    __rename_cascade: 'carry',
-    ...(overrides.delete_user ? { delete_user: 1 } : {}),
-  }), [currentUser?.id, currentUser?.name])
-
   const buildRoleWritePayload = useCallback((role: Partial<RoleRecord> = {}): Record<string, unknown> => ({
     name: String(role.name || '').trim(),
     permissions: normalizePermissionState(role.permissions),
@@ -828,15 +804,18 @@ export default function Users() {
       if (selectedUser) {
         const previousSnapshot = cloneHistorySnapshot(selectedUser)
         const nextSnapshot = cloneHistorySnapshot({ ...selectedUser, ...payload, id: selectedUser.id })
+        // Undo and redo replay the rename scope this edit was made with.
+        const replayScope = userEditReplayScope(previousSnapshot, nextSnapshot, renameScope)
+        const actor = { id: currentUser?.id, name: currentUser?.name }
         actionHistory.pushAction({
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot)), 'Undo user update')
+            const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot)), 'Redo user update')
+            const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot, actor, replayScope)), 'Redo user update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
