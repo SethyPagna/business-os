@@ -906,16 +906,38 @@ export default function POS() {
     } catch {}
   }, [settings.pos_payment_methods]) // eslint-disable-line
 
-  // Persist whenever orders or activeId change
+  // Persist whenever orders or activeId change. The state above was loaded
+  // for ONE storage scope; when the scope changes (the till mounted before
+  // the signed-in user resolved, or a different cashier signed in), the new
+  // scope's saved drafts are loaded instead of being overwritten with the old
+  // scope's carts. Writing first is what erased held orders overnight.
+  const loadedDraftScopeRef = useRef(posStorageScope)
+  const draftScopeChanged = loadedDraftScopeRef.current !== posStorageScope
   useEffect(() => {
+    if (loadedDraftScopeRef.current === posStorageScope) return
+    loadedDraftScopeRef.current = posStorageScope
+    let nextOrders: PosOrder[] = [normalizeOrder({}, 1)]
+    try {
+      const saved = readPosDraft(posOrdersStorageKey, 'bos_pos_orders')
+      const parsed = saved ? JSON.parse(saved) as unknown : null
+      if (Array.isArray(parsed) && parsed.length) nextOrders = parsed.map((order, index) => normalizeOrder(order as Partial<PosOrder>, index + 1))
+    } catch {}
+    setOrders(nextOrders)
+    setActiveId(readPosDraft(posActiveStorageKey, 'bos_pos_active'))
+    setOrderCounter(parseInt(readPosDraft(posCounterStorageKey, 'bos_pos_counter') || '2', 10) || 2)
+  }, [posStorageScope]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (draftScopeChanged) return
     writePosDraft(posOrdersStorageKey, JSON.stringify(orders))
-  }, [orders, posOrdersStorageKey])
+  }, [orders, posOrdersStorageKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (draftScopeChanged) return
     if (resolvedActiveId) writePosDraft(posActiveStorageKey, resolvedActiveId)
-  }, [resolvedActiveId, posActiveStorageKey])
+  }, [resolvedActiveId, posActiveStorageKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (draftScopeChanged) return
     writePosDraft(posCounterStorageKey, String(orderCounter))
-  }, [orderCounter, posCounterStorageKey])
+  }, [orderCounter, posCounterStorageKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Apply a partial update to the active order. Mirrors React's setState signature. */
   const patchActive = useCallback((patch: Partial<PosOrder>) => {
