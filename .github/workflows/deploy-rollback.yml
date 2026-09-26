@@ -1,6 +1,8 @@
 # Undo a production release from GitHub. Runs only when someone presses
 # "Run workflow", waits for the `production` environment's required
-# reviewer, and refuses to start unless the confirm box says ROLLBACK.
+# reviewer, and refuses to start unless the confirm box says ROLLBACK,
+# compared ordinally (byte for byte: no soft hyphen, zero-width or
+# look-alike letter passes).
 #
 #   worker   - put the website back to an earlier Worker version
 #              (empty version id = the version before the current one)
@@ -66,7 +68,7 @@ jobs:
         env:
           CONFIRM: ${{ inputs.confirm }}
         run: |
-          if ($env:CONFIRM -cne 'ROLLBACK') {
+          if (-not [string]::Equals($env:CONFIRM, 'ROLLBACK', [System.StringComparison]::Ordinal)) {
             Write-Output '::error::Type ROLLBACK (in capitals) in the confirm box.'
             exit 1
           }

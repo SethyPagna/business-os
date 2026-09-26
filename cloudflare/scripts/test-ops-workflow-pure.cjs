@@ -534,6 +534,75 @@ async function main() {
     notes.push(`${cases.length} confirm cases run under ${shell}; the replaced -cne ${admitted ? 'DOES' : 'does not'} admit a soft-hyphen look-alike here`)
   })
 
+  await check('all three workflows: every confirm check is ordinal and refuses soft-hyphen, zero-width and Cyrillic look-alikes under PowerShell', async () => {
+    // The one confirm step of Deploy and Deploy rollback, read as GitHub would hand it to pwsh.
+    const deployStep = (file) => {
+      const text = read('.github', 'workflows', file)
+      assert.strictEqual(count(text, /- name: Check the confirm word\n/g), 1, `${file}: one confirm step`)
+      const m = /\n( +)- name: Check the confirm word\n\1 {2}env:\n\1 {4}CONFIRM: \$\{\{ inputs\.confirm \}\}\n\1 {2}run: \|\n((?:\1 {4}.*\n)+)/.exec(text)
+      assert.ok(m, `${file}: the confirm step is not env CONFIRM + a run block`)
+      const script = m[2].split('\n').map((l) => l.slice(m[1].length + 4)).join('\n')
+      assert.ok(!/\s-[ci]?(ne|eq|like|notlike|match|notmatch)\b/i.test(script), `${file}: a culture-aware comparison operator in the confirm check`)
+      assert.ok(/\[string\]::Equals\(\$env:CONFIRM, '[A-Z]+', \[System\.StringComparison\]::Ordinal\)/.test(script), `${file}: not the ordinal compare`)
+      return script
+    }
+    for (const [, script] of strings(WF).filter(([w]) => /\.run$/.test(w))) {
+      if (/CONFIRM/.test(script)) assert.ok(!/\s-[ci]?(ne|eq|like|notlike|match|notmatch)\b/i.test(script), 'ops.yml: a culture-aware comparison in a confirm check')
+    }
+    const shell = findPowerShell()
+    if (!shell) {
+      assert.notStrictEqual(process.platform, 'win32', 'PowerShell is required on Windows to run the confirm checks')
+      deployStep('deploy.yml')
+      deployStep('deploy-rollback.yml')
+      notes.push('the Deploy / Deploy rollback confirm checks were verified statically only: no PowerShell on this machine')
+      return
+    }
+    // Look-alikes: invisible characters appended or inside the word, and one
+    // Latin letter swapped for its Cyrillic twin.
+    const CYRILLIC = { A: 'А', E: 'Е', O: 'О', C: 'С', a: 'а', e: 'е', o: 'о', c: 'с', p: 'р' }
+    const cyrillicTwin = (word) => {
+      const i = [...word].findIndex((ch) => CYRILLIC[ch])
+      assert.ok(i >= 0, `no Cyrillic twin for ${word}`)
+      return word.slice(0, i) + CYRILLIC[word[i]] + word.slice(i + 1)
+    }
+    const lookAlikes = (word) => [
+      `${word}${SOFT_HYPHEN}`,
+      `${word.slice(0, 2)}${SOFT_HYPHEN}${word.slice(2)}`,
+      `${word}${ZERO_WIDTH_JOINER}`,
+      `${word.slice(0, 3)}​${word.slice(3)}`,
+      `﻿${word}`,
+      cyrillicTwin(word),
+      word.toLowerCase() === word ? word.toUpperCase() : word.toLowerCase(),
+      ` ${word}`, `${word} `, '', undefined,
+    ]
+    const cases = []
+    for (const [file, word] of [['deploy.yml', 'DEPLOY'], ['deploy-rollback.yml', 'ROLLBACK']]) {
+      const script = deployStep(file)
+      cases.push({ label: `${file}, confirm ${word}`, script, env: { CONFIRM: word }, want: 0 })
+      for (const bad of lookAlikes(word)) cases.push({ label: `${file}, confirm ${JSON.stringify(bad)}`, script, env: { CONFIRM: bad }, want: 1 })
+    }
+    for (const task of TASKS) {
+      const script = WF.jobs[task].steps[0].run
+      for (const bad of lookAlikes(task)) cases.push({ label: `ops.yml ${task} job, confirm ${JSON.stringify(bad)}`, script, env: { CONFIRM: bad }, want: 1 })
+      for (const bad of lookAlikes(task)) cases.push({ label: `ops.yml gate, task ${task}, confirm ${JSON.stringify(bad)}`, script: WF.jobs.gate.steps[0].run, env: { TASK: task, CONFIRM: bad }, want: 1 })
+    }
+    // Counterexamples: what the replaced -cne let through, per word (a note, not a gate:
+    // it depends on the ICU build of the machine that runs the test).
+    const controls = ['DEPLOY', 'ROLLBACK'].map((word) => ({ script: `if ($env:CONFIRM -cne '${word}') {\n  exit 1\n}\n`, env: { CONFIRM: `${word.slice(0, 2)}${SOFT_HYPHEN}${word.slice(2)}` } }))
+    const results = await pool([...cases, ...controls], 6, (c) => runStepScript(shell, c.script, c.env))
+    const wrong = []
+    cases.forEach((c, n) => {
+      const r = results[n]
+      const printed = r.out.trim()
+      if (r.status !== c.want) wrong.push(`${c.label}: exit ${r.status}, want ${c.want} (${printed.slice(0, 200)})`)
+      else if (c.want === 1 && !printed.includes('::error::')) wrong.push(`${c.label}: refused without the error message (${printed.slice(0, 200)})`)
+      else if (c.want === 0 && printed !== '') wrong.push(`${c.label}: printed ${printed.slice(0, 200)}`)
+    })
+    assert.deepStrictEqual(wrong, [], wrong.join('\n'))
+    const admitted = results.slice(cases.length).filter((r) => r.status === 0).length
+    notes.push(`${cases.length} look-alike confirm cases across ops.yml, deploy.yml and deploy-rollback.yml run under ${shell}; the replaced -cne admits ${admitted} of 2 soft-hyphen DEPLOY/ROLLBACK words here`)
+  })
+
   await check('ops.yml: every step is a known one, in an order that deletes the Worker after any failure', () => {
     const allowedUses = new Set(['actions/checkout@v4', 'actions/setup-node@v4', 'actions/upload-artifact@v4'])
     for (const task of TASKS) {
