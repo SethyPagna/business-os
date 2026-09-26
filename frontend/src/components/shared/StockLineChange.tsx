@@ -54,20 +54,22 @@ const samePair = (a: [unknown, unknown], b: [unknown, unknown]) => a.every((valu
  * Owner, 26 Sep: the branch line first ("Shop 10 -> 7"), the total across
  * branches under it ("Total 18 -> 15"). When the business runs ONE active
  * branch (counted by the Worker from data, never a flag), the Total line is
- * redundant and is dropped -- but only while it really says the same thing:
- * a record from a branch since closed can still differ from the total, and
- * then both lines stay. With one branch and no derivable branch pair, the
- * single line carries the total under the branch's name. A null count
- * (unknown) keeps both lines.
+ * redundant and is dropped -- but ONLY when the branch pair is known and
+ * equals the total, so the one line truthfully is both. A record from a
+ * branch since closed can still differ from the total, and then both lines
+ * stay. With one branch and NO derivable branch pair the single line is the
+ * total and says so ("Total"): an inactive branch may still hold stock, so
+ * the total is not that branch's number and must never wear its name. A
+ * null count (unknown) keeps both lines.
  */
 export function stockBalanceLines(row: StockLineChangeRow, branchName: string | null | undefined, activeBranchCount: number | null | undefined, labels: { branch: string; total: string }): StockBalanceLine[] {
   const branchLabel = String(branchName || '').trim() || labels.branch
   const branch: [unknown, unknown] = [row.branch_before_qty, row.branch_after_qty]
   const total: [unknown, unknown] = [row.total_before_qty ?? row.before_qty, row.total_after_qty ?? row.after_qty]
   const branchKnown = branch.every((value) => value != null && value !== '')
-  if (activeBranchCount != null && Number(activeBranchCount) <= 1 && (!branchKnown || samePair(branch, total))) {
-    const pair = branchKnown ? branch : total
-    return [{ scope: branchKnown ? 'branch' : 'total', label: branchKnown ? branchLabel : (String(branchName || '').trim() || labels.total), before: pair[0], after: pair[1] }]
+  if (activeBranchCount != null && Number(activeBranchCount) <= 1) {
+    if (branchKnown && samePair(branch, total)) return [{ scope: 'branch', label: branchLabel, before: branch[0], after: branch[1] }]
+    if (!branchKnown) return [{ scope: 'total', label: labels.total, before: total[0], after: total[1] }]
   }
   return [
     { scope: 'branch', label: branchLabel, before: branch[0], after: branch[1] },

@@ -131,6 +131,11 @@ runTest('an underivable or failed balance reads "—", never a guessed number, a
   assert.deepEqual(balanceBlock(renderFloat(sale, { id: 76, value: twoBranches, failed: false })).lines, [['branch', 'Shop', '… → …'], ['total', 'Total', '… → …']])
 })
 
+runTest('one active branch and no branch pair: the float says Total, not the branch name', () => {
+  const html = renderFloat({ ...sale, branch_name: 'Store' }, { id: 77, value: { before_qty: 18, after_qty: 15, branch_before_qty: null, branch_after_qty: null, active_branch_count: 1 }, failed: false })
+  assert.deepEqual(balanceBlock(html).lines, [['total', 'Total', '18 pcs → 15 pcs']])
+})
+
 runTest('stockBalanceLines: branch first, total second, and the one-branch collapse', () => {
   const { stockBalanceLines } = stockLineChange
   const labels = { branch: 'Branch', total: 'Total' }
@@ -138,8 +143,16 @@ runTest('stockBalanceLines: branch first, total second, and the one-branch colla
     [{ scope: 'branch', label: 'Shop', before: 10, after: 7 }, { scope: 'total', label: 'Total', before: 18, after: 15 }])
   // explicit total_* wins over the compatibility before/after names
   assert.deepEqual(stockBalanceLines({ total_before_qty: 18, total_after_qty: 15, before_qty: 0, after_qty: 0, branch_before_qty: 10, branch_after_qty: 7 }, 'Shop', 2, labels)[1], { scope: 'total', label: 'Total', before: 18, after: 15 })
-  // one branch, no branch pair: one line, the total under the branch's name
-  assert.deepEqual(stockBalanceLines({ before_qty: 5, after_qty: 6, branch_before_qty: null, branch_after_qty: null }, 'Shop', 1, labels), [{ scope: 'total', label: 'Shop', before: 5, after: 6 }])
+  // one branch, no branch pair: one line, and it is the TOTAL, labelled
+  // Total -- never the branch's name. Refuter, 26 Sep: an inactive branch
+  // (Shop, once retired) can still hold stock, so the total is not the
+  // remaining branch's number; the branch-named line needs a known branch
+  // pair equal to the total.
+  assert.deepEqual(stockBalanceLines({ before_qty: 5, after_qty: 6, branch_before_qty: null, branch_after_qty: null }, 'Store', 1, labels), [{ scope: 'total', label: 'Total', before: 5, after: 6 }])
+  // one branch, a known branch pair equal to the total: the branch-named line
+  assert.deepEqual(stockBalanceLines({ before_qty: 5, after_qty: 6, branch_before_qty: 5, branch_after_qty: 6 }, 'Store', 1, labels), [{ scope: 'branch', label: 'Store', before: 5, after: 6 }])
+  // one branch, a known branch pair that differs (stock left in a closed branch): both lines
+  assert.deepEqual(stockBalanceLines({ before_qty: 9, after_qty: 10, branch_before_qty: 5, branch_after_qty: 6 }, 'Store', 1, labels).map((line: { scope: string; label: string }) => [line.scope, line.label]), [['branch', 'Store'], ['total', 'Total']])
   // no branch name falls back to the generic label
   assert.equal(stockBalanceLines({ before_qty: 1, after_qty: 2, branch_before_qty: 1, branch_after_qty: 2 }, '', 2, labels)[0].label, 'Branch')
 })
