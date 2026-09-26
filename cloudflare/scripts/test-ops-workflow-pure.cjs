@@ -238,7 +238,7 @@ function strings(node, at = [], out = []) {
 
 // ------------------------------------------------------ what ops.yml must be
 
-const TASKS = ['d1-export', 'r2-apac-copy']
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
@@ -283,10 +283,16 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-r2.mjs delete-worker', {}, { if: AFTER_CHECKOUT }),
     { kind: 'upload' },
   ],
+  // REST only (no wrangler), so no package install.
+  'secret-names': [
+    { kind: 'confirm' }, { kind: 'checkout' }, { kind: 'setup-node' },
+    scriptStep('node ops/scripts/ops-secret-names.mjs'),
+    { kind: 'upload' },
+  ],
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -294,6 +300,7 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-d1-export.mjs',
   'ops/scripts/ops-r2.mjs',
   'ops/scripts/ops-r2-lib.mjs',
+  'ops/scripts/ops-secret-names.mjs',
 ]
 const WORKER_SCRIPTS = ['ops/r2-copy-worker/src/index.mjs', 'ops/r2-copy-worker/src/core.mjs']
 const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url'])
@@ -405,6 +412,7 @@ async function main() {
   const d1 = await load('ops', 'scripts', 'ops-d1-export.mjs')
   const driver = await load('ops', 'scripts', 'ops-r2.mjs')
   const lib = await load('ops', 'scripts', 'ops-r2-lib.mjs')
+  const secretNames = await load('ops', 'scripts', 'ops-secret-names.mjs')
 
   const WF_TEXT = read('.github', 'workflows', 'ops.yml')
   let WF = null
@@ -643,7 +651,15 @@ async function main() {
       'ops/scripts/ops-common.mjs: value',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
-    ], 'publicToken() only for the query FILE name and Cloudflare error-code numbers')
+      'ops/scripts/ops-secret-names.mjs: name',
+    ], 'publicToken() only for the query FILE name, Cloudflare error-code numbers and the expected secret NAMES')
+    // The secret names printed are this file's own constant list, never what the API returned.
+    const sn = code['ops/scripts/ops-secret-names.mjs']
+    const loop = sn.indexOf("  for (const name of EXPECTED_SECRETS) {\n    lines.push(['{name}: ")
+    const token = sn.indexOf('publicToken(name)')
+    assert.ok(loop > 0 && token > loop && token < sn.indexOf('\n  }\n', loop), 'publicToken(name) only inside the loop over EXPECTED_SECRETS')
+    assert.ok(/\nexport const EXPECTED_SECRETS = Object\.freeze\(\[\n(  '[A-Z][A-Z0-9_]*',\n)+\]\)\n/.test(sn), 'EXPECTED_SECRETS is a frozen list of literals')
+    assert.ok(Object.isFrozen(secretNames.EXPECTED_SECRETS) && secretNames.EXPECTED_SECRETS.length === 8)
     const d = code['ops/scripts/ops-d1-export.mjs']
     const vetted = d.indexOf('const query = loadQuery(name)')
     assert.ok(vetted > 0 && vetted < d.indexOf('of publicLines({ name') && count(d, /(?<!function )publicLines\(/g) === 1, 'the query name is vetted by the guard before it is printed')

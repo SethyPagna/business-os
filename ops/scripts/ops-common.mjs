@@ -31,6 +31,7 @@ export const PUBLIC_WORDS = new Set([
   'copy', 'verify-only', 'source', 'destination', 'unknown', 'mixed',
   'present', 'absent', 'created', 'deleted', 'already-absent', 'still-present',
   'apac', 'eeur', 'weur', 'wnam', 'enam', 'oc', 'default',
+  'secret', 'plain-text', 'other-type',
 ])
 
 const TOKEN = Symbol('public-token')
@@ -230,6 +231,37 @@ export async function cfApi(method, pathname, { body, token = process.env.CLOUDF
 export function apiErrorCodes(response) {
   const errors = response && response.json && Array.isArray(response.json.errors) ? response.json.errors : []
   return errors.map((e) => Number(e && e.code)).filter((n) => Number.isFinite(n)).slice(0, 5)
+}
+
+// ------------------------------------------------- the production Worker
+
+export const PRODUCTION_WORKER = 'business-os'
+
+// The bindings of every version carrying traffic in a Worker's newest
+// deployment, as the API reports them (it never returns a secret's value).
+// api(method, path) -> { ok, status, json } (cfApi, or a test fake).
+//   { ok: true, versions: [{ versionId, percentage, bindings }] }
+//   { ok: false, reason, detail }   reason: a fixed kebab-case code
+export async function liveVersionBindings(api, accountId, script) {
+  const fail = (reason, detail) => ({ ok: false, reason, detail })
+  const base = `/accounts/${accountId}/workers/scripts/${script}`
+  const dep = await api('GET', `${base}/deployments`)
+  if (!dep || !dep.ok) return fail('deployments-unreadable', { status: dep && dep.status })
+  const deployments = dep.json && dep.json.result && dep.json.result.deployments
+  if (!Array.isArray(deployments) || !deployments.length) return fail('no-deployments')
+  // The API lists newest first (wrangler reads .at(0)); sort defensively.
+  const latest = [...deployments].sort((a, b) => String(b && b.created_on || '').localeCompare(String(a && a.created_on || '')))[0]
+  const live = (latest && Array.isArray(latest.versions) ? latest.versions : []).filter((v) => v && Number(v.percentage) > 0)
+  if (!live.length) return fail('no-live-versions')
+  const versions = []
+  for (const v of live) {
+    if (typeof v.version_id !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(v.version_id)) return fail('bad-version-id')
+    const r = await api('GET', `${base}/versions/${v.version_id}`)
+    const bindings = r && r.ok && r.json && r.json.result && r.json.result.resources ? r.json.result.resources.bindings : null
+    if (!Array.isArray(bindings)) return fail('bindings-unreadable', { status: r && r.status })
+    versions.push({ versionId: v.version_id, percentage: Number(v.percentage), bindings })
+  }
+  return { ok: true, versions }
 }
 
 export function sleep(ms) {

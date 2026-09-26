@@ -8,13 +8,13 @@
 // so the runner and the Worker share one definition of "identical".
 
 import { differences } from '../r2-copy-worker/src/core.mjs'
-import { OpsError } from './ops-common.mjs'
+import { OpsError, PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
 
+export { PRODUCTION_WORKER }
 export const SOURCE_BUCKET = 'business-os-assets'
 export const DEST_BUCKET = 'business-os-assets-apac'
 export const DEST_LOCATION = 'apac'
 export const COPY_WORKER = 'business-os-r2-copy'
-export const PRODUCTION_WORKER = 'business-os'
 export const ASSETS_BINDING = 'ASSETS'
 
 export const MAX_ITEMS_PER_COPY = 10
@@ -301,24 +301,13 @@ export function verifyVerdict(c, { sourceObjects, destObjects }) {
 // api(method, path) -> { ok, status, json } (ops-common cfApi, or a fake).
 export async function productionAssetsState(api, accountId) {
   const unknown = (reason, detail) => ({ state: 'unknown', reason, detail })
-  const base = `/accounts/${accountId}/workers/scripts/${PRODUCTION_WORKER}`
-  const dep = await api('GET', `${base}/deployments`)
-  if (!dep || !dep.ok) return unknown('deployments-unreadable', { status: dep && dep.status })
-  const deployments = dep.json && dep.json.result && dep.json.result.deployments
-  if (!Array.isArray(deployments) || !deployments.length) return unknown('no-deployments')
-  // The API lists newest first (wrangler reads .at(0)); sort defensively.
-  const latest = [...deployments].sort((a, b) => String(b && b.created_on || '').localeCompare(String(a && a.created_on || '')))[0]
-  const versions = (latest && Array.isArray(latest.versions) ? latest.versions : []).filter((v) => v && Number(v.percentage) > 0)
-  if (!versions.length) return unknown('no-live-versions')
+  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  if (!live.ok) return unknown(live.reason, live.detail)
   const buckets = []
-  for (const v of versions) {
-    if (typeof v.version_id !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(v.version_id)) return unknown('bad-version-id')
-    const r = await api('GET', `${base}/versions/${v.version_id}`)
-    const bindings = r && r.ok && r.json && r.json.result && r.json.result.resources ? r.json.result.resources.bindings : null
-    if (!Array.isArray(bindings)) return unknown('bindings-unreadable', { status: r && r.status })
-    const assets = bindings.filter((b) => b && b.name === ASSETS_BINDING)
+  for (const v of live.versions) {
+    const assets = v.bindings.filter((b) => b && b.name === ASSETS_BINDING)
     if (assets.length !== 1 || assets[0].type !== 'r2_bucket') return unknown('assets-binding-missing')
-    buckets.push({ versionId: v.version_id, percentage: Number(v.percentage), bucket: assets[0].bucket_name, jurisdiction: assets[0].jurisdiction || null })
+    buckets.push({ versionId: v.versionId, percentage: v.percentage, bucket: assets[0].bucket_name, jurisdiction: assets[0].jurisdiction || null })
   }
   const kinds = new Set(buckets.map((b) => {
     if (b.jurisdiction) return 'other'

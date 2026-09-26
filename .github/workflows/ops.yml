@@ -13,6 +13,9 @@
 #                 business-os-assets-apac through a temporary Worker that is
 #                 deleted at the end of every run. mode: copy (delta re-runs
 #                 skip identical objects) or verify-only (changes nothing).
+#   secret-names  which secrets the production Worker has: NAMES and binding
+#                 types only, read with GET requests (Cloudflare never returns
+#                 a secret's value). Changes nothing.
 #
 # THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and
 # artifacts. The log and summary carry counts, byte totals, pass/fail and
@@ -36,6 +39,7 @@ on:
         options:
           - d1-export
           - r2-apac-copy
+          - secret-names
       mode:
         description: r2-apac-copy only - copy, or verify-only (compares, changes nothing)
         required: true
@@ -215,6 +219,56 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ops-r2-apac-copy
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  secret-names:
+    name: secret-names
+    needs: gate
+    if: inputs.task == 'secret-names'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'secret-names', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type secret-names in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # REST calls only: no wrangler, so no package install.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Logs, per expected name, how the live versions bind it and whether
+      # the secret list shows it; any other secret names are only counted.
+      - name: Read the secret names (GET only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-secret-names.mjs
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-secret-names
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 3
           if-no-files-found: ignore
