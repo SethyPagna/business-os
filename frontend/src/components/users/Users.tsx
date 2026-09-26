@@ -34,6 +34,7 @@ import DeviceApprovals from './DeviceApprovals.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
+import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -897,7 +898,7 @@ export default function Users() {
           })
       ), allowAdminOverride ? 'Reset user password' : 'Change user password')
       if (result?.success === false) {
-        notify(result.error || 'Failed to change password', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
       const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
@@ -925,7 +926,7 @@ export default function Users() {
         setPasswordForm((prev) => ({ ...prev, currentPassword: '' }))
       }
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       finishSingleAction(passwordInFlightRef)
       setPasswordSaving(false)

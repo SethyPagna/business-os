@@ -20,6 +20,7 @@ import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassw
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
+import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -760,7 +761,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         ...(usernameChanged && renameScope ? { __rename_cascade: renameScope } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to save profile', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to save profile', 'error')
         return
       }
       const { success: _success, ...nextUser } = result || {}
@@ -789,7 +790,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('profile_updated', 'Profile updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save profile'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to save profile'), 'error')
     } finally {
       saveProfileInFlightRef.current = false
       setSavingProfile(false)
@@ -813,7 +814,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         userName: user?.name,
       }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to change password', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
       const persistence = await persistChangedPassword({
@@ -837,7 +838,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('password_updated', 'Password updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       savePasswordInFlightRef.current = false
       setSavingPassword(false)
@@ -961,7 +962,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           })
       ), 'Disconnect sign-in provider', PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
       }
       if (result?.methods) {
@@ -982,7 +983,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('identity_unlinked_success', 'Sign-in method disconnected.'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
     } finally {
       setDisconnectingProvider('')
     }
@@ -1539,7 +1540,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       {avatarRemoveConfirmOpen ? (
         <ConfirmDialog
           title={tr('remove_avatar_title', 'Remove profile photo?')}
-          message={tr('remove_avatar_message', 'Your photo is taken off your account and replaced by your initial. A photo uploaded only for this profile is deleted from storage; an image from the file library stays in the library.')}
+          message={tr('remove_avatar_message', 'Your photo is taken off your account and replaced by your initial. The image itself stays in the file library.')}
           danger
           confirmLabel={tr('remove_avatar', 'Remove')}
           working={removingAvatar}
