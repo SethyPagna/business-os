@@ -105,8 +105,11 @@ function npm(id, pkg, script, gate, extra = {}) {
   return { id, kind: 'npm', pkg, script, args: ['run', script], gate, ...extra }
 }
 
+// One row, one column per table, each a scalar sub-count. D1's SQLite caps
+// compound SELECTs at a few terms, so one UNION ALL term per table failed with
+// "too many terms in compound SELECT" once the list grew past that cap.
 function countsSql(tables = KEY_TABLES) {
-  return tables.map((t) => `SELECT '${t}' AS t, COUNT(*) AS n FROM ${t}`).join(' UNION ALL ')
+  return `SELECT ${tables.map((t) => `(SELECT COUNT(*) FROM ${t}) AS ${t}`).join(', ')}`
 }
 
 // Every production command the kit can run. Parameters are filled in by the
@@ -258,11 +261,28 @@ function findKey(value, key) {
   return undefined
 }
 
-function parseCounts(json) {
+// `wrangler deployments status --json` describes the live DEPLOYMENT: its own
+// `id` comes first and the Worker version(s) it serves sit under versions[].
+// A rollback needs the version id, so take the version with the most traffic.
+function liveVersionId(json) {
+  const versions = findKey(json, 'versions')
+  if (!Array.isArray(versions)) return ''
+  const top = versions
+    .filter((v) => v && typeof v.version_id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.version_id))
+    .sort((a, b) => Number(b.percentage || 0) - Number(a.percentage || 0))[0]
+  return top ? top.version_id : ''
+}
+
+// The single row countsSql returns; null unless every table has a count.
+function parseCounts(json, tables = KEY_TABLES) {
   const rows = findKey(json, 'results')
-  if (!Array.isArray(rows)) return null
+  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== 'object') return null
   const out = {}
-  for (const r of rows) out[r.t] = Number(r.n)
+  for (const t of tables) {
+    const n = rows[0][t] == null ? NaN : Number(rows[0][t])
+    if (!Number.isFinite(n)) return null
+    out[t] = n
+  }
   return out
 }
 
@@ -286,6 +306,22 @@ function compareCounts(pre, post, touched = new Set()) {
   const failed = rows.filter((r) => r.verdict === 'UNEXPECTED' || r.verdict === 'MISSING')
   const warnings = rows.filter((r) => r.verdict === 'changed-by-migration' || r.verdict === 'grew-live-traffic')
   return { rows, ok: failed.length === 0, failed, warnings }
+}
+
+// Row counts are business numbers, and the repository's Actions logs and job
+// summaries are public: under CI a table shows its verdict and, when it
+// changed, by how much -- never its size. The kit keeps the full numbers in
+// its records folder for the before/after comparison.
+function countsLines(rows, { ci = false } = {}) {
+  if (ci) return rows.map((r) => `  ${r.table.padEnd(20)} ${r.verdict ? `${r.verdict}${r.pre !== r.post ? ` (${countChange(r, { ci })})` : ''}` : 'counted'}`).join('\n')
+  return rows.map((r) => `  ${r.table.padEnd(20)} ${String(r.pre ?? '-').padStart(9)} ${String(r.post ?? '').padStart(9)}  ${r.verdict || ''}`).join('\n')
+}
+
+function countChange(row, { ci = false } = {}) {
+  if (!ci) return `${row.pre ?? '-'} -> ${row.post ?? '-'}`
+  if (row.pre == null || row.post == null) return 'not read'
+  const d = row.post - row.pre
+  return `${d > 0 ? '+' : ''}${d} row${Math.abs(d) === 1 ? '' : 's'}`
 }
 
 // ----------------------------------------------------------- live checks
@@ -347,6 +383,6 @@ module.exports = {
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, firstCommentLine, tablesTouched,
-  parseWranglerJson, findKey, parseCounts, compareCounts, checkVersion,
+  parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,
 }

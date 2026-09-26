@@ -465,10 +465,6 @@ async function readCounts(ctx, approval) {
   return { ok: r.ok && !!counts, counts }
 }
 
-function countsTable(rows) {
-  return rows.map((r) => `  ${r.table.padEnd(20)} ${String(r.pre ?? '-').padStart(9)} ${String(r.post ?? '').padStart(9)}  ${r.verdict || ''}`).join('\n')
-}
-
 async function stepSnapshot(ctx) {
   heading('Safety snapshot (restore point + row counts)')
   if (!needSha(ctx)) return false
@@ -486,14 +482,14 @@ async function stepSnapshot(ctx) {
   const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
   let previousVersionId = ''
   if (!dep.dry) {
-    const ids = JSON.stringify(dep.json || dep.out || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) || []
-    previousVersionId = ids[0] || ''
-    log.say(`  live Worker version now: ${previousVersionId || '(could not read)'}`)
+    previousVersionId = lib.liveVersionId(dep.json)
+    const deploymentId = dep.json && typeof dep.json.id === 'string' ? dep.json.id : ''
+    log.say(`  live Worker version now: ${previousVersionId || '(could not read)'}${deploymentId ? ` (deployment ${deploymentId})` : ''}`)
     if (!ctx.ci) writeRecord(ctx, 'deployment-before.json', dep.json || dep.out || '')
   }
   const c = await readCounts(ctx, approval)
   if (!c.ok) { log.say('STOP: could not read the row counts.'); return false }
-  if (c.counts) log.say(countsTable(lib.KEY_TABLES.map((t) => ({ table: t, pre: c.counts[t] }))))
+  if (c.counts) log.say(lib.countsLines(lib.KEY_TABLES.map((t) => ({ table: t, pre: c.counts[t] })), { ci: ctx.ci }))
   ctx.state.snapshot = { at: new Date().toISOString(), bookmarks, previousVersionId, preCounts: c.counts }
   saveState(ctx)
   writeRecord(ctx, 'snapshot.json', ctx.state.snapshot)
@@ -509,8 +505,9 @@ async function stepSnapshot(ctx) {
     '### Safety snapshot', '',
     ...lib.DATABASES.map((d) => `- Restore point \`${d.name}\`: \`${bookmarks[d.name] || '-'}\``),
     `- Worker version before: \`${previousVersionId || '-'}\``, '',
-    '| table | rows before |', '| --- | ---: |',
-    ...lib.KEY_TABLES.map((t) => `| ${t} | ${c.counts ? c.counts[t] : '-'} |`),
+    ...(ctx.ci
+      ? [`Row counts read for ${lib.KEY_TABLES.length} tables (numbers kept out of this public summary).`]
+      : ['| table | rows before |', '| --- | ---: |', ...lib.KEY_TABLES.map((t) => `| ${t} | ${c.counts ? c.counts[t] : '-'} |`)]),
   ].join('\n'))
   return true
 }
@@ -642,11 +639,11 @@ async function stepLive(ctx) {
       const pre = ctx.state.snapshot && ctx.state.snapshot.preCounts
       const touched = new Set((ctx.state.migrations && ctx.state.migrations.touchedTables) || [])
       comparison = lib.compareCounts(pre, c.counts, touched)
-      log.say(countsTable(comparison.rows))
-      for (const w of comparison.warnings) warnings.push(`${w.table}: ${w.pre} -> ${w.post} (${w.verdict === 'changed-by-migration' ? 'a database update in this release changes this table' : 'the shop kept working during the release'})`)
-      for (const f of comparison.failed) problems.push(`${f.table}: ${f.pre} -> ${f.post} (${f.verdict})`)
-      summary(ctx, ['### Row counts', '', '| table | before | after | verdict |', '| --- | ---: | ---: | --- |',
-        ...comparison.rows.map((r) => `| ${r.table} | ${r.pre ?? '-'} | ${r.post ?? '-'} | ${r.verdict} |`)].join('\n'))
+      log.say(lib.countsLines(comparison.rows, { ci: ctx.ci }))
+      for (const w of comparison.warnings) warnings.push(`${w.table}: ${lib.countChange(w, { ci: ctx.ci })} (${w.verdict === 'changed-by-migration' ? 'a database update in this release changes this table' : 'the shop kept working during the release'})`)
+      for (const f of comparison.failed) problems.push(`${f.table}: ${lib.countChange(f, { ci: ctx.ci })} (${f.verdict})`)
+      summary(ctx, ['### Row counts', '', '| table | verdict | change |', '| --- | --- | ---: |',
+        ...comparison.rows.map((r) => `| ${r.table} | ${r.verdict} | ${r.verdict === 'same' ? '-' : lib.countChange(r, { ci: ctx.ci })} |`)].join('\n'))
     }
   } else {
     warnings.push('row counts were not compared')

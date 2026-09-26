@@ -290,6 +290,48 @@ check('counts comparison: equal ok, migration and live traffic warn, loss fails'
   assert.ok(!productsGrew.ok, 'products is not written by the till, so an unexplained change fails')
 })
 
+check('row counts: one D1-safe query (no compound SELECT) and a strict one-row parser', () => {
+  // D1 refused the old one-UNION-ALL-term-per-table query with this exact
+  // error, so the release stopped at the snapshot on its first CI run.
+  const sql = lib.countsSql()
+  assert.ok(!/\b(UNION|INTERSECT|EXCEPT)\b/i.test(sql), 'D1 caps compound SELECT terms; the counts query must use none')
+  for (const t of lib.KEY_TABLES) assert.ok(sql.includes(`(SELECT COUNT(*) FROM ${t}) AS ${t}`), `${t} must be counted`)
+  const row = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 100 + i]))
+  const ok = lib.parseCounts(lib.parseWranglerJson(`[with-wrangler-auth] note\n${JSON.stringify([{ results: [row], success: true, meta: {} }], null, 2)}\n`))
+  assert.deepStrictEqual(ok, row)
+  const refused = lib.parseWranglerJson('\n{\n  "error": {\n    "text": "too many terms in compound SELECT: SQLITE_ERROR"\n  }\n}\n')
+  assert.strictEqual(lib.parseCounts(refused), null)
+  const { returns: _dropped, ...partial } = row
+  assert.strictEqual(lib.parseCounts([{ results: [partial] }]), null, 'a missing table is unreadable, not zero')
+  assert.strictEqual(lib.parseCounts([{ results: [row, row] }]), null, 'more than the one summary row is unexpected')
+})
+
+check('the saved rollback target is the live Worker VERSION, not the deployment id listed first', () => {
+  // Field order of `wrangler deployments status --json`: the deployment's own
+  // id precedes versions[]. The first UUID in the text is therefore the wrong one.
+  const dep = { id: 'aaaaaaaa-0000-4000-8000-000000000001', source: 'wrangler', strategy: 'percentage', annotations: {},
+    versions: [{ version_id: 'bbbbbbbb-0000-4000-8000-000000000002', percentage: 100 }], created_on: '2026-09-24T21:48:00Z' }
+  assert.strictEqual(lib.liveVersionId(lib.parseWranglerJson(`[with-wrangler-auth] note\n${JSON.stringify(dep, null, 2)}`)), 'bbbbbbbb-0000-4000-8000-000000000002')
+  const split = { ...dep, versions: [{ version_id: 'cccccccc-0000-4000-8000-000000000003', percentage: 10 }, { version_id: 'dddddddd-0000-4000-8000-000000000004', percentage: 90 }] }
+  assert.strictEqual(lib.liveVersionId(split), 'dddddddd-0000-4000-8000-000000000004', 'with split traffic, the version carrying most of it')
+  assert.strictEqual(lib.liveVersionId(null), '')
+  assert.strictEqual(lib.liveVersionId({ id: dep.id }), '', 'no versions[] -> unknown, never the deployment id')
+  const src = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+  assert.ok(/previousVersionId = lib\.liveVersionId\(dep\.json\)/.test(src), 'stepSnapshot must save the version id')
+})
+
+check('row counts stay out of the public CI log and summary; local runs still show them', () => {
+  const pre = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 48210 + i]))
+  const cmp = lib.compareCounts(pre, { ...pre, sales: pre.sales + 6, products: pre.products - 2 })
+  const ci = [lib.countsLines(cmp.rows, { ci: true }), lib.countsLines(lib.KEY_TABLES.map((t) => ({ table: t, pre: pre[t] })), { ci: true }),
+    ...cmp.rows.map((r) => lib.countChange(r, { ci: true }))].join('\n')
+  for (const n of Object.values(pre)) assert.ok(!ci.includes(String(n)), `CI output must not show a table size (${n})`)
+  assert.ok(ci.includes('grew-live-traffic (+6 rows)') && ci.includes('UNEXPECTED (-2 rows)'), 'CI output still says what changed and by how much')
+  assert.ok(lib.countsLines(cmp.rows).includes(String(pre.sales)), 'a local run keeps the full numbers')
+  const src = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+  assert.ok(!/\$\{\s*[a-z]\.(?:pre|post)\b/.test(src), 'release.cjs must print counts through lib.countsLines / lib.countChange')
+})
+
 check('migration list parsing, first comment and touched tables', () => {
   const out = 'Migrations to be applied:\n│ 0195_example_one.sql │\n│ 0196_example-two.sql │\n'
   assert.deepStrictEqual(lib.parseMigrationNames(out), ['0195_example_one.sql', '0196_example-two.sql'])
