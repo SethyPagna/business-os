@@ -30,7 +30,7 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
-import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql } from '../lib/catalogCostRecompute'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -1760,8 +1760,18 @@ async function foldCreateIntoExisting(
   }
   if (Object.keys(updates).length) {
     const setSql = Object.keys(updates).map((key) => `${key} = @${key}`).join(', ')
-    await db.prepare(`UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
-      .run({ ...updates, id: duplicate.id })
+    const write = { sql: `UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { ...updates, id: duplicate.id } }
+    // U-cost: the folded cost was typed into the product form, so it records
+    // the form's product_cost_entries row -- the 0195 triggers re-derive
+    // cost_price_usd at every stock movement and honour only a cost with
+    // one, so a bare write held until the next sale. Before the UPDATE (it
+    // reads the preimage) in one batch; nothing when the cost is unmoved.
+    const costEntry = typedCostEntryBeforeWriteStatement(duplicate.id, {
+      ...(updates.cost_price_usd !== undefined ? { usd: updates.cost_price_usd as number } : {}),
+      ...(updates.cost_price_khr !== undefined ? { khr: updates.cost_price_khr as number } : {}),
+    }, { id: actorId(user), name: actorSnapshot(user) })
+    if (costEntry) await db.batch([costEntry, write])
+    else await db.prepare(write.sql).run(write.params)
   }
   await audit(env, user?.id ?? null, actorSnapshot(user), 'fold', 'product', duplicate.id, {
     reason: 'create_identity_fold', requestedName: name, incomingBarcode: body.barcode, updates, costOutliers,

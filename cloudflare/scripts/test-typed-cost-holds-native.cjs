@@ -6,6 +6,8 @@
 // next sale. This file drives each writer, then a sale, and asserts the cost
 // holds:
 //   - the product form (PUT /:id) -- the reference behaviour;
+//   - the product form's CREATE that folds into an existing product (POST /
+//     -> foldCreateIntoExisting, which averages the typed cost in);
 //   - the catalog-wide bulk price adjust (POST /bulk-price-adjust);
 //   - the per-selection bulk adjust (frontend buildProductBulkUpdatePayload
 //     -> the same PUT /:id, one product at a time);
@@ -253,6 +255,31 @@ async function main() {
     sell(p)
     assert.equal(cost(p.id), 9)
     assert.equal(entries(p.id).length, 1)
+  })
+
+  await check('product form create folding into an existing product (POST /): the averaged cost records the entry and holds past a sale', async () => {
+    const p = seed()
+    const { name } = raw.prepare('SELECT name FROM products WHERE id = ?').get(p.id)
+    const folded = await request(products, 'POST', '/', { name, cost_price_usd: 6 })
+    assert.equal(folded.status, 200, JSON.stringify(folded))
+    assert.equal(folded.body.folded_into, p.id, 'same name, no barcode: the create folds into the existing row')
+    assert.equal(cost(p.id), 5, 'the fold averages the distinct costs: (4 + 6) / 2')
+    const [entry] = entries(p.id)
+    assert.ok(entry, 'an entry was recorded')
+    assert.deepEqual([entry.source, entry.cost_usd, entry.previous_cost_usd, entry.user_id, entry.user_name],
+      ['manual', 5, 4, 1, 'admin'])
+    assert.equal(entry.baseline_batch_id, raw.prepare('SELECT MAX(id) m FROM product_batches WHERE variant_product_id = ?').get(p.id).m)
+    sell(p)
+    assert.equal(cost(p.id), 5, 'the folded cost holds past the sale')
+  })
+
+  await check('product form create folding into an existing product with the SAME cost: nothing moved, no entry', async () => {
+    const p = seed()
+    const { name } = raw.prepare('SELECT name FROM products WHERE id = ?').get(p.id)
+    const folded = await request(products, 'POST', '/', { name, cost_price_usd: 4 })
+    assert.equal(folded.status, 200, JSON.stringify(folded))
+    assert.equal(folded.body.folded_into, p.id)
+    assert.equal(entries(p.id).length, 0)
   })
 
   await check('catalog-wide bulk price adjust: +5 on cost records the form\'s entry per moved row; the cost holds past a sale', async () => {
