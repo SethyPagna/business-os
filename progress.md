@@ -105,6 +105,17 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 
 ### Checkpoint 3 — A/B data architecture
 - [ ] From PD-1 evidence: precomputed search/catalog read model (organized once at write time, not parsed per request), indexes, query budget per hot route; A/B measured against current path before switching
+- [~] C3v2 plan (27 Sep, owner asked for a deep D1/R2/policy redesign; offline cancelled so the change feed is dropped). Full plan: `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`. Rule: every change measured A/B (shadow → on, KV flag, rollback in ~60 s); no second money or stock definition.
+  - [~] A0 metrics: per-request D1 rows_read/rows_written/statements/ms + cache state in Server-Timing and sampled Analytics Engine; KV feature flags. Foundation for every gated item.
+  - [ ] A1 hygiene: awaited broadcasts → waitUntil; every cache-version bump awaited (read-your-writes); ETag/304 on cached JSON
+  - [ ] A2 retention: `job_runs` table replaces settings stamps; bounded cleanup of idempotency/undo/revisions/telegram/image-audit/quota tables (sales, returns, movements, money audit never pruned)
+  - [ ] A3 catalog: one scan per page (COUNT OVER), family expansion limited to the page, parallel branch/stock reads, cached filters panel — after CP-2
+  - [ ] A4 dashboard: 20 s startup cache keyed by permissions + versions, expiry index, parallel config; refund-join narrowing gated on returns count
+  - [ ] A5 search: Khmer tokenizer probe on a local snapshot, then (if confirmed) FTS rebuild keeping combining marks + prefix index
+  - [ ] A6 R2 images: wire the existing thumbnail sizes (w160/320/640, made once, stored), srcset in the grids, orphan audit (report only) — after the APAC move
+  - [ ] A7 R2 layout: lifecycle for imports/ (7 d), quarantine/ (30 d), aborted multipart (1 d); backups/ in their own bucket during the APAC move
+  - [ ] A8 gated read models: closed-day report cache (trigger-invalidated), stored product family key + keyset paging, index cleanup by EXPLAIN — only if 7 days of A0 numbers cross the thresholds in the plan
+  - [ ] Production counts Q1–Q9 (read-only, via the ops d1-export path, results only in Records)
 
 <!-- PD-1 plan start -->
 ## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE
