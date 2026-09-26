@@ -89,6 +89,12 @@ const route = loadTs('routes/files.ts', {
     getMediaType: () => 'image',
     buildUniqueStoredName: (name) => name,
     sanitizeOriginalFileName: (name) => name,
+    // S-uploads key helpers (lib/fileAssets.ts): every row in this fixture
+    // is a pre-existing /uploads row, so its key is uploads/<stored_name>.
+    PRIVATE_LIBRARY_ROUTE: '/api/files/private/',
+    storageKeyForAsset: (asset) => `uploads/${asset.stored_name}`,
+    storageKeyForStoredName: (name) => `uploads/${name}`,
+    publicPathForStoredName: (name) => `/uploads/${name}`,
     normalizePhysicalStorageSummary: (row) => ({
       totalBytes: Number(row?.total_bytes || 0),
       fileCount: Number(row?.file_count || 0),

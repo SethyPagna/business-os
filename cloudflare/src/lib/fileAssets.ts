@@ -70,10 +70,58 @@ export function sanitizeOriginalFileName(originalName: string): string {
 // random suffix (the original does this whenever object storage is
 // enabled, which for the Workers path is always, since there is no local
 // disk to fall back to).
-export function buildUniqueStoredName(originalName: string): string {
+//
+// S-uploads (2026-09-26), owner direction: the public /uploads prefix is
+// for IMAGES ONLY. Library PDF, CSV and XLSX files are
+// written under PRIVATE_LIBRARY_PREFIX, which index.ts's public
+// /uploads/* route cannot reach (it only ever reads `uploads/<path>`), and
+// its file_assets.public_path is the authenticated route below instead of
+// an /uploads URL. Rows written before this change keep their /uploads
+// public_path and stay where they are; storageKeyForAsset reads either.
+// (Video stays public pending an owner ruling -- uploadSecurity.ts's
+// isPublicUploadFormat.)
+export const PUBLIC_UPLOADS_PREFIX = 'uploads/'
+export const PRIVATE_LIBRARY_PREFIX = 'private/library/'
+export const PRIVATE_LIBRARY_ROUTE = '/api/files/private/'
+
+export function publicPathForStoredName(storedName: string, isPublic: boolean): string {
+  return isPublic ? `/${PUBLIC_UPLOADS_PREFIX}${storedName}` : `${PRIVATE_LIBRARY_ROUTE}${encodeURIComponent(storedName)}`
+}
+
+export function storageKeyForStoredName(storedName: string, isPublic: boolean): string {
+  return `${isPublic ? PUBLIC_UPLOADS_PREFIX : PRIVATE_LIBRARY_PREFIX}${storedName}`
+}
+
+// The R2 key of an existing file_assets row: private rows are recognised by
+// their public_path, everything else (every pre-existing row) is uploads/.
+export function storageKeyForAsset(asset: { stored_name: string; public_path?: string | null }): string {
+  const isPrivate = String(asset.public_path || '').startsWith(PRIVATE_LIBRARY_ROUTE)
+  return storageKeyForStoredName(String(asset.stored_name || ''), !isPrivate)
+}
+
+//
+// S-uploads (2026-09-26): the extension is never the client's to choose.
+// A caller that classified the bytes passes the detected extension
+// (lib/uploadSecurity.ts's detectUploadFormat); otherwise the client's
+// extension survives only when it is on STORED_EXTENSION_ALLOWLIST, and
+// anything else (.html, .svg, .xml, .js ...) is stored as .bin.
+const STORED_EXTENSION_ALLOWLIST = new Set([
+  ...IMAGE_EXTENSIONS, '.avif', '.heic', '.heif',
+  ...VIDEO_EXTENSIONS,
+  ...DOCUMENT_EXTENSIONS, '.tsv', '.txt', '.xlsx', '.xls', '.xlsm', '.zip', '.json',
+])
+
+export function safeStoredExtension(fileName: string): string {
+  const ext = extname(fileName)
+  return STORED_EXTENSION_ALLOWLIST.has(ext) ? ext : '.bin'
+}
+
+export function buildUniqueStoredName(originalName: string, detectedExtension?: string): string {
   const safeName = sanitizeOriginalFileName(originalName)
-  const ext = extname(safeName) || '.bin'
-  const base = safeName.slice(0, safeName.length - ext.length) || 'file'
+  const clientExt = extname(safeName)
+  const base = (clientExt ? safeName.slice(0, safeName.length - clientExt.length) : safeName) || 'file'
+  const forced = detectedExtension ? String(detectedExtension).toLowerCase() : ''
+  const ext = /^\.[a-z0-9]{1,8}$/.test(forced) ? forced : safeStoredExtension(safeName)
   const randomSuffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
   return `${base}-${Date.now()}-${randomSuffix}${ext}`
 }
