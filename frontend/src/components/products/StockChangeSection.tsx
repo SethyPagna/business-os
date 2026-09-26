@@ -1135,10 +1135,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             {/* Stock before -> after: the movement's branch line, then the
                 total across branches -- the shared block the Movements float
                 renders, from the same walk, so one movement reads the same
-                on both screens (owner, 26 Sep). A failed read still shows the
-                row's own total pair. */}
+                on both screens (owner, 26 Sep). The type chip above already
+                shows the signed quantity, so the block drops its own; a
+                failed read still shows the row's own total pair. */}
             <div className="text-xs">
-              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} fallback={detail} />
+              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} fallback={detail} showQuantity={false} />
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">

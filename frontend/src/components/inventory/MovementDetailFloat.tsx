@@ -54,11 +54,12 @@ type Translator = (key: string) => string | undefined
  * already holds the row's own TOTAL pair (`fallback`: the ledger row, from
  * the same walk), which then fills the total line instead of "—".
  */
-export function MovementBalance({ movement, tr, loadBalance, fallback }: {
+export function MovementBalance({ movement, tr, loadBalance, fallback, showQuantity = true }: {
   movement: MovementDetailRecord
   tr: (key: string, fallback: string) => string
   loadBalance: (id: string | number) => Promise<MovementBalanceValue | null>
   fallback?: { before_qty?: unknown; after_qty?: unknown } | null
+  showQuantity?: boolean
 }) {
   const [balance, setBalance] = useState<{ id: string | number; value: MovementBalanceValue | null; failed: boolean } | null>(null)
   useEffect(() => {
@@ -92,6 +93,7 @@ export function MovementBalance({ movement, tr, loadBalance, fallback }: {
       canViewCosts={false}
       tr={tr}
       pending={!current}
+      showQuantity={showQuantity}
     />
     {current?.failed && !usedFallback ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
   </>

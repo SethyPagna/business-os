@@ -81,9 +81,12 @@ export function stockBalanceLines(row: StockLineChangeRow, branchName: string | 
  * `signedQuantity` is the movement with its direction (+ in, - out); null
  * when the direction is unknown, which shows the bare quantity. `pending`
  * while the balance is still being read: the tiles say so instead of "—",
- * which would claim the balance cannot be derived.
+ * which would claim the balance cannot be derived. `showQuantity` false
+ * drops the Quantity tile for a float that already shows the movement's
+ * signed quantity elsewhere (the Stock Changes ledger's type chip), so the
+ * one number never appears twice.
  */
-export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending = false, branchName, activeBranchCount }: {
+export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending = false, branchName, activeBranchCount, showQuantity = true }: {
   row: StockLineChangeRow
   signedQuantity: number | null
   canViewCosts: boolean
@@ -91,6 +94,7 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
   pending?: boolean
   branchName?: string | null
   activeBranchCount?: number | null
+  showQuantity?: boolean
 }) {
   const edited = Number(row.edit_count) > 0
   const changes: Array<{ label: string; received: string; now: string }> = edited ? [
@@ -114,8 +118,8 @@ export function StockLineChange({ row, signedQuantity, canViewCosts, tr, pending
       : 'bg-gray-50 text-gray-700 dark:bg-gray-800/60 dark:text-gray-200'
   return <div className="space-y-2">
     {/* leading-relaxed on every label: Khmer glyphs need the vertical room. */}
-    <div data-testid="stock-record-balance" aria-busy={pending || undefined} className="grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-2">
-      <div className={`rounded-xl px-3 py-2 ${movedTone}`}><div className="text-[11px] uppercase leading-relaxed tracking-wide opacity-80">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums">{moved}</div></div>
+    <div data-testid="stock-record-balance" aria-busy={pending || undefined} className={`grid ${showQuantity ? 'grid-cols-[auto_minmax(0,1fr)]' : 'grid-cols-1'} items-stretch gap-2`}>
+      {showQuantity ? <div className={`rounded-xl px-3 py-2 ${movedTone}`}><div className="text-[11px] uppercase leading-relaxed tracking-wide opacity-80">{tr('quantity', 'Quantity')}</div><div className="text-sm font-semibold tabular-nums">{moved}</div></div> : null}
       {/* Branch line first, then the total across branches (owner, 26 Sep).
           The column caption sits OUTSIDE the <dl> (a <dl> holds only dt/dd
           groups) and is hidden from assistive tech; each <dd> instead

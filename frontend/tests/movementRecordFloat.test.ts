@@ -219,24 +219,24 @@ runTest('the Stock Changes ledger float shows the same balance block, from the s
   assert.match(ledger, /const loadDetailBalance = useCallback\(\(id: string \| number\) => getStockLedgerMovementBalance\(id\), \[\]\)/)
   assert.doesNotMatch(ledger, /getInventoryMovementBalance/, 'the ledger never reads the Inventory-only balance route')
   assert.match(read('api/productReadTransport.ts'), /apiFetch\('GET', `\/api\/products\/stock-ledger\/\$\{Math\.trunc\(Number\(id\)\)\}\/balance`\)/)
-  assert.match(detailModal, /<MovementBalance movement=\{detail\} tr=\{\(key, fallback\) => tr\(t, key, fallback\)\} loadBalance=\{loadDetailBalance\} fallback=\{detail\} \/>/)
+  assert.match(detailModal, /<MovementBalance movement=\{detail\} tr=\{\(key, fallback\) => tr\(t, key, fallback\)\} loadBalance=\{loadDetailBalance\} fallback=\{detail\} showQuantity=\{false\} \/>/)
   // the old unlabelled total-only tiles are gone
   assert.doesNotMatch(detailModal, /\{detail\.before_qty\}|\{detail\.after_qty\}/)
   const float = read('components/inventory/MovementDetailFloat.tsx')
   assert.match(float, /<MovementBalance movement=\{movement\} tr=\{tr\} loadBalance=\{loadBalance\} \/>/, 'the Movements float renders the same block')
   // rendered: one movement, one balance -> the same lines in both
-  const inLedger = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: twoBranches, failed: false })
+  const inLedger = renderBalance({ movement: ledgerRow, fallback: ledgerRow, showQuantity: false }, { id: 77, value: twoBranches, failed: false })
   const inMovements = renderFloat(sale, { id: 77, value: twoBranches, failed: false })
   assert.deepEqual(linesOnly(inLedger), balanceBlock(inMovements).lines)
   assert.deepEqual(linesOnly(inLedger), [['branch', 'Shop', '10 pcs → 7 pcs'], ['total', 'Total', '18 pcs → 15 pcs']])
 })
 
 runTest('a failed or empty ledger balance read falls back to the row\'s own total, never "—" for a number the row holds', () => {
-  const failedRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: null, failed: true })
+  const failedRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow, showQuantity: false }, { id: 77, value: null, failed: true })
   assert.deepEqual(linesOnly(failedRead), [['branch', 'Shop', '— → —'], ['total', 'Total', '18 pcs → 15 pcs']])
   assert.doesNotMatch(failedRead, /could not be read/, 'the total is shown, so no failure notice')
   // the offline transport answers nulls instead of throwing: same fallback
-  const nullRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: { before_qty: null, after_qty: null, branch_before_qty: null, branch_after_qty: null, active_branch_count: null }, failed: false })
+  const nullRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow, showQuantity: false }, { id: 77, value: { before_qty: null, after_qty: null, branch_before_qty: null, branch_after_qty: null, active_branch_count: null }, failed: false })
   assert.deepEqual(linesOnly(nullRead).at(-1), ['total', 'Total', '18 pcs → 15 pcs'])
   // while still reading, the block says so; the read's own numbers win once in
   assert.deepEqual(linesOnly(renderBalance({ movement: ledgerRow, fallback: ledgerRow }, null)).at(-1), ['total', 'Total', '… → …'])
@@ -246,6 +246,17 @@ runTest('a failed or empty ledger balance read falls back to the row\'s own tota
   const noFallback = renderBalance({ movement: ledgerRow }, { id: 77, value: null, failed: true })
   assert.deepEqual(linesOnly(noFallback).at(-1), ['total', 'Total', '— → —'])
   assert.match(noFallback, /could not be read/)
+})
+
+runTest('the ledger float shows the movement quantity once: its type chip, not a second Quantity tile', () => {
+  const ledger = read('components/products/StockChangeSection.tsx')
+  const detailModal = ledger.slice(ledger.indexOf('<Modal title={`${detail.product_name}`}'), ledger.indexOf('{detail.batch_id ? ('))
+  assert.equal((detailModal.match(/signedLabel\(detail\)/g) || []).length, 1, 'the type chip carries the signed quantity')
+  const inLedger = renderBalance({ movement: ledgerRow, fallback: ledgerRow, showQuantity: false }, { id: 77, value: twoBranches, failed: false })
+  assert.doesNotMatch(inLedger, />Quantity</, 'the shared block drops its Quantity tile here')
+  assert.doesNotMatch(inLedger, /−3 pcs/)
+  // the Movements float has no type chip, so it keeps the tile
+  assert.equal(balanceBlock(renderFloat(sale, { id: 77, value: twoBranches, failed: false })).moved, '−3 pcs')
 })
 
 runTest('the float is its own modal, beside the others, and both packs carry its string', () => {
