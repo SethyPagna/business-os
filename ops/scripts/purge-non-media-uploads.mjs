@@ -116,7 +116,9 @@
 //       puts the Library rows back with every recorded column and the import
 //       rows' status, file_asset_id and updated_at. It never overwrites a
 //       different file, and running it again changes nothing. It writes
-//       restore-<time>.json next to the manifest.
+//       restore-<time>.json next to the manifest. A manifest recording a
+//       row that belongs to none of its moved files (an edited file) is
+//       refused before anything is written (restorableRows).
 //
 // Read-only on anything else. It never touches objects outside the three
 // prefixes (backups, exports, etc.) and its own quarantine/<time>/ folder.
@@ -1207,7 +1209,51 @@ export function validateManifest(manifest) {
       }
     }
   }
+  for (const refused of restorableRows(manifest).refused) {
+    problems.push(`a recorded ${refused.table === 'file_assets' ? 'Library' : 'import'} row (id ${printable(String(refused.id))}) ${refused.reason}`)
+  }
   return [...new Set(problems)].slice(0, 12)
+}
+
+// S-uploads3 (R-uploads2): the recorded rows --restore may write back. --move
+// records only rows of files it moved, so a row that belongs to no move in
+// the SAME manifest was not written by it: a Library row is put back only
+// when it points at a moved file, its public path is that file (or the same
+// stored name) under /uploads/, and its type columns are plain types; an
+// import row only when its own file was moved or it links to such a Library
+// row. Anything else (say an added row id 999 for /uploads/evil.html) is
+// refused, and validateManifest names it, so the whole file is refused.
+const MIME_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i
+const MEDIA_KIND_PATTERN = /^[a-z]+$/
+function libraryRowProblem(row, moved) {
+  const publicPath = typeof row?.public_path === 'string' ? row.public_path : ''
+  if (!publicPath.startsWith('/uploads/')) return 'has a public path outside /uploads/'
+  if (!assetKeys(row).some((key) => moved.has(key))) return 'matches no moved file'
+  const own = [publicPath.slice(1)]
+  try { own.push(decodeURIComponent(publicPath.slice(1))) } catch { /* not percent-encoded */ }
+  if (!own.some((key) => moved.has(key) || (typeof row.stored_name === 'string' && key === `uploads/${row.stored_name}`))) return 'has a public path to a file that was not moved'
+  if (row.mime_type != null && !MIME_TYPE_PATTERN.test(String(row.mime_type))) return 'has a mime_type that is not a media type'
+  if (row.media_type != null && !MEDIA_KIND_PATTERN.test(String(row.media_type))) return 'has a media_type that is not a plain word'
+  return null
+}
+export function restorableRows(manifest) {
+  const moved = new Set((Array.isArray(manifest?.moves) ? manifest.moves : []).map((move) => String(move?.key ?? '')).filter(Boolean))
+  const rows = manifest?.rows && typeof manifest.rows === 'object' ? manifest.rows : {}
+  const refused = []
+  const fileAssets = []
+  for (const row of Array.isArray(rows.file_assets) ? rows.file_assets : []) {
+    const reason = libraryRowProblem(row, moved)
+    if (reason) refused.push({ table: 'file_assets', id: row?.id ?? null, reason })
+    else fileAssets.push(row)
+  }
+  const assetIds = new Set(fileAssets.map((row) => Number(row.id)))
+  const importFiles = []
+  for (const row of Array.isArray(rows.import_job_files) ? rows.import_job_files : []) {
+    const linked = row?.file_asset_id != null && assetIds.has(Number(row.file_asset_id))
+    if (moved.has(String(row?.stored_path ?? '')) || linked) importFiles.push(row)
+    else refused.push({ table: 'import_job_files', id: row?.id ?? null, reason: 'matches no moved file' })
+  }
+  return { file_assets: fileAssets, import_job_files: importFiles, refused }
 }
 
 // Writes JSON so that a crash leaves either the old file or the new one,
@@ -1807,11 +1853,19 @@ async function restoreObject(cf, move) {
 
 // Library rows go back with every recorded column (a row that is already
 // there is left alone); import rows get back the three columns --move
-// changed, only while they still say 'purged'.
-async function restoreRows(cf, rows) {
-  const result = { fileAssets: { recorded: 0, present: 0, failed: [] }, importFiles: { recorded: 0, restored: 0, failed: [] } }
-  const fileAssets = rows.file_assets || []
-  const importFiles = rows.import_job_files || []
+// changed, only while they still say 'purged'. Only the rows
+// restorableRows accepts are written (validateManifest already refused a
+// manifest with any other; this holds even if it is called some other way),
+// and an import row's file_asset_id is only set back to a Library row this
+// restore puts back -- --move never changed any other link.
+async function restoreRows(cf, manifest) {
+  const result = { fileAssets: { recorded: 0, present: 0, failed: [] }, importFiles: { recorded: 0, restored: 0, failed: [] }, refused: [] }
+  const accepted = restorableRows(manifest)
+  result.refused = accepted.refused
+  const fileAssets = accepted.file_assets
+  const importFiles = accepted.import_job_files
+  const assetIds = new Set(fileAssets.map((row) => Number(row.id)))
+  const relinks = (row) => row.file_asset_id != null && assetIds.has(Number(row.file_asset_id))
   result.fileAssets.recorded = fileAssets.length
   result.importFiles.recorded = importFiles.length
   for (const row of fileAssets) {
@@ -1820,8 +1874,10 @@ async function restoreRows(cf, rows) {
     try { await cf.d1(sql, [...columns.map((column) => row[column]), row.id]) } catch (error) { result.fileAssets.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
   for (const row of importFiles) {
-    const sql = "UPDATE import_job_files SET status = ?, file_asset_id = ?, updated_at = ? WHERE id = ? AND status = 'purged'"
-    try { await cf.d1(sql, [row.status ?? null, row.file_asset_id ?? null, row.updated_at ?? null, row.id]) } catch (error) { result.importFiles.failed.push({ id: row.id, error: String(error?.message || error) }) }
+    const [sql, params] = relinks(row)
+      ? ["UPDATE import_job_files SET status = ?, file_asset_id = ?, updated_at = ? WHERE id = ? AND status = 'purged'", [row.status ?? null, row.file_asset_id, row.updated_at ?? null, row.id]]
+      : ["UPDATE import_job_files SET status = ?, updated_at = ? WHERE id = ? AND status = 'purged'", [row.status ?? null, row.updated_at ?? null, row.id]]
+    try { await cf.d1(sql, params) } catch (error) { result.importFiles.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
   // Read back what is there now.
   for (const ids of chunk(safeIds(fileAssets.map((row) => row.id)), 100)) {
@@ -1869,7 +1925,7 @@ async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFile
     } catch (error) { stray.outcome = `left (${String(error?.message || error)})` }
     strays.push(stray)
   }
-  const rowResult = await restoreRows(cf, rows)
+  const rowResult = await restoreRows(cf, manifest)
 
   const count = (outcome) => objects.filter((object) => object.outcome === outcome).length
   const reportPath = path.join(path.dirname(manifestPath), `restore-${stampOf(now())}.json`)
@@ -1880,8 +1936,9 @@ async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFile
   if (strays.length) log(`Unrecorded quarantine copies: ${strays.length} (${leftStrays.length} left).`)
   log(`Library rows present: ${rowResult.fileAssets.present} of ${rowResult.fileAssets.recorded}. Import rows back as they were: ${rowResult.importFiles.restored} of ${rowResult.importFiles.recorded}.`)
   for (const object of objects.filter((item) => item.outcome !== 'restored' && item.outcome !== 'in place').slice(0, 20)) log(`  ${object.outcome}: ${printable(object.key)} -- ${object.note}`)
+  for (const refused of rowResult.refused.slice(0, 20)) log(`  refused: a recorded ${refused.table} row (id ${printable(String(refused.id))}) ${refused.reason}; it was not written`)
   log(`Report saved: ${reportPath}`)
-  const clean = count('conflict') + count('missing') + count('failed') + leftStrays.length === 0
+  const clean = count('conflict') + count('missing') + count('failed') + leftStrays.length + rowResult.refused.length === 0
     && rowResult.fileAssets.failed.length === 0 && rowResult.importFiles.failed.length === 0
     && rowResult.fileAssets.present === rowResult.fileAssets.recorded && rowResult.importFiles.restored === rowResult.importFiles.recorded
   log(clean ? 'Done.' : 'FAILED: not everything could be put back; see above and the report. Running --restore again retries it and never overwrites a different file.')

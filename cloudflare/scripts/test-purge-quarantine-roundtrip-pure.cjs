@@ -773,6 +773,14 @@ async function main() {
       ['another bucket', (m) => { m.bucket = 'other' }, /bucket other/],
       ['a dry-run listing', (m) => { m.mode = 'dry-run' }, /dry run/],
       ['a missing hash', (m) => { delete m.moves[0].sha256 }, /no SHA-256/],
+      // S-uploads3 (R-uploads2): rows that belong to no move in the manifest.
+      ['an added Library row id 999 for /uploads/evil.html', (m) => {
+        m.rows.file_assets.push({ ...m.rows.file_assets[0], id: 999, stored_name: 'evil.html', public_path: '/uploads/evil.html', mime_type: 'text/html' })
+      }, /Library row \(id 999\) matches no moved file/],
+      ['a recorded Library row repointed at a kept file', (m) => { m.rows.file_assets[0].public_path = '/uploads/photo.jfif' }, /Library row \(id \d+\) has a public path to a file that was not moved/],
+      ['a recorded Library row moved out of /uploads/', (m) => { m.rows.file_assets[0].public_path = '/api/files/1' }, /public path outside \/uploads\//],
+      ['a Library row whose type is markup, not a media type', (m) => { m.rows.file_assets[0].mime_type = 'text/html; <script>' }, /not a media type/],
+      ['an added import row', (m) => { m.rows.import_job_files.push({ ...m.rows.import_job_files[0], id: 999, stored_path: 'uploads/photo.jfif', file_asset_id: 2 }) }, /import row \(id 999\) matches no moved file/],
     ]
     for (const [label, edit, message] of variants) {
       const copy = JSON.parse(JSON.stringify(good))
