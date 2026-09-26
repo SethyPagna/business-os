@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
-import { getStockLedger } from '../../api/productReadTransport.ts'
+import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 
 // The full-featured adjust modal (batch, price-lock, reasons) reused from the
@@ -20,9 +20,8 @@ import type { StockMode } from '../inventory/FastStockInModal'
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
 // U-records: a ledger row's float shows the SAME balance block, from the SAME
-// read, as the Movements tab's record float -- branch line, then total.
+// walk, as the Movements tab's record float -- branch line, then total.
 import { MovementBalance } from '../inventory/MovementDetailFloat.tsx'
-import { getInventoryMovementBalance } from '../../api/inventoryTransport.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -261,8 +260,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
   // The open row's before -> after: one read per opened record, the same
-  // endpoint and block as the Movements float (see MovementBalance).
-  const loadDetailBalance = useCallback((id: string | number) => getInventoryMovementBalance(id), [])
+  // walk and block as the Movements float (see MovementBalance), behind the
+  // ledger's own products-OR-inventory gate -- the Movements route is
+  // Inventory-only, and a Products-only user reads this ledger.
+  const loadDetailBalance = useCallback((id: string | number) => getStockLedgerMovementBalance(id), [])
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
@@ -1133,10 +1134,11 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
             </div>
             {/* Stock before -> after: the movement's branch line, then the
                 total across branches -- the shared block the Movements float
-                renders, fed by the same read, so one movement reads the same
-                on both screens (owner, 26 Sep). */}
+                renders, from the same walk, so one movement reads the same
+                on both screens (owner, 26 Sep). A failed read still shows the
+                row's own total pair. */}
             <div className="text-xs">
-              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} />
+              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} fallback={detail} />
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">

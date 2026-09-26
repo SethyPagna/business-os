@@ -65,7 +65,7 @@ async function reachesData(url, session, method = 'GET') {
   assert.ok(reads > 0, `${method} ${url}: real read handler reached (${response.status})`)
 }
 const catalog = ['/products', '/products/search', '/products/bootstrap']
-const detail = ['/products/1/detail-report', '/products/1/sales-detail?period=2026-09-01', '/products/1/supplier-purchases?supplierKey=1', '/products/stock-in-sessions', '/products/stock-ledger', '/products/auto-merges/1']
+const detail = ['/products/1/detail-report', '/products/1/sales-detail?period=2026-09-01', '/products/1/supplier-purchases?supplierKey=1', '/products/stock-in-sessions', '/products/stock-ledger', '/products/stock-ledger/1/balance', '/products/auto-merges/1']
 const productReads = [...catalog, ...detail, '/products/stock-in-session-lines?key=invalid', '/products/filters', '/products/bulk-delete-jobs/job', '/products/lookups/usage']
 const inventoryReads = ['/inventory/products/search', '/inventory/bootstrap', '/inventory/summary', '/inventory/stats', '/inventory/movements', '/inventory/reasons', '/inventory/reasons/impact?from=old&to=new', '/inventory/rfid/status', '/inventory/rfid/tags/search', '/inventory/rfid/sessions/1/review']
 const branchReads = ['/branches/summary', '/branches/stock-integrity', '/branches/1/stock', '/branches/1/stock?page=1', '/transfers']
@@ -187,6 +187,25 @@ async function main() {
       for (const key of ['cost_price_usd', 'purchase_price_usd', 'stock_value_usd', 'cogs_usd']) assert.equal(key in rows[0], false, `${url}: manager must not see ${key}`)
       assert.equal(rows[0].selling_price_usd, 20, `${url}: sale price retained`)
     }
+    // U-records (refuter, 26 Sep): the Stock Changes tab is a Products-view
+    // surface, and its row float's before -> after must read for a user who
+    // holds Products view only. The Movements balance route is Inventory-only,
+    // which is why the ledger has its own products-OR-inventory twin.
+    sqlite.exec("INSERT INTO inventory_movements(id,product_id,product_name,branch_id,movement_type,quantity,created_at) VALUES(1,1,'Example',1,'add',5,'2026-09-20 03:00:00')")
+    const productsOnly = staff({ products: true })
+    const ledgerBalance = await request('/products/stock-ledger/1/balance', productsOnly, {}, fixture)
+    assert.equal(ledgerBalance.status, 200, 'a Products-only user reads the ledger row balance')
+    const balancePayload = await ledgerBalance.json()
+    assert.deepEqual([balancePayload.id, balancePayload.before_qty, balancePayload.after_qty, balancePayload.branch_before_qty, balancePayload.branch_after_qty, balancePayload.active_branch_count], [1, 0, 5, 0, 5, 2])
+    const ledgerRows = await request('/products/stock-ledger', productsOnly, {}, fixture)
+    assert.equal(ledgerRows.status, 200)
+    const ledgerRow = (await ledgerRows.json()).items.find(row => row.id === 1)
+    assert.deepEqual([ledgerRow.before_qty, ledgerRow.after_qty], [balancePayload.before_qty, balancePayload.after_qty], 'the float balance and its ledger row agree')
+    const inventoryBalance = await request('/inventory/movements/1/balance', productsOnly, {}, fixture)
+    assert.equal(inventoryBalance.status, 403, 'the Movements route stays Inventory-only -- the reason the ledger float must not use it')
+    const inventoryReader = await request('/products/stock-ledger/1/balance', staff({ inventory: 'review' }), {}, fixture)
+    assert.equal(inventoryReader.status, 200, 'an Inventory-only reader of the ledger reads it too')
+    assert.equal((await request('/products/stock-ledger/0/balance', productsOnly, {}, fixture)).status, 400)
     const before = sqlite.prepare('SELECT total_changes() n').get().n
     for (const url of [...productReads, ...inventoryReads, ...branchReads]) {
       const response = await request(url, staff({ products: true, inventory: true, branches: true }, revoked), {}, fixture)

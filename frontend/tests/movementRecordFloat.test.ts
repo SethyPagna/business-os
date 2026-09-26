@@ -185,20 +185,11 @@ runTest('the balance is the Worker\'s one-statement read, the same helper as the
   assert.match(read('components/inventory/Inventory.tsx'), /getInventoryApi\(\)\.getInventoryMovementBalance\(id\)/)
 })
 
-runTest('the Stock Changes ledger float shows the same balance block, from the same read, as the Movements float', () => {
-  const ledger = read('components/products/StockChangeSection.tsx')
-  const detailModal = ledger.slice(ledger.indexOf('<Modal title={`${detail.product_name}`}'))
-  assert.ok(detailModal.length > 0, 'the ledger row float exists')
-  assert.match(ledger, /import \{ MovementBalance \} from '\.\.\/inventory\/MovementDetailFloat\.tsx'/)
-  assert.match(ledger, /const loadDetailBalance = useCallback\(\(id: string \| number\) => getInventoryMovementBalance\(id\), \[\]\)/)
-  assert.match(detailModal, /<MovementBalance movement=\{detail\} tr=\{\(key, fallback\) => tr\(t, key, fallback\)\} loadBalance=\{loadDetailBalance\} \/>/)
-  // the old unlabelled total-only tiles are gone
-  assert.doesNotMatch(detailModal, /\{detail\.before_qty\}|\{detail\.after_qty\}/)
-  const float = read('components/inventory/MovementDetailFloat.tsx')
-  assert.match(float, /<MovementBalance movement=\{movement\} tr=\{tr\} loadBalance=\{loadBalance\} \/>/, 'the Movements float renders the same block')
-  // rendered: one movement, one balance -> byte-identical block in both
+// The shared block, rendered on its own with a fixed balance state -- how the
+// Stock Changes ledger float mounts it.
+function renderBalance(props: Record<string, unknown>, balanceState: unknown): string {
   const exports = transpile('components/inventory/MovementDetailFloat.tsx', (id) => {
-    if (id === 'react') return { ...React, useState: () => [{ id: 77, value: twoBranches, failed: false }, () => {}], useEffect: () => {} }
+    if (id === 'react') return { ...React, useState: () => [balanceState, () => {}], useEffect: () => {} }
     if (id === 'react/jsx-runtime') return require(id)
     if (id.includes('StockLineChange')) return stockLineChange
     if (id.includes('movementGroups')) return movementGroups
@@ -206,12 +197,55 @@ runTest('the Stock Changes ledger float shows the same balance block, from the s
     if (id.includes('Modal')) return { default: ({ children }: { children: React.ReactNode }) => React.createElement('section', null, children) }
     throw new Error(`Unexpected dependency: ${id}`)
   })
-  // a ledger row as the Stock Changes list carries it (quantity is a magnitude)
-  const ledgerRow = { id: 77, product_id: 5, product_name: 'Cream', movement_type: 'sale', quantity: 3, signed_quantity: -3, unit: 'pcs', branch_name: 'Shop', before_qty: 18, after_qty: 15, created_at: '2026-09-20 10:00:00' }
-  const inLedger = renderToStaticMarkup(React.createElement(exports.MovementBalance, { movement: ledgerRow, tr: (_key: string, fallback: string) => fallback, loadBalance: () => Promise.resolve(null) }))
+  return renderToStaticMarkup(React.createElement(exports.MovementBalance, { tr: (_key: string, fallback: string) => fallback, loadBalance: () => Promise.resolve(null), ...props }))
+}
+// a ledger row as the Stock Changes list carries it (quantity is a magnitude;
+// before_qty/after_qty are the row's own TOTAL pair, from the same walk)
+const ledgerRow = { id: 77, product_id: 5, product_name: 'Cream', movement_type: 'sale', quantity: 3, signed_quantity: -3, unit: 'pcs', branch_name: 'Shop', before_qty: 18, after_qty: 15, created_at: '2026-09-20 10:00:00' }
+const linesOnly = (html: string) => {
+  const block = html.slice(html.indexOf('data-testid="stock-record-balance"'))
+  const visible = (dd: string) => dd.replace(/<span class="sr-only">[^<]*<\/span>/g, '').replace(/<[^>]+>/g, '')
+  return [...block.matchAll(/data-scope="(branch|total)"[^>]*><dt[^>]*>([^<]*)<\/dt><dd[^>]*>(.*?)<\/dd>/g)].map((match) => [match[1], match[2], visible(match[3])])
+}
+
+runTest('the Stock Changes ledger float shows the same balance block, from the same walk, behind the LEDGER\'s gate', () => {
+  const ledger = read('components/products/StockChangeSection.tsx')
+  const detailModal = ledger.slice(ledger.indexOf('<Modal title={`${detail.product_name}`}'))
+  assert.ok(detailModal.length > 0, 'the ledger row float exists')
+  assert.match(ledger, /import \{ MovementBalance \} from '\.\.\/inventory\/MovementDetailFloat\.tsx'/)
+  // Refuter, 26 Sep: the Stock Changes tab needs only Products view, and the
+  // Movements balance route is Inventory-only -- a Products-only user read
+  // "—". The ledger float reads its own products-gated twin.
+  assert.match(ledger, /const loadDetailBalance = useCallback\(\(id: string \| number\) => getStockLedgerMovementBalance\(id\), \[\]\)/)
+  assert.doesNotMatch(ledger, /getInventoryMovementBalance/, 'the ledger never reads the Inventory-only balance route')
+  assert.match(read('api/productReadTransport.ts'), /apiFetch\('GET', `\/api\/products\/stock-ledger\/\$\{Math\.trunc\(Number\(id\)\)\}\/balance`\)/)
+  assert.match(detailModal, /<MovementBalance movement=\{detail\} tr=\{\(key, fallback\) => tr\(t, key, fallback\)\} loadBalance=\{loadDetailBalance\} fallback=\{detail\} \/>/)
+  // the old unlabelled total-only tiles are gone
+  assert.doesNotMatch(detailModal, /\{detail\.before_qty\}|\{detail\.after_qty\}/)
+  const float = read('components/inventory/MovementDetailFloat.tsx')
+  assert.match(float, /<MovementBalance movement=\{movement\} tr=\{tr\} loadBalance=\{loadBalance\} \/>/, 'the Movements float renders the same block')
+  // rendered: one movement, one balance -> the same lines in both
+  const inLedger = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: twoBranches, failed: false })
   const inMovements = renderFloat(sale, { id: 77, value: twoBranches, failed: false })
-  assert.deepEqual(balanceBlock(inLedger), balanceBlock(inMovements))
-  assert.deepEqual(balanceBlock(inLedger).lines, [['branch', 'Shop', '10 pcs → 7 pcs'], ['total', 'Total', '18 pcs → 15 pcs']])
+  assert.deepEqual(linesOnly(inLedger), balanceBlock(inMovements).lines)
+  assert.deepEqual(linesOnly(inLedger), [['branch', 'Shop', '10 pcs → 7 pcs'], ['total', 'Total', '18 pcs → 15 pcs']])
+})
+
+runTest('a failed or empty ledger balance read falls back to the row\'s own total, never "—" for a number the row holds', () => {
+  const failedRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: null, failed: true })
+  assert.deepEqual(linesOnly(failedRead), [['branch', 'Shop', '— → —'], ['total', 'Total', '18 pcs → 15 pcs']])
+  assert.doesNotMatch(failedRead, /could not be read/, 'the total is shown, so no failure notice')
+  // the offline transport answers nulls instead of throwing: same fallback
+  const nullRead = renderBalance({ movement: ledgerRow, fallback: ledgerRow }, { id: 77, value: { before_qty: null, after_qty: null, branch_before_qty: null, branch_after_qty: null, active_branch_count: null }, failed: false })
+  assert.deepEqual(linesOnly(nullRead).at(-1), ['total', 'Total', '18 pcs → 15 pcs'])
+  // while still reading, the block says so; the read's own numbers win once in
+  assert.deepEqual(linesOnly(renderBalance({ movement: ledgerRow, fallback: ledgerRow }, null)).at(-1), ['total', 'Total', '… → …'])
+  const disagreeing = renderBalance({ movement: ledgerRow, fallback: { before_qty: 1, after_qty: 2 } }, { id: 77, value: twoBranches, failed: false })
+  assert.deepEqual(linesOnly(disagreeing).at(-1), ['total', 'Total', '18 pcs → 15 pcs'])
+  // no fallback (the Movements float): a failed read is still "—" and says why
+  const noFallback = renderBalance({ movement: ledgerRow }, { id: 77, value: null, failed: true })
+  assert.deepEqual(linesOnly(noFallback).at(-1), ['total', 'Total', '— → —'])
+  assert.match(noFallback, /could not be read/)
 })
 
 runTest('the float is its own modal, beside the others, and both packs carry its string', () => {

@@ -44,15 +44,21 @@ type Translator = (key: string) => string | undefined
 /**
  * The balance block of ANY stock record float that shows one movement: the
  * Movements tab's record float (below) and the Stock Changes ledger's row
- * float (products/StockChangeSection.tsx). One component, one read (GET
- * /api/inventory/movements/:id/balance through `loadBalance`), so the same
- * movement reads the same branch line and total line on both screens.
- * Pending while it is read; "—" when it cannot be.
+ * float (products/StockChangeSection.tsx). One component and one walk
+ * (loadMovementStockBalances), so the same movement reads the same branch
+ * line and total line on both screens. Each screen passes the read behind
+ * ITS OWN gate as `loadBalance`: the Movements tab
+ * /api/inventory/movements/:id/balance (Inventory view), the ledger
+ * /api/products/stock-ledger/:id/balance (Products OR Inventory view).
+ * Pending while it is read; "—" when it cannot be -- unless the caller
+ * already holds the row's own TOTAL pair (`fallback`: the ledger row, from
+ * the same walk), which then fills the total line instead of "—".
  */
-export function MovementBalance({ movement, tr, loadBalance }: {
+export function MovementBalance({ movement, tr, loadBalance, fallback }: {
   movement: MovementDetailRecord
   tr: (key: string, fallback: string) => string
   loadBalance: (id: string | number) => Promise<MovementBalanceValue | null>
+  fallback?: { before_qty?: unknown; after_qty?: unknown } | null
 }) {
   const [balance, setBalance] = useState<{ id: string | number; value: MovementBalanceValue | null; failed: boolean } | null>(null)
   useEffect(() => {
@@ -64,11 +70,17 @@ export function MovementBalance({ movement, tr, loadBalance }: {
   }, [movement.id, loadBalance])
   // A balance read for a previous record never labels this one.
   const current = balance && balance.id === movement.id ? balance : null
+  const known = (value: unknown): number | null => (value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value))
+  const readTotal = [known(current?.value?.before_qty), known(current?.value?.after_qty)]
+  const fallbackTotal = [known(fallback?.before_qty), known(fallback?.after_qty)]
+  // The read wins; a failed or empty read falls back to the row's own total.
+  const total = readTotal.every((value) => value != null) ? readTotal : fallbackTotal
+  const usedFallback = !!current && total === fallbackTotal && fallbackTotal.every((value) => value != null)
   return <>
     <StockLineChange
       row={{
-        before_qty: current?.value?.before_qty ?? null,
-        after_qty: current?.value?.after_qty ?? null,
+        before_qty: total[0],
+        after_qty: total[1],
         branch_before_qty: current?.value?.branch_before_qty ?? null,
         branch_after_qty: current?.value?.branch_after_qty ?? null,
         quantity: movement.quantity,
@@ -81,7 +93,7 @@ export function MovementBalance({ movement, tr, loadBalance }: {
       tr={tr}
       pending={!current}
     />
-    {current?.failed ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
+    {current?.failed && !usedFallback ? <p className="leading-relaxed text-amber-700 dark:text-amber-300">{tr('stock_balance_unavailable', 'The stock before and after could not be read.')}</p> : null}
   </>
 }
 

@@ -1660,6 +1660,21 @@ app.get('/stock-ledger', async (c) => {
   })
 })
 
+// U-records: ONE Stock Changes row's before -> after, branch pair and total
+// pair, for the row's record float. Same helper and wire shape as the
+// Movements tab's GET /api/inventory/movements/:id/balance, but behind THIS
+// tab's gate (products OR inventory view, canReadProductDetail -- the same
+// grant /stock-ledger itself needs). The inventory route requires Inventory
+// view, so a Products-only user who can read the ledger row would otherwise
+// be refused its balance.
+app.get('/stock-ledger/:id/balance', async (c) => {
+  if (!canReadProductDetail(c.get('user'))) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const id = Number.parseInt(String(c.req.param('id') || ''), 10)
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
+  const { balances, activeBranchCount } = await loadMovementStockBalances(getDb(c.env), [id])
+  return c.json({ id, ...movementBalanceFields(balances.get(id)), active_branch_count: activeBranchCount })
+})
+
 // P3 (Part 387): whole-catalog price adjustment, run server-side as
 // set-based UPDATEs -- the explicit "ALL products in the system" scope the
 // bulk price modal offers next to its selection scope. Never materializes
