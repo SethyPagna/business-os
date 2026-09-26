@@ -1909,15 +1909,20 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('transfer_reason_required', 'A transfer reason is required.'), 'error')
       return
     }
-    // The received date to move from, chosen among lots with stock at the
-    // source (InventoryStockModals). The Worker refuses 409 if it cannot cover it.
-    const transferBatchId = Number(transferForm.batch_id)
-    if (!(transferBatchId > 0)) {
-      notify(tr('transfer_pick_batch_first', 'Choose a received date first'), 'error')
+    // The received date is optional, as in the branch TransferModal: a
+    // chosen lot (among lots with stock at the source, InventoryStockModals)
+    // bounds the move and the Worker refuses 409 if it cannot cover it; no
+    // lot sends batchId null and the Worker allocates FIFO across the source
+    // lots, bounded by the source branch total (400 when it cannot cover it).
+    const transferBatchId = Number(transferForm.batch_id) > 0 ? Number(transferForm.batch_id) : null
+    if (transferBatchId && transferForm.batch_quantity !== '' && Number.isFinite(Number(transferForm.batch_quantity)) && quantity > Number(transferForm.batch_quantity)) {
+      notify(tr('transfer_only_available', 'Only {n} available').replace('{n}', String(transferForm.batch_quantity)), 'error')
       return
     }
-    if (Number.isFinite(Number(transferForm.batch_quantity)) && quantity > Number(transferForm.batch_quantity)) {
-      notify(tr('transfer_only_available', 'Only {n} available').replace('{n}', String(transferForm.batch_quantity)), 'error')
+    const sourceStockEntry = (transferModal.branch_stock || []).find((item) => String(item.branch_id) === String(transferForm.from_branch_id))
+    const sourceAvailable = sourceStockEntry ? Number(sourceStockEntry.quantity) : NaN
+    if (Number.isFinite(sourceAvailable) && quantity > sourceAvailable) {
+      notify(tr('transfer_only_available', 'Only {n} available').replace('{n}', String(Math.max(0, sourceAvailable))), 'error')
       return
     }
     const fromBranch = branchesById.get(String(transferForm.from_branch_id))

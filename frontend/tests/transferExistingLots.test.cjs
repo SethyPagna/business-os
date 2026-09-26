@@ -1,7 +1,10 @@
-// Explicit received dates on the branch transfer surfaces. Ported from
+// Received dates on the branch transfer surfaces. Ported from
 // codex/existing-stock-lot-corrections-20260912 and adapted to today's
-// TransferModal (per checked row, only lots with stock, no FIFO default) and
-// to the Inventory transfer form (POST /api/inventory/transfer batchId).
+// TransferModal (per checked row, only lots with stock) and to the Inventory
+// transfer form (POST /api/inventory/transfer batchId). Since 26 Sep 2026 the
+// lot is OPTIONAL on both (owner report: quantity could not be edited without
+// a dated lot); tests/transferLotOptional.test.cjs pins the lot-less path.
+// This file pins what still holds when a lot IS chosen.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const ts = require('typescript')
@@ -20,7 +23,7 @@ const lots = [lot(71, 5), lot(72, 7, '2026-09-05')]
 
 assert.deepEqual(positiveTransferLots([lot(1, 0), lot(2, -1), lot(3, 1, '2026-09-01', 0), lot(4, 1, null), lot(5, 2)]).map((row) => row.id), [5],
   'only active, dated lots with stock are offered')
-assert.throws(() => selectedTransferLot(product, lots, undefined, 2), /pick_batch/, 'no automatic lot')
+assert.deepEqual(selectedTransferLot(product, lots, undefined, 2), { productId: 7, quantity: 2 }, 'no lot chosen: lot-less line, Worker allocates FIFO')
 assert.equal(selectedTransferLot(product, lots, 71, 5).batchId, 71, 'an explicit earlier date is kept even though a later date holds more')
 assert.throws(() => selectedTransferLot(product, lots, 71, 6), /quantity/, 'bounded by the lot')
 assert.throws(() => selectedTransferLot({ ...product, branch_quantity: 3 }, lots, 71, 4), /quantity/, 'bounded by the branch')
@@ -44,8 +47,8 @@ const context = {
 }
 const submit = () => extract('const handleBulkTransfer =', '  /**\n   * The one write path', context)()
 submit()
-assert.equal(pending, undefined, 'no lot chosen: nothing is armed')
-assert.match(notice, /transfer_pick_batch_first/)
+assert.deepEqual(pending.items, [{ productId: 7, quantity: 2 }], 'no lot chosen: a lot-less item is armed')
+pending = undefined
 context.selectedLots[7] = 71
 submit()
 assert.equal(pending.items[0].batchId, 71)
@@ -56,7 +59,7 @@ submit()
 assert.equal(pending, undefined, 'lots loaded under another source branch never arm a transfer')
 
 // Source pins: the per-row selector and the wire.
-assert.match(source, /max=\{chosenLot \? Math\.min\(Number\(product\.branch_quantity\), Number\(chosenLot\.quantity\)\) : 0\}/)
+assert.match(source, /max=\{chosenLot \? Math\.min\(finiteStockAvailable\(product\.branch_quantity\), Number\(chosenLot\.quantity\)\) : finiteStockAvailable\(product\.branch_quantity\)\}/)
 assert.match(source, /\.map\(\(\{ productId, quantity, batchId \}\) => \(batchId \? \{ productId, quantity, batchId \} : \{ productId, quantity \}\)\)/)
 assert.match(source, /value=\{chosenLot\?\.id \?\? ''\}/, 'the live row selector has no automatic default')
 assert.match(source, /<AppSelect\s+id=\{`transfer-lot-\$\{id\}`\}/, 'lots use the shared accessible selector')
@@ -67,6 +70,6 @@ const modals = read('../src/components/inventory/InventoryStockModals.tsx')
 const inventory = read('../src/components/inventory/Inventory.tsx')
 assert.match(modals, /getProductBatches\(transferProductId, Number\(transferSourceId\), true\)/)
 assert.match(inventory, /batchId: transferBatchId,/)
-assert.match(inventory, /if \(!\(transferBatchId > 0\)\)/)
+assert.match(inventory, /const transferBatchId = Number\(transferForm\.batch_id\) > 0 \? Number\(transferForm\.batch_id\) : null/)
 
-console.log('PASS explicit existing transfer lots: selected lot and bounds, source-branch identity, wire and shared selector')
+console.log('PASS existing transfer lots: optional selected lot and bounds, source-branch identity, wire and shared selector')

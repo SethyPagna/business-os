@@ -62,14 +62,24 @@ export function positiveTransferLots(batches: ProductBatch[]): ProductBatch[] {
 }
 
 /**
- * One checked row's explicit lot line. Throws (never guesses) when no lot is
- * chosen or the quantity exceeds what that lot or the branch holds; the
- * Worker enforces the same bound (409 selected_lot_unavailable).
+ * One checked row's transfer line. The received date is OPTIONAL, exactly as
+ * in the single-product transfer: with no lot named the line carries no
+ * batchId, is bounded by the source branch quantity, and the Worker allocates
+ * it FIFO across the source lots (dated oldest first, then undated, then any
+ * branch stock the lot ledger never tracked -- lib/transferOperation.ts).
+ * A named lot bounds the line by min(branch, lot); a named lot that is not
+ * among the loaded lots with stock is refused, never swapped for another.
+ * The Worker enforces both bounds (400 insufficient / 409 selected lot).
  */
 export function selectedTransferLot(product: TransferProduct, batches: ProductBatch[], batchId: number | undefined, quantity: number): PendingTransferItem {
+  const branchLimit = Number(product.branch_quantity)
+  if (!(Number(batchId) > 0)) {
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(branchLimit) || quantity > branchLimit) throw new Error('transfer_invalid_quantity')
+    return { productId: product.id, quantity }
+  }
   const batch = positiveTransferLots(batches).find((row) => Number(row.id) === Number(batchId))
   if (!batch) throw new Error('transfer_pick_batch_first')
-  const limit = Math.min(Number(product.branch_quantity), Number(batch.quantity))
+  const limit = Math.min(branchLimit, Number(batch.quantity))
   if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(limit) || quantity > limit) throw new Error('transfer_invalid_quantity')
   return { productId: product.id, quantity, batchId: Number(batch.id) }
 }
@@ -321,8 +331,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>(initialDraft?.selectedQuantities || {})
-  // Explicit received date per checked row (no FIFO default), and the lots
-  // with stock loaded for it at the CURRENT source branch.
+  // Optional received date per checked row (absent = Automatic FIFO, the
+  // single-transfer behaviour), and the lots with stock loaded for it at the
+  // CURRENT source branch.
   const [selectedLots, setSelectedLots] = useState<Record<string, number>>(initialDraft?.selectedLots || {})
   const [rowLots, setRowLots] = useState<Record<string, { branch: string; batches: ProductBatch[]; error?: string }>>({})
   const lotBranchRef = useRef(fromBranch)
@@ -340,7 +351,17 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         try {
           const result = await withLoaderTimeout<{ batches: ProductBatch[] }>(() => getProductBatches(Number(id), Number(branch), true), 'Transfer received dates', TRANSFER_STOCK_LOAD_TIMEOUT_MS)
           if (cancelled || lotBranchRef.current !== branch) return
-          setRowLots((current) => ({ ...current, [id]: { branch, batches: positiveTransferLots(result?.batches || []) } }))
+          const offered = positiveTransferLots(result?.batches || [])
+          setRowLots((current) => ({ ...current, [id]: { branch, batches: offered } }))
+          // A received date restored from a draft (or picked before a reload)
+          // that this source no longer offers falls back to Automatic, which
+          // is what the row then displays -- never a silently different lot.
+          setSelectedLots((current) => {
+            if (!current[id] || offered.some((lot) => Number(lot.id) === Number(current[id]))) return current
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
         } catch (error) {
           if (cancelled || lotBranchRef.current !== branch) return
           setRowLots((current) => ({ ...current, [id]: { branch, batches: [], error: getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data') } }))
@@ -1121,19 +1142,22 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         notify(`${product?.name || productId}: ${message} ${product?.unit || ''}`.trim(), 'error')
         return
       }
-      // Each checked row names its received date explicitly; lots loaded
-      // under another source branch never count.
+      // A row with no received date goes out lot-less and the Worker
+      // allocates it FIFO. A row that names one must have that lot loaded
+      // under the CURRENT source branch; lots loaded under another source
+      // never count.
+      const chosenBatchId = Number(selectedLots[productId]) > 0 ? Number(selectedLots[productId]) : undefined
       const loaded = rowLots[productId]
-      if (!loaded || loaded.error || loaded.branch !== fromBranch) {
+      if (chosenBatchId && (!loaded || loaded.error || loaded.branch !== fromBranch)) {
         notify(`${product.name || productId}: ${t('transfer_pick_batch_first') || 'Choose a received date first'}`, 'error')
         return
       }
       try {
-        items.push(selectedTransferLot(product, loaded.batches, selectedLots[productId], qty))
+        items.push(selectedTransferLot(product, loaded?.batches || [], chosenBatchId, qty))
       } catch (error) {
-        const lot = loaded.batches.find((row) => Number(row.id) === Number(selectedLots[productId]))
+        const lot = loaded?.batches.find((row) => Number(row.id) === chosenBatchId)
         notify(`${product.name || productId}: ${error instanceof Error && error.message === 'transfer_invalid_quantity'
-          ? (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(Math.min(Number(product.branch_quantity), Number(lot?.quantity || 0))))
+          ? (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(chosenBatchId ? Math.min(Number(product.branch_quantity), Number(lot?.quantity || 0)) : finiteStockAvailable(product.branch_quantity)))
           : (t('transfer_pick_batch_first') || 'Choose a received date first')}`, 'error')
         return
       }
@@ -1179,8 +1203,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
           requests.push({ bulk: true, body: {
             fromBranchId: Number.parseInt(fromBranch, 10), toBranchId: Number.parseInt(toBranch, 10),
-            // A checked row carries its explicit received date; Transfer
-            // entire branch moves every lot, so it has none to name.
+            // A checked row carries its received date only when one was
+            // chosen; otherwise (and for Transfer entire branch) the line is
+            // lot-less and the Worker allocates it FIFO.
             reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE)
               .map(({ productId, quantity, batchId }) => (batchId ? { productId, quantity, batchId } : { productId, quantity })),
             userId: user?.id, userName: user?.name,
@@ -1666,15 +1691,23 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             buttonClassName="h-8 w-full text-xs"
                             ariaLabel={`${t('transfer_pick_batch') || 'Received date'} ${product.name || ''}`}
                             value={chosenLot?.id ?? ''}
-                            disabled={!lotsReady || !!loadedLots?.error}
+                            disabled={!lotsReady || !!loadedLots?.error || !lots.length}
                             options={[
-                              { value: '', label: !lotsReady ? (t('loading') || 'Loading...') : loadedLots?.error || !lots.length ? (t('no_batches_with_stock') || 'No received dates with stock') : (t('transfer_pick_batch_first') || 'Choose a received date') },
+                              // Blank = Automatic (FIFO), the same default the
+                              // single transfer uses; it never locks quantity.
+                              { value: '', label: !lotsReady && !loadedLots?.error ? (t('loading') || 'Loading...') : (t('transfer_auto_fifo') || 'Automatic (FIFO)') },
                               ...lots.map((lot) => ({ value: lot.id, label: `${batchDisplayLabel(lot, t('batch') || 'Received date')} · ${lot.quantity}` })),
                             ]}
                             onChange={(value) => {
                               const lot = lots.find((entry) => String(entry.id) === String(value))
-                              setSelectedLots((current) => ({ ...current, [id]: lot ? Number(lot.id) : 0 }))
-                              setProductQuantity(product.id, lot ? String(Math.min(Number(product.branch_quantity), Number(lot.quantity))) : '')
+                              setSelectedLots((current) => {
+                                const next = { ...current }
+                                if (lot) next[id] = Number(lot.id)
+                                else delete next[id]
+                                return next
+                              })
+                              const branchAvailable = finiteStockAvailable(product.branch_quantity)
+                              setProductQuantity(product.id, String(lot ? Math.min(branchAvailable, Number(lot.quantity)) : branchAvailable))
                             }}
                           />
                         ) : null}
@@ -1683,8 +1716,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             type="number"
                             className="input w-20 shrink-0 px-2 py-1 text-sm"
                             min="0.01"
-                            max={chosenLot ? Math.min(Number(product.branch_quantity), Number(chosenLot.quantity)) : 0}
-                            disabled={!chosenLot}
+                            max={chosenLot ? Math.min(finiteStockAvailable(product.branch_quantity), Number(chosenLot.quantity)) : finiteStockAvailable(product.branch_quantity)}
                             step="any"
                             value={rowQuantity}
                             onChange={(event) => setProductQuantity(product.id, event.target.value)}
