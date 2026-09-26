@@ -5,6 +5,20 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
+### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
+| Checkpoint | Contents | State |
+|---|---|---|
+| CP-1 | urgent @ `c26ab50c`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [~] full individual sweep running → final check → owner OK to push → owner deploys |
+| CP-2 | S-auth (OTP/2FA, Settings, Drive, AI key, Origin guard), S-uploads (images-only, stored XSS), U-records2, U-cost + 0195 | [~] lanes resumed after the usage limit |
+| CP-3 | U-cost past-sale repair migration (owner approves the remote run), U-print, U-confirm, U-sync, U-broadcast, U-drain + offline removal, S-secrets, K1/K3/K5 caching | [ ] after CP-2 |
+| CP-4 | U-branch (Shop → Store), R2 move to APAC, official-names Excel | [ ] owner-gated |
+
+### All workstreams — one line each; the details are in the session log and in local Records (`Records/Recovery/LANES.md`)
+- [x] Investigations, read-only: I1 I3 I5 I7 I8 I9, A1–A3, C3 A/B plan, M-offline map, C-cache plan, C-comply gap, A-profile audit, SEC-1 (secrets/history), SEC-2 (authz), SEC-3 (injection/leaks)
+- [~] SEC-1 full GitHub mirror key scan (all branches + PRs, masked) — running
+- [ ] Q12 repos (private main + public mirror + docker repo from `archive/docker-postgres-2026-07-26`) · Q13 print waits for QR · Q14 branch-scoped visibility + KPI · Q15 profile page + tutorials · Q16 undo broadcasts · Q17 review/audit previews · Q18 short display IDs · Q19 tidy ledgers/folders · Q20 SEC-3 P3 items · Q21 redact names/phones in public files · Q-drafts part 2 (server-side drafts across devices)
+- [ ] Owner checks: no stray `admin` user; 2FA on Cloudflare + GitHub; remove old-domain Google OAuth redirect URIs; delete the old zone later; confirm the test password `Foc…(15)` is not a real one
+
 Owner order: **admin fixes → public site → A/B data architecture**, deployed as soon as each
 checkpoint is verified. Base: resume line `2d1888ca`; integration branch `claude/urgent-20260925`.
 Each lane has its own worktree under `Downloads/Projects/BusinessOS/Worktrees/` and one writer.
