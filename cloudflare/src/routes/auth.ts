@@ -10,7 +10,7 @@ import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
@@ -56,8 +56,11 @@ const OTP_RESET_INVALID_ERROR = 'Invalid account or authenticator code.'
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
 // /password-reset/*, which both already used checkRateLimit. Two buckets:
 // - a per-IP ceiling (catches distributed low-and-slow guessing across many
-//   usernames from one source). It is a REQUEST ceiling, checked before any
-//   DB work, so it counts every attempt from that IP, successes included.
+//   usernames from one source). Every attempt reserves a slot atomically
+//   before any DB work (checkRateLimit), so a parallel burst cannot overrun
+//   it; a verified password gives the slot back (releaseRateLimitSlot). Only
+//   failures stay counted, because every till in a shop shares one public IP
+//   and a whole shift signing in must never be refused as "this network".
 // - a tighter per-account ceiling (catches focused guessing at one account,
 //   even if the attacker rotates IPs), keyed on the typed identifier and,
 //   once resolved, on the account id. It counts only FAILED attempts
@@ -302,6 +305,10 @@ app.post('/login', async (c) => {
   if (!user || !user.is_active) return invalidCredentials()
   const passwordMatches = bcrypt.compareSync(body.password, user.password)
   if (!passwordMatches) return invalidCredentials()
+
+  // A right password is not a guess: hand back the network slot reserved
+  // above, so shared tills behind one IP never fill the per-IP ceiling.
+  await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
 
   // Password matched -- clear the lockout counter here (not only at full
   // session creation further down) so an OTP-enabled account's counter
