@@ -164,6 +164,19 @@ function toNumberValue(value: unknown, fallback = 0): number {
 
 const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
+// The form mirrors the whole settings map, but Google Drive rows are owned by
+// the Worker and the Drive panel's dedicated endpoints (connection, recorded
+// authoriser, last sync, last error). Resending them from this form would
+// overwrite live status with whatever was loaded, and for a non-administrator
+// the Worker refuses any change to them (P1-3), so a sync that ran after the
+// page loaded would block an unrelated save. Never send them from here.
+const SERVER_OWNED_SETTING_PREFIXES = ['drive_sync_']
+function withoutServerOwnedSettings<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => !SERVER_OWNED_SETTING_PREFIXES.some((prefix) => key.trim().toLowerCase().startsWith(prefix))),
+  ) as T
+}
+
 const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
   en: {
     appearanceHintAccent: 'Buttons, active links, and highlights',
@@ -946,10 +959,10 @@ export default function Settings() {
       return
     }
     setSavingSettings(true)
-    const sanitizedForm = {
+    const sanitizedForm = withoutServerOwnedSettings({
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, toStringValue(settings.ui_app_favicon_image)),
-    }
+    })
     // Frontend half of the low-stock write guard: the SAME function the Worker
     // runs on POST /api/settings (lowStockSettings.ts twins), so a bad amount
     // is named here against the field the owner just typed in instead of
@@ -1044,7 +1057,7 @@ export default function Settings() {
     }
     const normalizedMergedDraft = mergedDraft as SettingsRecord
     setForm(normalizedMergedDraft)
-    const result = await saveSettings(normalizedMergedDraft, {
+    const result = await saveSettings(withoutServerOwnedSettings(normalizedMergedDraft), {
       reason: 'settings-merged',
       source: 'settings:conflict-merge',
     })
