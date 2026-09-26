@@ -32,6 +32,45 @@ function normalizeStoredImageResponse(value: unknown): unknown {
   }
 }
 
+// S-uploads2b: a product image is an image. When the Worker refuses a file
+// for its type, its message was written for the Library ("images ... and
+// videos (MP4, MOV, WebM)") or is plain English. On this surface the person
+// gets this surface's own images-only message, in their language, instead.
+// The set holds the Worker's exact sentences: cloudflare/src/lib/
+// uploadSecurity.ts's UNSUPPORTED_UPLOAD_MESSAGE, UNSUPPORTED_IMAGE_MESSAGE
+// and MISMATCHED_UPLOAD_MESSAGE, and routes/products.ts's POST /upload-image
+// refusal of a non-image claim. tests/imageOnlyUploadMessages.test.ts feeds
+// each one through this transport, so a reworded Worker message fails there.
+// A refusal for what an image CONTAINS (embedded markup) keeps its own
+// message, and so does every other failure.
+const PRODUCT_IMAGE_TYPE_REFUSALS: ReadonlySet<string> = new Set([
+  'This file type is not supported. The Library only stores images (JPEG, PNG, WebP, GIF, AVIF) and videos (MP4, MOV, WebM).',
+  'This file type is not supported. Upload a JPEG, PNG, WebP, GIF or AVIF image.',
+  'Uploaded file contents do not match the selected file type. Please choose a valid image or video file.',
+  'Only image files are accepted here',
+])
+
+// English only when the language pack cannot be loaded; equal to en.json's
+// value (the test pins it).
+const PRODUCT_IMAGE_UNSUPPORTED_TYPE_ENGLISH = 'Product images must be JPEG, PNG, WebP, GIF or AVIF. Choose another image.'
+
+// The message in the UI language AppContext applies to <html lang>, read from
+// the same language pack the screens use. Callers show error.message as is.
+// fileTransport.ts's avatarTypeRefusal is the avatar surface's twin; this
+// transport may not import fileTransport.ts (tests/performanceLoadingUx.test.ts).
+async function productImageTypeRefusal(): Promise<Error> {
+  let message = PRODUCT_IMAGE_UNSUPPORTED_TYPE_ENGLISH
+  try {
+    const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
+    const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
+    const value = pack['product_image_unsupported_type']
+    if (typeof value === 'string' && value.trim()) message = value
+  } catch {
+    // Keep the English.
+  }
+  return Object.assign(new Error(message), { code: 'unsupported_image_type' })
+}
+
 function dataUrlToBlob(dataUrl: string): Blob {
   const [meta = '', base64 = ''] = dataUrl.split(',')
   const mime = /data:([^;]+)/.exec(meta)?.[1] || 'application/octet-stream'
@@ -58,6 +97,9 @@ export async function uploadProductImage({
   const form = new FormData()
   if (file instanceof File) {
     const compressed = await compressImageFile(file, { renameTo: productName })
+    // Video or audio is never a product image: refuse it here instead of
+    // uploading all of it only for the Worker to refuse it.
+    if (/^(?:video|audio)\//i.test(String(compressed.type || ''))) throw await productImageTypeRefusal()
     form.append('image', compressed, compressed.name || fileName || 'product.jpg')
   } else if (filePath?.startsWith('data:')) {
     // Real bug fixed this session: this branch used to upload the raw
@@ -72,6 +114,7 @@ export async function uploadProductImage({
     const sourceBlob = dataUrlToBlob(filePath)
     const sourceFile = new File([sourceBlob], fileName || 'product.jpg', { type: sourceBlob.type })
     const compressed = await compressImageFile(sourceFile, { renameTo: productName })
+    if (/^(?:video|audio)\//i.test(String(compressed.type || ''))) throw await productImageTypeRefusal()
     form.append('image', compressed, compressed.name || fileName || 'product.jpg')
   } else if (filePath) {
     throw new Error('Native file path upload not supported in browser mode')
@@ -98,6 +141,8 @@ export async function uploadProductImage({
   }
   if (!res.ok) {
     const record = data as { error?: string; message?: string }
+    const serverMessage = String(record.error || record.message || '').trim()
+    if (PRODUCT_IMAGE_TYPE_REFUSALS.has(serverMessage)) throw await productImageTypeRefusal()
     throw new Error(record.error || record.message || `Image upload failed (${res.status})`)
   }
   const record = data as { data?: unknown }
