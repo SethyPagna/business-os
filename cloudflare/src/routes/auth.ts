@@ -115,6 +115,8 @@ function canManageOtpTarget(actor: SessionUser | null | undefined, target: OtpTa
 // pending secret it promotes was only ever minted behind that full check.)
 // Admin-for-other-user management is unchanged: canManageOtpTarget still
 // decides it, and it never asks for the target's password.
+// Refusals answer 400, never 401: the frontend's apiFetch treats a 401 on an
+// authenticated /api path as a dead session and signs the user out.
 const OTP_SELF_REAUTH_LIMIT_MAX = 10
 const OTP_SELF_REAUTH_LIMIT_WINDOW_MS = 15 * 60 * 1000
 
@@ -124,18 +126,18 @@ async function selfOtpReauthFailure(
   target: OtpTargetUser,
   body: { password?: unknown; currentToken?: unknown },
   options: { requireCurrentCode: boolean },
-): Promise<{ status: 400 | 401 | 429; error: string; code: string } | null> {
+): Promise<{ status: 400 | 429; error: string; code: string } | null> {
   if (Number(actor?.id || 0) !== Number(target.id)) return null
   const limit = await checkRateLimit(env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
   if (!limit.allowed) return { status: 429, error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }
   const password = String(body.password ?? '')
   if (!password.trim()) return { status: 400, error: 'Current password is required', code: 'current_password_required' }
-  if (!bcrypt.compareSync(password, target.password)) return { status: 401, error: 'Incorrect password', code: 'incorrect_password' }
+  if (!bcrypt.compareSync(password, target.password)) return { status: 400, error: 'Incorrect password', code: 'incorrect_password' }
   if (options.requireCurrentCode && target.otp_enabled && target.otp_secret) {
     const activeSecret = await decryptSecret(target.otp_secret, env.APP_ENCRYPTION_KEY)
     const step = activeSecret ? await verifyTotpStep(activeSecret, String(body.currentToken ?? '')) : null
     if (step === null || await isOtpStepReplayed(env, target.id, step)) {
-      return { status: 401, error: 'Enter the current code from your existing authenticator app.', code: 'current_otp_required' }
+      return { status: 400, error: 'Enter the current code from your existing authenticator app.', code: 'current_otp_required' }
     }
     await markOtpStepUsed(env, target.id, step)
   }

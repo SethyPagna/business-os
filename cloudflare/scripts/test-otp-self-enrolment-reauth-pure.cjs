@@ -51,7 +51,9 @@ async function main() {
   await check('self setup with a wrong password is refused', async () => {
     const h = seeded()
     const res = await h.request('/otp/setup', 'POST', { userId: 801, password: 'guess' }, { actorId: 801 })
-    assert.equal(res.status, 401)
+    // 400, not 401: a 401 on an authenticated path signs the frontend out.
+    assert.equal(res.status, 400)
+    assert.equal(res.body.code, 'incorrect_password')
     assert.equal(h.userRow(801).otp_pending_secret, null)
   })
 
@@ -72,14 +74,14 @@ async function main() {
   await check('replacing an active authenticator also needs a valid current code from it', async () => {
     const h = seeded()
     const passwordOnly = await h.request('/otp/setup', 'POST', { userId: 802, password: 'enrolled-password' }, { actorId: 802 })
-    assert.equal(passwordOnly.status, 401)
+    assert.equal(passwordOnly.status, 400)
     assert.equal(passwordOnly.body.code, 'current_otp_required')
     const current = await h.codeAt(ACTIVE)
     const withCode = await h.request('/otp/setup', 'POST', { userId: 802, password: 'enrolled-password', currentToken: current }, { actorId: 802 })
     assert.equal(withCode.status, 200)
     // The code is spent -- a watcher cannot reuse it for a second setup.
     const replay = await h.request('/otp/setup', 'POST', { userId: 802, password: 'enrolled-password', currentToken: current }, { actorId: 802 })
-    assert.equal(replay.status, 401)
+    assert.equal(replay.status, 400)
   })
 
   await check('admin-for-other-user rules are unchanged: no target password, non-admin target only', async () => {
