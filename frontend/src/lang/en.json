@@ -6797,5 +6797,9 @@
   "sale_bulk_cancelled_skipped": "{n} cancelled sale(s) left out: a cancelled sale cannot be edited.",
   "sale_cancelled_read_only": "A cancelled sale cannot be edited. Nothing was changed.",
   "change_driver": "Change driver",
-  "remove_driver": "Remove driver"
+  "remove_driver": "Remove driver",
+  "otp_setup_reauth_hint": "Enter your current password to set up two-factor authentication.",
+  "otp_setup_password_required": "Enter your current password to continue",
+  "otp_current_code": "Code from your current authenticator app",
+  "otp_current_code_required": "Enter the 6-digit code from your current authenticator app"
 }

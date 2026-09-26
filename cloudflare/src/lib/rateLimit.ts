@@ -30,7 +30,7 @@ export async function checkRateLimit(
   clientKey: string,
   max: number,
   windowMs: number,
-): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+): Promise<{ allowed: boolean; retryAfterSeconds: number; slot?: string }> {
   if (!Number.isSafeInteger(max) || max <= 0 || !Number.isSafeInteger(windowMs) || windowMs <= 0) {
     throw new RangeError('Rate limit and windowMs must be positive safe integers')
   }
@@ -51,8 +51,58 @@ export async function checkRateLimit(
     )) < @max
   `).run({ bucket, clientKey, createdAt, since: windowStart, max })
 
-  const allowed = result.changes === 1
+  if (result.changes === 1) return { allowed: true, retryAfterSeconds: 0, slot: createdAt }
+  return { allowed: false, retryAfterSeconds: Math.ceil(windowMs / 1000) }
+}
+
+// Gives back one slot checkRateLimit admitted (its `slot`). For a ceiling
+// that must admit atomically -- so a burst of parallel attempts cannot all
+// pass before the first failure is written -- yet should end up counting only
+// failures: reserve with checkRateLimit, release once the attempt succeeded.
+// Two slots admitted in the same millisecond are interchangeable.
+export async function releaseRateLimitSlot(env: Env, bucket: string, clientKey: string, slot: string | undefined): Promise<void> {
+  if (!slot) return
+  await getDb(env).prepare(`
+    DELETE FROM rate_limit_events WHERE id = (
+      SELECT id FROM rate_limit_events
+      WHERE bucket = @bucket AND client_key = @clientKey AND created_at = @slot
+      LIMIT 1
+    )
+  `).run({ bucket, clientKey, slot })
+}
+
+// Failure-only limiting. checkRateLimit spends a slot on every call, which
+// is right for a request ceiling but wrong for "N wrong guesses per account":
+// shared till logins sign in many times an hour, and every success would
+// spend the same allowance as a guess. peekRateLimit only reads the window;
+// recordRateLimitEvent spends a slot, called by the route on a failure.
+// Two concurrent failures can both pass a peek at max-1 -- an overshoot of a
+// few requests, which the escalating lockout (lib/loginLockout) still caps.
+export async function peekRateLimit(
+  env: Env,
+  bucket: string,
+  clientKey: string,
+  max: number,
+  windowMs: number,
+): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  if (!Number.isSafeInteger(max) || max <= 0 || !Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw new RangeError('Rate limit and windowMs must be positive safe integers')
+  }
+  const row = await getDb(env).prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT 1 FROM rate_limit_events
+      WHERE bucket = @bucket AND client_key = @clientKey AND created_at > @since
+      LIMIT @max
+    )
+  `).get<{ n: number }>({ bucket, clientKey, since: sqliteUtcTimestamp(Date.now() - windowMs), max })
+  const allowed = Number(row?.n || 0) < max
   return { allowed, retryAfterSeconds: allowed ? 0 : Math.ceil(windowMs / 1000) }
+}
+
+export async function recordRateLimitEvent(env: Env, bucket: string, clientKey: string): Promise<void> {
+  await getDb(env).prepare(`
+    INSERT INTO rate_limit_events (bucket, client_key, created_at) VALUES (@bucket, @clientKey, @createdAt)
+  `).run({ bucket, clientKey, createdAt: sqliteUtcTimestamp(Date.now()) })
 }
 
 // Best-effort IP extraction -- Cloudflare sets CF-Connecting-IP on every

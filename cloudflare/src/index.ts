@@ -43,7 +43,8 @@ import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
-import { driveSyncScheduleDue } from './lib/googleDrive'
+import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
+import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
 import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
@@ -54,6 +55,7 @@ import { ReportMoneyPrecisionError, reportMoneyHttpError } from './lib/reportMon
 import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocument } from './lib/adminDocumentIdentity'
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
+import { originGuard } from './lib/originGuard'
 
 export type Env = {
   DB: D1Database
@@ -247,6 +249,7 @@ app.use('*', async (c, next) => {
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
 })
+app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, seeding or DB work
 
 // G4: the app document itself, for the SPA routes wrangler.toml's
 // run_worker_first sends here.
@@ -624,6 +627,14 @@ export default {
       await runStep('drive-sync', async () => {
         const schedule = await driveSyncScheduleDue(env)
         if (!schedule.due) return schedule
+        // P1-2: only a destination connected by a user who may still take a
+        // full backup home receives scheduled uploads (re-checked again by
+        // the queue worker at run time).
+        const authority = await checkDriveSyncAuthorizer(env)
+        if (!authority.allowed) {
+          await recordDriveSyncError(env, authority.message)
+          return authority
+        }
         return enqueueDriveSyncJob(env, 'scheduled')
       })
       await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))

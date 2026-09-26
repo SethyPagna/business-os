@@ -15,6 +15,9 @@ import {
   PROVIDER_META,
   normalizeProviderPayload,
   serializeProviderRow,
+  assertProviderEndpoint,
+  describeProviderDestination,
+  effectiveProviderDestination,
   testProviderConfig,
   parseJsonSafe,
 } from '../lib/aiGateway'
@@ -42,6 +45,16 @@ function actorFrom(user: SessionUser) {
   return { userId: user?.id ?? null, userName: actorSnapshot(user) || '' }
 }
 
+// Null when the provider's effective endpoint is acceptable, else the reason.
+function providerEndpointError(provider: string, endpointOverride: string): string | null {
+  try {
+    assertProviderEndpoint(provider, effectiveProviderDestination(provider, endpointOverride))
+    return null
+  } catch (error) {
+    return (error as Error)?.message || 'Invalid endpoint'
+  }
+}
+
 async function getProviderRow(env: Env, id: string | number): Promise<any> {
   return getDb(env).prepare('SELECT * FROM ai_provider_configs WHERE id = @id').get({ id: Number(id) })
 }
@@ -67,6 +80,8 @@ app.post('/providers', async (c) => {
       return c.json({ success: false, error: 'Choose a supported AI provider' }, 400)
     }
     if (!payload.apiKey) return c.json({ success: false, error: 'API key is required' }, 400)
+    const endpointError = providerEndpointError(payload.provider, payload.endpointOverride)
+    if (endpointError) return c.json({ success: false, code: 'ai_endpoint_invalid', error: endpointError }, 400)
 
     const nowIso = new Date().toISOString()
     const encryptedKey = await encryptSecret(payload.apiKey, c.env.APP_ENCRYPTION_KEY)
@@ -111,6 +126,7 @@ app.post('/providers', async (c) => {
       provider: created.provider,
       name: created.name,
       provider_type: created.provider_type,
+      endpoint: describeProviderDestination(effectiveProviderDestination(created.provider, created.endpoint_override)),
     })
     return c.json({ success: true, item: await serializeProviderRow(created, c.env.APP_ENCRYPTION_KEY) })
   } catch (error: any) {
@@ -127,6 +143,24 @@ app.put('/providers/:id', async (c) => {
     assertUpdatedAtMatch('ai_provider_config', existing, getExpectedUpdatedAt(body))
 
     const payload = normalizeProviderPayload(body)
+    // F2: the stored key follows the endpoint. Moving the destination (a new
+    // override, a cleared override, or a provider switch that changes the
+    // default host) without supplying a key would let a `settings` holder aim
+    // someone else's key at a host they control and press Test. Refused with
+    // 400 rather than silently clearing the key: clearing would quietly break
+    // a working provider, while a refusal loses nothing and the only key that
+    // can reach a new host is one the editor already holds.
+    const nextProvider = payload.provider || existing.provider
+    const destinationBefore = effectiveProviderDestination(existing.provider, existing.endpoint_override)
+    const destinationAfter = effectiveProviderDestination(nextProvider, payload.endpointOverride)
+    const destinationChanged = destinationBefore !== destinationAfter
+    if (destinationChanged && !payload.apiKey) {
+      return c.json({ success: false, code: 'ai_endpoint_change_requires_key', error: 'Re-enter the API key to change where this provider sends it.' }, 400)
+    }
+    if (destinationChanged) {
+      const endpointError = providerEndpointError(nextProvider, payload.endpointOverride)
+      if (endpointError) return c.json({ success: false, code: 'ai_endpoint_invalid', error: endpointError }, 400)
+    }
     const apiKeyEncrypted = payload.apiKey ? await encryptSecret(payload.apiKey, c.env.APP_ENCRYPTION_KEY) : existing.api_key_encrypted
     const nowIso = new Date().toISOString()
     await getDb(c.env).prepare(`
@@ -168,6 +202,11 @@ app.put('/providers/:id', async (c) => {
       name: updated.name,
       provider_type: updated.provider_type,
       api_key_updated: !!payload.apiKey,
+      endpoint_changed: destinationChanged,
+      ...(destinationChanged ? {
+        endpoint_before: describeProviderDestination(destinationBefore),
+        endpoint_after: describeProviderDestination(destinationAfter),
+      } : {}),
     })
     return c.json({ success: true, item: await serializeProviderRow(updated, c.env.APP_ENCRYPTION_KEY) })
   } catch (error) {

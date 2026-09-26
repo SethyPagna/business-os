@@ -24,6 +24,17 @@ function lockoutKey(username: string): string {
   return String(username || '').trim().toLowerCase()
 }
 
+// The typed-identifier key above gives every alias of one account (its
+// username in any case, its email, its phone, its display name) a bucket of
+// its own, so an attacker rotating aliases got 5 free guesses per alias. Once
+// a route has RESOLVED the account it also keys on this id-based value, which
+// every alias shares. The '#' prefix keeps it out of the lowercased
+// typed-username space in practice; a collision would only let someone lock
+// an account they could already lock by typing its username.
+export function userIdLockoutKey(userId: number | string): string {
+  return `#uid:${Number(userId)}`
+}
+
 function computeWaitSeconds(failedCount: number): number {
   if (failedCount <= FREE_ATTEMPTS) return 0
   const doublings = failedCount - FREE_ATTEMPTS - 1
@@ -35,6 +46,17 @@ export type LoginLockoutState = {
   locked: boolean
   failedCount: number
   retryAfterSeconds: number
+}
+
+// A route that checks or feeds more than one key (the typed identifier AND
+// the resolved account id) answers with the most restrictive of them, so the
+// caller builds one message and never reveals which key tripped.
+export function worstLockoutState(...states: LoginLockoutState[]): LoginLockoutState {
+  return states.reduce<LoginLockoutState>((worst, state) => ({
+    locked: worst.locked || state.locked,
+    failedCount: Math.max(worst.failedCount, state.failedCount),
+    retryAfterSeconds: Math.max(worst.retryAfterSeconds, state.retryAfterSeconds),
+  }), { locked: false, failedCount: 0, retryAfterSeconds: 0 })
 }
 
 // Read-only check -- call before verifying credentials so a still-locked

@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -957,6 +958,23 @@ app.post('/', async (c) => {
         ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
+  }
+
+  // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
+  // need administrator control to CHANGE here. An unchanged value -- the
+  // Settings form resending what it loaded -- is a no-op and stays allowed.
+  if (!isAdminControlUser(user)) {
+    const storedAdminOnly = await getSettingsValues(c.env, attemptedKeys)
+    const changedAdminOnlyKey = firstChangedAdminOnlySettingKey(attemptedKeys, storedAdminOnly, (key) => {
+      const raw = body[key]
+      return typeof raw === 'string' ? raw : JSON.stringify(raw)
+    })
+    if (changedAdminOnlyKey) {
+      return c.json({
+        error: `Only an administrator can change "${changedAdminOnlyKey}".`,
+        code: 'admin_control_setting_required',
+      }, 403)
+    }
   }
 
   // Registered seller identity is displayed by the public portal only after

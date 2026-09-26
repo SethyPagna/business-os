@@ -68,11 +68,18 @@ export function getVerificationCapabilities(): Promise<unknown> {
   )
 }
 
-export function otpSetup(payload: AuthPayload = {}): Promise<unknown> {
+// Self-service setup/confirm must carry the account's current password, and
+// setup also `currentToken` (a code from the active authenticator) when one
+// is enrolled -- the Worker refuses a session-only request (P1-4). An
+// administrator managing another account sends only `userId`.
+export type OtpSetupPayload = AuthPayload & { userId?: string | number | null; password?: string; currentToken?: string }
+export type OtpConfirmPayload = AuthPayload & { userId?: string | number | null; token?: string; password?: string }
+
+export function otpSetup(payload: OtpSetupPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/otp/setup', payload || {})
 }
 
-export function otpConfirm(payload: AuthPayload = {}): Promise<unknown> {
+export function otpConfirm(payload: OtpConfirmPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/otp/confirm', payload || {})
 }
 

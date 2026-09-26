@@ -1371,6 +1371,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           <LazyOtpModal
             mode={otpMode}
             userId={user?.id}
+            otpCurrentlyEnabled={otpEnabled}
             onClose={() => setOtpMode(null)}
             onDone={refreshOtpState}
             t={t}

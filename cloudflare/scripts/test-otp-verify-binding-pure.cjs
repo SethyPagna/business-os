@@ -107,7 +107,8 @@ await check('source lock: /otp/verify gates in the right order -- challenge, loc
   const challengeAt = body.indexOf('isLiveOtpChallenge(c.env, body.otpChallenge, body.userId)')
   const userSelectAt = body.indexOf('FROM users u')
   const lockoutCheckAt = body.indexOf('getLoginLockoutState(c.env, user.username)')
-  const verifyAt = body.indexOf('verifyTotp(otpSecret')
+  // verifyTotpStep (the step-returning form the replay guard needs) since P1-1.
+  const verifyAt = body.search(/verifyTotp(?:Step)?\(otpSecret/)
   const failFeedAt = body.indexOf('recordFailedLogin(c.env, user.username)')
   const deviceAt = body.indexOf('checkDeviceTrust(c.env, user.id, body.deviceId')
   const clearAt = body.indexOf('clearLoginLockout(c.env, user.username)')

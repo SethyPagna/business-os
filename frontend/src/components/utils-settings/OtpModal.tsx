@@ -12,7 +12,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import InfoHint from '../shared/InfoHint.tsx'
 
 type OtpMode = 'setup' | 'disable' | 'recover'
-type OtpStep = 'loading' | 'confirm_disable' | 'scan' | 'error'
+type OtpStep = 'reauth' | 'loading' | 'confirm_disable' | 'scan' | 'error'
 type Translate = (key: string, fallback?: string) => string | undefined
 
 export type OtpModalProps = {
@@ -20,6 +20,10 @@ export type OtpModalProps = {
   userId?: string | number | null
   targetName?: string | null
   targetUsername?: string | null
+  // Whether the account already has an active authenticator. Self-service
+  // setup then also needs a current code from it (P1-4) -- the field renders
+  // from first paint instead of appearing after a refused attempt.
+  otpCurrentlyEnabled?: boolean
   onClose: () => void
   onDone: (enabled: boolean) => void
   t?: Translate
@@ -38,8 +42,8 @@ type OtpApiResult = {
 }
 
 type OtpApi = {
-  otpSetup?: (payload: { userId?: string | number | null }) => Promise<OtpApiResult>
-  otpConfirm?: (payload: { userId?: string | number | null; token: string }) => Promise<OtpApiResult>
+  otpSetup?: (payload: { userId?: string | number | null; password: string; currentToken?: string }) => Promise<OtpApiResult>
+  otpConfirm?: (payload: { userId?: string | number | null; token: string; password: string }) => Promise<OtpApiResult>
   otpDisable?: (payload: { userId?: string | number | null; password: string }) => Promise<OtpApiResult>
   otpRecoveryReset?: (payload: { userId?: string | number | null; password: string; confirmation: string }) => Promise<OtpApiResult>
 }
@@ -62,14 +66,15 @@ function normalizeOtpQrDataUrl(value: unknown): string | null {
   return /^data:image\/(?:png|jpeg|webp|svg\+xml);(?:base64|utf8),/i.test(dataUrl) ? dataUrl : null
 }
 
-export default function OtpModal({ mode, userId, targetName, targetUsername, onClose, onDone, t }: OtpModalProps) {
+export default function OtpModal({ mode, userId, targetName, targetUsername, otpCurrentlyEnabled = false, onClose, onDone, t }: OtpModalProps) {
   const app = useApp()
   const tr = t || app.t || ((key: string) => key)
-  const [step, setStep] = useState<OtpStep>(mode === 'setup' ? 'loading' : 'confirm_disable')
+  const [step, setStep] = useState<OtpStep>(mode === 'setup' ? 'reauth' : 'confirm_disable')
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [otpAuthUrl, setOtpAuthUrl] = useState<string | null>(null)
   const [secret, setSecret] = useState<string | null>(null)
   const [code, setCode] = useState('')
+  const [currentCode, setCurrentCode] = useState('')
   const [password, setPassword] = useState('')
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('')
   const [error, setError] = useState('')
@@ -94,44 +99,66 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, onC
       return
     }
 
-    setStep('loading')
+    // Setup no longer starts on mount: the Worker refuses a self-service
+    // setup without the current password (and, for an enrolled account, a
+    // current code), so the first screen asks for them -- see handleStartSetup.
+    invalidateTrackedRequest(setupRequestRef)
+    setStep('reauth')
     setError('')
+    setCurrentCode('')
     setQrDataUrl(null)
     setOtpAuthUrl(null)
     setSecret(null)
     setQrGenerationFailed(false)
-    const requestId = beginTrackedRequest(setupRequestRef)
-
-    async function loadSetup() {
-      try {
-        const result = await withLoaderTimeout(
-          () => getOtpApi().otpSetup?.({ userId }) || Promise.resolve({ success: false, error: 'OTP setup is unavailable' }),
-          'OTP setup',
-          OTP_SETUP_TIMEOUT_MS,
-        )
-        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
-        if (result?.success) {
-          setQrDataUrl(normalizeOtpQrDataUrl(result.qrDataUrl))
-          setOtpAuthUrl(result.otpAuthUrl || null)
-          setSecret(result.secret || null)
-          setStep('scan')
-          return
-        }
-        setError(result?.error || 'Setup failed')
-        setStep('error')
-      } catch (setupError: unknown) {
-        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
-        setError(getErrorMessage(setupError, 'Setup failed'))
-        setStep('error')
-      }
-    }
-
-    loadSetup()
 
     return () => {
       invalidateTrackedRequest(setupRequestRef)
     }
   }, [mode, userId])
+
+  const handleStartSetup = useCallback(async () => {
+    if (!password.trim()) {
+      setError(tr('otp_setup_password_required') || 'Enter your current password to continue')
+      return
+    }
+    if (otpCurrentlyEnabled && currentCode.length !== 6) {
+      setError(tr('otp_current_code_required') || 'Enter the 6-digit code from your current authenticator app')
+      return
+    }
+    if (!beginSingleAction(actionInFlightRef)) return
+
+    const requestId = beginTrackedRequest(setupRequestRef)
+    setLoading(true)
+    setError('')
+    setStep('loading')
+    try {
+      const result = await withLoaderTimeout(
+        () => getOtpApi().otpSetup?.({ userId, password, currentToken: otpCurrentlyEnabled ? currentCode : undefined }) || Promise.resolve({ success: false, error: 'OTP setup is unavailable' }),
+        'OTP setup',
+        OTP_SETUP_TIMEOUT_MS,
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
+      if (result?.success) {
+        setQrDataUrl(normalizeOtpQrDataUrl(result.qrDataUrl))
+        setOtpAuthUrl(result.otpAuthUrl || null)
+        setSecret(result.secret || null)
+        setStep('scan')
+        return
+      }
+      // Stay on the identity step so a mistyped password can be retried.
+      setError(result?.error || 'Setup failed')
+      setStep('reauth')
+    } catch (setupError: unknown) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
+      setError(getErrorMessage(setupError, 'Setup failed'))
+      setStep('reauth')
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(setupRequestRef, requestId)) {
+        finishSingleAction(actionInFlightRef)
+        setLoading(false)
+      }
+    }
+  }, [currentCode, otpCurrentlyEnabled, password, tr, userId])
 
   // The Worker returns the standards-based otpauth URI, rather than raster
   // image bytes. Generate the QR only in the user's browser so the temporary
@@ -165,7 +192,7 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, onC
     setError('')
     try {
       const result = await withLoaderTimeout(
-        () => getOtpApi().otpConfirm?.({ userId, token: code }) || Promise.resolve({ success: false, error: 'OTP confirmation is unavailable' }),
+        () => getOtpApi().otpConfirm?.({ userId, token: code, password }) || Promise.resolve({ success: false, error: 'OTP confirmation is unavailable' }),
         'OTP confirmation',
         OTP_CONFIRM_TIMEOUT_MS,
       )
@@ -184,7 +211,7 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, onC
         setLoading(false)
       }
     }
-  }, [code, onDone, userId])
+  }, [code, onDone, password, userId])
 
   const handleDisable = useCallback(async () => {
     if (!password.trim()) {
@@ -288,6 +315,59 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, onC
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {step === 'reauth' && (
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleStartSetup()
+            }}
+          >
+            <div className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300">
+              <span>{tr('otp_setup_reauth_hint') || 'Enter your current password to set up two-factor authentication.'}</span>
+            </div>
+            <div>
+              <label htmlFor="otp-setup-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('current_password') || 'Current password'}</label>
+              <input
+                id="otp-setup-password"
+                name="otp_setup_password"
+                autoComplete="current-password"
+                className="input h-10"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoFocus
+              />
+            </div>
+            {otpCurrentlyEnabled ? (
+              <div>
+                <label htmlFor="otp-setup-current-code" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('otp_current_code') || 'Code from your current authenticator app'}</label>
+                <input
+                  id="otp-setup-current-code"
+                  name="otp_setup_current_code"
+                  autoComplete="one-time-code"
+                  className="input h-10 text-center font-mono text-lg tracking-widest"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={currentCode}
+                  onChange={(event) => setCurrentCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                />
+              </div>
+            ) : null}
+            {error && <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 rounded-lg p-2">{error}</div>}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="submit" className="btn-primary min-w-0 px-2 text-xs" disabled={loading || !password || (otpCurrentlyEnabled && currentCode.length !== 6)}>
+                {tr('continue') || 'Continue'}
+              </button>
+              <button type="button" className="btn-secondary min-w-0 px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50" onClick={handleClose} disabled={loading}>
+                {tr('cancel')}
+              </button>
+            </div>
+          </form>
+        )}
 
         {step === 'loading' && <div className="py-8 text-center text-gray-400">{tr('loading') || 'Loading...'}</div>}
 

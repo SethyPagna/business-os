@@ -62,6 +62,8 @@ const settingsRoute = loadReal('routes/settings.ts', {
   '../lib/paymentMethodRegistry': {},
   '../lib/paymentSettlement': {},
   '../lib/permissions': permissions,
+  // The real P1-3 admin-only-key guard (pure, no imports of its own).
+  '../lib/settingsAdminKeys': loadReal('lib/settingsAdminKeys.ts'),
   '../lib/searchMatch': { normalizedHaystackSql: (expression) => expression },
   '../lib/settingsSensitive': { stripSensitiveSettings: (value) => value },
   // routes/settings.ts validates every Telegram forum-topic setting against

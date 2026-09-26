@@ -6,16 +6,17 @@ import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
 import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
-import { generateTotpSecret, verifyTotp } from '../lib/totp'
+import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
+import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
-import { recordFailedLogin, getLoginLockoutState, clearLoginLockout } from '../lib/loginLockout'
+import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
   buildGoogleOauthStartUrl,
@@ -42,16 +43,29 @@ const OTP_IP_LIMIT_MAX = 25
 const OTP_IP_LIMIT_WINDOW_MS = OTP_LIMIT_WINDOW_MS
 const OTP_RECOVERY_LIMIT_MAX = 5
 const OTP_RECOVERY_LIMIT_WINDOW_MS = 15 * 60 * 1000
+// POST /password-reset/otp (P1-1): a per-ACCOUNT ceiling that no choice of
+// alias, letter case or source IP resets, on top of the per-IP bucket.
+const OTP_RESET_ACCOUNT_LIMIT_MAX = 5
+const OTP_RESET_ACCOUNT_LIMIT_WINDOW_MS = 15 * 60 * 1000
+// One answer for "no such account", "account has no 2FA" and "wrong code",
+// so the endpoint cannot be used to learn which accounts exist or which
+// have an authenticator enrolled.
+const OTP_RESET_INVALID_ERROR = 'Invalid account or authenticator code.'
 
 // Brute-force / credential-stuffing protection on POST /login. Previously
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
 // /password-reset/*, which both already used checkRateLimit. Two buckets:
-// a per-IP ceiling (catches distributed low-and-slow guessing across many
-// usernames from one source) and a tighter per-username ceiling (catches
-// focused guessing at one account, even if the attacker rotates IPs).
-// Both are only counted on a *failed* attempt (see the route below), so a
-// legitimate user mistyping their password a couple of times never gets
-// close to either limit in practice.
+// - a per-IP ceiling (catches distributed low-and-slow guessing across many
+//   usernames from one source). Every attempt reserves a slot atomically
+//   before any DB work (checkRateLimit), so a parallel burst cannot overrun
+//   it; a verified password gives the slot back (releaseRateLimitSlot). Only
+//   failures stay counted, because every till in a shop shares one public IP
+//   and a whole shift signing in must never be refused as "this network".
+// - a tighter per-account ceiling (catches focused guessing at one account,
+//   even if the attacker rotates IPs), keyed on the typed identifier and,
+//   once resolved, on the account id. It counts only FAILED attempts
+//   (peekRateLimit before, recordRateLimitEvent in invalidCredentials), so
+//   a till login shared by a whole shift can sign in any number of times.
 const LOGIN_IP_LIMIT_MAX = 20
 const LOGIN_IP_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_USER_LIMIT_MAX = 8
@@ -94,6 +108,45 @@ function canManageOtpTarget(actor: SessionUser | null | undefined, target: OtpTa
   if (!isAdminControlUser(actor)) return false
   if (isAdminControlUser(target)) return false
   return true
+}
+
+// P1-4. Self-service /otp/setup and /otp/confirm used to need only a live
+// session, so anyone holding a stolen or unattended session could enrol
+// THEIR authenticator on the victim's account (or replace the victim's) and
+// lock the owner out of their own second factor. A self-service change now
+// re-proves the account: the current password on both steps, and -- when an
+// authenticator is already active -- a valid, unspent code from it at setup.
+// (Confirm then proves possession of the NEW secret with its own code; the
+// pending secret it promotes was only ever minted behind that full check.)
+// Admin-for-other-user management is unchanged: canManageOtpTarget still
+// decides it, and it never asks for the target's password.
+// Refusals answer 400, never 401: the frontend's apiFetch treats a 401 on an
+// authenticated /api path as a dead session and signs the user out.
+const OTP_SELF_REAUTH_LIMIT_MAX = 10
+const OTP_SELF_REAUTH_LIMIT_WINDOW_MS = 15 * 60 * 1000
+
+async function selfOtpReauthFailure(
+  env: Env,
+  actor: SessionUser,
+  target: OtpTargetUser,
+  body: { password?: unknown; currentToken?: unknown },
+  options: { requireCurrentCode: boolean },
+): Promise<{ status: 400 | 429; error: string; code: string } | null> {
+  if (Number(actor?.id || 0) !== Number(target.id)) return null
+  const limit = await checkRateLimit(env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
+  if (!limit.allowed) return { status: 429, error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }
+  const password = String(body.password ?? '')
+  if (!password.trim()) return { status: 400, error: 'Current password is required', code: 'current_password_required' }
+  if (!bcrypt.compareSync(password, target.password)) return { status: 400, error: 'Incorrect password', code: 'incorrect_password' }
+  if (options.requireCurrentCode && target.otp_enabled && target.otp_secret) {
+    const activeSecret = await decryptSecret(target.otp_secret, env.APP_ENCRYPTION_KEY)
+    const step = activeSecret ? await verifyTotpStep(activeSecret, String(body.currentToken ?? '')) : null
+    if (step === null || await isOtpStepReplayed(env, target.id, step)) {
+      return { status: 400, error: 'Enter the current code from your existing authenticator app.', code: 'current_otp_required' }
+    }
+    await markOtpStepUsed(env, target.id, step)
+  }
+  return null
 }
 
 function requiresSelfOtpDisablePassword(actor: SessionUser | null | undefined, target: OtpTargetUser | null | undefined, password: unknown): boolean {
@@ -193,9 +246,32 @@ app.post('/login', async (c) => {
   }
 
   const userLimitKey = `user:${body.username.trim().toLowerCase()}`
-  const userLimit = await checkRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
+  const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+  }
+
+  // P2-1: the typed-identifier bucket and lockout above give every alias of
+  // one account (username in any case, email, phone, display name) its own
+  // allowance, so rotating aliases multiplied the guesses. Once the account
+  // is resolved, the same limiter and lockout are ALSO keyed on its id,
+  // which every alias shares. The answers are the same shapes as above.
+  const resolvedLockoutKey = user ? userIdLockoutKey(user.id) : null
+  const accountLimitKey = user ? `uid:${user.id}` : null
+  if (user && resolvedLockoutKey && accountLimitKey) {
+    const accountLimit = await peekRateLimit(c.env, 'auth:login_user', accountLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
+    if (!accountLimit.allowed) {
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+    }
+    const accountLockout = await getLoginLockoutState(c.env, resolvedLockoutKey)
+    if (accountLockout.locked) {
+      return c.json({
+        error: `Too many failed login attempts. Please wait ${accountLockout.retryAfterSeconds} seconds and try again.`,
+        locked: true,
+        retryAfterSeconds: accountLockout.retryAfterSeconds,
+        failedAttempts: accountLockout.failedCount,
+      }, 429)
+    }
   }
 
   // Same response whether the user doesn't exist or the password is wrong --
@@ -208,7 +284,13 @@ app.post('/login', async (c) => {
   // password and to a username that doesn't exist, so a probe against
   // unknown usernames can't dodge the counter either.
   const invalidCredentials = async () => {
-    const failure = await recordFailedLogin(c.env, body.username)
+    // Only a failure spends the per-account allowance (see LOGIN_USER_LIMIT_MAX).
+    await recordRateLimitEvent(c.env, 'auth:login_user', userLimitKey)
+    if (accountLimitKey) await recordRateLimitEvent(c.env, 'auth:login_user', accountLimitKey)
+    const typedFailure = await recordFailedLogin(c.env, body.username)
+    const failure = resolvedLockoutKey
+      ? worstLockoutState(typedFailure, await recordFailedLogin(c.env, resolvedLockoutKey))
+      : typedFailure
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
@@ -224,12 +306,17 @@ app.post('/login', async (c) => {
   const passwordMatches = bcrypt.compareSync(body.password, user.password)
   if (!passwordMatches) return invalidCredentials()
 
+  // A right password is not a guess: hand back the network slot reserved
+  // above, so shared tills behind one IP never fill the per-IP ceiling.
+  await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
+
   // Password matched -- clear the lockout counter here (not only at full
   // session creation further down) so an OTP-enabled account's counter
   // resets as soon as the *password* step succeeds, same as it would for
   // an account with no second factor. The OTP code itself has its own,
   // separate rate limiting (OTP_LIMIT_MAX/OTP_IP_LIMIT_MAX below).
   await clearLoginLockout(c.env, body.username)
+  if (resolvedLockoutKey) await clearLoginLockout(c.env, resolvedLockoutKey)
 
   // Device-approval gate -- every non-administrator role must be approved
   // once per device. Administrator-control accounts remain able to manage
@@ -548,8 +635,13 @@ app.post('/otp/verify', async (c) => {
   if (!user) return c.json({ error: 'Invalid request' }, 401)
 
   // Same escalating per-username lockout as /login -- a wrong second factor
-  // counts like a wrong password, and a locked account waits here too.
-  const lockoutState = await getLoginLockoutState(c.env, user.username)
+  // counts like a wrong password, and a locked account waits here too. Also
+  // keyed on the account id (P2-1), the key every sign-in alias shares.
+  const accountLockoutKey = userIdLockoutKey(user.id)
+  const lockoutState = worstLockoutState(
+    await getLoginLockoutState(c.env, user.username),
+    await getLoginLockoutState(c.env, accountLockoutKey),
+  )
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
@@ -560,9 +652,15 @@ app.post('/otp/verify', async (c) => {
 
   const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
   if (!otpSecret) return c.json({ error: 'OTP secret is unavailable. Please set up OTP again.' }, 400)
-  const verified = await verifyTotp(otpSecret, String(body.token || ''))
+  // A code already spent (here or at /password-reset/otp) is refused for
+  // the rest of its validity window -- see lib/otpReplay.ts.
+  const matchedStep = await verifyTotpStep(otpSecret, String(body.token || ''))
+  const verified = matchedStep !== null && !(await isOtpStepReplayed(c.env, user.id, matchedStep))
   if (!verified) {
-    const failure = await recordFailedLogin(c.env, user.username)
+    const failure = worstLockoutState(
+      await recordFailedLogin(c.env, user.username),
+      await recordFailedLogin(c.env, accountLockoutKey),
+    )
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
@@ -598,6 +696,8 @@ app.post('/otp/verify', async (c) => {
   }
 
   await clearLoginLockout(c.env, user.username)
+  await clearLoginLockout(c.env, accountLockoutKey)
+  await markOtpStepUsed(c.env, user.id, matchedStep as number)
   await consumeOtpChallenge(c.env, body.otpChallenge)
   await audit(c.env, user.id, user.username, 'login', 'user', user.id, { username: user.username, method: 'otp' })
 
@@ -655,10 +755,12 @@ app.post('/session-duration', requireAuth, async (c) => {
 // image containing the enrollment secret.
 app.post('/otp/setup', requireAuth, async (c) => {
   const actor = c.get('user')
-  const body = await c.req.json<{ userId?: number }>().catch(() => ({} as { userId?: number }))
+  const body = await c.req.json<{ userId?: number; password?: string; currentToken?: string }>().catch(() => ({} as { userId?: number; password?: string; currentToken?: string }))
   const target = await getOtpTargetUser(c.env, body.userId || actor.id)
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
+  const reauthFailure = await selfOtpReauthFailure(c.env, actor, target, body, { requireCurrentCode: true })
+  if (reauthFailure) return c.json({ error: reauthFailure.error, code: reauthFailure.code }, reauthFailure.status)
 
   // The issuer is only an authenticator-app label; it does not affect the
   // generated codes. Use the public product name for newly enrolled devices
@@ -677,16 +779,25 @@ app.post('/otp/setup', requireAuth, async (c) => {
 // pending secret and, if it matches, promotes it to the active secret.
 app.post('/otp/confirm', requireAuth, async (c) => {
   const actor = c.get('user')
-  const body = await c.req.json<{ userId?: number; token?: string }>().catch(() => ({} as { userId?: number; token?: string }))
+  const body = await c.req.json<{ userId?: number; token?: string; password?: string }>().catch(() => ({} as { userId?: number; token?: string; password?: string }))
   if (!body.userId || !body.token) return c.json({ error: 'userId and token required' }, 400)
   const target = await getOtpTargetUser(c.env, body.userId)
   if (!target || !target.otp_pending_secret) return c.json({ error: 'OTP not set up' }, 400)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
+  const reauthFailure = await selfOtpReauthFailure(c.env, actor, target, body, { requireCurrentCode: false })
+  if (reauthFailure) return c.json({ error: reauthFailure.error, code: reauthFailure.code }, reauthFailure.status)
 
   const pendingSecret = await decryptSecret(target.otp_pending_secret, c.env.APP_ENCRYPTION_KEY)
   if (!pendingSecret) return c.json({ error: 'OTP setup secret is unavailable. Please start setup again.' }, 400)
-  const verified = await verifyTotp(pendingSecret, String(body.token || ''))
-  if (!verified) return c.json({ error: 'Invalid code. Check your authenticator app time sync.' }, 400)
+  // Same per-user replay store as /otp/verify, /password-reset/otp and the
+  // self re-auth currentToken: the pending secret becomes the active one
+  // below, so an unspent confirm code would otherwise still be good as the
+  // next login code or as currentToken for another re-enrolment.
+  const confirmStep = await verifyTotpStep(pendingSecret, String(body.token || ''))
+  if (confirmStep === null || await isOtpStepReplayed(c.env, target.id, confirmStep)) {
+    return c.json({ error: 'Invalid code. Check your authenticator app time sync.' }, 400)
+  }
+  await markOtpStepUsed(c.env, target.id, confirmStep)
 
   const db = getDb(c.env)
   await db.prepare(`
@@ -708,8 +819,15 @@ app.post('/otp/disable', requireAuth, async (c) => {
   if (!target) return c.json({ error: 'User not found' }, 404)
   if (!canManageOtpTarget(actor, target)) return c.json({ error: 'No permission' }, 403)
   if (requiresSelfOtpDisablePassword(actor, target, body.password)) return c.json({ error: 'Password required' }, 400)
-  if (Number(actor.id) === Number(target.id) && !bcrypt.compareSync(String(body.password || ''), target.password)) {
-    return c.json({ error: 'Incorrect password' }, 401)
+  if (Number(actor.id) === Number(target.id)) {
+    // The same allowance as the other self 2FA re-auth steps, so a stolen
+    // session is not an unlimited password-guessing oracle; 400, not 401, as
+    // a 401 on an authenticated path signs the frontend out.
+    const limit = await checkRateLimit(c.env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
+    if (!limit.allowed) return c.json({ error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }, 429)
+    if (!bcrypt.compareSync(String(body.password || ''), target.password)) {
+      return c.json({ error: 'Incorrect password', code: 'incorrect_password' }, 400)
+    }
   }
 
   const db = getDb(c.env)
@@ -742,7 +860,7 @@ app.post('/otp/recover', requireAuth, async (c) => {
 
   const actorRecord = await getOtpTargetUser(c.env, actor.id)
   if (!actorRecord || !bcrypt.compareSync(String(body.password || ''), actorRecord.password)) {
-    return c.json({ error: 'Your current password is incorrect.' }, 401)
+    return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
   }
   const target = await getOtpTargetUser(c.env, targetId)
   if (!target) return c.json({ error: 'User not found' }, 404)
@@ -772,8 +890,15 @@ app.post('/password-reset/otp', async (c) => {
   if (!body.otp) return c.json({ error: 'OTP code is required' }, 400)
   if (!body.newPassword || passwordTooShort(body.newPassword)) return c.json({ error: passwordMinLengthError() }, 400)
 
-  const limit = await checkRateLimit(c.env, 'auth:password_reset_otp', `${getClientIp(c.req.raw)}:${identifier}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
-  if (!limit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
+  // P1-1. This used to rate-limit only on `<ip>:<raw typed identifier>`,
+  // so changing the letter case, typing the email instead of the username,
+  // or moving to another IP each bought a fresh 10 guesses at a six-digit
+  // code; failures fed no lockout; a code seen once could be replayed for
+  // its whole validity window; and the three failure answers differed, so
+  // the endpoint told a caller which accounts exist and which have 2FA.
+  const ip = getClientIp(c.req.raw)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
+  if (!ipLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
 
   const db = getDb(c.env)
   const user = await db.prepare(`
@@ -783,16 +908,53 @@ app.post('/password-reset/otp', async (c) => {
       AND deleted_at IS NULL AND is_active = 1
     LIMIT 1
   `).get<{ id: number; username: string; otp_enabled: number; otp_secret: string | null }>({ identifier })
-  if (!user || !user.otp_enabled) return c.json({ error: 'Invalid reset request' }, 400)
 
+  // Global per-account bucket, keyed on the RESOLVED id. An unresolved
+  // identifier gets a bucket of its normalised text, so an unknown account
+  // throttles exactly like a real one.
+  const accountBucket = user ? `uid:${user.id}` : `unknown:${identifier.toLowerCase()}`
+  const accountLimit = await checkRateLimit(c.env, 'auth:password_reset_otp', accountBucket, OTP_RESET_ACCOUNT_LIMIT_MAX, OTP_RESET_ACCOUNT_LIMIT_WINDOW_MS)
+  if (!accountLimit.allowed) return c.json({ error: 'Too many OTP reset attempts.' }, 429)
+
+  // Failures feed the same escalating lockout as sign-in (lib/loginLockout.ts),
+  // on the typed value and on the account id, so a guessed-at account also
+  // waits at /login and /otp/verify.
+  const accountLockoutKey = user ? userIdLockoutKey(user.id) : null
+  const lockedAnswer = (state: { retryAfterSeconds: number }) => c.json({
+    error: `Too many failed attempts. Please wait ${state.retryAfterSeconds} seconds and try again.`,
+    locked: true,
+    retryAfterSeconds: state.retryAfterSeconds,
+  }, 429)
+  const lockoutState = worstLockoutState(
+    await getLoginLockoutState(c.env, identifier),
+    ...(accountLockoutKey ? [await getLoginLockoutState(c.env, accountLockoutKey)] : []),
+  )
+  if (lockoutState.locked) return lockedAnswer(lockoutState)
+
+  const invalidReset = async () => {
+    const failure = worstLockoutState(
+      await recordFailedLogin(c.env, identifier),
+      ...(accountLockoutKey ? [await recordFailedLogin(c.env, accountLockoutKey)] : []),
+    )
+    if (failure.locked) return lockedAnswer(failure)
+    return c.json({ error: OTP_RESET_INVALID_ERROR }, 401)
+  }
+
+  if (!user || !user.otp_enabled) return invalidReset()
   const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
-  if (!otpSecret) return c.json({ error: 'Invalid reset request' }, 400)
-  const verified = await verifyTotp(otpSecret, String(body.otp || ''))
-  if (!verified) return c.json({ error: 'Invalid OTP code' }, 401)
+  if (!otpSecret) return invalidReset()
+  const matchedStep = await verifyTotpStep(otpSecret, String(body.otp || ''))
+  if (matchedStep === null) return invalidReset()
+  if (await isOtpStepReplayed(c.env, user.id, matchedStep)) return invalidReset()
+  // Spend the step BEFORE the password write, so a racing replay of the same
+  // code sees it as used as early as possible.
+  await markOtpStepUsed(c.env, user.id, matchedStep)
 
   const passwordHash = bcrypt.hashSync(String(body.newPassword), 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
   await revokeUserSessions(c.env, user.id)
+  await clearLoginLockout(c.env, identifier)
+  if (accountLockoutKey) await clearLoginLockout(c.env, accountLockoutKey)
   await audit(c.env, user.id, user.username, 'password_reset_complete', 'user', user.id, { method: 'otp' })
 
   return c.json({ success: true, message: 'Password reset successfully.', username: user.username })

@@ -43,6 +43,11 @@ const DEFAULT_FOLDER_NAME = 'Business OS Sync'
 // 10 in Google Drive".
 export const DRIVE_BACKUP_KEEP = 10
 export const DRIVE_STAGED_BACKUP_KEEP = 2
+// Settings key holding the id of the user whose OAuth consent connected the
+// current Drive destination (P1-2). Written only by completeDriveOauth and
+// cleared by disconnectDrive; lib/driveSyncAuthority.ts re-checks that user's
+// grants before every push.
+export const DRIVE_SYNC_AUTHORIZED_BY_KEY = 'drive_sync_authorized_by'
 // R2's current single-PUT ceiling is 5 GiB minus 5 MiB. Drive staging uses
 // one streamed binding PUT, so reject metadata outside that bound before
 // opening a remote body.
@@ -256,7 +261,9 @@ export async function buildDriveOauthStartUrl(
   return { success: true, url: url.toString() }
 }
 
-export async function completeDriveOauth(env: Env, code: string, codeVerifier: string): Promise<{ success: boolean; error?: string }> {
+export async function completeDriveOauth(env: Env, code: string, codeVerifier: string, authorizedByUserId: number): Promise<{ success: boolean; error?: string }> {
+  const authorizer = Number(authorizedByUserId || 0)
+  if (!Number.isSafeInteger(authorizer) || authorizer <= 0) return { success: false, error: 'Google Drive OAuth requires an authenticated user.' }
   const clientId = trim(env.GOOGLE_DRIVE_CLIENT_ID)
   const clientSecret = trim(env.GOOGLE_DRIVE_CLIENT_SECRET)
   if (!clientId || !clientSecret) return { success: false, error: 'Google Drive OAuth is not configured.' }
@@ -288,8 +295,15 @@ export async function completeDriveOauth(env: Env, code: string, codeVerifier: s
     ['drive_sync_access_token_expires_at', expiresAt],
     ['drive_sync_account_email', accountEmail || ''],
     ['drive_sync_last_error', ''],
+    [DRIVE_SYNC_AUTHORIZED_BY_KEY, String(authorizer)],
   ])
   return { success: true }
+}
+
+// Lets the queue worker and the cron path surface a refusal in the status
+// panel the same way a failed upload does.
+export async function recordDriveSyncError(env: Env, message: string): Promise<void> {
+  await setSettings(env, [['drive_sync_last_error', message]])
 }
 
 export async function disconnectDrive(env: Env): Promise<void> {
@@ -299,6 +313,7 @@ export async function disconnectDrive(env: Env): Promise<void> {
     ['drive_sync_access_token_expires_at', ''],
     ['drive_sync_account_email', ''],
     ['drive_sync_folder_id', ''],
+    [DRIVE_SYNC_AUTHORIZED_BY_KEY, ''],
   ])
 }
 
@@ -474,14 +489,6 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
   }
 
   return { due: true }
-}
-
-export async function maybeRunScheduledDriveSync(env: Env): Promise<{ skipped: boolean; reason?: string; result?: Awaited<ReturnType<typeof pushBackupToDrive>> }> {
-  const schedule = await driveSyncScheduleDue(env)
-  if (!schedule.due) return { skipped: true, reason: schedule.reason }
-
-  const result = await pushBackupToDrive(env)
-  return { skipped: false, result }
 }
 
 type DriveBackupFile = {
