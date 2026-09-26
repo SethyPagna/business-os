@@ -68,6 +68,26 @@ export function updateUserProfile(id: string | number, payload: AccessPayload = 
   )
 }
 
+// Profile photo is its own action (routes/users.ts PUT/DELETE /users/:id/avatar):
+// the upload only stores the image, this is what attaches or clears it.
+export function setUserAvatar(id: string | number, avatarPath: string): Promise<unknown> {
+  return route(
+    'users:setAvatar',
+    () => apiFetch('PUT', `/api/users/${encodeId(id)}/avatar`, { avatar_path: avatarPath }),
+    null,
+    true,
+  )
+}
+
+export function removeUserAvatar(id: string | number): Promise<unknown> {
+  return route(
+    'users:removeAvatar',
+    () => apiFetch('DELETE', `/api/users/${encodeId(id)}/avatar`),
+    null,
+    true,
+  )
+}
+
 export function disconnectUserAuthProvider(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:disconnectProvider',
