@@ -235,10 +235,28 @@ function detectQuickTimeAtoms(bytes: Uint8Array): DetectedUploadFormat | null {
 // everything that runs script still does -- the other tokens and any event
 // handler attribute (` onload=`, `/onerror =`), so `<svg onload=...>` hidden
 // in a manifest is still refused.
+//
+// S-uploads3 (2026-09-27) closed refuter R-uploads2's bypasses: an event
+// handler on a tag that was not a token (`<details open ontoggle=...>`,
+// `<input autofocus onfocus=...>`, `<video><source onerror=...>`,
+// `<marquee onstart=...>`, `<x onclick=...>`) passed as image/jpeg. In every
+// 'full' region (the sniffing window and all metadata/text parts) a tag start
+// -- '<' and a letter, as bytes or UTF-16 -- followed within
+// TAG_EVENT_HANDLER_WINDOW_BYTES by an event handler attribute is refused,
+// whatever the tag, and the script-capable tags below are tokens too.
+// Compressed pixel data ('payload') keeps its long-token rule. False
+// positives: '<' + letter is about 8e-4 per random byte and a handler about
+// 6e-11 per position, so random 128 KB metadata would flag about 1 photo in
+// 100,000 (the owner's 12,321-file corpus: no new refusal).
 export const EMBEDDED_MARKUP_TOKENS: readonly string[] = [
   '<script', '<html', '<svg', '<iframe', '<body', '<object', '<embed', '<!doctype html', '<meta', '<img', '<a href', 'javascript:',
   '<style', '<form', '<link', '<base', '<frame', '<frameset', '<applet', '<math',
+  '<details', '<input', '<video', '<audio', '<marquee', '<textarea', '<select', '<noscript', '<template', '<button', '<dialog',
+  '<keygen', '<isindex', '<source', '<bgsound',
 ]
+// How far after a tag start an event handler attribute is looked for. Not
+// cut at '>': a browser's tag may run on past a '>' inside a quoted value.
+export const TAG_EVENT_HANDLER_WINDOW_BYTES = 1024
 // Bytes that end a '<' token (see above). A token needs none at the end of
 // the data; 'javascript:' needs none at all.
 export const MARKUP_TAG_TERMINATORS: readonly number[] = [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f, 0x3d, 0x3e]
@@ -310,6 +328,26 @@ function eventHandlerInRange(bytes: Uint8Array, start: number, end: number): boo
   return false
 }
 
+// '<' at `index` starts a tag: a letter follows, as a byte or as UTF-16.
+function tagStartAt(bytes: Uint8Array, index: number): boolean {
+  return isAsciiLetter(bytes[index + 1]) || (bytes[index + 1] === 0x00 && isAsciiLetter(bytes[index + 2]) && bytes[index + 3] === 0x00)
+}
+
+// An event handler attribute within TAG_EVENT_HANDLER_WINDOW_BYTES after a
+// tag start. Every byte is looked at once at most, however many tags overlap.
+function tagEventHandlerInRange(bytes: Uint8Array, start: number, end: number): boolean {
+  let scannedTo = start
+  for (let index = bytes.indexOf(0x3c, start); index !== -1 && index < end; index = bytes.indexOf(0x3c, index + 1)) {
+    if (!tagStartAt(bytes, index)) continue
+    const to = Math.min(end, index + TAG_EVENT_HANDLER_WINDOW_BYTES)
+    for (let position = Math.max(index + 2, scannedTo); position < to; position += 1) {
+      if ((bytes[position] | 0x20) === 0x6f && (eventHandlerAt(bytes, position, 1) || eventHandlerAt(bytes, position, 2))) return true
+    }
+    scannedTo = Math.max(scannedTo, to)
+  }
+  return false
+}
+
 // `step` 1 matches bytes; 2 matches UTF-16 (a zero byte after each character).
 function markupTokenAt(bytes: Uint8Array, start: number, token: string, step: 1 | 2): boolean {
   const charAt = (at: number) => (at < bytes.length && (step === 1 || bytes[at + 1] === 0x00) ? bytes[at] : -1)
@@ -337,7 +375,8 @@ function markupInRange(bytes: Uint8Array, start: number, end: number, mode: Mark
       }
     }
   }
-  return mode === 'manifest' && eventHandlerInRange(bytes, start, end)
+  if (mode === 'manifest') return eventHandlerInRange(bytes, start, end)
+  return mode === 'full' && tagEventHandlerInRange(bytes, start, end)
 }
 
 type AddMarkupRegion = (start: number, end: number, mode: MarkupScanMode) => void
