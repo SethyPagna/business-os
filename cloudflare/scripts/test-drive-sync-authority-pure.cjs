@@ -178,6 +178,26 @@ async function main() {
     assert.ok(run.indexOf('checkDriveSyncAuthorizer(env)') > -1 && run.indexOf('checkDriveSyncAuthorizer(env)') < run.indexOf('pushBackupToDrive(env)'), 'the worker re-checks before pushing')
   })
 
+  await check('source lock: the queue worker is the ONLY caller of pushBackupToDrive', () => {
+    // Any other caller would upload without the authoriser re-check. The dead
+    // maybeRunScheduledDriveSync in googleDrive.ts was one such bypass.
+    const srcRoot = path.join(__dirname, '..', 'src')
+    const callers = []
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.ts')) {
+          const text = fs.readFileSync(full, 'utf8')
+          const calls = (text.match(/(?<![A-Za-z0-9_])(?<!function )pushBackupToDrive[(]env/g) || []).length
+          if (calls) callers.push(`${path.relative(srcRoot, full).split(path.sep).join('/')}:${calls}`)
+        }
+      }
+    }
+    walk(srcRoot)
+    assert.deepEqual(callers, ['lib/driveSyncQueue.ts:1'])
+  })
+
   if (failures.length) throw new Error(`${failures.length} check(s) failed`)
   console.log(`test-drive-sync-authority-pure.cjs: ${passed} checks passed`)
 }

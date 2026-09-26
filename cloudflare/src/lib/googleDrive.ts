@@ -491,14 +491,6 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
   return { due: true }
 }
 
-export async function maybeRunScheduledDriveSync(env: Env): Promise<{ skipped: boolean; reason?: string; result?: Awaited<ReturnType<typeof pushBackupToDrive>> }> {
-  const schedule = await driveSyncScheduleDue(env)
-  if (!schedule.due) return { skipped: true, reason: schedule.reason }
-
-  const result = await pushBackupToDrive(env)
-  return { skipped: false, result }
-}
-
 type DriveBackupFile = {
   id: string
   name?: string
