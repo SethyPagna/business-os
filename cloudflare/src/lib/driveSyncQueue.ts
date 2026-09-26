@@ -1,6 +1,7 @@
 import type { Env } from '../index'
 import { getSystemJob, storeSystemJob } from './backup'
-import { pushBackupToDrive, stageLatestDriveBackupToR2 } from './googleDrive'
+import { pushBackupToDrive, recordDriveSyncError, stageLatestDriveBackupToR2 } from './googleDrive'
+import { checkDriveSyncAuthorizer } from './driveSyncAuthority'
 
 export type DriveSyncQueueMessage = {
   kind: 'drive-sync'
@@ -61,6 +62,25 @@ export async function runQueuedDriveSync(env: Env, jobId: string): Promise<void>
   const existing = await getSystemJob(env, jobId)
   if (!existing) throw new Error(`Google Drive sync job ${jobId} was not found.`)
   if (existing.status === 'cancelled' || existing.status === 'completed') {
+    await clearActiveJob(env, jobId)
+    return
+  }
+
+  // P1-2: re-check, at run time, that the user whose consent connected this
+  // Drive destination still may take a full backup home. A refusal is a
+  // terminal answer, not a transient fault, so it fails the job without
+  // throwing (a throw would only spend the queue's retry budget).
+  const authority = await checkDriveSyncAuthorizer(env)
+  if (!authority.allowed) {
+    await recordDriveSyncError(env, authority.message)
+    await storeSystemJob(env, {
+      ...existing,
+      status: 'failed',
+      progress: 100,
+      message: authority.message,
+      error: authority.message,
+      finished_at: new Date().toISOString(),
+    })
     await clearActiveJob(env, jobId)
     return
   }

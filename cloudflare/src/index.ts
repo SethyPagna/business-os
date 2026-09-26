@@ -43,7 +43,8 @@ import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
-import { driveSyncScheduleDue } from './lib/googleDrive'
+import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
+import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
 import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
@@ -624,6 +625,14 @@ export default {
       await runStep('drive-sync', async () => {
         const schedule = await driveSyncScheduleDue(env)
         if (!schedule.due) return schedule
+        // P1-2: only a destination connected by a user who may still take a
+        // full backup home receives scheduled uploads (re-checked again by
+        // the queue worker at run time).
+        const authority = await checkDriveSyncAuthorizer(env)
+        if (!authority.allowed) {
+          await recordDriveSyncError(env, authority.message)
+          return authority
+        }
         return enqueueDriveSyncJob(env, 'scheduled')
       })
       await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
