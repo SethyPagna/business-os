@@ -186,6 +186,13 @@ async function check(name, fn) {
     // AUTH_SESSION_SECRET still signs state, but the code exchange needs the client secret.
     assert.equal((await authMethods(2, noSecret)).body.google_ready, false)
     assert.equal((await authMethods(2, {})).body.google_ready, false)
+    // U-profile3 (refuter M6): everything but a redirect URI -- none
+    // configured and no app origin to derive one from -- is NOT ready: the
+    // consent URL could not name where Google sends the user back.
+    const { GOOGLE_LOGIN_REDIRECT_URI: _r, ...noRedirect } = READY_ENV
+    assert.equal((await authMethods(2, noRedirect)).body.google_ready, false, 'no redirect URI, not ready')
+    // Control: a derivable redirect (the admin origin) is enough.
+    assert.equal((await authMethods(2, { ...noRedirect, BUSINESS_OS_ADMIN_URL: 'https://admin.example' })).body.google_ready, true)
   })
 
   await check('auth-methods of another user stays refused for a non-admin', async () => {

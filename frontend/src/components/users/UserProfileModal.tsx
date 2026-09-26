@@ -19,6 +19,7 @@ import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
+import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -126,7 +127,7 @@ interface ProfileApi {
   disconnectUserAuthProvider: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   uploadUserAvatar: (payload: { file?: File; filePath?: string; fileName?: string }) => Promise<MutationResult>
   setUserAvatar: (id: EntityId, avatarPath: string) => Promise<ProfileResult>
-  removeUserAvatar: (id: EntityId) => Promise<ProfileResult & { objectDeleted?: boolean }>
+  removeUserAvatar: (id: EntityId) => Promise<ProfileResult>
 }
 
 // The account fields the form edits. The close guard compares these against
@@ -1024,22 +1025,22 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         positionX: avatarPositionX,
         positionY: avatarPositionY,
       })
-      // Sent as a data URL on purpose: uploadUserAvatar routes a File object
-      // to the general library upload (/api/files/upload), which requires
-      // Library or Products access -- a cashier's own photo was refused
-      // there. The data-URL branch posts to /api/users/avatar-upload, open to
-      // every signed-in user, and compresses the 512px crop on the way.
+      // Upload, then attach to the account (lib: ./avatarFlow.ts); resolves
+      // only once the account holds the photo.
       const dataUrl = await blobToDataUrl(blob)
-      const uploadResult = await withLoaderTimeout(() => getProfileApi().uploadUserAvatar({ filePath: dataUrl, fileName: 'avatar.png' }), 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
-      if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
-      // The upload only stores the image; this attaches it to the account.
-      // Previously nothing did until a full "Save profile", so the photo
-      // vanished on reload.
-      const saved = await withLoaderTimeout(() => getProfileApi().setUserAvatar(requireCurrentUserId(), String(uploadResult.path)), 'Save avatar', PROFILE_SAVE_TIMEOUT_MS)
-      if (saved?.success === false) throw new Error(saved.error || tr('avatar_upload_failed', 'Avatar upload failed'))
-      const nextAvatar = { avatar_path: saved?.avatar_path ?? uploadResult.path, updated_at: saved?.updated_at ?? profile?.updated_at ?? null }
-      // updated_at moves with the photo; carrying it keeps a later
-      // "Save profile" from reading as a stale-write conflict.
+      const nextAvatar = await uploadAndAttachAvatar(
+        getProfileApi(),
+        requireCurrentUserId(),
+        dataUrl,
+        {
+          noPath: tr('upload_no_image_path', 'Upload did not return an image path'),
+          attachFailed: tr('avatar_upload_failed', 'Avatar upload failed'),
+        },
+        (step, fn) => (step === 'upload'
+          ? withLoaderTimeout(fn, 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
+          : withLoaderTimeout(fn, 'Save avatar', PROFILE_SAVE_TIMEOUT_MS)),
+        profile?.updated_at ?? null,
+      )
       setProfile((current) => ({ ...(current || {}), ...nextAvatar }))
       setSavedProfile((current) => ({ ...(current || {}), ...nextAvatar }))
       window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: nextAvatar.avatar_path } }))
@@ -1083,6 +1084,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       setRemovingAvatar(false)
     }
   }
+
+  // Remove asks first: request only opens the confirm dialog; confirm runs
+  // removeAvatar; dismissing mid-removal is ignored (./avatarFlow.ts).
+  const avatarRemoveFlow = createAvatarRemoveFlow({
+    closeViewer: () => setAvatarViewerOpen(false),
+    setConfirmOpen: setAvatarRemoveConfirmOpen,
+    isWorking: () => removingAvatar,
+    remove: removeAvatar,
+  })
 
   return (
     <>
@@ -1523,10 +1533,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           setAvatarViewerOpen(false)
           setFilePickerOpen(true)
         }}
-        onRemove={() => {
-          setAvatarViewerOpen(false)
-          setAvatarRemoveConfirmOpen(true)
-        }}
+        onRemove={avatarRemoveFlow.request}
         tr={tr}
       />
       {avatarRemoveConfirmOpen ? (
@@ -1538,8 +1545,8 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           working={removingAvatar}
           workingLabel={tr('removing', 'Removing...')}
           layer="nested"
-          onConfirm={() => { void removeAvatar() }}
-          onClose={() => { if (!removingAvatar) setAvatarRemoveConfirmOpen(false) }}
+          onConfirm={() => { void avatarRemoveFlow.confirm() }}
+          onClose={avatarRemoveFlow.dismiss}
           t={t}
         />
       ) : null}
