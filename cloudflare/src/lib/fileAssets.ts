@@ -70,10 +70,31 @@ export function sanitizeOriginalFileName(originalName: string): string {
 // random suffix (the original does this whenever object storage is
 // enabled, which for the Workers path is always, since there is no local
 // disk to fall back to).
-export function buildUniqueStoredName(originalName: string): string {
+//
+// S-uploads (2026-09-26): the extension is never the client's to choose.
+// A caller that classified the bytes passes the detected extension
+// (lib/uploadSecurity.ts's detectUploadFormat); otherwise the client's
+// extension survives only when it is on STORED_EXTENSION_ALLOWLIST, and
+// anything else (.html, .svg, .xml, .js ...) is stored as .bin.
+// Media only (owner ruling: storage holds images and videos), plus the
+// temporary import source types routes/importJobs.ts writes under imports/.
+const STORED_EXTENSION_ALLOWLIST = new Set([
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif',
+  ...VIDEO_EXTENSIONS,
+  '.csv', '.tsv', '.zip',
+])
+
+export function safeStoredExtension(fileName: string): string {
+  const ext = extname(fileName)
+  return STORED_EXTENSION_ALLOWLIST.has(ext) ? ext : '.bin'
+}
+
+export function buildUniqueStoredName(originalName: string, detectedExtension?: string): string {
   const safeName = sanitizeOriginalFileName(originalName)
-  const ext = extname(safeName) || '.bin'
-  const base = safeName.slice(0, safeName.length - ext.length) || 'file'
+  const clientExt = extname(safeName)
+  const base = (clientExt ? safeName.slice(0, safeName.length - clientExt.length) : safeName) || 'file'
+  const forced = detectedExtension ? String(detectedExtension).toLowerCase() : ''
+  const ext = /^\.[a-z0-9]{1,8}$/.test(forced) ? forced : safeStoredExtension(safeName)
   const randomSuffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
   return `${base}-${Date.now()}-${randomSuffix}${ext}`
 }

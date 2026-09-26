@@ -39,6 +39,7 @@ function loadModule(relPath, requireShim) {
 const backup = loadModule('lib/backup.ts', (id) => {
   if (id === './customTableName') return loadModule('lib/customTableName.ts', require)
   if (id === './planTier') return loadModule('lib/planTier.ts', require)
+  if (id === './uploadSecurity') return loadModule('lib/uploadSecurity.ts', require)
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }
   if (id === './r2') return {}
   if (id === './db') return {}

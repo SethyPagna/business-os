@@ -7,7 +7,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isActionBlocked, getActionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { classifyImportUpload, validateUploadedBuffer } from '../lib/uploadSecurity'
 import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, productImportChangesImages, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
@@ -15,6 +15,7 @@ import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
 import { importJobFullDeleteStatements, importJobStagingDeleteStatements } from '../lib/importRetention'
+import { importSourceUnavailableForRetry, purgeImportIncomingFiles, IMPORT_FILE_PURGED_STATUS } from '../lib/importIncomingFiles'
 import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -805,22 +806,24 @@ app.post('/:id/preflight', async (c) => {
 // import spreadsheet kept can still upload it to Library separately,
 // same as any other file -- the import flow itself just no longer does
 // it FOR them automatically.
+//
+// S-uploads (compliance audit P1-2 / SEC-3): the ZIP container used to land
+// under the PUBLIC uploads/ prefix with the client's File.type and no byte
+// check -- a "zip" declared text/html was stored XSS. Owner direction:
+// public /uploads is images only. The ZIP now joins the CSV as a private,
+// job-scoped object (it only exists to seed this import; its images are
+// extracted and stored individually below), and every kind's stored
+// content-type and extension come from classifyImportUpload -- the bytes
+// for images/ZIP, never the client's claim.
 async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image', file: File, relativePath?: string) {
   const user = c.get('user')
   const originalName = sanitizeOriginalFileName(file.name || 'upload.bin')
-  const storedName = buildUniqueStoredName(originalName)
-  const mimeType = file.type || 'application/octet-stream'
   const bytes = new Uint8Array(await file.arrayBuffer())
-  if (kind === 'image') {
-    try {
-      validateUploadedBuffer(bytes, mimeType, originalName)
-    } catch (error) {
-      if (isImportMaintenanceFenceError(error)) throw error
-      throw new Error((error as Error).message)
-    }
-  }
+  const format = classifyImportUpload(kind, bytes, file.type || '', originalName)
+  const storedName = buildUniqueStoredName(originalName, format.extension)
+  const mimeType = format.contentType
 
-  const addToLibrary = kind !== 'csv'
+  const addToLibrary = format.isPublic
   const key = addToLibrary ? `uploads/${storedName}` : `imports/${jobId}/incoming/${storedName}`
   await c.env.ASSETS.put(key, bytes, { httpMetadata: { contentType: mimeType } })
   // K3: only library-bound files normalize (imports/... staging keys are
@@ -889,9 +892,9 @@ async function storeUpload(c: any, jobId: string, kind: 'csv' | 'zip' | 'image',
     // (uploadImportJobZip callers fetch each stored image back from this
     // path, recompress it client-side, then POST the smaller bytes to
     // /:id/images/:fileId/recompress below) -- only meaningful for
-    // addToLibrary uploads (zip/image), where the file genuinely lives at
-    // the shared /uploads/ path; a csv upload has no public_path since it
-    // was never added to Library.
+    // addToLibrary uploads (images), where the file genuinely lives at
+    // the shared /uploads/ path; a csv or zip upload has no public_path
+    // since it was never added to Library.
     public_path: addToLibrary ? `/uploads/${storedName}` : null,
   }
 }
@@ -948,9 +951,10 @@ app.post('/:id/zip', async (c) => {
   if (extname(file.name || '') !== '.zip') return c.json({ success: false, error: 'Upload a ZIP file for images' }, 400)
   if (file.size > MAX_ZIP_BYTES) return c.json({ success: false, error: `ZIP is too large (max ${Math.floor(MAX_ZIP_BYTES / (1024 * 1024))}MB)` }, 400)
   try {
-    // Store the ZIP itself first, same as before -- it lands in Library
-    // and import_job_files regardless of what's inside it or whether
-    // unpacking below succeeds for every entry.
+    // Store the ZIP itself first -- a private job-scoped object tracked in
+    // import_job_files (not Library, not /uploads; S-uploads) regardless
+    // of what's inside it or whether unpacking below succeeds for every
+    // entry. Bytes that are not a ZIP are refused here with a 400.
     const stored = await storeUpload(c, id, 'zip', file)
 
     // Unpack: read the central directory once, then extract + store each
@@ -1137,9 +1141,12 @@ app.post('/:id/images/:fileId/recompress', async (c) => {
   if (!IMAGE_EXTENSIONS.has(extname(file.name || ''))) return c.json({ success: false, error: 'Not a supported image type' }, 400)
 
   const bytes = new Uint8Array(await file.arrayBuffer())
-  const mimeType = file.type || IMAGE_MIME_BY_EXT[extname(file.name || '')] || 'application/octet-stream'
+  const claimedMimeType = file.type || IMAGE_MIME_BY_EXT[extname(file.name || '')] || 'application/octet-stream'
+  // S-uploads: the stored type is the one detected from the bytes (the
+  // claim only has to agree on the kind), same as storeUpload.
+  let mimeType: string
   try {
-    validateUploadedBuffer(bytes, mimeType, file.name || 'image')
+    mimeType = validateUploadedBuffer(bytes, claimedMimeType, file.name || 'image').mime
   } catch (error) {
     if (isImportMaintenanceFenceError(error)) throw error
     return c.json({ success: false, error: (error as Error).message }, 400)
@@ -1181,7 +1188,9 @@ app.post('/:id/start', async (c) => {
     return c.json({ success: false, error: 'Import was cancelled. Use Retry before starting it again.' }, 409)
   }
   const db = await getImportFencedDb(c.env)
-  const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv'`).get<{ n: number }>({ id })
+  // A purged CSV (S-uploads: import files are deleted when a job finishes)
+  // is not a CSV to start from.
+  const csvCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'csv' AND COALESCE(status, '') <> '${IMPORT_FILE_PURGED_STATUS}'`).get<{ n: number }>({ id })
   if (!csvCount?.n) return c.json({ success: false, error: 'Upload a CSV before starting the import' }, 400)
 
   await db.prepare(`UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
@@ -1319,6 +1328,10 @@ app.post('/:id/cancel', async (c) => {
   // cancelled" two-phase status, which had the same limitation under BullMQ.
   const nextStatus = ['analyzing', 'applying', 'queued'].includes(status) ? 'cancelling' : 'cancelled'
   await db.prepare(`UPDATE import_jobs SET status = @status, cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id, status: nextStatus })
+  // S-uploads: settled straight to 'cancelled', so the temporary import
+  // file goes now. A 'cancelling' job is still running; the engine purges
+  // when it honours the cancel.
+  if (nextStatus === 'cancelled') await purgeImportIncomingFiles(c.env, db, id)
   const cancelled = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_cancel', id, job, cancelled || null, { source: 'api', cancelSource: 'api' })
   return c.json({ success: true, job: serializeJob(cancelled || job) })
@@ -1386,6 +1399,12 @@ app.post('/:id/retry', async (c) => {
   // instead of failing downstream with a missing-file error.
   if (job.details_pruned_at) {
     return c.json({ success: false, error: 'This import\'s staged data was cleaned up by retention (details are kept 24 hours after a job finishes). Upload the file again to re-import.', code: 'import_details_pruned' }, 409)
+  }
+  // S-uploads: the temporary import file is deleted when a job finishes.
+  // A retry still runs from the materialized source rows; only a job that
+  // stopped before its CSV was fully read has nothing to retry from.
+  if (await importSourceUnavailableForRetry(db, id)) {
+    return c.json({ success: false, error: 'The file for this import was deleted when the import stopped (import files are only kept while an import runs). Upload the file again to re-import.', code: 'import_source_deleted' }, 409)
   }
   // Awaiting review is not a failed phase and must never be an alternate
   // route into apply. In particular, stock_actions /approve enforces the

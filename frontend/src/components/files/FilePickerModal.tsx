@@ -189,10 +189,13 @@ export default function FilePickerModal({
   }, [])
 
   const accept = useMemo(() => {
+    // Owner ruling 2026-09-26: Library uploads are images and videos only
+    // (the Worker refuses documents). 'document' still browses the CSV/PDF
+    // assets uploaded before the ruling, so it keeps its filter but offers
+    // no new upload type the server would refuse.
     if (mediaType === 'image') return 'image/*'
-    if (mediaType === 'video') return 'video/*'
-    if (mediaType === 'document') return '.csv,text/csv,application/pdf,.pdf'
-    return 'image/*,video/*,.csv,text/csv,application/pdf,.pdf'
+    if (mediaType === 'video') return 'video/mp4,video/quicktime,video/webm'
+    return 'image/*,video/mp4,video/quicktime,video/webm'
   }, [mediaType])
 
   function toggleSelectedPath(asset: FileAsset): void {

@@ -5448,6 +5448,7 @@
   "upload_complete": "បានបង្ហោះរួចរាល់",
   "upload_csv": "ផ្ទុកឡើង CSV",
   "upload_file": "បង្ហោះឯកសារ",
+  "library_upload_media_hint": "មានតែរូបភាព (JPEG, PNG, WebP, GIF, AVIF) និងវីដេអូ (MP4, MOV, WebM) ប៉ុណ្ណោះ។",
   "upload_image": "ផ្ទុករូបភាព",
   "upload_no_image_path": "ការបង្ហោះមិនបានផ្តល់ផ្លូវរូបភាព",
   "uploaded": "បានផ្ទុកឡើង",

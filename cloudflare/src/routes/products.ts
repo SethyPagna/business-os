@@ -18,7 +18,7 @@ import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, move
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
@@ -9088,21 +9088,27 @@ app.post('/upload-image', async (c) => {
   if (file.size === 0) return c.json({ success: false, error: 'Uploaded file is empty' }, 400)
 
   const originalName = sanitizeOriginalFileName(file.name || 'image')
-  const mimeType = file.type || 'application/octet-stream'
-  const mediaType = getMediaType(mimeType, originalName)
+  const claimedMimeType = file.type || 'application/octet-stream'
+  const mediaType = getMediaType(claimedMimeType, originalName)
   if (mediaType !== 'image') return c.json({ success: false, error: 'Only image files are accepted here' }, 400)
 
+  // S-uploads (compliance audit P1-2): stored under the public uploads/
+  // prefix, so the content-type and extension come from the bytes
+  // (JPEG/PNG/WebP/GIF/AVIF only), never from the client's claim.
   const buffer = new Uint8Array(await file.arrayBuffer())
+  let detected: DetectedUploadFormat
   try {
-    validateUploadedBuffer(buffer, mimeType, originalName)
+    detected = validateUploadedBuffer(buffer, claimedMimeType, originalName)
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
+  if (!isPublicImageFormat(detected)) return c.json({ success: false, error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
+  const mimeType = detected.mime
   if (buffer.byteLength > MAX_PRODUCT_IMAGE_UPLOAD_BYTES) {
     return c.json({ success: false, error: 'Image could not be normalized within the upload safety limit.' }, 400)
   }
 
-  const storedName = buildUniqueStoredName(originalName)
+  const storedName = buildUniqueStoredName(originalName, detected.extension)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
   // K3: same on-upload normalization every other image entry point gets.
