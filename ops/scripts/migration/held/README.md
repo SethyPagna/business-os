@@ -58,3 +58,42 @@ dataset-operation lifecycle chain is unwired in production.
 0185 through 0191 stay reserved -- do not reuse them for a new, unrelated migration even though
 they are currently absent from `cloudflare/migrations`. The next new migration starts at **0193**.
 0192 (`stock_mutation_receipts.sql`) is independent of all five and stays in the normal chain.
+
+## Shop -> Store branch consolidation (lane U-branch, 0198 + held 0199)
+
+0198 is in the normal chain; 0199 is reserved here and is the only one of the three files that
+moves stock. Do not reuse 0199 for anything else.
+
+1. **cloudflare/migrations/0198_branch_successor_role.sql** -- additive: `branches.role`,
+   `canonical_key`, `successor_branch_id`, the `branch_redirects` table. Inert: every branch stays
+   active with no successor, so the successor-aware Worker behaves exactly as today. Ships with an
+   ordinary release.
+2. **0199_branch_consolidation_shop_into_store.sql** (held) -- the move. Warehouse (id 1) is
+   renamed Store (role shop, default); Shop (id 2) is retired with successor 1 and keeps its name.
+   Written as one official transfer (receipt + one member per product + per-lot
+   `transfer_out`/`transfer_in` movements in the ordinary transfer convention + `stock_transfers`
+   rows), then both stock ledgers fold into Store. Open quarantine lots and RFID tags follow the
+   goods (recorded in `branch_redirects`), open undo entries are retired, database guards refuse
+   new stock at a retired branch, and the D1 `cache_versions` fallback rows are bumped. Preflight
+   and postflight are named CHECK constraints, so the file must be applied as ONE migration
+   (atomic in D1). It is held because the chain runs on every release and on every fresh
+   database: in the chain it would perform the move at whatever release came next.
+3. **0199_branch_consolidation_shop_into_store_recovery.sql** (held) -- the reversal,
+   delta-based. Byte-identical rows when nothing was written in between; refuses (never goes
+   negative) once Store has sold what Shop brought. Records the Worker redirected to Store after
+   the move stay at Store. Applied, if ever, under the next free number at that time.
+
+Runbook (owner-run; every step is a production action):
+
+- Release the Worker carrying `lib/branchSuccession.ts` together with 0198 (the Worker is correct
+  on both shapes).
+- Immediately before the cutover, record a D1 Time Travel bookmark.
+- Read `GET /api/branches/consolidation-preview` as an administrator. It runs the same counts as
+  the preflight and must say `ready: true`. Blockers: awaiting_payment/awaiting_delivery sales at
+  Shop, an open Shop shift, a running import/bulk delete, an open Shop RFID session, a product whose
+  Shop lots exceed its Shop branch_stock, a restore window.
+- Move 0199 unchanged into `cloudflare/migrations/`, commit, apply. Then make one product or sale
+  write, or bump the KV cache versions, so the KV copies of `products`/`sales`/`returns` move as
+  well (SQL can only reach the D1 fallback).
+- Tested by `cloudflare/scripts/test-migration-0198-0199-branch-consolidation-pure.cjs` (real
+  migration chain, all three files, with mutation controls).
