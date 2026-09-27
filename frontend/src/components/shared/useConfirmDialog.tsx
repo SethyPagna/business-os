@@ -13,9 +13,10 @@ import ConfirmDialog, { type ConfirmDialogLayer, type ConfirmReviewItem } from '
 //   ...
 //   return <>{...}{confirmDialog}</>
 //
-// askToConfirm() resolves true on Confirm and false on Cancel, the X, Escape or an
-// unmount -- the same two outcomes native confirm() had, so a call site keeps
-// its behaviour: the action on true, nothing on false. Asking again while a
+// askToConfirm() resolves true on Confirm (or Enter: Confirm takes focus on
+// open) and false on Cancel, the X, Escape or an unmount -- the same two
+// outcomes native confirm() had, so a call site keeps its behaviour: the
+// action on true, nothing on false. Asking again while a
 // question is open answers the earlier one false first, so no caller is ever
 // left awaiting a promise that can no longer settle.
 //
@@ -76,6 +77,7 @@ export function useConfirmDialog(t?: Translate) {
       cancelLabel={pending.cancelLabel}
       danger={pending.danger}
       layer={pending.layer ?? 'nested'}
+      keyboard
       t={translate}
       onConfirm={() => settle(true)}
       onClose={() => settle(false)}

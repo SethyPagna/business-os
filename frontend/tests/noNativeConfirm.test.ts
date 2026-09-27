@@ -201,5 +201,24 @@ runTest('a host that passes no translator still gets a translated dialog', () =>
   assert.doesNotMatch(hook, /\bt=\{t\}/, 'the raw, possibly undefined, host t never reaches the dialog')
 })
 
+// Native confirm() answered from the keyboard: Enter said yes, Escape said no.
+// The shared dialog replacing it keeps both (absorbed from U-confirm): the
+// Confirm button takes focus on open and Escape cancels -- but never while an
+// action is running. Opt-in on ConfirmDialog, because a dialog carrying its
+// own required-reason input must keep focus and Enter in that field; the hook
+// turns it on since its asks carry no inputs.
+runTest('the hook keeps native confirm() semantics: Enter confirms, Escape and every dismissal cancel', () => {
+  const hook = fs.readFileSync(path.join(srcRoot, 'components/shared/useConfirmDialog.tsx'), 'utf8')
+  const dialog = fs.readFileSync(path.join(srcRoot, 'components/shared/ConfirmDialog.tsx'), 'utf8')
+  assert.match(hook, /<ConfirmDialog[\s\S]*?\bkeyboard\b[\s\S]*?onConfirm=\{\(\) => settle\(true\)\}[\s\S]*?onClose=\{\(\) => settle\(false\)\}/, 'Confirm resolves true; Cancel, the X and Escape resolve false')
+  assert.match(hook, /pendingRef\.current\?\.resolve\(false\)\s*const next = /, 'a superseded ask resolves false, never hangs')
+  assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*pendingRef\.current\?\.resolve\(false\)/, 'unmounting the host resolves false')
+  assert.match(dialog, /keyboard\?: boolean/, 'keyboard parity is an opt-in prop')
+  assert.match(dialog, /autoFocus=\{keyboard\}/, 'Confirm takes focus so Enter answers yes')
+  assert.match(dialog, /event\.key !== 'Escape'[\s\S]*?escapeCloseRef\.current\(\)/, 'Escape answers no')
+  assert.match(dialog, /escapeCloseRef\.current = working \? \(\) => \{\} : onClose/, 'Escape cannot cancel a running action')
+  assert.match(dialog, /if \(!keyboard\) return/, 'dialogs that did not opt in keep their own keyboard handling')
+})
+
 if (failed) { console.error(`\n${failed} native-confirm guard test(s) failed`); process.exit(1) }
 console.log('PASS noNativeConfirm')

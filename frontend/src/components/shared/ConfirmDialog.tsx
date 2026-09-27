@@ -1,5 +1,5 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
 import Modal from './Modal'
 
 // Shared compact "review before you commit" confirmation dialog (Part 563).
@@ -49,6 +49,13 @@ type ConfirmDialogProps = {
   confirmDisabled?: boolean
   /** Explicit stacking for prompts opened from another modal. */
   layer?: ConfirmDialogLayer
+  /**
+   * Native confirm() keyboard parity, opt-in: Confirm takes focus on open so
+   * Enter answers yes, and Escape answers no. Opt-in because a dialog that
+   * carries its own input (a required reason) must keep focus and Enter in
+   * that field. useConfirmDialog turns it on.
+   */
+  keyboard?: boolean
   onConfirm: () => void
   onClose: () => void
   t?: Translate
@@ -67,10 +74,24 @@ export default function ConfirmDialog({
   workingLabel,
   confirmDisabled = false,
   layer,
+  keyboard = false,
   onConfirm,
   onClose,
   t,
 }: ConfirmDialogProps) {
+  // The ref keeps the listener current without re-subscribing every render.
+  const escapeCloseRef = useRef<() => void>(onClose)
+  escapeCloseRef.current = working ? () => {} : onClose
+  useEffect(() => {
+    if (!keyboard) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      escapeCloseRef.current()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [keyboard])
   const inheritedLayer = useContext(ConfirmDialogLayerContext)
   const resolvedLayer = layer || inheritedLayer
   const T = (key: string, fallback: string): string => {
@@ -120,6 +141,7 @@ export default function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
+            autoFocus={keyboard}
             disabled={working || confirmDisabled}
             className={`${primaryActionClass} min-w-0 flex-1 break-words`}
           >
