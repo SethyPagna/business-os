@@ -34,7 +34,7 @@ tool, use your harness's equivalent (table at the end).
 10. **Deterministic work to scripts.** If a step is mechanical, script it; spend judgment only where judgment is needed.
 11. **Shortest path = right path.** When agents keep taking a wrong shortcut, change the code layout or add a check so the easy path is correct.
 12. **Every correction becomes an artifact.** Missing knowledge → AGENTS.md/skill; missing procedure → skill; escaped bug → regression test; repeated review comment → a CI/source check.
-13. **Production is gated.** Deploys, remote migrations, secret sync, remote D1 writes follow `deploy-provenance` and the owner's standing delegation recorded in progress.md.
+13. **Production is gated.** Deployments, remote migrations, secret sync and every remote D1 command (reads too) are production actions that need explicit user authorization; planning and review agents never run them (`AGENTS.md`, `deploy-provenance`). A harness's own user or session instructions may carry a specific owner grant; this skill never asserts one.
 14. **Small commits, often.** A usage limit can kill every agent at once; uncommitted work is the only thing that is lost (`lane-recovery`).
 15. **Code carries meaning, not comments.** Names, types and tests explain; comments are for tool directives only (`no-comments`).
 
@@ -78,7 +78,7 @@ tool, use your harness's equivalent (table at the end).
 2. Fresh integration branch from main; merge only refuter-certified lanes, in the council's order.
 3. Resolve conflicts by union, never by choosing a side blindly; after merging run every test file alone.
 4. Integrated refuter on the candidate.
-5. Deploy from the committed candidate after trading close; smoke test live; record provenance in progress.md.
+5. With explicit user authorization, deploy from the committed candidate after trading close; smoke test live; record provenance in progress.md.
 
 ### recover — after a usage limit, account switch or new session
 Load `lane-recovery` and follow it.
@@ -86,7 +86,7 @@ Load `lane-recovery` and follow it.
 ### forensics — "did this bug damage past records?"
 1. Write read-only detection SQL per bug (bounded: keyset/date windows; D1 memory limits).
 2. Prove each query on a local fixture with a known positive and a known negative.
-3. The lead runs them through the ops workflow; results stay encrypted/local.
+3. A remote D1 read is a production action: with explicit user authorization, the lead runs the queries through the ops workflow; results stay encrypted/local.
 4. Classify each hit: already compensated / partial / uncompensated / owner review.
 5. Repairs only through the app's adjustment paths after owner approval; never ad-hoc SQL.
 
@@ -108,7 +108,7 @@ Load `lane-recovery` and follow it.
 ### loop — overnight / unattended
 1. Write the goal, stop conditions and the verify command at the top of the todo list.
 2. Each iteration: pick the next item → playbook → verify → commit → update the registry.
-3. Never deploy, delete, or touch production data unattended unless the owner delegated exactly that.
+3. Never deploy, delete, or run any production action unattended unless the user explicitly authorized exactly that action.
 4. On repeated failure of the same item, park it with evidence and move on.
 
 ## Report format

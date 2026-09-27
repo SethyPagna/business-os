@@ -34,7 +34,8 @@ reconcile before you ship.
 
 ## Step 1 — What is live right now
 
-Run all three. They are independent, and no one of them is sufficient.
+Run all three. They are independent, and no one of them is sufficient. The second is a remote D1
+command, which is a production action: run it only with explicit user authorization (`AGENTS.md`).
 
 ```bash
 cd cloudflare && npx wrangler deployments list
