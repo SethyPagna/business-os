@@ -6,6 +6,7 @@ import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
 import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
+import { readReturnedIntoLots, spreadReturnedIntoAllocations } from './returnsStock';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
@@ -401,8 +402,14 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             map.set(key, (map.get(key) || 0) + r.quantity);
         }
         const returned = allocateReturnedQuantities(own, itemReturned, productReturned);
+        // H-stock #5: copies carrying what live restocked returns already put
+        // back per lot, so the restore walk refills the lots they did not. The
+        // undo snapshots below still read the untouched `allocations` rows.
+        const returnedIntoLots = await readReturnedIntoLots(db, own.map(i => i.id));
         for (const item of own) {
-            item.allocations = allocations.filter(a => a.sale_item_id === item.id);
+            const itemAllocations = allocations.filter(a => a.sale_item_id === item.id);
+            const spread = spreadReturnedIntoAllocations(itemAllocations, returnedIntoLots.get(item.id));
+            item.allocations = itemAllocations.map((a, index) => ({ ...a, returned_into_quantity: spread[index] }));
             if (allocations.some(a => a.sale_item_id === item.id && a.branch_id != null && Number(a.branch_id) !== item.branch_id))
                 fail('Sale allocation belongs to a different branch.');
         }

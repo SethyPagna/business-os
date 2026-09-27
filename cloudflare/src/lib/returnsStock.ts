@@ -26,6 +26,7 @@
 // added, so scripts/test-returns-replace-damaged-pure.cjs can drive the
 // real logic against a real sqlite database.
 import type { D1Compat } from './db'
+import { chunkForBinding } from './sqlBinding'
 import { InsufficientBatchStockError, planRemoveStockFromBatch, type StockWriteStatement } from './productBatches'
 import {
   DEFAULT_STOCK_CONDITION_TAG, parseStockConditionTag,
@@ -164,6 +165,85 @@ export function matchRefundSaleLine<L extends RefundSaleLine>(
 }
 
 export type ReturnLotSplit = { batchId: number; quantity: number }
+
+// H-stock #5 (FX-returns D). Which of a sale line's lot allocations are still
+// OUT is not (quantity - released_quantity) alone: released_quantity is
+// written only by the sale-side flows (cancel/un-cancel, amendments), never by
+// a return. A live restocked customer return has already put its units back
+// into specific lots -- recorded per lot in return_item_batch_allocations, or,
+// for rows written before that table was used, in return_items.batch_id. Left
+// out, every later return of a multi-lot line (and a sale cancel after a
+// partial return) walks the same last-drawn lot again: a 2+2 line (A, B)
+// returned twice ends B=4, A=0.
+//
+// This is derived on read, not stored: cancelling, restoring or editing a
+// return changes what it contributes the moment its row changes, so no writer
+// has to maintain (or reverse) a counter, and returns recorded before this fix
+// count too. Cancelled returns, supplier returns and non-restock lines
+// contribute nothing; the return being edited is excluded so its own units
+// are re-planned as out.
+export type ReturnedIntoLotRow = { sale_item_id: number; batch_id: number; quantity: number }
+
+export async function readReturnedIntoLots(
+  db: D1Compat,
+  saleItemIds: number[],
+  excludeReturnId: number | null = null,
+): Promise<Map<number, Map<number, number>>> {
+  const result = new Map<number, Map<number, number>>()
+  const ids = [...new Set(saleItemIds.map(Number))].filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (!ids.length) return result
+  const exclude = Number.isSafeInteger(Number(excludeReturnId)) && Number(excludeReturnId) > 0 ? Number(excludeReturnId) : 0
+  const live = `LOWER(TRIM(COALESCE(r.status,'completed')))<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer' AND r.id<>?`
+  const restock = `COALESCE(NULLIF(LOWER(TRIM(ri.stock_action)),''),CASE WHEN ri.return_to_stock=1 THEN 'restock' ELSE 'none' END)='restock'`
+  // Each id is bound twice (two IN lists) plus two exclude slots.
+  for (const chunk of chunkForBinding(ids, 2, 2)) {
+    const marks = chunk.map(() => '?').join(',')
+    const rows = await db.prepare(`SELECT COALESCE(a.sale_item_id,ri.sale_item_id) AS sale_item_id,a.batch_id,a.quantity
+        FROM return_item_batch_allocations a JOIN return_items ri ON ri.id=a.return_item_id JOIN returns r ON r.id=ri.return_id
+        WHERE COALESCE(a.sale_item_id,ri.sale_item_id) IN (${marks}) AND ${live} AND ${restock}
+      UNION ALL
+      SELECT ri.sale_item_id,ri.batch_id,ri.quantity
+        FROM return_items ri JOIN returns r ON r.id=ri.return_id
+        WHERE ri.sale_item_id IN (${marks}) AND ri.batch_id IS NOT NULL AND ${live} AND ${restock}
+          AND NOT EXISTS (SELECT 1 FROM return_item_batch_allocations a WHERE a.return_item_id=ri.id)`)
+      .all<ReturnedIntoLotRow>([...chunk, exclude, ...chunk, exclude])
+    for (const row of rows) {
+      const saleItemId = Number(row.sale_item_id)
+      const batchId = Number(row.batch_id)
+      const quantity = Number(row.quantity) || 0
+      if (!(saleItemId > 0) || !(batchId > 0) || !(quantity > 0)) continue
+      const perLot = result.get(saleItemId) || new Map<number, number>()
+      perLot.set(batchId, (perLot.get(batchId) || 0) + quantity)
+      result.set(saleItemId, perLot)
+    }
+  }
+  return result
+}
+
+// Spread one sale line's returned-into units over its allocation rows: per
+// lot, last-drawn row first (the order returns and cancels give units back),
+// each capped at that row's (quantity - released_quantity). Units recorded
+// against a lot beyond what the line drew from it (a pick into the same lot,
+// or a return misplaced before this fix) are clamped, never negative.
+export function spreadReturnedIntoAllocations(
+  allocations: Array<{ batch_id: number; quantity: number; released_quantity: number }>,
+  returnedIntoByLot: Map<number, number> | undefined,
+): number[] {
+  const spread = allocations.map(() => 0)
+  if (!returnedIntoByLot || !returnedIntoByLot.size) return spread
+  const left = new Map(returnedIntoByLot)
+  for (let index = allocations.length - 1; index >= 0; index -= 1) {
+    const alloc = allocations[index]
+    const batchId = Number(alloc.batch_id)
+    const want = left.get(batchId) || 0
+    if (want <= 0) continue
+    const room = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
+    const take = Math.min(room, want)
+    spread[index] = take
+    left.set(batchId, want - take)
+  }
+  return spread
+}
 
 export class ReturnLotRequiredError extends Error {
   code = 'return_lot_required'

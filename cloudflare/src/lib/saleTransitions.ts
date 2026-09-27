@@ -78,6 +78,12 @@ export type SaleItemAllocation = {
   batch_id: number
   quantity: number
   released_quantity: number
+  // H-stock #5: units a live restocked customer return already put back into
+  // THIS allocation's lot (readReturnedIntoLots + spreadReturnedIntoAllocations
+  // in returnsStock.ts). released_quantity never counts them -- returns do not
+  // write it -- so the restore walk below must, or a cancel after a partial
+  // return re-fills the lot the return already refilled. Absent = 0.
+  returned_into_quantity?: number
 }
 
 export type TransitionItem = {
@@ -349,13 +355,29 @@ export function planSaleStockTransition(input: {
       if (restoreAllocations.length) {
         // Z0: put the units back into the SAME lots the sale drew from --
         // reverse order (last-drawn units return first), each capped at the
-        // allocation's outstanding (quantity - released_quantity), so units
-        // a recorded return already restocked are never re-added.
+        // allocation's outstanding (quantity - released_quantity - what a
+        // live return already restocked into it), so units a recorded return
+        // already restocked are never re-added to the same lot.
+        // H-stock #5: the first pass honours returned_into_quantity; the
+        // second (plain outstanding) runs only if the first could not place
+        // every unit, so the lot total never falls short of the branch total
+        // restored above.
         let remaining = restore
-        for (let index = restoreAllocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+        const given = restoreAllocations.map(() => 0)
+        for (const honourReturns of [true, false]) {
+          for (let index = restoreAllocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
+            const alloc = restoreAllocations[index]
+            const returnedInto = honourReturns ? Math.max(0, Number(alloc.returned_into_quantity) || 0) : 0
+            const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0) - returnedInto - given[index])
+            const give = Math.min(outstanding, remaining)
+            if (give <= 0) continue
+            given[index] += give
+            remaining -= give
+          }
+        }
+        for (let index = restoreAllocations.length - 1; index >= 0; index -= 1) {
           const alloc = restoreAllocations[index]
-          const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
-          const give = Math.min(outstanding, remaining)
+          const give = given[index]
           if (give <= 0) continue
           statements.push(...restoreBatchStockStatements(alloc.batch_id, item.branch_id, give))
           restoredLots.push({ batchId: alloc.batch_id, quantity: give })
@@ -366,7 +388,6 @@ export function planSaleStockTransition(input: {
                   WHERE id = @id`,
             params: { give, id: alloc.id },
           })
-          remaining -= give
         }
       } else if (item.batch_id) {
         statements.push(...restoreBatchStockStatements(item.batch_id, item.branch_id, restore))

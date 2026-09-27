@@ -122,7 +122,7 @@ import {
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
-import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
+import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT, readReturnedIntoLots, spreadReturnedIntoAllocations } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
   allocateReturnedQuantities,
@@ -2174,6 +2174,13 @@ app.patch('/:id/status', async (c) => {
       const list = allocByItem.get(Number(row.sale_item_id)) || []
       list.push({ id: Number(row.id), batch_id: Number(row.batch_id), quantity: Number(row.quantity) || 0, released_quantity: Number(row.released_quantity) || 0 })
       allocByItem.set(Number(row.sale_item_id), list)
+    }
+    // H-stock #5: what live restocked returns already put back per lot, so a
+    // cancel after a partial return refills the lots the return did not.
+    const returnedIntoLots = await readReturnedIntoLots(db, [...allocByItem.keys()])
+    for (const [saleItemId, list] of allocByItem) {
+      const spread = spreadReturnedIntoAllocations(list, returnedIntoLots.get(saleItemId))
+      list.forEach((alloc, index) => { alloc.returned_into_quantity = spread[index] })
     }
     for (const item of regularItems) {
       const list = allocByItem.get(Number(item.id))
