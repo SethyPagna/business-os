@@ -187,5 +187,19 @@ runTest('every useConfirmDialog host uses the answer, renders the dialog, and ke
   assert.deepEqual(problems, [])
 })
 
+// Seven hosts call useConfirmDialog() with no translator (Inventory, stock
+// movements, Manage Received Dates, the server queue, three Backup sections).
+// The dialog's own words -- Cancel, Confirm, "Are you sure?", Saving... -- then
+// fell back to English on a Khmer screen (Manage Received Dates' save review
+// passes no cancelLabel). The hook resolves the app's translator itself when
+// the host passes none.
+runTest('a host that passes no translator still gets a translated dialog', () => {
+  const hook = fs.readFileSync(path.join(srcRoot, 'components/shared/useConfirmDialog.tsx'), 'utf8')
+  assert.match(hook, /import \{ useApp\b[^}]*\} from '\.\.\/\.\.\/app\/AppContextCore(\.tsx)?'/, 'the hook reads the app translator')
+  assert.match(hook, /const translate = t \?\? /, "the host's t wins, the app's t is the fallback")
+  assert.match(hook, /<ConfirmDialog[\s\S]*?\bt=\{translate\}/, 'the dialog receives the resolved translator')
+  assert.doesNotMatch(hook, /\bt=\{t\}/, 'the raw, possibly undefined, host t never reaches the dialog')
+})
+
 if (failed) { console.error(`\n${failed} native-confirm guard test(s) failed`); process.exit(1) }
 console.log('PASS noNativeConfirm')

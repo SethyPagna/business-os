@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import ConfirmDialog, { type ConfirmDialogLayer, type ConfirmReviewItem } from './ConfirmDialog'
 
 // The awaitable form of the shared ConfirmDialog -- the drop-in replacement
@@ -40,6 +41,9 @@ export type ConfirmRequest = {
 type PendingConfirm = ConfirmRequest & { resolve: (confirmed: boolean) => void }
 
 export function useConfirmDialog(t?: Translate) {
+  // A host that passes no t still gets Cancel/Confirm in the operator's language.
+  const appT = (useAppHook() as { t?: Translate }).t
+  const translate = t ?? appT
   const [pending, setPending] = useState<PendingConfirm | null>(null)
   const pendingRef = useRef<PendingConfirm | null>(null)
 
@@ -72,7 +76,7 @@ export function useConfirmDialog(t?: Translate) {
       cancelLabel={pending.cancelLabel}
       danger={pending.danger}
       layer={pending.layer ?? 'nested'}
-      t={t}
+      t={translate}
       onConfirm={() => settle(true)}
       onClose={() => settle(false)}
     />
