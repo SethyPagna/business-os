@@ -489,6 +489,7 @@
   "dated_count_analyzing": "Analyzing rows against your product catalog...",
   "dated_count_apply_decisions_failed": "Could not apply those decisions.",
   "dated_count_apply_failed": "The import failed to apply.",
+  "dated_count_apply_conflict": "The stock count history for these products changed while this import was being applied. Nothing was changed; preview and apply again.",
   "dated_count_applying": "Applying stock movements...",
   "dated_count_applying_decisions": "Applying decisions and building a preview...",
   "dated_count_branch": "Branch",
