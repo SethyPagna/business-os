@@ -1575,16 +1575,83 @@ export async function recordSupplierBackfillSnapshot(
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
 
+// Staleness (FX-undo): a replay may only rewrite a lot that still carries the
+// attribution the recorded action left on it. An undo expects every lot to
+// still be attributed to the backfilled supplier (its name may have been
+// re-stamped by a supplier rename -- that is the same attribution); a redo
+// expects every lot to still hold the prior attribution the undo restored.
+// Anything else is a later edit (a batch edit, a supplier merge, another
+// backfill) that the replay must refuse rather than overwrite. A lot that no
+// longer exists counts as changed.
+function supplierBackfillLotsJson(r: SupplierBackfillReversal): string {
+  return JSON.stringify((r.lots || []).filter((l) => Number(l.id) > 0).map((l) => ({
+    id: Number(l.id),
+    prevSupplierId: l.prevSupplierId == null ? null : Number(l.prevSupplierId),
+    prevSupplierName: l.prevSupplierName ?? null,
+  })))
+}
+
+function supplierBackfillLotMatchesSql(direction: 'undo' | 'redo'): string {
+  return direction === 'undo'
+    ? 'b.supplier_id IS @supplierId'
+    : `b.supplier_id IS json_extract(l.value, '$.prevSupplierId')
+       AND lower(trim(COALESCE(b.supplier_name, ''))) = lower(trim(COALESCE(json_extract(l.value, '$.prevSupplierName'), '')))`
+}
+
+function supplierBackfillStaleLotsSql(direction: 'undo' | 'redo'): string {
+  return `SELECT json_extract(l.value, '$.id') AS id FROM json_each(@lots) l
+    WHERE NOT EXISTS (SELECT 1 FROM product_batches b
+      WHERE b.id = json_extract(l.value, '$.id') AND ${supplierBackfillLotMatchesSql(direction)})`
+}
+
+async function assertSupplierBackfillLotsUnchanged(
+  db: ReturnType<typeof getDb>, r: SupplierBackfillReversal, direction: 'undo' | 'redo',
+): Promise<void> {
+  const stale = await db.prepare(supplierBackfillStaleLotsSql(direction))
+    .all<{ id: number }>({ lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId) })
+  if (stale.length) {
+    const noun = stale.length === 1 ? 'lot was' : 'lots were'
+    throw new UndoConflictError(`${stale.length} ${noun} re-attributed after this change, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'} without overwriting that edit. Nothing was changed.`)
+  }
+}
+
+// In-batch twin of the check above: aborts the whole batch through a malformed
+// JSON path (the ordinaryBusinessMaintenanceGuard mechanism) when any lot
+// changed between the check and the write.
+function supplierBackfillGuardStatement(r: SupplierBackfillReversal, direction: 'undo' | 'redo') {
+  return {
+    sql: `SELECT CASE WHEN NOT EXISTS (${supplierBackfillStaleLotsSql(direction)})
+      THEN 1 ELSE json_extract('[1]', '$[supplier_backfill_lot_changed]') END AS supplier_backfill_guard`,
+    params: { lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId) },
+  }
+}
+
+async function runSupplierBackfillBatch(
+  db: ReturnType<typeof getDb>, r: SupplierBackfillReversal, direction: 'undo' | 'redo',
+  stmts: Array<{ sql: string; params: Record<string, unknown> }>,
+): Promise<void> {
+  if (!stmts.length) return
+  try {
+    await db.batch([supplierBackfillGuardStatement(r, direction), ...stmts])
+  } catch (error) {
+    if (/JSON path error|supplier_backfill_lot_changed/i.test(String((error as Error)?.message ?? error))) {
+      throw new UndoConflictError(`A lot was re-attributed while this change was being ${direction === 'undo' ? 'undone' : 'redone'}. Nothing was changed.`)
+    }
+    throw error
+  }
+}
+
 // UNDO: restore each lot's exact prior attribution.
 async function applySupplierBackfillUndo(env: Env, r: SupplierBackfillReversal): Promise<void> {
   const db = getDb(env)
+  await assertSupplierBackfillLotsUnchanged(db, r, 'undo')
   const stmts = (r.lots || [])
     .filter((l) => Number(l.id) > 0)
     .map((l) => ({
       sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
       params: { id: Number(l.id), sid: l.prevSupplierId == null ? null : Number(l.prevSupplierId), sname: l.prevSupplierName ?? null },
     }))
-  if (stmts.length) await db.batch(stmts)
+  await runSupplierBackfillBatch(db, r, 'undo', stmts)
 }
 
 // REDO: re-apply the supplier to the same lots, using the supplier's CURRENT
@@ -1595,6 +1662,7 @@ async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal):
   const supplierId = Number(r.supplierId)
   const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string }>([supplierId])
   if (!supplier) throw new Error('That supplier no longer exists, so this attribution cannot be redone.')
+  await assertSupplierBackfillLotsUnchanged(db, r, 'redo')
   const name = supplier.name
   const stmts = (r.lots || [])
     .filter((l) => Number(l.id) > 0)
@@ -1602,7 +1670,7 @@ async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal):
       sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
       params: { id: Number(l.id), sid: supplierId, sname: name },
     }))
-  if (stmts.length) await db.batch(stmts)
+  await runSupplierBackfillBatch(db, r, 'redo', stmts)
   return name
 }
 
