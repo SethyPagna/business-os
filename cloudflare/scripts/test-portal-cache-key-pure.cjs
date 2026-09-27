@@ -96,18 +96,19 @@ async function main() {
   }).default
   global.caches.default.match = async request => new Response(JSON.stringify({ key: request.url }))
   const mounted = new Hono().route('/api/portal', portal)
-  const env = { CACHE: { get: async key => { versionReads++; return key === 'v2:products' ? '4' : '7' } } }
+  const env = { CACHE: { get: async key => { versionReads++; return key === 'v2:products' ? '4' : key === 'v2:stock' ? '9' : '7' } } }
   for (const route of [...independent, '/catalog/products/search']) {
     const response = await mounted.fetch(new Request(root + route + '?q=cream&noise=x'), env, context)
     assert.equal(response.status, 200, route)
     const { key } = await response.json()
     const query = new URL(key).searchParams
-    assert.equal(query.get('_v'), 'portal-query-v1:k2:4:k2:7')
+    // I2-1: sales bump 'stock', which the storefront's stock_status/membership reads.
+    assert.equal(query.get('_v'), 'portal-query-v1:k2:4:k2:7:k2:9')
     assert.equal(query.get('noise'), null)
     assert.equal(query.get('q'), route.endsWith('/search') ? 'cream' : null)
   }
   assert.equal(dbCalls, 0)
-  assert.equal(versionReads, 10)
+  assert.equal(versionReads, 15)
   console.log('PASS portal caching: all five actual handlers, eleven consumed parameters, first-value semantics, cache reuse, host/path/version/generation isolation, no D1 hit gate')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

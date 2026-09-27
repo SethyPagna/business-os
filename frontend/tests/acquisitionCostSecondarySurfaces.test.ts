@@ -38,7 +38,8 @@ for (const [user, expected] of [
   [{ permissions: { products: true, inventory: true } }, false],
   [{ permissions: { product_cost_edit: true } }, false],
   [{ permissions: { product_cost_view: true } }, true],
-  [{ username: 'admin', permissions: { product_cost_view: false } }, true],
+  // Admin override through the admin role (not the name, FX-sec).
+  [{ username: 'admin', role_code: 'admin', permissions: { product_cost_view: false } }, true],
 ] as [PermissionUser, boolean][]) {
   context.__costTestContext = { user, ...effectivePermissions(user) }
   const html = renderToStaticMarkup(React.createElement(Dialog, props))

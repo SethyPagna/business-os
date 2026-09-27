@@ -20,7 +20,13 @@ type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
 // as App.tsx and chunkReloadGuard.ts read it.
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
-const AdminRoot = React.lazy(() => import('./AdminRoot.tsx')) as ComponentType
+// The admin root resolves only once the device's stored language pack is in
+// memory (bounded; see primeStoredLanguagePack), so its first render is
+// already in that language. The pack download itself started in index.html.
+const AdminRoot = React.lazy(() => import('./AdminRoot.tsx').then(async (adminRoot) => {
+  await adminRoot.primeStoredLanguagePack()
+  return adminRoot
+})) as ComponentType
 const PublicCatalogRoot = React.lazy(() => import('./PublicCatalogRoot.tsx')) as ComponentType
 const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
 const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200

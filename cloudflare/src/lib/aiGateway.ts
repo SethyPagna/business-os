@@ -139,6 +139,46 @@ export function normalizeProviderPayload(payload: Record<string, unknown> = {}) 
   }
 }
 
+// F2 (Release 1 auth audit). The stored API key goes wherever the provider's
+// effective endpoint points, so the endpoint is part of the credential.
+//
+// The effective destination is the override when set, else the provider's
+// default. Compared as a parsed URL so '' vs NULL, host case and default
+// ports do not count as a change.
+export function effectiveProviderDestination(provider: unknown, endpointOverride: unknown): string {
+  const raw = trim(endpointOverride) || getProviderMeta(provider)?.defaultEndpoint || ''
+  try {
+    return new URL(raw).toString()
+  } catch (_) {
+    return raw
+  }
+}
+
+// What the audit trail records for a destination: origin + path only, so a
+// query string on an override never lands in the log.
+export function describeProviderDestination(destination: string): string {
+  try {
+    const url = new URL(destination)
+    return `${url.origin}${url.pathname}`
+  } catch (_) {
+    return destination ? '(unparseable endpoint)' : ''
+  }
+}
+
+// assertSafeOutboundUrl (https, no embedded credentials, no private hosts)
+// plus a per-provider host pin. Google keys are only ever sent to Google:
+// the host must be googleapis.com or a subdomain of it.
+export function assertProviderEndpoint(provider: unknown, rawUrl: unknown): string {
+  const safe = assertSafeOutboundUrl(rawUrl)
+  if (trim(provider).toLowerCase() === 'google') {
+    const host = new URL(safe).hostname.toLowerCase()
+    if (host !== 'googleapis.com' && !host.endsWith('.googleapis.com')) {
+      throw new Error('Google AI endpoints must be on googleapis.com')
+    }
+  }
+  return safe
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function serializeProviderRow(row: any, encryptionKey: string | undefined) {
   const apiKey = await decryptSecret(row?.api_key_encrypted || '', encryptionKey)
@@ -265,11 +305,13 @@ export async function callChatProvider(providerConfig: any, messages: Array<{ ro
   }
 
   if (provider === 'google') {
-    const base = assertSafeOutboundUrl(trim(providerConfig?.endpoint_override) || meta?.defaultEndpoint)
-    const endpoint = `${base}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`
+    // F2: pinned to googleapis.com, and the key travels in the x-goog-api-key
+    // header instead of ?key=, so it stays out of URLs, logs and error text.
+    const base = assertProviderEndpoint('google', trim(providerConfig?.endpoint_override) || meta?.defaultEndpoint)
+    const endpoint = `${base}/${encodeURIComponent(model)}:generateContent`
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
       signal: requestSignal,
       body: JSON.stringify({
         contents: buildGoogleMessageContents(messages),

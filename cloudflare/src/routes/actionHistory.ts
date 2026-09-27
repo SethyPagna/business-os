@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, undoConflictCode, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -12,6 +12,7 @@ import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { sendReturnStatusTelegramEvents } from '../lib/telegram'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -429,7 +430,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
         const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        // A replay refused to protect newer data names its machine code, so the
+        // client can restate it in the operator's language.
+        const refusalCode = status === 409 ? undoConflictCode(error) : null
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 
@@ -451,6 +455,16 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
             : applier.name === BULK_STATUS_KIND
               ? notifyBulkStatus(c.env)
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+      // Telegram (owner, 27 Sep 2026): undoing or redoing a grouped return
+      // STATUS change cancels or restores those returns, so it is announced
+      // like the original action. The sender reads each return's status now,
+      // which is what says "cancelled" or "restored".
+      if (applier.name === RETURN_BULK_ACTION_KIND && payload.field === 'status') {
+        c.executionCtx.waitUntil(db.prepare('SELECT return_id FROM return_bulk_members WHERE operation_id = @operation')
+          .all<{ return_id: number }>({ operation: String(payload.operation_id) })
+          .then((rows) => sendReturnStatusTelegramEvents(c.env, rows.map((member) => Number(member.return_id)), actorSnapshot(user)))
+          .catch((error) => console.error('[telegram] return status notification failed', error)))
+      }
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
       return c.json({
         success: true,

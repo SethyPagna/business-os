@@ -199,12 +199,25 @@ function emitBuildManifest(): Plugin {
 }
 
 const routePreloadChunkNames = {
+  // I6-2 (Sep 25 2026): no generic 'vendor' here. It is html2canvas, qrcode
+  // and @ffmpeg/ffmpeg (241 KB raw / 63 KB gz), and no startup chunk imports
+  // it: Receipt, printReceipt, file-api and settings-otp-modal import() it,
+  // and only the lazy scanner chunk (vendor-zxing) imports it statically
+  // (measured in the emitted graph) -- yet it was preloaded at
+  // fetchpriority=high on every admin cold load. It stays in the eager
+  // precache below, so an installed PWA still prints offline.
+  //
+  // I6-3: 'app-shared' (the /src/components/shared/ catch-all, 257 KB raw /
+  // 76 KB gz) is a static import of AdminRoot and of PublicCatalogRoot, so
+  // every admin page, the sign-in page and the storefront wait for it -- but
+  // it was not preloaded, so the browser only discovered it after the root
+  // chunk had downloaded and parsed: one extra round trip on every cold load.
   admin: [
     'AdminRoot',
     'vendor-react',
-    'vendor',
     'app-routing',
     'app-shell',
+    'app-shared',
     'Sidebar',
     'shared-ui',
     'api-http-core',
@@ -215,6 +228,7 @@ const routePreloadChunkNames = {
   ],
   login: [
     'AdminRoot',
+    'app-shared',
     'auth-login',
     'app-auth',
     'app-bootstrap',
@@ -222,6 +236,7 @@ const routePreloadChunkNames = {
   public: [
     'PublicCatalogRoot',
     'app-shell',
+    'app-shared',
     'catalog-public-core',
     'catalog-public-utils',
     'catalog-public',
@@ -310,11 +325,27 @@ const eagerPrecacheChunkNames = [...new Set([
   ...routePreloadChunkNames.pos,
   'lang-en',
   'lang-km',
+  // Receipt printing (html2canvas) and receipt QR codes (qrcode) must work
+  // offline the first time after an install or update, before any page has
+  // pulled this chunk in. It left the admin preload list in I6-2; it did not
+  // leave the offline set.
+  'vendor',
 ])]
 
-function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
+// I6-1: language pack chunk per UI language code. The route preload script
+// preloads the device's stored non-English pack alongside the admin chunks,
+// so the pack is already downloaded when index.tsx waits for it
+// (primeStoredLanguagePack in AppContext.tsx) instead of being requested only
+// after React's first commit. English is absent on purpose: CORE_ENGLISH_PACK
+// covers its first paint and AppProvider loads the full pack at idle time.
+const languagePackChunkNames = {
+  km: 'lang-km',
+} satisfies Record<string, string>
+
+function buildRoutePreloadScript(preloads: Record<string, string[]>, languagePacks: Record<string, string>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
   var preloads = ${JSON.stringify(preloads)};
+  var languagePacks = ${JSON.stringify(languagePacks)};
   function normalizePath(value) {
     return String(value || '/')
       .split('?')[0]
@@ -374,6 +405,16 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   function hasEmbeddedAuthBootstrap() {
     return !!document.getElementById('business-os-auth-bootstrap');
   }
+  // Same key, same default and same trimming as readStoredUiLanguage in
+  // AppContext.tsx: the language is a device-local setting.
+  function storedUiLanguage() {
+    try {
+      var deviceSettings = JSON.parse(window.localStorage.getItem('businessos_device_settings') || '{}');
+      return (deviceSettings && typeof deviceSettings === 'object' ? String(deviceSettings.language || '').trim() : '') || 'en';
+    } catch (_) {
+      return 'en';
+    }
+  }
   function routePreloadKey(pathname) {
     var segment = pathname.split('/').filter(Boolean)[0] || '';
     if (segment === 'product') return 'products';
@@ -417,6 +458,10 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   var files = isPublicCatalogPath(pathname)
     ? preloads.public
     : (isLoginPath(pathname) ? preloads.login : [].concat(preloads.admin || [], preloads[routeKey] || []));
+  // The storefront has its own language packs; only the admin app and its
+  // sign-in page render from src/lang.
+  var languagePack = isPublicCatalogPath(pathname) ? '' : languagePacks[storedUiLanguage()];
+  if (languagePack) files = files.concat([languagePack]);
   var seen = {};
   files.forEach(function preload(file) {
     var href = '/' + String(file || '').replace(/^\\/+/, '');
@@ -447,7 +492,12 @@ function injectRouteAwareModulePreloads(): Plugin {
               .map(([key, names]) => [key, toRoutePreloadFiles(bundle, names)]),
           ),
         }
-        const script = buildRoutePreloadScript(preloads)
+        const languagePacks = Object.fromEntries(
+          Object.entries(languagePackChunkNames)
+            .map(([language, chunkName]) => [language, toRoutePreloadFiles(bundle, [chunkName])[0]])
+            .filter(([, file]) => Boolean(file)),
+        )
+        const script = buildRoutePreloadScript(preloads, languagePacks)
         return html.replace(/(\s*<script type="module")/, `\n    ${script}$1`)
       },
     },
@@ -672,6 +722,15 @@ function manualChunks(id: string): string | undefined {
     ) return 'notification-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
+    // The saved-transfer-run refusal/recovery helpers wrap branchTransport and
+    // serve only the admin transfer surfaces (TransferModal, Inventory). Left
+    // to the /src/api/ catch-all they land in app-api-methods, which the
+    // public storefront loads, and drag branch-api in with them (U-transfer3:
+    // +8 KB, past performanceBudgets' catalog-products budget).
+    if (
+      normalized.endsWith('/src/api/transferRunRecovery.ts')
+      || normalized.endsWith('/src/api/transferRunRefusal.ts')
+    ) return 'branch-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
     if (normalized.endsWith('/src/components/inventory/inventoryExport.ts')) return 'inventory-export'
@@ -991,6 +1050,21 @@ export default defineConfig({
         },
       },
     },
+  },
+
+  // I6-1 (Sep 25 2026): the language packs (src/lang/*.json, the only JSON
+  // the app itself imports) used to be emitted as ES modules with one named
+  // export per key -- every key name written again as a `const` and again in
+  // the export list, +151 KB raw per pack over its own JSON. Nothing imports
+  // a named key; AppContext only ever reads `default`. stringify emits
+  // `export default JSON.parse('...')` instead: the pack is its own JSON
+  // text again, and JSON.parse is faster to parse than an object literal of
+  // the same size. The option is global, so @ffmpeg/ffmpeg's package.json in
+  // the lazy `vendor` chunk is now carried whole (+2 KB raw, measured) -- a
+  // trade kept for the simpler config. The chunks keep their names (lang-en /
+  // lang-km), so the precache and the early head preload above still find them.
+  json: {
+    stringify: true,
   },
 
   css: {

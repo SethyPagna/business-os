@@ -7,7 +7,8 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
-import { useFormDirty } from '../../utils/formDirty.ts'
+import { isDirtySince, stableSnapshot } from '../../utils/formDirty.ts'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -17,6 +18,9 @@ import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isT
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import { UserAvatarImage } from './UserAvatar.tsx'
+import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
+import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -34,6 +38,10 @@ type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
 type OtpMode = 'setup' | 'disable' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
+// PUT /users/:id/profile's __rename_cascade: 'carry' also rewrites the live
+// user-name snapshots (sales, returns, movements, transfers...); 'record_only'
+// renames only the account.
+type UserRenameScope = 'carry' | 'record_only'
 type ProfileFilePickerModalProps = {
   open: boolean
   onClose: () => void
@@ -94,6 +102,7 @@ interface AuthMethodsResult {
   success?: boolean
   google_linked?: boolean
   google_ready?: boolean
+  google_email?: string
   email_login_enabled?: boolean
   [key: string]: unknown
 }
@@ -117,7 +126,27 @@ interface ProfileApi {
   startGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
   unlinkGoogleOauth: (payload: Record<string, unknown>) => Promise<MutationResult>
   disconnectUserAuthProvider: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
-  uploadUserAvatar: (payload: { file: File }) => Promise<MutationResult>
+  uploadUserAvatar: (payload: { file?: File; filePath?: string; fileName?: string }) => Promise<MutationResult>
+  setUserAvatar: (id: EntityId, avatarPath: string) => Promise<ProfileResult>
+  removeUserAvatar: (id: EntityId) => Promise<ProfileResult>
+}
+
+// The account fields the form edits. The close guard compares these against
+// the last SAVED copy -- not the first render -- so a successful save (or an
+// avatar change, which saves itself) never leaves a "discard changes?" prompt.
+const PROFILE_EDITABLE_FIELDS = ['name', 'username', 'phone', 'email'] as const
+function editableProfileFields(value: ProfileUser | null): Record<string, unknown> | null {
+  if (!value) return null
+  return Object.fromEntries(PROFILE_EDITABLE_FIELDS.map((key) => [key, value[key] ?? '']))
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('Failed to read the edited image'))
+    reader.readAsDataURL(blob)
+  })
 }
 
 interface AvatarPreviewProps {
@@ -163,6 +192,7 @@ interface AvatarViewerModalProps {
   onUpload: () => void
   onEdit: () => void
   onOpenFiles: () => void
+  onRemove: () => void
   tr: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
 
@@ -206,20 +236,17 @@ function parseStoredOrganization(): StoredOrganization | null {
  */
 
 function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
-  if (avatarPath) {
-    return (
-      <img
-        src={avatarPath}
-        alt={name || 'Avatar'}
-        className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
-      />
-    )
-  }
-
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-      {name?.[0]?.toUpperCase() || 'U'}
-    </div>
+    <UserAvatarImage
+      src={avatarPath}
+      alt={name || 'Avatar'}
+      className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
+      fallback={(
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+          {name?.[0]?.toUpperCase() || 'U'}
+        </div>
+      )}
+    />
   )
 }
 
@@ -286,6 +313,8 @@ const PROFILE_KM_FALLBACKS: Record<string, string> = {
   google_provider_disabled_note: 'មិនទាន់បើក Google sign-in នៅក្នុង Google login នៅឡើយទេ។',
   current_password: 'ពាក្យសម្ងាត់បច្ចុប្បន្ន',
   disconnect_google_password_hint: 'ប្រើពាក្យសម្ងាត់បច្ចុប្បន្ន មុនពេលផ្ដាច់ Google ចេញពីគណនីនេះ។',
+  connect_google_password_hint: 'ការភ្ជាប់ Google បន្ថែមផ្លូវចូលគណនីនេះជាអចិន្ត្រៃយ៍ ដូច្នេះត្រូវការពាក្យសម្ងាត់បច្ចុប្បន្នរបស់អ្នក។',
+  current_password_required_connect: 'សូមបញ្ចូលពាក្យសម្ងាត់បច្ចុប្បន្ន ដើម្បីភ្ជាប់ Google។',
   disconnect_google: 'ផ្ដាច់ Google',
   connecting: 'កំពុងភ្ជាប់...',
   disconnecting: 'កំពុងផ្ដាច់...',
@@ -452,6 +481,7 @@ function AvatarViewerModal({
   onUpload,
   onEdit,
   onOpenFiles,
+  onRemove,
   tr,
 }: AvatarViewerModalProps) {
   if (!open) return null
@@ -460,19 +490,18 @@ function AvatarViewerModal({
     <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="flex max-h-[72dvh] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
-          {avatarPath ? (
-            <img
-              src={avatarPath}
-              alt={name || tr('avatar_image', 'Profile photo')}
-              className="max-h-[56dvh] w-full rounded-xl object-contain"
-            />
-          ) : (
-            <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-              {name?.[0]?.toUpperCase() || 'U'}
-            </div>
-          )}
+          <UserAvatarImage
+            src={avatarPath}
+            alt={name || tr('avatar_image', 'Profile photo')}
+            className="max-h-[56dvh] w-full rounded-xl object-contain"
+            fallback={(
+              <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+                {name?.[0]?.toUpperCase() || 'U'}
+              </div>
+            )}
+          />
         </div>
-        <div className="-mx-5 -mb-5 mt-3 grid flex-shrink-0 grid-cols-3 gap-2 border-t border-gray-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-700 dark:bg-gray-800 sm:pb-3">
+        <div className="-mx-5 -mb-5 mt-3 grid flex-shrink-0 grid-cols-4 gap-2 border-t border-gray-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-700 dark:bg-gray-800 sm:pb-3">
           <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onUpload} disabled={uploading}>
             {uploading ? tr('uploading', 'Uploading...') : tr('upload_image', 'Upload')}
           </button>
@@ -481,6 +510,9 @@ function AvatarViewerModal({
           </button>
           <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onOpenFiles} disabled={uploading}>
             {tr('open_files', 'Files')}
+          </button>
+          <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs text-red-600 dark:text-red-400" onClick={onRemove} disabled={uploading || !avatarPath}>
+            {tr('remove_avatar', 'Remove')}
           </button>
         </div>
       </div>
@@ -538,11 +570,27 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const [avatarPositionX, setAvatarPositionX] = useState(50)
   const [avatarPositionY, setAvatarPositionY] = useState(50)
   // S4-21: the account form holds typed profile fields that a dismissal
-  // would lose. `profile` is null while loading, which useFormDirty
-  // deliberately does not baseline -- otherwise the form would read as
-  // dirty the instant its data arrived. (The avatar editor declares its
-  // own dirtiness from its props, in AvatarEditorModal above.)
-  const { dirty: profileDirty } = useFormDirty(profile)
+  // would lose. Compared against the last SAVED copy (`savedProfile`, set on
+  // load and after every successful save) rather than a first-render
+  // baseline that was never moved: before, a successful "Save profile" still
+  // left the modal asking to discard changes on close. (The avatar editor
+  // declares its own dirtiness from its props, in AvatarEditorModal above.)
+  const [savedProfile, setSavedProfile] = useState<ProfileUser | null>(null)
+  const [removingAvatar, setRemovingAvatar] = useState(false)
+  const [avatarRemoveConfirmOpen, setAvatarRemoveConfirmOpen] = useState(false)
+  const [renameChoiceOpen, setRenameChoiceOpen] = useState(false)
+  // The shared Modal has no Escape handling; this dialog promises Escape
+  // aborts, so it wires its own (abort only -- never a save).
+  useEffect(() => {
+    if (!renameChoiceOpen) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saveProfileInFlightRef.current) setRenameChoiceOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [renameChoiceOpen])
+  const profileDirty = !!profile && !!savedProfile
+    && isDirtySince(stableSnapshot(editableProfileFields(savedProfile)), editableProfileFields(profile))
   const avatarFileInputRef = useRef<HTMLInputElement | null>(null)
   const avatarObjectUrlRef = useRef('')
   const loadProfileRequestRef = useRef(0)
@@ -613,6 +661,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       if (profileResult?.success === false) throw new Error(profileResult.error || 'Failed to load profile')
       const { success: _success, ...profileData } = profileResult || {}
       setProfile(profileData)
+      setSavedProfile(profileData)
       setOtpEnabled(!!otpResult?.otpEnabled)
       if (capsResult && capsResult.success !== false) {
         setVerificationCaps({
@@ -663,6 +712,8 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
    * 4.2 Password update.
    * 4.3 Session-duration preference update.
    */
+  const profileUsernameChanged = String(user?.username || '').trim() !== String(profile?.username || '').trim()
+
   const handleProfileSave = async () => {
     if (savingProfile || saveProfileInFlightRef.current) return
     if (!profile?.name?.trim() || !profile?.username?.trim()) {
@@ -673,13 +724,31 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       notify(tr('current_password_required_save', 'Current password is required to save account changes'), 'error')
       return
     }
+    // A username change asks what else follows the new name, in the shared
+    // review dialog: both behaviours are explicit buttons, and dismissing it
+    // (Cancel, X, Escape) saves nothing.
+    if (profileUsernameChanged) {
+      setRenameChoiceOpen(true)
+      return
+    }
+    await commitProfileSave(null)
+  }
 
+  const commitProfileSave = async (renameScope: UserRenameScope | null) => {
+    if (savingProfile || saveProfileInFlightRef.current) return
+    if (!profile) return
+    const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
+    // Never send a rename without the user's explicit choice.
+    if (usernameChanged && !renameScope) {
+      setRenameChoiceOpen(true)
+      return
+    }
+    setRenameChoiceOpen(false)
     saveProfileInFlightRef.current = true
     setSavingProfile(true)
     try {
       const previousEmail = String(profile.email || '').trim().toLowerCase()
       const userId = requireCurrentUserId()
-      const usernameChanged = String(user?.username || '').trim() !== String(profile.username || '').trim()
       const result = await withLoaderTimeout(() => getProfileApi().updateUserProfile(userId, {
         name: profile.name,
         username: profile.username,
@@ -691,20 +760,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         adminOverride: canAdminOverride,
         userId,
         userName: user?.name,
-        ...(usernameChanged ? {
-          __rename_cascade: window.confirm('Update linked sales, returns, stock movements, transfers, and other live user-name displays too? Point-in-time audit history will stay unchanged.')
-            ? 'carry'
-            : 'record_only',
-        } : {}),
+        ...(usernameChanged && renameScope ? { __rename_cascade: renameScope } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to save profile', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to save profile', 'error')
         return
       }
       const { success: _success, ...nextUser } = result || {}
       if (nextUser) {
         window.dispatchEvent(new CustomEvent('user:updated', { detail: nextUser }))
         setProfile(nextUser)
+        setSavedProfile(nextUser)
       }
       const authResult = await withLoaderTimeout(() => getProfileApi().getUserAuthMethods?.(userId), 'Profile sign-in methods', PROFILE_AUTH_REFRESH_TIMEOUT_MS).catch(() => null)
       if (authResult && authResult.success !== false) {
@@ -726,7 +792,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('profile_updated', 'Profile updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save profile'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to save profile'), 'error')
     } finally {
       saveProfileInFlightRef.current = false
       setSavingProfile(false)
@@ -750,7 +816,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         userName: user?.name,
       }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to change password', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
       const persistence = await persistChangedPassword({
@@ -774,7 +840,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('password_updated', 'Password updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       savePasswordInFlightRef.current = false
       setSavingPassword(false)
@@ -839,12 +905,29 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     resetAvatarEditor()
   }
 
+  // A refused link start answers in the operator's language: the rate limit,
+  // or a missing / wrong current password (code current_password_required).
+  const connectPasswordMessage = (value: unknown): string | null => {
+    const limited = currentPasswordRateLimitMessage(value, tr)
+    if (limited) return limited
+    if (value && typeof value === 'object' && (value as { code?: unknown }).code === 'current_password_required') {
+      return tr('current_password_required_connect', 'Enter your current password to connect Google.')
+    }
+    return null
+  }
+
   const handleStartOauthLink = async (provider: string): Promise<void> => {
     if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
     if (!verificationCaps.googleLoginAuth) {
       notify(tr('google_oauth_not_ready', 'Google login is not ready yet.'), 'error')
+      return
+    }
+    // S-auth4e: the Worker re-checks the current password before it hands
+    // out a link consent URL (routes/auth.ts /oauth/start).
+    if (!currentPassword.trim()) {
+      notify(tr('current_password_required_connect', 'Enter your current password to connect Google.'), 'error')
       return
     }
 
@@ -864,14 +947,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         provider: normalizedProvider,
         mode: 'link',
         redirectTo,
+        currentPassword,
       }), 'Start sign-in provider', PROFILE_OAUTH_START_TIMEOUT_MS)
       if (result?.success === false || !result?.url) {
-        notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
+        notify(connectPasswordMessage(result) || result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
         return
       }
       window.location.assign(result.url)
     } catch (error) {
-      notify(getErrorMessage(error, tr('oauth_start_failed', 'Unable to start sign-in with provider.')), 'error')
+      notify(connectPasswordMessage(error) || getErrorMessage(error, tr('oauth_start_failed', 'Unable to start sign-in with provider.')), 'error')
     } finally {
       oauthRequestInFlightRef.current = false
       setOauthConnecting('')
@@ -898,7 +982,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           })
       ), 'Disconnect sign-in provider', PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
       }
       if (result?.methods) {
@@ -919,7 +1003,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('identity_unlinked_success', 'Sign-in method disconnected.'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
     } finally {
       setDisconnectingProvider('')
     }
@@ -962,10 +1046,25 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         positionX: avatarPositionX,
         positionY: avatarPositionY,
       })
-      const file = new File([blob], 'avatar.png', { type: 'image/png' })
-      const uploadResult = await withLoaderTimeout(() => getProfileApi().uploadUserAvatar({ file }), 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
-      if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
-      setProfile((current) => ({ ...(current || {}), avatar_path: uploadResult.path }))
+      // Upload, then attach to the account (lib: ./avatarFlow.ts); resolves
+      // only once the account holds the photo.
+      const dataUrl = await blobToDataUrl(blob)
+      const nextAvatar = await uploadAndAttachAvatar(
+        getProfileApi(),
+        requireCurrentUserId(),
+        dataUrl,
+        {
+          noPath: tr('upload_no_image_path', 'Upload did not return an image path'),
+          attachFailed: tr('avatar_upload_failed', 'Avatar upload failed'),
+        },
+        (step, fn) => (step === 'upload'
+          ? withLoaderTimeout(fn, 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
+          : withLoaderTimeout(fn, 'Save avatar', PROFILE_SAVE_TIMEOUT_MS)),
+        profile?.updated_at ?? null,
+      )
+      setProfile((current) => ({ ...(current || {}), ...nextAvatar }))
+      setSavedProfile((current) => ({ ...(current || {}), ...nextAvatar }))
+      window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: nextAvatar.avatar_path } }))
       notify(tr('avatar_uploaded', 'Avatar uploaded'), 'success')
       actionHistory.pushAction({
         scope: 'profile',
@@ -981,6 +1080,40 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       setUploadingAvatar(false)
     }
   }
+
+  const removeAvatar = async (): Promise<void> => {
+    if (removingAvatar || uploadingAvatar) return
+    setRemovingAvatar(true)
+    try {
+      const result = await withLoaderTimeout(() => getProfileApi().removeUserAvatar(requireCurrentUserId()), 'Remove avatar', PROFILE_SAVE_TIMEOUT_MS)
+      if (result?.success === false) throw new Error(result.error || tr('avatar_remove_failed', 'Could not remove the profile photo'))
+      const cleared = { avatar_path: null, updated_at: result?.updated_at ?? profile?.updated_at ?? null }
+      setProfile((current) => ({ ...(current || {}), ...cleared }))
+      setSavedProfile((current) => ({ ...(current || {}), ...cleared }))
+      window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: null } }))
+      setAvatarRemoveConfirmOpen(false)
+      notify(tr('avatar_removed', 'Profile photo removed'), 'success')
+      actionHistory.pushAction({
+        scope: 'profile',
+        entity: 'user_avatar',
+        entity_id: currentUserId,
+        label: tr('avatar_removed', 'Profile photo removed'),
+      })
+    } catch (error) {
+      notify(getErrorMessage(error, tr('avatar_remove_failed', 'Could not remove the profile photo')), 'error')
+    } finally {
+      setRemovingAvatar(false)
+    }
+  }
+
+  // Remove asks first: request only opens the confirm dialog; confirm runs
+  // removeAvatar; dismissing mid-removal is ignored (./avatarFlow.ts).
+  const avatarRemoveFlow = createAvatarRemoveFlow({
+    closeViewer: () => setAvatarViewerOpen(false),
+    setConfirmOpen: setAvatarRemoveConfirmOpen,
+    isWorking: () => removingAvatar,
+    remove: removeAvatar,
+  })
 
   return (
     <>
@@ -1157,13 +1290,27 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                         ? tr('ready_on_login', 'Ready on login')
                         : tr('setup_needed', 'setup needed')}
                   </div>
-                  {authMethods?.google_linked && needsSensitivePassword ? (
+                  {authMethods?.google_linked && authMethods?.google_email ? (
+                    <div className="mt-1 detail-scroll-text text-xs text-gray-600 dark:text-gray-300" title={authMethods.google_email}>
+                      {authMethods.google_email}
+                    </div>
+                  ) : null}
+                  {!authMethods?.google_linked && !(verificationCaps.googleOauth && authMethods?.google_ready) ? (
+                    <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      {tr('google_link_unavailable_note', 'Google sign-in is not set up on this system yet, so it cannot be connected. An administrator has to finish the Google setup first.')}
+                    </p>
+                  ) : null}
+                  {(authMethods?.google_linked ? needsSensitivePassword : (verificationCaps.googleOauth && authMethods?.google_ready)) ? (
                     <div className="mt-2">
                       <div className="mb-1 flex items-center gap-1">
                         <label htmlFor="disconnect-google-password" className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                         {tr('current_password', 'Current password')}
                         </label>
-                        <InfoHint label={tr('disconnect_google', 'Disconnect Google')} text={tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')} />
+                        {authMethods?.google_linked ? (
+                          <InfoHint label={tr('disconnect_google', 'Disconnect Google')} text={tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')} />
+                        ) : (
+                          <InfoHint label={tr('connect_google', 'Connect Google')} text={tr('connect_google_password_hint', 'Connecting Google adds a lasting way into this account, so it needs your current password.')} />
+                        )}
                       </div>
                       <input
                         id="disconnect-google-password"
@@ -1176,16 +1323,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                       />
                     </div>
                   ) : null}
-                  {verificationCaps.googleOauth && authMethods?.google_ready ? (
-                    authMethods?.google_linked ? (
-                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'google'} onClick={() => handleDisconnectOauthProvider('google')}>
-                        {disconnectingProvider === 'google' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_google', 'Disconnect Google')}
-                      </button>
-                    ) : (
-                      <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
-                        {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
-                      </button>
-                    )
+                  {/* Disconnect never needs Google itself (only the current
+                      password), so it stays available even if the Google
+                      setup is later removed; Connect needs the full setup. */}
+                  {authMethods?.google_linked ? (
+                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={disconnectingProvider === 'google'} onClick={() => handleDisconnectOauthProvider('google')}>
+                      {disconnectingProvider === 'google' ? tr('disconnecting', 'Disconnecting...') : tr('disconnect_google', 'Disconnect Google')}
+                    </button>
+                  ) : verificationCaps.googleOauth && authMethods?.google_ready ? (
+                    <button type="button" className="btn-secondary mt-3 px-3 py-1 text-xs" disabled={oauthConnecting === 'google'} onClick={() => handleStartOauthLink('google')}>
+                      {oauthConnecting === 'google' ? tr('connecting', 'Connecting...') : tr('connect_google', 'Connect Google')}
+                    </button>
                   ) : null}
                 </div>
 
@@ -1371,6 +1519,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           <LazyOtpModal
             mode={otpMode}
             userId={user?.id}
+            otpCurrentlyEnabled={otpEnabled}
             onClose={() => setOtpMode(null)}
             onDone={refreshOtpState}
             t={t}
@@ -1409,8 +1558,54 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           setAvatarViewerOpen(false)
           setFilePickerOpen(true)
         }}
+        onRemove={avatarRemoveFlow.request}
         tr={tr}
       />
+      {avatarRemoveConfirmOpen ? (
+        <ConfirmDialog
+          title={tr('remove_avatar_title', 'Remove profile photo?')}
+          message={tr('remove_avatar_message', 'Your photo is taken off your account and replaced by your initial. The image itself stays in the file library.')}
+          danger
+          confirmLabel={tr('remove_avatar', 'Remove')}
+          working={removingAvatar}
+          workingLabel={tr('removing', 'Removing...')}
+          layer="nested"
+          onConfirm={() => { void avatarRemoveFlow.confirm() }}
+          onClose={avatarRemoveFlow.dismiss}
+          t={t}
+        />
+      ) : null}
+      {renameChoiceOpen && profile ? (
+        <ConfirmDialog
+          title={tr('rename_user_choice_title', 'Rename this user?')}
+          items={[
+            { label: tr('rename_user_from', 'Current username'), value: String(user?.username || '').trim() },
+            { label: tr('rename_user_to', 'New username'), value: String(profile.username || '').trim() },
+          ]}
+          note={tr('rename_user_history_note', 'Point-in-time audit history keeps the old name either way.')}
+          confirmLabel={tr('rename_user_carry', 'Rename and update linked records')}
+          cancelLabel={tr('cancel', 'Cancel')}
+          working={savingProfile}
+          workingLabel={tr('saving', 'Saving...')}
+          layer="nested"
+          onConfirm={() => { void commitProfileSave('carry') }}
+          onClose={() => { if (!savingProfile) setRenameChoiceOpen(false) }}
+          t={t}
+        >
+          <div className="space-y-2 text-xs text-gray-500 dark:text-gray-400">
+            <p>{tr('rename_user_carry_desc', 'Live sales, returns, stock movements, transfers and other screens that show this user name switch to the new name.')}</p>
+            <button
+              type="button"
+              disabled={savingProfile}
+              onClick={() => { void commitProfileSave('record_only') }}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700/40"
+            >
+              {tr('rename_user_record_only', 'Rename this user only')}
+              <span className="mt-0.5 block text-xs font-normal text-gray-500 dark:text-gray-400">{tr('rename_user_record_only_desc', 'Only the account changes; records that already show the old name keep it.')}</span>
+            </button>
+          </div>
+        </ConfirmDialog>
+      ) : null}
       {filePickerOpen ? (
         <Suspense fallback={null}>
           <LazyFilePickerModal

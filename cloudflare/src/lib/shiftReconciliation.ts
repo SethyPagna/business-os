@@ -285,6 +285,27 @@ async function readCashConfig(env: Env): Promise<ShiftCashOptions> {
 }
 
 /**
+ * Which fees are the DELIVERY half of the expense split. One predicate for
+ * both halves: shiftDeliveryFeeExpenses sums the rows it matches, and
+ * shiftExpenses(..., { excludeDeliveryFees }) lists the rows it does not, so
+ * a surface that prints the split with per-expense rows (the Telegram shift
+ * report) lists exactly the fees composeShiftFigures counts as "other".
+ */
+const DELIVERY_FEE_PREDICATE = "COALESCE(fees.fee_type, '') = 'delivery'"
+
+/**
+ * SELECT columns for a `fees` scan that feeds composeShiftFigures: every fee
+ * (`usd`/`khr`, its `expenses` input) and the delivery-typed subset
+ * (`delivery_usd`/`delivery_khr`, its `deliveryFees` input), off ONE scan so
+ * the two halves cannot come from two different sets of rows. For the
+ * reports that select fees by business day rather than by drawer window (the
+ * Telegram day summary and Reports overview), with the same predicate.
+ */
+export const FEE_SPLIT_COLUMNS = `COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
+      COALESCE(SUM(CASE WHEN ${DELIVERY_FEE_PREDICATE} THEN amount_usd ELSE 0 END), 0) AS delivery_usd,
+      COALESCE(SUM(CASE WHEN ${DELIVERY_FEE_PREDICATE} THEN amount_khr ELSE 0 END), 0) AS delivery_khr`
+
+/**
  * Which `fees` rows were paid out of THIS drawer: recorded inside the window,
  * and by the same employee only under per-account policy. `created_at` shares
  * sales' timestamp shape; `fee_date` is a bare day and could not tell two
@@ -318,9 +339,13 @@ export async function shiftExpenses(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number,
-  options: { overflowLabel?: string } = {},
+  options: { overflowLabel?: string; excludeDeliveryFees?: boolean } = {},
 ) {
   const { clauses: feeClauses, params } = shiftFeeWhere(shift, nowMs)
+  // The "other expenses" rows only: every fee minus the delivery half, which
+  // composeShiftFigures moves into the delivery cost. The total this returns
+  // is then that same "other" figure, row for row.
+  if (options.excludeDeliveryFees) feeClauses.push(`NOT (${DELIVERY_FEE_PREDICATE})`)
   const rows = await getDb(env).prepare(`
     SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label,
       COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
@@ -376,25 +401,39 @@ export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, 
 }
 
 /**
- * What couriers were actually paid inside the window. The USD half is the
- * sales kernel's own expression (lane boundary: salesAnalytics is owned
+ * What couriers were actually paid on the sales `clauses` select (a `sales`
+ * table scan, alias `sales`), cancelled sales always excluded. The USD half is
+ * the sales kernel's own expression (lane boundary: salesAnalytics is owned
  * elsewhere and consumed, never edited); the riel column has no expression
  * there, so the SAME "already recorded as a delivery fee" guard is mirrored
  * onto it. test-shift-reconciliation-pure.cjs proves both currencies drop a
  * payout that also exists as a fee, so the mirror cannot drift silently.
+ *
+ * Every report that prints "Actual delivery cost" reads its courier half here
+ * -- the shift's drawer window below, a business day (and branch) for the
+ * Telegram day summary and Reports overview -- and adds the fees typed
+ * 'delivery' through composeShiftFigures. NOT the kernel's
+ * delivery_actual_cost_usd: that total is the raw column, unguarded, so a
+ * payout also recorded as a linked delivery fee would be counted twice
+ * (R-telegram E2, 27 Sep 2026).
  */
-export async function shiftCourierPayouts(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
-  const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
-  if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
+export async function courierPayoutsWhere(env: Env, clauses: string[], params: Record<string, unknown>): Promise<ShiftMoney> {
+  const where = [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"]
   const khrExpr = `CASE WHEN EXISTS (
       SELECT 1 FROM fees
       WHERE fees.sale_id = sales.id AND COALESCE(fees.fee_type, '') = 'delivery'
     ) THEN 0 ELSE COALESCE(sales.delivery_actual_cost_khr, 0) END`
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${deliveryActualCostExpr('sales.')}), 0) AS usd,
-      COALESCE(SUM(${khrExpr}), 0) AS khr FROM sales WHERE ${clauses.join(' AND ')}`)
+      COALESCE(SUM(${khrExpr}), 0) AS khr FROM sales WHERE ${where.join(' AND ')}`)
     .get<{ usd: number; khr: number }>(params)
   return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
+}
+
+/** What couriers were actually paid inside the shift's window. */
+export async function shiftCourierPayouts(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
+  const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
+  return courierPayoutsWhere(env, clauses, params)
 }
 
 /** The reconciliation for one shift, read from D1. */
@@ -563,7 +602,7 @@ export async function shiftDeliveryFeeExpenses(
   nowMs: number,
 ): Promise<ShiftMoney> {
   const { clauses, params } = shiftFeeWhere(shift, nowMs)
-  clauses.push("COALESCE(fees.fee_type, '') = 'delivery'")
+  clauses.push(DELIVERY_FEE_PREDICATE)
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd,
       COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE ${clauses.join(' AND ')}`)
     .get<{ usd: number; khr: number }>(params)

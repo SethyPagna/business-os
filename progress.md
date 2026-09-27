@@ -1,6 +1,39 @@
 <!-- U-1 plan start -->
 ## U-1 — Urgent owner batch (25 Sep 2026) — ACTIVE, takes priority over PD-1 phases 2–7
 
+**How to read this file with the session log.** Status marks: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked.
+Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
+and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
+
+### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
+| Checkpoint | Contents | State |
+|---|---|---|
+| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [x] deployed 26 Sep 11:35 UTC as `c64eced5` (Deploy run 36237752796, approved under the owner's delegation): 0196 + 0197 applied, key-table counts unchanged, live revision `c64eced5c231` → Part 633 |
+| CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [x] deployed with CP-1 (`c64eced5`) → Part 633 |
+| CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock could not be transferred at all; a saved draft plus a failed lot load dead-ended | [x] deployed 27 Sep as `c35af63b` (Deploy run 36271249835; R-transfer2 certified: 540 cf + 570 fe files green individually). Follow-up U-transfer3: a refused saved transfer run locks the form (Edit/Discard) → Part 634 |
+| CP-2 | S-auth, U-profile + U-profile2 (+ U-profile3 fixes), U-records2, S-uploads2a/2b (+ S-uploads3 fixes), U-cost + 0195 | [x] deployed 27 Sep as `c5b28762` (Deploy run 36292174516, both hosts); smoke: /uploads CSP sandbox + nosniff + Range 206 live; R-cp2 exception (session-duration mints a session → bypasses the current-password allowance) → S-auth4 → Part 636 |
+| CP-3a-1 | U-receipt (receipt numbers stay unique across concurrent tills, imports and returns) + U-transfer3 (a refused transfer run recovers with Edit/Discard; coded refusals in en/km) + one stale source-shape test fixed (`5654fc71`) | [x] deployed 28 Sep as `39be7c38` (Deploy run 36338734993 after the trading check showed no open shift; gate 36336810696: 595/595 cf + 579/579 fe; R-cp3a1 certified with low exceptions; no migrations; row counts unchanged; live revision 39be7c3885e2) → Part 637 |
+| CP-3a-2 | FX-undo `506ccba2`, FX-stock `8b8d6f44`, FX-returns `848eb292`, FX-sec `22a4f643`, S-auth4 `627b991f` (migrations 0201–0203), FX-telegram `0339898d` (+ FX-telegram3: Audit Log field names in the reader's pack) | [x] deployed 28 Sep as `5bdf689b` (Deploy run 36344854500 after trading check 36344647895 showed no open shift; gate 36342784088: 624/624 cf + 587/587 fe; every lane refuter-certified with exceptions; 0201–0203 applied; row counts unchanged; live revision 5bdf689ba6f0) → Part 638 |
+| CP-3b-1 | U-print2 `0d86b6a5`, U-broadcast `30e5411d` (both certified), S-uploads4 `a539af87`, OPS-settings `5771ccf7`, F1+F3 `115e9bc1`, A0 `204f6d70` — no migrations | [~] probe `d589d048` gate 36342843725; refuters running for S-uploads4, OPS-settings, F1+F3, A0; recompose on `5bdf689b` under a new branch → Part 638 |
+| CP-3b-2 | FX-exc1 (undo refusal codes, settings permission order, receipt-number conflict in Khmer, restore-capacity detail, fees without a branch in the Telegram overview), F2 (merged with F1+F3), S-secrets2 (merged with FX-sec/S-auth4), FX-ui3 (confirm dialog + Khmer gaps, absorbs U-confirm), FX-stock4 (count re-apply after a duplicate merge, multi-lot revert) | [~] writers running, each followed by a refuter → Part 638 |
+| CP-3c | FX-audit-labels (R-telegram3 exceptions), U-ops2, A2+B1 (needs the owner's approval of the deletes), findings of deep scan SCAN1 | [ ] queued; 0200 repair NOT certified (R-cost2) → U-cost3, ships separately after certification + audit + backup |
+| CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC (done 27 Sep, `0ecf871d`); official-names Excel (batches 01–04 researched; the rest need a fresh web-search budget) | [!] owner-gated |
+
+### All workstreams — one line each; the details are in the session log and in local Records (`Records/Recovery/LANES.md`)
+- [x] Investigations, read-only: I1 I3 I5 I7 I8 I9, A1–A3, C3 A/B plan, M-offline map, C-cache plan, C-comply gap, A-profile audit, SEC-1 (secrets/history), SEC-2 (authz), SEC-3 (injection/leaks)
+- [x] SEC-1 full GitHub key scan: all 865 refs incl. PRs, 31,387 files, masked — no real key leaked (12 hits, all test fixtures)
+- [ ] Q12 repos (private main + public mirror + docker repo from `archive/docker-postgres-2026-07-26`) · Q13 print waits for QR · Q14 branch-scoped visibility + KPI · Q15 profile page + tutorials · Q16 undo broadcasts · Q17 review/audit previews · Q18 short display IDs · Q19 tidy ledgers/folders · Q20 SEC-3 P3 items · Q21 redact names/phones in public files · Q-drafts part 2 (server-side drafts across devices)
+- [ ] Owner checks: no stray `admin` user; 2FA on Cloudflare + GitHub; remove old-domain Google OAuth redirect URIs; delete the old zone later; confirm the test password `Foc…(15)` is not a real one
+- [~] BH-1 bug hunt 27 Sep (6 areas + route matrix, vs production c5b28762) → `Records/Bugs/2026-09-27/`. Fix lanes: FX-stock (dated count re-apply doubles stock; revert race), FX-returns (legacy refund price; legacy restore over-return; edit-after-cancel moves stock; return restock inflates supplier received; per-lot release), FX-undo (branch.update clobber, committed 72a694cc; applier audit), FX-sec (security hardening, details in local Records), FX-telegram (shift delivery split parity; /settopic + /topics; returns family), FX-ui (POS/Sales Khmer gaps; 42 native confirm()). Further security items queued (local Records).
+- [~] F-forensics: every bug's effect on past records; per product/branch/lot classify already-compensated by staff (code fix only, stock untouched) / partial / uncompensated / owner review; downstream numbers traced; repairs only via the app's adjustment path after owner approval
+- [ ] Telegram topics (owner 27 Sep): owner supplied six topics (ids in local Records). Production has no topic ids stored (read-only check). Owner asked us to write them: needs a guarded ops settings-write task (single-tenant: one Worker + D1 per organization, so never via a migration)
+- [ ] Security (owner 27 Sep): owner credential follow-up (local Records); S-auth4 adds a forced change for known-leaked passwords; password reset offers authenticator code, emailed code, or admin approval
+- [ ] Agent tooling (owner 27 Sep): agent-friendly code + verification skills (CDP/devtools: DOM, screenshots, click/type, a11y tree, eval, profiling, CPU/network throttling, console/network streaming; iOS/Android/desktop emulation; isolated parallel worktree instances) wired into the workflow with the AI council and dead-code sweeps
+- [ ] W-site (owner 27 Sep): thorough overhaul + redesign of the public website — top-tier minimalist, barely any text, English/Khmer
+- [ ] W-admin (owner 27 Sep): a landing page for the admin app in the same design language, English/Khmer
+- [ ] OPS-settings: guarded ops task to write allow-listed Telegram topic settings into this deployment only (single-tenant per organization; never a migration), with refuter
+- [x] Handoff 27–28 Sep: account switch; lead resumed 28 Sep 01:25 local from Records/Recovery/HANDOFF-LATEST.md + LANES.md (local) → Part 637
+
 Owner order: **admin fixes → public site → A/B data architecture**, deployed as soon as each
 checkpoint is verified. Base: resume line `2d1888ca`; integration branch `claude/urgent-20260925`.
 Each lane has its own worktree under `Downloads/Projects/BusinessOS/Worktrees/` and one writer.
@@ -9,8 +42,8 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 ### Location (everything as close to Cambodia as possible)
 - [x] D1 `business-os` and `business-os-import` already run in APAC (read-only `d1 info`).
 - [x] Worker placement pinned to Singapore (`aws:ap-southeast-1`); Smart Placement had left calls at the requesting edge (`local-MRS`) — `3b8d37a9`
-- [ ] Verify live `cf-placement` after deploy (expect `remote-SIN`-style value) and D1 round trips
-- [!] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): new APAC bucket + copy + binding switch — plan and owner checkpoint after checkpoint 1
+- [x] Live `Cf-Placement: remote-SIN` verified after CP-1 (26 Sep) → Part 633
+- [x] R2 moved to APAC 27 Sep: copy 36276031042 + verify-only 36277493318 (2,900 objects, 1.45 GB, identical); switch deployed as `0ecf871d` (Deploy run 36283563411, both hosts); top-up 36285297729 PASS (only a backup set written by the old cron; no upload missed). Old EEUR bucket untouched, kept until the owner decides (candidate off-site backup copy) → Part 635
 
 ### Owner decisions (25 Sep 2026)
 - Cost = quantity-weighted average over lots still on hand; 0-cost lots excluded; nothing on hand → newest received lot cost; 4dp round-up kept. Replaces the distinct-cost mean.
@@ -21,11 +54,12 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - Product name tap opens the product; chips keep filtering. Commit email stays ungsethypagna@gmail.com.
 - (26 Sep) Stock before/after shows the branch pair and the total pair; all staff keep seeing all branches (no per-branch access).
 - (26 Sep) Soon one branch: Warehouse (id 1) is renamed Store and Shop (id 2) is retired, keeping its name so its records read as legacy. The move is an official transfer ("+N from Shop" on each stock card) run as one fast backend step; history is never relabelled; returns/edits/queued sales against Shop are rewired to Store and keep that they came from Shop. Prepare now so the day is one approved step: branch UI collapses to one line/view from data, dry-run + backup + recovery ready.
+- (26 Sep) Offline mode is cancelled for good, and the app is optimized as online-only. The next build uploads any sales or actions still queued on a till exactly once, then removes offline data. Without internet, a clear "No connection" banner appears, Save/Checkout are blocked, and the cart stays on screen. The app stays installable, keeps the "Restart now" bar, and caches app code only. The dashboard may be up to 20 s stale. Anonymous A/B comparison telemetry (hashes, counts, timings) goes to Analytics Engine.
 
 ### Data safety (nothing lost or corrupted)
-- [ ] Before any remote migration: record the D1 Time Travel bookmark (restore point) and pre-migration counts/totals in the deploy record
+- [x] Before any remote migration: the release kit records the D1 Time Travel restore point and key-table counts (kept in local Records, never in the public Actions log) → Part 633
 - [ ] Every data-changing migration writes a backup table first and carries tested recovery SQL (round-trip test: migrate → recover → byte-identical)
-- [ ] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
+- [x] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
 - [x] Recovery checkout and Codex worktrees untouched; no force pushes; exact-path commits only
 
 ### Checkpoint 1 — admin (lanes run in parallel)
@@ -33,17 +67,47 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [~] U-cost: depleted (qty 0) received lots excluded from the cost average; lots with stock listed first, depleted greyed; guards; read-only production audit of affected products
 - [x] U-products-ui (integrated; refuter certified): invisible chip scroll on large screens; cost click opens cost; mobile hit targets (name ≠ received date, empty space ≠ records); record rows open their own before/after
 - [~] U-records (first part integrated; now adding branch + total before/after): stock-in lines get before/after (one set-based query), record floats beside the backdrop in Transfer / Fast stock-in / Receive batch, shared confirm dialog instead of native confirm in stock screens, movement rows open their own record
-- [~] U-load: language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
-- [~] U-db: search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
+- [x] U-load (integrated; refuter certified: KM pack 205→148 KB gz, icons −28% lossless): language packs as plain JSON fetched from the head script, no vendor preload, app-shared preloaded, immutable assets cache-only in the service worker, recompressed icons
+- [x] U-db (integrated; refuter certified): search relevance computed once (216–358 ms → ~20 ms in the lab), stats and dashboard readers use indexes, audit_logs indexes (0196), FTS triggers limited to text columns (0197), sales stop invalidating the whole catalog
 - [x] Live-update hub moved to an APAC-hinted Durable Object; 12 route handlers no longer wait on it — dc2e4596
-- [!] Deploy blocked: this laptop exits through a German datacenter proxy/VPN and the Cloudflare API answers wrangler with a bot challenge; owner to switch network
+- [x] Deploy path: the GitHub Actions Deploy workflow (owner's secrets) replaces this laptop, whose VPN gets a Cloudflare bot challenge; CP-1 shipped that way → Part 633
 - [~] U-branch-prep (plan in local Records; build lane claude/u-branch-20260926): retire Shop into Store (every branch reference, lots keep batch identity, dry-run, backup, recovery, single-branch UI); execution is owner-gated
+- [~] U-confirm: remaining native confirm() → shared review dialog (files owned by running lanes excluded)
+- [~] CERT: every test file individually at the deploy-branch tip + hygiene list (a stale Telegram pin was found and fixed, 19013909)
 - [ ] Integrate → both package gates at committed HEAD → browser check → deploy → live check
 
 ### Checkpoint 2 — public site
 - [x] P-public (refuter certified; translate DOM guard, viewer focus/scroll lock, CSP frame-src added; on-screen check pending): Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
-- [ ] Official product names and details from brand websites (research lane → owner-reviewed import; no silent writes)
+- [~] Official product names: step 1 product list from the public catalog (local Records only) → brand batches researched in parallel → Excel for owner review; no import without owner review
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
+
+### Owner queue (26 Sep) — after RELEASE-1 deploys
+- [ ] Q14 Branch-scoped order visibility permission (staff see all by default) + per-branch performance/KPI in profile
+- [~] Q15 Profile as a full page, friendlier design; verify photo upload, sign-in linking, OTP/2FA setup; annotated screenshot tutorials (EN/KM) — read-only audit running
+- [ ] Q17 Review queue and audit log show a preview of the actual change in the same format/UI as the real screen (before → after), not raw ids
+- [ ] Q12 Repos: private main + public sanitized mirror; new repo from `archive/docker-postgres-2026-07-26`, then port post-pivot changes (owner OK before creating any repo)
+- [ ] Q13 Print waits for QR codes (grey placeholder printed if tapped early)
+- [ ] PR 9 (codex/verified-resume-20260925): fully contained in urgent; close after RELEASE-1 with owner OK
+
+### Lane tracker (26 Sep) — one writer per file set; integrate only after a refuter verdict
+| Lane | Branch / worktree | Owns | State |
+|---|---|---|---|
+| U-cost | claude/u-cost-20260925 | catalogCostRecompute, migration 0195, batch lists (ManageBatchesModal, inventory ProductDetailModal) | building (resumed after usage limit) |
+| U-db | claude/u-db-20260925 | search relevance, sales.ts empty IN, salesAnalytics, migrations 0196/0197, catalog cache invalidation | [x] integrated (3fbb9fb4..b3583a9a, migrations 0196/0197); refuter certified with test-gap notes |
+| U-records | claude/u-records-20260925 | stockLedgerQuery, movement balance endpoint, StockLineChange, MovementDetailFloat | refuter: certified with exceptions (transfer total false on both legs, total labelled as a branch, guessed branch balance, mixed timestamps, ledger float, list markup); fixes building |
+| U-load | claude/u-load-20260925 | language packs, preload lists, sw.js, icons | [x] integrated (8d2f7cd8..d2b4acf6 + fix c589d67b); refuter certified |
+| U-branch | claude/u-branch-20260926 | branch roles/successor, stock-writer guards, activeBranches UI, held consolidation migration, import routing | building (resumed) |
+| U-print | claude/u-print-20260926 | printReceipt, receiptAssetLoader, printSurface, exportOptions, Receipt | building (resumed) |
+| U-confirm | claude/u-confirm-20260926 | native confirm() to shared dialog, outside every other lane's files | building (resumed) |
+| U-broadcast | claude/u-broadcast-20260926 | awaited broadcast() in lib (reviewApply, bulkDelete, customer repairs) + guard test | building (resumed) |
+| U-worker | claude/u-worker-20260926 | auth.ts, coreDataInvariants, permissions, settings route, index middleware | building |
+| CERT | council-build (detached 19013909) | read-only: every test file individually + hygiene | running |
+| Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
+| Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
+| P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
+| U-sync | claude/u-sync-20260926 | sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers | phase 1 done; refuter running |
+| U-drain | claude/u-drain-20260926 | automatic one-time upload of queued sales/outbox rows (existing server duplicate checks), nothing auto-deleted; then snapshot/mirror removal, POS checkout gate and copy (after U-sync, U-confirm, U-branch) | building; the offline map is in local Records |
+| U-deploykit | claude/u-deploykit-20260926 | run/release.bat menu, GitHub Actions deploy (manual start + owner approval), beginner setup guide, VPN split-tunnel guide | building; not pushed |
 
 ### Verification (every lane, before integration)
 - [ ] Refuter per lane (separate agent, read-only): tries to prove the fix wrong; checks sibling surfaces (POS, inventory, reports, public preview), permissions (backend role gate = UI gate), both language packs, undo/audit, offline paths
@@ -54,6 +118,26 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 
 ### Checkpoint 3 — A/B data architecture
 - [ ] From PD-1 evidence: precomputed search/catalog read model (organized once at write time, not parsed per request), indexes, query budget per hot route; A/B measured against current path before switching
+- [~] C3v2 plan (27 Sep, owner asked for a deep D1/R2/policy redesign; offline cancelled so the change feed is dropped). Full plan: `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`. Rule: every change measured A/B (shadow → on, KV flag, rollback in ~60 s); no second money or stock definition.
+  - [~] A0 metrics: per-request D1 rows_read/rows_written/statements/ms + cache state in Server-Timing and sampled Analytics Engine; KV feature flags. Foundation for every gated item.
+  - [ ] A1 hygiene: awaited broadcasts → waitUntil; every cache-version bump awaited (read-your-writes); ETag/304 on cached JSON
+  - [ ] A2 retention: `job_runs` table replaces settings stamps; bounded cleanup of idempotency/undo/revisions/telegram/image-audit/quota tables (sales, returns, movements, money audit never pruned)
+  - [ ] A3 catalog: one scan per page (COUNT OVER), family expansion limited to the page, parallel branch/stock reads, cached filters panel — after CP-2
+  - [ ] A4 dashboard: 20 s startup cache keyed by permissions + versions, expiry index, parallel config; refund-join narrowing gated on returns count
+  - [ ] A5 search: Khmer tokenizer probe on a local snapshot, then (if confirmed) FTS rebuild keeping combining marks + prefix index
+  - [ ] A6 R2 images: wire the existing thumbnail sizes (w160/320/640, made once, stored), srcset in the grids, orphan audit (report only) — after the APAC move
+  - [ ] A7 R2 layout: lifecycle for imports/ (7 d), quarantine/ (30 d), aborted multipart (1 d); backups/ in their own bucket during the APAC move
+  - [ ] A8 gated read models: closed-day report cache (trigger-invalidated), stored product family key + keyset paging, index cleanup by EXPLAIN — only if 7 days of A0 numbers cross the thresholds in the plan
+  - [ ] Production counts Q1–Q9 (read-only, via the ops d1-export path, results only in Records)
+  - [x] C3v3 deep audit (27 Sep, read-only, 4 reviewers: D1 schema, Worker round trips, frontend data flow, storage/platform) → `Records/Performance/2026-09-27/C3v3-plan-revision.md`. Corrections: only `undo_snapshots` + operation/receipt tables are truly unbounded (revisions and receipts must never be pruned); version bumps are not awaited today.
+  - [ ] F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) — first after CP-3
+  - [ ] F2 Durable Object auto-pong + pause health/WS/pending polls while the tab is hidden; F3 stop pre-downloading every route on deploy
+  - [~] A2 fix (corrected by council 27 Sep): `action_history` retention must skip every FK/JSON-referenced row and stop swallowing the error; `undo_snapshots` are NEVER expired (merge lineage evidence); cron split folded into B1; backups gain `stock_mutation_receipts` + a completeness test — lane A2+B1
+  - [ ] B1 backups: keyset paging instead of OFFSET, full backup at 03:00 local; separate backups bucket (owner decision)
+  - [ ] W1 sale create ~18–20 D1 trips → 3–4; W2 report reader one-batch snapshot instead of double read; W3 login batching + atomic lockout
+  - [x] C3v4 AI council (performance / data-integrity / operator) → `Records/Performance/2026-09-27/C3v4-council-synthesis.md`: thumbnails to #2, version bumps into the D1 write batch before any money cache, W1 keeps in-batch guards, W2 7-day shadow compare, A0 gains a D1 wall-clock probe, new items: tab-return fan-out, checkout triple reload, dashboard refresh per sale, stock-in commit batching, deploy after close until F3
+  - [x] Debloat sweep: 2 dead frontend files, 2 test-only; all dependencies used; unwired Worker libs are in-flight lanes (keep); 927 dead i18n keys (~160 KB) queued behind FX-ui
+  - [ ] U-receipt: duplicate receipt numbers possible (no UNIQUE since 0107; probe outside the batch) — lane running
 
 <!-- PD-1 plan start -->
 ## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE

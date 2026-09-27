@@ -58,14 +58,13 @@ workers_dev = false
 # A record must be deleted in the Cloudflare DNS dashboard first -- wrangler
 # will not silently overwrite an existing record.
 #
-# The old leangcosmetics.dpdns.org zone routes stay during the transition:
-# existing PWA installs, bookmarks and the Google OAuth redirect URIs
-# registered for the old admin host keep working until the cutover is done.
+# The old leangcosmetics.dpdns.org zone routes were REMOVED (owner decision,
+# Sep 26 2026): that domain is retired completely. Do not re-add a route on
+# any other zone -- the deploy API token is scoped to the leangbeauty.com
+# zone only, so a route on a foreign zone makes the whole deploy fail.
 routes = [
   { pattern = "leangbeauty.com", custom_domain = true },
   { pattern = "admin.leangbeauty.com", custom_domain = true },
-  { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
-  { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
 ]
 
 # Copied VERBATIM from wrangler.toml (not a diff site). The document-route
@@ -124,8 +123,11 @@ crons = ["0 */6 * * *"]
 # elsewhere in this program), which is exactly the workload Smart Placement
 # is for. Free on both Workers plans (no [limits]-style Paid gate), so it
 # needs no free/paid branch the way cpu_ms above does.
+# 2026-09-25: mirrored from wrangler.toml -- pinned to Singapore next to the
+# APAC D1 (Smart Placement had left requests at the requesting edge).
 [placement]
-mode = "smart"
+mode = "targeted"
+region = "aws:ap-southeast-1"
 
 # CPU headroom for the import queue consumer (queue.ts) and other chunked
 # D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
@@ -207,7 +209,7 @@ migrations_dir = "migrations-import"
 
 [[r2_buckets]]
 binding = "ASSETS"
-bucket_name = "business-os-assets"
+bucket_name = "business-os-assets-apac"
 
 # Analytics Engine. Free with Workers, and the only place in this stack where
 # writing an observation is genuinely cheap: it does not draw on D1's row

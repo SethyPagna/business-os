@@ -113,7 +113,9 @@ test('E6: an opted-in save with an empty diff still has something to show', () =
 
   // ...and the page says so in words rather than rendering an empty box.
   const page = readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
-  assert.match(page, /const contextRows = buildAuditFieldDiff\(null, detailLog\.details\)/)
+  // The page names the context rows with its pack (auditLogEntityLabels.test.ts
+  // pins the vocabulary); the call is still the details column, no old side.
+  assert.match(page, /const contextRows = buildAuditFieldDiff\(null, detailLog\.details, fieldLabelFor\)/)
   assert.match(page, /if \(!hasRawData && !contextRows\.length\) return null/)
   assert.match(page, /hasRawData && !fieldDiffRows\.length \? \([\s\S]{0,400}copy\('no_field_changed'/)
   assert.match(page, /copy\('recorded_context'/)

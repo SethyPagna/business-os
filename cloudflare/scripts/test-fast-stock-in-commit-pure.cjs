@@ -235,7 +235,8 @@ function freshDb() {
   return wrapFlat(rawDb)
 }
 
-const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', permissions: '{}' }
+// Administrator control comes from the role, not the name (FX-sec).
+const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
 // inventory: false blocks BOTH wires identically -- runAdjustAction's own
 // `getActionTier(user, 'inventory', 'adjust') !== 'full'` check and this
 // route's own canReceiveBatchStock() (hasPermission('inventory')) both read

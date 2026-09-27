@@ -2,8 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
-import { getStockLedger } from '../../api/productReadTransport.ts'
+import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
+import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 
 // The full-featured adjust modal (batch, price-lock, reasons) reused from the
 // Inventory/Branches page -- lazy so its weight only loads when the person
@@ -19,6 +20,9 @@ import type { StockMode } from '../inventory/FastStockInModal'
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
 import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
+// U-records: a ledger row's float shows the SAME balance block, from the SAME
+// walk, as the Movements tab's record float -- branch line, then total.
+import { MovementBalance } from '../inventory/MovementDetailFloat.tsx'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker'
 import StatsRangeRow from '../shared/StatsRangeRow'
 import FilterMenu, { type FilterSection } from '../shared/FilterMenu'
@@ -256,9 +260,18 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [detail, setDetail] = useState<LedgerRow | null>(null)
+  // The open row's before -> after: one read per opened record, the same
+  // walk and block as the Movements float (see MovementBalance), behind the
+  // ledger's own products-OR-inventory gate -- the Movements route is
+  // Inventory-only, and a Products-only user reads this ledger.
+  const loadDetailBalance = useCallback((id: string | number) => getStockLedgerMovementBalance(id), [])
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
+  // Synchronous in-flight latch for Revert: rowBusy only disables the button
+  // after a re-render, so a double tap inside one frame could send two
+  // requests. The Worker refuses the second (H-stock 2); this stops sending it.
+  const revertInFlightRef = useRef(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
   // U-records: the reason edit awaiting review in the shared ConfirmDialog
@@ -503,17 +516,19 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // reverted row stays -- the ledger is append-only -- and the new counter-
   // movement appears). Close the detail so the person sees the updated list.
   const doRevert = useCallback(async () => {
-    if (!detail) return
+    if (!detail || revertInFlightRef.current) return
+    revertInFlightRef.current = true
     setRowBusy(true)
     try {
       const res = await revertStockMovement(detail.id) as { success?: boolean; error?: string } | undefined
-      if (res && res.success === false) throw new Error(res.error || tr(t, 'revert_failed', 'Revert failed'))
+      if (res && res.success === false) throw Object.assign(new Error(res.error || tr(t, 'revert_failed', 'Revert failed')), { code: (res as { code?: string }).code })
       app.notify(tr(t, 'movement_reverted', 'Change reverted'))
       closeDetail()
       void load()
     } catch (error) {
-      app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
+      app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
     } finally {
+      revertInFlightRef.current = false
       setRowBusy(false)
     }
   }, [detail, app, t, closeDetail, load])
@@ -1123,18 +1138,15 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   {detail.unit ? <span className="ml-1 break-words font-normal opacity-80">{detail.unit}</span> : null}
                 </div>
               </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{beforeLabel}</div>
-                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-                  {detail.before_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
-                </div>
-              </div>
-              <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{afterLabel}</div>
-                <div className="mt-0.5 break-words text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-100">
-                  {detail.after_qty}{detail.unit ? <span className="ml-1 font-normal text-gray-500 dark:text-gray-400">{detail.unit}</span> : null}
-                </div>
-              </div>
+            </div>
+            {/* Stock before -> after: the movement's branch line, then the
+                total across branches -- the shared block the Movements float
+                renders, from the same walk, so one movement reads the same
+                on both screens (owner, 26 Sep). The type chip above already
+                shows the signed quantity, so the block drops its own; a
+                failed read still shows the row's own total pair. */}
+            <div className="text-xs">
+              <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} fallback={detail} showQuantity={false} />
             </div>
             {detail.batch_id ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">

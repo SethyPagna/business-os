@@ -33,8 +33,8 @@ checkout and installing destroys it for every live session at once.
    cd cloudflare/scripts && for f in test-*.cjs; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done
    ```
 
-   `test:utils` stops at the first red, so when hunting run the files individually:
-   `for f in tests/*.test.ts; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done`.
+   `test:utils` keeps going after a red and lists every red at the end; when hunting, run the files individually:
+   `for f in tests/*.test.ts tests/*.test.cjs; do node "$f" >/dev/null 2>&1 || echo "RED $f"; done`.
 
 2. **Coverage matrix** — enumerate every surface, writer or route the claim implies, with a verdict
    per item and a `path:line`. Sampled is not certified. Include both language packs, both

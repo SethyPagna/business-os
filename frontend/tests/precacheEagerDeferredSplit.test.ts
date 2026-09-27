@@ -47,6 +47,11 @@ runTest('vite.config.ts computes an eager precache chunk set from the existing r
   assert.match(viteConfig, /\.\.\.routePreloadChunkNames\.pos,/, 'the POS route chunks must be eager so an offline POS keeps working after an update')
   assert.match(viteConfig, /'lang-en',/, 'the English language pack must be eager')
   assert.match(viteConfig, /'lang-km',/, 'the Khmer language pack must be eager -- both packs, not an English-only fast path')
+  // I6-2: generic 'vendor' left the admin preload list, so it has to be named
+  // here or receipt printing and QR codes would stop working offline.
+  const eagerListStart = viteConfig.indexOf('const eagerPrecacheChunkNames')
+  const eagerList = viteConfig.slice(eagerListStart, viteConfig.indexOf('])]', eagerListStart))
+  assert.match(eagerList, /^\s*'vendor',\r?$/m, 'the print/QR vendor chunk must stay in the eager offline set')
 })
 
 runTest('vite.config.ts emits eager and deferred asset lists in the precache manifest, entry chunks always eager', () => {

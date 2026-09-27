@@ -854,6 +854,13 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
         // query -- distinct values so a crossed source shows on the line.
         if (/FROM returns/.test(sql)) return { usd: 12, khr: 0 }
         if (/delivery_actual_cost_khr/.test(sql)) return { usd: 3.5, khr: 0 }
+        // The delivery-typed half of the fees (shiftDeliveryFeeExpenses, read
+        // since H-io #2). None here: this stub's one fee is "Example expense";
+        // the split itself is pinned by test-telegram-shift-delivery-split-pure.cjs.
+        if (/fee_type, ''\) = 'delivery'/.test(sql)) return { usd: 0, khr: 0 }
+        // The dated report's sale_items id band (salesAnalytics readReportSaleItems,
+        // I4-4). This stub's .all() returns no item rows, so the band is empty too.
+        if (/MIN\(si\.id\) AS lo, MAX\(si\.id\) AS hi/.test(sql)) return { lo: null, hi: null }
         throw new Error(`unexpected .get in the mapping stub:\n${sql}`)
       }
       return {

@@ -67,7 +67,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { ordinaryBusinessBatch } from './businessMaintenanceGuard'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { resolveReceiptLotTarget, type ReceiptLotCandidate, type StockWriteStatement } from './productBatches'
-import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { stockReceiptGateCode, stockReceiptGateMessage } from './stockReceiptGate'
 import { divideMoney4, multiplyMoney4, roundMoney4, subtractMoney4, addMoney4 } from './moneyPrecision'
@@ -761,10 +761,11 @@ export async function replayStockInLineEdit(
       AND json_extract(h.undo_payload,'$.operation_id')=@operation AND json_extract(h.undo_payload,'$.generation')=@generation)`, params),
     ...stateGuard(from, false),
     ...stateWrites(to, productDelta),
-    // Restore the catalog cost only while it still holds the value this
-    // generation left; a later receipt's recompute is never clobbered.
-    ...(costFrom && costTo ? [{ sql: `UPDATE products SET cost_price_usd=@costTo, purchase_price_usd=@purchaseTo
-      WHERE id=@product AND cost_price_usd IS @costFrom AND purchase_price_usd IS @purchaseFrom`, params }] : []),
+    // U-cost (supervisor decision, 2026-09-25): the catalog cost is re-derived
+    // from the lots this replay just restored, never written back from the
+    // snapshot -- a lot that sold out since the edit must not count again.
+    // Writes nothing when the figure is already right.
+    catalogCostRecomputeIfChangedStatement(revision.productId),
     ...movementStatements({
       plans, state: to, lotIds, reference: stockInEditReference(revision.rootMovementId, row.id, next),
       reason: `${direction === 'undo' ? 'Undo' : 'Redo'}: ${revision.reason}`, user,

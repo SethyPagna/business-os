@@ -44,30 +44,74 @@ export function parseJsonObject(value: string | null | undefined): Record<string
 //               page-access see 'view' as "allowed, not none".
 export type PermissionValue = boolean | 'review' | 'view'
 
+// Parsed permissions, memoized per user object (perf CPU item, Records/
+// Performance/2026-09-25 I1). hasPermission() alone used to JSON.parse both
+// strings twice (once via isAdminControlUser, once itself), and a route runs
+// many checks against the same session user -- all re-parsing identical
+// JSON. The WeakMap entry dies with the user object (one request), and it is
+// only reused while BOTH source strings are still the ones it was parsed
+// from, so a reassigned permissions/role_permissions value is re-read, never
+// served stale. Internal checks read the cached map without mutating it;
+// the exported getters hand out copies so a caller that edits its result
+// cannot poison the next check.
+type ParsedPermissions = {
+  permissions: string | null | undefined
+  rolePermissions: string | null | undefined
+  own: Record<string, PermissionValue>
+  merged: Record<string, PermissionValue>
+}
+const parsedPermissionsMemo = new WeakMap<object, ParsedPermissions>()
+const NO_PERMISSIONS: Readonly<Record<string, PermissionValue>> = Object.freeze({})
+
+function parsedFor(user: NonNullable<PermissionUser>): ParsedPermissions {
+  const hit = parsedPermissionsMemo.get(user)
+  if (hit && hit.permissions === user.permissions && hit.rolePermissions === user.role_permissions) return hit
+  // Ported from backend/src/middleware.ts's getMergedPermissions(): role
+  // grants are the baseline, user-level permissions override per-key.
+  const rolePermissions = parseJsonObject(user.role_permissions)
+  const own = parseJsonObject(user.permissions) as Record<string, PermissionValue>
+  const entry: ParsedPermissions = {
+    permissions: user.permissions,
+    rolePermissions: user.role_permissions,
+    own,
+    merged: { ...rolePermissions, ...own } as Record<string, PermissionValue>,
+  }
+  parsedPermissionsMemo.set(user, entry)
+  return entry
+}
+
+// Read-only view for the checks in this file. Never hand this object out.
+function mergedView(user: PermissionUser): Readonly<Record<string, PermissionValue>> {
+  return user ? parsedFor(user).merged : NO_PERMISSIONS
+}
+
 export function parsePermissions(user: PermissionUser): Record<string, PermissionValue> {
-  return parseJsonObject(user?.permissions) as Record<string, PermissionValue>
+  return user ? { ...parsedFor(user).own } : {}
 }
 
 // Ported from backend/src/middleware.ts's getMergedPermissions(): role
 // grants are the baseline, user-level permissions override per-key.
 export function getMergedPermissions(user: PermissionUser): Record<string, PermissionValue> {
-  const rolePermissions = parseJsonObject(user?.role_permissions)
-  const userPermissions = parseJsonObject(user?.permissions)
-  return { ...rolePermissions, ...userPermissions } as Record<string, PermissionValue>
+  return { ...mergedView(user) }
 }
 
-// Ported from backend/src/middleware.ts's isAdminControlUser(). The
-// reserved `admin` username, the `admin` role code, or an explicit
-// `permissions.all` grant are all treated as full administrator control --
-// used to gate user/role management, backup restore, and other
+// Ported from backend/src/middleware.ts's isAdminControlUser(). The `admin`
+// role code or an effective `permissions.all` grant is full administrator
+// control -- used to gate user/role management, backup restore, and other
 // destructive-by-default operations beyond the normal per-key permission
 // check below.
+//
+// The username is deliberately NOT an input (FX-sec, 27 Sep 2026). It used
+// to be: `username === 'admin'` alone granted everything, so whoever held
+// that name -- by self-rename once the seeded account was renamed away, or
+// by an admin creating it -- held every admin gate. The seeded account is
+// created with the admin role (lib/coreDataInvariants.ts), so the role code
+// already covers it. routes/users.ts also reserves the name.
 export function isAdminControlUser(user: PermissionUser): boolean {
   if (!user) return false
-  const username = String(user.username || '').trim().toLowerCase()
   const roleCode = String(user.role_code || '').trim().toLowerCase()
-  const merged = getMergedPermissions(user)
-  return username === 'admin' || roleCode === 'admin' || merged.all === true
+  const merged = mergedView(user)
+  return roleCode === 'admin' || merged.all === true
 }
 
 // Mirrors the original's special-cased aliases for the *settings* sub-
@@ -86,7 +130,7 @@ export function hasPermission(user: PermissionUser, key: string | null | undefin
   const normalized = String(key || '').trim().toLowerCase()
   if (!normalized) return !!user
   if (isAdminControlUser(user)) return true
-  const permissions = getMergedPermissions(user)
+  const permissions = mergedView(user)
   // Strict `=== true`, not a truthy check: `permissions[normalized]` can
   // now legitimately be the string 'review' for a REVIEW_TIER_KEYS section,
   // and 'review' must NOT count as full access here -- callers that need to
@@ -167,7 +211,7 @@ export function getPermissionTier(user: PermissionUser, key: string | null | und
   const normalized = String(key || '').trim().toLowerCase()
   if (!normalized) return 'none'
   if (isAdminControlUser(user)) return 'full'
-  const permissions = getMergedPermissions(user)
+  const permissions = mergedView(user)
   const raw = permissions[normalized]
   if (raw === true) return 'full'
   if (raw === 'review' && REVIEW_TIER_KEYS.has(normalized)) return 'review'
@@ -221,7 +265,7 @@ export function actionOverrideKey(section: string, action: string): string {
  */
 export function isActionBlocked(user: PermissionUser, section: string, action: string): boolean {
   if (isAdminControlUser(user)) return false
-  const permissions = getMergedPermissions(user)
+  const permissions = mergedView(user)
   return permissions[actionOverrideKey(section, action)] === false
 }
 

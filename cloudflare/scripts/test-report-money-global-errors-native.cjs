@@ -66,6 +66,9 @@ Module._load = function(request, parent, isMain) {
   // admin-host document handler, so this one lib must be the real module: a
   // harmless proxy is not iterable and the Worker never finishes loading.
   if (request === './lib/adminDocumentIdentity') return originalLoad.call(this, path.join(root, 'src', 'lib', 'adminDocumentIdentity.ts'), parent, isMain)
+  // The F4 origin guard is /api middleware: a harmless proxy returns
+  // undefined without calling next(), so every request would die unfinalized.
+  if (request === './lib/originGuard') return originalLoad.call(this, path.join(root, 'src', 'lib', 'originGuard.ts'), parent, isMain)
   if (request === './lib/coreDataInvariants') return { ensureCoreDataInvariantsOnce: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }

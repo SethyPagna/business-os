@@ -6,7 +6,9 @@ import Modal from './Modal'
 import { getProductCostBreakdown } from '../../api/productReadTransport.ts'
 import { fmtDate } from '../../utils/formatters.ts'
 import {
-  formatCostFormula,
+  formatBreakdownFormula,
+  formatCostShare,
+  formatCostWeight,
   costExclusionLabelKey,
   costRowPrimaryText,
   costRowMeta,
@@ -64,7 +66,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId, canViewCosts, user])
 
-  const formula = breakdown ? formatCostFormula(breakdown.distinct_usd, breakdown.mean_usd) : ''
+  const formula = breakdown ? formatBreakdownFormula(breakdown) : ''
   if (!canViewCosts) return null
 
   return (
@@ -96,6 +98,14 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                 const costText = isManual
                   ? `${input.previous_cost_usd == null ? '—' : fmtUSD(input.previous_cost_usd)} → ${currentCostText}`
                   : currentCostText
+                // U-cost (owner, 2026-09-25): the average is weighted by what is
+                // on hand, so every counted row says how much it weighs and its
+                // share; the sold-out fallback says why it stands in.
+                const weight = formatCostWeight(input)
+                const share = formatCostShare(input.share)
+                const weightText = weight
+                  ? `${weight} ${tr('cost_breakdown_on_hand', 'on hand')}${share ? ` · ${share}` : ''}`
+                  : input.fallback ? tr('cost_breakdown_fallback_note', 'Nothing on hand - newest received cost') : ''
                 return (
                   // ONE compact row per entry (P10-11 ruling): the lot
                   // code/date or the "Manual" tag on the left with its
@@ -118,6 +128,7 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
                     </span>
                     <span className={`${isManual ? 'min-w-0 max-w-[65%]' : 'shrink-0'} text-right tabular-nums`}>
                       <span className={`block font-medium ${isManual ? 'detail-scroll-text' : ''}`} title={isManual ? costText : undefined}>{costText}</span>
+                      {weightText ? <span className={`block text-[11px] text-gray-500 dark:text-gray-400 ${isManual ? 'detail-scroll-text' : ''}`}>{weightText}</span> : null}
                       {excludedLabel ? <span className={`block text-[11px] text-gray-400 ${isManual ? 'detail-scroll-text' : ''}`}>{excludedLabel}</span> : null}
                     </span>
                   </li>

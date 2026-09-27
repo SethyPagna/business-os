@@ -13,6 +13,7 @@ import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import { getInventoryMovements } from '../../api/inventoryTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { isDepletedLot, orderLotsOnHandFirst } from '../../utils/productBatches.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import TruncatedText from '../shared/TruncatedText.tsx'
@@ -355,11 +356,15 @@ export default function ManageBatchesModal({
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{loadError}</div>
           ) : batches.length === 0 ? (
             <div className="py-8 text-center text-sm text-gray-400">{tr('no_batches_for_branch', 'No received dates for this branch')}</div>
-          ) : batches.map((batch) => {
+          ) : orderLotsOnHandFirst(batches, (batch) => batch.quantity).map((batch) => {
             const isEditing = editingId === batch.id
             const isSaving = savingId === batch.id
+            // Lots that still hold stock at this branch come first; sold-out
+            // ones follow, greyed but still viewable and editable (owner,
+            // 2026-09-25). The editor itself is never dimmed.
+            const soldOut = batch.is_active && isDepletedLot(batch.quantity) && !isEditing
             return (
-              <div key={batch.id} className={`rounded-xl border px-3 py-2.5 ${batch.is_active ? 'border-amber-100 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20' : 'border-gray-200 bg-gray-50 opacity-60 dark:border-gray-700 dark:bg-gray-900/40'}`}>
+              <div key={batch.id} className={`rounded-xl border px-3 py-2.5 ${batch.is_active ? 'border-amber-100 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20' : 'border-gray-200 bg-gray-50 opacity-60 dark:border-gray-700 dark:bg-gray-900/40'} ${soldOut ? 'opacity-50' : ''}`}>
                 {isEditing ? (
                   <div className="space-y-2">
                     <div className="grid gap-2 sm:grid-cols-2">

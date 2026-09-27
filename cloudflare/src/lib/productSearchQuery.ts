@@ -90,8 +90,14 @@ export interface ProductSearchQuery {
   // nothing was typed. Callers push this into their own WHERE list.
   whereClause?: string
   // bm25 relevance (+ the exact-barcode offset), or undefined when nothing
-  // was typed / nothing scored. ASC.
+  // was typed / nothing scored. ASC. When it reads the FTS rank it refers
+  // to the `rankCteSql` CTE, so it is only valid inside a statement whose
+  // WITH carries that CTE (lib/familyPagination.ts does this for you).
   matchRankSql?: string
+  // `__fts_rank AS MATERIALIZED (...)`: the products_fts MATCH run ONCE per
+  // statement, yielding (id, rank) for every FTS hit. Set exactly when
+  // matchRankSql references it. See FTS_RANK_CTE_NAME.
+  rankCteSql?: string
   // Discrete relevance tier, 0..3 per the contract above. ASC. Undefined
   // when nothing was typed.
   matchTierSql?: string
@@ -104,6 +110,17 @@ export const MATCH_TIER_EXACT_BARCODE = 0
 export const MATCH_TIER_EXACT_NAME = 1
 export const MATCH_TIER_NAME_PREFIX = 2
 export const MATCH_TIER_OTHER = 3
+
+// The per-statement FTS rank table. bm25() only scores rows the FTS5 table
+// itself matched and must be evaluated inside a query carrying that table's
+// own MATCH. It used to be a correlated scalar subquery
+// (`... WHERE products_fts.rowid = p.id AND products_fts MATCH ...`), which
+// re-ran the whole MATCH for every candidate row: a common word ("glow",
+// 242 products) or a 2-letter prefix ("ro", 458) cost 216-358 ms per
+// statement on the seeded lab DB, twice per search (count + page).
+// MATERIALIZED runs the MATCH once and the per-row read becomes an indexed
+// lookup into that result: 13-25 ms, identical rows (I4-1).
+export const FTS_RANK_CTE_NAME = '__fts_rank'
 
 // The stored, already-normalized name column with a cheap fallback for any
 // row written before migration 0037_product_search_compact_columns_01
@@ -281,13 +298,14 @@ export function buildProductSearchQuery(
   if (!matchClauses.length) return { hasSearchTerm: true, titleOnly }
 
   let matchRankSql: string | undefined
-  // bm25() only scores rows the FTS5 table itself matched, and it has to be
-  // evaluated inside a query carrying that table's own MATCH -- hence the
-  // correlated scalar subquery. Rows that arrived via a trigram/LIKE
-  // fallback COALESCE to 0 and stay orderable rather than dropping out of
-  // the sort.
+  let rankCteSql: string | undefined
+  // The FTS rank is computed once per statement in rankCteSql (see
+  // FTS_RANK_CTE_NAME for why) and looked up per row. Rows that arrived via
+  // a trigram/LIKE fallback have no FTS hit, COALESCE to 0 and stay
+  // orderable rather than dropping out of the sort.
   if (!titleOnly && ftsMatch) {
-    matchRankSql = `COALESCE((SELECT ${PRODUCTS_FTS_BM25_SQL} FROM products_fts WHERE products_fts.rowid = p.id AND products_fts MATCH @${prefix}ftsQuery), 0)`
+    rankCteSql = `${FTS_RANK_CTE_NAME} AS MATERIALIZED (SELECT rowid AS id, ${PRODUCTS_FTS_BM25_SQL} AS bm25_rank FROM products_fts WHERE products_fts MATCH @${prefix}ftsQuery)`
+    matchRankSql = `COALESCE((SELECT ${FTS_RANK_CTE_NAME}.bm25_rank FROM ${FTS_RANK_CTE_NAME} WHERE ${FTS_RANK_CTE_NAME}.id = p.id), 0)`
   }
   // Kept for callers that order by match_rank alone; match_tier expresses
   // the same "exact barcode leads" rule as a discrete key, and the two
@@ -302,6 +320,7 @@ export function buildProductSearchQuery(
     titleOnly,
     whereClause: matchClauses.length > 1 ? `(${matchClauses.join(' OR ')})` : matchClauses[0],
     matchRankSql,
+    rankCteSql,
     matchTierSql: buildMatchTierSql(rawSearchText, params, {
       prefix, nameNormalizedColumn, nameColumn, barcodeColumn, includeBarcodeTier: !titleOnly,
     }),

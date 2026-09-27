@@ -1320,7 +1320,7 @@ export default function PublicCatalogPage() {
   //
   // This used to build the manifest AND the favicon at runtime from the
   // merchant's uploaded logo. Two problems, both fixed here:
-  //   1. PWA "Install app" was gone on leangcosmetics.dpdns.org (16.1): the
+  //   1. PWA "Install app" was gone on the public storefront (16.1): the
   //      manifest <link> was swapped to a runtime blob: URL, which Chrome
   //      refuses to treat as installable. The §16 fix that
   //      removed the blob swap only touched CatalogPage.tsx (the ADMIN

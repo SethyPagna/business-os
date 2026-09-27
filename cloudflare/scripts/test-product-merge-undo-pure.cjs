@@ -170,6 +170,8 @@ function loadUndoAppliers(d1) {
   }
   stubs['./productMergeLineage'] = loadActualDependency(path.join(LIB_DIR, 'productMergeLineage.ts'))
   stubs['./saleItemPricing'] = loadActualDependency(path.join(LIB_DIR, 'saleItemPricing.ts'))
+  // U-cost: merge undo re-derives catalog cost with the real formula.
+  stubs['./catalogCostRecompute'] = loadActualDependency(path.join(LIB_DIR, 'catalogCostRecompute.ts'))
   const src = fs.readFileSync(path.join(LIB_DIR, 'undoAppliers.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },

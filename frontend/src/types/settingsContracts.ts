@@ -19,6 +19,8 @@ export const SETTINGS_REFRESH_CHANNELS = [
 export type SettingsRefreshChannel = (typeof SETTINGS_REFRESH_CHANNELS)[number]
 
 export interface SettingsWriteOptions {
+  // Keys the save blanks on purpose (api/settingsTransport.ts saveSettingsOnce).
+  clearKeys?: string[]
   silentToast?: boolean
   refreshChannels?: SettingsRefreshChannel[]
   reason?: string

@@ -119,14 +119,19 @@ function loadProductsRoute(d1) {
   const realSqlBinding = loadTs(path.join('lib', 'sqlBinding.ts'), {})
   const realProductMerge = loadTs(path.join('lib', 'productMerge.ts'), { './moneyPrecision': realMoneyPrecision })
   const realProductMergeSnapshot = loadTs(path.join('lib', 'productMergeSnapshot.ts'), { './db': {} })
+  const realCatalogCost = loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './moneyPrecision': realMoneyPrecision })
   const realUndoAppliers = loadTs(path.join('lib', 'undoAppliers.ts'), {
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
+    // U-cost: merge undo re-derives catalog cost with the real formula.
+    './catalogCostRecompute': realCatalogCost,
   })
   const mod = loadTs(path.join('routes', 'products.ts'), {
     hono: { Hono: FakeHono },
+    // U-cost: the merge fold re-derives the keeper's catalog cost too.
+    '../lib/catalogCostRecompute': realCatalogCost,
     '../lib/db': { getDb: () => adapter },
     '../lib/audit': { audit: async () => {} },
     '../lib/undoAppliers': realUndoAppliers,
@@ -180,6 +185,8 @@ const EXCLUDED = new Map([
   ['sale_amendments.product_id', 'SNAPSHOT, declared as such in migration 0115'],
   ['sale_not_paid_repair_0173.product_id', 'provenance: repair receipt of migration 0173 (before-values per line)'],
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
+  ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],
+  ['sale_cost_repair_0200.product_id', 'provenance: backup of held migration 0200 (sale line cost before/after; recovery keys on sale_item_id)'],
   // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
   // stock_session_members included. It is excluded instead, and refused rather
   // than reparented, because the column is the replay DRIVER and not a link:
@@ -375,12 +382,15 @@ async function main() {
       'undo cannot restore a rule the reversal never recorded')
     assert.deepEqual(reversal.reparentedChildProductIds, [400])
 
-    // ...and the undo, run through the REAL applier over a real snapshot row.
-    live.db.prepare(`INSERT INTO undo_snapshots (id, kind, status, payload_json) VALUES (1, 'product.merge', 'applied', @p)`)
-      .run({ p: JSON.stringify(reversal) })
-    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: 1 })
+    // ...and the undo, run through the REAL applier over a snapshot row the REAL
+    // recorder wrote. Every recorder stores the merged-state fingerprint; a row
+    // without one is a pre-fingerprint (legacy) merge, which never carried
+    // promotion rules or re-parented children, so the applier now refuses a
+    // hand-built fingerprint-less row of this shape (FX-undo2, R-undo C11).
+    const { snapshotId } = await undoAppliers.recordMergeUndoSnapshot({}, { id: 1, name: 'tester' }, reversal)
+    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: snapshotId })
     assert.ok(applier, 'the product.merge applier must be registered')
-    await applier.run({ applier: 'product.merge', snapshot_id: 1 }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
+    await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
     assert.equal(ruleRow(10).product_ids, '[200,777]', 'undo restores the scope list byte for byte')
     assert.equal(ruleRow(11).product_ids, '[100,200]')
     assert.equal(ruleRow(12).product_ids, '[777]')

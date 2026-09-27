@@ -13,9 +13,16 @@ type SettingsOptions = {
   // have a meaningful baseline (most small single-toggle saves) simply omit
   // it and get the old <=2-keys-only auto-retry behavior unchanged.
   baselineSettings?: SettingsPayload
+  // Keys this save blanks on purpose. The Worker keeps a blank value for its
+  // clear-only keys (the website assistant's prompt and provider) unless the
+  // request names them here; names the save does not send are dropped.
+  clearKeys?: unknown[]
   force?: boolean
   refreshChannels?: unknown[]
   reason?: string
+  // Read the server's answer and nothing else: no read cache, no device copy,
+  // and a failure is thrown instead of answered from this device.
+  serverOnly?: boolean
   source?: string
   skipExpectedUpdatedAt?: boolean
 }
@@ -111,6 +118,7 @@ async function getServerSettings(): Promise<SettingsPayload> {
 }
 
 export async function getSettings(options: SettingsOptions = {}): Promise<SettingsPayload> {
+  if (options.serverOnly) return getServerSettings()
   if (options.force) cacheInvalidate('settings')
   const settings = await routeMirrored(
     'settings:get',
@@ -154,6 +162,11 @@ function attemptedKeysAreSafeToAutoRetry(
   })
 }
 
+function explicitClearKeys(updates: SettingsPayload, keys: unknown): string[] {
+  if (!Array.isArray(keys)) return []
+  return [...new Set(keys.filter((key): key is string => typeof key === 'string' && Object.prototype.hasOwnProperty.call(updates, key)))]
+}
+
 async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptions = {}): Promise<unknown> {
   const attempted = buildAttemptedSettings(updates)
   const refreshChannels = getSettingsRefreshChannels(attempted, options.refreshChannels)
@@ -161,7 +174,11 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
     reason: String(options.reason || 'settings-saved').trim() || 'settings-saved',
     source: String(options.source || 'settings:save').trim() || 'settings:save',
   }
-  let payload: Record<string, unknown> = { ...updates }
+  // Request metadata the Worker never stores; the conflict retry below sends
+  // it again, since a 409 answer does not echo it back.
+  const clearKeys = explicitClearKeys(updates, options.clearKeys)
+  const clearPayload = clearKeys.length ? { clearKeys } : {}
+  let payload: Record<string, unknown> = { ...updates, ...clearPayload }
   if (!options.skipExpectedUpdatedAt) {
     const scopedUpdatedAt = await getScopedExpectedUpdatedAt(Object.keys(updates))
     if (scopedUpdatedAt) payload = { ...payload, expectedUpdatedAt: scopedUpdatedAt }
@@ -188,7 +205,7 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
     if (isWriteConflictError(error) && error.actualUpdatedAt && canAutoRetry) {
       let nextExpectedUpdatedAt = error.actualUpdatedAt
       for (let retryAttempt = 0; retryAttempt < 3 && nextExpectedUpdatedAt; retryAttempt += 1) {
-        const retryPayload = { ...attemptedSettings, expectedUpdatedAt: nextExpectedUpdatedAt }
+        const retryPayload = { ...attemptedSettings, ...clearPayload, expectedUpdatedAt: nextExpectedUpdatedAt }
         try {
           const retryResult = asSettingsPayload(await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true))
           await saveSettingsLocally(attemptedSettings)

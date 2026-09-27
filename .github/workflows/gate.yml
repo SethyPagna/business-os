@@ -1,0 +1,89 @@
+# Run the release safety tests on any branch or commit, without deploying.
+#
+# The same `release.cjs gates` step as Deploy, on a clean runner, so a busy
+# laptop cannot turn a green commit red. Runs ONLY when someone presses
+# "Run workflow". No secrets and no environment: it never reaches production.
+name: Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit to test
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Safety tests
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the release kit
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          persist-credentials: false
+          sparse-checkout: ops/scripts/deploy-kit
+
+      - name: Check out the commit to test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          path: release
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Show the commit
+        working-directory: release
+        run: |
+          $sha = git rev-parse HEAD
+          $subject = git log -1 --format=%s
+          Write-Output "Testing $sha  $subject"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            release/frontend/package-lock.json
+            release/cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: release/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: Install packages (frontend)
+        working-directory: release/frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Install the test browser (frontend)
+        working-directory: release/frontend
+        run: npx playwright install chromium
+
+      - name: Record the commit
+        run: node kit/ops/scripts/deploy-kit/release.cjs prepare -CI -ReleaseDir release -Records "${{ runner.temp }}/records"
+
+      - name: Safety tests (every test file on its own, retried on timeout)
+        run: node kit/ops/scripts/deploy-kit/release.cjs gates -CI -ReleaseDir release -Records "${{ runner.temp }}/records" -Jobs 4
+
+      - name: Keep the test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-records
+          path: ${{ runner.temp }}/records
+          retention-days: 14
+          if-no-files-found: ignore

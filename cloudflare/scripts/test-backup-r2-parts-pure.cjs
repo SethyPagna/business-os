@@ -67,6 +67,8 @@ const { R2StreamWriter, R2_PART_BYTES } = load('lib/backup.ts', {
   './backupRestoreStream': {},
   // Real: planTier.ts is pure and is what backup.ts's asset cap now reads.
   './planTier': load('lib/planTier.ts'),
+  // Real: the restore re-checks backed-up files with the upload gate.
+  './uploadSecurity': load('lib/uploadSecurity.ts'),
 })
 
 assert.strictEqual(typeof R2StreamWriter, 'function', 'R2StreamWriter must be exported')

@@ -327,6 +327,12 @@ const { outputText: searchMatchOutputText } = ts.transpileModule(searchMatchSour
 const searchMatchModuleObj = { exports: {} }
 const searchMatchWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', searchMatchOutputText)
 searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, searchMatchSourcePath, path.dirname(searchMatchSourcePath))
+// Real module -- the apply path names the import's actor on a typed-cost entry (U-cost).
+const actorSnapshotSourcePath = path.join(__dirname, '..', 'src', 'lib', 'actorSnapshot.ts')
+const actorSnapshotModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', ts.transpileModule(fs.readFileSync(actorSnapshotSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }, fileName: 'actorSnapshot.ts',
+}).outputText)(actorSnapshotModuleObj.exports, require, actorSnapshotModuleObj)
 
 // sqlBinding.ts is pure (no D1/Env dependency) and owns the chunk sizes
 // that keep importEngine's IN(...) lookups inside D1's 100-bound-parameter
@@ -399,8 +405,11 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
   if (request === './planTier') return planTierModule
+  if (request === './actorSnapshot') return actorSnapshotModuleObj.exports
   if (request === './db') return { isImportMaintenanceFenceError: () => false }
   if (request === './queueDispatch') return queueDispatchModule
+  // S-uploads: the temporary-import-file purge is R2 work, not engine logic.
+  if (request === './importIncomingFiles') return { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) }
   if (request === './permissions') return permissionsModule
   if (request === './acquisitionCostAccess') return acquisitionCostAccessModule
   if (request === './media') return mediaModule

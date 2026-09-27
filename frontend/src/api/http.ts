@@ -413,6 +413,10 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // cost (409 cost_outlier_review), and which stock-in session must settle
   // before the rows it names can be merged (409 stock_session_reversible).
   error.costOutlier = parsed?.costOutlier || null
+  // A Library delete refused as still in use (409 forceable) names what uses
+  // the file, so the dialog can switch to its locked / unlock-anyway form.
+  error.usage = parsed?.usage || null
+  error.forceable = parsed?.forceable === true
   error.operationId = parsed?.operationId || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
@@ -489,6 +493,26 @@ function createCloudflareAccessError(path: unknown): ApiRuntimeError {
   error.reason = 'cloudflare_access_redirect'
   error.transientGateway = false
   return error
+}
+
+// S-auth4b owner requirement (27 Sep 2026): while an account must change a
+// publicly known password, the Worker refuses every call but its own password
+// change and the sign-out probe with 403 password_change_required
+// (cloudflare/src/lib/auth.ts requireAuth). Whichever screen made the call,
+// AppContext answers this event with the change screen instead of an app
+// whose every call fails. `sequence` orders requests as sent, so a refusal of
+// a request sent before the flag cleared cannot bring the screen back.
+export const PASSWORD_CHANGE_REQUIRED_EVENT = 'auth:password-change-required'
+const PASSWORD_CHANGE_REQUIRED_CODE = 'password_change_required'
+let apiRequestSequence = 0
+
+export function currentApiRequestSequence(): number {
+  return apiRequestSequence
+}
+
+function dispatchPasswordChangeRequired(path: string, sequence: number): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path, sequence } }))
 }
 
 function dispatchUnauthorized(detail: LooseRecord = {}): void {
@@ -878,6 +902,7 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       requestInit.body = JSON.stringify({ ...payload, redirectTo: prepareActorOauthCookieRedirect(cookieMutation, String(payload.redirectTo || window.location.href)) })
     }
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
+    const requestSequence = ++apiRequestSequence
     const res = await fetch(`${base}${path}`, requestInit)
     if (signoutProbe || signoutWrite) assertSignoutIntentCurrent(options.signoutRecovery!)
     if (establishesActor && res.status >= 400 && res.status < 500) ownerReconciliation = false
@@ -915,6 +940,9 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
           reason: parsed?.reason || null,
           path,
         })
+      }
+      if (res.status === 403 && parsed?.code === PASSWORD_CHANGE_REQUIRED_CODE && !recoveryRead && isActorReadScopeCurrent(sideEffectScope, false)) {
+        dispatchPasswordChangeRequired(path, requestSequence)
       }
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }

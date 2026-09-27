@@ -33,7 +33,8 @@ for (const source of [inventory, history]) {
     [{ role_permissions: { all: true }, permissions: { all: false } }, false],
     [{ role_permissions: { all: true }, permissions: { all: 'true' } }, false],
     [{ permissions: { all: 'false' } }, false],
-    [{ username: ' ADMIN ', permissions: { all: false } }, true],
+    // The name alone is not administrator authority (FX-sec); the role code is.
+    [{ username: ' ADMIN ', permissions: { all: false } }, false],
     [{ role_code: ' AdMiN ', permissions: { all: false } }, true],
   ] as const) assert.equal(getAdmin(user), expected)
 }

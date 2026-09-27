@@ -68,7 +68,17 @@ function transpile(relPath) {
   return outputText
 }
 
+// What a REAL module needs beyond what its caller lists; a caller's own entry
+// wins. lib/currentPasswordGuard.ts keys its limit on the session's sign-in
+// (S-auth4: './auth' currentSessionLimitFamily). With no session here the
+// family is unknown and the guard keeps its per-cookie fallback; its verdict,
+// a real bcrypt compare, is unchanged. Unused when no caller loads it real.
+const REAL_LOAD_DEFAULTS = {
+  'lib/currentPasswordGuard.ts': { './auth': { currentSessionLimitFamily: async () => null } },
+}
+
 function loadReal(relPath, requireOverrides = {}) {
+  requireOverrides = { ...REAL_LOAD_DEFAULTS[relPath], ...requireOverrides }
   const outputText = transpile(relPath)
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load
@@ -76,9 +86,12 @@ function loadReal(relPath, requireOverrides = {}) {
     if (request in requireOverrides) return requireOverrides[request]
     return originalLoad.call(this, request, parent, isMain)
   }
+  // Overrides also answer requires made AFTER load: factory reset imports
+  // lib/currentPasswordGuard lazily, at request time, once the patch is gone.
+  const localRequire = (request) => (Object.prototype.hasOwnProperty.call(requireOverrides, request) ? requireOverrides[request] : require(request))
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
-    moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
+    moduleObj.exports, localRequire, moduleObj, sourcePath, path.dirname(sourcePath),
   )
   Module._load = originalLoad
   return moduleObj.exports
@@ -88,6 +101,12 @@ function loadReal(relPath, requireOverrides = {}) {
 // the restore/reset permission -- the export-grade 'backup' alone no longer
 // clears the gate this test drives.
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ backup: true, backup_restore: true }) }
+// Factory reset demands more (FX-sec): administrator control (the admin role),
+// the typed phrase, the caller's REAL current password, a configured seed
+// admin password and a backup first. This owner satisfies every guard.
+const OWNER_PASSWORD = 'owner-current-password'
+const OWNER_USER = { id: 900, username: 'owner', name: 'Owner', role_code: 'admin', role_permissions: '{"all":true}', permissions: '{}' }
+let sessionUser = FAKE_USER
 
 // Real table list under test -- if PRODUCTS_RESET_TABLES in the shipped
 // source drifts (a table added/removed), this import picks up the change
@@ -127,7 +146,13 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/planTier': planTier,
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
-  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { c.set('user', sessionUser); return next() } },
+  // The REAL current-password guard and a real bcrypt compare; only its
+  // rate-limit store is stubbed, like '../lib/rateLimit' below.
+  '../lib/currentPasswordGuard': loadReal('lib/currentPasswordGuard.ts', {
+    bcryptjs: { __esModule: true, default: require('bcryptjs') },
+    './rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0, slot: 'test' }), releaseRateLimitSlot: async () => {} },
+  }),
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
@@ -197,12 +222,12 @@ let sectionBackupTables = null
 const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
-async function req(method, url, body) {
+async function req(method, url, body, env = fakeEnv) {
   const res = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body != null ? JSON.stringify(body) : undefined,
-  }, fakeEnv, fakeExecutionCtx)
+  }, env, fakeExecutionCtx)
   const json = await res.json().catch(() => null)
   return { status: res.status, json }
 }
@@ -630,9 +655,30 @@ async function main() {
     assert.strictEqual(count('sale_record_events'), 1, 'sanity: immutable event fixture exists')
     assert.strictEqual(count('return_mutation_receipts'), 1, 'sanity: immutable return receipt fixture exists')
     assert.strictEqual(count('return_create_receipts'), 1, 'sanity: immutable return-create receipt fixture exists')
-    const { status, json } = await req('POST', '/factory-reset', {})
+    const confirmed = { confirm: 'FACTORY RESET', currentPassword: OWNER_PASSWORD }
+    const ownerEnv = { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' }
+    // The guards stay real: a restore-only account and a wrong password are
+    // both refused before anything is touched.
+    const notAdmin = await req('POST', '/factory-reset', confirmed, ownerEnv)
+    assert.strictEqual(notAdmin.status, 403, JSON.stringify(notAdmin.json))
+    rawDbHandle.prepare('INSERT OR REPLACE INTO users (id, username, name, password) VALUES (?, ?, ?, ?)')
+      .run([OWNER_USER.id, OWNER_USER.username, OWNER_USER.name, require('bcryptjs').hashSync(OWNER_PASSWORD, 4)])
+    backupCallLog = []
+    sessionUser = OWNER_USER
+    let status, json, wrong, untouched
+    try {
+      wrong = await req('POST', '/factory-reset', { ...confirmed, currentPassword: 'not-the-password' }, ownerEnv)
+      untouched = count('sale_record_events') + count('return_mutation_receipts') + count('return_create_receipts')
+      ;({ status, json } = await req('POST', '/factory-reset', confirmed, ownerEnv))
+    } finally {
+      sessionUser = FAKE_USER
+    }
+    assert.strictEqual(wrong.status, 400, JSON.stringify(wrong.json))
+    assert.strictEqual(wrong.json.code, 'incorrect_password')
+    assert.strictEqual(untouched, 3, 'the refused attempts touched nothing')
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
+    assert.deepStrictEqual(backupCallLog, ['called'], 'one full backup ran first, and only for the accepted reset')
     assert.strictEqual(count('sale_record_events'), 0)
     for (const table of [
       'product_conflict_action_group_members',

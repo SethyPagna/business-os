@@ -82,6 +82,39 @@ export type CoreDataInvariants = {
   adminPassword: string | null
 }
 
+// The password a first-run admin is seeded with, or null for "do not seed".
+//
+//   - BUSINESS_OS_ADMIN_PASSWORD, when non-blank, exactly as given.
+//   - Otherwise the demo password 'admin123', ONLY in local development:
+//     BUSINESS_OS_LOCAL_DEV=1/true (an opt-in that belongs in the gitignored
+//     .dev.vars, which only `wrangler dev` reads) AND an unstamped build
+//     (scripts/deploy.cjs stamps every production deploy, lib/buildStamp.ts).
+//     Both are required: a stray var on a real deploy, or a bare unstamped
+//     `wrangler deploy`, each fall through to null.
+//   - Otherwise null. Production never seeds a known password. A generated
+//     random one was rejected: nothing would ever show it, and once an admin
+//     exists seeding never runs again, so the account could not be recovered
+//     by setting the secret afterwards. Skipping keeps that recovery path.
+export const LOCAL_DEV_ADMIN_PASSWORD = 'admin123'
+
+// The same esbuild define lib/buildStamp.ts reads (scripts/deploy.cjs sets it
+// from git for every production deploy). Read directly rather than imported
+// so this module keeps its small dependency set; absent or blank = unstamped.
+declare const __WORKER_BUILD_REVISION__: string | undefined
+function isUnstampedBuild(): boolean {
+  const revision = typeof __WORKER_BUILD_REVISION__ !== 'undefined' ? String(__WORKER_BUILD_REVISION__ ?? '').trim() : ''
+  return !revision || revision === 'dev'
+}
+
+export function resolveSeedAdminPassword(env: Env): string | null {
+  const vars = env as unknown as { BUSINESS_OS_ADMIN_PASSWORD?: string; BUSINESS_OS_LOCAL_DEV?: string }
+  const configured = vars.BUSINESS_OS_ADMIN_PASSWORD
+  if (typeof configured === 'string' && configured.trim()) return configured
+  const localFlag = String(vars.BUSINESS_OS_LOCAL_DEV ?? '').trim().toLowerCase()
+  if ((localFlag === '1' || localFlag === 'true') && isUnstampedBuild()) return LOCAL_DEV_ADMIN_PASSWORD
+  return null
+}
+
 // Read-only pre-check for ensureCoreDataInvariants(). Every request on a
 // fresh Worker isolate runs ensureCoreDataInvariants() once (see
 // ensureCoreDataInvariantsOnce() below) -- and until this fast path
@@ -97,9 +130,9 @@ export type CoreDataInvariants = {
 // every endpoint behind this middleware (i.e. every route in the app) was
 // observed 500ing together in bursts, then succeeding on a lone refresh
 // once the contention had cleared. This function turns the overwhelmingly
-// common case ("already set up, nothing to do") into a handful of plain
-// SELECTs -- which D1 handles fine under concurrency -- instead of a batch
-// of writes. Returns null if anything is missing/out of date, so the
+// common case ("already set up, nothing to do") into one read-only SQL
+// projection, avoiding eight serial D1 round-trips on each cold isolate.
+// Returns null if anything is missing/out of date, so the
 // caller falls through to the original (write-capable) path below.
 async function tryFastPath(
   db: ReturnType<typeof getDb>,
@@ -107,59 +140,57 @@ async function tryFastPath(
   orgSlug: string,
   publicId: string,
 ): Promise<CoreDataInvariants | null> {
-  const org = await db.prepare(`
-    SELECT id FROM organizations
-    WHERE (public_id = @publicId OR slug = @slug)
-      AND name = @name AND is_active = 1 AND setup_enabled = 0
-    ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
-  `).get<{ id: number }>({ publicId, slug: orgSlug, name: orgName })
-  if (!org?.id) return null
-
-  const group = await db.prepare(`
-    SELECT id FROM organization_groups
-    WHERE organization_id = @orgId AND slug = 'main' AND is_default = 1 AND is_active = 1
-    LIMIT 1
-  `).get<{ id: number }>({ orgId: org.id })
-  if (!group?.id) return null
-
-  const branch = await db.prepare(`
-    SELECT id FROM branches WHERE is_active = 1 AND is_default = 1 ORDER BY id ASC LIMIT 1
-  `).get<{ id: number }>()
-  if (!branch?.id) return null
-
-  const adminRole = await db.prepare(`
-    SELECT id, permissions FROM roles WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 LIMIT 1
-  `).get<{ id: number; permissions: string }>()
-  if (!adminRole?.id || adminRole.permissions !== JSON.stringify(DEFAULT_ROLE_PERMISSIONS.admin)) return null
-
-  const managerRole = await db.prepare(`SELECT id FROM roles WHERE code = 'manager' LIMIT 1`).get<{ id: number }>()
-  if (!managerRole?.id) return null
-
-  const employeeRole = await db.prepare(`SELECT id FROM roles WHERE code = 'employee' LIMIT 1`).get<{ id: number }>()
-  if (!employeeRole?.id) return null
-
-  const admin = await db.prepare(`
-    SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1
-  `).get<{ id: number }>()
-  if (!admin?.id) return null
-
-  // Same NOT IN check the write path uses below, just without the INSERT --
-  // an EXISTS short-circuits on the first missing row instead of scanning
-  // the whole table, so this stays cheap even as the catalog grows.
-  const missingBranchStock = await db.prepare(`
-    SELECT EXISTS(
-      SELECT 1 FROM products p
-      WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock)
-    ) AS missing
-  `).get<{ missing: number }>()
-  if (Number(missingBranchStock?.missing || 0)) return null
+  // Keep each selector's original predicates and ordering. In particular,
+  // check permissions AFTER choosing the admin role, and retain NOT IN's
+  // semantics for stock coverage. Scalar subqueries preserve missing rows
+  // as null without joining unrelated identities or multiplying results.
+  const state = await db.prepare(`
+    WITH org AS (
+      SELECT id FROM organizations
+      WHERE (public_id = @publicId OR slug = @slug)
+        AND name = @name AND is_active = 1 AND setup_enabled = 0
+      ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
+    ), admin_role AS (
+      -- roles.code is not UNIQUE, and this CTE is read twice below (id and
+      -- permissions): ORDER BY pins both reads to the same, lowest-id row.
+      SELECT id, permissions FROM roles
+      WHERE code = 'admin' AND name = 'Admin' AND is_system = 1 ORDER BY id ASC LIMIT 1
+    )
+    SELECT org.id AS organizationId,
+      (SELECT id FROM organization_groups
+        WHERE organization_id = org.id AND slug = 'main' AND is_default = 1 AND is_active = 1
+        LIMIT 1) AS organizationGroupId,
+      (SELECT id FROM branches WHERE is_active = 1 AND is_default = 1 ORDER BY id ASC LIMIT 1) AS branchId,
+      (SELECT id FROM admin_role) AS adminRoleId,
+      (SELECT permissions FROM admin_role) AS adminPermissions,
+      (SELECT id FROM roles WHERE code = 'manager' LIMIT 1) AS managerRoleId,
+      (SELECT id FROM roles WHERE code = 'employee' LIMIT 1) AS employeeRoleId,
+      (SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1) AS adminUserId,
+      EXISTS(SELECT 1 FROM products p
+        WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock)) AS missingBranchStock
+    FROM org
+  `).get<{
+    organizationId: number
+    organizationGroupId: number | null
+    branchId: number | null
+    adminRoleId: number | null
+    adminPermissions: string | null
+    managerRoleId: number | null
+    employeeRoleId: number | null
+    adminUserId: number | null
+    missingBranchStock: number
+  }>({ publicId, slug: orgSlug, name: orgName })
+  if (!state?.organizationId || !state.organizationGroupId || !state.branchId || !state.adminRoleId
+    || state.adminPermissions !== JSON.stringify(DEFAULT_ROLE_PERMISSIONS.admin)
+    || !state.managerRoleId || !state.employeeRoleId || !state.adminUserId
+    || Number(state.missingBranchStock || 0)) return null
 
   return {
-    organizationId: org.id,
-    organizationGroupId: group.id,
-    branchId: branch.id,
-    adminRoleId: adminRole.id,
-    adminUserId: admin.id,
+    organizationId: state.organizationId,
+    organizationGroupId: state.organizationGroupId,
+    branchId: state.branchId,
+    adminRoleId: state.adminRoleId,
+    adminUserId: state.adminUserId,
     adminUserCreated: false,
     adminPassword: null,
   }
@@ -307,16 +338,33 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
     }
   }
 
-  const adminRole = await db.prepare(`SELECT id FROM roles WHERE code = 'admin' LIMIT 1`).get<{ id: number }>()
+  const adminRole = await db.prepare(`SELECT id FROM roles WHERE code = 'admin' ORDER BY id ASC LIMIT 1`).get<{ id: number }>()
   const existingAdmin = await db.prepare(`
     SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1
   `).get<{ id: number }>()
+  // Seeding is keyed on "no active user holds the admin role", NEVER on the
+  // literal username 'admin' (security review, 26 Sep 2026). Keying on the
+  // username meant renaming or soft-deleting the admin account made every
+  // cold isolate re-create `admin` with a password printed in this public
+  // repository: a remote takeover.
+  const activeAdmin = await db.prepare(`
+    SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+    WHERE r.code = 'admin' AND u.is_active = 1 AND u.deleted_at IS NULL
+    ORDER BY u.id ASC LIMIT 1
+  `).get<{ id: number }>()
 
-  let adminUserId: number | null = existingAdmin?.id ?? null
+  let adminUserId: number | null = existingAdmin?.id ?? activeAdmin?.id ?? null
   let adminUserCreated = false
   let adminPassword: string | null = null
-  if (!existingAdmin?.id) {
-    adminPassword = (env as unknown as { BUSINESS_OS_ADMIN_PASSWORD?: string }).BUSINESS_OS_ADMIN_PASSWORD || 'Admin123456!'
+  const seedPassword = !activeAdmin?.id && !existingAdmin?.id ? resolveSeedAdminPassword(env) : null
+  if (!activeAdmin?.id && existingAdmin?.id) {
+    // An 'admin' row exists but no one active holds the role. Never create a
+    // second 'admin' or touch that row's password from here.
+    console.warn('[core-invariants] No active admin-role user exists, but a user named "admin" does. Not seeding; restore an administrator deliberately.')
+  } else if (!activeAdmin?.id && !seedPassword) {
+    console.warn('[core-invariants] No active admin-role user exists and BUSINESS_OS_ADMIN_PASSWORD is not set, so no admin was seeded. Set it (wrangler secret put BUSINESS_OS_ADMIN_PASSWORD) and the next cold start seeds the admin.')
+  } else if (!activeAdmin?.id && seedPassword) {
+    adminPassword = seedPassword
     const passwordHash = bcrypt.hashSync(adminPassword, 10)
     const inserted = await db.prepare(`
       INSERT INTO users (

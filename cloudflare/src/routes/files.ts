@@ -5,11 +5,13 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import { getMediaType, buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { sanitizeMediaPath } from '../lib/media'
+import { findUploadReferences } from '../lib/uploadReferences'
+import { UPLOAD_CONTENT_SECURITY_POLICY } from '../lib/r2'
 import { chunkForBinding } from '../lib/sqlBinding'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { classifyUploadedBuffer, extensionForImageMime, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -380,18 +382,28 @@ app.post('/upload', async (c) => {
   }
 
   const originalName = sanitizeOriginalFileName(file.name || 'file')
-  const mimeType = file.type || 'application/octet-stream'
-  const mediaType = getMediaType(mimeType, originalName)
 
+  // S-uploads (compliance audit P1-2): the client's File.type and file-name
+  // extension are ignored. The bytes are classified against the upload
+  // allowlist (lib/uploadSecurity.ts) and the stored content-type,
+  // extension and media_type all come from the detected format -- /uploads/*
+  // serves the stored content-type on the admin origin, so a client-chosen
+  // text/html or .svg would be stored XSS. Owner ruling: storage holds only
+  // images (JPEG/PNG/WebP/GIF/AVIF) and videos (MP4/MOV/WebM); PDF, CSV,
+  // XLSX, HTML, SVG, XML, JS and anything unrecognised -> 400.
   const buffer = new Uint8Array(await file.arrayBuffer())
+  let detected: DetectedUploadFormat
   try {
-    validateUploadedBuffer(buffer, mimeType, originalName)
+    detected = classifyUploadedBuffer(buffer)
   } catch (error) {
-    return c.json({ error: (error as Error).message }, 400)
+    return c.json({ error: (error as Error).message, code: 'unsupported_file_type' }, 400)
   }
+  const mimeType = detected.mime
+  const mediaType = detected.kind
 
   let storedBuffer = buffer
   let storedMimeType = mimeType
+  let storedExtension = detected.extension
   let normalizedInline = false
   if (mediaType === 'image' && buffer.byteLength > MAX_IMAGE_UPLOAD_BYTES) {
     if (buffer.byteLength > MAX_IMAGE_FALLBACK_BYTES) {
@@ -404,12 +416,16 @@ app.post('/upload', async (c) => {
     const optimized = await optimizeImage(c.env, buffer.buffer, originalName)
     if (optimized.ok && optimized.bytes && Number(optimized.byteSize || optimized.bytes.byteLength) <= IMAGE_MAX_BYTES) {
       storedBuffer = new Uint8Array(optimized.bytes)
-      storedMimeType = optimized.contentType || mimeType
+      // The optimizer is server-side, but only an image type it names is
+      // trusted; anything else keeps the detected type of the original.
+      const optimizedExtension = extensionForImageMime(optimized.contentType)
+      storedMimeType = optimizedExtension ? String(optimized.contentType) : mimeType
+      storedExtension = optimizedExtension || storedExtension
       normalizedInline = true
     }
   }
 
-  const storedName = buildUniqueStoredName(originalName)
+  const storedName = buildUniqueStoredName(originalName, storedExtension)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, storedBuffer, { httpMetadata: { contentType: storedMimeType } })
   // If inline normalization was unavailable, the existing queue gets another
@@ -480,6 +496,10 @@ app.get('/:id/download', async (c) => {
   headers.set('Content-Length', String(object.size))
   headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`)
   headers.set('X-Content-Type-Options', 'nosniff')
+  // The stored mime_type can be text/html or SVG on legacy rows. Attachment
+  // alone is a browser convention; the same sandbox CSP /uploads/* serves
+  // with (lib/r2.ts applySafeUploadHeaders) keeps it inert if one renders.
+  headers.set('Content-Security-Policy', UPLOAD_CONTENT_SECURITY_POLICY)
   headers.set('Cache-Control', 'private, no-store')
   return new Response(object.body, { headers })
 })
@@ -671,31 +691,19 @@ app.delete('/:id', async (c) => {
   // type ("CONFIRM DELETE"), checked here too so a force-delete can't
   // happen from a stale client that never actually showed that prompt.
   const body = await c.req.json<{ force?: boolean; confirmText?: string }>().catch(() => ({}) as { force?: boolean; confirmText?: string })
-  const [usageBreakdown, settingValues, promotionReferences] = await Promise.all([
-    db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM products WHERE image_path = @publicPath) AS product_count,
-      (SELECT COUNT(*) FROM product_images WHERE image_path = @publicPath) AS gallery_count,
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count
-    `).get<{ product_count: number; gallery_count: number; avatar_count: number }>({ publicPath: asset.public_path }),
-    db.prepare('SELECT value FROM settings').all<{ value: string }>(),
-    loadPromotionImageReferences(db, [asset.public_path]),
-  ])
-  const settingsUsage = isPathReferencedInSettings(settingValues, asset.public_path) ? 1 : 0
-  const promotionsUsage = promotionReferences.get(asset.public_path)?.length || 0
-  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + promotionsUsage + settingsUsage
+  // The one reference rule (lib/uploadReferences.ts): every table that can
+  // hold an upload path, every stored form of it (`uploads/NAME` without the
+  // slash, `?v=3`, an absolute URL, percent-encoded, JSON-escaped). The
+  // canonical-only counts this used to run let a file referenced in any
+  // other form be deleted as "not in use".
+  const references = await findUploadReferences(db, asset)
+  const { total: usageCount, ...usageBreakdown } = references
   if (usageCount > 0) {
     const forceRequested = body.force === true && String(body.confirmText || '').trim().toUpperCase() === 'CONFIRM DELETE'
     if (!forceRequested) {
       return c.json({
         error: 'This file is still in use and cannot be deleted.',
-        usage: {
-          products: Number(usageBreakdown?.product_count || 0),
-          gallery: Number(usageBreakdown?.gallery_count || 0),
-          avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: promotionsUsage,
-          settings: settingsUsage,
-        },
+        usage: usageBreakdown,
         forceable: true,
       }, 409)
     }
@@ -709,15 +717,7 @@ app.delete('/:id', async (c) => {
   await audit(c.env, user.id, user.username || null, 'delete', 'file', id, {
     original_name: asset.original_name,
     forced: usageCount > 0,
-    usage: usageCount > 0
-      ? {
-          products: Number(usageBreakdown?.product_count || 0),
-          gallery: Number(usageBreakdown?.gallery_count || 0),
-          avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: promotionsUsage,
-          settings: settingsUsage,
-        }
-      : undefined,
+    usage: usageCount > 0 ? usageBreakdown : undefined,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id }))
   return c.json(asset)

@@ -195,5 +195,19 @@ if (process.argv.includes('--bundle')) {
       assert.equal(fs.existsSync(path.join(frontend, 'dist', match[1].replace(/^\//, ''))), true, `missing font asset: ${match[1]}`)
     }
   }
+  // I6-1: a language pack is its JSON text behind one default export. The
+  // named-export form repeated every key name twice (+151 KB raw per pack),
+  // and the early head preload must name the real Khmer chunk.
+  for (const language of ['en', 'km']) {
+    const file = files.find(name => new RegExp(`^lang-${language}-[\\w-]{8}\\.js$`).test(name))
+    assert.ok(file, `missing lang-${language} chunk`)
+    const source = fs.readFileSync(path.join(assets, file), 'utf8')
+    assert.match(source, /JSON\.parse\(/, `lang-${language} must parse its pack as JSON text`)
+    assert.match(source, /export\s*\{\s*\w+ as default\s*\}\s*;?\s*$/, `lang-${language} must export only its default`)
+  }
+  const languagePacks = JSON.parse(html.match(/var languagePacks = (\{[^\n]*\});/)?.[1] ?? 'null') as Record<string, string> | null
+  assert.deepEqual(Object.keys(languagePacks ?? {}), ['km'], 'only the non-core pack is preloaded early')
+  assert.ok(files.includes(path.posix.basename(languagePacks!.km)), 'the early Khmer preload names an emitted chunk')
+  console.log('PASS language packs: JSON text, default export only, Khmer preload wired')
   console.log(`PASS emitted static chunk graph: ${files.length} chunks, zero cycles`)
 }

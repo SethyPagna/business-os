@@ -182,6 +182,13 @@ assert.match(appContext, /const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000/, 'fu
 assert.doesNotMatch(appContext, /CORE_LANGUAGE_PACK_DEFER_MS/, 'the old fixed pre-idle defer was deliberately removed (see AppContext.tsx comment) -- it left non-core translation keys showing as raw key names in the UI for up to 29s after login')
 assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS \}\)/, 'full language pack should be requested via requestIdleCallback right after load, not stacked behind an extra fixed delay')
 assert.match(appContext, /useEffect\(\(\) => \{\s*if \(publicMode\) return undefined[\s\S]*CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*\}, \[language, publicMode\]\)/, 'public portal startup should not schedule the full admin language pack after first paint')
+// I6-1: a device set to Khmer renders its first admin frame in Khmer. The
+// language state starts from the device record (the setting is device-local,
+// so loadSettings would land on it anyway), and the AdminRoot lazy import
+// waits -- bounded -- for that pack, whose download index.html already started.
+assert.match(appContext, /useState\(readStoredUiLanguage\)/, 'admin language state must start from the stored device language, not a hard-coded English')
+assert.match(appContext, /export function primeStoredLanguagePack\(\): Promise<void> \{[\s\S]*CORE_LANGUAGE_CODES\.has\(lang\)[\s\S]*\.catch\(\(\) => \{\}\)[\s\S]*Promise\.race\(\[loaded, waitLimit\]\)/, 'the primer skips English, never rejects and is bounded by a timeout')
+assert.match(index, /import\('\.\/AdminRoot\.tsx'\)\.then\(async \(adminRoot\) => \{\s*await adminRoot\.primeStoredLanguagePack\(\)/, 'the admin root must not render before the stored pack is primed')
 assert.match(publicCatalogRoot, /import \{ PublicCatalogAppProvider \} from '\.\/app\/PublicCatalogAppProvider\.tsx'/, 'public catalog root should use the public-only provider instead of the full admin AppProvider')
 assert.doesNotMatch(publicCatalogRoot, /import \{ AppProvider \}|AppContext\.tsx/, 'public catalog root should not import the admin AppContext provider')
 assert.match(publicCatalogAppProvider, /AppContext\.Provider[\s\S]*SyncContext\.Provider/, 'public catalog provider should supply the shared hook contexts without admin startup side effects')
@@ -356,7 +363,9 @@ assert.doesNotMatch(viteConfig, /function toRoutePreloadFiles\(bundle: OutputBun
 assert.match(viteConfig, /link\.fetchPriority = 'high'[\s\S]*link\.setAttribute\('fetchpriority', 'high'\)/, 'route-aware modulepreload links should use high fetch priority so direct route chunks do not wait behind secondary work')
 assert.match(viteConfig, /public:\s*\[[\s\S]*'PublicCatalogRoot'[\s\S]*'catalog-public'[\s\S]*'catalog-icons'[\s\S]*'catalog-products'[\s\S]*'app-portal'/, 'public routes should start fetching portal root, public catalog shell, catalog icons, product grid, and portal transport chunks before React finishes loading')
 assert.match(viteConfig, /public:\s*\[[\s\S]*'route-sync-utils'[\s\S]*'app-portal'/, 'public routes should preload one small synchronous helper chunk instead of waiting on multiple late catalog waterfalls')
-assert.match(viteConfig, /admin:\s*\[[\s\S]*'AdminRoot'[\s\S]*'vendor-react'[\s\S]*'vendor'[\s\S]*'app-routing'[\s\S]*'app-shell'[\s\S]*'Sidebar'[\s\S]*'shared-ui'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'[\s\S]*\][\s\S]*login:\s*\[[\s\S]*'AdminRoot'[\s\S]*'auth-login'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'/, 'authenticated admin routes should preload required shell chunks while direct login routes still preload the sign-in chunk')
+// I6-2: 'vendor' (print/QR/ffmpeg, dynamic-import only) is no longer an admin
+// startup preload; routePreloadPolicy.test.ts pins its exclusion.
+assert.match(viteConfig, /admin:\s*\[[\s\S]*'AdminRoot'[\s\S]*'vendor-react'[\s\S]*'app-routing'[\s\S]*'app-shell'[\s\S]*'Sidebar'[\s\S]*'shared-ui'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'[\s\S]*\][\s\S]*login:\s*\[[\s\S]*'AdminRoot'[\s\S]*'auth-login'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'/, 'authenticated admin routes should preload required shell chunks while direct login routes still preload the sign-in chunk')
 assert.match(viteConfig, /isLoginPath\(pathname\)[\s\S]*preloads\.login[\s\S]*preloads\.admin/, 'route-aware preload script should reserve auth-login preloads for direct login paths')
 assert.match(viteConfig, /function hasEmbeddedAuthBootstrap\(\)[\s\S]*business-os-auth-bootstrap[\s\S]*!hasEmbeddedAuthBootstrap\(\)[\s\S]*window\.fetch\('\/api\/auth\/bootstrap'[\s\S]*credentials: 'include'/, 'admin direct-route HTML should skip the early auth fetch when the server already embedded the bootstrap payload')
 assert.match(appBootstrapTransport, /EMBEDDED_AUTH_BOOTSTRAP_SCRIPT_ID = 'business-os-auth-bootstrap'[\s\S]*function takeEmbeddedAuthBootstrapPayload\(\): unknown \| null[\s\S]*JSON\.parse\(raw\)/, 'app bootstrap transport should consume the server-embedded admin auth bootstrap payload before making a network request')
@@ -2720,7 +2729,7 @@ assert.match(
 )
 assert.match(
   otpModal,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*otpSetup\?\.\(\{ userId \}\)[\s\S]*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*otpSetup\?\.\(\{ userId, password, currentToken[\s\S]*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
   'OTP setup should timeout slow setup reads',
 )
 assert.match(
@@ -2765,7 +2774,7 @@ assert.doesNotMatch(
 )
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(confirmation\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
   'factory reset should timeout slow destructive reset actions',
 )
 assert.match(

@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local",
+    "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local --var BUSINESS_OS_LOCAL_DEV:1",
     "build:frontend": "npm --prefix ../frontend run build",
     "typecheck": "tsc --noEmit",
     "test:import-engine": "node scripts/test-import-engine-pure.cjs && node scripts/test-sales-import-commit-pure.cjs",

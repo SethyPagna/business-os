@@ -9,6 +9,7 @@ import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './sale
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
+import { assertReturnCreateCapacity } from './returnCreateAction'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -94,14 +95,17 @@ type Member = {
 type SaleStatusSnapshot = { saleId: number; before: string; after: string }
 type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
 
+// `code` names a business refusal the client restates in the operator's
+// language; without one the route answers the generic write_conflict /
+// invalid_bulk_action it always has.
 export class ReturnBulkError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) {
+  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string) {
     super(message)
   }
 }
 
-function fail(message: string, status: 400 | 403 | 409 = 409): never {
-  throw new ReturnBulkError(message, status)
+function fail(message: string, status: 400 | 403 | 409 = 409, code?: string): never {
+  throw new ReturnBulkError(message, status, code)
 }
 
 function normalize(value: unknown, fallback = ''): string {
@@ -358,9 +362,9 @@ function entitlementGraphExpression(): string {
         AND EXISTS(SELECT 1 FROM json_each(@entitlementSaleIds) ids WHERE CAST(ids.value AS INTEGER)=sale_id)
       ORDER BY id)),json('[]')),
     'items',COALESCE((SELECT json_group_array(json_object(
-      'id',id,'return_id',return_id,'sale_item_id',sale_item_id,'quantity',quantity,
+      'id',id,'return_id',return_id,'sale_item_id',sale_item_id,'product_id',product_id,'quantity',quantity,
       'total_usd',total_usd,'refund_snapshot_json',refund_snapshot_json
-    )) FROM (SELECT ri.id,ri.return_id,ri.sale_item_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
+    )) FROM (SELECT ri.id,ri.return_id,ri.sale_item_id,ri.product_id,ri.quantity,ri.total_usd,ri.refund_snapshot_json
       FROM return_items ri JOIN returns r ON r.id=ri.return_id
       WHERE COALESCE(r.return_scope,'customer')='customer'
         AND EXISTS(SELECT 1 FROM json_each(@entitlementSaleIds) ids WHERE CAST(ids.value AS INTEGER)=r.sale_id)
@@ -387,13 +391,40 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
   }
   const override = new Map(changed.map(member => [member.id, member[target].status]))
   const saleLines = await db.prepare(`SELECT s.id AS sale_id,s.sale_status,s.status_before_return,
-    si.id AS sale_item_id,si.quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
+    si.id AS sale_item_id,si.product_id,si.product_name,si.quantity FROM sales s JOIN sale_items si ON si.sale_id=s.id
     WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=s.id)
     ORDER BY s.id,si.id`).all<Row>({ saleIds: entitlementSaleIds })
   const exactStatuses: SaleStatusSnapshot[] = []
   for (const saleId of saleIds) {
     const headers = parsed.returns.filter(row => Number(row.sale_id) === saleId)
-    if (!headers.some(row => Number(row.money_precision_version) === 1)) continue
+    if (!headers.some(row => Number(row.money_precision_version) === 1)) {
+      // Legacy (v0) sale: no exact-refund authority to validate, but the
+      // quantity cap POST / enforces still holds. A transition that brings a
+      // cancelled return back must not leave more units returned against a
+      // sale line than it sold -- matched by sale_item_id, else product_id,
+      // exactly as assertReturnCreateCapacity matches a new return.
+      const reactivates = headers.some(row => override.has(Number(row.id))
+        && override.get(Number(row.id)) !== 'cancelled' && normalize(row.status, 'completed') === 'cancelled')
+      if (reactivates) {
+        const activeIds = new Set(headers.filter(row =>
+          (override.get(Number(row.id)) ?? normalize(row.status, 'completed')) !== 'cancelled').map(row => Number(row.id)))
+        const activeLines = parsed.items.filter(item => activeIds.has(Number(item.return_id))).map(item => ({
+          sale_item_id: item.sale_item_id == null ? null : Number(item.sale_item_id),
+          product_id: item.product_id == null ? null : Number(item.product_id),
+          quantity: Number(item.quantity),
+        }))
+        const soldLines = saleLines.filter(row => Number(row.sale_id) === saleId).map(row => ({
+          id: Number(row.sale_item_id), product_id: row.product_id == null ? null : Number(row.product_id),
+          quantity: Number(row.quantity), product_name: row.product_name == null ? null : String(row.product_name),
+        }))
+        try {
+          assertReturnCreateCapacity(soldLines, [], activeLines)
+        } catch (error) {
+          fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409, 'return_restore_over_capacity')
+        }
+      }
+      continue
+    }
     const materialize = (rows: Row[]) => rows.map(row => ({
       id: Number(row.id), sale_id: saleId, money_precision_version: Number(row.money_precision_version) as 1,
       calculated_refund_usd: Number(row.calculated_refund_usd), rounding_adjustment_usd: Number(row.rounding_adjustment_usd),
@@ -584,6 +615,22 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
 }
 
 export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row): Promise<Row> {
+  return (await applyReturnBulkActionOutcome(env, user, raw)).receipt
+}
+
+/**
+ * The receipt, and whether THIS call's own batch wrote it. `wrote` is false
+ * for every replay of a request id: a sequential retry (early replay below),
+ * a retry that overtook a slow original, and the original overtaken by its
+ * retry (either replay path). routes/returns.ts announces a status change to
+ * Telegram only when `wrote` is true, so one write is announced once even
+ * when the app's own retry (Returns.tsx, same client_request_id after its
+ * client timeout) races the first request (R-telegram E1, 27 Sep 2026). A
+ * check made BEFORE the write cannot say this; only the batch outcome can.
+ */
+export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
+
+export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -591,7 +638,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   const previous = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous) {
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
-    return JSON.parse(String(previous.receipt_json)) as Row
+    return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
   const { members, guards } = await buildMembers(db, request)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
@@ -650,10 +697,16 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     const results = await db.batch(statements)
-    return { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }
+    return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
-    if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json)) as Row
+    if (retry?.request_json === canonical) {
+      const stored = JSON.parse(String(retry.receipt_json)) as Row
+      // operationId is this call's own random UUID: the stored receipt carries
+      // it only when THIS batch committed and the error came after the commit.
+      // Any other receipt was written by a concurrent call with the same id.
+      return { receipt: stored, wrote: stored.operationId === operationId }
+    }
     if (/constraint/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
     throw error
   }

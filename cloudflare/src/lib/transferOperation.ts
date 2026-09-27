@@ -23,7 +23,27 @@ export type TransferAllocationSummary = Readonly<{
   takes: readonly Readonly<{ batchId: number; quantity: number; receivedAt: string | null; lotCode: string | null }>[]
   untrackedQuantity: number
 }>
-export class TransferConflictError extends Error { statusCode = 409 }
+// Every way a transfer can be refused once it reaches the planner, as the
+// exact English the Worker sends. Each sentence is the English of the pack key
+// with the same name, so frontend/src/api/branchRuleErrors.ts can show it in
+// the operator's language (Worker-side parity:
+// scripts/test-transfer-lots-exceed-branch-pure.cjs).
+export const TRANSFER_REFUSALS = {
+  transfer_stock_changed: 'The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.',
+  transfer_selected_lot_short: 'The selected received date no longer has enough stock.',
+  transfer_too_many_lots: 'This transfer has too many received dates. Split it into smaller transfers.',
+  transfer_maintenance_active: 'Maintenance is in progress. No stock was transferred; try again shortly.',
+} as const
+export type TransferRefusalCode = keyof typeof TRANSFER_REFUSALS
+export class TransferConflictError extends Error {
+  statusCode = 409
+  code: string
+  constructor(message: string, code = 'stock_conflict') { super(message); this.code = code }
+}
+const refuse = (code: Exclude<TransferRefusalCode, 'transfer_maintenance_active'>) => new TransferConflictError(TRANSFER_REFUSALS[code], code)
+// Quantities are REAL. FIFO over lots 0.5 + 0.3 for 0.8 leaves ~5.6e-17
+// "uncovered": float noise, not stock the lot ledger lacks.
+const QUANTITY_EPSILON = 0.000000001
 const productSnapshotSql = `json_object('id',id,'name',name,'barcode',barcode,'created_at',created_at,'is_active',is_active)`
 const lotSnapshotSql = `json_object('id',id,'variant_product_id',variant_product_id,'batch_key',batch_key,'lot_code',lot_code,'received_at',received_at,'expiry_date',expiry_date,'notes',notes)`
 // lotSnapshotSql's column names are bare -- fine in a plain single-table
@@ -87,9 +107,10 @@ export async function planTransferOperation(db: D1Compat, args: {
   const linePlans = args.lines.map(line => {
     const lots = lotsByProductBranch.get(`${line.productId}:${args.fromBranchId}`) || []
     const selected: FifoLotAvailability[] = line.batchId == null ? lots : lots.filter(lot => lot.batchId === line.batchId)
-    const { takes, uncovered } = allocateAcrossLots(selected, line.quantity)
-    if (line.batchId != null && uncovered > 0) throw new TransferConflictError('The selected received date no longer has enough stock.')
-    return { takes, uncovered }
+    const allocation = allocateAcrossLots(selected, line.quantity)
+    const uncovered = allocation.uncovered > QUANTITY_EPSILON ? allocation.uncovered : 0
+    if (line.batchId != null && uncovered > 0) throw refuse('transfer_selected_lot_short')
+    return { takes: allocation.takes, uncovered }
   })
 
   // 4. Every source lot (product_batches row) any line's takes reference.
@@ -159,7 +180,7 @@ export async function planTransferOperation(db: D1Compat, args: {
     const sourceProduct = productById.get(line.productId)
     const destinationProduct = line.productId === line.destProductId ? sourceProduct : productById.get(line.destProductId)
     const snapshots = [sourceProduct, destinationProduct]
-    if (snapshots.some(row => !row)) throw new TransferConflictError('A transfer product changed. Refresh and try again.')
+    if (snapshots.some(row => !row)) throw refuse('transfer_stock_changed')
     // Only planning reads mutable catalog costs. Both movement directions and
     // every later replay consume the same immutable source-cost provenance.
     const fallback = { fallbackUnitCostUsd: sourceProduct!.cost_price_usd, fallbackUnitCostKhr: sourceProduct!.cost_price_khr }
@@ -169,7 +190,7 @@ export async function planTransferOperation(db: D1Compat, args: {
     const allocations: Allocation[] = []
     for (const take of takes) {
       const source = lotById.get(take.batchId)
-      if (!source) throw new TransferConflictError('The source received date changed.')
+      if (!source) throw refuse('transfer_stock_changed')
       const costSnapshot = resolveMovementCostSnapshot({ quantity: take.quantity,
         // Lots store USD only. KHR uses the captured source product currency,
         // never a guessed exchange rate or destination product's cost.
@@ -227,8 +248,25 @@ export async function planTransferOperation(db: D1Compat, args: {
       '$.destBatchId',CASE WHEN @explicit=1 THEN (SELECT json_extract(allocations_json,'$[0].destination_batch_id') FROM transfer_operation_members WHERE receipt_id=transfer_operation_receipts.id AND ordinal=0) ELSE NULL END),updated_at=CURRENT_TIMESTAMP WHERE operation_id=@operation`,
     params: { operation: operationId, response: JSON.stringify(args.response), explicit: args.lines.length === 1 && args.lines[0].batchId != null ? 1 : 0 } })
   // D1 bound/query limits are explicit; no partial chunk commits of a transfer.
-  if (statements.length > 5000) throw new TransferConflictError('This transfer has too many received dates. Split it into smaller transfers.')
+  if (statements.length > 5000) throw refuse('transfer_too_many_lots')
   return { statements, operationId, allocationSummaries: Object.freeze(allocationSummaries) }
+}
+
+export type TransferRefusal = { status: 409 | 503; body: { error: string; code: string } }
+
+/** The response for a transfer that was refused rather than failed, or null
+ * for a genuine server error. Covers the planner's own refusals, every guard
+ * in the batch (the NOT NULL sentinel of `assert`, which the canonical-branch
+ * guard shares -- a guard trips only when state moved after the route's own
+ * checks) and the ordinary maintenance guard. Callers check for a committed
+ * receipt first: a same-key request that won the race is a replay. */
+export function transferRefusal(error: unknown): TransferRefusal | null {
+  if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  // House convention (stockLotAdjustment, stockInLineEdit): 503, retry later.
+  if (/ordinary_business_maintenance_active/.test(message)) return { status: 503, body: { error: TRANSFER_REFUSALS.transfer_maintenance_active, code: 'maintenance_active' } }
+  if (/NOT NULL constraint failed: branches\.name/i.test(message)) return { status: 409, body: { error: TRANSFER_REFUSALS.transfer_stock_changed, code: 'transfer_stock_changed' } }
+  return null
 }
 
 function transferEffectStatements(operation: string, reverse: boolean, generation: number, user: SessionUser, reason: string): Statement[] {
@@ -250,11 +288,20 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
       COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.from_product)=json_remove(m.from_snapshot,'$.untracked_cost_snapshot'),0)=0
       OR COALESCE((SELECT ${productSnapshotSql} FROM products WHERE id=m.to_product)=json_remove(m.to_snapshot,'$.untracked_cost_snapshot'),0)=0
       OR ABS((SELECT COALESCE(SUM(json_extract(value,'$.quantity')),0) FROM json_each(m.allocations_json))+m.untracked_quantity-m.quantity)>0.000000001)`, params),
+    // Branch stock must cover the whole quantity.
     assert(`NOT EXISTS(SELECT 1 FROM (${sources}) m WHERE
-      NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch AND quantity>=m.quantity)
-      OR COALESCE((SELECT quantity FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch),0)
+      NOT EXISTS(SELECT 1 FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch AND quantity>=m.quantity))`, params),
+    // Only the part no lot covers draws on untracked stock: what branch_stock
+    // holds beyond the sum of every lot row (as before), floored at zero. A
+    // line the lots cover is not checked against that difference -- lots that
+    // already exceed branch stock must not block moving what both ledgers
+    // hold; the lot guard below checks each lot the plan takes. Forward, this
+    // is a race backstop; on undo it keeps an untracked part from leaving a
+    // destination whose lots already claim all of its stock.
+    assert(`NOT EXISTS(SELECT 1 FROM (${sources}) m WHERE m.untracked>${QUANTITY_EPSILON}
+      AND MAX(COALESCE((SELECT quantity FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch),0)
         -COALESCE((SELECT SUM(bs.quantity) FROM branch_batch_stock bs JOIN product_batches b ON b.id=bs.batch_id
-          WHERE b.variant_product_id=m.from_product AND bs.branch_id=m.from_branch),0)<m.untracked)`, params),
+          WHERE b.variant_product_id=m.from_product AND bs.branch_id=m.from_branch),0),0)<m.untracked-${QUANTITY_EPSILON})`, params),
     assert(`NOT EXISTS(SELECT 1 FROM (${sourceLots}) m WHERE NOT EXISTS(
       SELECT 1 FROM branch_batch_stock bs JOIN product_batches b ON b.id=bs.batch_id
       WHERE bs.batch_id=m.from_batch AND bs.branch_id=m.from_branch AND b.variant_product_id=m.from_product AND b.is_active=1 AND bs.quantity>=m.quantity))

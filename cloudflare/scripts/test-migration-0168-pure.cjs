@@ -22,7 +22,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const db = new Database(':memory:')
 db.pragma('foreign_keys = OFF')
-for (const migration of loadAll()) db.exec(migration)
+// The schema 0168 ran on (0195's cost triggers would rewrite the fixture).
+for (const migration of loadAll({ through: 168 })) db.exec(migration)
 
 function insertProduct(p) {
   db.prepare(`INSERT INTO products (id, name, barcode, brand, category, supplier, image_path, description,

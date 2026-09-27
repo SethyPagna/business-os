@@ -52,12 +52,18 @@ function main() {
   const listHandler = extractHandler(src, '/')
 
   check('GET /search uses cachedJsonResponse with a products-namespace version (reference behaviour)', () => {
-    assert.match(searchHandler, /getVersionWithFallback\(c\.env, 'products'\)/)
+    // I2-1: the version comes from productSearchCacheVersion ('products', plus
+    // 'stock' only for stock-filtered membership); a hit is refreshed live.
+    assert.match(searchHandler, /productSearchCacheVersion\(c\.env, query\)/)
+    assert.match(searchHandler, /refreshCachedProductRows\(c\.env,/)
+    const versionFn = src.slice(src.indexOf('async function productSearchCacheVersion'), src.indexOf('async function refreshCachedProductRows'))
+    assert.match(versionFn, /getVersionWithFallback\(env, 'products'\)/)
     assert.match(searchHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, 20,/)
   })
 
   check('GET / (bare list) now routes through the SAME cachedJsonResponse wrapper, same namespace and TTL', () => {
-    assert.match(listHandler, /getVersionWithFallback\(c\.env, 'products'\)/, 'GET / must read the products cache version, same as GET /search')
+    assert.match(listHandler, /productSearchCacheVersion\(c\.env, \{\}\)/, 'GET / must read the products cache version, same as GET /search')
+    assert.match(listHandler, /refreshCachedProductRows\(c\.env,/, 'GET / must refresh a cache hit the same way GET /search does')
     assert.match(listHandler, /cachedJsonResponse\(c\.req\.raw, c\.executionCtx, version, 20,/, 'GET / must wrap its query in cachedJsonResponse with a 20s TTL, same as GET /search')
   })
 

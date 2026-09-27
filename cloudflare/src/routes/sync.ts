@@ -260,10 +260,22 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   })
 
   // Chunked file upload: each request for a given uploadId is routed to the
-  // same Durable Object instance (idFromName(uploadId)), which accumulates
-  // chunks and finalizes to R2 + file_assets on /complete. See
-  // ../durable-objects/syncUploadSession.ts for why a DO fits this
-  // specific piece even though the outbox above doesn't need one.
+  // same Durable Object instance, which accumulates chunks and finalizes to
+  // R2 + file_assets on /complete. See ../durable-objects/syncUploadSession.ts
+  // for why a DO fits this specific piece even though the outbox above
+  // doesn't need one.
+  //
+  // S-uploads (F14): the DO name is `<user id>:<uploadId>`, never the bare
+  // client-chosen uploadId -- otherwise any other Library uploader who knew
+  // or guessed an uploadId could reset, overwrite or finish someone else's
+  // upload. The owner is also passed to the DO, which records it at /init
+  // and refuses /chunk and /complete from anyone else.
+  const uploadSessionStub = (c: any, uploadId: string) => {
+    const owner = String(c.get('user')?.id ?? '')
+    const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(`${owner}:${uploadId}`))
+    return { stub, owner }
+  }
+
   app.post('/files/chunks/init', async (c) => {
     if (!ensureLibraryUploadAccess(c.get('user'))) {
       return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
@@ -275,8 +287,8 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
       const manifest = (parsed.manifest || parsed) as Record<string, unknown>
       uploadId = String(manifest.upload_id || manifest.uploadId || '').trim() || 'unknown'
     } catch { /* handled by the DO's own validation */ }
-    const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
-    const upstream = await stub.fetch('https://sync-upload/init', { method: 'POST', body: rawBody, headers: { 'content-type': 'application/json' } })
+    const { stub, owner } = uploadSessionStub(c, uploadId)
+    const upstream = await stub.fetch('https://sync-upload/init', { method: 'POST', body: rawBody, headers: { 'content-type': 'application/json', 'x-upload-owner': owner } })
     return new Response(upstream.body, upstream)
   })
 
@@ -285,8 +297,8 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
       return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
     }
     const uploadId = c.req.param('uploadId')
-    const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
-    const upstream = await stub.fetch('https://sync-upload/chunk', { method: 'POST', body: await c.req.text(), headers: { 'content-type': 'application/json' } })
+    const { stub, owner } = uploadSessionStub(c, uploadId)
+    const upstream = await stub.fetch('https://sync-upload/chunk', { method: 'POST', body: await c.req.text(), headers: { 'content-type': 'application/json', 'x-upload-owner': owner } })
     return new Response(upstream.body, upstream)
   })
 
@@ -295,8 +307,8 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
       return c.json({ error: 'Uploading to the library requires Full Access to Library.' }, 403)
     }
     const uploadId = c.req.param('uploadId')
-    const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
-    const upstream = await stub.fetch('https://sync-upload/complete', { method: 'POST' })
+    const { stub, owner } = uploadSessionStub(c, uploadId)
+    const upstream = await stub.fetch('https://sync-upload/complete', { method: 'POST', headers: { 'x-upload-owner': owner } })
     // /complete is the request that materializes the file_assets row (init/
     // chunk only stage bytes in DO storage). The DO has no session context --
     // its row carries source='offline_sync' and no creator -- so the audit

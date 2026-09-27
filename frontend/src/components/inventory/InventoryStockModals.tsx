@@ -271,7 +271,14 @@ export default function InventoryStockModals({
         setTransferForm((current) => (current.batch_id && !batches.some((batch) => String(batch.id) === String(current.batch_id))
           ? { ...current, batch_id: '', batch_quantity: '' } : current))
       })
-      .catch((error: unknown) => { if (!cancelled) { console.error('[Inventory] transfer lot load failed:', error); setTransferBatchOptions([]) } })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        console.error('[Inventory] transfer lot load failed:', error)
+        setTransferBatchOptions([])
+        // Only Automatic can be shown without the lot list, so a lot restored
+        // from a draft must not ride the wire unseen: fall back to Automatic.
+        setTransferForm((current) => (current.batch_id ? { ...current, batch_id: '', batch_quantity: '' } : current))
+      })
       .finally(() => { if (!cancelled) setTransferBatchesLoading(false) })
     return () => { cancelled = true }
     // setTransferForm is the parent's stable setter; re-key on product/source only.
@@ -952,11 +959,22 @@ export default function InventoryStockModals({
                 />
               </label>
               <div>
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('transfer_pick_batch', 'Received date')} *</span>
+                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('transfer_pick_batch_optional', 'Received date (optional)')}</span>
                 {transferBatchesLoading ? (
                   <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
-                ) : transferBatchOptions.length ? (
+                ) : (
                   <div className="flex flex-wrap gap-1.5">
+                    {/* Automatic (FIFO) is the default and never blocks the
+                        transfer: a product whose stock has no dated lot at the
+                        source still moves, allocated by the Worker. */}
+                    <button
+                      type="button"
+                      aria-pressed={!(Number(transferForm.batch_id) > 0)}
+                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${!(Number(transferForm.batch_id) > 0) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
+                      onClick={() => setTransferForm((current) => ({ ...current, batch_id: '', batch_quantity: '' }))}
+                    >
+                      {tr('transfer_auto_fifo', 'Automatic (FIFO)')}
+                    </button>
                     {transferBatchOptions.map((batch) => (
                       <button
                         key={batch.id}
@@ -969,8 +987,6 @@ export default function InventoryStockModals({
                       </button>
                     ))}
                   </div>
-                ) : (
-                  <div className="text-xs text-gray-400">{tr('no_batches_with_stock', 'No received dates with stock in this branch')}</div>
                 )}
               </div>
               <label className="block">

@@ -1,0 +1,26 @@
+# TEMPORARY Worker for the r2-apac-copy job of .github/workflows/ops.yml.
+#
+# The job deploys it, drives it page by page from the runner, and DELETES it
+# at the end of every run -- including a failed or cancelled one. It is not
+# part of the production Worker (cloudflare/wrangler.toml) and has no routes,
+# crons, queues or observability: it is reachable only on workers.dev, and
+# every request needs the bearer secret COPY_TOKEN, which the runner
+# generates per run and sets with `wrangler secret put` (never echoed).
+# Without that secret every request is refused with 503.
+#
+# SOURCE is only ever used through a read-only wrapper (head/get/list): the
+# Worker cannot write or delete anything in business-os-assets.
+name = "business-os-r2-copy"
+main = "src/index.mjs"
+compatibility_date = "2026-07-01"
+account_id = "743e5b727d139e85ed11679097f6f99e"
+workers_dev = true
+preview_urls = false
+
+[[r2_buckets]]
+binding = "SOURCE"
+bucket_name = "business-os-assets"
+
+[[r2_buckets]]
+binding = "DESTINATION"
+bucket_name = "business-os-assets-apac"

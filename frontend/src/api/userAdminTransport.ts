@@ -68,6 +68,26 @@ export function updateUserProfile(id: string | number, payload: AccessPayload = 
   )
 }
 
+// Profile photo is its own action (routes/users.ts PUT/DELETE /users/:id/avatar):
+// the upload only stores the image, this is what attaches or clears it.
+export function setUserAvatar(id: string | number, avatarPath: string): Promise<unknown> {
+  return route(
+    'users:setAvatar',
+    () => apiFetch('PUT', `/api/users/${encodeId(id)}/avatar`, { avatar_path: avatarPath }),
+    null,
+    true,
+  )
+}
+
+export function removeUserAvatar(id: string | number): Promise<unknown> {
+  return route(
+    'users:removeAvatar',
+    () => apiFetch('DELETE', `/api/users/${encodeId(id)}/avatar`),
+    null,
+    true,
+  )
+}
+
 export function disconnectUserAuthProvider(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:disconnectProvider',
@@ -93,6 +113,26 @@ export function resetPassword(id: string | number, payload: AccessPayload = {}):
     null,
     true,
   )
+}
+
+// S-auth4c: sign-in-screen "Ask an administrator" requests. Admin-control
+// only (the Worker refuses anyone else); answered by resetPassword above,
+// which resolves the account's pending request, or dismissed here.
+export type PasswordResetRequestRecord = {
+  id: number
+  user_id: number
+  requested_at: string
+  device_name?: string | null
+  username?: string | null
+  name?: string | null
+}
+
+export function getPasswordResetRequests(): Promise<unknown> {
+  return apiFetch('GET', '/api/users/password-reset-requests')
+}
+
+export function dismissPasswordResetRequest(id: string | number): Promise<unknown> {
+  return apiFetch('POST', `/api/users/password-reset-requests/${encodeId(id)}/dismiss`, {})
 }
 
 export function createRole(payload: AccessPayload = {}): Promise<unknown> {

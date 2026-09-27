@@ -77,6 +77,8 @@ const STUBS = {
   './importCsv': {},
   '../index': {},
   './stockActionSeal': new Proxy({}, { get: () => async () => 0 }),
+  // S-uploads: the temporary-import-file purge the finalizer runs is R2 work.
+  './importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
 }
 
 const realCache = new Map()

@@ -277,6 +277,26 @@ const ENTITY_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
 }
 
 /**
+ * The Telegram forum-topic ids (cloudflare/src/lib/telegram.ts
+ * TELEGRAM_TOPIC_KEYS), written under the 'settings' entity by the Settings
+ * save AND by the /settopic command (lib/telegramTopicSetting.ts). The words
+ * are the Settings screen's own; there each sits under its "Forum topics"
+ * heading, so the heading goes in front here -- "Shift reports" alone would
+ * not say it is where shift reports are SENT that moved. "Heading - Field" is
+ * the Parent - Child form the diff builder already uses for a nested field.
+ */
+const TELEGRAM_TOPIC_FIELD_LABEL_KEYS: Record<string, [string, string]> = {
+  telegram_topic_shift: ['telegram_topic_shift_label', 'Shift reports'],
+  telegram_topic_sales: ['telegram_topic_sales_label', 'Sale invoices'],
+  telegram_topic_status: ['telegram_topic_status_label', 'Status updates'],
+  telegram_topic_returns: ['telegram_topic_returns_label', 'Returns'],
+  telegram_topic_expenses: ['telegram_topic_expenses_label', 'Expenses & fees'],
+  telegram_topic_stock: ['telegram_topic_stock_label', 'Stock in/out'],
+  telegram_topic_reports: ['telegram_topic_reports_label', "Day's summary"],
+  telegram_topic_alerts: ['telegram_topic_alerts_label', 'Test & alerts'],
+}
+
+/**
  * A return's kinds. CLOSED on the server (cloudflare/src/lib/returnRecords.ts's
  * RETURN_RECORD_KINDS), which is what makes a translated label possible for
  * every one of them; anything a newer Worker adds reads as "Other change"
@@ -310,6 +330,8 @@ export const RETURN_RECORDS_ADAPTER: RecordsAdapter = {
 }
 
 export function entityFieldLabel(field: string, label: LabelFn): string {
+  const topic = TELEGRAM_TOPIC_FIELD_LABEL_KEYS[field]
+  if (topic) return `${label('telegram_topics_title', 'Forum topics')} - ${label(topic[0], topic[1])}`
   const entry = ENTITY_FIELD_LABEL_KEYS[field]
   return entry ? label(entry[0], entry[1]) : formatAuditFieldLabel(field)
 }

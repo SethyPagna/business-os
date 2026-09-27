@@ -128,7 +128,9 @@ new Function('exports', ts.transpileModule(guardDeclaration.getText(additionAst)
 // undoAppliers.ts now imports the exact sale money kernel (depends only on
 // moneyPrecision, which loadModule already maps).
 const saleMoneyPrecisionKernel = loadModule('lib/saleMoneyPrecision.ts', require)
+const catalogCostRecomputeKernel = loadModule('lib/catalogCostRecompute.ts', require)
 const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
+  if (id === './catalogCostRecompute') return catalogCostRecomputeKernel
   if (id === './actorSnapshot') return actorSnapshotKernel
   if (id === './saleMoneyPrecision') return saleMoneyPrecisionKernel
   if (id === './productMerge') return productMergeKernel
@@ -256,7 +258,17 @@ function freshDb() {
            CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);
            CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
            CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);`)
+  // FX-undo: branch.update compares the row against the OTHER payload of its
+  // own history row before replaying, so a replay needs its history row.
+  db.exec(`CREATE TABLE action_history (id INTEGER PRIMARY KEY AUTOINCREMENT, undo_payload TEXT DEFAULT '{}', redo_payload TEXT DEFAULT '{}')`)
   return db
+}
+
+function recordBranchHistory(db, id, undoFields, redoFields) {
+  return Number(db.prepare('INSERT INTO action_history (undo_payload, redo_payload) VALUES (?, ?)').run(
+    JSON.stringify({ applier: 'branch.update', id, fields: undoFields }),
+    JSON.stringify({ applier: 'branch.update', id, fields: redoFields }),
+  ).lastInsertRowid)
 }
 
 const atomicUser = { id: 7, name: 'Atomic verifier' }
@@ -326,9 +338,11 @@ async function productMergeGroupFixture() {
   const db = new Database(':memory:')
   db.exec(`
     CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER,updated_at TEXT,image_path TEXT,barcode TEXT,
-      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL);
+      category TEXT,categories TEXT,brand TEXT,brands TEXT,unit TEXT,unit_normalized TEXT,brand_compact TEXT,stock_quantity REAL,
+      cost_price_usd REAL,purchase_price_usd REAL); -- U-cost: the merge undo re-derives the catalog cost
+    CREATE TABLE product_cost_entries(id INTEGER PRIMARY KEY,product_id INTEGER,cost_usd REAL,baseline_batch_id INTEGER);
     CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
-    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT);
+    CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,batch_number INTEGER,is_active INTEGER,updated_at TEXT,unit_cost_usd REAL,received_at TEXT);
     CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,PRIMARY KEY(batch_id,branch_id));
     CREATE TABLE product_images(id INTEGER PRIMARY KEY,product_id INTEGER,image_path TEXT,sort_order INTEGER);
     CREATE TABLE stock_session_members(operation_id TEXT,product_id INTEGER);
@@ -340,9 +354,9 @@ async function productMergeGroupFixture() {
     CREATE TABLE product_conflict_action_group_members(review_id TEXT,group_ordinal INTEGER,member_ordinal INTEGER,product_id INTEGER,role TEXT,status TEXT,undo_snapshot_id INTEGER,updated_at TEXT,PRIMARY KEY(review_id,group_ordinal,member_ordinal));
     CREATE TABLE audit_logs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,new_value TEXT);
   `)
-  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0)").run()
-  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0)").run()
-  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0)").run()
+  db.prepare("INSERT INTO products VALUES(1,1,NULL,NULL,'GROUP-1','Final','[\"Final\"]','Final','[\"Final\"]','ea','ea','final',0,NULL,NULL)").run()
+  db.prepare("INSERT INTO products VALUES(2,0,NULL,NULL,'GROUP-1','Old A','[\"Old A\"]','A','[\"A\"]','box','box','a',0,NULL,NULL)").run()
+  db.prepare("INSERT INTO products VALUES(3,0,NULL,NULL,'GROUP-1','Old B','[\"Old B\"]','B','[\"B\"]','pack','pack','b',0,NULL,NULL)").run()
   const reversal = (dupId, label) => ({
     keeperId: 1, keeperName: 'Keeper', dupId, dupName: label, mergeContext: 'group test',
     keeperImagePathBefore: null, dupImagePathBefore: null, keeperBarcodeBefore: 'GROUP-1',
@@ -444,7 +458,8 @@ await check('the real branch.update applier updates canonical metadata through t
   const payload = { applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'Old Loc', is_default: 0, is_active: 1 } }
   const applier = resolveUndoApplier(payload)
   assert.ok(applier && applier.name === 'branch.update')
-  await applier.run(payload, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo' })
+  const historyId = recordBranchHistory(db, 2, payload.fields, { name: 'Shop', location: 'x', is_default: 0, is_active: 1 })
+  await applier.run(payload, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo', historyId })
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: null, manager: null, notes: null, is_default: 0, is_active: 1 })
 })
 
@@ -453,16 +468,18 @@ await check('the branch.update applier rejects historical identity changes and a
   db.prepare(`INSERT INTO branches (id, name, location, is_default, is_active) VALUES (2, 'Shop', 'before', 0, 1)`).run()
   sharedDb = db
   const applier = resolveUndoApplier({ applier: 'branch.update', id: 2 })
+  const renameHistory = recordBranchHistory(db, 2, { name: 'Depot', location: 'forbidden' }, { name: 'Shop', location: 'before' })
   await assert.rejects(
-    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Depot', location: 'forbidden' } }, { env: {}, user: null, direction: 'undo' }),
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Depot', location: 'forbidden' } }, { env: {}, user: null, direction: 'undo', historyId: renameHistory }),
     /fixed to Shop and Warehouse/,
   )
   assert.equal(readBranch(db, 2).location, 'before')
 
+  const raceHistory = recordBranchHistory(db, 2, { name: 'Shop', location: 'before' }, { name: 'Shop', location: 'raced' })
   beforeAtomicBatch = (sqlite) => sqlite.prepare("UPDATE branches SET name='Changed elsewhere' WHERE id=2").run()
   await assert.rejects(
-    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'raced' } }, { env: {}, user: null, direction: 'redo' }),
-    /NOT NULL/,
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'raced' } }, { env: {}, user: null, direction: 'redo', historyId: raceHistory }),
+    (error) => error.statusCode === 409 && /changed while the change was being redone/.test(error.message),
   )
   assert.equal(readBranch(db, 2).location, 'before')
   assert.equal(readBranch(db, 2).name, 'Changed elsewhere')

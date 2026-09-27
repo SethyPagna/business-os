@@ -78,7 +78,19 @@ export function getInventoryBootstrap(params: QueryParams = {}): Promise<unknown
   return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/bootstrap', query), 'inventory:bootstrap')
 }
 
-export type InventoryMovementBalance = { id: number; before_qty: number | null; after_qty: number | null }
+// before_qty/after_qty (= total_*) are the total across branches; branch_*
+// is the movement's own branch; active_branch_count lets the float drop the
+// redundant Total line once one branch remains.
+export type InventoryMovementBalance = {
+  id: number
+  before_qty: number | null
+  after_qty: number | null
+  total_before_qty?: number | null
+  total_after_qty?: number | null
+  branch_before_qty?: number | null
+  branch_after_qty?: number | null
+  active_branch_count?: number | null
+}
 
 /**
  * U-records: ONE movement's stock before -> after, read when its record
@@ -90,7 +102,7 @@ export function getInventoryMovementBalance(id: string | number): Promise<Invent
   return route<InventoryMovementBalance>(
     `inventory:movement-balance:${movementId}`,
     () => apiFetch('GET', `/api/inventory/movements/${movementId}/balance`),
-    () => ({ id: movementId, before_qty: null, after_qty: null }),
+    () => ({ id: movementId, before_qty: null, after_qty: null, branch_before_qty: null, branch_after_qty: null, active_branch_count: null }),
   )
 }
 

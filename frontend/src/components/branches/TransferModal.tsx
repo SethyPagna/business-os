@@ -19,9 +19,14 @@ import {
   getBranchStock as getBranchStockRequest,
   transferStock as transferStockRequest,
   transferStockBulk as transferStockBulkRequest,
-  prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun,
-  type PendingTransferRun,
+  prepareTransferRun, loadTransferRun, saveTransferRun,
 } from '../../api/branchTransport.ts'
+// The same executor, plus the record of a definitive refusal that lets a
+// refused saved run be edited or discarded instead of locking the form.
+import {
+  executeTransferRun, isRefusedTransferRun, localizeTransferRefusal, transferRunEditState,
+  type RecoverableTransferRun as PendingTransferRun,
+} from '../../api/transferRunRecovery.ts'
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
@@ -62,14 +67,24 @@ export function positiveTransferLots(batches: ProductBatch[]): ProductBatch[] {
 }
 
 /**
- * One checked row's explicit lot line. Throws (never guesses) when no lot is
- * chosen or the quantity exceeds what that lot or the branch holds; the
- * Worker enforces the same bound (409 selected_lot_unavailable).
+ * One checked row's transfer line. The received date is OPTIONAL, exactly as
+ * in the single-product transfer: with no lot named the line carries no
+ * batchId, is bounded by the source branch quantity, and the Worker allocates
+ * it FIFO across the source lots (dated oldest first, then undated, then any
+ * branch stock the lot ledger never tracked -- lib/transferOperation.ts).
+ * A named lot bounds the line by min(branch, lot); a named lot that is not
+ * among the loaded lots with stock is refused, never swapped for another.
+ * The Worker enforces both bounds (400 insufficient / 409 selected lot).
  */
 export function selectedTransferLot(product: TransferProduct, batches: ProductBatch[], batchId: number | undefined, quantity: number): PendingTransferItem {
+  const branchLimit = Number(product.branch_quantity)
+  if (!(Number(batchId) > 0)) {
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(branchLimit) || quantity > branchLimit) throw new Error('transfer_invalid_quantity')
+    return { productId: product.id, quantity }
+  }
   const batch = positiveTransferLots(batches).find((row) => Number(row.id) === Number(batchId))
   if (!batch) throw new Error('transfer_pick_batch_first')
-  const limit = Math.min(Number(product.branch_quantity), Number(batch.quantity))
+  const limit = Math.min(branchLimit, Number(batch.quantity))
   if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(limit) || quantity > limit) throw new Error('transfer_invalid_quantity')
   return { productId: product.id, quantity, batchId: Number(batch.id) }
 }
@@ -250,10 +265,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [savedRun, setSavedRun] = useState<PendingTransferRun | null>(null)
   const [retryError, setRetryError] = useState('')
   const [retryStorageError, setRetryStorageError] = useState('')
+  // Discard of a saved run always goes through the shared review dialog.
+  const [discardingRun, setDiscardingRun] = useState(false)
+  // Bumped by Edit so the catalog and the received dates reload even when the
+  // restored source branch and product set equal what is already cached.
+  const [stockReload, setStockReload] = useState(0)
   useEffect(() => {
     try { setSavedRun(loadTransferRun(user?.id)); setRetryStorageError('') }
     catch (error) { setRetryStorageError(getErrorMessage(error, t('transfer_failed'))) }
   }, [user?.id])
+  // A saved run the server refused for good (see api/transferRunRecovery.ts).
+  const refusedRun = savedRun && isRefusedTransferRun(savedRun) ? savedRun : null
+  const refusalText = refusedRun ? localizeTransferRefusal(refusedRun.refusal, t) : ''
 
   /**
    * 2. UI State
@@ -321,13 +344,14 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
   const [selectedQuantities, setSelectedQuantities] = useState<Record<string, string>>(initialDraft?.selectedQuantities || {})
-  // Explicit received date per checked row (no FIFO default), and the lots
-  // with stock loaded for it at the CURRENT source branch.
+  // Optional received date per checked row (absent = Automatic FIFO, the
+  // single-transfer behaviour), and the lots with stock loaded for it at the
+  // CURRENT source branch.
   const [selectedLots, setSelectedLots] = useState<Record<string, number>>(initialDraft?.selectedLots || {})
   const [rowLots, setRowLots] = useState<Record<string, { branch: string; batches: ProductBatch[]; error?: string }>>({})
   const lotBranchRef = useRef(fromBranch)
   lotBranchRef.current = fromBranch
-  const selectedLotProducts = Object.keys(selectedQuantities).sort().join(',')
+  const selectedLotProducts = `${stockReload}|${Object.keys(selectedQuantities).sort().join(',')}`
   useEffect(() => {
     let cancelled = false
     const branch = fromBranch
@@ -340,10 +364,29 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         try {
           const result = await withLoaderTimeout<{ batches: ProductBatch[] }>(() => getProductBatches(Number(id), Number(branch), true), 'Transfer received dates', TRANSFER_STOCK_LOAD_TIMEOUT_MS)
           if (cancelled || lotBranchRef.current !== branch) return
-          setRowLots((current) => ({ ...current, [id]: { branch, batches: positiveTransferLots(result?.batches || []) } }))
+          const offered = positiveTransferLots(result?.batches || [])
+          setRowLots((current) => ({ ...current, [id]: { branch, batches: offered } }))
+          // A received date restored from a draft (or picked before a reload)
+          // that this source no longer offers falls back to Automatic, which
+          // is what the row then displays -- never a silently different lot.
+          setSelectedLots((current) => {
+            if (!current[id] || offered.some((lot) => Number(lot.id) === Number(current[id]))) return current
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
         } catch (error) {
           if (cancelled || lotBranchRef.current !== branch) return
           setRowLots((current) => ({ ...current, [id]: { branch, batches: [], error: getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data') } }))
+          // The row can then show only Automatic, with its selector locked, so
+          // a received date restored from a draft must not stay behind it: it
+          // blocked submit ("choose a received date") with nothing choosable.
+          setSelectedLots((current) => {
+            if (!current[id]) return current
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
         }
       }
     }))
@@ -744,7 +787,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     return () => {
       invalidateTrackedRequest(multiStockRequestRef)
     }
-  }, [debouncedSearch, fromBranch, mode, showAllProducts])
+  }, [debouncedSearch, fromBranch, mode, showAllProducts, stockReload])
 
   // Switching source branch invalidates whatever was picked under the old
   // branch, in both modes -- a selection made against branch A's stock
@@ -1121,25 +1164,81 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         notify(`${product?.name || productId}: ${message} ${product?.unit || ''}`.trim(), 'error')
         return
       }
-      // Each checked row names its received date explicitly; lots loaded
-      // under another source branch never count.
+      // A row with no received date goes out lot-less and the Worker
+      // allocates it FIFO. A row that names one must have that lot loaded
+      // under the CURRENT source branch; lots loaded under another source
+      // never count.
+      const chosenBatchId = Number(selectedLots[productId]) > 0 ? Number(selectedLots[productId]) : undefined
       const loaded = rowLots[productId]
-      if (!loaded || loaded.error || loaded.branch !== fromBranch) {
+      if (chosenBatchId && (!loaded || loaded.error || loaded.branch !== fromBranch)) {
         notify(`${product.name || productId}: ${t('transfer_pick_batch_first') || 'Choose a received date first'}`, 'error')
         return
       }
       try {
-        items.push(selectedTransferLot(product, loaded.batches, selectedLots[productId], qty))
+        items.push(selectedTransferLot(product, loaded?.batches || [], chosenBatchId, qty))
       } catch (error) {
-        const lot = loaded.batches.find((row) => Number(row.id) === Number(selectedLots[productId]))
+        const lot = loaded?.batches.find((row) => Number(row.id) === chosenBatchId)
         notify(`${product.name || productId}: ${error instanceof Error && error.message === 'transfer_invalid_quantity'
-          ? (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(Math.min(Number(product.branch_quantity), Number(lot?.quantity || 0))))
+          ? (t('transfer_only_available') || 'Only {n} available').replace('{n}', String(chosenBatchId ? Math.min(Number(product.branch_quantity), Number(lot?.quantity || 0)) : finiteStockAvailable(product.branch_quantity)))
           : (t('transfer_pick_batch_first') || 'Choose a received date first')}`, 'error')
         return
       }
     }
 
     setPendingTransfer(buildPendingTransfer('selected', items))
+  }
+
+  /**
+   * U-transfer3: a saved run the server REFUSED (a definitive 4xx, recorded
+   * on the run by api/transferRunRecovery.ts) answers the same on every
+   * Retry, so it must not lock the form for good. Edit puts every line the
+   * run has not yet transferred back into the form -- products, quantities,
+   * received dates, source, destination and reason -- and clears the saved
+   * run; sending again is a NEW transfer with a new key. Requests the server
+   * already confirmed are never restored. A restored received date that the
+   * source no longer offers falls back to Automatic in the lot load effect.
+   * A run whose result is unknown has no refusal and cannot be edited.
+   */
+  const editSavedTransfer = () => {
+    const run = savedRun
+    if (!run || !isRefusedTransferRun(run) || saving || savingBulk || !canTransferStock) return
+    const restored = transferRunEditState(run)
+    try { saveTransferRun(run.actorId, null) }
+    catch (error) { notify(getErrorMessage(error, t('save_failed') || 'Save failed'), 'error'); return }
+    // The source-change effect clears every pick when fromBranch changes;
+    // these picks belong to the restored source, so they must survive it.
+    previousSourceRef.current = restored.fromBranch
+    multiProductsBranchRef.current = ''
+    setFromBranch(restored.fromBranch)
+    setToBranch(restored.toBranch)
+    setReason(restored.reason)
+    setSelectedQuantities(restored.selectedQuantities)
+    setSelectedLots(restored.selectedLots)
+    setRowLots({})
+    setStockReload((current) => current + 1)
+    setShowAllProducts(true)
+    setShowSelectedOnly(restored.lineCount > 0)
+    setPendingTransfer(null)
+    setRetryError('')
+    setSavedRun(null)
+  }
+
+  /**
+   * Discard clears the saved run after the shared review dialog. For a
+   * refused run nothing in the refused part moved; for an unknown result the
+   * dialog warns that the transfer may already have been applied. A saved
+   * run that cannot even be read (retryStorageError) is discarded the same
+   * way, with the same warning -- it locked the form just as permanently.
+   */
+  const discardSavedTransfer = () => {
+    const actorId = savedRun?.actorId ?? (retryStorageError ? String(user?.id ?? '') : '')
+    setDiscardingRun(false)
+    if (!actorId || saving || savingBulk) return
+    try { saveTransferRun(actorId, null) }
+    catch (error) { notify(getErrorMessage(error, t('save_failed') || 'Save failed'), 'error'); return }
+    setRetryError('')
+    setRetryStorageError('')
+    setSavedRun(null)
   }
 
   /**
@@ -1179,8 +1278,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         for (let index = 0; index < pending.items.length; index += TRANSFER_BULK_CHUNK_SIZE) {
           requests.push({ bulk: true, body: {
             fromBranchId: Number.parseInt(fromBranch, 10), toBranchId: Number.parseInt(toBranch, 10),
-            // A checked row carries its explicit received date; Transfer
-            // entire branch moves every lot, so it has none to name.
+            // A checked row carries its received date only when one was
+            // chosen; otherwise (and for Transfer entire branch) the line is
+            // lot-less and the Worker allocates it FIFO.
             reason, items: pending.items.slice(index, index + TRANSFER_BULK_CHUNK_SIZE)
               .map(({ productId, quantity, batchId }) => (batchId ? { productId, quantity, batchId } : { productId, quantity })),
             userId: user?.id, userName: user?.name,
@@ -1255,19 +1355,37 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
         {savedRun || retryError || retryStorageError ? (
           <div role="status" className="m-4 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-            <p className="min-w-0 break-words">{savedRun ? t('sale_bulk_pending') : retryError || retryStorageError}</p>
+            <p className="min-w-0 break-words">{savedRun ? (refusedRun ? t('transfer_run_refused') : t('sale_bulk_pending')) : retryError || retryStorageError}</p>
             {savedRun ? <>
               <p className="break-words text-xs">{t('from_branch')}: {branchNameById(String(savedRun.requests[0].body.fromBranchId))} → {branchNameById(String(savedRun.requests[0].body.toBranchId))} · {t('transfer_reason')}: {String(savedRun.requests[0].body.reason || '')}</p>
               <p className="text-xs">{t('transfer_chunk_progress').replace('{done}', String(savedRun.next)).replace('{total}', String(savedRun.requests.length))}</p>
-              {retryError ? <p className="break-words text-xs">{savedRun.transferred > 0
+              {retryError && !refusedRun ? <p className="break-words text-xs">{savedRun.transferred > 0
                 ? t('transfer_bulk_partial').replace('{done}', String(savedRun.transferred))
                   .replace('{total}', String(savedRun.requests.reduce((total, request) => total + (request.bulk ? (request.body.items as unknown[]).length : 1), 0)))
                   .replace('{reason}', retryError)
                 : retryError}</p> : null}
+              {refusedRun ? <>
+                {/* Read from the run, so the reason survives a reload and is
+                    translated even when the Worker sent plain English. */}
+                <p className="break-words text-xs">{refusedRun.transferred > 0
+                  ? t('transfer_bulk_partial').replace('{done}', String(refusedRun.transferred))
+                    .replace('{total}', String(refusedRun.requests.reduce((total, request) => total + (request.bulk ? (request.body.items as unknown[]).length : 1), 0)))
+                    .replace('{reason}', refusalText)
+                  : t('transfer_run_refused_reason').replace('{reason}', refusalText)}</p>
+                <p className="break-words text-xs">{t('transfer_run_edit_hint').replace('{n}', String(transferRunEditState(refusedRun).lineCount))}</p>
+              </> : null}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
+                {refusedRun ? (
+                  <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock} onClick={editSavedTransfer}>{t('transfer_run_edit')}</button>
+                ) : null}
+                <button type="button" className={`${refusedRun ? 'btn-secondary' : 'btn-primary'} min-h-10`} disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
+                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={() => setDiscardingRun(true)}>{t('discard')}</button>
               </div>
-            </> : null}
+            </> : retryStorageError ? (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={() => setDiscardingRun(true)}>{t('discard')}</button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <fieldset disabled={saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock}
@@ -1666,15 +1784,23 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             buttonClassName="h-8 w-full text-xs"
                             ariaLabel={`${t('transfer_pick_batch') || 'Received date'} ${product.name || ''}`}
                             value={chosenLot?.id ?? ''}
-                            disabled={!lotsReady || !!loadedLots?.error}
+                            disabled={!lotsReady || !!loadedLots?.error || !lots.length}
                             options={[
-                              { value: '', label: !lotsReady ? (t('loading') || 'Loading...') : loadedLots?.error || !lots.length ? (t('no_batches_with_stock') || 'No received dates with stock') : (t('transfer_pick_batch_first') || 'Choose a received date') },
+                              // Blank = Automatic (FIFO), the same default the
+                              // single transfer uses; it never locks quantity.
+                              { value: '', label: !lotsReady && !loadedLots?.error ? (t('loading') || 'Loading...') : (t('transfer_auto_fifo') || 'Automatic (FIFO)') },
                               ...lots.map((lot) => ({ value: lot.id, label: `${batchDisplayLabel(lot, t('batch') || 'Received date')} · ${lot.quantity}` })),
                             ]}
                             onChange={(value) => {
                               const lot = lots.find((entry) => String(entry.id) === String(value))
-                              setSelectedLots((current) => ({ ...current, [id]: lot ? Number(lot.id) : 0 }))
-                              setProductQuantity(product.id, lot ? String(Math.min(Number(product.branch_quantity), Number(lot.quantity))) : '')
+                              setSelectedLots((current) => {
+                                const next = { ...current }
+                                if (lot) next[id] = Number(lot.id)
+                                else delete next[id]
+                                return next
+                              })
+                              const branchAvailable = finiteStockAvailable(product.branch_quantity)
+                              setProductQuantity(product.id, String(lot ? Math.min(branchAvailable, Number(lot.quantity)) : branchAvailable))
                             }}
                           />
                         ) : null}
@@ -1683,8 +1809,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                             type="number"
                             className="input w-20 shrink-0 px-2 py-1 text-sm"
                             min="0.01"
-                            max={chosenLot ? Math.min(Number(product.branch_quantity), Number(chosenLot.quantity)) : 0}
-                            disabled={!chosenLot}
+                            max={chosenLot ? Math.min(finiteStockAvailable(product.branch_quantity), Number(chosenLot.quantity)) : finiteStockAvailable(product.branch_quantity)}
                             step="any"
                             value={rowQuantity}
                             onChange={(event) => setProductQuantity(product.id, event.target.value)}
@@ -1781,6 +1906,28 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           confirmLabel={t('transfer') || 'Transfer'}
           onConfirm={() => { runPendingTransfer(pendingTransfer) }}
           onClose={() => { if (!savingBulk) setPendingTransfer(null) }}
+          t={t}
+        />
+      ) : null}
+
+      {/* Discarding a saved run: a refused run moved nothing in its refused
+          part; any other run may already have been applied, so the dialog
+          says to check Stock Changes before sending it again. */}
+      {discardingRun && (savedRun || retryStorageError) ? (
+        <ConfirmDialog
+          title={t('transfer_run_discard_title') || 'Discard saved transfer?'}
+          message={refusedRun
+            ? (t('transfer_run_discard_refused') || 'The server refused this transfer, so the refused part moved no stock. Discarding removes it and its lines are not sent.')
+            : (t('transfer_run_discard_unknown') || 'The result of this transfer is unknown: it may already have been applied. Check Stock Changes before sending it again. Discarding removes the saved retry, so it cannot be resumed.')}
+          items={savedRun ? [
+            { label: t('from_branch') || 'From Branch', value: `${branchNameById(String(savedRun.requests[0].body.fromBranchId))} → ${branchNameById(String(savedRun.requests[0].body.toBranchId))}` },
+            { label: t('transfer_reason') || 'Reason', value: String(savedRun.requests[0].body.reason || '') },
+            ...(refusedRun ? [{ label: t('transfer_run_refusal_label') || 'Refused because', value: refusalText }] : []),
+          ] : undefined}
+          danger={!refusedRun}
+          confirmLabel={t('discard') || 'Discard'}
+          onConfirm={discardSavedTransfer}
+          onClose={() => setDiscardingRun(false)}
           t={t}
         />
       ) : null}

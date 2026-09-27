@@ -310,6 +310,10 @@ function isValidStaticResponse(request, response) {
   const contentType = String(response.headers.get('content-type') || '').toLowerCase()
   if (pathname.endsWith('.js')) return contentType.includes('javascript') || contentType.includes('ecmascript')
   if (pathname.endsWith('.css')) return contentType.includes('text/css')
+  // A hashed font, image or other asset answered with HTML is the SPA
+  // fallback, not the file. The immutable fast path in cacheFirstStatic
+  // never refetches, so storing it would serve that page for the whole build.
+  if (contentType.split(';')[0].trim() === 'text/html') return pathname === '/' || pathname.endsWith('.html')
   return true
 }
 
@@ -986,6 +990,15 @@ async function fetchAndCacheShell(request, cache) {
   return response
 }
 
+// vite.config.ts names every file it emits under /assets/
+// `<name>-<8-character content hash>.<ext>` (chunkFileNames, entryFileNames,
+// assetFileNames), so a path of that shape can only ever hold one set of
+// bytes. The icons, manifests and runtime scripts in isCacheableStaticPath
+// keep their names across builds and are NOT immutable.
+function isImmutableBuildAsset(pathname) {
+  return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.[a-z0-9]+$/i.test(pathname)
+}
+
 async function cacheFirstStatic(request, event) {
   const cache = await caches.open(STATIC_CACHE)
   const cached = await cache.match(request)
@@ -997,6 +1010,13 @@ async function cacheFirstStatic(request, event) {
     return await retainedStaticAsset(request) || fetchAndCacheStatic(request, event, cache)
   }
   if (cached) {
+    // I6-4: content-hashed build output never changes under its URL, so the
+    // cached copy already IS the network copy and a background refetch only
+    // spends a request (about 40 per admin open) and a Worker invocation on
+    // an edge-cache miss. A new build ships new file names, and reaches a
+    // long-lived tab through the shell revalidation in appShellFallback and
+    // the worker update check -- neither of which passes through here.
+    if (isImmutableBuildAsset(new URL(request.url).pathname)) return cached
     const refresh = fetch(request)
       .then(async (response) => {
         if (isValidStaticResponse(request, response)) {

@@ -89,8 +89,6 @@ const REMAINING: Record<string, number> = {
   'components/server/ServerPage.tsx': 1,
   'components/shared/BackgroundImportTracker.tsx': 1,
   'components/users/DeviceApprovals.tsx': 1,
-  'components/users/UserProfileModal.tsx': 1,
-  'components/users/Users.tsx': 2,
   'components/utils-settings/Backup.tsx': 4,
   'components/utils-settings/Settings.tsx': 2,
 }
@@ -102,8 +100,8 @@ runTest('positive control: every native form is counted, comments and a local co
   assert.equal(nativeConfirmCalls('d.tsx', `dialog.confirm(); api.confirm('x')`), 0)
 })
 
-runTest('the stock record surfaces use the shared review dialog, not confirm()', () => {
-  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx']) {
+runTest('the stock record and user account surfaces use the shared review dialog, not confirm()', () => {
+  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx', 'components/users/UserProfileModal.tsx', 'components/users/Users.tsx']) {
     const source = fs.readFileSync(path.join(srcRoot, rel), 'utf8')
     assert.equal(nativeConfirmCalls(rel, source), 0, `${rel} calls native confirm()`)
     assert.match(source, /<ConfirmDialog\b/, `${rel} renders the shared ConfirmDialog`)

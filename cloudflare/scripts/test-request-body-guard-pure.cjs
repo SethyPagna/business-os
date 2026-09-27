@@ -192,6 +192,9 @@ async function main() {
     // scope to register the admin-host document handler, and the poisoned proxy
     // is not iterable.
     './lib/adminDocumentIdentity': load('lib/adminDocumentIdentity.ts'),
+    // Real module too: the poisoned proxy would throw as middleware on every
+    // /api request (F4 origin guard, mounted ahead of body admission).
+    './lib/originGuard': load('lib/originGuard.ts'),
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
     './lib/coreDataInvariants': { ensureCoreDataInvariantsOnce: async () => { calls.bootstrap++ } },
     './lib/maintenance': { isMaintenanceGatedRequest: () => true, getMaintenance: async () => { calls.maintenance++; return null } },
@@ -217,7 +220,7 @@ async function main() {
   assert.equal(calls.effect, 1, 'exact-limit repair reaches handler exactly once')
   calls.effect = 0
   authenticated = false; restore = false
-  for (const route of ['/api/auth/login', '/api/auth/password-reset/complete', '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout']) {
+  for (const route of ['/api/auth/login', '/api/auth/password-reset/complete', '/api/auth/password-reset/admin-request', '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout']) {
     const before = { ...calls }
     const response = await send(route, small + 1, '1')
     assert.equal(response.status, 413, route)

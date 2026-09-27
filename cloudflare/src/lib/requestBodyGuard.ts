@@ -9,7 +9,7 @@ export const PORTAL_SCREENSHOT_BODY_BYTES = 20 * 1024 * 1024
 // binary uploads and all GET/HEAD requests need their own streaming budgets.
 const PUBLIC_SMALL_POSTS = new Set([
   '/api/auth/login', '/api/auth/logout', '/api/auth/password-reset/email',
-  '/api/auth/password-reset/complete', '/api/auth/password-reset/otp',
+  '/api/auth/password-reset/complete', '/api/auth/password-reset/otp', '/api/auth/password-reset/admin-request',
   '/api/auth/otp/verify', '/api/auth/oauth/start', '/api/auth/oauth/complete',
   '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout',
 ])

@@ -43,6 +43,12 @@ const mockModules: Record<string, string> = {
         summary: { inCount: 0, outCount: 1, inQty: 0, outQty: 12, total: 1 },
       }
     }
+    // U-records: the row float's own balance read (products-gated twin of
+    // the Movements route); answers the fixture row's own total pair.
+    export async function getStockLedgerMovementBalance(id) {
+      const row = window.__fixtureRow
+      return { id, before_qty: row.before_qty, after_qty: row.after_qty, branch_before_qty: null, branch_after_qty: null, active_branch_count: null }
+    }
   `,
   '../../api/inventoryWriteTransport.ts': `
     export async function revertStockMovement(id) {

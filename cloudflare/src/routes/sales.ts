@@ -43,7 +43,7 @@ import {
 } from '../lib/saleSettlementAction'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from '../lib/saleRecordEvents'
 import { CUSTOMER_REFUND_JOIN, getCustomerSalesTotals, getDeliveryContactTotals, getSalesDayReport, getSalesPeriodSeries, getSalesTotals, netRefundExpr, netSaleExpr, recognizedExpr, saleStatusExpr, whereActiveSales } from '../lib/salesAnalytics'
-import { readSalesReportSnapshot, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
+import { readSalesReportSnapshot, salesListFilterReportScope, salesTotalsFromSnapshot, paymentMethodBreakdownFromSnapshot, removalLossesFor, withRemovalLosses } from '../lib/salesAnalytics'
 import { ReportExactDecimal, ReportMoneyPrecisionError, REPORT_MONEY_MAX_ROWS, REPORT_MONEY_PAGE_SIZE } from '../lib/reportMoneyPrecision'
 import { allocateAcrossLots, decrementBatchStockStrictStatement, readFifoLotAvailabilityForCart, type FifoLotTake } from '../lib/productBatches'
 // S4-24b: adding lines to an EXISTING sale. The rules (which statuses accept
@@ -152,6 +152,10 @@ import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAno
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+// POST / re-mints a receipt number this many times after losing an in-batch
+// receipt race before answering receipt_number_conflict. Each retry re-runs
+// the whole atomic batch, so the bound caps the write cost of a burst.
+const RECEIPT_NUMBER_RETRY_LIMIT = 3
 
 async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId: number): Promise<boolean> {
   const latest = await db.prepare(`
@@ -1113,10 +1117,16 @@ app.post('/', async (c) => {
   // is dropped and replaced by the server-minted id. Normalise rather than
   // 400: see normalizeClientReceiptNumber for why rejecting an offline
   // replay would strand a sale that really happened in the outbox forever.
-  const receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber(
-    '',
-    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
-  )
+  //
+  // The probe below only picks a CANDIDATE. receipt_number has no UNIQUE
+  // index (migration 0107 / lib/receiptNumber.ts), so a second till can
+  // commit the same number between this probe and the write batch. The batch
+  // therefore re-asserts uniqueness in-transaction (receiptNumberGuard in
+  // step 5) and a lost race re-mints and retries, bounded -- see
+  // RECEIPT_NUMBER_RETRY_LIMIT. `let` because a retry replaces it.
+  const receiptNumberTaken = async (candidate: string) =>
+    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
   // An offline replay carries the sale's own queue-time moment (stamped in
   // saleWriteTransport); honored with bounded trust so day-ranged reports
   // put the sale on the day it happened, not the day it synced. Online
@@ -1135,14 +1145,15 @@ app.post('/', async (c) => {
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
   const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
-  let creationSnapshotJson: string
-  try {
-    creationSnapshotJson = buildSaleCreationSnapshot({
+  // The snapshot embeds the receipt number, so a receipt-race retry rebuilds
+  // it from the same inputs (and the same recordedAt) with the new number.
+  const snapshotRecordedAt = new Date().toISOString()
+  const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
       moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
       origin: clientCreatedAt ? 'offline_replay' : 'pos',
-      recordedAt: new Date().toISOString(),
+      recordedAt: snapshotRecordedAt,
       saleAt: clientCreatedAt,
-      receiptNumber,
+      receiptNumber: snapshotReceiptNumber,
       actor: user,
       cashierId: actorId(user) ?? (body.cashier_id || null),
       cashierName: actorSnapshot(user),
@@ -1177,10 +1188,20 @@ app.post('/', async (c) => {
         pointsRedeemed: membershipPointsRedeemed,
       } : null,
     })
+  let creationSnapshotJson: string
+  try {
+    creationSnapshotJson = buildCreationSnapshotFor(receiptNumber)
   } catch (error) {
     if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
     throw error
   }
+  // Same fold as the search_normalized param below; a function so a
+  // receipt-race retry can refold it around the new number.
+  const saleSearchNormalizedFor = (searchReceiptNumber: string) => normalizeSearchText(
+    [searchReceiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
+      .filter(Boolean)
+      .join(' '),
+  )
   const saleInsertStatement = {
     sql: `
       INSERT INTO sales (
@@ -1248,11 +1269,7 @@ app.post('/', async (c) => {
       // run through, so folded queries match folded storage. Read additively
       // by buildSalesSearchWhere; membership_number is joined from customers
       // at read time, so it stays out of this per-row blob.
-      search_normalized: normalizeSearchText(
-        [receiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
-          .filter(Boolean)
-          .join(' '),
-      ),
+      search_normalized: saleSearchNormalizedFor(receiptNumber),
       creation_snapshot_json: creationSnapshotJson,
       // Keep the legacy compatibility projection in sync with the canonical
       // sale_items rows.  The Sales list joins sale_items directly, but the
@@ -1327,9 +1344,55 @@ app.post('/', async (c) => {
   let saleId = 0
   let recoveredCommittedCreate = false
   let resolvedReceiptNumber = receiptNumber
+  // Set only when every bounded retry lost the receipt race; the catch below
+  // then answers receipt_number_conflict instead of guessing from the message.
+  let receiptNumberRaceLost = false
+  // In-batch uniqueness: the probe that minted receiptNumber ran outside this
+  // transaction, so re-assert it here, in the same transaction ahead of the
+  // header INSERT (before the loyalty redemptionGuard, which keeps its slot
+  // directly above the INSERT).
+  // Aborts via the same json_extract idiom as the other guards; because that
+  // error text ("malformed JSON") is shared, the route attributes the failure
+  // afterwards by re-probing the number (see the retry loop), never by message.
+  const receiptNumberGuard = {
+    sql: `SELECT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM sales WHERE receipt_number = @receipt_number
+          ) THEN 1 ELSE json_extract('receipt_number_conflict', '$') END`,
+    params: { receipt_number: receiptNumber } as Record<string, unknown>,
+  }
+  const saleCreationAuditDetails = (auditReceiptNumber: string) => JSON.stringify({
+    kind: 'sale.creation',
+    receiptNumber: auditReceiptNumber,
+    itemCount: priced.length,
+    totalUsd,
+    saleStatus,
+    origin: clientCreatedAt ? 'offline_replay' : 'pos',
+  })
+  const saleCreationAuditStatement = {
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+          SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
+          FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
+    params: {
+      user_id: actorId(user),
+      user_name: actorSnapshot(user),
+      details: saleCreationAuditDetails(receiptNumber),
+      sale_write_key: saleWriteKey,
+    } as Record<string, unknown>,
+  }
+  // Every statement that carries the receipt number, moved together.
+  const adoptReceiptNumber = (next: string) => {
+    receiptNumber = next
+    resolvedReceiptNumber = next
+    receiptNumberGuard.params.receipt_number = next
+    saleInsertStatement.params.receipt_number = next
+    saleInsertStatement.params.search_normalized = saleSearchNormalizedFor(next)
+    saleInsertStatement.params.creation_snapshot_json = buildCreationSnapshotFor(next)
+    saleCreationAuditStatement.params.details = saleCreationAuditDetails(next)
+  }
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
+      receiptNumberGuard,
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1631,26 +1694,30 @@ app.post('/', async (c) => {
             ), 0) = @item_count
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
-    }, {
-      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
-            SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
-            FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
-      params: {
-        user_id: actorId(user),
-        user_name: actorSnapshot(user),
-        details: JSON.stringify({
-          kind: 'sale.creation',
-          receiptNumber,
-          itemCount: priced.length,
-          totalUsd,
-          saleStatus,
-          origin: clientCreatedAt ? 'offline_replay' : 'pos',
-        }),
-        sale_write_key: saleWriteKey,
-      },
-    })
+    }, saleCreationAuditStatement)
     statements.push(ordinaryBusinessMaintenanceGuard)
-    await db.batch(statements)
+    // Receipt-race retry. A failed batch rolled back completely, so re-running
+    // it with a fresh number re-evaluates every guard (stock, pricing,
+    // customer) from scratch. Retry ONLY when the failure is attributable to
+    // the receipt number: this request's own sale is absent (a committed own
+    // sale is a lost response, reconciled below as a replay) and another sale
+    // now holds the number. Anything else falls through unchanged.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await db.batch(statements)
+        break
+      } catch (batchError) {
+        const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
+          WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+          .get({ sale_write_key: saleWriteKey })
+        if (ownSale || !(await receiptNumberTaken(receiptNumber))) throw batchError
+        if (attempt >= RECEIPT_NUMBER_RETRY_LIMIT) {
+          receiptNumberRaceLost = true
+          throw batchError
+        }
+        adoptReceiptNumber(await uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+      }
+    }
     const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
       WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
       .get<{ id: number; receipt_number: string }>({ sale_write_key: saleWriteKey })
@@ -1675,6 +1742,17 @@ app.post('/', async (c) => {
         return c.json({
           error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
           code: 'sale_incomplete',
+        }, 409)
+      }
+      // Checked BEFORE the generic guesses below: the receipt guard fails
+      // with the same "malformed JSON" text as the pricing/loyalty guards, and
+      // a UNIQUE failure on the column (should an index ever exist) matches
+      // the catch-all /constraint failed/ that answers stock_conflict. Neither
+      // is a stock shortage, and a retry with the same body mints afresh.
+      if (receiptNumberRaceLost || /UNIQUE constraint failed:\s*sales\.receipt_number/i.test(message)) {
+        return c.json({
+          error: 'Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.',
+          code: 'receipt_number_conflict',
         }, 409)
       }
       if (/malformed JSON/i.test(message)) {
@@ -1708,13 +1786,14 @@ app.post('/', async (c) => {
     }
   }
 
-  // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
-  // Products/POS/Inventory pages reflect this sale's stock deduction
-  // immediately instead of waiting out the TTL -- this write path deducts
-  // products.stock_quantity above but wasn't bumping the version, so a
-  // browsed-then-cached product list could show pre-sale stock for up to 20s.
+  // Stock visibility: /api/products/search refreshes every cached page's
+  // rows and stock live on each read (routes/products.ts
+  // refreshCachedProductRows), so this deduction shows on every till at once.
+  // 'stock' still turns over the pages whose MEMBERSHIP depends on stock
+  // (stockState/issueState filters) and the portal. Bumping 'products' here
+  // used to discard every cached catalog page on every sale (I2-1).
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
   if (recoveredCommittedCreate) {
@@ -2685,7 +2764,8 @@ app.patch('/:id/status', async (c) => {
         stockSkipSource: skipStockRequested ? 'requested' : 'sale_already_stock_skipped',
       } : {}),
     }),
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
@@ -3570,7 +3650,8 @@ app.post('/:id/items', async (c) => {
   }
 
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
 
@@ -5203,7 +5284,8 @@ async function auditAmendment(
       sale_status: sale.sale_status ?? null,
       ...details,
     }),
-    bumpVersion(c.env, 'products'),
+    // I2-1: a sale moves stock only -- 'stock', not the catalog version.
+    bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
   ]))
 }
@@ -5430,13 +5512,10 @@ app.get('/', async (c) => {
     }
   }
   if (query.userId) {
-    // Matches the original's isAdminControlUser check -- simplified to
-    // username==='admin' or an explicit permissions.all flag, since role
-    // management (role_code lookups against the roles table) isn't ported
-    // yet. Disclosed simplification, not a silent behavior change: see
-    // MIGRATION.md.
-    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
-    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    // The shared administrator rule (lib/permissions.ts): admin role code or
+    // an effective all grant. This used to be an inline copy keyed on the
+    // literal username 'admin' (FX-sec: a name is not a credential).
+    const isAdmin = isAdminControlUser(user)
     if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
     const userIds = String(query.userId).split(',').map((v) => v.trim()).filter(Boolean)
     if (userIds.length === 1) {
@@ -5717,8 +5796,7 @@ app.get('/stats', async (c) => {
   appendLocalTimeRange(query, where, params, 's.created_at')
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
-    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
-    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    const isAdmin = isAdminControlUser(user)
     if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
     const userIds = String(query.userId).split(',').map((v) => v.trim()).filter(Boolean)
     if (userIds.length === 1) {
@@ -5760,20 +5838,7 @@ app.get('/stats', async (c) => {
   // refund formula is maintained in this route.
   const cacheVersion = await getSalesReadCacheVersion(c.env)
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, cacheVersion, SALES_READ_CACHE_TTL_SECONDS, async () => {
-    const scopedParams:Record<string,string|number|null>={}
-    const scopedWhere=where.join(' AND ').replace(/\bs\./g,'matched_sale.').replace(/@([A-Za-z][A-Za-z0-9_]*)/g,(_match,key:string)=>{
-      const value=params[key]
-      if(typeof value!=='string'&&typeof value!=='number'&&value!==null)throw new ReportMoneyPrecisionError('unsupported_row')
-      scopedParams[`reportScope_${key}`]=value
-      return `@reportScope_${key}`
-    })
-    // Preserve the list's rich, server-built predicates, including the LEFT
-    // customer join and item-branch search. The shared reader applies this
-    // immutable scope to every header/child query in both coherent passes.
-    const snapshot=await readSalesReportSnapshot(c.env,{},false,alias=>({
-      sql:`${alias}.id IN (SELECT matched_sale.id FROM sales matched_sale LEFT JOIN customers c ON c.id=matched_sale.customer_id WHERE ${scopedWhere})`,
-      params:scopedParams,
-    }))
+    const snapshot=await readSalesReportSnapshot(c.env,{},false,salesListFilterReportScope(where,params))
     const totals=salesTotalsFromSnapshot(snapshot)
     const totalCount=snapshot.sales.length+snapshot.voidSales.length
     const listLimit = Math.max(1, Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 200))

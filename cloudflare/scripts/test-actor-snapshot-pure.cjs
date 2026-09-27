@@ -237,7 +237,13 @@ ok(true, 'cancelled_by_name / stock_skipped_by_name carry ONE identity whether t
 // because the array literal sits under the normalizeSearchText( call.
 for (const [label, rel] of [['sales', 'src/routes/sales.ts'], ['returns', 'src/routes/returns.ts']]) {
   const src = read(rel)
-  const blobs = src.split('search_normalized: normalizeSearchText(').slice(1).map((chunk) => chunk.slice(0, 500))
+  // POST /api/sales builds its blob in a receipt-parameterised helper
+  // (saleSearchNormalizedFor) so a receipt-number race retry can refold it;
+  // that helper is a blob too, and the INSERT param must route through it.
+  if (/const saleSearchNormalizedFor = /.test(src)) {
+    assert.ok(/search_normalized: saleSearchNormalizedFor\(receiptNumber\)/.test(src), `${rel} search_normalized bypasses saleSearchNormalizedFor`)
+  }
+  const blobs = src.split(/search_normalized: normalizeSearchText\(|const saleSearchNormalizedFor = \([^)]*\) => normalizeSearchText\(/).slice(1).map((chunk) => chunk.slice(0, 500))
   assert.ok(blobs.length > 0, `${rel} has no search_normalized blob to check`)
   for (const [i, blob] of blobs.entries()) {
     assert.ok(!/\b(?:user|actor)\??\.name\b/.test(blob), `${rel} search_normalized blob #${i + 1} folds the full name into the search index`)

@@ -600,6 +600,8 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
       './productMerge': productMerge,
       './productMergeLineage': productMergeLineage,
       './saleItemPricing': saleItemPricing,
+      // U-cost: merge undo re-derives catalog cost with the real formula.
+      './catalogCostRecompute': compile('catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision }),
       // Bulk status replay is outside this suite; fail if it is invoked.
       './saleBulkStatus': {
         replaySaleBulkStatus: () => { throw new Error('Unexpected bulk status replay in test-sale-add-items-pure.cjs') },

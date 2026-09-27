@@ -18,7 +18,8 @@
 //      and a `fees` row typed 'delivery' -- and the fixture below contains
 //      BOTH, on two different sales, in two different currencies. The two
 //      obvious wrong implementations are:
-//        (a) "other expenses = every fee" (what the Telegram figures do), which
+//        (a) "other expenses = every fee" (what the Telegram figures did until
+//            H-io #2, 27 Sep 2026 -- test-telegram-shift-delivery-split-pure.cjs), which
 //            reports the $5 Grab fee as an other-expense AND inside delivery
 //            cost, so the halves sum to $17 against a $12 drawer outflow; and
 //        (b) "delivery cost = courier payouts only", which reports $3 and hides

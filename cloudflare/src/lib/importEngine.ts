@@ -28,7 +28,8 @@ import { COST_OUTLIER_RATIO, identityBarcodeKey, normalizeProductGroupName, prod
 import type { MergedCostOutlier } from './productDetailRule'
 import { sanitizeImportedDescription } from './productDescriptionSections'
 import { planReconcileBranchSnapshot, planReceiveBatchStock, resolveReceiptLotTarget, type ReceiptLotCandidate } from './productBatches'
-import { catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { catalogCostRecomputeStatement, typedCostEntryBeforeWriteStatement } from './catalogCostRecompute'
+import { actorId, actorSnapshot } from './actorSnapshot'
 import { multiplyMoney4 } from './moneyPrecision'
 import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE_GOODS_REASON_NOTE } from './stockReceiptGate'
 // per-row mode system now, just via a different channel than
@@ -60,6 +61,7 @@ import { stockReceiptGateCode, stockReceiptGateMessage, appendReceiptNotes, FREE
 
 import type { Env } from '../index'
 import { getDb, getImportFencedDb, isImportMaintenanceFenceError, type D1Compat } from './db'
+import { purgeImportIncomingFiles } from './importIncomingFiles'
 import { freePlanRefusalSuffix, getPlanLimits } from './planTier'
 import { chunkRowsForAttempt, dispatchImportWork } from './queueDispatch'
 import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
@@ -4399,6 +4401,14 @@ async function persistChunkResults(db: D1Compat, jobId: string, phase: 'analyze'
 // ---------------------------------------------------------------------------
 // ANALYZE: preview only, writes summary/error counts, no data-table writes.
 
+// import_job_errors.code of the rows routes/importJobs.ts writes for files a
+// person gave the job that were NOT imported -- a ZIP entry that is HEIC,
+// BMP, a video or not an image, one that failed to extract, one over the
+// per-upload limit (S-uploads2b). They describe the uploads, not the CSV,
+// and the uploads happen BEFORE /start: a fresh analyze wiping every error
+// row would erase the only report of them, so it keeps these.
+export const IMPORT_FILE_SKIPPED_ERROR_CODE = 'import_file_skipped'
+
 // Chunked + resumable (see migration 0011's header and ROWS_PER_IMPORT_CHUNK's
 // comment). One call = one small window's worth of work: ensure the file is
 // materialized (see ensureSourceRowsMaterialized -- a no-op after the first
@@ -4449,11 +4459,15 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       await db.prepare(`UPDATE import_jobs SET status = 'analyzing', phase = 'analyzing', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
     }
     if (isFreshStart) {
-      await db.prepare(`DELETE FROM import_job_errors WHERE job_id = @id`).run({ id: jobId })
+      // A fresh run replaces the previous run's ROW errors; the report of
+      // skipped upload files (IMPORT_FILE_SKIPPED_ERROR_CODE) stays.
+      await db.prepare(`DELETE FROM import_job_errors WHERE job_id = @id AND COALESCE(code, '') <> @skippedFileCode`).run({ id: jobId, skippedFileCode: IMPORT_FILE_SKIPPED_ERROR_CODE })
       await resetChunkState(db, jobId, 'analyze')
     }
     if (jobRow.cancel_requested) {
       await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      // S-uploads: a cancelled job's temporary import file goes now.
+      await purgeImportIncomingFiles(env, db, jobId)
       return
     }
 
@@ -4903,7 +4917,9 @@ export async function reconcileDuplicateProductSnapshotRows(db: D1Compat, jobId:
   return groups.length
 }
 
-async function finalizeImportApply(
+// Exported for scripts/test-import-incoming-files-native.cjs.
+export async function finalizeImportApply(
+  env: Env,
   db: D1Compat,
   jobId: string,
   totalUnits: number,
@@ -4958,6 +4974,10 @@ async function finalizeImportApply(
     },
   }
   await db.prepare(`UPDATE import_jobs SET summary_json = @summary WHERE id = @id`).run({ id: jobId, summary: JSON.stringify(summary) })
+  // S-uploads: the job is finished; its temporary CSV/ZIP goes now
+  // (lib/importIncomingFiles.ts). Best-effort -- the scheduled sweep
+  // retries anything this misses.
+  await purgeImportIncomingFiles(env, db, jobId)
   return { applied: totalApplied, failed: totalFailed }
 }
 
@@ -5332,7 +5352,7 @@ async function applyStockActionsSinglePass(
   const stockJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
   const unifiedGroupCount = stockJobRow?.started_at ? await unifyTouchedProductGroups(db, stockJobRow.started_at) : 0
 
-  const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
+  const outcome = await finalizeImportApply(env, db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -5616,7 +5636,7 @@ async function applyStockActionsContinuation(
   // continuation window only, after every created child row exists.
   const contJobRow = await db.prepare(`SELECT started_at FROM import_jobs WHERE id = @id`).get<{ started_at: string | null }>({ id: jobId })
   const unifiedGroupCount = contJobRow?.started_at ? await unifyTouchedProductGroups(db, contJobRow.started_at) : 0
-  const outcome = await finalizeImportApply(db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
+  const outcome = await finalizeImportApply(env, db, jobId, totalRows, state.startedAtMs ?? startedAtMs, sw.marks, queueLatencyMs, 0, unifiedGroupCount)
   console.log('[import-timing] stock-action apply done', jobId, outcome)
   return outcome
 }
@@ -5779,6 +5799,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // write here is the terminal job status itself.
     if (jobRow.cancel_requested) {
       await db.prepare(`UPDATE import_jobs SET status = 'cancelled', phase = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id: jobId })
+      // S-uploads: a cancelled job's temporary import file goes now.
+      await purgeImportIncomingFiles(env, db, jobId)
       return { applied: 0, failed: 0 }
     }
     const job = await db.prepare(`SELECT id, type, policy_json, summary_json FROM import_jobs WHERE id = @id`).get<ImportApplyJob>({ id: jobId })
@@ -5789,6 +5811,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // actor from live users/roles before this invocation changes job/chunk
     // state or composes any catalog, stock, sales, or image write.
     const authority = await assertCurrentImportApplyAuthority(env, job)
+    const importCostActor = { id: actorId(authority.actor), name: actorSnapshot(authority.actor) }
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
       // in-progress continuation -- see runImportAnalyze's identical block
@@ -6156,10 +6179,49 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         })
         d.__importAssignedId = nextProductId
       }
+      // U-cost: the rows of this chunk that RECEIVE stock into an existing
+      // product (the merge_stock / override_add receipt below). A receipt
+      // plans its lot against the override baseline read at chunk start
+      // (receiptBaselines) and re-checks that baseline in SQL, so a cost
+      // entry recorded for the same product EARLIER in the chunk would fail
+      // the check and abort the chunk. A product with a receipt still to come
+      // keeps the receipt as its cost record (it re-derives, as before):
+      // pushImportedCostEntry skips a row at or before that product's last
+      // receipt row, which also covers an override_add row's own receipt.
+      const importRowIndex = new Map(actionable.map((row, index) => [row, index] as const))
+      const importRowReceives = (row: (typeof actionable)[number]): boolean => {
+        const data = row.data as Record<string, unknown>
+        return row.action === 'update' && Boolean(row.existingId)
+          // (fill_blank and a column replace never reach the receipt code)
+          && productImportMode !== 'fill_blank' && !(productReplaceColumns.length > 0 && productImportMode === 'replace_columns')
+          && (row.plannedMode === 'merge_stock' || row.plannedMode === 'override_add')
+          && !appliedRowGuards.has(`row:${row.rowNumber}`)
+          && Boolean(data.branch_id_explicit) && data.branch_id != null && (data.stock_quantity as number) > 0
+      }
+      const lastReceiptRowIndex = new Map<number, number>()
+      actionable.forEach((row, index) => { if (importRowReceives(row)) lastReceiptRowIndex.set(Number(row.existingId), index) })
       for (const r of actionable) {
         const d = r.data as Record<string, unknown> & { branch_id: number | null; branch_id_explicit: number }
         const receiptUnitCostUsd = receiptCosts.get(r.rowNumber) ?? null
         let rowWriteGroup: Array<{ sql: string; params: Record<string, unknown> }> = []
+        // U-cost: an imported cost must hold past the next stock movement,
+        // which re-derives cost_price_usd (0195 triggers) and honours only a
+        // cost with a product_cost_entries row -- the same row the product
+        // form records. Pushed IMMEDIATELY BEFORE the UPDATE that writes the
+        // cost (it reads the preimage); writes nothing when the cost is unmoved.
+        // A row whose cost cells are both blank states no cost ("a BLANK cost
+        // cell states nothing"): the 0 a replace writes for it is not typed,
+        // so it records no override and the rule keeps deriving. An explicit
+        // 0 in the file is stated and records one, as the form's clear does.
+        const pushImportedCostEntry = (productId: number, next: { usd?: unknown; khr?: unknown }) => {
+          if (Number(d.__costPriceUsdProvided) !== 1 && Number(d.__costPriceKhrProvided) !== 1) return
+          if ((lastReceiptRowIndex.get(productId) ?? -1) >= (importRowIndex.get(r) ?? 0)) return
+          const statement = typedCostEntryBeforeWriteStatement(productId, {
+            ...('usd' in next ? { usd: (next.usd ?? null) as number | null } : {}),
+            ...('khr' in next ? { khr: (next.khr ?? null) as number | null } : {}),
+          }, importCostActor)
+          if (statement) rowWriteGroup.push(statement)
+        }
         let rowWriteGroupFinished = false
         const finishProductRowWriteGroup = () => {
           if (rowWriteGroupFinished) return
@@ -6219,6 +6281,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // column. Contrast with the legacy/default branch further
             // down, which does write branch_stock for an explicit-branch
             // row.
+            pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
@@ -6251,6 +6314,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 if (derived && !allSetColumns.includes(derived)) allSetColumns.push(derived)
               }
               const setClause = allSetColumns.map((col) => `${col}=@${col}`).join(', ')
+              pushImportedCostEntry(Number(r.existingId), {
+                ...(allSetColumns.includes('cost_price_usd') ? { usd: d.cost_price_usd } : {}),
+                ...(allSetColumns.includes('cost_price_khr') ? { khr: d.cost_price_khr } : {}),
+              })
               const params: Record<string, unknown> = { id: r.existingId, updated_at: nowIso }
               for (const col of allSetColumns) params[col] = d[col]
               rowWriteGroup.push({
@@ -6278,6 +6345,12 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // scalar after its receipt already derived the current mean.
           if ((mode === 'merge_stock' || mode === 'override_add') && appliedRowGuards.has(`row:${r.rowNumber}`)) continue
           if (mode !== 'merge_stock') {
+            // An override_add row that carries a receipt prices it as a lot
+            // and re-derives in the same group: the lot is its cost record,
+            // not an override (pushImportedCostEntry skips a row at or before
+            // its product's last receipt row). Every other field write sets
+            // the cost as typed.
+            pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
               sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
@@ -6652,6 +6725,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         // 'add' rows only -- classifyInventory only ever sets these two
         // fields when a unit cost was actually given in the file.
         if (d.cost_price_usd != null || d.cost_price_khr != null) {
+          // U-cost: recorded like a typed cost so the next stock movement
+          // (0195 triggers) does not re-derive it away.
+          const costEntry = typedCostEntryBeforeWriteStatement(Number(d.product_id), {
+            ...(d.cost_price_usd != null ? { usd: d.cost_price_usd } : {}),
+            ...(d.cost_price_khr != null ? { khr: d.cost_price_khr } : {}),
+          }, importCostActor)
+          if (costEntry) group.push(costEntry)
           group.push({
             sql: `UPDATE products SET ${d.cost_price_usd != null ? 'cost_price_usd = @usd' : ''}${d.cost_price_usd != null && d.cost_price_khr != null ? ', ' : ''}${d.cost_price_khr != null ? 'cost_price_khr = @khr' : ''}, updated_at = @updated_at WHERE id = @id`,
             params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },
@@ -6817,7 +6897,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // EVERY chunk (not just this last one) -- see runImportAnalyze's
     // finalize step for the same reasoning. Shared so the dedicated
     // stock-actions apply path can never disagree with this one.
-    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
+    const outcome = await finalizeImportApply(env, db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount, unifiedGroupCount, aggregatedSnapshotGroupCount)
     console.log('[import-timing] apply done', jobId, outcome)
     return outcome
   } catch (error) {

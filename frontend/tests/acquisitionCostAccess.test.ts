@@ -20,7 +20,9 @@ for (const user of [null, {}, { permissions: { products: true, inventory: true }
   assert.equal(canViewAcquisitionCosts(user), false)
   assert.equal(canEditAcquisitionCosts(user), false)
 }
-for (const user of [{ username: 'admin' }, { role_code: 'admin' }, { permissions: { all: true, product_cost_view: false, product_cost_edit: false } }]) {
+// The seeded admin as its session carries it: control comes from the admin
+// role, not the name (FX-sec).
+for (const user of [{ username: 'admin', role_code: 'admin', role_permissions: '{"all":true}' }, { role_code: 'admin' }, { permissions: { all: true, product_cost_view: false, product_cost_edit: false } }]) {
   assert.equal(canViewAcquisitionCosts(user), true)
   assert.equal(canEditAcquisitionCosts(user), true)
 }

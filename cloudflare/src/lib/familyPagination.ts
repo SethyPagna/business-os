@@ -93,6 +93,11 @@ export interface FamilyPaginationOptions {
   // unaffected either way since `matched`/`families` only add the extra
   // column when this is set.
   matchRankSql?: string
+  // The CTE matchRankSql reads the FTS rank from (buildProductSearchQuery's
+  // `rankCteSql`, computed once per statement). Pass it whenever you pass
+  // that search's matchRankSql -- without it the statement fails loudly
+  // with "no such table: __fts_rank" (never a silently wrong order).
+  rankCteSql?: string
   // Optional per-row DISCRETE relevance-tier expression (referencing `p.`
   // columns), built by lib/productSearchQuery.ts's buildProductSearchQuery:
   // 0 = exact barcode, 1 = exact name, 2 = name prefix, 3 = everything
@@ -159,7 +164,7 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
   const matchTierSelect = opts.matchTierSql ? `, (${opts.matchTierSql}) AS __match_tier` : ''
@@ -184,7 +189,8 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     )`
     : ''
   return `
-    WITH matched AS (
+    WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
+    matched AS (
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,

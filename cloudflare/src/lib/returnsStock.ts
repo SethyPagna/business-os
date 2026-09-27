@@ -85,23 +85,82 @@ export function resolveDamagedReturnChoice(item: { condition_tag?: unknown; dama
 
 // What one returned line refunds. The ONLY authority is the price the
 // ORIGINAL sale line charged -- not the product's current selling price, and
-// not whatever the client posted. A manual return (no sale line on file) has
-// no such authority and falls back to the posted price, which is the only
+// not whatever the client posted. A manual return (no sale on file at all)
+// has no such authority and falls back to the posted price, which is the only
 // number that exists for it.
+//
+// matchedBy says how the caller found the sale line (see matchRefundSaleLine):
+//   'sale_item' -- the line named its sale_item_id: the recorded price, as is.
+//   'product'   -- a line on a sale that omitted sale_item_id, matched by
+//                  product_id: the posted price is honoured only up to the
+//                  recorded price (a lower goodwill refund stays possible, a
+//                  higher one is capped), and an omitted price is the recorded
+//                  price.
 export function resolveRefundUnitPrice(input: {
   saleLine?: { applied_price_usd?: number | null; applied_price_khr?: number | null } | null
-  postedUsd: number
-  postedKhr: number
+  matchedBy?: 'sale_item' | 'product'
+  postedUsd: number | null | undefined
+  postedKhr: number | null | undefined
 }): { unitUsd: number; unitKhr: number; fromSaleLine: boolean } {
   const line = input.saleLine
   if (line && (line.applied_price_usd != null || line.applied_price_khr != null)) {
-    return {
-      unitUsd: Number(line.applied_price_usd) || 0,
-      unitKhr: Number(line.applied_price_khr) || 0,
-      fromSaleLine: true,
+    const recordedUsd = Number(line.applied_price_usd) || 0
+    const recordedKhr = Number(line.applied_price_khr) || 0
+    if (input.matchedBy === 'product') {
+      const cap = (posted: number | null | undefined, recorded: number) => {
+        if (posted == null || !Number.isFinite(Number(posted))) return recorded
+        return Math.min(Math.max(0, Number(posted)), recorded)
+      }
+      return { unitUsd: cap(input.postedUsd, recordedUsd), unitKhr: cap(input.postedKhr, recordedKhr), fromSaleLine: true }
     }
+    return { unitUsd: recordedUsd, unitKhr: recordedKhr, fromSaleLine: true }
   }
   return { unitUsd: Number(input.postedUsd) || 0, unitKhr: Number(input.postedKhr) || 0, fromSaleLine: false }
+}
+
+export type RefundSaleLine = {
+  id: number
+  product_id: number | null
+  applied_price_usd: number | null
+  applied_price_khr: number | null
+}
+
+export class RefundSaleLineError extends Error {
+  code: 'return_refund_price_ambiguous' | 'return_refund_sale_line_required'
+  constructor(code: RefundSaleLineError['code'], message: string) {
+    super(message)
+    this.name = 'RefundSaleLineError'
+    this.code = code
+  }
+}
+
+// Which recorded line of the ORIGINAL sale prices a return line. Mirrors the
+// quantity cap (assertReturnCreateCapacity): sale_item_id wins; without one
+// the line is matched by product_id against the sale's own lines. A line with
+// no sale_item_id whose product was sold on more than one line at DIFFERENT
+// prices is refused -- the server does not guess which price was paid.
+// Returns null only when nothing on the sale matches; callers decide whether
+// that is allowed (the quantity guards already refuse an unsold product).
+export function matchRefundSaleLine<L extends RefundSaleLine>(
+  saleLines: L[],
+  item: { sale_item_id?: number | null; product_id?: number | null },
+): { line: L; matchedBy: 'sale_item' | 'product' } | null {
+  const saleItemId = Number(item.sale_item_id) || 0
+  if (saleItemId > 0) {
+    const line = saleLines.find((candidate) => Number(candidate.id) === saleItemId)
+    return line ? { line, matchedBy: 'sale_item' } : null
+  }
+  const productId = Number(item.product_id) || 0
+  if (!(productId > 0)) return null
+  const matches = saleLines.filter((candidate) => Number(candidate.product_id) === productId)
+  if (!matches.length) return null
+  const priceKey = (candidate: L) => `${candidate.applied_price_usd ?? ''}|${candidate.applied_price_khr ?? ''}`
+  const firstKey = priceKey(matches[0])
+  if (matches.some((candidate) => priceKey(candidate) !== firstKey)) {
+    throw new RefundSaleLineError('return_refund_price_ambiguous',
+      `Product #${productId} was sold on more than one line of this sale at different prices. Pick the exact sale line being returned.`)
+  }
+  return { line: matches[0], matchedBy: 'product' }
 }
 
 export type ReturnLotSplit = { batchId: number; quantity: number }
