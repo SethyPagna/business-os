@@ -193,7 +193,8 @@ app.post('/:id/approve', async (c) => {
 
   let pendingActionMarkedAtomically = false
   try {
-    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user)
+    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user,
+      (promise) => c.executionCtx.waitUntil(promise))
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
     if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)

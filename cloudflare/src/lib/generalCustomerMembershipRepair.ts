@@ -305,11 +305,16 @@ export async function applyGeneralCustomerMembershipRepair(db: Pick<D1Compat, 'p
 
 export async function readGeneralCustomerMembershipRepairCacheToken(env: Env): Promise<string | null> { try { return await getVersionWithFallback(env, 'customers') } catch { return null } }
 
-export async function refreshGeneralCustomerMembershipRepair(env: Env, beforeToken: string | null) {
+// waitUntil: the calling request's, so the hub round trip never holds the response.
+export async function refreshGeneralCustomerMembershipRepair(env: Env, beforeToken: string | null, waitUntil?: (promise: Promise<unknown>) => void) {
   try { await bumpVersion(env, 'customers') } catch { /* surfaced as pending */ }
   let afterToken: string | null = null
   try { afterToken = await getVersionWithFallback(env, 'customers') } catch { /* surfaced as pending */ }
-  try { await broadcast(env, 'customers', { action: 'update', id: GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID, reason: 'shared_general_membership_repair' }) } catch { /* best effort */ }
+  try {
+    const sent = broadcast(env, 'customers', { action: 'update', id: GENERAL_CUSTOMER_MEMBERSHIP_REPAIR_TARGET_ID, reason: 'shared_general_membership_repair' })
+    if (waitUntil) waitUntil(sent)
+    else await sent
+  } catch { /* best effort */ }
   const cache_invalidated = beforeToken !== null && afterToken !== null && beforeToken !== afterToken
   return { cache_invalidated, refresh_pending: !cache_invalidated, broadcast_requested: true as const }
 }
