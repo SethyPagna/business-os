@@ -514,16 +514,20 @@ export async function readGeneralCustomerRepairCacheToken(env: Env): Promise<str
   }
 }
 
-export async function refreshGeneralCustomerRepair(env: Env, beforeToken: string | null) {
+// waitUntil: the calling request's, so the hub round trip never holds the
+// response. broadcast_requested is true either way -- it never claimed delivery.
+export async function refreshGeneralCustomerRepair(env: Env, beforeToken: string | null, waitUntil?: (promise: Promise<unknown>) => void) {
   try { await bumpVersion(env, 'customers') } catch { /* reported as refresh_pending below */ }
   let afterToken: string | null = null
   try { afterToken = await getVersionWithFallback(env, 'customers') } catch { /* reported below */ }
   try {
-    await broadcast(env, 'customers', {
+    const sent = broadcast(env, 'customers', {
       action: 'update',
       id: GENERAL_CUSTOMER_REPAIR_TARGET_ID,
       reason: 'anonymous_marker_repair',
     })
+    if (waitUntil) waitUntil(sent)
+    else await sent
   } catch { /* broadcast is best effort; requested remains the honest claim */ }
   const cacheInvalidated = beforeToken !== null && afterToken !== null && afterToken !== beforeToken
   return {
