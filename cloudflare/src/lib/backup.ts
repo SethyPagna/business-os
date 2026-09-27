@@ -192,6 +192,13 @@ export const BACKUP_TABLES = [
   'stock_lot_adjustment_operations',
   'transfer_operation_receipts',
   'transfer_operation_members',
+  // 0192 per-line idempotency receipts for stock adjust/receive, kept
+  // forever. Dropping them on restore reopened duplicate stock mutations on
+  // a client retry. No FKs and no triggers, so any position restores it;
+  // it sits with its sibling receipts. Deliberately NOT in
+  // SALE_REPLAY_RESTORE_BUNDLE: that would make every backup taken before
+  // this line unrestorable (the bundle refuses a document lacking a member).
+  'stock_mutation_receipts',
   'undo_snapshots',
   // A global conflict review owns its groups and independent-removal
   // receipts. Keep these after every referenced product/history/snapshot
