@@ -562,7 +562,7 @@ app.delete('/:id', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
   const id = Number(c.req.param('id'))
-  const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // A deactivated batch drops out of every FIFO picker (listBatchesForProduct
@@ -578,7 +578,16 @@ app.delete('/:id', async (c) => {
   // Keep the invariant atomic with the state change. If a receipt/correction
   // committed first, this matches zero rows; if this committed first, every
   // positive producer reactivates the lot in its own atomic write.
-  const deactivated = await db.prepare(`
+  // U-cost3: the catalog cost re-derives in the same batch. The 0195 triggers
+  // fire on stock rows and on lot INSERT/DELETE, never on this UPDATE, and
+  // with nothing on hand the formula falls back to the newest ACTIVE lot --
+  // so retiring that lot changes the figure, and without this the product
+  // kept the retired lot's cost for every later sale (the PATCH twin above
+  // already does this).
+  const recompute = catalogCostRecomputeStatement(existing.variant_product_id)
+  const results = await db.batch([
+    {
+      sql: `
     UPDATE product_batches
     SET is_active = 0, updated_at = datetime('now')
     WHERE id = @id
@@ -586,14 +595,20 @@ app.delete('/:id', async (c) => {
         SELECT 1 FROM branch_batch_stock
         WHERE batch_id = @id AND quantity > 0
       )
-  `).run({ id })
-  if (deactivated.changes === 0) {
+  `,
+      params: { id },
+    },
+    { ...recompute, sql: `${recompute.sql} AND changes() > 0` },
+  ])
+  if (Number(results[0]?.meta?.changes ?? 0) === 0) {
     return c.json({ error: activeBatchStockError(await positiveBatchStock(db, id)) }, 400)
   }
   // Perf-2: `{ success: true }` reads nothing audit() writes -- defer it
   // into the same waitUntil the broadcast already used.
   c.executionCtx.waitUntil(Promise.all([
     audit(c.env, user?.id ?? null, actorSnapshot(user), 'batch_deactivate', 'product_batch', id, null),
+    bumpVersion(c.env, 'products'),
+    broadcast(c.env, 'products', { action: 'update', id: existing.variant_product_id }),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }),
   ]))
   return c.json({ success: true })

@@ -20,6 +20,7 @@ import {
 import { multiplyMoney4 } from './moneyPrecision'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { isDamagedLotReference } from './stockCondition'
+import { catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 const RECEIPT_TYPES = new Set<string>(STOCK_RECEIPT_MOVEMENT_TYPES)
@@ -249,6 +250,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   const receiptCostUsd = m.total_cost_usd != null ? Number(m.total_cost_usd)
     : m.unit_cost_usd != null ? multiplyMoney4(Number(m.unit_cost_usd), magnitude) : null
   let usedBatchId: number | null = null
+  // Set when the revert un-receives a lot (planUnreceiveBatchStock), which may
+  // retire it -- see the catalog re-derive before the batch below.
+  let unreceived = false
   const statements: StockWriteStatement[] = []
 
   if (revertType === 'remove') {
@@ -271,7 +275,10 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       }
       // Un-purchase: the lot loses this receipt's units and money; supplier
       // and payment state stay on the row (see planUnreceiveBatchStock).
-      if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+      if (purchaseSide) {
+        statements.push(...planUnreceiveBatchStock({ batchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+        unreceived = true
+      }
     } else {
       const drained = await removeStockAcrossBatches(db, { productId, branchId, quantity: magnitude })
       usedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
@@ -282,7 +289,10 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       // is stamped with it by the same rule). Spread across several lots
       // there is no honest target and only the stock moves -- blank, the rule
       // 0084 set for the stamp itself.
-      if (purchaseSide && usedBatchId != null) statements.push(...planUnreceiveBatchStock({ batchId: usedBatchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+      if (purchaseSide && usedBatchId != null) {
+        statements.push(...planUnreceiveBatchStock({ batchId: usedBatchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+        unreceived = true
+      }
     }
   } else if (batchId != null && purchaseSide) {
     // Reverting the revert of a receipt puts the purchase back on the same
@@ -353,6 +363,12 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       batchId: usedBatchId,
     },
   })
+  // U-cost3: un-receiving can retire the lot (is_active = 0) AFTER the stock
+  // decrement already fired the 0195 trigger, which then still counted it as
+  // the newest active lot. With nothing left on hand the catalog cost is that
+  // fallback, so without this re-derive the product kept the reverted
+  // receipt's cost for every later sale. Written only when the figure moves.
+  if (unreceived) statements.push(catalogCostRecomputeIfChangedStatement(productId))
   await db.batch(statements)
   return { ok: true, revertType, quantity: magnitude, usedBatchId, movementId: m.id }
 }
