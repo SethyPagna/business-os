@@ -140,6 +140,7 @@ const authRoute = load('routes/auth.ts', {
     getLoginLockoutState: async () => ({ locked: false }),
     clearLoginLockout: noop,
     userIdLockoutKey: (id) => `uid:${id}`,
+    perNetworkLockoutKey: (key, ip) => `${key}@${ip}`,
     worstLockoutState: (...states) => states[0] || { locked: false },
   },
   '../lib/deviceTrust': { requiresDeviceApproval: () => false, checkDeviceTrust: async () => ({ status: 'approved' }) },

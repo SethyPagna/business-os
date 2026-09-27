@@ -17,7 +17,7 @@ import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
-import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState } from '../lib/loginLockout'
+import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
   buildGoogleOauthStartUrl,
@@ -76,6 +76,14 @@ const LOGIN_IP_LIMIT_MAX = 20
 const LOGIN_IP_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_USER_LIMIT_MAX = 8
 const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
+// S-auth4d: the per-account limiter and the escalating lockout are scoped to
+// the network (account + IP), so a stranger failing a username locks only
+// their own network. What still spans networks is this account-wide FAILURE
+// ceiling: guessing spread over many IPs stays bounded, and filling it takes
+// 40 failures inside the window from at least two networks (the per-IP
+// ceiling is 20), not six from anywhere. Successes never spend it.
+const LOGIN_ACCOUNT_WIDE_MAX = 40
+const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
 
 type OtpTargetUser = {
   id: number
@@ -184,7 +192,8 @@ app.post('/login', async (c) => {
   // since that window resets on its own and doesn't escalate the wait.
   // Checked before the DB credential lookup for the same reason as the IP
   // limit above -- a locked account shouldn't get a password compare at all.
-  const lockoutState = await getLoginLockoutState(c.env, body.username)
+  const typedLockoutKey = perNetworkLockoutKey(body.username, ip)
+  const lockoutState = await getLoginLockoutState(c.env, typedLockoutKey)
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
@@ -251,7 +260,7 @@ app.post('/login', async (c) => {
     if (candidates && candidates.length === 1) user = candidates[0]
   }
 
-  const userLimitKey = `user:${body.username.trim().toLowerCase()}`
+  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${ip}`
   const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
@@ -262,9 +271,14 @@ app.post('/login', async (c) => {
   // allowance, so rotating aliases multiplied the guesses. Once the account
   // is resolved, the same limiter and lockout are ALSO keyed on its id,
   // which every alias shares. The answers are the same shapes as above.
-  const resolvedLockoutKey = user ? userIdLockoutKey(user.id) : null
-  const accountLimitKey = user ? `uid:${user.id}` : null
-  if (user && resolvedLockoutKey && accountLimitKey) {
+  const resolvedLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
+  const accountLimitKey = user ? `uid:${user.id}@${ip}` : null
+  const accountWideKey = user ? `uid:${user.id}` : null
+  if (user && resolvedLockoutKey && accountLimitKey && accountWideKey) {
+    const accountWide = await peekRateLimit(c.env, 'auth:login_account', accountWideKey, LOGIN_ACCOUNT_WIDE_MAX, LOGIN_ACCOUNT_WIDE_WINDOW_MS)
+    if (!accountWide.allowed) {
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+    }
     const accountLimit = await peekRateLimit(c.env, 'auth:login_user', accountLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
     if (!accountLimit.allowed) {
       return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
@@ -293,7 +307,8 @@ app.post('/login', async (c) => {
     // Only a failure spends the per-account allowance (see LOGIN_USER_LIMIT_MAX).
     await recordRateLimitEvent(c.env, 'auth:login_user', userLimitKey)
     if (accountLimitKey) await recordRateLimitEvent(c.env, 'auth:login_user', accountLimitKey)
-    const typedFailure = await recordFailedLogin(c.env, body.username)
+    if (accountWideKey) await recordRateLimitEvent(c.env, 'auth:login_account', accountWideKey)
+    const typedFailure = await recordFailedLogin(c.env, typedLockoutKey)
     const failure = resolvedLockoutKey
       ? worstLockoutState(typedFailure, await recordFailedLogin(c.env, resolvedLockoutKey))
       : typedFailure
@@ -332,7 +347,7 @@ app.post('/login', async (c) => {
   // resets as soon as the *password* step succeeds, same as it would for
   // an account with no second factor. The OTP code itself has its own,
   // separate rate limiting (OTP_LIMIT_MAX/OTP_IP_LIMIT_MAX below).
-  await clearLoginLockout(c.env, body.username)
+  await clearLoginLockout(c.env, typedLockoutKey)
   if (resolvedLockoutKey) await clearLoginLockout(c.env, resolvedLockoutKey)
 
   // Device-approval gate -- every non-administrator role must be approved
@@ -696,8 +711,6 @@ app.post('/otp/verify', async (c) => {
   const ip = getClientIp(c.req.raw)
   const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.' }, 429)
-  const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
-  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
 
   // The first factor must have run, recently, for THIS user -- checked
   // before any DB read so an unbound caller learns nothing (same generic
@@ -705,6 +718,11 @@ app.post('/otp/verify', async (c) => {
   if (!(await isLiveOtpChallenge(c.env, body.otpChallenge, body.userId))) {
     return c.json({ error: 'Your sign-in step expired. Please enter your password again.' }, 401)
   }
+  // S-auth4d: the per-user allowance is spent only by a caller holding a live
+  // challenge (one who passed the password step). Spent before the challenge
+  // check, ten forged calls naming a user id blocked that user's second factor.
+  const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
+  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
 
   const db = getDb(c.env)
   const user = await db.prepare(`
@@ -718,10 +736,12 @@ app.post('/otp/verify', async (c) => {
 
   // Same escalating per-username lockout as /login -- a wrong second factor
   // counts like a wrong password, and a locked account waits here too. Also
-  // keyed on the account id (P2-1), the key every sign-in alias shares.
-  const accountLockoutKey = userIdLockoutKey(user.id)
+  // keyed on the account id (P2-1), the key every sign-in alias shares. Both
+  // are scoped to this network like /login (S-auth4d).
+  const usernameLockoutKey = perNetworkLockoutKey(user.username, ip)
+  const accountLockoutKey = perNetworkLockoutKey(userIdLockoutKey(user.id), ip)
   const lockoutState = worstLockoutState(
-    await getLoginLockoutState(c.env, user.username),
+    await getLoginLockoutState(c.env, usernameLockoutKey),
     await getLoginLockoutState(c.env, accountLockoutKey),
   )
   if (lockoutState.locked) {
@@ -740,7 +760,7 @@ app.post('/otp/verify', async (c) => {
   const verified = matchedStep !== null && !(await isOtpStepReplayed(c.env, user.id, matchedStep))
   if (!verified) {
     const failure = worstLockoutState(
-      await recordFailedLogin(c.env, user.username),
+      await recordFailedLogin(c.env, usernameLockoutKey),
       await recordFailedLogin(c.env, accountLockoutKey),
     )
     if (failure.locked) {
@@ -777,7 +797,7 @@ app.post('/otp/verify', async (c) => {
     }
   }
 
-  await clearLoginLockout(c.env, user.username)
+  await clearLoginLockout(c.env, usernameLockoutKey)
   await clearLoginLockout(c.env, accountLockoutKey)
   await markOtpStepUsed(c.env, user.id, matchedStep as number)
   await consumeOtpChallenge(c.env, body.otpChallenge)
@@ -1024,21 +1044,24 @@ app.post('/password-reset/otp', async (c) => {
   // Failures feed the same escalating lockout as sign-in (lib/loginLockout.ts),
   // on the typed value and on the account id, so a guessed-at account also
   // waits at /login and /otp/verify.
-  const accountLockoutKey = user ? userIdLockoutKey(user.id) : null
+  // Scoped to this network like /login (S-auth4d); the account bucket above
+  // stays account-wide (P1-1).
+  const identifierLockoutKey = perNetworkLockoutKey(identifier, ip)
+  const accountLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
   const lockedAnswer = (state: { retryAfterSeconds: number }) => c.json({
     error: `Too many failed attempts. Please wait ${state.retryAfterSeconds} seconds and try again.`,
     locked: true,
     retryAfterSeconds: state.retryAfterSeconds,
   }, 429)
   const lockoutState = worstLockoutState(
-    await getLoginLockoutState(c.env, identifier),
+    await getLoginLockoutState(c.env, identifierLockoutKey),
     ...(accountLockoutKey ? [await getLoginLockoutState(c.env, accountLockoutKey)] : []),
   )
   if (lockoutState.locked) return lockedAnswer(lockoutState)
 
   const invalidReset = async () => {
     const failure = worstLockoutState(
-      await recordFailedLogin(c.env, identifier),
+      await recordFailedLogin(c.env, identifierLockoutKey),
       ...(accountLockoutKey ? [await recordFailedLogin(c.env, accountLockoutKey)] : []),
     )
     if (failure.locked) return lockedAnswer(failure)
@@ -1059,7 +1082,7 @@ app.post('/password-reset/otp', async (c) => {
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
   await setPasswordMustChange(db, user.id, false)
   await revokeUserSessions(c.env, user.id)
-  await clearLoginLockout(c.env, identifier)
+  await clearLoginLockout(c.env, identifierLockoutKey)
   if (accountLockoutKey) await clearLoginLockout(c.env, accountLockoutKey)
   await audit(c.env, user.id, user.username, 'password_reset_complete', 'user', user.id, { method: 'otp' })
 
