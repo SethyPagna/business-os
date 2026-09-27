@@ -21,6 +21,7 @@ import Modal from '../shared/Modal'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -519,6 +520,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Rename prompt, same flow as CustomersTab/SuppliersTab: the save awaits
   // the user's carry / only-this-one choice before the PUT goes out.
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
@@ -978,7 +980,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleDelete = async (c: DeliveryContact) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete "${c.name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_delivery', 'Delete delivery contact?'),
+      message: c.name,
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -1015,7 +1022,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_delivery_count', 'Delete selected delivery contacts?'),
+      items: [{ label: tr('selected', 'Selected'), value: selectedIds.size }],
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1465,6 +1477,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         </Suspense>
       ) : null}
       <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(key, fallback || key)} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </div>
   )
 }

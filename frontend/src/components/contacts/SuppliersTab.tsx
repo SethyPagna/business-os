@@ -21,6 +21,7 @@ import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -536,6 +537,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([])
   const [search, setSearch] = useState('')
   const appliedInitialSearchRef = useRef<string | undefined>(undefined)
@@ -1005,7 +1007,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
   const handleDelete = async (supplier: SupplierRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete supplier "${supplier.name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_supplier', 'Delete supplier?'),
+      message: supplier.name,
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -1044,7 +1051,12 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} supplier(s)?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_suppliers', 'Delete selected suppliers?'),
+      items: [{ label: tr('selected', 'Selected'), value: selectedIds.size }],
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1588,6 +1600,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         </Suspense>
       ) : null}
       <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </div>
   )
 }
