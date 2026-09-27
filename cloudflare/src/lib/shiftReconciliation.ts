@@ -296,6 +296,15 @@ async function readCashConfig(env: Env): Promise<ShiftCashOptions> {
  * slightly different clause would stop summing to the total the drawer was
  * reconciled against, and the shift report would foot against nothing.
  */
+/**
+ * Which fees are the DELIVERY half of the expense split. One predicate for
+ * both halves: shiftDeliveryFeeExpenses sums the rows it matches, and
+ * shiftExpenses(..., { excludeDeliveryFees }) lists the rows it does not, so
+ * a surface that prints the split with per-expense rows (the Telegram shift
+ * report) lists exactly the fees composeShiftFigures counts as "other".
+ */
+const DELIVERY_FEE_PREDICATE = "COALESCE(fees.fee_type, '') = 'delivery'"
+
 function shiftFeeWhere(shift: ShiftReconciliationSession, nowMs: number) {
   const { clauses, params } = shiftWindowWhere('fees', shiftFilters(shift, nowMs))
   // fees has no cashier_id -- the equivalent column is created_by. Drop the
@@ -318,9 +327,13 @@ export async function shiftExpenses(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number,
-  options: { overflowLabel?: string } = {},
+  options: { overflowLabel?: string; excludeDeliveryFees?: boolean } = {},
 ) {
   const { clauses: feeClauses, params } = shiftFeeWhere(shift, nowMs)
+  // The "other expenses" rows only: every fee minus the delivery half, which
+  // composeShiftFigures moves into the delivery cost. The total this returns
+  // is then that same "other" figure, row for row.
+  if (options.excludeDeliveryFees) feeClauses.push(`NOT (${DELIVERY_FEE_PREDICATE})`)
   const rows = await getDb(env).prepare(`
     SELECT COALESCE(NULLIF(TRIM(label), ''), fee_type, 'Expense') AS label,
       COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr,
@@ -563,7 +576,7 @@ export async function shiftDeliveryFeeExpenses(
   nowMs: number,
 ): Promise<ShiftMoney> {
   const { clauses, params } = shiftFeeWhere(shift, nowMs)
-  clauses.push("COALESCE(fees.fee_type, '') = 'delivery'")
+  clauses.push(DELIVERY_FEE_PREDICATE)
   const row = await getDb(env).prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd,
       COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE ${clauses.join(' AND ')}`)
     .get<{ usd: number; khr: number }>(params)

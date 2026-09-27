@@ -15,8 +15,8 @@ import {
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  computeShiftReconciliation, loadShiftReconciliation, shiftExpenses, shiftFilters, summarizeShiftCash,
-  type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, loadShiftReconciliation, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash,
+  type ShiftMoney, type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -968,6 +968,17 @@ export type ShiftReportFigures = {
    *  shiftExpenses(...).details, already capped and folded there). */
   expenseDetails?: Array<{ label: string; usd: number; khr: number }>
   /**
+   * The delivery-cost / other-expenses split, straight off
+   * lib/shiftReconciliation.ts composeShiftFigures -- the SAME function the
+   * in-app shift report renders (shiftReportModel.ts delivery_actual_cost and
+   * shift_other_expenses). A fee typed 'delivery' is delivery cost there, so
+   * it is delivery cost here too, and expenseDetails then lists only the
+   * OTHER fees. Optional only for callers without a database (the pure
+   * tests): when absent the split is derived from the fields above through
+   * the same function, with no fee known to be delivery-typed.
+   */
+  expenseSplit?: { deliveryCost: ShiftMoney; otherExpenses: ShiftMoney }
+  /**
    * Stock removed entirely during the shift, at cost. Optional: absent means
    * the kernel could not scope the window to stock movements, not that
    * nothing was destroyed, so the row is omitted rather than printed as $0.00.
@@ -1148,27 +1159,40 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     ]))
     : [EMPTY_SECTION]))
 
-  // 6. Expenses -- every expense paid out of this drawer as its own row, then
-  // the ONE total. The total is expenseTotals(): the fees plus the courier
-  // money actually paid out, the same sum the day summary prints, so the
-  // courier payout is a row here rather than a figure with no row.
-  const expenses = expenseTotals({
-    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
-    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
-  })
+  // 6. Expenses -- the delivery cost, then every OTHER expense paid out of
+  // this drawer as its own row, then the ONE total. The split is
+  // composeShiftFigures' (lib/shiftReconciliation.ts), the function the
+  // in-app shift report renders, so a fee typed 'delivery' is delivery cost
+  // on the phone exactly as it is in the app (H-io #2, 27 Sep 2026: this
+  // section used to count only the sale-level courier payout as delivery and
+  // list the delivery-typed fee under its own label). The total is still
+  // every fee plus the courier payout -- the split moves money between the
+  // two rows, never in or out of the section.
+  const split = figures.expenseSplit ?? (() => {
+    const derived = composeShiftFigures({
+      opening: null, counted: null, totals: null,
+      expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
+      deliveryFees: null,
+      courier: { usd: figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0, khr: 0 },
+    })
+    return { deliveryCost: derived.delivery_cost, otherExpenses: derived.other_expenses }
+  })()
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [usd(expenses.courierUsd)]))
+  if (split.deliveryCost.usd || split.deliveryCost.khr) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [money(split.deliveryCost.usd, split.deliveryCost.khr)]))
   const details = figures.expenseDetails || []
   if (details.length) {
     for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [money(detail.usd, detail.khr)]))
-  } else if (expenses.otherUsd || expenses.otherKhr) {
+  } else if (split.otherExpenses.usd || split.otherExpenses.khr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(expenses.otherUsd, expenses.otherKhr)]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(split.otherExpenses.usd, split.otherExpenses.khr)]))
   }
   lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
-    ? [...expenseRows, labeled('total', money(expenses.totalUsd, expenses.otherKhr))]
+    ? [...expenseRows, labeled('total', money(
+      round2(split.deliveryCost.usd + split.otherExpenses.usd),
+      split.deliveryCost.khr + split.otherExpenses.khr,
+    ))]
     : [EMPTY_SECTION]))
 
   return lines.join('\n')
@@ -1220,14 +1244,23 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
   // 2026: the owner's reference layout has a section for each. They are the
   // SAME kernel entry points routes/reports.ts reads, so the phone message and
   // the Reports hub cannot disagree about a method's takings.
-  const [totals, counts, expenses, reconciliation, payments, couriers] = await Promise.all([
+  const [totals, counts, otherExpenses, deliveryFees, reconciliation, payments, couriers] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
-    shiftExpenses(env, shift, nowMs, { overflowLabel }),
+    // The per-expense rows list only the OTHER fees: the delivery-typed ones
+    // are inside the delivery cost row, as composeShiftFigures splits them.
+    shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }),
+    shiftDeliveryFeeExpenses(env, shift, nowMs),
     loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
   ])
+  // Every fee and every courier payout, as the drawer was reconciled against
+  // them -- the same two inputs loadShiftFigures hands composeShiftFigures.
+  const split = composeShiftFigures({
+    opening: null, counted: null, totals: null,
+    expenses: reconciliation.expenses, deliveryFees, courier: reconciliation.courier,
+  })
   return {
     invoices: counts.invoices,
     cancelled: counts.cancelled,
@@ -1260,9 +1293,11 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // day summary and the Reports hub read, so the surfaces cannot disagree.
     removalLossUsd: totals.removal_loss_usd,
     removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
-    otherExpenseUsd: expenses.usd,
-    otherExpenseKhr: expenses.khr,
-    expenseDetails: expenses.details,
+    // Every fee paid out of the drawer (the reconciliation's own figure).
+    otherExpenseUsd: reconciliation.expenses.usd,
+    otherExpenseKhr: reconciliation.expenses.khr,
+    expenseDetails: otherExpenses.details,
+    expenseSplit: { deliveryCost: split.delivery_cost, otherExpenses: split.other_expenses },
     // Eight rows each at most -- a phone message is not a report page -- with
     // the tail folded into ONE "Other" row so the section still adds up to the
     // money above it.
