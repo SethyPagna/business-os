@@ -300,22 +300,22 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
             ) : null}
             <div className="rounded-xl bg-gray-50 p-4 dark:bg-gray-700/50">
               <div className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
-                {tr('accounting_summary', 'Accounting Summary')} {preview.period?.start} to {preview.period?.end}
+                {tr('accounting_summary', 'Accounting Summary')} {tr('accounting_summary_period', '{start} to {end}').replace('{start}', String(preview.period?.start ?? '')).replace('{end}', String(preview.period?.end ?? ''))}
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 {([
-                  ['Total Transactions', preview.summary?.total_transactions],
-                  ['Completed Sales', preview.summary?.completed_transactions],
-                  ['Revenue (USD)', fmtUSD(preview.summary?.revenue_usd || 0)],
-                  ['COGS (USD)', fmtUSD(preview.summary?.cogs_usd || 0)],
-                  ['Gross Profit', fmtUSD(preview.summary?.gross_profit_usd || 0)],
-                  ['Margin %', `${preview.summary?.gross_margin_pct || 0}%`],
-                  ['Discounts', fmtUSD(preview.summary?.total_discounts_usd || 0)],
-                  ['Tax Collected', fmtUSD(preview.summary?.total_tax_usd || 0)],
-                  ['Delivery Fees', fmtUSD(preview.summary?.total_delivery_usd || 0)],
-                  ['Total Refunds', fmtUSD(preview.summary?.total_refunds_usd || 0)],
-                  ['Net Revenue', fmtUSD(preview.summary?.net_revenue_usd || 0)],
-                  ['Avg Order', fmtUSD(preview.summary?.avg_order_usd || 0)],
+                  [tr('total_transactions', 'Total Transactions'), preview.summary?.total_transactions],
+                  [tr('completed_sales', 'Completed Sales'), preview.summary?.completed_transactions],
+                  [tr('revenue_usd', 'Revenue (USD)'), fmtUSD(preview.summary?.revenue_usd || 0)],
+                  [`${tr('cogs', 'COGS')} (USD)`, fmtUSD(preview.summary?.cogs_usd || 0)],
+                  [tr('gross_profit', 'Gross Profit'), fmtUSD(preview.summary?.gross_profit_usd || 0)],
+                  [tr('margin_pct', 'Margin %'), `${preview.summary?.gross_margin_pct || 0}%`],
+                  [tr('discounts', 'Discounts'), fmtUSD(preview.summary?.total_discounts_usd || 0)],
+                  [tr('tax_collected', 'Tax Collected'), fmtUSD(preview.summary?.total_tax_usd || 0)],
+                  [tr('delivery_fees', 'Delivery Fees'), fmtUSD(preview.summary?.total_delivery_usd || 0)],
+                  [tr('total_refunded', 'Total Refunded'), fmtUSD(preview.summary?.total_refunds_usd || 0)],
+                  [tr('net_revenue', 'Net Revenue'), fmtUSD(preview.summary?.net_revenue_usd || 0)],
+                  [tr('avg_order', 'Avg Order'), fmtUSD(preview.summary?.avg_order_usd || 0)],
                 ] satisfies Array<[string, string | number | undefined]>).map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between gap-3">
                     <span className="text-gray-500 dark:text-gray-400">{label}</span>
@@ -327,12 +327,12 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
 
             {preview.by_status?.length ? (
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">By Status</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{tr('by_status', 'By Status')}</div>
                 <div className="space-y-1">
                   {preview.by_status.map((row) => (
                     <div key={String(row.status || 'status')} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
                       <StatusBadge status={row.status} t={t} />
-                      <span className="text-gray-500">{row.count} sales · {fmtUSD(row.revenue || 0)}</span>
+                      <span className="text-gray-500">{tr('export_status_sales_count', '{count} sales').replace('{count}', String(row.count ?? 0))} · {fmtUSD(row.revenue || 0)}</span>
                     </div>
                   ))}
                 </div>
@@ -341,12 +341,12 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
 
             {preview.by_product?.length ? (
               <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Top Products</div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{tr('top_products', 'Top Products')}</div>
                 <div className="space-y-1">
                   {preview.by_product.slice(0, 8).map((row, index) => (
                     <div key={`${row.product_id || row.product_name}-${index}`} className="flex items-center justify-between border-b border-gray-100 py-1 text-sm dark:border-gray-700">
                       <span className="mr-2 min-w-0 flex-1 detail-scroll-text text-gray-700 dark:text-gray-300">{row.product_name}</span>
-                      <span className="shrink-0 text-gray-500">{row.qty_sold} sold · {fmtUSD(row.revenue_usd || 0)}</span>
+                      <span className="shrink-0 text-gray-500">{tr('export_product_qty_sold', '{count} sold').replace('{count}', String(row.qty_sold ?? 0))} · {fmtUSD(row.revenue_usd || 0)}</span>
                     </div>
                   ))}
                 </div>

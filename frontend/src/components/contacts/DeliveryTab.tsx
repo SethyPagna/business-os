@@ -395,9 +395,9 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
       <div className="space-y-3">
         <div>
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('name')} <span className="text-xs font-normal text-gray-400">(driver / rider)</span>
+            {t('name')} <span className="text-xs font-normal text-gray-400">({t('delivery_driver_or_rider')})</span>
           </label>
-          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
+          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} autoFocus placeholder={t('driver_name')} />
         </div>
         <div>
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

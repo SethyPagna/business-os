@@ -1367,7 +1367,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     // the pending one and no status write started meanwhile.
     if (currentPendingDirectStatus()?.entityId !== pending.entityId || statusActionRef.current.size > 0) return
     try { savePendingDirectStatus(pending.entityId, null) }
-    catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
+    catch (error) { notify(getErrorMessage(error, translateOr('pending_status_retry_discard_failed', 'Unable to discard the pending retry.', 'មិនអាចបោះបង់ការព្យាយាមឡើងវិញដែលកំពុងរង់ចាំបានទេ។')), 'error') }
   }
 
   // S4-24b: add product lines to a sale that already exists. The server does
@@ -2242,7 +2242,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       }
       notify(unpaid
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
-        : getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
+        : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')

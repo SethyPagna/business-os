@@ -194,7 +194,7 @@ export default function SalesListSurface({
                       className="h-4 w-4 rounded"
                       checked={filteredIds.length > 0 && selectedIds.size === filteredIds.length}
                       onChange={(event) => toggleSelectAll(event.target.checked)}
-                      aria-label="Select all sales"
+                      aria-label={t('select_all')}
                     />
                   ) : null}
                 </th>
@@ -253,7 +253,7 @@ export default function SalesListSurface({
                                   if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                                 }}
                                 onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                                aria-label={`Select ${section.label}`}
+                                aria-label={`${t('select')} ${section.label}`}
                               />
                               <span>{section.label}</span>
                               <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
@@ -290,7 +290,7 @@ export default function SalesListSurface({
                                     if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                                   }}
                                   onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                  aria-label={`Select ${group.label}`}
+                                  aria-label={`${t('select')} ${group.label}`}
                                 />
                                 ) : null}
                                 <span className="font-medium text-slate-600 dark:text-slate-300">{group.label}</span>
@@ -338,7 +338,7 @@ export default function SalesListSurface({
                                   className="h-4 w-4 rounded"
                                   checked={rowSelected}
                                   onChange={() => toggleSelected(sale.id)}
-                                  aria-label={`Select ${sale.receipt_number}`}
+                                  aria-label={`${t('select')} ${sale.receipt_number}`}
                                 />
                                 ) : null}
                               </td>
@@ -442,7 +442,7 @@ export default function SalesListSurface({
                           if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                         }}
                         onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                        aria-label={`Select ${section.label}`}
+                        aria-label={`${t('select')} ${section.label}`}
                       />
                       <span>{section.label}</span>
                       <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
@@ -473,7 +473,7 @@ export default function SalesListSurface({
                             if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                           }}
                           onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                          aria-label={`Select ${group.label}`}
+                          aria-label={`${t('select')} ${group.label}`}
                         />
                         ) : null}
                         <span>{group.label}</span>
@@ -521,7 +521,7 @@ export default function SalesListSurface({
                                 checked={cardSelected}
                                 onChange={() => toggleSelected(sale.id)}
                                 onClick={(event) => event.stopPropagation()}
-                                aria-label={`Select ${sale.receipt_number}`}
+                                aria-label={`${t('select')} ${sale.receipt_number}`}
                               />
                               ) : null}
                               {/* The card layout is the phone one (<768px). Keep

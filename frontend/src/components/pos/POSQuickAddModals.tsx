@@ -144,23 +144,25 @@ export default function POSQuickAddModals({
         <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
           <DuplicateDecisionPanel check={deliveryDuplicateCheck} entityLabel="delivery contact" saving={savingDelivery} onUseExisting={handleUseExistingDelivery} onCreateSeparate={handleCreateSeparateDelivery} onBack={clearDeliveryDuplicateCheck} t={t} />
           <div>
-            <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Driver / Rider Name</label>
+            <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t('name')} <span className="font-normal text-gray-400">({t('delivery_driver_or_rider')})</span>
+            </label>
             <input id="pos-quick-delivery-name" name="pos_quick_delivery_name" className="input" value={newDeliveryForm.name} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, name: event.target.value }))} autoComplete="name" autoFocus />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label htmlFor="pos-quick-delivery-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <label htmlFor="pos-quick-delivery-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('phone')}</label>
               <input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={(event) => {
                 const phone = formatPhoneInputElement(event.currentTarget)
                 setNewDeliveryForm((form) => ({ ...form, phone }))
               }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} placeholder="012 345 678" autoComplete="tel" inputMode="tel" />
             </div>
             <div>
-              <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Area / Zone</label>
-              <input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, area: event.target.value }))} placeholder="Central, North" autoComplete="address-level2" />
+              <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('area_zone')}</label>
+              <input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, area: event.target.value }))} placeholder={t('delivery_area_placeholder')} autoComplete="address-level2" />
             </div>
           </div>
-          <p className="text-xs text-gray-400">Enter at least a driver name or phone number.</p>
+          <p className="text-xs text-gray-400">{t('delivery_option_hint')}</p>
         </QuickAddModal>
       ) : null}
     </>
