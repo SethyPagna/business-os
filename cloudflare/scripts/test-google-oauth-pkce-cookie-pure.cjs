@@ -47,6 +47,7 @@ const SCHEMA = `
     is_active INTEGER DEFAULT 1, deleted_at TEXT, updated_at TEXT,
     google_subject TEXT, google_email TEXT, google_email_verified INTEGER DEFAULT 0, google_linked_at TEXT
   );
+  CREATE TABLE roles (id INTEGER PRIMARY KEY, name TEXT, permissions TEXT DEFAULT '{}', code TEXT);
 `
 
 const noop = async () => {}

@@ -61,6 +61,16 @@ import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
 } from './portalTranslationData.ts'
+import {
+  applyPrivateAiRead,
+  createPrivateAiState,
+  editPrivateAi,
+  isPrivateAiKey,
+  privateAiBlocksSave,
+  privateAiFormValues,
+  privateAiSaveChanges,
+  settlePrivateAiSave,
+} from './portalPrivateAi.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -691,8 +701,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_ai_title: config.aiTitle || '',
     customer_portal_ai_intro: config.aiIntro || '',
     customer_portal_ai_disclaimer: config.aiDisclaimer || '',
-    customer_portal_ai_provider_id: config.aiProviderId ? String(config.aiProviderId) : '',
-    customer_portal_ai_prompt: config.aiPrompt || '',
+    // The assistant's prompt and provider are not website config: the editor
+    // keeps them in portalPrivateAi.ts state, read from the server's answer.
     customer_portal_show_faq: !!config.showFaq,
     customer_portal_faq_title: config.faqTitle || '',
     customer_portal_faq_items: JSON.stringify(Array.isArray(config.faqItems) ? config.faqItems : []),
@@ -834,11 +844,6 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     aiTitle: String(draft.customer_portal_ai_title || config.aiTitle || 'Beauty Assistant').trim() || 'Beauty Assistant',
     aiIntro: String(draft.customer_portal_ai_intro || config.aiIntro || '').trim(),
     aiDisclaimer: String(draft.customer_portal_ai_disclaimer || config.aiDisclaimer || 'AI generated, for reference only.').trim() || 'AI generated, for reference only.',
-    aiProviderId: (() => {
-      const id = Number(draft.customer_portal_ai_provider_id || config.aiProviderId || 0) || 0
-      return id > 0 ? id : null
-    })(),
-    aiPrompt: String(draft.customer_portal_ai_prompt || config.aiPrompt || '').trim(),
     showFaq: toBoolean(draft.customer_portal_show_faq, config.showFaq),
     faqTitle: String(draft.customer_portal_faq_title || config.faqTitle || 'Frequently asked questions').trim() || 'Frequently asked questions',
     faqItems: (() => {
@@ -1246,6 +1251,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   ))
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
+  const [privateAi, setPrivateAi] = useState(createPrivateAiState)
   // Same viewer-owned page size as the standalone storefront
   // (PublicCatalogPage.tsx): the in-app public route and the editor preview
   // mount the same pager, so the 20/50/100 choice has to behave identically on
@@ -1353,6 +1359,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const assistantInFlightRef = useRef(false)
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
+  const privateAiReadRef = useRef(0)
   const skipNextBootstrappedProductSearchRef = useRef(false)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
   const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
@@ -1694,6 +1701,25 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     return aliveRef.current && Number(loadRequestRef.current) === Number(requestId)
   }
 
+  // The assistant's prompt and provider come only from the server's own
+  // settings answer (portalPrivateAi.ts): the public website config never
+  // carries them, and the app's settings map may be empty or device-only.
+  async function loadPrivateAiSettings() {
+    const readId = beginTrackedRequest(privateAiReadRef)
+    let settings: unknown = null
+    try {
+      settings = await withLoaderTimeout(
+        () => getCatalogApi().getSettings({ serverOnly: true }),
+        'Portal AI settings',
+        CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
+      )
+    } catch {
+      settings = null
+    }
+    if (!aliveRef.current || !isTrackedRequestCurrent(privateAiReadRef, readId)) return
+    setPrivateAi((current) => applyPrivateAiRead(current, settings))
+  }
+
   async function loadPortalEditorData(
     requestId: number,
     nextConfig: PortalConfig,
@@ -1804,6 +1830,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
       return
     }
+
+    // Read beside the bootstrap, not after it, so a failed bootstrap never
+    // leaves the assistant fields waiting.
+    if (canEditConfig) void loadPrivateAiSettings()
 
     const bootstrapResult = await withLoaderTimeout(
       () => getCatalogApi().getPortalBootstrap(),
@@ -2302,6 +2332,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   function setDraft(key: string, value: unknown) {
     setEditorDirty(true)
+    if (isPrivateAiKey(key)) {
+      setPrivateAi((current) => editPrivateAi(current, key, value))
+      return
+    }
     setEditorDraft((current) => ({ ...current, [key]: value }))
   }
 
@@ -2634,6 +2668,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the website.'), 'error')
         return
       }
+      if (canEditConfig && privateAiBlocksSave(privateAi)) {
+        notify(copy('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.'), 'error')
+        return
+      }
       const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/')
       if (isReservedPortalPath(normalizedPath)) {
         notify(copy('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.'), 'error')
@@ -2776,8 +2814,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_ai_title: String(editorDraft.customer_portal_ai_title || '').trim(),
         customer_portal_ai_intro: String(editorDraft.customer_portal_ai_intro || '').trim(),
         customer_portal_ai_disclaimer: String(editorDraft.customer_portal_ai_disclaimer || '').trim(),
-        customer_portal_ai_provider_id: String(editorDraft.customer_portal_ai_provider_id || '').trim(),
-        customer_portal_ai_prompt: String(editorDraft.customer_portal_ai_prompt || '').trim(),
         customer_portal_show_faq: editorDraft.customer_portal_show_faq ? 'true' : 'false',
         customer_portal_faq_title: String(editorDraft.customer_portal_faq_title || '').trim(),
         customer_portal_faq_items: JSON.stringify(faqItems),
@@ -2824,10 +2860,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
       }
+      // The assistant's prompt and provider ride only when the person changed
+      // one after it loaded; a change to blank is named in clearKeys, since
+      // the Worker otherwise keeps a blank for them as stored.
+      const privateAiChanges = privateAiSaveChanges(privateAi)
       const savePayload = Object.fromEntries(
-        Object.entries(fullSavePayload).filter(([key]) => canWriteSettingKey(key, hasPermission)),
+        Object.entries({ ...fullSavePayload, ...privateAiChanges.updates }).filter(([key]) => canWriteSettingKey(key, hasPermission)),
       )
-      const result = await saveSettings(savePayload, { baselineSettings }) as LegacyCatalogRecord
+      const clearKeys = privateAiChanges.clearKeys.filter((key) => Object.prototype.hasOwnProperty.call(savePayload, key))
+      const result = await saveSettings(savePayload, { baselineSettings, clearKeys }) as LegacyCatalogRecord
       if (result?.conflict) {
         notify(copy('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
@@ -2837,6 +2878,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // saved (posts and their order included), so a failed write stops here
       // and the edits stay unsaved for another try.
       if (result?.success === false) return
+      // What this save sent is now the stored value; a read begun before it
+      // landed would bring back the old one, so it is dropped.
+      invalidateTrackedRequest(privateAiReadRef)
+      setPrivateAi((current) => settlePrivateAiSave(current, savePayload))
       setDraft('customer_portal_logo_image', sanitizedLogoImage)
       setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
       setDraft('customer_portal_cover_image', sanitizedCoverImage)
@@ -3440,7 +3485,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       dragAboutBlockId,
       dragPromoItemId,
       editorDirty,
-      editorDraft,
+      editorDraft: { ...editorDraft, ...privateAiFormValues(privateAi) },
       editorSaving,
       editorSections,
       faqItems,
@@ -3456,6 +3501,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       openPortalImage,
       previewConfig,
       previewSectionRef,
+      privateAiStatus: privateAi.status,
       products,
       promoItems,
       publicPortalUrl,

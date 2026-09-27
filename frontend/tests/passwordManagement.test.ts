@@ -182,7 +182,10 @@ await runTest('peer-admin reset uses dedicated admin endpoint and permits managi
   assert.match(usersSource, /import \{ isAdminControlUser,[\s\S]*?\} from '\.\.\/\.\.\/utils\/permissions\.ts'/, 'Users must consume the shared frontend/backend-parity admin authority')
   assert.match(usersSource, /const canManage = isAdminControlUser\(currentUser\)/, 'peer-admin management must use the effective shared admin decision')
   assert.equal(isAdminControlUser({ role_code: 'admin' }), true, 'the admin role remains an administrator')
-  assert.equal(isAdminControlUser({ username: 'admin' }), true, 'the reserved admin identity remains an administrator')
+  // FX-sec (27 Sep 2026): the name alone no longer grants control -- the
+  // seeded admin keeps it through its admin role_code.
+  assert.equal(isAdminControlUser({ username: 'admin', role_code: 'admin' }), true, 'the seeded admin identity remains an administrator')
+  assert.equal(isAdminControlUser({ username: 'admin' }), false, 'the username alone does not grant administrator control')
   assert.equal(isAdminControlUser({ role_code: 'employee', role_permissions: { all: true } }), true, 'effective role-level all access remains administrative')
   assert.equal(isAdminControlUser({ role_code: 'employee', role_permissions: { all: true }, permissions: { all: false } }), false, 'an explicit user override must narrow a role-level all grant')
   assert.match(usersSource, /return canManage && !!targetUser/)

@@ -2774,7 +2774,7 @@ assert.doesNotMatch(
 )
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(confirmation\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
   'factory reset should timeout slow destructive reset actions',
 )
 assert.match(

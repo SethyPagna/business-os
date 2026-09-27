@@ -139,8 +139,32 @@ app.get('/meta', async (c) => {
 // this port invented and which the real frontend never calls). Any key in
 // the body except expectedUpdatedAt/expected_updated_at/updatedAt is
 // treated as a setting to write.
-const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at'])
+const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys'])
 const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
+
+// The website assistant's prompt and provider (FX-sec2, refuter R-sec F2).
+// The public portal config never carries them, so an editor that had not
+// loaded them sent them back blank and wiped the stored prompt. A blank
+// (empty, whitespace or null) value for these keys is left as stored unless
+// the request names the key in `clearKeys`, its explicit clear list.
+const CLEAR_ONLY_ON_REQUEST_SETTING_KEYS = new Set(['customer_portal_ai_prompt', 'customer_portal_ai_provider_id'])
+
+// Drops each unrequested blank from the body and returns the dropped keys.
+function keepUnclearedBlankSettings(body: Record<string, unknown>): string[] {
+  const clearKeys = new Set(Array.isArray(body.clearKeys) ? body.clearKeys.filter((key) => typeof key === 'string') : [])
+  const kept: string[] = []
+  for (const key of Object.keys(body)) {
+    const raw = body[key]
+    if (!CLEAR_ONLY_ON_REQUEST_SETTING_KEYS.has(key) || (raw != null && (typeof raw !== 'string' || raw.trim() !== ''))) continue
+    if (clearKeys.has(key)) {
+      body[key] = ''
+    } else {
+      delete body[key]
+      kept.push(key)
+    }
+  }
+  return kept
+}
 
 function isDedicatedEndpointSettingKey(key: string): boolean {
   return DEDICATED_ENDPOINT_SETTING_KEYS.has(String(key || '').trim().toLowerCase())
@@ -918,8 +942,11 @@ function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<Record<string, unknown>>()
+  const keptAsStored = keepUnclearedBlankSettings(body)
   const attemptedKeys = Object.keys(body).filter((key) => !METADATA_KEYS.has(key))
   if (attemptedKeys.length === 0) {
+    // Only unrequested blanks were sent: nothing to write, nothing changed.
+    if (keptAsStored.length) return c.json({ updatedAt: await getSettingsUpdatedAt(c.env), keys: [] })
     return c.json({ error: 'No settings provided' }, 400)
   }
 

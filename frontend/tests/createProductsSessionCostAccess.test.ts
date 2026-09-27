@@ -45,7 +45,8 @@ for (const [view, edit] of [[false, false], [false, true], [true, false], [true,
   assert.equal(html.includes('Cost edit permission is required'), !edit, 'receive denial is explained before submit')
   assert.deepEqual(globals.__sessionCostDraft, draft, 'permission rendering never destroys or zeros the draft')
 }
-const admin = renderToStaticMarkup(React.createElement(module.exports.default, { ...props, user: { username: 'admin' } }))
+// The admin sees costs through the admin role, not the name (FX-sec).
+const admin = renderToStaticMarkup(React.createElement(module.exports.default, { ...props, user: { username: 'admin', role_code: 'admin' } }))
 assert.ok(admin.includes('1753.08'))
 const defaultDenied = renderToStaticMarkup(React.createElement(module.exports.default, { ...props, user: { id: 7, permissions: { products: true, inventory: true } } }))
 assert.ok(!defaultDenied.includes('1753.08') && defaultDenied.includes('Cost edit permission is required'), 'unset grants deny costs by default')

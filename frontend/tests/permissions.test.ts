@@ -87,9 +87,17 @@ for (const products of [false, 'review', true] as const) for (const blocked of [
   assert.equal(authority.can('products', 'add'), products !== false && !blocked)
   assert.equal(authority.getPermissionTier('products'), products === true ? 'full' : products === 'review' ? 'review' : 'none')
 }
-for (const identity of [{ username: ' ADMIN ' }, { role_code: ' AdMiN ' }, { role_permissions: { all: true } }]) {
+for (const identity of [{ role_code: ' AdMiN ' }, { role_permissions: { all: true } }]) {
   const actor = { ...identity, permissions: { products: false, 'products:add': false } }
   assert.equal(effectivePermissions(actor).can('products', 'add'), true, 'administrator bypasses narrowing')
+}
+// A name is not a credential: "admin" with no admin role and no all grant is
+// an ordinary user on both sides (FX-sec).
+for (const username of ['admin', ' ADMIN ']) {
+  const actor = { username, role_code: 'employee', permissions: { products: false, 'products:add': false } }
+  assert.equal(isAdminControlUser(actor), false, 'the admin username alone is not administrator control')
+  assert.equal(workerPermissions.isAdminControlUser(actor), false, 'the Worker agrees')
+  assert.equal(effectivePermissions(actor).can('products', 'add'), false)
 }
 for (const sales of [false, 'view', true] as const) {
   const authority = effectivePermissions({ permissions: { sales, 'sales:status': true } })
@@ -121,7 +129,7 @@ for (const roleValue of overrides) for (const userValue of overrides) {
     for (const sales of [false, 'false', 1, 'view']) {
       assert.equal(effectivePermissions({ ...actor, permissions: { ...personal, sales } }).can('sales', 'status'), false)
     }
-    assert.equal(effectivePermissions({ ...actor, username: ' ADMIN ' }).can('sales', 'status'), true)
+    assert.equal(effectivePermissions({ ...actor, role_code: ' ADMIN ' }).can('sales', 'status'), true)
     overrideCases++
   }
 }
