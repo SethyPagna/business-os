@@ -1854,7 +1854,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       if (!picked) return
       await analyzePickedCsv(picked)
     } catch (error) {
-      alert(`Failed to analyze CSV: ${getErrorMessage(error, 'Unknown error')}`)
+      notify(`${T('csv_analyze_failed', 'Failed to analyze CSV')}: ${getErrorMessage(error, T('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishImportAction('pick-csv')
       setAnalysisProgress(null)

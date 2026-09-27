@@ -5545,6 +5545,7 @@
   "unknown_browser": "កម្មវិធីរុករកមិនស្គាល់",
   "unknown_device": "ឧបករណ៍មិនស្គាល់",
   "unknown_error": "កំហុសមិនស្គាល់",
+  "csv_analyze_failed": "មិនអាចវិភាគឯកសារ CSV បានទេ",
   "unnamed_group": "ក្រុមគ្មានឈ្មោះ",
   "unsaved_changes": "មានការផ្លាស់ប្ដូរមិនទាន់រក្សាទុក",
   "unsaved_work_hint": "ចាកចេញឥឡូវនឹងបាត់វា។ តើចង់ធ្វើអ្វី?",

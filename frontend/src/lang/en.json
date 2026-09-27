@@ -5549,6 +5549,7 @@
   "unknown_browser": "Unknown browser",
   "unknown_device": "Unknown device",
   "unknown_error": "unknown error",
+  "csv_analyze_failed": "Failed to analyze CSV",
   "unnamed_group": "Unnamed group",
   "unsaved_changes": "You have unsaved changes",
   "unsaved_work_hint": "Leaving now would lose it. What should happen?",
