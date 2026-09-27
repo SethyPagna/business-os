@@ -409,6 +409,53 @@ async function main() {
     check('corrected up to 4', { branch: 4, lotSum: 2 })
   })
 
+  // The route loads a lot the superseded provenance names even when it is
+  // inactive (or has no stock row left at the branch), WITH its own date:
+  // the re-apply's FIFO drain must then walk it in date order. Without the
+  // load the plan still reverses it (parity holds) but dateless, so it
+  // sorts first and the drain empties the wrong lot.
+  for (const variant of ['inactive, zero row kept', 'inactive, stock row gone']) {
+    await test(`a re-apply drains FIFO by the real date of a superseded lot that is ${variant}: 09-01 first, 09-10 keeps 2`, async () => {
+      const { rawDb, db } = freshDb()
+      const P = variant.endsWith('kept') ? 11 : 12
+      addProduct(rawDb, P)
+      const lotOn = (date) => rawDb.prepare('SELECT id FROM product_batches WHERE variant_product_id = @p AND received_at LIKE @d').get({ p: P, d: `${date}%` }).id
+      await runSteps(rawDb, P, [
+        ['receipt 2 @09-01', () => receive(db, P, 2, '2026-09-01'), { branch: 2 }],
+        ['receipt 3 @09-10', () => receive(db, P, 3, '2026-09-10'), { branch: 5 }],
+        ['count 09-12 = 0 drains both', () => applyCount(db, P, [['2026-09-12', 0]]), { branch: 0, lots: '2026-09-01=0 2026-09-10=0' }],
+        [`09-10 lot ${variant}`, () => {
+          const id = lotOn('2026-09-10')
+          rawDb.prepare('UPDATE product_batches SET is_active = 0 WHERE id = @id').run({ id })
+          if (variant.endsWith('gone')) rawDb.prepare('DELETE FROM branch_batch_stock WHERE batch_id = @id').run({ id })
+        }, { branch: 0 }],
+        ['receipt 4 @09-15', () => receive(db, P, 4, '2026-09-15'), { branch: 4 }],
+        // Reversal: 09-01 +2, 09-10 +3, baseline 9; the count's -3 drains
+        // 09-01 (2) then 09-10 (1), oldest first.
+        ['corrected count 09-12 = 6', () => applyCount(db, P, [['2026-09-12', 6]]), { branch: 6, lots: '2026-09-01=0 2026-09-10=2 2026-09-15=4' }],
+        ['re-applied', () => applyCount(db, P, [['2026-09-12', 6]]), { branch: 6, lots: '2026-09-01=0 2026-09-10=2 2026-09-15=4' }],
+      ])
+    })
+  }
+
+  await test('no lots at all: a sale between plan and apply leaves too little for the plan\'s removal: refused (409), nothing written; a fresh plan lands 4', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 13
+    addProduct(rawDb, P)
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 10)').run({ p: P })
+    rawDb.prepare('UPDATE products SET stock_quantity = 10 WHERE id = @p').run({ p: P })
+    const stale = await buildDatedStockCountPlan(db, entriesFor(P, [['2026-08-16', 4]]))
+    await sell(db, rawDb, P, 8)
+    const before = ledger(rawDb, P)
+    assert.deepStrictEqual({ branch: before.branch, lotSum: before.lotSum }, { branch: 2, lotSum: 0 })
+    // The plan removes 6 from a branch that now holds 2: never clamped to 0.
+    await assert.rejects(() => applyDatedStockCountPlan(db, stale.plan), (err) => err instanceof DatedStockCountConflictError)
+    assert.deepStrictEqual(ledger(rawDb, P), before, 'nothing written')
+    await applyCount(db, P, [['2026-08-16', 4]])
+    const after = ledger(rawDb, P)
+    assert.deepStrictEqual({ branch: after.branch, product: after.product }, { branch: 4, product: 4 })
+  })
+
   await test('seeded random walk: receipts, FIFO sales, counts, re-applies, corrections, soft-deletes and reverts keep lots == branch at every step', async () => {
     const { rawDb, db } = freshDb()
     const SEQUENCES = 120
