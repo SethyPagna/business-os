@@ -5,17 +5,25 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import { changeUserPassword } from '../../api/userAdminTransport.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { currentPasswordRateLimitMessage } from '../users/currentPasswordErrors.ts'
+import { requestPasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
 
 // S-auth4b: shown instead of the app while the signed-in account is marked
 // must_change_password -- it signed in with a password that is publicly known
 // (it sits in this project's public git history). The Worker refuses every
 // other request with 403 password_change_required until the password is
 // changed (cloudflare/src/lib/auth.ts requireAuth), so this screen is the
-// only thing that can work: change the password here, or sign out.
+// only thing that can work.
 //
-// The server is the authority on what is allowed; the checks below only save
-// a round trip (length 6 = cloudflare/src/lib/passwordPolicy.ts
-// MIN_PASSWORD_LENGTH, the same literal My Profile uses).
+// Owner requirement (27 Sep 2026): never a closed loop. Old -> new is the
+// main way; a wrong current password is an error here, never a sign-out; and
+// there are two ways out: the reset-method chooser (signs out, then the
+// sign-in screen opens the chooser for this account) and a plain Sign out
+// (the Worker lets the sign-out probe through for exactly this).
+//
+// The server is the authority on what is allowed, including which passwords
+// are publicly known; the checks below only save a round trip (length 6 =
+// cloudflare/src/lib/passwordPolicy.ts MIN_PASSWORD_LENGTH, the same literal
+// My Profile uses). No password rule of its own.
 
 type ForcedPasswordUser = { id?: number | string; username?: string; name?: string } | null
 type ForcedPasswordAppContext = {
@@ -53,6 +61,9 @@ export default function ForcedPasswordChange() {
     if (resultCode(value) === PASSWORD_KNOWN_LEAKED_CODE) {
       return tr('password_known_leaked', 'This password is publicly known. Choose a different password.')
     }
+    if (resultCode(value) === 'incorrect_password') {
+      return tr('current_password_incorrect', 'The current password is not correct.')
+    }
     return currentPasswordRateLimitMessage(value, tr) || resultMessage(value) || fallback
   }
 
@@ -63,7 +74,6 @@ export default function ForcedPasswordChange() {
     if (!currentPassword) return setError(tr('current_password_required_change', 'Current password is required to change password'))
     if (newPassword.length < 6) return setError(tr('password_min_6', 'Use at least 6 characters for the new password.'))
     if (newPassword !== confirmPassword) return setError(tr('new_password_confirm_mismatch', 'New password confirmation does not match'))
-    if (newPassword === currentPassword) return setError(tr('password_known_leaked', 'This password is publicly known. Choose a different password.'))
     const userId = user?.id
     if (userId === undefined || userId === null || userId === '') return
     setSaving(true)
@@ -117,8 +127,18 @@ export default function ForcedPasswordChange() {
         <button type="submit" className="btn-primary h-10 w-full text-sm" disabled={saving}>
           {saving ? tr('saving', 'Saving...') : tr('change_password', 'Change password')}
         </button>
+        <button
+          type="button"
+          className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300"
+          onClick={() => {
+            requestPasswordRecoveryAfterSignOut(String(user?.username || ''))
+            void logout()
+          }}
+        >
+          {tr('forced_password_change_forgot', 'Forgot your current password? Reset it another way')}
+        </button>
         <button type="button" className="w-full text-sm text-gray-600 hover:text-gray-800 dark:text-gray-300" onClick={() => { void logout() }}>
-          {tr('logout', 'Logout')}
+          {tr('forced_password_change_sign_out', 'Sign out')}
         </button>
       </form>
     </div>

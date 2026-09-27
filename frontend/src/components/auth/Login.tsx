@@ -18,6 +18,7 @@ import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
+import { takePasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
 import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
   beginTrackedRequest,
@@ -319,6 +320,15 @@ export default function Login() {
   const [resetNewPassword, setResetNewPassword] = useState('')
   const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [resetInfo, setResetInfo] = useState('')
+  // S-auth4b owner requirement: the forced password change screen's "Forgot
+  // your current password?" signs out and lands here; open the reset-method
+  // chooser for that account, once (components/auth/passwordRecoveryHandoff.ts).
+  useEffect(() => {
+    const handoff = takePasswordRecoveryAfterSignOut()
+    if (!handoff) return
+    setShowResetChooser(true)
+    setResetIdentifier(handoff.identifier)
+  }, [])
   const [verificationCaps, setVerificationCaps] = useState({
     googleOauth: false,
     googleLoginAuth: false,
