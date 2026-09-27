@@ -413,6 +413,10 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // cost (409 cost_outlier_review), and which stock-in session must settle
   // before the rows it names can be merged (409 stock_session_reversible).
   error.costOutlier = parsed?.costOutlier || null
+  // A Library delete refused as still in use (409 forceable) names what uses
+  // the file, so the dialog can switch to its locked / unlock-anyway form.
+  error.usage = parsed?.usage || null
+  error.forceable = parsed?.forceable === true
   error.operationId = parsed?.operationId || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'

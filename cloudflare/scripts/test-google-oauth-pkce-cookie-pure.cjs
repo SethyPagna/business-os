@@ -90,6 +90,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/permissions': { isAdminControlUser: () => false },
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: noop, getClientIp: () => '127.0.0.1' },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
@@ -283,6 +284,46 @@ async function check(name, fn) {
     assert.equal(done.status, 400)
     assert.deepEqual(googleCalls, [])
     assert.equal(db.prepare('SELECT google_subject FROM users WHERE id = 2').get({}).google_subject, null)
+  })
+
+  // Part C (U-profile3, refuter X7b) -----------------------------------------
+  // leangbeauty.com/login serves the same admin app, but the callback is
+  // registered on admin.leangbeauty.com and both the PKCE cookie and the
+  // session cookie are host-only: a flow started on the storefront host could
+  // never finish. Start there now hands back the same page on the callback
+  // host and sets nothing.
+  async function startAt(origin, mode, redirectTo, sessionToken) {
+    const headers = { 'Content-Type': 'application/json' }
+    if (sessionToken) headers.Cookie = `bos_session=${sessionToken}`
+    const res = await authRoute.request(`${origin}/oauth/start`, { method: 'POST', headers, body: JSON.stringify({ mode, redirectTo }) }, env(), ctx)
+    return { status: res.status, body: await res.json(), cookieLine: pkceSetCookie(res) }
+  }
+
+  await check('X7b: Google sign-in started on the storefront host is sent to the same page on the callback host', async () => {
+    const started = await startAt('https://example.com', 'login', 'https://example.com/login?auth_mode=login&auth_provider=google')
+    assert.equal(started.status, 200, JSON.stringify(started.body))
+    assert.equal(started.body.url, 'https://admin.example.com/login')
+    assert.equal(started.cookieLine, null, 'no PKCE cookie on a host the callback never sees')
+    assert.equal(kv.size, 0, 'no one-time state is minted for a flow that cannot finish')
+  })
+
+  await check('X7b: a Google link started on the storefront host is sent to the same page on the callback host', async () => {
+    const started = await startAt('https://example.com', 'link', 'https://example.com/profile?auth_mode=link&auth_provider=google', 'tok-cashier')
+    assert.equal(started.status, 200, JSON.stringify(started.body))
+    assert.equal(started.body.url, 'https://admin.example.com/profile')
+    assert.equal(started.cookieLine, null)
+  })
+
+  await check('X7b control: on the callback host start still returns the Google consent URL and sets the cookie', async () => {
+    const started = await startAt('https://admin.example.com', 'login', 'https://admin.example.com/login')
+    assert.equal(started.status, 200, JSON.stringify(started.body))
+    assert.equal(new URL(started.body.url).origin, 'https://accounts.google.com')
+    assert.ok(started.cookieLine, 'PKCE cookie set')
+  })
+
+  await check('X7b control: an origin outside the allowed pair is not redirected anywhere new', async () => {
+    const started = await startAt('https://evil.example', 'login', 'https://evil.example/login')
+    assert.equal(new URL(started.body.url).origin, 'https://accounts.google.com')
   })
 
   globalThis.fetch = realFetch

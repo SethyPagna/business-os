@@ -22,7 +22,12 @@ check('self change-password route is self-only and requires the current password
   assert.match(handler, /options\.requireSelf && Number\(actor\?\.id \|\| 0\) !== Number\(targetId \|\| 0\)/)
   // The compare lives in refuseWrongCurrentPassword since it became rate limited.
   assert.match(handler, /if \(options\.requireCurrent\) \{[\s\S]*?Current password required[\s\S]*?refuseWrongCurrentPassword\(c, user\.id, currentPassword/)
-  assert.match(source, /async function refuseWrongCurrentPassword[\s\S]*?bcrypt\.compareSync\(currentPassword, passwordHash\)/)
+  // Since U-profile3 (X3) the compare runs inside lib/currentPasswordGuard.ts,
+  // after the attempt is reserved; its behaviour is pinned by
+  // test-current-password-rate-limit-pure.cjs. Here: the chain still reaches it.
+  assert.match(source, /async function refuseWrongCurrentPassword[\s\S]*?verifyCurrentPassword\(c, \{[^}]*\}, currentPassword, passwordHash\)[\s\S]*?if \(verdict\.ok\) return null/)
+  const guard = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'currentPasswordGuard.ts'), 'utf8')
+  assert.match(guard, /export async function verifyCurrentPassword[\s\S]*?bcrypt\.compareSync\(String\(candidate \|\| ''\), String\(passwordHash \|\| ''\)\)/)
   assert.doesNotMatch(handler, /body\.adminOverride/)
 })
 

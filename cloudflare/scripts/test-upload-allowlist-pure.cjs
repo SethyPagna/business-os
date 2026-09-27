@@ -251,6 +251,8 @@ const filesRoute = loadTs('routes/files.ts', {
   '../lib/db': { getDb: () => dbShim },
   '../lib/permissions': permissions,
   '../lib/media': loadTs('lib/media.ts'),
+  '../lib/uploadReferences': loadTs('lib/uploadReferences.ts'),
+  '../lib/r2': { UPLOAD_CONTENT_SECURITY_POLICY: "sandbox; default-src 'none'" },
   '../lib/sqlBinding': loadTs('lib/sqlBinding.ts'),
   '../lib/fileAssets': fileAssets,
   '../lib/uploadSecurity': security,

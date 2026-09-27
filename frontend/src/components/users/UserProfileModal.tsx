@@ -18,6 +18,9 @@ import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isT
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import { UserAvatarImage } from './UserAvatar.tsx'
+import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
+import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -125,7 +128,7 @@ interface ProfileApi {
   disconnectUserAuthProvider: (id: EntityId, payload: Record<string, unknown>) => Promise<MutationResult>
   uploadUserAvatar: (payload: { file?: File; filePath?: string; fileName?: string }) => Promise<MutationResult>
   setUserAvatar: (id: EntityId, avatarPath: string) => Promise<ProfileResult>
-  removeUserAvatar: (id: EntityId) => Promise<ProfileResult & { objectDeleted?: boolean }>
+  removeUserAvatar: (id: EntityId) => Promise<ProfileResult>
 }
 
 // The account fields the form edits. The close guard compares these against
@@ -233,20 +236,17 @@ function parseStoredOrganization(): StoredOrganization | null {
  */
 
 function AvatarPreview({ name, avatarPath }: AvatarPreviewProps) {
-  if (avatarPath) {
-    return (
-      <img
-        src={avatarPath}
-        alt={name || 'Avatar'}
-        className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
-      />
-    )
-  }
-
   return (
-    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-      {name?.[0]?.toUpperCase() || 'U'}
-    </div>
+    <UserAvatarImage
+      src={avatarPath}
+      alt={name || 'Avatar'}
+      className="h-12 w-12 rounded-xl object-cover ring-2 ring-blue-100 dark:ring-blue-900/40"
+      fallback={(
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+          {name?.[0]?.toUpperCase() || 'U'}
+        </div>
+      )}
+    />
   )
 }
 
@@ -488,17 +488,16 @@ function AvatarViewerModal({
     <Modal title={tr('avatar_image', 'Profile photo')} onClose={onClose} size="sm" unsavedChanges="read-only">
       <div className="flex max-h-[72dvh] min-h-0 flex-col">
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl bg-gray-100 p-2 dark:bg-zinc-900/70">
-          {avatarPath ? (
-            <img
-              src={avatarPath}
-              alt={name || tr('avatar_image', 'Profile photo')}
-              className="max-h-[56dvh] w-full rounded-xl object-contain"
-            />
-          ) : (
-            <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-              {name?.[0]?.toUpperCase() || 'U'}
-            </div>
-          )}
+          <UserAvatarImage
+            src={avatarPath}
+            alt={name || tr('avatar_image', 'Profile photo')}
+            className="max-h-[56dvh] w-full rounded-xl object-contain"
+            fallback={(
+              <div className="flex aspect-square w-full max-w-72 items-center justify-center rounded-2xl bg-blue-100 text-6xl font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+                {name?.[0]?.toUpperCase() || 'U'}
+              </div>
+            )}
+          />
         </div>
         <div className="-mx-5 -mb-5 mt-3 grid flex-shrink-0 grid-cols-4 gap-2 border-t border-gray-200 bg-white px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] dark:border-zinc-700 dark:bg-gray-800 sm:pb-3">
           <button type="button" className="btn-secondary min-w-0 px-2 py-2 text-xs" onClick={onUpload} disabled={uploading}>
@@ -762,7 +761,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         ...(usernameChanged && renameScope ? { __rename_cascade: renameScope } : {}),
       }), 'Save profile', PROFILE_SAVE_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to save profile', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to save profile', 'error')
         return
       }
       const { success: _success, ...nextUser } = result || {}
@@ -791,7 +790,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('profile_updated', 'Profile updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save profile'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to save profile'), 'error')
     } finally {
       saveProfileInFlightRef.current = false
       setSavingProfile(false)
@@ -815,7 +814,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         userName: user?.name,
       }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || 'Failed to change password', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
       const persistence = await persistChangedPassword({
@@ -839,7 +838,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('password_updated', 'Password updated'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       savePasswordInFlightRef.current = false
       setSavingPassword(false)
@@ -963,7 +962,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           })
       ), 'Disconnect sign-in provider', PROFILE_OAUTH_DISCONNECT_TIMEOUT_MS)
       if (result?.success === false) {
-        notify(result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || tr('identity_unlink_failed', 'Failed to disconnect sign-in method.'), 'error')
         return
       }
       if (result?.methods) {
@@ -984,7 +983,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('identity_unlinked_success', 'Sign-in method disconnected.'),
       })
     } catch (error) {
-      notify(getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, tr('identity_unlink_failed', 'Failed to disconnect sign-in method.')), 'error')
     } finally {
       setDisconnectingProvider('')
     }
@@ -1027,22 +1026,22 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         positionX: avatarPositionX,
         positionY: avatarPositionY,
       })
-      // Sent as a data URL on purpose: uploadUserAvatar routes a File object
-      // to the general library upload (/api/files/upload), which requires
-      // Library or Products access -- a cashier's own photo was refused
-      // there. The data-URL branch posts to /api/users/avatar-upload, open to
-      // every signed-in user, and compresses the 512px crop on the way.
+      // Upload, then attach to the account (lib: ./avatarFlow.ts); resolves
+      // only once the account holds the photo.
       const dataUrl = await blobToDataUrl(blob)
-      const uploadResult = await withLoaderTimeout(() => getProfileApi().uploadUserAvatar({ filePath: dataUrl, fileName: 'avatar.png' }), 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
-      if (!uploadResult?.path) throw new Error(tr('upload_no_image_path', 'Upload did not return an image path'))
-      // The upload only stores the image; this attaches it to the account.
-      // Previously nothing did until a full "Save profile", so the photo
-      // vanished on reload.
-      const saved = await withLoaderTimeout(() => getProfileApi().setUserAvatar(requireCurrentUserId(), String(uploadResult.path)), 'Save avatar', PROFILE_SAVE_TIMEOUT_MS)
-      if (saved?.success === false) throw new Error(saved.error || tr('avatar_upload_failed', 'Avatar upload failed'))
-      const nextAvatar = { avatar_path: saved?.avatar_path ?? uploadResult.path, updated_at: saved?.updated_at ?? profile?.updated_at ?? null }
-      // updated_at moves with the photo; carrying it keeps a later
-      // "Save profile" from reading as a stale-write conflict.
+      const nextAvatar = await uploadAndAttachAvatar(
+        getProfileApi(),
+        requireCurrentUserId(),
+        dataUrl,
+        {
+          noPath: tr('upload_no_image_path', 'Upload did not return an image path'),
+          attachFailed: tr('avatar_upload_failed', 'Avatar upload failed'),
+        },
+        (step, fn) => (step === 'upload'
+          ? withLoaderTimeout(fn, 'Upload avatar', PROFILE_AVATAR_UPLOAD_TIMEOUT_MS)
+          : withLoaderTimeout(fn, 'Save avatar', PROFILE_SAVE_TIMEOUT_MS)),
+        profile?.updated_at ?? null,
+      )
       setProfile((current) => ({ ...(current || {}), ...nextAvatar }))
       setSavedProfile((current) => ({ ...(current || {}), ...nextAvatar }))
       window.dispatchEvent(new CustomEvent('user:updated', { detail: { id: requireCurrentUserId(), avatar_path: nextAvatar.avatar_path } }))
@@ -1086,6 +1085,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       setRemovingAvatar(false)
     }
   }
+
+  // Remove asks first: request only opens the confirm dialog; confirm runs
+  // removeAvatar; dismissing mid-removal is ignored (./avatarFlow.ts).
+  const avatarRemoveFlow = createAvatarRemoveFlow({
+    closeViewer: () => setAvatarViewerOpen(false),
+    setConfirmOpen: setAvatarRemoveConfirmOpen,
+    isWorking: () => removingAvatar,
+    remove: removeAvatar,
+  })
 
   return (
     <>
@@ -1526,23 +1534,20 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
           setAvatarViewerOpen(false)
           setFilePickerOpen(true)
         }}
-        onRemove={() => {
-          setAvatarViewerOpen(false)
-          setAvatarRemoveConfirmOpen(true)
-        }}
+        onRemove={avatarRemoveFlow.request}
         tr={tr}
       />
       {avatarRemoveConfirmOpen ? (
         <ConfirmDialog
           title={tr('remove_avatar_title', 'Remove profile photo?')}
-          message={tr('remove_avatar_message', 'Your photo is taken off your account and replaced by your initial. A photo uploaded only for this profile is deleted from storage; an image from the file library stays in the library.')}
+          message={tr('remove_avatar_message', 'Your photo is taken off your account and replaced by your initial. The image itself stays in the file library.')}
           danger
           confirmLabel={tr('remove_avatar', 'Remove')}
           working={removingAvatar}
           workingLabel={tr('removing', 'Removing...')}
           layer="nested"
-          onConfirm={() => { void removeAvatar() }}
-          onClose={() => { if (!removingAvatar) setAvatarRemoveConfirmOpen(false) }}
+          onConfirm={() => { void avatarRemoveFlow.confirm() }}
+          onClose={avatarRemoveFlow.dismiss}
           t={t}
         />
       ) : null}

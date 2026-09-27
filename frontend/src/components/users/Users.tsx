@@ -32,6 +32,9 @@ import {
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
+import { UserAvatarImage } from './UserAvatar.tsx'
+import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
+import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -133,17 +136,6 @@ interface MutationResult {
   id?: EntityId
   data?: { id?: EntityId } | null
   item?: { id?: EntityId } | null
-}
-
-type UserWritePayload = Record<string, unknown> & {
-  name: string
-  username: string
-  phone: string
-  email: string
-  avatar_path: string
-  role_id: EntityId | null
-  is_active: boolean | number
-  __rename_cascade?: 'carry' | 'record_only'
 }
 
 interface UsersApi {
@@ -740,20 +732,6 @@ export default function Users() {
       .join(', ')
   }
 
-  const buildUserWritePayload = useCallback((account: Partial<UserRecord> = {}, overrides: Partial<UserRecord> & { delete_user?: boolean | number } = {}): UserWritePayload => ({
-    name: String(overrides.name ?? account.name ?? '').trim(),
-    username: String(overrides.username ?? account.username ?? '').trim(),
-    phone: String(overrides.phone ?? account.phone ?? '').trim(),
-    email: String(overrides.email ?? account.email ?? '').trim(),
-    avatar_path: String(overrides.avatar_path ?? account.avatar_path ?? '').trim(),
-    role_id: overrides.role_id ?? account.role_id ?? null,
-    is_active: overrides.is_active ?? account.is_active ?? 1,
-    userId: currentUser?.id,
-    userName: currentUser?.name,
-    __rename_cascade: 'carry',
-    ...(overrides.delete_user ? { delete_user: 1 } : {}),
-  }), [currentUser?.id, currentUser?.name])
-
   const buildRoleWritePayload = useCallback((role: Partial<RoleRecord> = {}): Record<string, unknown> => ({
     name: String(role.name || '').trim(),
     permissions: normalizePermissionState(role.permissions),
@@ -827,15 +805,18 @@ export default function Users() {
       if (selectedUser) {
         const previousSnapshot = cloneHistorySnapshot(selectedUser)
         const nextSnapshot = cloneHistorySnapshot({ ...selectedUser, ...payload, id: selectedUser.id })
+        // Undo and redo replay the rename scope this edit was made with.
+        const replayScope = userEditReplayScope(previousSnapshot, nextSnapshot, renameScope)
+        const actor = { id: currentUser?.id, name: currentUser?.name }
         actionHistory.pushAction({
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
-            const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot)), 'Undo user update')
+            const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
             if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
-            const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot)), 'Redo user update')
+            const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot, actor, replayScope)), 'Redo user update')
             if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
@@ -917,7 +898,7 @@ export default function Users() {
           })
       ), allowAdminOverride ? 'Reset user password' : 'Change user password')
       if (result?.success === false) {
-        notify(result.error || 'Failed to change password', 'error')
+        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
       const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
@@ -945,7 +926,7 @@ export default function Users() {
         setPasswordForm((prev) => ({ ...prev, currentPassword: '' }))
       }
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       finishSingleAction(passwordInFlightRef)
       setPasswordSaving(false)
@@ -1210,7 +1191,7 @@ export default function Users() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                            {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-9 w-9 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+                            <UserAvatarImage src={user.avatar_path} alt={user.name} className="h-9 w-9 object-cover" fallback={(user.name?.[0]?.toUpperCase() || 'U')} />
                           </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-white">{user.name}</div>
@@ -1252,7 +1233,7 @@ export default function Users() {
             {(!loading || users.length) ? filteredUsers.map((user) => (
               <div key={user.id} className="card flex items-center gap-3 p-3" onClick={() => { setSelectedUser(user); setModal('userDetail') }}>
                 <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-sm font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-                  {user.avatar_path ? <img src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+                  <UserAvatarImage src={user.avatar_path} alt={user.name} className="h-10 w-10 object-cover" fallback={(user.name?.[0]?.toUpperCase() || 'U')} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="detail-scroll-text font-semibold text-gray-900 dark:text-white">{user.name}</div>
