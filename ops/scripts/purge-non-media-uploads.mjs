@@ -80,7 +80,8 @@
 //                 BMP, TIFF, camera raw, AVI, MP3, M4A...); and the files of
 //                 imports that are still running;
 //         REVIEW  images with web-page code inside, files stored compressed,
-//                 and files it cannot identify -- kept, and listed for you;
+//                 text that starts like a media file, and files it cannot
+//                 identify -- kept, and listed for you;
 //         PURGE   only files it positively recognises as documents (PDF,
 //                 Word, Excel...), web pages, SVG, XML, text, CSV, JSON,
 //                 scripts, archives (ZIP...), programs or fonts.
@@ -115,7 +116,9 @@
 //       puts the Library rows back with every recorded column and the import
 //       rows' status, file_asset_id and updated_at. It never overwrites a
 //       different file, and running it again changes nothing. It writes
-//       restore-<time>.json next to the manifest.
+//       restore-<time>.json next to the manifest. A manifest recording a
+//       row that belongs to none of its moved files (an edited file) is
+//       refused before anything is written (restorableRows).
 //
 // Read-only on anything else. It never touches objects outside the three
 // prefixes (backups, exports, etc.) and its own quarantine/<time>/ folder.
@@ -255,7 +258,12 @@ function detectQuickTimeAtoms(bytes) {
 export const EMBEDDED_MARKUP_TOKENS = [
   '<script', '<html', '<svg', '<iframe', '<body', '<object', '<embed', '<!doctype html', '<meta', '<img', '<a href', 'javascript:',
   '<style', '<form', '<link', '<base', '<frame', '<frameset', '<applet', '<math',
+  '<details', '<input', '<video', '<audio', '<marquee', '<textarea', '<select', '<noscript', '<template', '<button', '<dialog',
+  '<keygen', '<isindex', '<source', '<bgsound',
 ]
+// S-uploads3: an event handler after ANY tag start in a 'full' region (see
+// uploadSecurity.ts).
+export const TAG_EVENT_HANDLER_WINDOW_BYTES = 1024
 export const MARKUP_TAG_TERMINATORS = [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f, 0x3d, 0x3e]
 export const MARKUP_TOKEN_SEPARATORS = [0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f]
 export const MARKUP_SNIFF_WINDOW_BYTES = 1445
@@ -314,6 +322,23 @@ function eventHandlerInRange(bytes, start, end) {
   return false
 }
 
+function tagStartAt(bytes, index) {
+  return isAsciiLetter(bytes[index + 1]) || (bytes[index + 1] === 0x00 && isAsciiLetter(bytes[index + 2]) && bytes[index + 3] === 0x00)
+}
+
+function tagEventHandlerInRange(bytes, start, end) {
+  let scannedTo = start
+  for (let index = bytes.indexOf(0x3c, start); index !== -1 && index < end; index = bytes.indexOf(0x3c, index + 1)) {
+    if (!tagStartAt(bytes, index)) continue
+    const to = Math.min(end, index + TAG_EVENT_HANDLER_WINDOW_BYTES)
+    for (let position = Math.max(index + 2, scannedTo); position < to; position += 1) {
+      if ((bytes[position] | 0x20) === 0x6f && (eventHandlerAt(bytes, position, 1) || eventHandlerAt(bytes, position, 2))) return true
+    }
+    scannedTo = Math.max(scannedTo, to)
+  }
+  return false
+}
+
 function markupTokenAt(bytes, start, token, step) {
   const charAt = (at) => (at < bytes.length && (step === 1 || bytes[at + 1] === 0x00) ? bytes[at] : -1)
   let position = start
@@ -340,7 +365,8 @@ function markupInRange(bytes, start, end, mode) {
       }
     }
   }
-  return mode === 'manifest' && eventHandlerInRange(bytes, start, end)
+  if (mode === 'manifest') return eventHandlerInRange(bytes, start, end)
+  return mode === 'full' && tagEventHandlerInRange(bytes, start, end)
 }
 
 function walkMarkupTrailer(bytes, offset, add, depth) {
@@ -533,14 +559,19 @@ export function detectUploadFormat(bytes) {
   return detectQuickTimeAtoms(bytes)
 }
 // =====================================================================
-// END mirror of cloudflare/src/lib/uploadSecurity.ts
+// END mirror of cloudflare/src/lib/uploadSecurity.ts (upload allowlist)
 // =====================================================================
+// ALSO MIRRORED (S-uploads3, 2026-09-27): detectOtherMedia and
+// otherMediaLooksLikeText below, with every declaration they use
+// (zipFirstEntry, isNetpbm, quickTimeAtomsFit, id3TagFits, decodeText...).
+// The Worker judges STORED files -- /uploads/* serving and the backup
+// restore -- with the same code, so a restore puts back exactly what this
+// script keeps. The same parity test holds them token-identical.
 
 const u16leAt = (bytes, offset) => bytes[offset] | (bytes[offset + 1] << 8)
 const u16beAt = (bytes, offset) => (bytes[offset] << 8) | bytes[offset + 1]
 const textAt = (bytes, offset, text) => asciiAt(bytes, offset, offset + text.length) === text
 const latin1Head = (bytes, limit) => String.fromCharCode(...bytes.subarray(0, Math.min(bytes.length, limit)))
-const isPrintableAscii = (byte) => byte >= 0x20 && byte <= 0x7e
 const printable = (text) => text.replace(/[^\x20-\x7e]/g, '?')
 
 // The first entry of a ZIP file: its name and, when stored uncompressed,
@@ -585,6 +616,41 @@ function isNetpbm(bytes) {
   return offset < bytes.length && bytes[offset] >= 0x30 && bytes[offset] <= 0x39
 }
 
+// S-uploads3 (2026-09-27): the loose QuickTime and MP3 signatures below
+// kept crafted text as media (R-uploads2: `\0\0\0\x08free` followed by
+// notes, `ID3\x03\x00` followed by notes). Every atom header within the
+// bytes read must be a four-character type with a size that stays inside
+// the file; the last one may run past the bytes read.
+function quickTimeAtomsFit(bytes, totalSize) {
+  let offset = 0
+  for (let atoms = 0; atoms < 64 && offset + 8 <= bytes.length; atoms += 1) {
+    if (!isFourCcAt(bytes, offset + 4)) return false
+    let size = readU32BE(bytes, offset)
+    if (size === 0) return true
+    if (size === 1) {
+      if (offset + 16 > bytes.length) return true
+      size = readU32BE(bytes, offset + 8) * 0x100000000 + readU32BE(bytes, offset + 12)
+      if (size < 16) return false
+    } else if (size < 8) {
+      return false
+    }
+    if (offset + size > totalSize) return false
+    offset += size
+  }
+  return true
+}
+
+// An ID3v2 header: version 2-4, only the flag bits that version defines,
+// a sync-safe size (every byte under 0x80) and a tag that fits in the file.
+const ID3_UNDEFINED_FLAG_BITS = [0x3f, 0x1f, 0x0f]
+function id3TagFits(bytes, totalSize) {
+  if (bytes.length < 10 || bytes[3] < 2 || bytes[3] > 4 || bytes[4] === 0xff) return false
+  if (bytes[5] & ID3_UNDEFINED_FLAG_BITS[bytes[3] - 2]) return false
+  if ([6, 7, 8, 9].some((index) => bytes[index] >= 0x80)) return false
+  const size = bytes[6] * 0x200000 + bytes[7] * 0x4000 + bytes[8] * 0x80 + bytes[9]
+  return 10 + size <= totalSize
+}
+
 // { kind: 'photo' | 'video-audio', format } or null. `totalSize` is the
 // object's size when only its first bytes were read.
 export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
@@ -600,14 +666,11 @@ export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
     if (ftyp.major === 'crx ') return photo('camera raw (CR3)')
     if (ISO_AUDIO_BRANDS.includes(ftyp.major)) return media('M4A/M4B audio')
     if ([ftyp.major, ...ftyp.compatible].some((brand) => OTHER_HEIF_BRANDS.includes(brand))) return photo('HEIC/HEIF')
-    return media(`MP4 family (brand ${printable(ftyp.major)})`)
+    return media('MP4 family (brand ' + printable(ftyp.major) + ')')
   }
-  // QuickTime atoms that do not chain within the bytes read. Text whose
-  // bytes 4-8 spell an atom name has a printable "size" larger than the file.
-  if (bytes.length >= 8 && QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8))) {
-    const sizeIsText = [0, 1, 2, 3].every((index) => isPrintableAscii(bytes[index]))
-    if (!(sizeIsText && readU32BE(bytes, 0) > totalSize)) return media('QuickTime')
-  }
+  // QuickTime atoms that do not chain within the bytes read, as long as
+  // every atom header that is read fits in the file (see quickTimeAtomsFit).
+  if (bytes.length >= 8 && QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8)) && quickTimeAtomsFit(bytes, totalSize)) return media('QuickTime')
   if (has(0, 'RIFF') || has(0, 'RIFX')) {
     const form = asciiAt(bytes, 8, 12)
     if (form === 'AVI ' || form === 'AVIX') return media('AVI')
@@ -632,7 +695,7 @@ export function detectOtherMedia(bytes, totalSize = bytes ? bytes.length : 0) {
   if (has(0, '.RMF')) return media('RealMedia')
   if (has(0, 'OggS') && bytes[4] === 0) return media('Ogg')
   // Audio. 0xFF 0xFE is a UTF-16 byte order mark, not an MPEG frame.
-  if (has(0, 'ID3') && bytes.length >= 10 && bytes[3] >= 2 && bytes[3] <= 4 && bytes[4] !== 0xff) return media('MP3')
+  if (has(0, 'ID3') && id3TagFits(bytes, totalSize)) return media('MP3')
   if (bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0) return media('AAC')
   if (bytes.length >= 3 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0 && bytes[1] !== 0xfe && bytes[1] !== 0xff
     && (bytes[1] & 0x18) !== 0x08 && (bytes[1] & 0x06) !== 0 && (bytes[2] >> 4) !== 0x0f && ((bytes[2] >> 2) & 0x03) !== 0x03) return media('MP3')
@@ -741,7 +804,7 @@ export function decodeText(bytes, complete = true) {
   const start = bufferStartsWith(sample, [0xef, 0xbb, 0xbf]) ? 3 : 0
   const end = whole ? sample.length : utf8CompleteEnd(sample, start)
   let text = null
-  try { text = new TextDecoder('utf-8', { fatal: true }).decode(sample.subarray(start, end)) } catch { text = null }
+  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(sample.subarray(start, end)) } catch { text = null }
   if (text !== null) {
     for (const char of text) if (!isTextCode(char.codePointAt(0))) return null
     return text
@@ -754,6 +817,19 @@ export function decodeText(bytes, complete = true) {
     if (byte < 0x80) asciiBytes += 1
   }
   return asciiBytes >= sample.length * 0.75 ? String.fromCharCode(...sample) : null
+}
+
+// Media formats that are plain text by design.
+const TEXT_MEDIA_FORMATS = ['XPM', 'XBM', 'NetPBM', 'Radiance HDR', 'FITS']
+
+// S-uploads3 (2026-09-27): some signatures detectOtherMedia accepts are
+// loose enough for text to meet them -- MPEG transport-stream sync bytes
+// ('G') 188 apart in a CSV, the AC-3 sync word (vertical tab, 'w'). Media of
+// every other format has control bytes within its first bytes, so when the
+// data also decodes as text it is neither kept as media nor purged as text:
+// it goes to review.
+export function otherMediaLooksLikeText(other, bytes, complete = true) {
+  return !TEXT_MEDIA_FORMATS.includes(other.format) && decodeText(bytes, complete) !== null
 }
 
 // The start of the data as text (UTF-16 decoded when it has a BOM).
@@ -930,6 +1006,7 @@ export function classifyObject({ key, size, bytes, complete = true, activeJobIds
     return media('images', allowed.mime, checked)
   }
   const other = detectOtherMedia(bytes, total)
+  if (other && otherMediaLooksLikeText(other, bytes, complete)) return verdict('unrecognised', `text that starts like ${other.format}`)
   if (other) return media(other.kind === 'photo' ? 'other-images' : 'other-video-audio', other.format)
   const nonMedia = detectNonMedia(bytes, complete)
   if (nonMedia) return verdict(nonMedia.group, nonMedia.format)
@@ -1155,7 +1232,51 @@ export function validateManifest(manifest) {
       }
     }
   }
+  for (const refused of restorableRows(manifest).refused) {
+    problems.push(`a recorded ${refused.table === 'file_assets' ? 'Library' : 'import'} row (id ${printable(String(refused.id))}) ${refused.reason}`)
+  }
   return [...new Set(problems)].slice(0, 12)
+}
+
+// S-uploads3 (R-uploads2): the recorded rows --restore may write back. --move
+// records only rows of files it moved, so a row that belongs to no move in
+// the SAME manifest was not written by it: a Library row is put back only
+// when it points at a moved file, its public path is that file (or the same
+// stored name) under /uploads/, and its type columns are plain types; an
+// import row only when its own file was moved or it links to such a Library
+// row. Anything else (say an added row id 999 for /uploads/evil.html) is
+// refused, and validateManifest names it, so the whole file is refused.
+const MIME_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i
+const MEDIA_KIND_PATTERN = /^[a-z]+$/
+function libraryRowProblem(row, moved) {
+  const publicPath = typeof row?.public_path === 'string' ? row.public_path : ''
+  if (!publicPath.startsWith('/uploads/')) return 'has a public path outside /uploads/'
+  if (!assetKeys(row).some((key) => moved.has(key))) return 'matches no moved file'
+  const own = [publicPath.slice(1)]
+  try { own.push(decodeURIComponent(publicPath.slice(1))) } catch { /* not percent-encoded */ }
+  if (!own.some((key) => moved.has(key) || (typeof row.stored_name === 'string' && key === `uploads/${row.stored_name}`))) return 'has a public path to a file that was not moved'
+  if (row.mime_type != null && !MIME_TYPE_PATTERN.test(String(row.mime_type))) return 'has a mime_type that is not a media type'
+  if (row.media_type != null && !MEDIA_KIND_PATTERN.test(String(row.media_type))) return 'has a media_type that is not a plain word'
+  return null
+}
+export function restorableRows(manifest) {
+  const moved = new Set((Array.isArray(manifest?.moves) ? manifest.moves : []).map((move) => String(move?.key ?? '')).filter(Boolean))
+  const rows = manifest?.rows && typeof manifest.rows === 'object' ? manifest.rows : {}
+  const refused = []
+  const fileAssets = []
+  for (const row of Array.isArray(rows.file_assets) ? rows.file_assets : []) {
+    const reason = libraryRowProblem(row, moved)
+    if (reason) refused.push({ table: 'file_assets', id: row?.id ?? null, reason })
+    else fileAssets.push(row)
+  }
+  const assetIds = new Set(fileAssets.map((row) => Number(row.id)))
+  const importFiles = []
+  for (const row of Array.isArray(rows.import_job_files) ? rows.import_job_files : []) {
+    const linked = row?.file_asset_id != null && assetIds.has(Number(row.file_asset_id))
+    if (moved.has(String(row?.stored_path ?? '')) || linked) importFiles.push(row)
+    else refused.push({ table: 'import_job_files', id: row?.id ?? null, reason: 'matches no moved file' })
+  }
+  return { file_assets: fileAssets, import_job_files: importFiles, refused }
 }
 
 // Writes JSON so that a crash leaves either the old file or the new one,
@@ -1755,11 +1876,19 @@ async function restoreObject(cf, move) {
 
 // Library rows go back with every recorded column (a row that is already
 // there is left alone); import rows get back the three columns --move
-// changed, only while they still say 'purged'.
-async function restoreRows(cf, rows) {
-  const result = { fileAssets: { recorded: 0, present: 0, failed: [] }, importFiles: { recorded: 0, restored: 0, failed: [] } }
-  const fileAssets = rows.file_assets || []
-  const importFiles = rows.import_job_files || []
+// changed, only while they still say 'purged'. Only the rows
+// restorableRows accepts are written (validateManifest already refused a
+// manifest with any other; this holds even if it is called some other way),
+// and an import row's file_asset_id is only set back to a Library row this
+// restore puts back -- --move never changed any other link.
+async function restoreRows(cf, manifest) {
+  const result = { fileAssets: { recorded: 0, present: 0, failed: [] }, importFiles: { recorded: 0, restored: 0, failed: [] }, refused: [] }
+  const accepted = restorableRows(manifest)
+  result.refused = accepted.refused
+  const fileAssets = accepted.file_assets
+  const importFiles = accepted.import_job_files
+  const assetIds = new Set(fileAssets.map((row) => Number(row.id)))
+  const relinks = (row) => row.file_asset_id != null && assetIds.has(Number(row.file_asset_id))
   result.fileAssets.recorded = fileAssets.length
   result.importFiles.recorded = importFiles.length
   for (const row of fileAssets) {
@@ -1768,8 +1897,10 @@ async function restoreRows(cf, rows) {
     try { await cf.d1(sql, [...columns.map((column) => row[column]), row.id]) } catch (error) { result.fileAssets.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
   for (const row of importFiles) {
-    const sql = "UPDATE import_job_files SET status = ?, file_asset_id = ?, updated_at = ? WHERE id = ? AND status = 'purged'"
-    try { await cf.d1(sql, [row.status ?? null, row.file_asset_id ?? null, row.updated_at ?? null, row.id]) } catch (error) { result.importFiles.failed.push({ id: row.id, error: String(error?.message || error) }) }
+    const [sql, params] = relinks(row)
+      ? ["UPDATE import_job_files SET status = ?, file_asset_id = ?, updated_at = ? WHERE id = ? AND status = 'purged'", [row.status ?? null, row.file_asset_id, row.updated_at ?? null, row.id]]
+      : ["UPDATE import_job_files SET status = ?, updated_at = ? WHERE id = ? AND status = 'purged'", [row.status ?? null, row.updated_at ?? null, row.id]]
+    try { await cf.d1(sql, params) } catch (error) { result.importFiles.failed.push({ id: row.id, error: String(error?.message || error) }) }
   }
   // Read back what is there now.
   for (const ids of chunk(safeIds(fileAssets.map((row) => row.id)), 100)) {
@@ -1817,7 +1948,7 @@ async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFile
     } catch (error) { stray.outcome = `left (${String(error?.message || error)})` }
     strays.push(stray)
   }
-  const rowResult = await restoreRows(cf, rows)
+  const rowResult = await restoreRows(cf, manifest)
 
   const count = (outcome) => objects.filter((object) => object.outcome === outcome).length
   const reportPath = path.join(path.dirname(manifestPath), `restore-${stampOf(now())}.json`)
@@ -1828,8 +1959,9 @@ async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFile
   if (strays.length) log(`Unrecorded quarantine copies: ${strays.length} (${leftStrays.length} left).`)
   log(`Library rows present: ${rowResult.fileAssets.present} of ${rowResult.fileAssets.recorded}. Import rows back as they were: ${rowResult.importFiles.restored} of ${rowResult.importFiles.recorded}.`)
   for (const object of objects.filter((item) => item.outcome !== 'restored' && item.outcome !== 'in place').slice(0, 20)) log(`  ${object.outcome}: ${printable(object.key)} -- ${object.note}`)
+  for (const refused of rowResult.refused.slice(0, 20)) log(`  refused: a recorded ${refused.table} row (id ${printable(String(refused.id))}) ${refused.reason}; it was not written`)
   log(`Report saved: ${reportPath}`)
-  const clean = count('conflict') + count('missing') + count('failed') + leftStrays.length === 0
+  const clean = count('conflict') + count('missing') + count('failed') + leftStrays.length + rowResult.refused.length === 0
     && rowResult.fileAssets.failed.length === 0 && rowResult.importFiles.failed.length === 0
     && rowResult.fileAssets.present === rowResult.fileAssets.recorded && rowResult.importFiles.restored === rowResult.importFiles.recorded
   log(clean ? 'Done.' : 'FAILED: not everything could be put back; see above and the report. Running --restore again retries it and never overwrites a different file.')

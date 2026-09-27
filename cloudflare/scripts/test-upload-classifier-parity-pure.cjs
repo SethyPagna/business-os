@@ -31,7 +31,9 @@ const F = require('./harness/upload_fixtures.cjs')
 
 const SECURITY_SOURCE = process.env.UPLOAD_SECURITY_TS || path.join(__dirname, '..', 'src', 'lib', 'uploadSecurity.ts')
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.join(__dirname, '..', '..', 'ops', 'scripts', 'purge-non-media-uploads.mjs')
-const ROOTS = ['detectUploadFormat', 'containsEmbeddedMarkup']
+// S-uploads3: the stored-media detection the backup restore and /uploads/*
+// serving share with the purge is mirrored too.
+const ROOTS = ['detectUploadFormat', 'containsEmbeddedMarkup', 'detectOtherMedia', 'otherMediaLooksLikeText']
 
 const failures = []
 let checks = 0
@@ -160,11 +162,23 @@ function repoImages() {
   return files.map((file) => ({ label: `repo ${file}`, bytes: new Uint8Array(fs.readFileSync(path.join(repoRoot, file))) }))
 }
 
+const otherSeen = {}
 function same(worker, purge, bytes) {
   const want = worker.detectUploadFormat(bytes)
   const got = purge.detectUploadFormat(bytes)
   assert.deepEqual(got, want, 'detectUploadFormat differs')
   assert.equal(purge.containsEmbeddedMarkup(bytes), worker.containsEmbeddedMarkup(bytes), 'containsEmbeddedMarkup differs')
+  // An older uploadSecurity.ts has no stored-media detection: that shows as
+  // structure failures above, not as a crash here.
+  if (typeof worker.detectOtherMedia === 'function') {
+    const other = worker.detectOtherMedia(bytes)
+    assert.deepEqual(purge.detectOtherMedia(bytes), other, 'detectOtherMedia differs')
+    for (const complete of [true, false]) {
+      if (other) assert.equal(purge.otherMediaLooksLikeText(other, bytes, complete), worker.otherMediaLooksLikeText(other, bytes, complete), 'otherMediaLooksLikeText differs')
+    }
+    const kind = other ? other.kind : 'none'
+    otherSeen[kind] = (otherSeen[kind] || 0) + 1
+  }
   return want
 }
 
@@ -246,6 +260,9 @@ async function main() {
       seenFormats[label] = (seenFormats[label] || 0) + 1
     })
   }
+  check('the fixtures reach every stored-media outcome', () => {
+    for (const kind of ['photo', 'video-audio', 'none']) assert.ok(otherSeen[kind] > 0, `no fixture detected as ${kind}`)
+  })
   check('the fixtures cover every format the Worker accepts, and refusals', () => {
     for (const mime of ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'video/mp4', 'video/quicktime', 'video/webm', 'refused']) {
       assert.ok(seenFormats[mime] > 0, `no fixture for ${mime}`)

@@ -31,6 +31,18 @@
 //      never changed and nothing is deleted.
 //   6. End to end: createCloudflareBackup, lose the files, restore.
 //
+// S-uploads3 (2026-09-27): parity with the owner-run purge. The expected
+// outcome of each file is now the PURGE's verdict on it
+// (ops/scripts/purge-non-media-uploads.mjs classifyObject -- not the code
+// under test): what the purge keeps comes back under uploads/, images and
+// videos of the upload allowlist with their detected type and every other
+// media format it keeps (HEIC, BMP, TIFF, camera raw, MP4 brands off the
+// allowlist such as Canon `CAEP` and `mp21`, audio...) with a plain media
+// type for its format, never one a browser renders as a document; images
+// with web-page code, empty files and everything the purge would move or
+// review are withheld. Before this, HEIC/BMP/CAEP/mp21 were withheld as
+// not-media although the purge keeps them and /uploads/* serves them.
+//
 // To see it fail on an older tree, point it at an older backup.ts:
 //   git show 1e2c945c:cloudflare/src/lib/backup.ts > /tmp/backup.ts
 //   BACKUP_TS=/tmp/backup.ts node test-backup-restore-asset-gate-pure.cjs
@@ -42,6 +54,8 @@ const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
 const F = require('./harness/upload_fixtures.cjs')
+const { pathToFileURL } = require('node:url')
+const PURGE_SOURCE = path.resolve(__dirname, '../../ops/scripts/purge-non-media-uploads.mjs')
 
 const SRC = path.join(__dirname, '..', 'src', 'lib')
 const BACKUP_TS = process.env.BACKUP_TS || path.join(SRC, 'backup.ts')
@@ -301,12 +315,22 @@ function seedBackup(world, { name, entries, copied, assetsPrefix, lifecycle }) {
   return key
 }
 
-// The image and video fixtures come back; everything else is withheld.
-const verdictOf = (worker, markup, bytes) => (worker && !markup ? { mime: worker }
-  : worker ? { reason: 'image-with-code' }
-    : bytes.length === 0 ? { reason: 'empty' } : { reason: 'not-media' })
-const CARRIER_MIME = (carrier) => (/^(JPEG|after the JPEG)/.test(carrier) ? 'image/jpeg' : /^PNG/.test(carrier) ? 'image/png'
-  : /^GIF/.test(carrier) ? 'image/gif' : /^WebP/.test(carrier) ? 'image/webp' : 'image/avif')
+// What the purge keeps comes back; everything else is withheld. `mime`: the
+// exact stored type; `other`: another media format, stored with one of
+// OTHER_MEDIA_STORED_TYPES (or its PINNED_OTHER_TYPES entry).
+let purge = null
+function verdictOf(key, bytes) {
+  const verdict = purge.classifyObject({ key, size: bytes.length, bytes, complete: true })
+  if (verdict.action === 'keep') {
+    const allowed = purge.detectUploadFormat(bytes)
+    return allowed ? { mime: allowed.mime } : { other: verdict.format }
+  }
+  if (verdict.group === 'image-with-code') return { reason: 'image-with-code' }
+  return bytes.length === 0 ? { reason: 'empty' } : { reason: 'not-media' }
+}
+const OTHER_MEDIA_STORED_TYPES = ['image/heic', 'image/bmp', 'image/tiff', 'video/mp4', 'video/quicktime', 'video/x-msvideo', 'audio/mp4', 'audio/mpeg', 'application/octet-stream']
+// The owner's cases, pinned to their exact stored type.
+const PINNED_OTHER_TYPES = { 'HEIC/HEIF': 'image/heic', BMP: 'image/bmp', 'MP4 family (brand caep)': 'video/mp4', 'MP4 family (brand mp21)': 'video/mp4' }
 
 function fixtureSet() {
   const out = []
@@ -318,16 +342,22 @@ function fixtureSet() {
   }
   for (const entry of F.catalogue()) {
     const key = entry.key.startsWith('uploads/') ? entry.key : `uploads/${entry.key.replace(/\//g, '-')}`
-    add(entry.name, key, entry.bytes, verdictOf(entry.worker, entry.markup, entry.bytes))
+    add(entry.name, key, entry.bytes, verdictOf(key, entry.bytes))
   }
   F.BYPASSES.forEach(([payload, bytes], p) => F.bypassCarriers(bytes).forEach(([carrier, carried], c) => {
-    add(`bypass ${payload} in ${carrier}`, `uploads/bypass-${p}-${c}`, carried, verdictOf(CARRIER_MIME(carrier), true, carried))
+    add(`bypass ${payload} in ${carrier}`, `uploads/bypass-${p}-${c}`, carried, verdictOf(`uploads/bypass-${p}-${c}`, carried))
   }))
   F.c2paCarriers().forEach(([carrier, make], c) => F.C2PA_ICONS.forEach(([icon, svg, refused], i) => {
     const carried = make(svg)
-    add(`C2PA ${icon} in ${carrier}`, `uploads/c2pa-${c}-${i}`, carried, verdictOf(CARRIER_MIME(carrier), refused, carried))
+    add(`C2PA ${icon} in ${carrier}`, `uploads/c2pa-${c}-${i}`, carried, verdictOf(`uploads/c2pa-${c}-${i}`, carried))
   }))
-  F.brandCases().forEach(([name, bytes, worker], b) => add(`ISO/QuickTime ${name}`, `uploads/brand-${b}.bin`, bytes, verdictOf(worker, false, bytes)))
+  F.brandCases().forEach(([name, bytes], b) => add(`ISO/QuickTime ${name}`, `uploads/brand-${b}.bin`, bytes, verdictOf(`uploads/brand-${b}.bin`, bytes)))
+  // MP4 brands off the upload allowlist: Canon cameras, MPEG-21.
+  const caep = F.bytes(F.ftyp('CAEP', 'CAEP', 'mp42'), F.MOOV, F.MDAT)
+  const mp21 = F.bytes(F.ftyp('mp21', 'mp21'), F.MOOV, F.MDAT)
+  add('Canon MP4 (brand CAEP)', 'uploads/MVI_0001.MP4', caep, verdictOf('uploads/MVI_0001.MP4', caep))
+  add('MPEG-21 MP4 (brand mp21)', 'uploads/clip21.mp4', mp21, verdictOf('uploads/clip21.mp4', mp21))
+  add('HEIC with no extension', 'uploads/IMG_0004', F.heic(), verdictOf('uploads/IMG_0004', F.heic()))
   // Literal keys with spaces, '#', '%', '+', '?' and Khmer.
   add('JPEG under a Khmer name', 'uploads/រូបថត #1 100%+?.jpg', F.jpeg(), { mime: 'image/jpeg' })
   add('PDF under a Khmer name', 'uploads/ឯកសារ #2 100%+?.pdf', F.pdf(), { reason: 'not-media' })
@@ -346,6 +376,7 @@ const snapshot = (world, prefix) => [...world.objects.entries()].filter(([key]) 
 const withheldOf = (result) => new Map(((result && result.withheldAssets) || []).map((entry) => [entry.key, entry]))
 
 async function main() {
+  purge = await import(pathToFileURL(PURGE_SOURCE).href)
   // --------------------------------------------------- 1. every fixture
   await scenario('every fixture', async (expect) => {
     const world = makeWorld()
@@ -358,14 +389,26 @@ async function main() {
     const puts = requests.filter((request) => request.op === 'put')
     const folder = quarantineFolderOf(puts)
     const withheld = withheldOf(result)
-    const media = entries.filter((entry) => entry.expected.mime)
-    const refused = entries.filter((entry) => !entry.expected.mime)
-    expect(`the fixtures cover both outcomes (${media.length} media, ${refused.length} not)`, () => assert.ok(media.length >= 40 && refused.length >= 150))
+    const media = entries.filter((entry) => entry.expected.mime || entry.expected.other)
+    const refused = entries.filter((entry) => !(entry.expected.mime || entry.expected.other))
+    const others = media.filter((entry) => entry.expected.other)
+    expect(`the fixtures cover both outcomes (${media.length} media, ${others.length} of them other formats, ${refused.length} not)`, () => assert.ok(media.length >= 40 && others.length >= 20 && refused.length >= 150))
+    for (const format of Object.keys(PINNED_OTHER_TYPES)) {
+      expect(`the owner's case ${format} is among the fixtures`, () => assert.ok(others.some((entry) => entry.expected.other === format)))
+    }
+    const expectedType = (entry) => entry.expected.mime || PINNED_OTHER_TYPES[entry.expected.other] || null
 
     for (const entry of media) {
       const live = world.objects.get(entry.key)
       expect(`${entry.name}: written back byte for byte`, () => { assert.ok(live, 'not written'); assert.equal(sha(live.bytes), sha(entry.bytes)) })
-      expect(`${entry.name}: stored as ${entry.expected.mime}, not the backed-up ${STORED_TYPE}`, () => assert.deepEqual(live && live.httpMetadata, { contentType: entry.expected.mime }))
+      if (expectedType(entry)) {
+        expect(`${entry.name}: stored as ${expectedType(entry)}, not the backed-up ${STORED_TYPE}`, () => assert.deepEqual(live && live.httpMetadata, { contentType: expectedType(entry) }))
+      } else {
+        expect(`${entry.name} (${entry.expected.other}): stored with a plain media type, not the backed-up ${STORED_TYPE}`, () => {
+          assert.ok(live && OTHER_MEDIA_STORED_TYPES.includes(live.httpMetadata.contentType), JSON.stringify(live && live.httpMetadata))
+          assert.deepEqual(Object.keys(live.httpMetadata), ['contentType'])
+        })
+      }
       expect(`${entry.name}: not quarantined or listed`, () => {
         assert.ok(!puts.some((request) => request.key.startsWith('quarantine/') && request.key.endsWith(entry.key)))
         assert.ok(!withheld.has(entry.key))
@@ -393,10 +436,11 @@ async function main() {
       for (const request of puts) assert.ok(request.key.startsWith('uploads/') || request.key.startsWith(folder), request.key)
     })
     expect('every uploads/ write is a fixture that passes the upload gate', () => {
-      const allowed = new Map(media.map((entry) => [entry.key, entry.expected.mime]))
+      const allowed = new Map(media.map((entry) => [entry.key, expectedType(entry)]))
       for (const request of puts.filter((put) => put.key.startsWith('uploads/'))) {
         assert.ok(allowed.has(request.key), `${request.key} written`)
-        assert.equal(request.httpMetadata.contentType, allowed.get(request.key), request.key)
+        if (allowed.get(request.key)) assert.equal(request.httpMetadata.contentType, allowed.get(request.key), request.key)
+        else assert.ok(OTHER_MEDIA_STORED_TYPES.includes(request.httpMetadata.contentType), request.key)
       }
     })
     expect('nothing is deleted and the backup\'s copies are unchanged', () => {
@@ -767,6 +811,24 @@ async function main() {
     })
   })
 
+  // S-uploads3: a copy too large to read whole is judged by its first bytes,
+  // as the purge judges a large file; text that only starts like media is
+  // withheld, as the purge lists it for review.
+  expect('judgeRestoredAsset: large other media is written back, crafted text is not', () => {
+    assert.equal(typeof backup.judgeRestoredAsset, 'function', 'not exported')
+    const heicHead = F.heic().subarray(0, 64)
+    assert.deepEqual(backup.judgeRestoredAsset(heicHead, false, SCAN_MAX + 1), { contentType: 'image/heic' })
+    const caepHead = F.bytes(F.ftyp('CAEP', 'CAEP', 'mp42'), F.MOOV).subarray(0, 64)
+    assert.deepEqual(backup.judgeRestoredAsset(caepHead, false, SCAN_MAX + 1), { contentType: 'video/mp4' })
+    const bigFree = F.bytes(F.u32be(SCAN_MAX), 'free', new Uint8Array(4000))
+    assert.deepEqual(backup.judgeRestoredAsset(bigFree, false, SCAN_MAX + 1), { contentType: 'video/quicktime' })
+    const csv = F.enc('G' + 'x'.repeat(187) + 'G' + 'y'.repeat(187) + 'G' + 'z'.repeat(187) + '\n')
+    assert.deepEqual(backup.judgeRestoredAsset(csv, true, csv.length), { reason: 'not-media' })
+    const notes = F.bytes([0, 0, 0, 8], 'free', 'hello text after a tiny header')
+    assert.deepEqual(backup.judgeRestoredAsset(notes, true, notes.length), { reason: 'not-media' })
+    assert.deepEqual(backup.judgeRestoredAsset(F.jpeg().subarray(0, 600), false, SCAN_MAX + 1), { reason: 'too-large-to-check' })
+  })
+
   // An older tree has none of this: say so rather than crash.
   expect('backup.ts exports RESTORE_ASSET_SCAN_MAX_BYTES (32 MB)', () => assert.equal(backup.RESTORE_ASSET_SCAN_MAX_BYTES, 32 * 1024 * 1024))
 
@@ -783,7 +845,7 @@ async function main() {
     process.exitCode = 1
     return
   }
-  console.log(`PASS ${checks} checks: a restore writes back under uploads/ only images and videos the upload gate accepts, with their detected type; everything else goes byte for byte to quarantine/<time>/ and is listed in withheldAssets; large copies are streamed and pinned; the document cannot aim it outside backups/ and uploads/`)
+  console.log(`PASS ${checks} checks: a restore writes back under uploads/ what the purge keeps -- allowlisted images and videos with their detected type, other media (HEIC, BMP, CAEP/mp21 MP4...) with a plain media type; everything else goes byte for byte to quarantine/<time>/ and is listed in withheldAssets; large copies are streamed and pinned; the document cannot aim it outside backups/ and uploads/`)
 }
 
 main().catch((error) => {

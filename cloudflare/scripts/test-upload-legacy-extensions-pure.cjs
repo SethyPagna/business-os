@@ -11,7 +11,8 @@
 //     inline as image/heic / image/heif -- no extra R2 read;
 //   - `.bin` and extensionless keys are decided by their FIRST BYTES
 //     (uploadSecurity's detectUploadFormat, plus HEIF brands): an allowed
-//     image is inline as the detected type, anything else stays a 404. The
+//     image is inline as the detected type, a video (S-uploads3) is an
+//     attachment as the detected type, anything else stays a 404. The
 //     uploader's stored type is never consulted, in either direction;
 //   - the sniff is ONE small ranged read, paid only by those keys: a .jpg
 //     still costs exactly one unranged R2 get;
@@ -204,11 +205,21 @@ check('a .bin holding HTML is still refused, even stored as image/png', async ()
   await assertDenied(await serve('uploads/evil.bin'), '.bin html')
 })
 
-check('sniffed SVG, PDF, video and empty objects are refused', async () => {
+check('sniffed SVG, PDF and empty objects are refused', async () => {
   await assertDenied(await serve('uploads/evil-svg.bin'), '.bin svg')
   await assertDenied(await serve('uploads/invoice'), 'noext pdf stored as image/jpeg')
-  await assertDenied(await serve('uploads/clip.bin'), '.bin mp4 (sniffed keys serve images only)')
   await assertDenied(await serve('uploads/empty.bin'), 'empty .bin')
+})
+
+// S-uploads3: a sniffed video is served like a .mp4 (an attachment); the full
+// matrix, Range and HEAD are in test-upload-legacy-video-sniff-pure.cjs.
+check('a .bin holding an MP4 is a video/mp4 attachment, never inline', async () => {
+  const res = await serve('uploads/clip.bin')
+  assert.strictEqual(res.status, 200)
+  assert.strictEqual(res.headers.get('content-type'), 'video/mp4')
+  assert.strictEqual(res.headers.get('content-disposition'), 'attachment; filename="clip.bin"')
+  assertHardened(res, '.bin mp4')
+  assert.deepStrictEqual(await bodyBytes(res), MP4)
 })
 
 check('.html and .svg stay 404 without any R2 read, even holding image bytes', async () => {
@@ -289,14 +300,20 @@ check('if the byte classifier cannot load, sniffed keys fail closed', async () =
   assert.strictEqual(jpg.status, 200)
 })
 
-check('the policy: sniffed keys take only the image type their bytes were detected as', async () => {
+check('the policy: sniffed keys take only the image or video type their bytes were detected as', async () => {
   assert.deepStrictEqual(uploadServePolicy('uploads/a.bin'), { kind: 'deny' }, 'no sniffed type -> deny')
   assert.deepStrictEqual(uploadServePolicy('uploads/a'), { kind: 'deny' })
-  for (const type of ['text/html', 'image/svg+xml', 'application/pdf', 'text/xml', 'video/mp4', 'application/octet-stream']) {
+  for (const type of ['text/html', 'image/svg+xml', 'application/pdf', 'text/xml', 'audio/mp4', 'audio/mpeg', 'application/octet-stream']) {
     assert.deepStrictEqual(uploadServePolicy('uploads/a.bin', type), { kind: 'deny' }, `.bin as ${type}`)
     assert.deepStrictEqual(uploadServePolicy('uploads/a', type), { kind: 'deny' }, `noext as ${type}`)
+    assert.deepStrictEqual(uploadServePolicy('uploads/a.m4v', type), { kind: 'deny' }, `.m4v as ${type}`)
   }
   assert.deepStrictEqual(uploadServePolicy('uploads/a.bin', 'image/png'), { kind: 'inline', contentType: 'image/png' })
+  for (const type of ['video/mp4', 'video/quicktime', 'video/webm']) {
+    for (const key of ['uploads/a.bin', 'uploads/a', 'uploads/a.m4v', 'uploads/a.3gp', 'uploads/a.3g2']) {
+      assert.deepStrictEqual(uploadServePolicy(key, type), { kind: 'attachment', contentType: type }, `${key} as ${type}`)
+    }
+  }
   for (const ext of ['.jfif', '.jpe', '.pjpeg', '.pjp']) {
     assert.deepStrictEqual(uploadServePolicy(`uploads/a${ext}`, 'text/html'), { kind: 'inline', contentType: 'image/jpeg' }, ext)
   }
