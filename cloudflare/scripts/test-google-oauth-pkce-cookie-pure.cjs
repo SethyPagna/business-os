@@ -233,6 +233,30 @@ async function check(name, fn) {
     assertCleared(done.cleared)
   })
 
+  // S-auth4b (council K21): the app shows its forced password change screen
+  // from the sign-in payload's flag. The Google sign-in payload must carry the
+  // account's flag like POST /login and /otp/verify do, or a Google sign-in of
+  // an account that must change its password mounts the app behind 403s.
+  const googlePayload = (html) => JSON.parse(/const payload = (\{.*\});/.exec(html)[1])
+  await check('S-auth4b: a Google sign-in of an account that must change its password carries the flag', async () => {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
+    db.prepare('UPDATE users SET must_change_password = 1 WHERE id = 3').run({})
+    const started = await start('login')
+    const done = await callback(started.state, { pkce: started.cookieValue })
+    assert.equal(done.status, 200, done.html)
+    const payload = googlePayload(done.html)
+    assert.equal(payload.user.id, 3)
+    assert.equal(payload.user.must_change_password, 1)
+  })
+
+  await check('S-auth4b control: a Google sign-in of an account that need not change reads 0', async () => {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
+    const started = await start('login')
+    const done = await callback(started.state, { pkce: started.cookieValue })
+    assert.equal(done.status, 200, done.html)
+    assert.equal(googlePayload(done.html).user.must_change_password, 0)
+  })
+
   await check('a callback WITHOUT the cookie is refused and the code is never redeemed', async () => {
     const started = await start('login')
     const done = await callback(started.state, {})

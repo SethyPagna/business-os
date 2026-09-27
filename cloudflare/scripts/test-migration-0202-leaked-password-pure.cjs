@@ -19,6 +19,12 @@
 //   - every writer refuses a known password: user create, self change, admin
 //     reset, email-link reset, authenticator-code reset;
 //   - the plaintext never reaches console output or the audit log;
+//   - owner requirement (27 Sep 2026), no closed loop: the app's sign-out
+//     probe (the path read from frontend/src/api/http.ts) answers for a
+//     must-change account, so Sign out finishes; a reload reads the flag from
+//     /bootstrap; a wrong current password is 400 then the usual 429 limit,
+//     the session and the flag untouched; old -> new needs no rule beyond
+//     length and not publicly known; the new password signs in unflagged;
 //   - before 0202 is applied (no column) sign-in still works: the lookup falls
 //     back and nothing 500s.
 
@@ -71,6 +77,7 @@ const SCHEMA = `
     created_at TEXT DEFAULT CURRENT_TIMESTAMP, device_id TEXT, limit_family_id INTEGER
   );
   CREATE UNIQUE INDEX idx_user_sessions_token_hash_unique_pg ON user_sessions (token_hash);
+  CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 `
 
 const noop = async () => {}
@@ -122,10 +129,20 @@ const usersRoute = load('routes/users.ts', {
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
 }).default
 
+// Like D1, every statement answers with a promise: GET /bootstrap chains
+// .catch() on its settings read instead of awaiting it at once. Result shapes
+// are the shim's own.
+const promisedDb = (raw) => ({
+  prepare(sql) {
+    const stmt = raw.prepare(sql)
+    return { get: async (p) => stmt.get(p), all: async (p) => stmt.all(p), run: async (p) => stmt.run(p) }
+  },
+})
+
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
   bcryptjs: bcryptStub,
-  '../lib/db': { getDb: (env) => env.DB },
+  '../lib/db': { getDb: (env) => promisedDb(env.DB) },
   '../lib/auth': authLib,
   '../lib/verification': {
     issuePasswordResetLink: noop,
@@ -158,6 +175,21 @@ const authRoute = load('routes/auth.ts', {
 }).default
 
 const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {} }
+
+// The app's Sign out (frontend/src/api/http.ts recoverUnresolvedSignout) asks
+// who owns the cookie before and after POST /api/auth/logout, and believes the
+// sign-out only once that probe reads 401 invalid_session. Mounted the way
+// index.ts mounts routes/sync.ts: a sub-app at /api/sync behind the REAL
+// requireAuth.
+const { Hono } = require('hono')
+const FRONTEND_HTTP_SOURCE = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'http.ts'), 'utf8')
+const SIGNOUT_PROBE_PATH = /apiFetch\('GET', '([^']+)', undefined, 8000, \{ signoutRecovery: token \}\)/.exec(FRONTEND_HTTP_SOURCE)?.[1] || null
+const syncApp = new Hono()
+syncApp.use('*', authLib.requireAuth)
+syncApp.get('/owner', (c) => c.json({ owner: { actor_id: c.get('user').id } }))
+syncApp.post('/outbox', (c) => c.json({ success: true, results: [] }))
+const workerApp = new Hono()
+workerApp.route('/api/sync', syncApp)
 let db
 let env
 
@@ -321,6 +353,76 @@ async function check(name, fn) {
     assert.equal(lines.join('\n').includes(LEAKED), false, 'console')
     assert.ok(audits.some((a) => a.includes('login_known_leaked_password')), 'the sign-in is audited')
     assert.equal(audits.join('\n').includes(LEAKED), false, 'audit')
+  })
+
+  // Owner requirement (27 Sep 2026): the forced change must never be a closed
+  // loop -- old -> new works, Sign out works, a reload and a wrong current
+  // password keep the change screen, and the new password signs in cleanly.
+
+  await check('owner: Sign out on the change screen finishes -- the sign-out probe answers, logout revokes, the probe then reads 401', async () => {
+    assert.equal(SIGNOUT_PROBE_PATH, '/api/sync/owner', 'the path the app probes (frontend/src/api/http.ts)')
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'index.ts'), 'utf8'), /app\.route\('\/api\/sync', createSyncRoute\(app\)\)/)
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sync.ts'), 'utf8'), /app\.use\('\*', requireAuth\)\s+app\.get\('\/owner'/)
+    reset()
+    const token = (await login('owner', LEAKED)).minted
+    const probe = await send(workerApp, 'GET', SIGNOUT_PROBE_PATH, token)
+    assert.equal(probe.status, 200, `the probe must answer for an account that must change: ${probe.text}`)
+    assert.equal(probe.body.owner.actor_id, 2)
+    for (const [method, url] of [['POST', '/api/sync/outbox'], ['POST', '/api/sync/owner'], ['GET', '/api/sync/owners']]) {
+      const closed = await send(workerApp, method, url, token, method === 'POST' ? {} : undefined)
+      assert.equal(closed.status, 403, `${method} ${url} stays closed: ${closed.text}`)
+      assert.equal(closed.body.code, 'password_change_required')
+    }
+    const out = await send(authRoute, 'POST', '/logout', token, { expected_actor_id: 2, expected_organization_id: null })
+    assert.equal(out.status, 200, out.text)
+    const after = await send(workerApp, 'GET', SIGNOUT_PROBE_PATH, token)
+    assert.equal(after.status, 401, after.text)
+    assert.equal(after.body.code, 'invalid_session', 'the app confirms a sign-out on exactly this')
+    assert.equal(flagOf(2), 1, 'signing out does not clear the flag: the next sign-in shows the change screen again')
+  })
+
+  await check('owner: a reload on the change screen reads the flag again (GET /bootstrap); after the change it reads 0', async () => {
+    reset()
+    const token = (await login('owner', LEAKED)).minted
+    const boot = await send(authRoute, 'GET', '/bootstrap', token)
+    assert.equal(boot.status, 200, boot.text)
+    assert.equal(boot.body.user.must_change_password, 1, 'a reload shows the change screen, not the app')
+    assert.equal((await changePassword(token, 2, LEAKED, 'a-new-owner-pass-7')).status, 200)
+    const again = await send(authRoute, 'GET', '/bootstrap', token)
+    assert.equal(again.body.user.must_change_password, 0, 'the next load is the app')
+    assert.equal((await someProtectedCall(token)).status, 200)
+  })
+
+  await check('owner: a wrong current password stays on the change screen with an error and the usual limit, never a sign-out', async () => {
+    reset()
+    const token = (await login('owner', LEAKED)).minted
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      const wrong = await changePassword(token, 2, 'not-the-password', 'a-new-owner-pass-7')
+      assert.equal(wrong.status, 400, `attempt ${attempt}: ${wrong.text}`)
+      assert.equal(wrong.body.code, 'incorrect_password')
+    }
+    const limited = await changePassword(token, 2, 'not-the-password', 'a-new-owner-pass-7')
+    assert.equal(limited.status, 429, limited.text)
+    assert.equal(limited.body.code, 'current_password_rate_limited')
+    assert.equal(flagOf(2), 1, 'still must change')
+    assert.equal(passwordOf(2), `hash:${LEAKED}`, 'nothing written')
+    const me = await send(authRoute, 'GET', '/me', token)
+    assert.equal(me.status, 200, 'still signed in: the screen stays, no bounce to sign-in')
+    assert.equal(me.body.user.must_change_password, 1)
+  })
+
+  await check('owner: old -> new needs only a password that is not publicly known (no other rule); signing in again with it shows no change screen', async () => {
+    reset()
+    const token = (await login('owner', LEAKED)).minted
+    const changed = await changePassword(token, 2, LEAKED, 'qwerty')
+    assert.equal(changed.status, 200, `a plain 6-character password is enough: ${changed.text}`)
+    assert.equal(flagOf(2), 0)
+    assert.equal((await send(authRoute, 'POST', '/logout', token, { expected_actor_id: 2, expected_organization_id: null })).status, 200)
+    const again = await login('owner', 'qwerty')
+    assert.equal(again.body.user.must_change_password, 0, 'no forced screen after signing in with the new password')
+    assert.equal((await someProtectedCall(again.minted)).status, 200)
+    const old = await send(authRoute, 'POST', '/login', null, { username: 'owner', password: LEAKED, deviceId: 'dev-1' })
+    assert.equal(old.status, 401, 'the old password is gone')
   })
 
   await check('before 0202 is applied, sign-in and ordinary calls still work (no 500)', async () => {

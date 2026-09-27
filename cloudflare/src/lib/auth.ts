@@ -461,11 +461,19 @@ export async function revokeUserSessions<E extends { Bindings: Env } = { Binding
 // middleware. Usage: app.use('/protected/*', requireAuth) or per-route:
 // app.get('/x', requireAuth, handler). Stores the resolved user on
 // c.set('user', ...) for handlers to read via c.get('user').
-// The one route a must-change account may use through requireAuth: POST
-// .../users/<own id>/change-password (routes/users.ts; it re-checks the
-// current password and that the target is the caller).
+// What a must-change account may use through requireAuth:
+//   - POST .../users/<own id>/change-password (routes/users.ts; it re-checks
+//     the current password and that the target is the caller);
+//   - GET /api/sync/owner, the app's sign-out probe (frontend/src/api/http.ts
+//     recoverUnresolvedSignout). The app believes a sign-out only once this
+//     probe reads 401; answered 403 it never sent the logout, so Sign out on
+//     the change screen could not finish. It returns who owns the cookie,
+//     which /me already tells this session.
+const SIGNOUT_PROBE_PATH = /^\/api\/sync\/owner\/?$/
 export function allowedWhilePasswordMustChange(method: string, path: string, userId: number | string): boolean {
-  if (String(method).toUpperCase() !== 'POST') return false
+  const verb = String(method).toUpperCase()
+  if (verb === 'GET') return SIGNOUT_PROBE_PATH.test(String(path || ''))
+  if (verb !== 'POST') return false
   const match = /\/users\/([^/]+)\/change-password\/?$/.exec(String(path || ''))
   return !!match && Number(match[1]) === Number(userId)
 }
@@ -497,8 +505,8 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   // had already re-confirmed the session was fine.
   if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   // Signed in with a publicly known password (S-auth4b): nothing but the
-  // self password change until it is changed. Sign-out, /me and /bootstrap
-  // do not pass through here. 403 with its own code, never 401 or the
+  // self password change and the sign-out probe until it is changed. Logout,
+  // /me and /bootstrap do not pass through here. 403 with its own code, never 401 or the
   // "sign in again" wording, so the client does not treat it as a lost session.
   if (Number(user.must_change_password || 0) === 1 && !allowedWhilePasswordMustChange(c.req.method, c.req.path, user.id)) {
     return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)
