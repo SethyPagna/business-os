@@ -97,6 +97,36 @@ assert.throws(() => subject.assertReturnCreateCapacity(
   [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }], [],
   [{ sale_item_id: 1, quantity: 2 }, { product_id: 5, quantity: 1 }],
 ), /additional unit/, 'sale-line and product-fallback quantities share one capacity')
+// FX-exc1 item 4 (28 Sep 2026): the refusal also carries its product and its
+// counts as data (`params`), so POST /api/returns/bulk can hand them to the
+// till, which restates the refusal in the operator's language. The English
+// sentences stay exactly as they were.
+{
+  const refusal = (sold, committed, requested) => {
+    try { subject.assertReturnCreateCapacity(sold, committed, requested) } catch (error) { return error }
+    return null
+  }
+  const byLine = refusal([{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }], [{ sale_item_id: 1, quantity: 2 }], [{ sale_item_id: 1, quantity: 1 }])
+  assert.equal(byLine.message, 'Cannot return 3 of A — only 2 sold', 'the sale-line sentence is unchanged')
+  assert.deepEqual(byLine.params, { product: 'A', returned: 3, sold: 2 }, 'a sale-line overflow names the line and its counts')
+  // Line 1 is full (2 of 2), so the product-matched 3 fills line 2's 1 and
+  // overflows by 2: 5 counted as returned against the 3 the sale sold of it.
+  const byProduct = refusal(
+    [{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }, { id: 2, product_id: 5, product_name: 'A', quantity: 1 }],
+    [{ sale_item_id: 1, quantity: 2 }], [{ product_id: 5, quantity: 3 }])
+  assert.equal(byProduct.message, 'Cannot return 2 additional unit(s) of product #5 — only the unreturned sold quantity is eligible', 'the product sentence is unchanged')
+  assert.deepEqual(byProduct.params, { product: 'A', returned: 5, sold: 3 }, 'a product-matched overflow names the product by its sale line and totals it')
+  assert.deepEqual(refusal([{ id: 1, product_id: 5, product_name: 'A', quantity: 2 }], [], [{ product_id: 9, quantity: 1 }]).params,
+    { product: '#9', returned: 1, sold: 0 }, 'a product the sale never sold is named by its id')
+  assert.deepEqual(refusal([{ id: 1, product_id: 5, product_name: null, quantity: 1 }], [], [{ sale_item_id: 1, quantity: 2 }]).params,
+    { product: '#5', returned: 2, sold: 1 }, 'an unnamed line is named by its product id')
+  // 0.1 + 0.1 + 0.1 sums to 0.30000000000000004 in binary floats.
+  assert.deepEqual(refusal([{ id: 1, product_id: 5, product_name: 'A', quantity: 0.2 }], [{ sale_item_id: 1, quantity: 0.1 }],
+    [{ sale_item_id: 1, quantity: 0.1 }, { sale_item_id: 1, quantity: 0.1 }]).params,
+  { product: 'A', returned: 0.3, sold: 0.2 }, 'the counts carry no binary-float noise')
+  assert.equal(refusal([{ id: 1, product_id: null, product_name: null, quantity: 1 }], [], [{ sale_item_id: 1, quantity: 2 }]).params, null,
+    'a line with neither name nor product carries no params, so the till keeps its plain sentence')
+}
 
 const guard = subject.returnCreateGuardStatement(crypto.randomUUID(), 'precondition', '1=1')
 assert.match(guard.sql, /operation_id,phase,guard_value/)

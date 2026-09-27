@@ -106,14 +106,17 @@ function activeReturned(f) {
     WHERE r.sale_id=1 AND COALESCE(r.status,'completed')<>'cancelled'`).get().q
 }
 
-async function refused(f, id, key, label) {
+async function refused(f, id, key, label, params) {
   const before = state(f)
   await assert.rejects(helper.applyReturnBulkAction(f.env, user, restoreRequest(f, id, key)),
     error => error instanceof Error && error.statusCode === 409 && /more units as returned than the sale sold/.test(error.message)
       // The machine code the bulk route forwards, so the client can restate
       // the refusal in the operator's language (en/km return_restore_over_capacity).
-      && error.code === 'return_restore_over_capacity',
-    `${label}: the restore is refused with code return_restore_over_capacity`)
+      && error.code === 'return_restore_over_capacity'
+      // ...and the product and counts the English names (FX-exc1 item 4), so
+      // the restated refusal keeps them (return_restore_over_capacity_detail).
+      && JSON.stringify(error.params) === JSON.stringify(params),
+    `${label}: the restore is refused with code return_restore_over_capacity and params ${JSON.stringify(params)}`)
   assert.equal(state(f), before, `${label}: a refused restore writes nothing`)
   assert.equal(activeReturned(f), 2, `${label}: still exactly the 2 sold units counted as returned`)
 }
@@ -122,19 +125,19 @@ async function run() {
   // 1. The hunt's sequence: R10 (2, cancelled) then R11 (2, completed). Restoring R10 would make 4 of 2.
   {
     const f = fixture(); seed(f, [{ id: 10, status: 'cancelled', quantity: 2 }, { id: 11, status: 'completed', quantity: 2 }])
-    await refused(f, 10, 'legacy-restore-over-1', 'sale_item_id lines')
+    await refused(f, 10, 'legacy-restore-over-1', 'sale_item_id lines', { product: 'Serum', returned: 4, sold: 2 })
   }
   // 2. Same, but the newer return matched the sale by product only (no sale_item_id).
   {
     const f = fixture(); seed(f, [{ id: 10, status: 'cancelled', quantity: 2 }, { id: 11, status: 'completed', quantity: 2, saleItemId: null }])
-    await refused(f, 10, 'legacy-restore-over-2', 'product-matched line')
+    await refused(f, 10, 'legacy-restore-over-2', 'product-matched line', { product: 'Serum', returned: 4, sold: 2 })
   }
   // 3. Partial overlap: 1 already active + restoring 2 = 3 of 2.
   {
     const f = fixture(); seed(f, [{ id: 10, status: 'cancelled', quantity: 2 }, { id: 11, status: 'completed', quantity: 1 }])
     const before = state(f)
     await assert.rejects(helper.applyReturnBulkAction(f.env, user, restoreRequest(f, 10, 'legacy-restore-over-3')),
-      error => error.statusCode === 409)
+      error => error.statusCode === 409 && JSON.stringify(error.params) === JSON.stringify({ product: 'Serum', returned: 3, sold: 2 }))
     assert.equal(state(f), before)
   }
   // 4. Positive control: nothing else active, the restore succeeds and counts 2 of 2.
