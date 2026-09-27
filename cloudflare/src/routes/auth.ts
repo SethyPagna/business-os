@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
-import { createSession, currentSessionLimitFamily, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionReissueSource, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -833,18 +833,23 @@ app.post('/otp/verify', async (c) => {
 // renews, that sign-in's current-password allowance (S-auth4), and the route
 // itself is capped per family as defence in depth. The frontend calls it
 // only when someone saves the "Default login duration" setting.
+//
+// The new session also keeps the caller's device id and name, read from the
+// session row and never from the body (SEC1-01): the app sends no device id
+// here, and a session with none escaped Devices -> Revoke / Reject.
 const SESSION_DURATION_LIMIT_BUCKET = 'auth:session_duration'
 const SESSION_DURATION_LIMIT_MAX = 10
 const SESSION_DURATION_LIMIT_WINDOW_MS = 15 * 60 * 1000
 app.post('/session-duration', requireAuth, async (c) => {
-  const body = await c.req.json<{ sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
+  const body = await c.req.json<{ sessionDuration?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceTz?: string; clientTime?: string }))
   const user = c.get('user')
   if (!user?.id) return c.json({ error: 'Please sign in again to continue.' }, 401)
 
   // Deliberately not caught: without migration 0201 this throws, and a 500
   // is better than minting a session that escapes its family's allowance.
-  const limitFamilyId = await currentSessionLimitFamily(c)
-  if (!limitFamilyId) return c.json({ error: 'Please sign in again to continue.' }, 401)
+  const source = await currentSessionReissueSource(c)
+  if (!source) return c.json({ error: 'Please sign in again to continue.' }, 401)
+  const limitFamilyId = source.limitFamilyId
   const cap = await checkRateLimit(c.env, SESSION_DURATION_LIMIT_BUCKET, `family:${limitFamilyId}`, SESSION_DURATION_LIMIT_MAX, SESSION_DURATION_LIMIT_WINDOW_MS)
   if (!cap.allowed) {
     return c.json({ error: 'Too many login duration changes. Please try again later.', code: 'session_duration_rate_limited', retryAfterSeconds: cap.retryAfterSeconds }, 429)
@@ -852,8 +857,8 @@ app.post('/session-duration', requireAuth, async (c) => {
 
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
-    deviceName: body.deviceName,
-    deviceId: body.deviceId,
+    deviceName: source.deviceName || undefined,
+    deviceId: source.deviceId,
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,
