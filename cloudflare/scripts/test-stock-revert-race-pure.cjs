@@ -154,6 +154,39 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM stock_session_guards').get().n, 0)
   })
 
+  // FX-stock F3 (R-stock+returns): a dated stock count re-apply supersedes
+  // its own prior movement -- reverses its effect and DELETES the row -- in
+  // one batch. A revert that read that row just before must not then
+  // compensate a movement that no longer exists (the refuter's G02: branch
+  // 0 where the count says 5, and a revert:<id> row pointing at nothing).
+  for (const c of [
+    { name: 'an addition of 3 onto a named lot', stock: 10, type: 'add', delta: -3 },
+    { name: 'a removal of 3 from a named lot', stock: 7, type: 'remove', delta: 3 },
+  ]) {
+    await test(`${c.name} superseded (deleted) between the revert's read and its write: refused, nothing written`, async () => {
+      const { rawDb, db, setBeforeBatch } = freshDb()
+      seed(rawDb, { stock: c.stock, lot: true })
+      rawDb.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, batch_id)
+        VALUES (50, 1, 'Widget', 1, 'Shop', @type, 3, 'Dated stock count import', 1)`).run({ type: c.type })
+      const mv = rawDb.prepare('SELECT * FROM inventory_movements WHERE id = 50').get()
+      setBeforeBatch((raw) => {
+        // The re-apply's own batch: the row's effect reversed on both
+        // ledgers, the row deleted (datedStockCountApply.ts).
+        raw.prepare('UPDATE branch_batch_stock SET quantity = quantity + @d WHERE batch_id = 1').run({ d: c.delta })
+        raw.prepare('UPDATE branch_stock SET quantity = quantity + @d WHERE product_id = 1').run({ d: c.delta })
+        raw.prepare('UPDATE products SET stock_quantity = quantity FROM branch_stock WHERE branch_stock.product_id = products.id').run()
+        raw.prepare('DELETE FROM inventory_movements WHERE id = 50').run()
+      })
+      const before = c.stock + c.delta
+      const res = await applyMovementRevert(db, mv, actor)
+      assert.strictEqual(res.ok, false, `the revert of a deleted row must not apply: ${JSON.stringify(res)} ${JSON.stringify(state(rawDb, 50))}`)
+      assert.strictEqual(res.status, 409)
+      assert.strictEqual(res.code, 'stock_changed')
+      assert.deepStrictEqual(state(rawDb, 50), { branch: before, product: before, lot: before, counters: 0 }, 'nothing written, no counter-movement')
+      assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM stock_session_guards').get().n, 0)
+    })
+  }
+
   console.log(`\n${passed} PASS, ${failed} FAIL`)
   process.exitCode = failed ? 1 : 0
 }

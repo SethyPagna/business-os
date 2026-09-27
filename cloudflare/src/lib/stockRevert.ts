@@ -392,7 +392,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   })
   try {
     await db.batch([
-      { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef } },
+      { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
     ])
@@ -411,9 +411,15 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
 
 // In-batch assertion (stock_session_guards' CHECK(guard_value = 1), the
 // repo's existing idiom): 0 when a counter-movement for this row already
-// exists, which aborts the whole batch before any stock moves.
+// exists, or when the row itself is gone, which aborts the whole batch before
+// any stock moves. The second half is FX-stock F3: a dated stock count
+// re-apply reverses and DELETES its own superseded movement in one batch; a
+// revert that read that row just before would otherwise compensate a
+// movement that no longer exists (the stock moved twice, and a revert:<id>
+// row points at nothing). The caller reports it as stock_changed.
 const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
-  SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref) THEN 0 ELSE 1 END`
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref)
+    OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
 
 const ALREADY_REVERTED: RevertResult = { ok: false, status: 409, code: 'already_reverted', error: 'This movement has already been reverted.' }
 
