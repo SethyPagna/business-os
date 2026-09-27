@@ -216,11 +216,13 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
     assert.match(source, /disabled=\{uploading \|\| deletingAssetId != null\}/)
   }
 
-  // Picker keeps the plain window.confirm gate; FilesPage.tsx replaced it
+  // Picker keeps a plain yes/no gate (the shared ConfirmDialog through
+  // useConfirmDialog since FX-ui -- never window.confirm); FilesPage.tsx replaced it
   // with a real "type CONFIRM DELETE" modal (with an unlock checkbox for
   // locked/in-use files) -- these diverged on purpose, so each gets its
   // own assertion instead of sharing the loop above.
-  assert.match(picker, /deleteInFlightRef\.current = true[\s\S]*window\.confirm/)
+  assert.match(picker, /deleteInFlightRef\.current = true[\s\S]*await askToConfirm\(/)
+  assert.doesNotMatch(picker, /window\.confirm\(/)
   assert.match(filesPage, /deleteConfirmText\.trim\(\)\.toUpperCase\(\) !== 'CONFIRM DELETE'\) return[\s\S]*const locked = !asset\.canDelete[\s\S]*if \(locked && !deleteUnlockChecked\) return[\s\S]*deleteInFlightRef\.current = true/)
 
   assert.match(filesPage, /const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000/)
@@ -381,7 +383,8 @@ await runTest('server queue and connection actions use guarded bounded actions',
   assert.match(source, /if \(!beginSingleAction\(queueActionInFlightRef, \{ blocked: retryingQueue \}\)\) return/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.retryPendingSyncNow\?\.\(reviewToken\),\s*'Retry pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.discardPendingSyncQueue\?\.\('Reviewed pending sales were cleared\.', reviewToken\),\s*'Discard pending sync queue',\s*SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /const reviewToken = pendingSync.review_token[\s\S]*if \(!reviewToken \|\| !window.confirm/)
+  assert.match(source, /const reviewToken = pendingSync.review_token\s*if \(!reviewToken\) return\s*if \(!\(await askToConfirm\(\{[\s\S]*?\}\)\)\) return[\s\S]*?if \(!beginSingleAction\(queueActionInFlightRef/)
+  assert.doesNotMatch(source, /window\.confirm\(/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(queueActionInFlightRef\)[\s\S]*setRetryingQueue\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(testSyncInFlightRef, \{ blocked: testing \}\)\) return/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/)

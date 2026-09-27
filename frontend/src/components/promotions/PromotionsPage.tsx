@@ -19,6 +19,7 @@ import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import HubSectionNav, { type HubSectionDef } from '../shared/HubSectionNav.tsx'
@@ -177,6 +178,7 @@ type PromotionsSection = 'rules' | 'discounts' | 'loyalty'
 
 export default function PromotionsPage() {
   const { t, notify, fmtUSD, getPermissionTier, can, hasPermission, navigateTo } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // G2 section gates: the page door admits either grant (see
   // AppContext.canAccessPage); each section still needs its own.
   const canPromotions = can('promotions', 'view')
@@ -365,7 +367,12 @@ export default function PromotionsPage() {
     if (!canManagePromotions) { notify(t('perm_view_only_generic') || 'View only: you do not have permission to make this change.', 'error'); return }
     const rule = row.normalized
     const label = rule?.title || `#${row.id}`
-    if (!window.confirm((t('promo_rule_delete_confirm') || 'Delete promotion "{name}"? Prices return to normal immediately.').replace('{name}', label))) return
+    if (!(await askToConfirm({
+      title: t('promo_rule_delete_title') || 'Delete promotion?',
+      message: (t('promo_rule_delete_confirm') || 'Delete promotion "{name}"? Prices return to normal immediately.').replace('{name}', label),
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) return
     try {
       await deletePromotionRule(row.id)
       notify(t('promo_rule_deleted') || 'Promotion deleted.')
@@ -1083,6 +1090,7 @@ export default function PromotionsPage() {
           </div>
         ) : null}
       </div>
+      {confirmDialog}
     </div>
   )
 }

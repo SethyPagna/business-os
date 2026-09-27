@@ -15,7 +15,9 @@ const km = JSON.parse(read('lang/km.json')) as Record<string, string>
 assert.match(transport, /apiFetch\('POST', `\/api\/auth\/devices\/\$\{encodeURIComponent\(String\(id\)\)\}\/reset`, \{\}\)/, 'reset uses the online admin API directly')
 const resetTransport = transport.slice(transport.indexOf('export function resetDeviceForReapproval'), transport.indexOf('// ---- Live sessions'))
 assert.doesNotMatch(resetTransport, /route\(|queue|outbox/i, 'reset transport remains outside offline replay')
-assert.match(panel, /window\.confirm\(tr\([\s\S]*?'device_reapproval_reset_confirm'/, 'reset requires an explicit confirmation')
+// FX-ui: the explicit confirmation is the shared ConfirmDialog, never window.confirm.
+assert.match(panel, /const confirmed = await askToConfirm\(\{[\s\S]*?'device_reapproval_reset_confirm'[\s\S]*?\}\)\s*if \(!confirmed\) return\s*void runAction\(device\.id, 'reset'/, 'reset requires an explicit confirmation')
+assert.doesNotMatch(panel, /window\.confirm\(/, 'reset never uses the native confirm popup')
 assert.match(panel, /resetDeviceForReapproval\(id\)/, 'reset handler calls only the reset transport')
 assert.match(panel, /void runAction\(device\.id, 'reset'/, 'confirmed reset is distinct from approve')
 const historyAt = panel.indexOf("'device_rejected_history'")

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,
@@ -131,6 +132,7 @@ export default function FilePickerModal({
   const loadRequestRef = useRef(0)
   const uploadInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const notifyRef = useRef(notify)
 
   useEffect(() => {
@@ -260,7 +262,12 @@ export default function FilePickerModal({
       return
     }
     deleteInFlightRef.current = true
-    if (!window.confirm(`Delete "${asset.original_name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr('delete_file', 'Delete file'),
+      message: asset.original_name,
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       deleteInFlightRef.current = false
       return
     }
@@ -382,6 +389,7 @@ export default function FilePickerModal({
           </div>
         ) : null}
       </div>
+      {confirmDialog}
     </Modal>
   )
 }
