@@ -13,6 +13,7 @@ import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { refreshAppData } from '../../utils/appRefresh'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 import LegacySubtotalRepair from './LegacySubtotalRepair.tsx'
 import GeneralCustomerRepair from './GeneralCustomerRepair.tsx'
 import GeneralCustomerMembershipRepair from './GeneralCustomerMembershipRepair.tsx'
@@ -27,6 +28,7 @@ type AppContextValue = {
   t?: Translate
   notify: Notify
   hasPermission: (permission: string) => boolean
+  user?: PermissionUser
 }
 
 type ResetApiResult = {
@@ -51,7 +53,7 @@ type ProductsResetToggles = {
 type ResetApi = {
   resetData?: (mode: ResetMode, options?: ProductsResetToggles) => Promise<ResetApiResult>
   resetSection?: (section: 'customers' | 'suppliers' | 'delivery_contacts' | 'audit_log') => Promise<ResetApiResult>
-  factoryReset?: () => Promise<ResetApiResult>
+  factoryReset?: (confirmation: { confirm: string; currentPassword: string }) => Promise<ResetApiResult>
 }
 
 type ActionHistory = {
@@ -652,23 +654,29 @@ function SectionReset({ actionHistory = null }: ResetPanelProps) {
 
 
 function FactoryReset({ actionHistory = null }: ResetPanelProps) {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, user } = useApp()
   const T = (key: string, fallback: string) => (typeof t === 'function' ? t(key, fallback) || fallback : fallback)
   const [step, setStep] = useState(0)
   const [typed, setTyped] = useState('')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [working, setWorking] = useState(false)
+  // Mirrors the Worker's gate (routes/system.ts): administrator control AND
+  // backup_restore. backup_restore alone no longer reaches the wipe.
+  const canFactoryReset = isAdminControlUser(user) && hasPermission('backup_restore')
   const elapsedSeconds = useElapsedSeconds(working)
   const showSlowHint = working && elapsedSeconds * 1000 >= SLOW_ACTION_HINT_AFTER_MS
   const factoryResetInFlightRef = useRef(false)
   const CONFIRM_WORD = 'FACTORY RESET'
 
   async function doFactoryReset() {
-    if (!hasPermission('backup_restore')) return notify(T('access_denied', 'No permission'), 'error')
+    if (!canFactoryReset) return notify(T('access_denied', 'No permission'), 'error')
+    if (typed !== CONFIRM_WORD || !currentPassword) return
     if (!beginSingleAction(factoryResetInFlightRef, { blocked: working })) return
     setWorking(true)
     try {
+      const confirmation = { confirm: typed, currentPassword }
       const result = await withLoaderTimeout(
-        () => getResetApi().factoryReset?.() || Promise.resolve({ success: false, error: 'Factory reset API is unavailable' }),
+        () => getResetApi().factoryReset?.(confirmation) || Promise.resolve({ success: false, error: 'Factory reset API is unavailable' }),
         'Factory reset',
         FACTORY_RESET_TIMEOUT_MS,
       )
@@ -684,11 +692,13 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
         notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${result?.error || 'unknown error'}`, 'error')
         setStep(0)
         setTyped('')
+        setCurrentPassword('')
       }
     } catch (error: unknown) {
       notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${describeError(error, T)}`, 'error')
       setStep(0)
       setTyped('')
+      setCurrentPassword('')
     } finally {
       finishSingleAction(factoryResetInFlightRef)
       setWorking(false)
@@ -708,7 +718,11 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
         </div>
       </div>
 
-      {step === 0 ? (
+      {step === 0 && !canFactoryReset ? (
+        <p className="text-sm text-red-700 dark:text-red-400">{T('factory_reset_admin_only', 'Only an administrator can run a factory reset.')}</p>
+      ) : null}
+
+      {step === 0 && canFactoryReset ? (
         <button onClick={() => setStep(1)} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800">
           {T('factory_reset_start', 'Begin Factory Reset')}
         </button>
@@ -745,11 +759,23 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
             {T('reset_type_to_confirm', 'Type {word} to confirm').split('{word}')[1]}
           </p>
           <input autoFocus disabled={working} className="input border-red-400 font-mono text-sm focus:ring-red-500 disabled:opacity-60 dark:border-red-700" placeholder={CONFIRM_WORD} value={typed} onChange={(event) => setTyped(event.target.value)} />
+          <label className="block text-sm font-medium text-red-700 dark:text-red-300">
+            {T('current_password', 'Current password')}
+            <input
+              type="password"
+              autoComplete="current-password"
+              disabled={working}
+              className="input mt-1 border-red-400 text-sm focus:ring-red-500 disabled:opacity-60 dark:border-red-700"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+            />
+          </label>
+          <p className="text-xs text-red-600 dark:text-red-400">{T('factory_reset_password_hint', 'Enter your current password. A full backup is taken before anything is deleted.')}</p>
           <div className="flex gap-3">
-            <button onClick={doFactoryReset} disabled={typed !== CONFIRM_WORD || working} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800 disabled:opacity-40">
+            <button onClick={doFactoryReset} disabled={typed !== CONFIRM_WORD || !currentPassword || working} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800 disabled:opacity-40">
               {working ? `${T('reset_working', 'Resetting...')}${showSlowHint ? ` ${elapsedSeconds}s` : ''}` : T('factory_reset_label', 'Factory Reset')}
             </button>
-            <button onClick={() => { setStep(0); setTyped('') }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
+            <button onClick={() => { setStep(0); setTyped(''); setCurrentPassword('') }} disabled={working} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300">{T('cancel', 'Cancel')}</button>
           </div>
           {showSlowHint ? (
             <p className="text-xs text-gray-500 dark:text-gray-400">

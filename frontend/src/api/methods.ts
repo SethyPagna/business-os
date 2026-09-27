@@ -1163,8 +1163,8 @@ export async function resetSection(section) {
   return result
 }
 
-export async function factoryReset() {
-  const result = await callSystemRuntimeMethod('factoryReset')
+export async function factoryReset(confirmation) {
+  const result = await callSystemRuntimeMethod('factoryReset', confirmation)
   await invalidateClientRuntimeState('factory-reset')
   return result
 }

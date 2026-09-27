@@ -96,8 +96,9 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
     await denied('/reports/overview', staff({ [section]: true }, { [`${section}:view`]: false }))
   }
   const revoked = { 'returns:view': false, 'fees:view': false, 'sales:view': false, 'inventory:view': false, 'branches:view': false, 'audit_log:view': false }
+  // The username alone no longer grants administrator control (FX-sec).
+  assert.equal(permissions.isAdminControlUser({ ...staff({}, revoked), username: ' ADMIN ' }), false)
   for (const admin of [
-    { ...staff({}, revoked), username: ' ADMIN ' },
     { ...staff({}, revoked), role_code: ' AdMiN ' },
     staff({ all: true }, revoked),
   ]) {

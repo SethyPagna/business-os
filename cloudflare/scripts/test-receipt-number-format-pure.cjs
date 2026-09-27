@@ -315,7 +315,8 @@ function readSource(...parts) {
 
 check('POST /api/sales normalises a client receipt number instead of trusting it', () => {
   const salesRoute = readSource('routes', 'sales.ts')
-  assert.match(salesRoute, /const receiptNumber = normalizeClientReceiptNumber\(body\.receipt_number\) \|\| await uniqueBusinessDateTimeNumber\(/)
+  // `let`: a receipt-race retry re-mints it (test-sale-receipt-number-race-pure.cjs).
+  assert.match(salesRoute, /(?:const|let) receiptNumber = normalizeClientReceiptNumber\(body\.receipt_number\) \|\| await uniqueBusinessDateTimeNumber\(/)
   // The old unguarded pass-through must be gone, not merely shadowed.
   assert.doesNotMatch(salesRoute, /const receiptNumber = body\.receipt_number\?\.trim\(\) \|\|/)
   // ...and a legacy number stays findable through search.

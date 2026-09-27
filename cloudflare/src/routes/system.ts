@@ -1,14 +1,14 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
 import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
 import { runDataIntegrityCheck } from '../lib/dataIntegrity'
 import { listObjects, deleteObject, deleteObjectsBulk } from '../lib/r2'
 import { cleanOrphanImportStaging } from '../lib/importRetention'
 import { sanitizeMediaList } from '../lib/media'
-import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables } from '../lib/coreDataInvariants'
+import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables, resolveSeedAdminPassword } from '../lib/coreDataInvariants'
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion, bumpVersions } from '../lib/cache'
@@ -1181,8 +1181,26 @@ app.post('/finalize-migration', async (c) => {
 // dropAllCustomTables() added because this Worker (unlike the original)
 // creates real per-row `CREATE TABLE` DDL for user-defined tables that a
 // plain DELETE from custom_tables would leave orphaned.
+//
+// Server-side guards (FX-sec, 27 Sep 2026). This used to run for any
+// backup_restore holder on a bodiless POST: the typed phrase lived only in
+// the browser, no password was asked, no backup was taken, and the response
+// carried the reseeded admin password. The wipe now needs ALL of, in order:
+//   1. administrator control -- not merely backup_restore;
+//   2. body.confirm === 'FACTORY RESET' (FACTORY_RESET_CONFIRM_PHRASE);
+//   3. the caller's current password (lib/currentPasswordGuard.ts, the same
+//      failure-only allowance as the profile save and Google unlink);
+//   4. a seed admin password configured (BUSINESS_OS_ADMIN_PASSWORD) --
+//      the wipe deletes every user, so without one nobody could sign in;
+//   5. a full backup completed first, the same forced-backup rule every
+//      /reset-data mode follows (Part 248).
+// Each refusal happens before anything is touched.
 // ---------------------------------------------------------------------------
+export const FACTORY_RESET_CONFIRM_PHRASE = 'FACTORY RESET'
+
 app.post('/factory-reset', async (c) => {
+  const user = c.get('user')
+  if (!isAdminControlUser(user)) return c.json({ error: 'Administrator access required.' }, 403)
   const denied = denyUnlessRestorePermission(c)
   if (denied) return denied
   // Matches backend's factory-reset rate limit (2 attempts / 30 minutes) --
@@ -1192,8 +1210,46 @@ app.post('/factory-reset', async (c) => {
     return c.json({ error: 'Too many factory reset attempts. Wait a few minutes and try again.' }, 429)
   }
 
-  const user = c.get('user')
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  if (body?.confirm !== FACTORY_RESET_CONFIRM_PHRASE) {
+    return c.json({ success: false, error: `Type ${FACTORY_RESET_CONFIRM_PHRASE} to confirm. No data was changed.`, code: 'factory_reset_confirm_required' }, 400)
+  }
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  if (!currentPassword) {
+    return c.json({ success: false, error: 'Enter your current password to confirm. No data was changed.', code: 'current_password_required' }, 400)
+  }
+
   const db = getDb(c.env)
+  const actorId = Number(user?.id || 0)
+  const account = actorId
+    ? await db.prepare('SELECT password FROM users WHERE id = @id AND deleted_at IS NULL').get<{ password: string | null }>({ id: actorId })
+    : null
+  if (!account) return c.json({ error: 'Please sign in again to continue.' }, 403)
+  // Lazy, like the repair modules above: only this route needs it.
+  const guard = await import('../lib/currentPasswordGuard')
+  const verdict = await guard.verifyCurrentPassword(c, { actorId, targetId: actorId }, currentPassword, String(account.password || ''))
+  if (!verdict.ok && verdict.rateLimited) {
+    return c.json({ success: false, error: guard.CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+  }
+  // 400, never 401: the client treats a 401 on /api as a dead session.
+  if (!verdict.ok) return c.json({ success: false, error: 'Current password is incorrect. No data was changed.', code: 'incorrect_password' }, 400)
+
+  if (!resolveSeedAdminPassword(c.env)) {
+    return c.json({
+      success: false,
+      error: 'Factory reset is unavailable: no seed admin password is configured (BUSINESS_OS_ADMIN_PASSWORD), so nobody could sign in after the reset. No data was changed.',
+      code: 'factory_reset_seed_unavailable',
+    }, 409)
+  }
+
+  try {
+    await createCloudflareBackup(c.env, 'manual')
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: `Factory reset aborted: could not create a backup first (${(error as Error).message || 'unknown error'}). No data was changed.`,
+    }, 500)
+  }
 
   try {
     const droppedCustomTables = await dropAllCustomTables(c.env)
@@ -1241,13 +1297,12 @@ app.post('/factory-reset', async (c) => {
 
     return c.json({
       success: true,
-      message: 'Factory reset complete. All data and images wiped. Admin account and defaults restored.',
-      // Only present the one time the admin row is actually (re)created --
-      // this is the only path back into the app, so it has to be surfaced
-      // here rather than left to a password the operator may not remember.
-      admin: invariants.adminUserCreated
-        ? { username: 'admin', password: invariants.adminPassword }
-        : { username: 'admin', password: null },
+      message: 'Factory reset complete. All data and images wiped. A fresh backup was taken first. Sign in as admin with the configured seed admin password.',
+      // The password is never echoed (FX-sec). The seed is the operator's
+      // own BUSINESS_OS_ADMIN_PASSWORD secret (or the documented local-dev
+      // one), which the guard above requires to exist -- the operator
+      // already holds it, so returning it only put it in a response body.
+      admin: { username: 'admin', password: null, created: invariants.adminUserCreated },
       r2CleanupErrors: r2Errors.length ? r2Errors : undefined,
     })
   } catch (error) {

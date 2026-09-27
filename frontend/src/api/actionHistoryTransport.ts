@@ -51,13 +51,45 @@ export function updateActionHistory(id: string | number, payload: ActionHistoryP
   )
 }
 
+// A replay the Worker refused to protect newer data answers 409 with a code
+// from cloudflare/src/lib/undoAppliers.ts (UNDO_RECORD_CHANGED_CODE,
+// UNDO_NO_DEFAULT_BRANCH_CODE). It is restated in the UI language AppContext
+// applies to <html lang>, from the same language pack the screens use, the way
+// fileTransport.ts restates an avatar type refusal; callers
+// (utils/actionHistory.ts runEntry and runServerEntry) show error.message as
+// is. Every other failure keeps its own message, and the English stays when
+// the pack cannot be loaded. tests/undoConflictMessages.test.ts pins these
+// codes to the Worker's.
+const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string }>> = {
+  undo_record_changed: { undo: 'undo_refused_record_changed', redo: 'redo_refused_record_changed' },
+  undo_no_default_branch: { undo: 'undo_refused_no_default_branch', redo: 'redo_refused_no_default_branch' },
+}
+
+async function localizeReplayRefusal(error: unknown, direction: 'undo' | 'redo'): Promise<never> {
+  const refusal = error instanceof Error ? error as Error & { status?: unknown; code?: unknown } : null
+  const keys = refusal && refusal.status === 409 && typeof refusal.code === 'string' && Object.prototype.hasOwnProperty.call(REPLAY_REFUSAL_KEYS, refusal.code)
+    ? REPLAY_REFUSAL_KEYS[refusal.code]
+    : null
+  if (refusal && keys) {
+    try {
+      const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
+      const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
+      const value = pack[keys[direction]]
+      if (typeof value === 'string' && value.trim()) refusal.message = value
+    } catch {
+      // Keep the server's English.
+    }
+  }
+  throw error
+}
+
 export function undoActionHistory(id: string | number, payload: ActionHistoryPayload = {}): Promise<unknown> {
   return route(
     `actionHistory:undo:${id}`,
     () => apiFetch('POST', `/api/action-history/${id}/undo`, { ...getDevicePayload(), ...(payload || {}) }),
     null,
     true,
-  )
+  ).catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
 }
 
 export function redoActionHistory(id: string | number, payload: ActionHistoryPayload = {}): Promise<unknown> {
@@ -66,5 +98,5 @@ export function redoActionHistory(id: string | number, payload: ActionHistoryPay
     () => apiFetch('POST', `/api/action-history/${id}/redo`, { ...getDevicePayload(), ...(payload || {}) }),
     null,
     true,
-  )
+  ).catch((error: unknown) => localizeReplayRefusal(error, 'redo'))
 }

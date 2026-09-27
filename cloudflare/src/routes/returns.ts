@@ -7,7 +7,7 @@ import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
-import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
+import { sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -15,14 +15,14 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, resolveRefundUnitPrice, planReturnLot, ReturnLotRequiredError,
+  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
-import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -1201,16 +1201,29 @@ app.post('/reasons/replace', async (c) => {
 
 // Conditional grouped action: every selected row is revision checked, while
 // only rows whose chosen field still equals `source` move to `target`.
-// applyReturnBulkAction owns the atomic stock/snapshot/idempotency contract;
+// applyReturnBulkActionOutcome owns the atomic stock/snapshot/idempotency contract;
 // this route only translates typed business failures to HTTP responses.
 app.post('/bulk', async (c) => {
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const user = c.get('user')
   try {
-    const result = await applyReturnBulkAction(c.env, c.get('user'), body)
+    // `wrote` is true only for the call whose OWN batch committed the change.
+    // A replayed request id -- a sequential retry, a retry that overtook a
+    // slow original, or that original itself -- gets the stored receipt with
+    // wrote=false, so one write is announced once (R-telegram E1). A read made
+    // here before the write could not tell; see applyReturnBulkActionOutcome.
+    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body)
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
+    // status field, only the rows that actually moved.
+    const changedIds = Array.isArray(result.changedIds) ? result.changedIds.map(Number) : []
+    if (wrote && body.field === 'status' && changedIds.length) {
+      c.executionCtx.waitUntil(sendReturnStatusTelegramEvents(c.env, changedIds, actorSnapshot(user))
+        .catch((error) => console.error('[telegram] return status notification failed', error)))
+    }
     return c.json(result)
   } catch (error) {
-    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action' }, error.statusCode)
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action') }, error.statusCode)
     throw error
   }
 })
@@ -1429,6 +1442,7 @@ app.post('/', async (c) => {
   let soldLines: Array<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
+    applied_price_usd: number | null; applied_price_khr: number | null
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
@@ -1448,7 +1462,7 @@ app.post('/', async (c) => {
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     returnItems = body.items.map((item) => {
@@ -1562,13 +1576,31 @@ app.post('/', async (c) => {
   const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
   const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
   const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
-  const refundPrices = returnItems.map((item) => {
-    const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
-    return exact ? { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr } : resolveRefundUnitPrice({
-      saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
-      postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+  // A return against a sale is priced from that sale's own lines, matched the
+  // same way the quantity cap matched them: by sale_item_id, else by product_id.
+  // Only a return with no sale at all falls back to the posted price.
+  let refundPrices: Array<{ unitUsd: number; unitKhr: number }>
+  try {
+    refundPrices = returnItems.map((item) => {
+      const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
+      if (exact) return { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr }
+      if (!saleMeta) {
+        return resolveRefundUnitPrice({
+          saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
+          postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+        })
+      }
+      const match = matchRefundSaleLine(soldLines, item)
+      return resolveRefundUnitPrice({
+        saleLine: match?.line ?? null, matchedBy: match?.matchedBy,
+        postedUsd: item.applied_price_usd == null ? null : toNumber(item.applied_price_usd),
+        postedKhr: item.applied_price_khr == null ? null : toNumber(item.applied_price_khr),
+      })
     })
-  })
+  } catch (error) {
+    if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
   const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
   const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
@@ -2671,6 +2703,16 @@ app.patch('/:id', async (c) => {
   if ((await saleMoneyPrecisionVersion(db, existing.sale_id)) === 1) {
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
+  // A cancelled return counts for nothing and its restock was already taken
+  // back out by the cancel. The reversal below assumes the return's stock is
+  // still IN, so editing it would pull those units out a second time and then
+  // restock the new lines, and a later restore would add them again. Restore
+  // first, then edit. The write-revision guard on the final batch covers a
+  // cancel that lands between this read and the write.
+  if (String(existing.status || 'completed') === 'cancelled') {
+    return c.json({ error: 'This return is cancelled. Restore it before editing.',
+      code: 'return_edit_cancelled', action: 'restore_required' }, 409)
+  }
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
@@ -2738,12 +2780,40 @@ app.patch('/:id', async (c) => {
 
   // The refund per line: the ORIGINAL sale line's price, always -- an edit is
   // not a chance to restate what the customer paid. A manual return (no sale
-  // line) has only the posted price to go on.
-  const editRefundPrices = newItems.map((item) => resolveRefundUnitPrice({
-    saleLine: item.sale_item_id ? saleItemBatchInfoForEdit.get(Number(item.sale_item_id)) ?? null : null,
-    postedUsd: toNumber(item.applied_price_usd, 0),
-    postedKhr: toNumber(item.applied_price_khr, 0),
-  }))
+  // line) has only the posted price to go on. A return against a sale is
+  // priced from that sale's lines, matched exactly as POST / matches them:
+  // by sale_item_id, else by product_id (capped at the recorded price).
+  const editSalePriceLines = existing.sale_id
+    ? await db.prepare('SELECT id,product_id,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<{ id: number; product_id: number | null; applied_price_usd: number | null; applied_price_khr: number | null }>([existing.sale_id])
+    : []
+  let editRefundPrices: Array<{ unitUsd: number; unitKhr: number; fromSaleLine: boolean }>
+  try {
+    editRefundPrices = newItems.map((item) => {
+      if (!existing.sale_id) {
+        return resolveRefundUnitPrice({
+          saleLine: item.sale_item_id ? saleItemBatchInfoForEdit.get(Number(item.sale_item_id)) ?? null : null,
+          postedUsd: toNumber(item.applied_price_usd, 0),
+          postedKhr: toNumber(item.applied_price_khr, 0),
+        })
+      }
+      // Same rule POST / enforces through its quantity cap: a posted line on
+      // a sale must name a sale item or a product, or there is no recorded
+      // price to hold it to.
+      if (Array.isArray(body.items) && !(Number(item.sale_item_id) > 0) && !(Number(item.product_id) > 0)) {
+        throw new RefundSaleLineError('return_refund_sale_line_required', 'Each return line needs a sale item or product')
+      }
+      const match = matchRefundSaleLine(editSalePriceLines, item)
+      return resolveRefundUnitPrice({
+        saleLine: match?.line ?? null, matchedBy: match?.matchedBy,
+        postedUsd: item.applied_price_usd == null ? null : toNumber(item.applied_price_usd, 0),
+        postedKhr: item.applied_price_khr == null ? null : toNumber(item.applied_price_khr, 0),
+      })
+    })
+  } catch (error) {
+    if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
 
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of newItems) {

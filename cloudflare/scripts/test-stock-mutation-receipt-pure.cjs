@@ -182,7 +182,8 @@ function freshDb() {
   return wrapFlat(rawDb)
 }
 
-const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', permissions: '{}' }
+// Administrator control comes from the role, not the name (FX-sec).
+const ADMIN_USER = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
 
 function makeContext(db, user = ADMIN_USER) {
   currentDb = db

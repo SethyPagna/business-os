@@ -10,6 +10,7 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
+import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import {
@@ -289,7 +290,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         return
       }
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') clearPendingRequest()
-      notify((T('error','Error') || 'Error') + ': ' + getLoaderErrorMessage(error), 'error')
+      notify((T('error','Error') || 'Error') + ': ' + (returnRefusalText(error, T) ?? getLoaderErrorMessage(error)), 'error')
     } finally {
       finishSingleAction(submitInFlightRef)
       setSubmitting(false)

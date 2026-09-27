@@ -3,6 +3,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import { configureTelegramWebhook, getTelegramStatus, handleTelegramWebhook, isTelegramWebhookRequest, sendTelegramTest, sendTelegramTodaySummary } from '../lib/telegram'
+import { saveTelegramTopicSetting } from '../lib/telegramTopicSetting'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -22,7 +23,9 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.post('/webhook', async (c) => {
   if (!(await isTelegramWebhookRequest(c.env, c.req.header('X-Telegram-Bot-Api-Secret-Token')))) return c.json({ error: 'Unauthorized' }, 401)
   const update = await c.req.json().catch(() => null)
-  if (update) await handleTelegramWebhook(c.env, update)
+  // `/settopic` writes a setting; it is gated inside (alerts chat + group
+  // admin) and stored through the settings-equivalent writer handed in here.
+  if (update) await handleTelegramWebhook(c.env, update, { saveTopics: saveTelegramTopicSetting })
   return c.json({ ok: true })
 })
 

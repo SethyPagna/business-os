@@ -30,6 +30,7 @@ import {
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
+import { entityFieldLabel } from '../../utils/entityRecords.ts'
 import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
@@ -1380,7 +1381,11 @@ export default function AuditLog() {
               </div>
 
               {(() => {
-                const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value)
+                // A column is named with the same pack words a record's own
+                // history uses (entityRecords.ts), not Title-Cased English --
+                // the Khmer pack read "Telegram Topic Shift" for a /settopic row.
+                const fieldLabelFor = (key: string) => entityFieldLabel(key, vocab)
+                const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value, fieldLabelFor)
                 // The recorded context: the payload the route wrote alongside
                 // the pair (a rename's linked-sale counts, a profile save's
                 // mode, the operator's reason). It used to be reachable only
@@ -1388,7 +1393,7 @@ export default function AuditLog() {
                 // columns happened not to move, the float showed nothing at
                 // all. Same builder as the pair -- a details payload has no
                 // old side, so its rows come back as context rows.
-                const contextRows = buildAuditFieldDiff(null, detailLog.details)
+                const contextRows = buildAuditFieldDiff(null, detailLog.details, fieldLabelFor)
                 const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
                 if (!hasRawData && !contextRows.length) return null
                 return (

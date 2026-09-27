@@ -537,10 +537,12 @@ for (const doc of lang.TELEGRAM_COMMANDS) {
 assert.ok(!reference.includes('▸'), 'no example lines survive in the reference')
 // Two lines per command (usage + Khmer), one rule for the whole block, a
 // two-line header and a four-line footer: 7 * 2 + 3 + 5 = 22, against the 45
-// the owner called "so long".
-assert.ok(reference.split('\n').length <= 24, `the reference must stay at a glance; it is ${reference.split('\n').length} lines`)
+// the owner called "so long". 27 Sep 2026: /settopic and /topics (the owner's
+// forum-topic setup) add two commands, four lines: 26, and the ceiling moves
+// by the same four.
+assert.ok(reference.split('\n').length <= 28, `the reference must stay at a glance; it is ${reference.split('\n').length} lines`)
 for (const doc of lang.TELEGRAM_COMMANDS) {
-  assert.ok(reference.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: ${doc.en}`), `${doc.command} has no usage line`)
+  assert.ok(reference.includes(`${doc.icon} ${lang.commandUsage(doc)}: ${doc.en}`), `${doc.command} has no usage line`)
 }
 assert.ok(reference.includes('dd/mm/yyyy'), 'the reference states the project date convention')
 // The refusal inverted on Sep 4 2026 rather than loosening: exactly ONE
@@ -564,7 +566,7 @@ for (const [mode, single] of [['en', referenceEn], ['km', referenceKm]]) {
     `the '${mode}' reference must drop exactly one line per pair:\n${single}`)
   assert.ok(!single.split('\n').some((line) => line.trim() === ''), `the '${mode}' reference left an empty line behind`)
   for (const doc of lang.TELEGRAM_COMMANDS) {
-    assert.ok(single.includes(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: ${mode === 'en' ? doc.en : doc.km}`),
+    assert.ok(single.includes(`${doc.icon} ${lang.commandUsage(doc)}: ${mode === 'en' ? doc.en : doc.km}`),
       `${doc.command} has no usage line in '${mode}':\n${single}`)
   }
   // The accepted date FORMS are what the reader types; they never change.

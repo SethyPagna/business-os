@@ -4,6 +4,7 @@ import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
+import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 
 // The full-featured adjust modal (batch, price-lock, reasons) reused from the
 // Inventory/Branches page -- lazy so its weight only loads when the person
@@ -267,6 +268,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // Row context actions on the open detail: an inline reason editor and a
   // two-step revert confirm. rowBusy blocks both while a write is in flight.
   const [rowBusy, setRowBusy] = useState(false)
+  // Synchronous in-flight latch for Revert: rowBusy only disables the button
+  // after a re-render, so a double tap inside one frame could send two
+  // requests. The Worker refuses the second (H-stock 2); this stops sending it.
+  const revertInFlightRef = useRef(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
   // U-records: the reason edit awaiting review in the shared ConfirmDialog
@@ -511,17 +516,19 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // reverted row stays -- the ledger is append-only -- and the new counter-
   // movement appears). Close the detail so the person sees the updated list.
   const doRevert = useCallback(async () => {
-    if (!detail) return
+    if (!detail || revertInFlightRef.current) return
+    revertInFlightRef.current = true
     setRowBusy(true)
     try {
       const res = await revertStockMovement(detail.id) as { success?: boolean; error?: string } | undefined
-      if (res && res.success === false) throw new Error(res.error || tr(t, 'revert_failed', 'Revert failed'))
+      if (res && res.success === false) throw Object.assign(new Error(res.error || tr(t, 'revert_failed', 'Revert failed')), { code: (res as { code?: string }).code })
       app.notify(tr(t, 'movement_reverted', 'Change reverted'))
       closeDetail()
       void load()
     } catch (error) {
-      app.notify(error instanceof Error ? error.message : tr(t, 'unknown_error', 'Something went wrong'), 'error')
+      app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
     } finally {
+      revertInFlightRef.current = false
       setRowBusy(false)
     }
   }, [detail, app, t, closeDetail, load])

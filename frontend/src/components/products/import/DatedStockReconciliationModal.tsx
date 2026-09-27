@@ -41,6 +41,7 @@ import {
   previewDatedStockCount as apiPreview,
   applyDatedStockCount as apiApply,
 } from '../../../api/methods.ts'
+import { datedStockCountApplyErrorText } from '../../../utils/datedStockCountApplyError.ts'
 
 type TranslateFn = (key: string, fallback?: string, km?: string) => string
 type EntityId = string | number
@@ -375,16 +376,16 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
     setStep('applying')
     try {
       const entries = combinedResolved.map((row) => ({ date: row.date, productId: row.productId, branchId: row.branchId, count: row.count }))
-      const result = await apiApply(entries) as { success?: boolean; error?: string } | null
+      const result = await apiApply(entries) as { success?: boolean; error?: string; code?: string } | null
       if (!result || result.success === false) {
-        setError(result?.error || T('dated_count_apply_failed', 'The import failed to apply.'))
+        setError(datedStockCountApplyErrorText(result, T))
         setStep('plan')
         return
       }
       setStep('done')
       onDone()
     } catch (e) {
-      setError(e instanceof Error ? e.message : T('dated_count_apply_failed', 'The import failed to apply.'))
+      setError(datedStockCountApplyErrorText(e, T))
       setStep('plan')
     } finally {
       setWorking(false)

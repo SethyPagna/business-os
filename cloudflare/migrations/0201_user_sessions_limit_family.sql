@@ -1,0 +1,38 @@
+-- S-auth4: the current-password allowance must not multiply by minting
+-- sessions.
+--
+-- lib/currentPasswordGuard.ts limits wrong current-password guesses (change
+-- password, profile save, Google unlink) to 10 per 15 minutes, keyed per
+-- session cookie. POST /api/auth/session-duration creates a NEW session from
+-- an existing one without the password and leaves the old cookie valid, so a
+-- stolen session could mint sessions and get 10 more guesses from each.
+--
+-- limit_family_id records which sign-in a re-issued session descends from:
+-- the id of the session row the password/OTP/Google sign-in created.
+-- /session-duration copies COALESCE(limit_family_id, id) of the caller's
+-- session into the new row; the guard and /session-duration's own cap key on
+-- that value (lib/auth.ts currentSessionLimitFamily). NULL means "this row is
+-- a sign-in; its family is its own id", so every existing row is already
+-- correct with no backfill, and sign-in INSERTs never name the column.
+--
+-- Purely additive: one nullable column, no default, no index (every read is
+-- by token_hash, which is already uniquely indexed). No row is changed.
+--
+-- Pre-assert:  SELECT COUNT(*) FROM pragma_table_info('user_sessions')
+--                WHERE name = 'limit_family_id'
+--              -- expected 0
+-- Post-assert: the same query -- expected 1;
+--              SELECT COUNT(*) FROM user_sessions WHERE limit_family_id IS NOT NULL
+--              -- expected 0 immediately after apply;
+--              SELECT COUNT(*) FROM user_sessions -- unchanged.
+-- Deploy order: MIGRATION FIRST. The new Worker names the column on
+--              /session-duration (a 500 there until applied, deliberately:
+--              it will not mint a session outside its family) and in the
+--              guard's lookup (which falls back to the old per-cookie key
+--              until applied).
+-- Recovery:    roll the Worker back first, then
+--              ALTER TABLE user_sessions DROP COLUMN limit_family_id;
+--              loses only the family links of sessions minted since, which
+--              then count as their own sign-ins (the pre-0201 behaviour).
+
+ALTER TABLE user_sessions ADD COLUMN limit_family_id INTEGER;

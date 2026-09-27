@@ -19,9 +19,14 @@ import {
   getBranchStock as getBranchStockRequest,
   transferStock as transferStockRequest,
   transferStockBulk as transferStockBulkRequest,
-  prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun,
-  type PendingTransferRun,
+  prepareTransferRun, loadTransferRun, saveTransferRun,
 } from '../../api/branchTransport.ts'
+// The same executor, plus the record of a definitive refusal that lets a
+// refused saved run be edited or discarded instead of locking the form.
+import {
+  executeTransferRun, isRefusedTransferRun, localizeTransferRefusal, transferRunEditState,
+  type RecoverableTransferRun as PendingTransferRun,
+} from '../../api/transferRunRecovery.ts'
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
@@ -262,10 +267,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [savedRun, setSavedRun] = useState<PendingTransferRun | null>(null)
   const [retryError, setRetryError] = useState('')
   const [retryStorageError, setRetryStorageError] = useState('')
+  // Discard of a saved run always goes through the shared review dialog.
+  const [discardingRun, setDiscardingRun] = useState(false)
+  // Bumped by Edit so the catalog and the received dates reload even when the
+  // restored source branch and product set equal what is already cached.
+  const [stockReload, setStockReload] = useState(0)
   useEffect(() => {
     try { setSavedRun(loadTransferRun(user?.id)); setRetryStorageError('') }
     catch (error) { setRetryStorageError(getErrorMessage(error, t('transfer_failed'))) }
   }, [user?.id])
+  // A saved run the server refused for good (see api/transferRunRecovery.ts).
+  const refusedRun = savedRun && isRefusedTransferRun(savedRun) ? savedRun : null
+  const refusalText = refusedRun ? localizeTransferRefusal(refusedRun.refusal, t) : ''
 
   /**
    * 2. UI State
@@ -340,7 +353,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   const [rowLots, setRowLots] = useState<Record<string, { branch: string; batches: ProductBatch[]; error?: string }>>({})
   const lotBranchRef = useRef(fromBranch)
   lotBranchRef.current = fromBranch
-  const selectedLotProducts = Object.keys(selectedQuantities).sort().join(',')
+  const selectedLotProducts = `${stockReload}|${Object.keys(selectedQuantities).sort().join(',')}`
   useEffect(() => {
     let cancelled = false
     const branch = fromBranch
@@ -776,7 +789,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     return () => {
       invalidateTrackedRequest(multiStockRequestRef)
     }
-  }, [debouncedSearch, fromBranch, mode, showAllProducts])
+  }, [debouncedSearch, fromBranch, mode, showAllProducts, stockReload])
 
   // Switching source branch invalidates whatever was picked under the old
   // branch, in both modes -- a selection made against branch A's stock
@@ -1192,6 +1205,59 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   }
 
   /**
+   * U-transfer3: a saved run the server REFUSED (a definitive 4xx, recorded
+   * on the run by api/transferRunRecovery.ts) answers the same on every
+   * Retry, so it must not lock the form for good. Edit puts every line the
+   * run has not yet transferred back into the form -- products, quantities,
+   * received dates, source, destination and reason -- and clears the saved
+   * run; sending again is a NEW transfer with a new key. Requests the server
+   * already confirmed are never restored. A restored received date that the
+   * source no longer offers falls back to Automatic in the lot load effect.
+   * A run whose result is unknown has no refusal and cannot be edited.
+   */
+  const editSavedTransfer = () => {
+    const run = savedRun
+    if (!run || !isRefusedTransferRun(run) || saving || savingBulk || !canTransferStock) return
+    const restored = transferRunEditState(run)
+    try { saveTransferRun(run.actorId, null) }
+    catch (error) { notify(getErrorMessage(error, t('save_failed') || 'Save failed'), 'error'); return }
+    // The source-change effect clears every pick when fromBranch changes;
+    // these picks belong to the restored source, so they must survive it.
+    previousSourceRef.current = restored.fromBranch
+    multiProductsBranchRef.current = ''
+    setFromBranch(restored.fromBranch)
+    setToBranch(restored.toBranch)
+    setReason(restored.reason)
+    setSelectedQuantities(restored.selectedQuantities)
+    setSelectedLots(restored.selectedLots)
+    setRowLots({})
+    setStockReload((current) => current + 1)
+    setShowAllProducts(true)
+    setShowSelectedOnly(restored.lineCount > 0)
+    setPendingTransfer(null)
+    setRetryError('')
+    setSavedRun(null)
+  }
+
+  /**
+   * Discard clears the saved run after the shared review dialog. For a
+   * refused run nothing in the refused part moved; for an unknown result the
+   * dialog warns that the transfer may already have been applied. A saved
+   * run that cannot even be read (retryStorageError) is discarded the same
+   * way, with the same warning -- it locked the form just as permanently.
+   */
+  const discardSavedTransfer = () => {
+    const actorId = savedRun?.actorId ?? (retryStorageError ? String(user?.id ?? '') : '')
+    setDiscardingRun(false)
+    if (!actorId || saving || savingBulk) return
+    try { saveTransferRun(actorId, null) }
+    catch (error) { notify(getErrorMessage(error, t('save_failed') || 'Save failed'), 'error'); return }
+    setRetryError('')
+    setRetryStorageError('')
+    setSavedRun(null)
+  }
+
+  /**
    * The one write path for both scopes, submitted in chunks of
    * TRANSFER_BULK_CHUNK_SIZE.
    *
@@ -1305,19 +1371,37 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
 
         {savedRun || retryError || retryStorageError ? (
           <div role="status" className="m-4 space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-            <p className="min-w-0 break-words">{savedRun ? t('sale_bulk_pending') : retryError || retryStorageError}</p>
+            <p className="min-w-0 break-words">{savedRun ? (refusedRun ? t('transfer_run_refused') : t('sale_bulk_pending')) : retryError || retryStorageError}</p>
             {savedRun ? <>
               <p className="break-words text-xs">{t('from_branch')}: {branchNameById(String(savedRun.requests[0].body.fromBranchId))} → {branchNameById(String(savedRun.requests[0].body.toBranchId))} · {t('transfer_reason')}: {String(savedRun.requests[0].body.reason || '')}</p>
               <p className="text-xs">{t('transfer_chunk_progress').replace('{done}', String(savedRun.next)).replace('{total}', String(savedRun.requests.length))}</p>
-              {retryError ? <p className="break-words text-xs">{savedRun.transferred > 0
+              {retryError && !refusedRun ? <p className="break-words text-xs">{savedRun.transferred > 0
                 ? t('transfer_bulk_partial').replace('{done}', String(savedRun.transferred))
                   .replace('{total}', String(savedRun.requests.reduce((total, request) => total + (request.bulk ? (request.body.items as unknown[]).length : 1), 0)))
                   .replace('{reason}', retryError)
                 : retryError}</p> : null}
+              {refusedRun ? <>
+                {/* Read from the run, so the reason survives a reload and is
+                    translated even when the Worker sent plain English. */}
+                <p className="break-words text-xs">{refusedRun.transferred > 0
+                  ? t('transfer_bulk_partial').replace('{done}', String(refusedRun.transferred))
+                    .replace('{total}', String(refusedRun.requests.reduce((total, request) => total + (request.bulk ? (request.body.items as unknown[]).length : 1), 0)))
+                    .replace('{reason}', refusalText)
+                  : t('transfer_run_refused_reason').replace('{reason}', refusalText)}</p>
+                <p className="break-words text-xs">{t('transfer_run_edit_hint').replace('{n}', String(transferRunEditState(refusedRun).lineCount))}</p>
+              </> : null}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
+                {refusedRun ? (
+                  <button type="button" className="btn-primary min-h-10" disabled={saving || savingBulk || !canTransferStock} onClick={editSavedTransfer}>{t('transfer_run_edit')}</button>
+                ) : null}
+                <button type="button" className={`${refusedRun ? 'btn-secondary' : 'btn-primary'} min-h-10`} disabled={saving || savingBulk || !canTransferStock || !!retryStorageError} onClick={() => { void runPendingTransfer(null) }}>{savingBulk ? t('saving') : t('retry')}</button>
+                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={() => setDiscardingRun(true)}>{t('discard')}</button>
               </div>
-            </> : null}
+            </> : retryStorageError ? (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-secondary min-h-10" disabled={saving || savingBulk} onClick={() => setDiscardingRun(true)}>{t('discard')}</button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <fieldset disabled={saving || savingBulk || !!savedRun || !!retryStorageError || !canTransferStock}
@@ -1838,6 +1922,28 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           confirmLabel={t('transfer') || 'Transfer'}
           onConfirm={() => { runPendingTransfer(pendingTransfer) }}
           onClose={() => { if (!savingBulk) setPendingTransfer(null) }}
+          t={t}
+        />
+      ) : null}
+
+      {/* Discarding a saved run: a refused run moved nothing in its refused
+          part; any other run may already have been applied, so the dialog
+          says to check Stock Changes before sending it again. */}
+      {discardingRun && (savedRun || retryStorageError) ? (
+        <ConfirmDialog
+          title={t('transfer_run_discard_title') || 'Discard saved transfer?'}
+          message={refusedRun
+            ? (t('transfer_run_discard_refused') || 'The server refused this transfer, so the refused part moved no stock. Discarding removes it and its lines are not sent.')
+            : (t('transfer_run_discard_unknown') || 'The result of this transfer is unknown: it may already have been applied. Check Stock Changes before sending it again. Discarding removes the saved retry, so it cannot be resumed.')}
+          items={savedRun ? [
+            { label: t('from_branch') || 'From Branch', value: `${branchNameById(String(savedRun.requests[0].body.fromBranchId))} → ${branchNameById(String(savedRun.requests[0].body.toBranchId))}` },
+            { label: t('transfer_reason') || 'Reason', value: String(savedRun.requests[0].body.reason || '') },
+            ...(refusedRun ? [{ label: t('transfer_run_refusal_label') || 'Refused because', value: refusalText }] : []),
+          ] : undefined}
+          danger={!refusedRun}
+          confirmLabel={t('discard') || 'Discard'}
+          onConfirm={discardSavedTransfer}
+          onClose={() => setDiscardingRun(false)}
           t={t}
         />
       ) : null}

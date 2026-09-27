@@ -32,8 +32,10 @@ function load(filename) {
 const { projectAcquisitionCosts, acquisitionCostResponses, hasCatalogCostWrite, hasAcquisitionCostInput, canViewAcquisitionCosts, canEditAcquisitionCosts } = load(path.join(root, 'lib/acquisitionCostAccess.ts'))
 const actor = (role_code, permissions = {}, role_permissions = {}) => ({ id: 7, username: 'staff', role_code, permissions: JSON.stringify(permissions), role_permissions: JSON.stringify(role_permissions) })
 const manager = actor('manager', { products: true, inventory: true, pos: true, sales: true })
-const admins = [actor('admin'), { ...actor('staff'), username: ' ADMIN ' }, actor('manager', { all: true }), actor('staff', {}, { all: true })]
-const staff = [manager, actor('cashier', { pos: true }), actor('staff', { products: true, inventory: true }), actor('manager', { all: false }, { all: true })]
+// The username alone no longer grants administrator control (FX-sec); the
+// role code does, case- and whitespace-insensitively.
+const admins = [actor('admin'), actor(' AdMiN '), actor('manager', { all: true }), actor('staff', {}, { all: true })]
+const staff = [{ ...actor('staff'), username: ' ADMIN ' }, manager, actor('cashier', { pos: true }), actor('staff', { products: true, inventory: true }), actor('manager', { all: false }, { all: true })]
 const viewer = actor('manager', { products: true, inventory: true, product_cost_view: true })
 const editor = actor('manager', { products: true, inventory: true, product_cost_edit: true })
 const cached = {
