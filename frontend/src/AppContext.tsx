@@ -5,7 +5,7 @@ import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import { ACTOR_SESSION_RETRY_EVENT, acknowledgeActorCookieUser, actorCookieMutationPendingStatus, actorSessionReconciliationMarker, captureActorReadScope, isActorReadScopeCurrent, completeActorSessionReconciliation, isActorCookieMutationPending, isActorSessionQuarantined, resetActorReadSession, setActorSessionQuarantineStatus, subscribeActorSessionQuarantine } from './api/actorReadScope.ts'
 import { readActorSessionRecoveryBootstrap } from './api/http.ts'
-import { recoverUnresolvedSignout } from './api/http.ts'
+import { PASSWORD_CHANGE_REQUIRED_EVENT, currentApiRequestSequence, recoverUnresolvedSignout } from './api/http.ts'
 import { SIGNOUT_RETRY_EVENT, acknowledgeConfirmedSignout, assertNoUnresolvedSignout, beginUnresolvedSignout, isSignoutBlocked, prepareConfirmedSignoutUi, readSignoutIntent } from './api/unresolvedSignout.ts'
 import {
   normalizeRuntimeDescriptor,
@@ -1522,28 +1522,67 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return () => window.removeEventListener('otp:login', handleOtpLogin)
   }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, readAppBootstrap])
 
+  // S-auth4b owner requirement (27 Sep 2026): whichever way this account got
+  // here -- a sign-in payload without the flag, a session from before it, or
+  // another device signing the account in with the publicly known password --
+  // a call the Worker refuses with 403 password_change_required (api/http.ts)
+  // shows the change screen (App.tsx) instead of an app whose every call
+  // fails. A refusal of a request sent before the flag last cleared (this
+  // tab's own successful change, a bootstrap) is stale and ignored; otherwise
+  // a slow poll answered after the change would bring the screen back.
+  const passwordChangeClearedAtRef = useRef(0)
+  const mustChangePassword = Number(user?.must_change_password || 0) === 1
+  const wasMustChangePasswordRef = useRef(mustChangePassword)
   useEffect(() => {
+    if (wasMustChangePasswordRef.current && !mustChangePassword) passwordChangeClearedAtRef.current = currentApiRequestSequence()
+    wasMustChangePasswordRef.current = mustChangePassword
+  }, [mustChangePassword])
+
+  useEffect(() => {
+    const persistUser = (next: AppUser) => {
+      const expiry = getStoredUserExpiry()
+      const expiryTime = expiry ? Number(expiry) : null
+      const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || '30d'
+      persistAuthState({
+        user: next,
+        expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
+        sessionDuration: currentMode,
+      })
+    }
     const handleUserUpdated = (e: Event) => {
       if (isActorSessionQuarantined()) return
       const nextUser = eventDetail<AppUser>(e)
       if (!nextUser) return
+      // The change screen's own success clears the flag here: mark it now,
+      // before any refusal already on its way back can be handled.
+      if ('must_change_password' in nextUser && Number(nextUser.must_change_password || 0) !== 1) {
+        passwordChangeClearedAtRef.current = currentApiRequestSequence()
+      }
       setUser((prev: AppUser | null) => {
         if (!prev || Number(prev.id) !== Number(nextUser.id)) return prev
         const merged = { ...prev, ...nextUser }
-        const expiry = getStoredUserExpiry()
-        const expiryTime = expiry ? Number(expiry) : null
-        const currentMode = safeStorageGet(getAuthStorage('local'), STORAGE_KEYS.SESSION_DURATION) || '30d'
-        persistAuthState({
-          user: merged,
-          expiryTime: Number.isFinite(expiryTime) ? expiryTime : null,
-          sessionDuration: currentMode,
-        })
+        persistUser(merged)
         return merged
+      })
+    }
+    const handlePasswordChangeRequired = (e: Event) => {
+      if (isActorSessionQuarantined()) return
+      const sequence = Number(eventDetail<{ sequence?: number }>(e)?.sequence || 0)
+      if (sequence <= passwordChangeClearedAtRef.current) return
+      setUser((prev: AppUser | null) => {
+        if (!prev || Number(prev.must_change_password || 0) === 1) return prev
+        const flagged = { ...prev, must_change_password: 1 }
+        persistUser(flagged)
+        return flagged
       })
     }
 
     window.addEventListener('user:updated', handleUserUpdated)
-    return () => window.removeEventListener('user:updated', handleUserUpdated)
+    window.addEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired)
+    return () => {
+      window.removeEventListener('user:updated', handleUserUpdated)
+      window.removeEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired)
+    }
   }, [])
 
   // Startup: load settings, fetch config, and health-check the server.

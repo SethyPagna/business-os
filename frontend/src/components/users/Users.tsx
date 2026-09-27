@@ -31,6 +31,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
+import PasswordResetRequests from './PasswordResetRequests.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
@@ -330,6 +331,8 @@ export default function Users() {
   }, [t])
 
   const [users, setUsers] = useState<UserRecord[]>([])
+  // S-auth4c: bumped after an admin reset so the request panel reloads.
+  const [resetRequestsVersion, setResetRequestsVersion] = useState(0)
   const [roles, setRoles] = useState<RoleRecord[]>([])
   const [tab, setTab] = useState<UsersTab>('users')
   const [modal, setModal] = useState<UsersModal>(null)
@@ -905,6 +908,7 @@ export default function Users() {
         return
       }
       const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
+      if (adminReset) setResetRequestsVersion((version) => version + 1)
       const persistence = await persistChangedPassword({
         username: String(selectedUser.username || '').trim(),
         displayName: String(selectedUser.name || selectedUser.username || '').trim(),
@@ -1163,6 +1167,24 @@ export default function Users() {
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
           {loadError}
         </div>
+      ) : null}
+
+      {tab === 'users' && canManage ? (
+        <PasswordResetRequests
+          t={t}
+          notify={notify}
+          refreshKey={resetRequestsVersion}
+          onReset={(userId) => {
+            const target = users.find((candidate) => Number(candidate.id) === Number(userId))
+            if (!target || !canManageTargetUser(target)) {
+              notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
+              return
+            }
+            setSelectedUser(target)
+            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+            setModal('resetPw')
+          }}
+        />
       ) : null}
 
       {tab === 'users' ? (

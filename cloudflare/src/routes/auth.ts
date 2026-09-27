@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
-import { createSession, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionLimitFamily, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -11,13 +11,13 @@ import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
-import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
-import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState } from '../lib/loginLockout'
+import { recordFailedLogin, getLoginLockoutState, clearLoginLockout, userIdLockoutKey, worstLockoutState, perNetworkLockoutKey } from '../lib/loginLockout'
 import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
   buildGoogleOauthStartUrl,
@@ -76,6 +76,14 @@ const LOGIN_IP_LIMIT_MAX = 20
 const LOGIN_IP_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_USER_LIMIT_MAX = 8
 const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
+// S-auth4d: the per-account limiter and the escalating lockout are scoped to
+// the network (account + IP), so a stranger failing a username locks only
+// their own network. What still spans networks is this account-wide FAILURE
+// ceiling: guessing spread over many IPs stays bounded, and filling it takes
+// 40 failures inside the window from at least two networks (the per-IP
+// ceiling is 20), not six from anywhere. Successes never spend it.
+const LOGIN_ACCOUNT_WIDE_MAX = 40
+const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
 
 type OtpTargetUser = {
   id: number
@@ -184,7 +192,8 @@ app.post('/login', async (c) => {
   // since that window resets on its own and doesn't escalate the wait.
   // Checked before the DB credential lookup for the same reason as the IP
   // limit above -- a locked account shouldn't get a password compare at all.
-  const lockoutState = await getLoginLockoutState(c.env, body.username)
+  const typedLockoutKey = perNetworkLockoutKey(body.username, ip)
+  const lockoutState = await getLoginLockoutState(c.env, typedLockoutKey)
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
@@ -251,7 +260,7 @@ app.post('/login', async (c) => {
     if (candidates && candidates.length === 1) user = candidates[0]
   }
 
-  const userLimitKey = `user:${body.username.trim().toLowerCase()}`
+  const userLimitKey = `user:${body.username.trim().toLowerCase()}@${ip}`
   const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
     return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
@@ -262,9 +271,14 @@ app.post('/login', async (c) => {
   // allowance, so rotating aliases multiplied the guesses. Once the account
   // is resolved, the same limiter and lockout are ALSO keyed on its id,
   // which every alias shares. The answers are the same shapes as above.
-  const resolvedLockoutKey = user ? userIdLockoutKey(user.id) : null
-  const accountLimitKey = user ? `uid:${user.id}` : null
-  if (user && resolvedLockoutKey && accountLimitKey) {
+  const resolvedLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
+  const accountLimitKey = user ? `uid:${user.id}@${ip}` : null
+  const accountWideKey = user ? `uid:${user.id}` : null
+  if (user && resolvedLockoutKey && accountLimitKey && accountWideKey) {
+    const accountWide = await peekRateLimit(c.env, 'auth:login_account', accountWideKey, LOGIN_ACCOUNT_WIDE_MAX, LOGIN_ACCOUNT_WIDE_WINDOW_MS)
+    if (!accountWide.allowed) {
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+    }
     const accountLimit = await peekRateLimit(c.env, 'auth:login_user', accountLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
     if (!accountLimit.allowed) {
       return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
@@ -293,7 +307,8 @@ app.post('/login', async (c) => {
     // Only a failure spends the per-account allowance (see LOGIN_USER_LIMIT_MAX).
     await recordRateLimitEvent(c.env, 'auth:login_user', userLimitKey)
     if (accountLimitKey) await recordRateLimitEvent(c.env, 'auth:login_user', accountLimitKey)
-    const typedFailure = await recordFailedLogin(c.env, body.username)
+    if (accountWideKey) await recordRateLimitEvent(c.env, 'auth:login_account', accountWideKey)
+    const typedFailure = await recordFailedLogin(c.env, typedLockoutKey)
     const failure = resolvedLockoutKey
       ? worstLockoutState(typedFailure, await recordFailedLogin(c.env, resolvedLockoutKey))
       : typedFailure
@@ -312,6 +327,17 @@ app.post('/login', async (c) => {
   const passwordMatches = bcrypt.compareSync(body.password, user.password)
   if (!passwordMatches) return invalidCredentials()
 
+  // S-auth4b: a right password that is publicly known (in git history) still
+  // signs in -- refusing it would lock the owner out -- but the account is
+  // marked must_change_password, and requireAuth then refuses everything but
+  // the self password change. Checked here, the one place the plaintext
+  // exists. The password itself is never logged or audited.
+  const signedInWithLeakedPassword = await passwordKnownLeaked(body.password, c.env)
+  if (signedInWithLeakedPassword) {
+    await setPasswordMustChange(getDb(c.env), user.id, true)
+    await audit(c.env, user.id, user.username, 'login_known_leaked_password', 'user', user.id, { mustChangePassword: true })
+  }
+
   // A right password is not a guess: hand back the network slot reserved
   // above, so shared tills behind one IP never fill the per-IP ceiling.
   await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
@@ -321,7 +347,7 @@ app.post('/login', async (c) => {
   // resets as soon as the *password* step succeeds, same as it would for
   // an account with no second factor. The OTP code itself has its own,
   // separate rate limiting (OTP_LIMIT_MAX/OTP_IP_LIMIT_MAX below).
-  await clearLoginLockout(c.env, body.username)
+  await clearLoginLockout(c.env, typedLockoutKey)
   if (resolvedLockoutKey) await clearLoginLockout(c.env, resolvedLockoutKey)
 
   // Device-approval gate -- every non-administrator role must be approved
@@ -422,6 +448,7 @@ app.post('/login', async (c) => {
       // follow-up request to become correctly authorized.
       role_code: user.role_code,
       role_permissions: user.role_permissions,
+      must_change_password: (signedInWithLeakedPassword || await accountMustChangePassword(c.env, user.id)) ? 1 : 0,
     },
     sessionExpiresAt: session.expiresAt,
   })
@@ -536,6 +563,66 @@ app.post('/password-reset/email', async (c) => {
   return c.json(GENERIC_RESET_REQUEST_RESPONSE)
 })
 
+// ---- Password reset by administrator approval (S-auth4c) ----
+//
+// The third recovery method, next to the emailed link (/password-reset/email)
+// and the authenticator code (/password-reset/otp): someone who has neither
+// asks an administrator. This records a pending request that administrators
+// see in Users (GET /api/users/password-reset-requests); the administrator
+// resolves it with the existing admin reset-password action, which marks the
+// request resolved, or dismisses it. Nothing about the account changes here.
+//
+// Same no-enumeration rule as /email: one identical answer whether the
+// identifier matched one active account, none, several, or was rate-limited.
+// Limits: per network and per typed identifier, so the admin list cannot be
+// flooded and one account cannot be spammed; a repeat while a request is
+// already pending adds nothing (partial unique index, migration 0203).
+const ADMIN_RESET_REQUEST_RESPONSE = {
+  success: true,
+  message: 'If this account exists, an administrator has been asked to reset its password.',
+}
+const ADMIN_RESET_REQUEST_IP_MAX = 5
+const ADMIN_RESET_REQUEST_IDENTIFIER_MAX = 3
+const ADMIN_RESET_REQUEST_WINDOW_MS = 60 * 60 * 1000
+
+app.post('/password-reset/admin-request', async (c) => {
+  const body = await c.req.json<{ identifier?: string; deviceName?: string }>().catch(() => ({} as { identifier?: string; deviceName?: string }))
+  const identifier = String(body.identifier || '').trim()
+  if (!identifier || identifier.length > 200) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+
+  const ip = getClientIp(c.req.raw)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', ip, ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  if (!ipLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+  const identifierLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_identifier', identifier.toLowerCase(), ADMIN_RESET_REQUEST_IDENTIFIER_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  if (!identifierLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+
+  const db = getDb(c.env)
+  // LIMIT 2: an identifier naming two accounts (a shared email) is ambiguous
+  // and records nothing, rather than asking about an arbitrary one.
+  const rows = await db.prepare(`
+    SELECT id, username FROM users
+    WHERE (lower(username) = lower(@identifier) OR lower(email) = lower(@identifier))
+      AND deleted_at IS NULL AND is_active = 1
+    LIMIT 2
+  `).all<{ id: number; username: string }>({ identifier })
+  if (rows.length !== 1) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+  const user = rows[0]
+  try {
+    const inserted = await db.prepare(`
+      INSERT OR IGNORE INTO password_reset_requests (user_id, request_ip, device_name, status)
+      VALUES (@user_id, @ip, @device_name, 'pending')
+    `).run({ user_id: user.id, ip: ip || null, device_name: String(body.deviceName || '').trim().slice(0, 120) || null })
+    const changes = Number((inserted as { changes?: number; meta?: { changes?: number } })?.changes ?? (inserted as { meta?: { changes?: number } })?.meta?.changes ?? 0)
+    if (changes > 0) {
+      await audit(c.env, user.id, user.username, 'password_reset_admin_requested', 'user', user.id, { ip: ip || null })
+    }
+  } catch (error) {
+    // Before migration 0203: nothing to record into. Same answer regardless.
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+})
+
 app.post('/password-reset/complete', async (c) => {
   const body = await c.req.json<{ accessToken?: string; newPassword?: string }>().catch(() => ({} as { accessToken?: string; newPassword?: string }))
   const accessToken = String(body.accessToken || '').trim()
@@ -546,6 +633,9 @@ app.post('/password-reset/complete', async (c) => {
   }
   if (passwordTooShort(newPassword)) {
     return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  }
+  if (await passwordKnownLeaked(newPassword, c.env)) {
+    return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
   }
 
   const result = await consumePasswordResetLink(c.env, accessToken)
@@ -559,6 +649,7 @@ app.post('/password-reset/complete', async (c) => {
 
   const passwordHash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
+  await setPasswordMustChange(db, user.id, false)
   // Reset means "I may have lost control of this account" -- every
   // existing session (including any an attacker holds) should stop working.
   await db.prepare('UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run([user.id])
@@ -617,8 +708,6 @@ app.post('/otp/verify', async (c) => {
   const ip = getClientIp(c.req.raw)
   const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.' }, 429)
-  const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
-  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
 
   // The first factor must have run, recently, for THIS user -- checked
   // before any DB read so an unbound caller learns nothing (same generic
@@ -626,6 +715,11 @@ app.post('/otp/verify', async (c) => {
   if (!(await isLiveOtpChallenge(c.env, body.otpChallenge, body.userId))) {
     return c.json({ error: 'Your sign-in step expired. Please enter your password again.' }, 401)
   }
+  // S-auth4d: the per-user allowance is spent only by a caller holding a live
+  // challenge (one who passed the password step). Spent before the challenge
+  // check, ten forged calls naming a user id blocked that user's second factor.
+  const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
+  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
 
   const db = getDb(c.env)
   const user = await db.prepare(`
@@ -639,10 +733,12 @@ app.post('/otp/verify', async (c) => {
 
   // Same escalating per-username lockout as /login -- a wrong second factor
   // counts like a wrong password, and a locked account waits here too. Also
-  // keyed on the account id (P2-1), the key every sign-in alias shares.
-  const accountLockoutKey = userIdLockoutKey(user.id)
+  // keyed on the account id (P2-1), the key every sign-in alias shares. Both
+  // are scoped to this network like /login (S-auth4d).
+  const usernameLockoutKey = perNetworkLockoutKey(user.username, ip)
+  const accountLockoutKey = perNetworkLockoutKey(userIdLockoutKey(user.id), ip)
   const lockoutState = worstLockoutState(
-    await getLoginLockoutState(c.env, user.username),
+    await getLoginLockoutState(c.env, usernameLockoutKey),
     await getLoginLockoutState(c.env, accountLockoutKey),
   )
   if (lockoutState.locked) {
@@ -661,7 +757,7 @@ app.post('/otp/verify', async (c) => {
   const verified = matchedStep !== null && !(await isOtpStepReplayed(c.env, user.id, matchedStep))
   if (!verified) {
     const failure = worstLockoutState(
-      await recordFailedLogin(c.env, user.username),
+      await recordFailedLogin(c.env, usernameLockoutKey),
       await recordFailedLogin(c.env, accountLockoutKey),
     )
     if (failure.locked) {
@@ -698,7 +794,7 @@ app.post('/otp/verify', async (c) => {
     }
   }
 
-  await clearLoginLockout(c.env, user.username)
+  await clearLoginLockout(c.env, usernameLockoutKey)
   await clearLoginLockout(c.env, accountLockoutKey)
   await markOtpStepUsed(c.env, user.id, matchedStep as number)
   await consumeOtpChallenge(c.env, body.otpChallenge)
@@ -718,7 +814,7 @@ app.post('/otp/verify', async (c) => {
   // their grants on the ROLE, and a login payload without them resolves to
   // no permissions whenever the bootstrap re-fetch can't run.
   return c.json({
-    user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions },
+    user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions, must_change_password: (await accountMustChangePassword(c.env, user.id)) ? 1 : 0 },
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
   })
@@ -730,10 +826,29 @@ app.post('/otp/verify', async (c) => {
 // the caller's *current* cookie is left valid (no revoke) since the
 // response also sets the new cookie in the same round trip and there's no
 // second in-flight request racing to hand off here in the Workers port.
+//
+// Because the old cookie stays valid, every call yields one more live
+// session with no password. The new session therefore inherits the caller's
+// sign-in family (lib/auth.ts currentSessionLimitFamily) so it shares, not
+// renews, that sign-in's current-password allowance (S-auth4), and the route
+// itself is capped per family as defence in depth. The frontend calls it
+// only when someone saves the "Default login duration" setting.
+const SESSION_DURATION_LIMIT_BUCKET = 'auth:session_duration'
+const SESSION_DURATION_LIMIT_MAX = 10
+const SESSION_DURATION_LIMIT_WINDOW_MS = 15 * 60 * 1000
 app.post('/session-duration', requireAuth, async (c) => {
   const body = await c.req.json<{ sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
   const user = c.get('user')
   if (!user?.id) return c.json({ error: 'Please sign in again to continue.' }, 401)
+
+  // Deliberately not caught: without migration 0201 this throws, and a 500
+  // is better than minting a session that escapes its family's allowance.
+  const limitFamilyId = await currentSessionLimitFamily(c)
+  if (!limitFamilyId) return c.json({ error: 'Please sign in again to continue.' }, 401)
+  const cap = await checkRateLimit(c.env, SESSION_DURATION_LIMIT_BUCKET, `family:${limitFamilyId}`, SESSION_DURATION_LIMIT_MAX, SESSION_DURATION_LIMIT_WINDOW_MS)
+  if (!cap.allowed) {
+    return c.json({ error: 'Too many login duration changes. Please try again later.', code: 'session_duration_rate_limited', retryAfterSeconds: cap.retryAfterSeconds }, 429)
+  }
 
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
@@ -742,6 +857,7 @@ app.post('/session-duration', requireAuth, async (c) => {
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,
+    limitFamilyId,
   })
   setSessionCookie(c, session.token, session.expiresAt)
 
@@ -894,6 +1010,7 @@ app.post('/password-reset/otp', async (c) => {
   if (!identifier) return c.json({ error: 'Username or email is required' }, 400)
   if (!body.otp) return c.json({ error: 'OTP code is required' }, 400)
   if (!body.newPassword || passwordTooShort(body.newPassword)) return c.json({ error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(body.newPassword, c.env)) return c.json({ error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   // P1-1. This used to rate-limit only on `<ip>:<raw typed identifier>`,
   // so changing the letter case, typing the email instead of the username,
@@ -924,21 +1041,24 @@ app.post('/password-reset/otp', async (c) => {
   // Failures feed the same escalating lockout as sign-in (lib/loginLockout.ts),
   // on the typed value and on the account id, so a guessed-at account also
   // waits at /login and /otp/verify.
-  const accountLockoutKey = user ? userIdLockoutKey(user.id) : null
+  // Scoped to this network like /login (S-auth4d); the account bucket above
+  // stays account-wide (P1-1).
+  const identifierLockoutKey = perNetworkLockoutKey(identifier, ip)
+  const accountLockoutKey = user ? perNetworkLockoutKey(userIdLockoutKey(user.id), ip) : null
   const lockedAnswer = (state: { retryAfterSeconds: number }) => c.json({
     error: `Too many failed attempts. Please wait ${state.retryAfterSeconds} seconds and try again.`,
     locked: true,
     retryAfterSeconds: state.retryAfterSeconds,
   }, 429)
   const lockoutState = worstLockoutState(
-    await getLoginLockoutState(c.env, identifier),
+    await getLoginLockoutState(c.env, identifierLockoutKey),
     ...(accountLockoutKey ? [await getLoginLockoutState(c.env, accountLockoutKey)] : []),
   )
   if (lockoutState.locked) return lockedAnswer(lockoutState)
 
   const invalidReset = async () => {
     const failure = worstLockoutState(
-      await recordFailedLogin(c.env, identifier),
+      await recordFailedLogin(c.env, identifierLockoutKey),
       ...(accountLockoutKey ? [await recordFailedLogin(c.env, accountLockoutKey)] : []),
     )
     if (failure.locked) return lockedAnswer(failure)
@@ -957,8 +1077,9 @@ app.post('/password-reset/otp', async (c) => {
 
   const passwordHash = bcrypt.hashSync(String(body.newPassword), 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
+  await setPasswordMustChange(db, user.id, false)
   await revokeUserSessions(c.env, user.id)
-  await clearLoginLockout(c.env, identifier)
+  await clearLoginLockout(c.env, identifierLockoutKey)
   if (accountLockoutKey) await clearLoginLockout(c.env, accountLockoutKey)
   await audit(c.env, user.id, user.username, 'password_reset_complete', 'user', user.id, { method: 'otp' })
 
@@ -999,6 +1120,21 @@ function normalizeOauthMode(mode: unknown): 'login' | 'link' {
 
 function trim(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+// S-auth4b: every sign-in payload carries the account's must_change_password
+// flag, which the app reads to show its forced change screen instead of
+// mounting behind 403s. POST /login set it from this sign-in only; the
+// authenticator step (/otp/verify) and Google sign-in did not carry it.
+// Before migration 0202 there is no column and nothing is forced.
+async function accountMustChangePassword(env: Env, userId: number): Promise<boolean> {
+  try {
+    const row = await getDb(env).prepare('SELECT must_change_password AS flag FROM users WHERE id = ?').get<{ flag: number | null }>([userId])
+    return Number(row?.flag || 0) === 1
+  } catch (error) {
+    if (/no such column/i.test(String((error as Error)?.message || error))) return false
+    throw error
+  }
 }
 
 function buildUserPayload(user: {
@@ -1071,8 +1207,16 @@ async function updateLocalUserGoogleIdentity(env: Env, userId: number, googleUse
 // redirects the browser to (or opens in a popup). `mode: 'link'` requires
 // an existing session (linking Google to the already-logged-in account);
 // `mode: 'login'` (default) is the sign-in flow.
+//
+// S-auth4e: linking also re-checks the current password (the same guarded,
+// rate-limited re-check as unlink and change password). A linked Google
+// identity is a lasting way in that survives a password change, so a
+// borrowed, stolen or left-open session must not be enough to attach one.
+// An account that must first replace a publicly known password (S-auth4b)
+// cannot link at all -- this route is not behind requireAuth, so that gate
+// is repeated here and at the callback.
 app.post('/oauth/start', async (c) => {
-  const body = await c.req.json<{ provider?: string; mode?: string; organization?: string; redirectTo?: string; deviceId?: string; deviceName?: string }>().catch(() => ({} as Record<string, string>))
+  const body = await c.req.json<{ provider?: string; mode?: string; organization?: string; redirectTo?: string; deviceId?: string; deviceName?: string; currentPassword?: string }>().catch(() => ({} as Record<string, string>))
   if (trim(body.provider || 'google').toLowerCase() !== 'google') {
     return c.json({ error: 'Only Google login is supported.' }, 400)
   }
@@ -1084,6 +1228,22 @@ app.post('/oauth/start', async (c) => {
     const sessionUser = await getSessionUser(c)
     if (!sessionUser?.id) return c.json({ error: 'Please sign in before linking Google.' }, 401)
     currentUserId = Number(sessionUser.id || 0) || 0
+    if (Number(sessionUser.must_change_password || 0) === 1) {
+      return c.json({ error: 'Change your password before connecting Google.', code: 'password_change_required' }, 403)
+    }
+    const currentPassword = String(body.currentPassword || '')
+    if (!currentPassword) {
+      return c.json({ error: 'Current password is required to connect Google.', code: 'current_password_required' }, 403)
+    }
+    const account = await getDb(c.env).prepare('SELECT password FROM users WHERE id = ? AND deleted_at IS NULL').get<{ password: string }>([currentUserId])
+    if (!account) return c.json({ error: 'Please sign in before linking Google.' }, 401)
+    const verdict = await verifyCurrentPassword(c, { actorId: currentUserId, targetId: currentUserId }, currentPassword, account.password)
+    if (!verdict.ok && verdict.rateLimited) {
+      return c.json({ error: CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+    }
+    if (!verdict.ok) {
+      return c.json({ error: 'Current password is required to connect Google.', code: 'current_password_required' }, 403)
+    }
   }
   const result = await buildGoogleOauthStartUrl(c.env, {
     mode: oauthMode,
@@ -1212,6 +1372,11 @@ app.get('/oauth/callback', async (c) => {
       else if (!finishingUser || Number(finishingUser.id) !== actorId) {
         callbackPayload = { success: false, error: 'Sign in to Business OS in this browser as the account you are linking, then connect Google again.' }
       }
+      // S-auth4e: same gate as /oauth/start -- a session that must first
+      // replace a publicly known password cannot attach a lasting way in.
+      else if (Number(finishingUser.must_change_password || 0) === 1) {
+        callbackPayload = { success: false, error: 'Change your password before connecting Google.' }
+      }
       else if (linkedToOtherUser) { callbackPayload = { success: false, error: 'This Google account is already linked to another user.' } }
       else {
         const localUser = await db.prepare('SELECT id, username, name FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL').get<{ id: number; username: string; name: string }>([actorId])
@@ -1302,7 +1467,7 @@ app.get('/oauth/callback', async (c) => {
         await audit(c.env, synced.id, synced.username, 'login', 'user', synced.id, { method: 'google', email: googleUser.email, google_subject: googleSubject })
         const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: statePayload.deviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
         setSessionCookie(c, session.token, session.expiresAt)
-        callbackPayload = { success: true, provider: 'google', user: buildUserPayload(synced), sessionExpiresAt: session.expiresAt, authMode: 'cookie' }
+        callbackPayload = { success: true, provider: 'google', user: { ...buildUserPayload(synced), must_change_password: (await accountMustChangePassword(c.env, synced.id)) ? 1 : 0 }, sessionExpiresAt: session.expiresAt, authMode: 'cookie' }
       }
     }
 

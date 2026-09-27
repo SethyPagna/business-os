@@ -313,6 +313,8 @@ const PROFILE_KM_FALLBACKS: Record<string, string> = {
   google_provider_disabled_note: 'មិនទាន់បើក Google sign-in នៅក្នុង Google login នៅឡើយទេ។',
   current_password: 'ពាក្យសម្ងាត់បច្ចុប្បន្ន',
   disconnect_google_password_hint: 'ប្រើពាក្យសម្ងាត់បច្ចុប្បន្ន មុនពេលផ្ដាច់ Google ចេញពីគណនីនេះ។',
+  connect_google_password_hint: 'ការភ្ជាប់ Google បន្ថែមផ្លូវចូលគណនីនេះជាអចិន្ត្រៃយ៍ ដូច្នេះត្រូវការពាក្យសម្ងាត់បច្ចុប្បន្នរបស់អ្នក។',
+  current_password_required_connect: 'សូមបញ្ចូលពាក្យសម្ងាត់បច្ចុប្បន្ន ដើម្បីភ្ជាប់ Google។',
   disconnect_google: 'ផ្ដាច់ Google',
   connecting: 'កំពុងភ្ជាប់...',
   disconnecting: 'កំពុងផ្ដាច់...',
@@ -903,12 +905,29 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     resetAvatarEditor()
   }
 
+  // A refused link start answers in the operator's language: the rate limit,
+  // or a missing / wrong current password (code current_password_required).
+  const connectPasswordMessage = (value: unknown): string | null => {
+    const limited = currentPasswordRateLimitMessage(value, tr)
+    if (limited) return limited
+    if (value && typeof value === 'object' && (value as { code?: unknown }).code === 'current_password_required') {
+      return tr('current_password_required_connect', 'Enter your current password to connect Google.')
+    }
+    return null
+  }
+
   const handleStartOauthLink = async (provider: string): Promise<void> => {
     if (oauthRequestInFlightRef.current) return
     const normalizedProvider = String(provider || '').trim().toLowerCase()
     if (!normalizedProvider) return
     if (!verificationCaps.googleLoginAuth) {
       notify(tr('google_oauth_not_ready', 'Google login is not ready yet.'), 'error')
+      return
+    }
+    // S-auth4e: the Worker re-checks the current password before it hands
+    // out a link consent URL (routes/auth.ts /oauth/start).
+    if (!currentPassword.trim()) {
+      notify(tr('current_password_required_connect', 'Enter your current password to connect Google.'), 'error')
       return
     }
 
@@ -928,14 +947,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         provider: normalizedProvider,
         mode: 'link',
         redirectTo,
+        currentPassword,
       }), 'Start sign-in provider', PROFILE_OAUTH_START_TIMEOUT_MS)
       if (result?.success === false || !result?.url) {
-        notify(result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
+        notify(connectPasswordMessage(result) || result?.error || tr('oauth_start_failed', 'Unable to start sign-in with provider.'), 'error')
         return
       }
       window.location.assign(result.url)
     } catch (error) {
-      notify(getErrorMessage(error, tr('oauth_start_failed', 'Unable to start sign-in with provider.')), 'error')
+      notify(connectPasswordMessage(error) || getErrorMessage(error, tr('oauth_start_failed', 'Unable to start sign-in with provider.')), 'error')
     } finally {
       oauthRequestInFlightRef.current = false
       setOauthConnecting('')
@@ -1280,13 +1300,17 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                       {tr('google_link_unavailable_note', 'Google sign-in is not set up on this system yet, so it cannot be connected. An administrator has to finish the Google setup first.')}
                     </p>
                   ) : null}
-                  {authMethods?.google_linked && needsSensitivePassword ? (
+                  {(authMethods?.google_linked ? needsSensitivePassword : (verificationCaps.googleOauth && authMethods?.google_ready)) ? (
                     <div className="mt-2">
                       <div className="mb-1 flex items-center gap-1">
                         <label htmlFor="disconnect-google-password" className="block text-xs font-medium text-gray-600 dark:text-gray-300">
                         {tr('current_password', 'Current password')}
                         </label>
-                        <InfoHint label={tr('disconnect_google', 'Disconnect Google')} text={tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')} />
+                        {authMethods?.google_linked ? (
+                          <InfoHint label={tr('disconnect_google', 'Disconnect Google')} text={tr('disconnect_google_password_hint', 'Use your current password before disconnecting Google from this account.')} />
+                        ) : (
+                          <InfoHint label={tr('connect_google', 'Connect Google')} text={tr('connect_google_password_hint', 'Connecting Google adds a lasting way into this account, so it needs your current password.')} />
+                        )}
                       </div>
                       <input
                         id="disconnect-google-password"

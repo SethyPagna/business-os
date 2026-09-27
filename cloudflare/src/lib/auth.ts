@@ -71,6 +71,11 @@ export type SessionUser = {
   // `r.name AS role_name` correctly -- this just brings the session user's
   // own query in line with that.
   role_name?: string | null
+  // users.must_change_password (migration 0202): 1 once a sign-in used a
+  // publicly known password (lib/passwordPolicy.ts). requireAuth then refuses
+  // everything but the self password change; /bootstrap and /me carry it so
+  // the client shows the forced change screen. Absent before 0202.
+  must_change_password?: number | null
 }
 
 type SessionLookupRow = SessionUser & {
@@ -116,7 +121,13 @@ export async function createSession(
   // Optional and best-effort: a caller that doesn't have a deviceId (e.g.
   // a very old cached frontend build) still gets a working session, just
   // one that a future device revoke can't immediately terminate.
-  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null } = {},
+  //
+  // `limitFamilyId`: pass ONLY when this session is re-issued from an existing
+  // one without a fresh sign-in (POST /session-duration). It is the id of
+  // the sign-in's own session row, so the child shares that sign-in's
+  // current-password allowance (see currentSessionLimitFamily below). A real
+  // sign-in omits it: the column stays NULL and the row is its own family.
+  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null; limitFamilyId?: number | null } = {},
 ): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken()
   const tokenHash = await hashToken(token)
@@ -124,10 +135,8 @@ export async function createSession(
   const expiresAt = new Date(Date.now() + ttlMs).toISOString()
 
   const db = getDb(env)
-  await db.prepare(`
-    INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at)
-    VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at)
-  `).run({
+  const limitFamilyId = Number(options.limitFamilyId || 0)
+  const params = {
     user_id: userId,
     token_hash: tokenHash,
     device_name: options.deviceName || null,
@@ -136,7 +145,20 @@ export async function createSession(
     ip: options.ip || null,
     device_id: options.deviceId || null,
     expires_at: expiresAt,
-  })
+  }
+  if (Number.isSafeInteger(limitFamilyId) && limitFamilyId > 0) {
+    // Only the re-issue path names limit_family_id (migration 0201), so the
+    // sign-in INSERT below never depends on it.
+    await db.prepare(`
+      INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at, limit_family_id)
+      VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at, @limit_family_id)
+    `).run({ ...params, limit_family_id: limitFamilyId })
+  } else {
+    await db.prepare(`
+      INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at)
+      VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at)
+    `).run(params)
+  }
 
   return { token, expiresAt }
 }
@@ -228,14 +250,17 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   return lookup
 }
 
+// Set once per isolate if users.must_change_password does not exist yet.
+let mustChangeColumnMissing = false
+
 async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string): Promise<SessionUser | null> {
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
 
   const db = getDb(c.env)
-  const row = await db.prepare(`
+  const lookupSql = (mustChangeColumn: string) => `
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
-           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,${mustChangeColumn}
            s.created_at AS session_created_at, s.expires_at AS session_expires_at,
            s.last_seen_at AS session_last_seen_at
     FROM user_sessions s
@@ -247,7 +272,22 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
       AND u.is_active = 1
       AND u.deleted_at IS NULL
     LIMIT 1
-  `).get<SessionLookupRow>({ token_hash: tokenHash, now: nowIso })
+  `
+  const lookupParams = { token_hash: tokenHash, now: nowIso }
+  let row: SessionLookupRow | undefined
+  if (mustChangeColumnMissing) {
+    row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+  } else {
+    try {
+      row = await db.prepare(lookupSql(' u.must_change_password,')).get<SessionLookupRow>(lookupParams)
+    } catch (error) {
+      // Worker deployed before migration 0202: every request would 500 on
+      // the missing column. Remember it for this isolate and read without it.
+      if (!/no such column/i.test(String((error as Error)?.message || error))) throw error
+      mustChangeColumnMissing = true
+      row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+    }
+  }
 
   if (!row) return null
 
@@ -358,6 +398,27 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
   }
 }
 
+// The sign-in the request's session descends from: the id of the session
+// row a password/OTP/Google sign-in created, shared by every session later
+// re-issued from it without the password (POST /session-duration copies it
+// into limit_family_id). NULL there means the row IS a sign-in, so the family
+// is its own id -- which also covers every row created before migration 0201.
+//
+// Allowances that must not multiply by minting sessions key on this, not on
+// the cookie (lib/currentPasswordGuard.ts, /session-duration's own cap).
+// Returns null when the request has no cookie or no matching row. Throws if
+// the column is missing (migration 0201 not applied); callers decide.
+export async function currentSessionLimitFamily<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<number | null> {
+  const token = getCookie(c, SESSION_COOKIE_NAME)
+  if (!token) return null
+  const tokenHash = await hashToken(token)
+  const row = await getDb(c.env).prepare(
+    'SELECT COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
+  ).get<{ family: number | null }>({ token_hash: tokenHash })
+  const family = Number(row?.family || 0)
+  return Number.isSafeInteger(family) && family > 0 ? family : null
+}
+
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return
@@ -400,6 +461,23 @@ export async function revokeUserSessions<E extends { Bindings: Env } = { Binding
 // middleware. Usage: app.use('/protected/*', requireAuth) or per-route:
 // app.get('/x', requireAuth, handler). Stores the resolved user on
 // c.set('user', ...) for handlers to read via c.get('user').
+// What a must-change account may use through requireAuth:
+//   - POST .../users/<own id>/change-password (routes/users.ts; it re-checks
+//     the current password and that the target is the caller);
+//   - GET /api/sync/owner, the app's sign-out probe (frontend/src/api/http.ts
+//     recoverUnresolvedSignout). The app believes a sign-out only once this
+//     probe reads 401; answered 403 it never sent the logout, so Sign out on
+//     the change screen could not finish. It returns who owns the cookie,
+//     which /me already tells this session.
+const SIGNOUT_PROBE_PATH = /^\/api\/sync\/owner\/?$/
+export function allowedWhilePasswordMustChange(method: string, path: string, userId: number | string): boolean {
+  const verb = String(method).toUpperCase()
+  if (verb === 'GET') return SIGNOUT_PROBE_PATH.test(String(path || ''))
+  if (verb !== 'POST') return false
+  const match = /\/users\/([^/]+)\/change-password\/?$/.exec(String(path || ''))
+  return !!match && Number(match[1]) === Number(userId)
+}
+
 export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: () => Promise<void>) {
   // A router stacked behind another one that already authenticated this
   // request (see getSessionUser's memo note) has nothing left to check.
@@ -426,6 +504,13 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   // shared auth-recovery flow (AppContext.tsx's authRecoveryRef check)
   // had already re-confirmed the session was fine.
   if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+  // Signed in with a publicly known password (S-auth4b): nothing but the
+  // self password change and the sign-out probe until it is changed. Logout,
+  // /me and /bootstrap do not pass through here. 403 with its own code, never 401 or the
+  // "sign in again" wording, so the client does not treat it as a lost session.
+  if (Number(user.must_change_password || 0) === 1 && !allowedWhilePasswordMustChange(c.req.method, c.req.path, user.id)) {
+    return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)
+  }
   c.set('user', user)
   await next()
 }

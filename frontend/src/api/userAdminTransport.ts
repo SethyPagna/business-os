@@ -115,6 +115,26 @@ export function resetPassword(id: string | number, payload: AccessPayload = {}):
   )
 }
 
+// S-auth4c: sign-in-screen "Ask an administrator" requests. Admin-control
+// only (the Worker refuses anyone else); answered by resetPassword above,
+// which resolves the account's pending request, or dismissed here.
+export type PasswordResetRequestRecord = {
+  id: number
+  user_id: number
+  requested_at: string
+  device_name?: string | null
+  username?: string | null
+  name?: string | null
+}
+
+export function getPasswordResetRequests(): Promise<unknown> {
+  return apiFetch('GET', '/api/users/password-reset-requests')
+}
+
+export function dismissPasswordResetRequest(id: string | number): Promise<unknown> {
+  return apiFetch('POST', `/api/users/password-reset-requests/${encodeId(id)}/dismiss`, {})
+}
+
 export function createRole(payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'roles:create',

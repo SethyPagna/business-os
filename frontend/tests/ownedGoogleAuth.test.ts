@@ -39,6 +39,19 @@ await runTest('frontend uses owned Google OAuth API names and no Supabase OAuth 
   assert.match(profileSource, /unlinkGoogleOauth/)
 })
 
+await runTest('S-auth4e: Connect Google re-enters the current password, which the Worker checks', () => {
+  // The Worker refuses a link start without it (cloudflare/src/routes/auth.ts
+  // /oauth/start, test-google-link-profile-pure.cjs); the profile must send it
+  // and say so in the operator's language instead of a generic failure.
+  assert.match(profileSource, /getProfileApi\(\)\.startGoogleOauth\(\{[\s\S]{0,120}mode: 'link',[\s\S]{0,80}currentPassword,/)
+  assert.match(profileSource, /if \(!currentPassword\.trim\(\)\) \{\s*notify\(tr\('current_password_required_connect'/)
+  assert.match(profileSource, /code === 'current_password_required'/)
+  for (const pack of [enSource, kmSource]) {
+    assert.match(pack, /"current_password_required_connect": "/)
+    assert.match(pack, /"connect_google_password_hint": "/)
+  }
+})
+
 await runTest('visible auth and diagnostics copy no longer mentions Supabase', () => {
   ;[loginSource, profileSource, backupSource, enSource, kmSource].forEach((source) => {
     assert.doesNotMatch(source, /Supabase/i)

@@ -35,6 +35,18 @@ export function userIdLockoutKey(userId: number | string): string {
   return `#uid:${Number(userId)}`
 }
 
+// S-auth4d: every lockout key is ALSO scoped to the network it came from.
+// Keyed on the account alone, anyone who knew a username could fail it six
+// times from anywhere and lock the owner out at the shop -- and one failure
+// every 30 minutes kept the wait armed. Scoped, the failing network waits
+// and the owner's does not. Guessing spread across many networks is bounded
+// separately by the routes' account-wide failure ceiling. The '@' suffix is
+// applied after the lowercasing above, so every alias still shares one key
+// per network (P2-1).
+export function perNetworkLockoutKey(key: string, ip: string | null | undefined): string {
+  return `${lockoutKey(key)}@${String(ip || 'unknown').trim().toLowerCase()}`
+}
+
 function computeWaitSeconds(failedCount: number): number {
   if (failedCount <= FREE_ATTEMPTS) return 0
   const doublings = failedCount - FREE_ATTEMPTS - 1

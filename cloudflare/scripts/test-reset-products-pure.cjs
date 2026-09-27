@@ -68,7 +68,17 @@ function transpile(relPath) {
   return outputText
 }
 
+// What a REAL module needs beyond what its caller lists; a caller's own entry
+// wins. lib/currentPasswordGuard.ts keys its limit on the session's sign-in
+// (S-auth4: './auth' currentSessionLimitFamily). With no session here the
+// family is unknown and the guard keeps its per-cookie fallback; its verdict,
+// a real bcrypt compare, is unchanged. Unused when no caller loads it real.
+const REAL_LOAD_DEFAULTS = {
+  'lib/currentPasswordGuard.ts': { './auth': { currentSessionLimitFamily: async () => null } },
+}
+
 function loadReal(relPath, requireOverrides = {}) {
+  requireOverrides = { ...REAL_LOAD_DEFAULTS[relPath], ...requireOverrides }
   const outputText = transpile(relPath)
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const originalLoad = Module._load

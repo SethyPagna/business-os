@@ -14,7 +14,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
-import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -541,6 +541,7 @@ app.post('/users', async (c) => {
   const email = String(body.email || '').trim().toLowerCase() || null
   if (!username || !password) return c.json({ success: false, error: 'Username and password required' }, 400)
   if (passwordTooShort(password)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(password, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
   if (!isValidEmail(email)) return c.json({ success: false, error: 'Valid email required' }, 400)
   const roleId = Number(body.role_id)
   if (!Number.isInteger(roleId) || roleId <= 0) {
@@ -815,6 +816,7 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   const newPassword = String(body.newPassword || body.new_password || '').trim()
   if (!newPassword) return c.json({ success: false, error: 'New password required' }, 400)
   if (passwordTooShort(newPassword)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   if (options.requireAdminControl && !isAdminControlUser(actor)) {
     return c.json({ success: false, error: 'No permission' }, 403)
@@ -845,6 +847,11 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
 
   const hash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
+  // A new password that is not publicly known ends a forced change.
+  await setPasswordMustChange(db, targetId, false)
+  // An administrator's reset answers any pending "ask an administrator"
+  // recovery request for this account (S-auth4c, migration 0203).
+  if (adminReset) await resolvePasswordResetRequests(db, targetId, Number(actor?.id || 0) || null, 'resolved')
   // Changing YOUR OWN password keeps the session that made the change and
   // signs out every other device. Resetting SOMEONE ELSE's password signs out
   // all of theirs -- the actor's own sessions are a different user_id and are
@@ -859,6 +866,66 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
 
 app.post('/users/:id/change-password', (c) => handlePasswordChange(c, { requireCurrent: true, requireAdminControl: false, requireSelf: true, allowInactive: false }))
 app.post('/users/:id/reset-password', (c) => handlePasswordChange(c, { requireCurrent: false, requireAdminControl: true, requireSelf: false, allowInactive: true }))
+
+// -- Password reset by administrator approval (S-auth4c) ----------------------
+//
+// Requests are recorded by the public POST /api/auth/password-reset/admin-request
+// (routes/auth.ts). Administrators see the pending ones here and answer each
+// with the existing reset-password action above (which resolves it) or
+// dismiss it. Before migration 0203 there is no table: the list is empty and
+// nothing fails.
+async function resolvePasswordResetRequests(db: ReturnType<typeof getDb>, userId: number | string, actorId: number | null, status: 'resolved' | 'dismissed', requestId?: number): Promise<number> {
+  try {
+    const result = await db.prepare(`
+      UPDATE password_reset_requests
+      SET status = @status, resolved_by = @actor_id, resolved_at = CURRENT_TIMESTAMP
+      WHERE user_id = @user_id AND status = 'pending'
+        AND (@request_id IS NULL OR id = @request_id)
+    `).run({ status, actor_id: actorId, user_id: Number(userId), request_id: requestId ?? null })
+    return Number((result as { changes?: number; meta?: { changes?: number } })?.changes ?? (result as { meta?: { changes?: number } })?.meta?.changes ?? 0)
+  } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return 0
+    throw error
+  }
+}
+
+app.get('/users/password-reset-requests', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  try {
+    const rows = await getDb(c.env).prepare(`
+      SELECT q.id, q.user_id, q.requested_at, q.device_name, u.username, u.name
+      FROM password_reset_requests q
+      JOIN users u ON u.id = q.user_id
+      WHERE q.status = 'pending' AND u.deleted_at IS NULL
+      ORDER BY q.requested_at DESC, q.id DESC
+      LIMIT 50
+    `).all<{ id: number; user_id: number; requested_at: string; device_name: string | null; username: string; name: string | null }>()
+    return c.json({ success: true, requests: rows })
+  } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return c.json({ success: true, requests: [] })
+    throw error
+  }
+})
+
+app.post('/users/password-reset-requests/:requestId/dismiss', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  const requestId = Number(c.req.param('requestId'))
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) return c.json({ success: false, error: 'Request not found' }, 404)
+  const db = getDb(c.env)
+  let request: { user_id: number } | undefined
+  try {
+    request = await db.prepare("SELECT user_id FROM password_reset_requests WHERE id = @id AND status = 'pending'").get<{ user_id: number }>({ id: requestId })
+  } catch (error) {
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  if (!request) return c.json({ success: false, error: 'Request not found' }, 404)
+  const changed = await resolvePasswordResetRequests(db, request.user_id, Number(actor?.id || 0) || null, 'dismissed', requestId)
+  if (!changed) return c.json({ success: false, error: 'Request not found' }, 404)
+  await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'password_reset_admin_request_dismissed', 'user', request.user_id, { requestId })
+  return c.json({ success: true })
+})
 
 // -- Role CRUD (admin control) ---------------------------------------------
 

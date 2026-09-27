@@ -220,7 +220,7 @@ async function main() {
   assert.equal(calls.effect, 1, 'exact-limit repair reaches handler exactly once')
   calls.effect = 0
   authenticated = false; restore = false
-  for (const route of ['/api/auth/login', '/api/auth/password-reset/complete', '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout']) {
+  for (const route of ['/api/auth/login', '/api/auth/password-reset/complete', '/api/auth/password-reset/admin-request', '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout']) {
     const before = { ...calls }
     const response = await send(route, small + 1, '1')
     assert.equal(response.status, 413, route)
