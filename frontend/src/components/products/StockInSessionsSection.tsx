@@ -316,7 +316,8 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const removeRow = async (row: Row) => {
     if (pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     if (row.id == null) return
-    if (busy || removeInFlightRef.current) return
+    if (busy) return
+    if (removeInFlightRef.current) return
     if (Number(row.edit_count) > 0 && selected) {
       try { await commitLineAttempt(lineRemovalAttempt(row), selected, () => removeLine(row)) }
       catch (error) { notify(stockInLineEditErrorText(error, tr), 'error') }
