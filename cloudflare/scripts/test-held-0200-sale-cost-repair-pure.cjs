@@ -42,6 +42,8 @@ const heldName = '0200_sale_cost_on_hand_repair.sql'
 const migrationText = fs.readFileSync(path.join(heldDir, heldName), 'utf8')
 const migration0195 = fs.readFileSync(path.join(migrationsDir, '0195_catalog_cost_on_hand.sql'), 'utf8')
 const auditText = fs.readFileSync(path.resolve(__dirname, '../../ops/scripts/audit/sale-cost-on-hand-audit.sql'), 'utf8')
+  // SELECT-only and outside the eol=lf rule: a fresh autocrlf checkout may give it CRLF.
+  .replace(/\r\n/g, '\n')
 
 let checks = 0
 function check(name, fn) {
@@ -211,11 +213,11 @@ function seed() {
   return { ...w, ids, lots: { a, b } }
 }
 
-const buckets = (raw) => Object.fromEntries(raw.prepare(planSelect('SELECT sale_item_id, bucket, correct FROM classified')).all()
-  .map((row) => [row.sale_item_id, { bucket: row.bucket, correct: row.correct }]))
+const buckets = (raw, kind = 'sale') => Object.fromEntries(raw.prepare(planSelect(`SELECT item_id, bucket, correct FROM classified WHERE kind = '${kind}'`)).all()
+  .map((row) => [row.item_id, { bucket: row.bucket, correct: row.correct }]))
 
 check('text: LF-only, one plan shared verbatim by the migration and every audit statement, audit SELECT-only', () => {
-  assert.ok(!migrationText.includes('\r') && !auditText.includes('\r'), 'LF-only')
+  assert.ok(!migrationText.includes('\r'), 'migration LF-only (held/*.sql is eol=lf)')
   const plans = [...planOf(migrationText), ...planOf(auditText)]
   assert.equal(planOf(migrationText).length, 1)
   assert.equal(planOf(auditText).length, 3, 'three audit statements')
@@ -227,11 +229,19 @@ check('text: LF-only, one plan shared verbatim by the migration and every audit 
     assert.match(body.trim(), /^WITH\b/)
     assert.doesNotMatch(body, /\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i, 'no writes')
   }
-  const create = migrationText.search(/\nCREATE TABLE sale_cost_repair_0200 /)
-  const firstUpdate = migrationText.search(/\nUPDATE /)
-  assert.ok(create > 0 && create < migrationText.indexOf('\nINSERT INTO sale_cost_repair_0200 ') && migrationText.indexOf('\nINSERT INTO sale_cost_repair_0200_return_items') < firstUpdate, 'backups before any UPDATE')
-  const updates = [...migrationText.matchAll(/\nUPDATE (\w+) SET (\w+) =/g)].map((m) => `${m[1]}.${m[2]}`)
+  const body = migrationText.split('\n').filter((l) => !l.startsWith('--')).join('\n')
+  const at = (needle) => { const i = body.indexOf(needle); assert.ok(i > 0, needle); return i }
+  const firstUpdate = at('\nUPDATE ')
+  assert.ok(at('\nCREATE TABLE IF NOT EXISTS sale_cost_repair_0200 (') < at('\nINSERT OR IGNORE INTO sale_cost_repair_0200 (')
+    && at('\nINSERT OR IGNORE INTO sale_cost_repair_0200 (') < firstUpdate
+    && at('\nINSERT OR IGNORE INTO sale_cost_repair_0200_return_items (') < firstUpdate, 'backups before any UPDATE')
+  const updates = [...body.matchAll(/\nUPDATE (\w+) SET (\w+) =/g)].map((m) => `${m[1]}.${m[2]}`)
   assert.deepEqual(updates, ['sale_items.cost_price_usd', 'return_items.cost_price_usd'], 'the only writes are the two cost columns')
+  const writes = [...body.matchAll(/\n(INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM|REPLACE INTO|DROP \w+|ALTER TABLE) (\w+)/g)].map((m) => `${m[1]} ${m[2]}`)
+  assert.deepEqual([...new Set(writes)], ['INSERT OR IGNORE INTO sale_cost_repair_0200_plan', 'INSERT OR IGNORE INTO sale_cost_repair_0200',
+    'INSERT OR IGNORE INTO sale_cost_repair_0200_return_items', 'UPDATE sale_items', 'UPDATE return_items', 'INSERT INTO branches'], 'nothing else is written')
+  const asserts = [...body.matchAll(/\nINSERT INTO branches\(name\) SELECT NULL WHERE /g)].map((m) => m.index)
+  assert.ok(asserts.length >= 4 && asserts.every((i) => i > body.lastIndexOf('\nUPDATE ')), 'post assertions use the NOT NULL abort idiom, after the writes')
 })
 
 check('buckets: repair / already_correct / ledger_unverified; hand-typed and pre-era lines are not candidates; the audit writes nothing', () => {
@@ -256,8 +266,15 @@ check('buckets: repair / already_correct / ledger_unverified; hand-typed and pre
   const today = raw.prepare('SELECT cost_price_usd c FROM products WHERE id = ?').get(ids.p1).c
   assert.equal(today, 12.375, "today's corrected catalog cost, today's quantities: (2 x 12 + 6 x 12.5) / 8")
   assert.ok(today !== 12.4 && today !== 12.4444, "today's corrected average is NOT the shelf at either sale")
-  const summary = Object.fromEntries(raw.prepare(auditStatements()[0]).all().map((r) => [r.bucket, r]))
+  const summaryRows = raw.prepare(auditStatements()[0]).all()
+  assert.deepEqual(summaryRows.map((r) => r.bucket), ['repair', 'window', 'returns_sale_linked', 'returns_walk_in', 'ledger_unverified',
+    'needs_owner_review', 'after_window', 'already_correct'], 'every bucket listed, in order, even when empty')
+  const summary = Object.fromEntries(summaryRows.map((r) => [r.bucket, r]))
   assert.equal(summary.repair.lines, 5)
+  assert.equal(summary.ledger_unverified.lines, 7, 's5, s9, s10, s11, the two unnamed earlier sales of P3 and P9, and the earlier sale of P7 -- its estimate equals its recorded cost, but an unreconciled ledger proves neither')
+  assert.equal(summary.returns_sale_linked.lines, 1, 'the copied return line')
+  assert.equal(summary.window.lines + summary.returns_walk_in.lines + summary.needs_owner_review.lines + summary.after_window.lines, 0)
+  assert.deepEqual(buckets(raw, 'return'), { [ids.returnCopied]: { bucket: 'returns_sale_linked', correct: 12.4 } }, 'the typed return line is not listed')
   assert.equal(summary.repair.cost_delta_usd, Math.round((3 * (12.0769 - 11.8333) + (12.4 - 11.8333) + 2 * (12.4444 - 11.8333) + (7 - 6) + (8 - 7)) * 10000) / 10000)
   const effect = raw.prepare(auditStatements()[2]).get()
   assert.equal(effect.return_lines, 1, 'one copied return line')
@@ -290,7 +307,16 @@ check('apply: backup first, only the two cost columns move, revenue and everythi
     [[ids.s0.lineId, 11.8333, 12.0769], [ids.s1.lineId, 11.8333, 12.4], [ids.s2.lineId, 11.8333, 12.4444], [ids.s4.lineId, 6, 7], [ids.s8.lineId, 7, 8]])
   // Double-apply: the plan finds nothing further to repair.
   assert.equal(Object.values(buckets(raw)).filter((b) => b.bucket === 'repair').length, 0, 'second run: nothing to repair')
-  assert.equal(raw.prepare(auditStatements()[0]).all().filter((r) => r.bucket === 'repair').length, 0, 'audit after: no repair bucket')
+  const after = Object.fromEntries(raw.prepare(auditStatements()[0]).all().map((r) => [r.bucket, r.lines]))
+  assert.deepEqual([after.repair, after.window, after.returns_sale_linked, after.returns_walk_in], [0, 0, 0, 0], 'audit after: nothing left to rewrite')
+  assert.equal(after.ledger_unverified, 7, 'review buckets unchanged')
+  // Re-running the whole file changes nothing at all, backup tables included.
+  const snap = () => Object.fromEntries([...['sale_items', 'return_items', ...tables].map((t) => [t, dump(raw, t)]),
+    ...['sale_cost_repair_0200', 'sale_cost_repair_0200_return_items'].map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY 1`).all()]),
+    ['plan', raw.prepare('SELECT * FROM sale_cost_repair_0200_plan ORDER BY kind, item_id').all()]])
+  const once = snap()
+  raw.exec(migrationText)
+  assert.deepEqual(snap(), once, 'second exec of the file: every table identical')
 })
 
 check('recovery: the header statements restore both cost columns byte-identical; a line changed after 0200 is left alone', () => {
@@ -307,7 +333,7 @@ check('recovery: the header statements restore both cost columns byte-identical;
   again.raw.exec(migrationText)
   again.raw.prepare('UPDATE sale_items SET cost_price_usd = 99 WHERE id = ?').run(again.ids.s2.lineId)
   const preview = migrationText.split('Preview:\n')[1].split('\n-- Statements:')[0].split('\n').map((l) => l.replace(/^--\s+/, '')).join(' ')
-  assert.equal(again.raw.prepare(preview).get()['COUNT(*)'], 1, 'preview names the line changed since')
+  assert.equal(Object.values(again.raw.prepare(preview).get())[0], 1, 'preview names the line changed since')
   again.raw.exec(recoverySql())
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s2.lineId).c, 99, 'a later edit is not reverted')
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s1.lineId).c, 11.8333, 'the rest is restored')
@@ -338,14 +364,16 @@ check('owner-run audit: every header command is --command (never --file); the cu
     assert.match(c, /^node scripts\/with-wrangler-auth\.cjs wrangler d1 execute business-os --remote --command "/)
     assert.doesNotMatch(c, /--file/)
   }
-  for (const read of ["bucket 'repair' -> lines = R", 'cost_delta_usd = D', "bucket 'ledger_unverified' -> lines"]) {
+  for (const read of ["bucket 'repair' -> lines = R", "bucket 'window' -> lines = W", "'returns_sale_linked' and 'returns_walk_in'", 'cost_delta_usd = D',
+    "bucket 'ledger_unverified' -> lines", "bucket 'needs_owner_review' -> lines", "bucket 'after_window'"]) {
     assert.ok(header.includes(read), `header says to read ${read}`)
   }
   const { raw } = seed()
   // A: the literal SELECT (d1_migrations is wrangler's own table, absent here).
   const eraEnd = commands.map((c) => c.match(/--command "(SELECT [^"]*catalog_cost_repair_0195_backup)"/)).find(Boolean)
   assert.ok(eraEnd, 'A names the 0195 backup')
-  assert.equal(raw.prepare(eraEnd[1]).get().era_end, '2026-09-26 00:00:00')
+  const eraRow = raw.prepare(eraEnd[1]).get()
+  assert.deepEqual([eraRow.fix_at, eraRow.era_end], ['2026-09-26 00:00:00', '2026-09-26 02:00:00'], 'A reads fix_at and the window end')
   // B, C, D: emulate  sed -n '/^-- N\. /,/;$/p' <audit> | grep -v '^--'
   const auditLines = auditText.split('\n')
   const cut = (n) => {
@@ -369,6 +397,10 @@ check('owner-run audit: every header command is --command (never --file); the cu
   assert.equal(typeof summary.repair.cost_delta_usd, 'number', 'D')
   assert.equal(raw.prepare(cut(2)).all().length, Object.values(summary).reduce((n, r) => n + r.lines, 0), 'C lists every line B counts')
   assert.deepEqual(Object.keys(raw.prepare(cut(3)).get()), ['sold_cost_delta_usd', 'returned_cost_delta_usd', 'return_lines'])
+  // Logs get counts and sums only: statements 1 and 3 print no id, number or name.
+  for (const n of [1, 3]) for (const row of raw.prepare(cut(n)).all()) for (const [k, v] of Object.entries(row)) {
+    assert.ok(k === 'bucket' || typeof v === 'number', `statement ${n} prints only aggregates (${k})`)
+  }
 })
 
 console.log(`${checks} checks passed`)
