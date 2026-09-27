@@ -21,7 +21,10 @@ import {
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
-export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
+// `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
+// restored -- get their own switch and their own forum topic. Until then a
+// customer return was sent as a `sales` event, into the Sale invoices topic.
+export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
@@ -52,7 +55,7 @@ type TelegramUpdate = { message?: TelegramMessage }
 // read the same way every other Telegram setting is (generic key/value, no
 // migration). Empty means "send to General", exactly as before this existed.
 export const TELEGRAM_TOPIC_KEYS = [
-  'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status',
+  'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_returns',
   'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
 ] as const
 export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
@@ -61,7 +64,7 @@ export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
 // this module and never grows from request or database input.
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
-  'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
+  'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -203,6 +206,10 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     // remain available when a less noisy chat is preferred.
     categories: {
       sales: isEnabled(values.telegram_sales_enabled, true), status: isEnabled(values.telegram_status_enabled, true),
+      // Unset follows the Sales switch: a customer return was a `sales` event
+      // until 27 Sep 2026, so a shop that never touched the new switch keeps
+      // exactly the return alerts it had -- on with Sales, off with it.
+      returns: isEnabled(values.telegram_returns_enabled, isEnabled(values.telegram_sales_enabled, true)),
       fees: isEnabled(values.telegram_fees_enabled, true), stock_in: isEnabled(values.telegram_stock_in_enabled, true), stock_out: isEnabled(values.telegram_stock_out_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
@@ -277,7 +284,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   // sales and status get their own topic each; fees, stock in and stock out
   // share the Expenses/Stock slots this event type maps onto.
   const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
-    sales: 'telegram_topic_sales', status: 'telegram_topic_status',
+    sales: 'telegram_topic_sales', status: 'telegram_topic_status', returns: 'telegram_topic_returns',
     fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
   }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
@@ -2279,7 +2286,9 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
     db.prepare('SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id').all<{ product_name: string | null; quantity: number }>({ returnId }).catch(() => []),
   ])
   return sendTelegramEvent(env, {
-    type: base.kind === 'supplier' ? 'stock_out' : 'sales',
+    // A customer return is the `returns` family (its own switch and topic);
+    // it is NOT also sent as a sale. A supplier return stays a stock-out.
+    type: base.kind === 'supplier' ? 'stock_out' : 'returns',
     heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
     lines: formatReturnTelegramLines({
       ...base,
@@ -2295,4 +2304,102 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
       replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
     }),
   })
+}
+
+// ---- Return cancelled / restored (owner, 27 Sep 2026) ----------------------
+// A return changes status only through the grouped Returns action
+// (routes/returns.ts POST /bulk, field `status`) and its undo/redo
+// (routes/actionHistory.ts). Both call this AFTER the write committed, inside
+// waitUntil, with the ids that actually changed; this reads each return's
+// status NOW, so an undo of a cancel reports a restore without the caller
+// having to work out the direction.
+
+export type TelegramReturnStatusRow = {
+  returnNumber: string; receiptNumber?: string | null; party?: string | null; branch?: string | null
+  refundUsd?: number | null; refundKhr?: number | null
+}
+
+/**
+ * One message for one group of returns that moved the same way. Pure, so the
+ * pure tests pin it. One return reads like the "Return recorded" alert; a
+ * group lists one row per return, capped like every other item list.
+ */
+export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'supplier'; returns: TelegramReturnStatusRow[]; by?: string | null; nowMs?: number }): string[] {
+  const code = input.kind === 'supplier' ? 'SRET' : 'RET'
+  const partyLabel = input.kind === 'supplier' ? 'Supplier' : 'Customer'
+  const lines: string[] = [`Date: ${formatBusinessDateTime(null, input.nowMs ?? Date.now())}`]
+  if (input.returns.length === 1) {
+    const ret = input.returns[0]
+    const hasMoney = (Number(ret.refundUsd) || 0) !== 0 || (Number(ret.refundKhr) || 0) !== 0
+    lines.push(
+      `${code}: ${ret.returnNumber}`,
+      ret.receiptNumber ? `INV: ${ret.receiptNumber}` : '',
+      ret.party ? `${partyLabel}: ${ret.party}` : '',
+      ret.branch ? `Branch: ${ret.branch}` : '',
+      input.kind === 'customer' && hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : '',
+    )
+  } else {
+    // No cap needed: a grouped Returns action holds at most RETURN_BULK_LIMIT
+    // (25) returns, and the sender below never passes more than that.
+    for (const ret of input.returns) {
+      const hasMoney = (Number(ret.refundUsd) || 0) !== 0 || (Number(ret.refundKhr) || 0) !== 0
+      lines.push(...telegramRowLines(`• ${cleanLine(ret.returnNumber, 40)}`, [
+        ret.receiptNumber ? cleanLine(ret.receiptNumber, 40) : '',
+        ret.party ? cleanLine(ret.party, 60) : '',
+        input.kind === 'customer' && hasMoney ? money(ret.refundUsd, ret.refundKhr) : '',
+      ].filter(Boolean)))
+    }
+  }
+  if (input.by) lines.push(`By: ${input.by}`)
+  return lines.filter(Boolean)
+}
+
+export const RETURN_STATUS_HEADINGS = {
+  customer: { cancelled: '🚫 Return cancelled', completed: '♻️ Return restored' },
+  supplier: { cancelled: '🚫 Supplier return cancelled', completed: '♻️ Supplier return restored' },
+} as const
+
+type ReturnStatusDbRow = {
+  id: number; return_number: string | null; status: string | null; return_scope: string | null
+  receipt_number: string | null; customer_name: string | null; supplier_name: string | null
+  branch_name: string | null; total_refund_usd: number | null; total_refund_khr: number | null
+}
+
+/**
+ * Announce returns whose status just changed. Customer returns go out as the
+ * `returns` family, supplier returns as `stock_out` -- the same families their
+ * "recorded" alerts use. Never throws: a failed alert must not fail the write
+ * it describes (callers still wrap it in waitUntil + catch, like every event).
+ */
+export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readonly number[], by: string | null): Promise<void> {
+  const ids = [...new Set(returnIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 25)
+  if (!ids.length) return
+  const rows = await getDb(env).prepare(`
+    SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
+      b.name AS branch_name, r.total_refund_usd, r.total_refund_khr
+    FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
+    WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
+  `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })
+  const groups = new Map<string, { kind: 'customer' | 'supplier'; status: 'cancelled' | 'completed'; returns: TelegramReturnStatusRow[] }>()
+  for (const row of rows) {
+    const kind = String(row.return_scope || 'customer').toLowerCase() === 'supplier' ? 'supplier' : 'customer'
+    const status = String(row.status || 'completed').toLowerCase() === 'cancelled' ? 'cancelled' : 'completed'
+    const key = `${kind}:${status}`
+    const group = groups.get(key) ?? { kind, status, returns: [] }
+    group.returns.push({
+      returnNumber: row.return_number || String(row.id),
+      receiptNumber: row.receipt_number,
+      party: kind === 'supplier' ? row.supplier_name : row.customer_name,
+      branch: row.branch_name,
+      refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr,
+    })
+    groups.set(key, group)
+  }
+  for (const group of groups.values()) {
+    await sendTelegramEvent(env, {
+      type: group.kind === 'supplier' ? 'stock_out' : 'returns',
+      heading: RETURN_STATUS_HEADINGS[group.kind][group.status],
+      lines: formatReturnStatusTelegramLines({ kind: group.kind, returns: group.returns, by }),
+    }).catch((error) => console.error('[telegram] return status notification failed', error))
+  }
 }

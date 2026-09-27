@@ -359,6 +359,12 @@ const HEADINGS = {
   '🔁 Stock transferred': 'បានផ្ទេរស្តុក',
   '↩️ Return recorded': 'បានកត់ត្រាការប្រគល់មកវិញ',
   '📤 Supplier return recorded': 'បានកត់ត្រាការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
+  // A return's status changing (owner, 27 Sep 2026). បោះបង់ and ស្ដារ are the
+  // packs' own `cancel` and `restore`.
+  '🚫 Return cancelled': 'បានបោះបង់ការប្រគល់មកវិញ',
+  '♻️ Return restored': 'បានស្ដារការប្រគល់មកវិញ',
+  '🚫 Supplier return cancelled': 'បានបោះបង់ការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
+  '♻️ Supplier return restored': 'បានស្ដារការប្រគល់ទៅអ្នកផ្គត់ផ្គង់',
 } as const
 /** Exported for the pure test. */
 export const TELEGRAM_HEADINGS: Record<string, string> = HEADINGS

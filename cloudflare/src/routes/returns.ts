@@ -7,7 +7,7 @@ import { selectInChunks } from '../lib/sqlBinding'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
-import { sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
+import { sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -1204,10 +1204,23 @@ app.post('/reasons/replace', async (c) => {
 // applyReturnBulkAction owns the atomic stock/snapshot/idempotency contract;
 // this route only translates typed business failures to HTTP responses.
 app.post('/bulk', async (c) => {
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
+  const user = c.get('user')
   try {
-    const result = await applyReturnBulkAction(c.env, c.get('user'), body)
+    // A retried request id replays its stored receipt without writing again,
+    // so it must not announce the same cancel/restore to Telegram twice.
+    const replayed = typeof body.client_request_id === 'string' && Boolean(await getDb(c.env)
+      .prepare('SELECT 1 AS hit FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request')
+      .get<{ hit: number }>({ actor: user.id, request: body.client_request_id }))
+    const result = await applyReturnBulkAction(c.env, user, body)
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
+    // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
+    // status field, only the rows that actually moved.
+    const changedIds = Array.isArray(result.changedIds) ? result.changedIds.map(Number) : []
+    if (!replayed && body.field === 'status' && changedIds.length) {
+      c.executionCtx.waitUntil(sendReturnStatusTelegramEvents(c.env, changedIds, actorSnapshot(user))
+        .catch((error) => console.error('[telegram] return status notification failed', error)))
+    }
     return c.json(result)
   } catch (error) {
     if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action' }, error.statusCode)

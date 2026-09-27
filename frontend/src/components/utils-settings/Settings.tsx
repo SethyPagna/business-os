@@ -2160,6 +2160,7 @@ export default function Settings() {
               {[
                 ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
                 ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_returns_enabled', t('telegram_cat_returns') || 'Customer returns', t('telegram_cat_returns_desc') || 'Return recorded, cancelled or restored: receipt, customer, items and refund'],
                 ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
@@ -2174,7 +2175,10 @@ export default function Settings() {
                   </div>
                   <input
                     type="checkbox"
-                    checked={String(form[key] ?? 'true') === 'true'}
+                    // Unset returns follows Sales -- the Worker's own default
+                    // (lib/telegram.ts getTelegramConfig): returns were sent as
+                    // sales alerts before they had a switch of their own.
+                    checked={String(form[key] ?? (key === 'telegram_returns_enabled' ? (form.telegram_sales_enabled ?? 'true') : 'true')) === 'true'}
                     onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
                     disabled={!canEditSettings}
                   />
@@ -2217,6 +2221,7 @@ export default function Settings() {
                     ['telegram_topic_shift', t('telegram_topic_shift_label') || 'Shift reports'],
                     ['telegram_topic_sales', t('telegram_topic_sales_label') || 'Sale invoices'],
                     ['telegram_topic_status', t('telegram_topic_status_label') || 'Status updates'],
+                    ['telegram_topic_returns', t('telegram_topic_returns_label') || 'Returns'],
                     ['telegram_topic_expenses', t('telegram_topic_expenses_label') || 'Expenses & fees'],
                     ['telegram_topic_stock', t('telegram_topic_stock_label') || 'Stock in/out'],
                     ['telegram_topic_reports', t('telegram_topic_reports_label') || "Day's summary"],

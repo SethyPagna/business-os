@@ -12,6 +12,7 @@ import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
+import { sendReturnStatusTelegramEvents } from '../lib/telegram'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -451,6 +452,16 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
             : applier.name === BULK_STATUS_KIND
               ? notifyBulkStatus(c.env)
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
+      // Telegram (owner, 27 Sep 2026): undoing or redoing a grouped return
+      // STATUS change cancels or restores those returns, so it is announced
+      // like the original action. The sender reads each return's status now,
+      // which is what says "cancelled" or "restored".
+      if (applier.name === RETURN_BULK_ACTION_KIND && payload.field === 'status') {
+        c.executionCtx.waitUntil(db.prepare('SELECT return_id FROM return_bulk_members WHERE operation_id = @operation')
+          .all<{ return_id: number }>({ operation: String(payload.operation_id) })
+          .then((rows) => sendReturnStatusTelegramEvents(c.env, rows.map((member) => Number(member.return_id)), actorSnapshot(user)))
+          .catch((error) => console.error('[telegram] return status notification failed', error)))
+      }
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
       return c.json({
         success: true,

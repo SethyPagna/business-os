@@ -3,7 +3,7 @@
 // existing generic `settings` table -- no migration. This pins:
 //   1. parseTelegramTopicId: integer string -> number; empty/blank -> undefined;
 //      non-digit, negative, zero, decimal -> undefined (rejected, not coerced).
-//   2. getTelegramConfig reads all seven topic keys into config.topics.
+//   2. getTelegramConfig reads all eight topic keys into config.topics.
 //   3. postTelegram includes message_thread_id in the POST body only when a
 //      topic is configured; it is entirely ABSENT from the body otherwise
 //      (not just falsy -- Telegram rejects a null/0 thread id on non-forum
@@ -150,12 +150,13 @@ const baseSettings = [
   assert.equal(bare.parseTelegramTopicId('abc'), undefined, 'non-numeric is rejected')
   console.log('PASS parseTelegramTopicId: integer-or-empty, defensively')
 
-  // ---- 2. TELEGRAM_TOPIC_KEYS names all seven settings the UI/backend share -
+  // ---- 2. TELEGRAM_TOPIC_KEYS names all eight settings the UI/backend share -
+  // (returns joined 27 Sep 2026: customer returns got their own family)
   assert.deepEqual([...bare.TELEGRAM_TOPIC_KEYS].sort(), [
-    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_reports',
+    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_reports', 'telegram_topic_returns',
     'telegram_topic_sales', 'telegram_topic_shift', 'telegram_topic_stock', 'telegram_topic_status',
   ].sort())
-  console.log('PASS TELEGRAM_TOPIC_KEYS: the seven settings keys the UI, backend validation, and config reader all share')
+  console.log('PASS TELEGRAM_TOPIC_KEYS: the eight settings keys the UI, backend validation, and config reader all share')
 
   // ---- 3-5. every outbound send path carries the right topic, or none -----
   const realFetch = globalThis.fetch
