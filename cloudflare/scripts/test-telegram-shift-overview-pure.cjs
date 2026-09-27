@@ -23,6 +23,10 @@
 //      sends nothing. Automation off wins over both.
 //   6. Revenue parity: the kernel is called with the Overview's own filters,
 //      and the fees/returns clauses are routes/reports.ts reportRecordRange's.
+//   7. Fees with no branch (R-telegram X1, FX-exc1 28 Sep 2026): a branch's
+//      overview prints the day's on their own row beside -- never inside --
+//      its expense total and delivery split; the all-branches overview counts
+//      them in its own totals and prints no such row.
 //
 // Run (from cloudflare/): node scripts/test-telegram-shift-overview-pure.cjs
 const fs = require('fs')
@@ -68,6 +72,11 @@ sqlite.exec(`
   -- ...and nothing from another branch or another day.
   INSERT INTO fees VALUES (2, 2, '2026-09-23', 'expense', 99, 0, '2026-09-23T03:00:00Z', NULL);
   INSERT INTO fees VALUES (3, 1, '2026-09-22', 'expense', 77, 0, '2026-09-22T03:00:00Z', NULL);
+  -- A shop-wide fee with no branch on the day (R-telegram X1: the branch
+  -- overview dropped it without a trace), typed delivery so the delivery
+  -- split is seen to stay the branch's own; and one on another day.
+  INSERT INTO fees VALUES (4, NULL, '2026-09-23', 'delivery', 2, 1000, '2026-09-23T04:00:00Z', NULL);
+  INSERT INTO fees VALUES (5, NULL, '2026-09-22', 'expense', 66, 0, '2026-09-22T04:00:00Z', NULL);
   -- The courier money paid on the day's sales on the branch: 2.50 + 2.00
   -- (the second one at 00:30 local on the 23rd). The kernel stub below
   -- answers the same 4.50. Another branch, another day and a cancelled
@@ -232,6 +241,7 @@ async function main() {
     '· Actual delivery cost: $4.50',
     '· Other expenses: $5.00 · 4,000៛',
     '· Total: $9.50 · 4,000៛',
+    '· No branch (not in total): $2.00 · 1,000៛',
     '=====Returns=====',
     '· Total: 2 · $10.00',
   ])
@@ -262,6 +272,7 @@ async function main() {
     '· ថ្លៃដឹកដើម: $4.50',
     '· ចំណាយផ្សេងទៀត: $5.00 · 4,000៛',
     '· សរុប: $9.50 · 4,000៛',
+    '· គ្មានសាខា (មិនរាប់ក្នុងសរុប): $2.00 · 1,000៛',
     '=====ការប្រគល់មកវិញ=====',
     '· សរុប: 2 · $10.00',
   ])
@@ -318,6 +329,24 @@ async function main() {
     figures.returns.count === 2 && figures.returns.refundUsd === 10
       && JSON.stringify(figures.expenses) === JSON.stringify({ fees: { usd: 5, khr: 4000 }, deliveryFees: { usd: 0, khr: 0 }, courier: { usd: 4.5, khr: 0 } }),
     JSON.stringify(figures))
+  // R-telegram X1 (FX-exc1 item 5): the day's shop-wide fees are reported
+  // beside a branch's figures, never inside its totals or its delivery split.
+  check('a branch overview carries the day\'s no-branch fees on their own, and only the day\'s',
+    JSON.stringify(figures.unbranchedFees) === JSON.stringify({ usd: 2, khr: 1000 }), JSON.stringify(figures))
+  const orgShift = closedShift({ branch_id: null, branch_name: null })
+  const orgWide = await telegram.shiftOverviewFigures(envPaid, orgShift)
+  check('an all-branches overview counts the no-branch fee in its own totals (and its delivery split) and has nothing beside them',
+    JSON.stringify(orgWide.expenses.fees) === JSON.stringify({ usd: 106, khr: 5000 })
+      && JSON.stringify(orgWide.expenses.deliveryFees) === JSON.stringify({ usd: 2, khr: 1000 }) && orgWide.unbranchedFees === null,
+    JSON.stringify(orgWide))
+  telegramLang.setTelegramLanguage('en')
+  const orgText = telegram.formatShiftOverview('Leang Cosmetics', orgShift, orgWide, undefined, T0).split('\n')
+  const zeroText = telegram.formatShiftOverview('Leang Cosmetics', shift, { ...figures, unbranchedFees: { usd: 0, khr: 0 } }, undefined, T0).split('\n')
+  const hiddenText = telegram.formatShiftOverview('Leang Cosmetics', shift, figures, { fees: false }, T0).split('\n')
+  telegramLang.setTelegramLanguage('both')
+  const noBranchRow = (text) => text.some((line) => line.startsWith('· No branch'))
+  check('the no-branch row prints only on a branch overview with such fees, and only where expenses are shown',
+    !noBranchRow(orgText) && !noBranchRow(zeroText) && !noBranchRow(hiddenText), `${orgText.join('\n')}\n---\n${zeroText.join('\n')}\n---\n${hiddenText.join('\n')}`)
 
   // ---- 2. Paid path: a delayed queue message ------------------------------
   const paid = closedShift()
