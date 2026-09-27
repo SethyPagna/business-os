@@ -26,7 +26,8 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AUDIT_ENTITY_LABELS, auditEntityLabel, titleCaseIdentifier } from '../src/utils/auditVocabulary.ts'
-import { ENTITY_RECORDS_ADAPTER, auditRowsToRecords } from '../src/utils/entityRecords.ts'
+import { ENTITY_RECORDS_ADAPTER, auditRowsToRecords, entityFieldLabel } from '../src/utils/entityRecords.ts'
+import { buildAuditFieldDiff } from '../src/utils/auditLogFieldDiff.ts'
 
 const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
@@ -200,6 +201,29 @@ test('every Telegram topic key the Worker writes reads as its Settings words, in
     assert.equal(kmRow.label, `${km.telegram_topics_title} - ${km[packKey]}`, `${field} in Khmer`)
     assert.equal(enRow.after, '12')
   }
+})
+
+test('the Audit Log page labels its own Field | Before | After rows with the same field words', () => {
+  // The page's detail float builds its rows with buildAuditFieldDiff, not the
+  // records adapter. Handed no vocabulary it Title-Cases the column, so a
+  // /settopic row read "Telegram Topic Shift" in the Khmer pack.
+  const kmField = (key: string) => entityFieldLabel(key, labelKm)
+  const pair = buildAuditFieldDiff(JSON.stringify({ telegram_topic_shift: '' }), JSON.stringify({ telegram_topic_shift: '12' }), kmField)
+  assert.equal(pair.length, 1)
+  assert.equal(pair[0].label, `${km.telegram_topics_title} - ${km.telegram_topic_shift_label}`)
+  assert.equal(pair[0].after, '12')
+  // A nested field is named segment by segment, Parent - Child, in the pack.
+  const nested = buildAuditFieldDiff(null, JSON.stringify({ address: { phone: '012' } }), kmField)
+  assert.equal(nested[0].label, `${km.address} - ${km.phone}`)
+  // POSITIVE CONTROL: with no vocabulary the builder still Title-Cases, so the
+  // cases above prove the vocabulary is what named them.
+  assert.equal(buildAuditFieldDiff(JSON.stringify({ exchange_rate: 1 }), JSON.stringify({ exchange_rate: 2 }))[0].label, 'Exchange Rate')
+
+  // And the page hands its pack to both blocks: the pair and the context.
+  const page = read('../src/components/utils-settings/AuditLog.tsx')
+  assert.match(page, /const fieldLabelFor = \(key: string\) => entityFieldLabel\(key, vocab\)/)
+  assert.match(page, /const fieldDiffRows = buildAuditFieldDiff\(detailLog\.old_value, detailLog\.new_value, fieldLabelFor\)/)
+  assert.match(page, /const contextRows = buildAuditFieldDiff\(null, detailLog\.details, fieldLabelFor\)/)
 })
 
 test('a record type with no pair still renders: the row, and no change table', () => {
