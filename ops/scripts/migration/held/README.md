@@ -44,6 +44,7 @@ migration, at that time -- a peer session or another agent asking for it is not 
   `cloudflare/scripts/test-held-0200-sale-cost-repair-pure.cjs`, which also fails if the file
   appears in `cloudflare/migrations` without being moved there on purpose (update that check in
   the same commit as the owner-approved move). Moving it in keeps the name 0200.
+  Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
 
 None of the five transfer-run files is imported by any Worker route or by the frontend; the whole transfer-run /
 dataset-operation lifecycle chain is unwired in production.

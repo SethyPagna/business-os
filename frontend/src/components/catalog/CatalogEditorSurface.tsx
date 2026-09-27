@@ -25,6 +25,7 @@ import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
 import { PRODUCT_CAUTION_SUGGESTED_TEXT, PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT } from './productDetailDefaultsText.ts'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
+import type { PrivateAiStatus } from './portalPrivateAi.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
 const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
@@ -202,6 +203,8 @@ type CatalogEditorSurfaceContext = {
   openPortalImage: (title: string, images: Array<string | null | undefined>, startIndex?: number) => void
   previewConfig: CatalogPreviewConfig
   previewSectionRef: RefObject<HTMLElement>
+  // The assistant's prompt and provider: 'loaded' once the server answered.
+  privateAiStatus: PrivateAiStatus
   products: unknown[]
   promoItems: CatalogPromoItem[]
   publicPortalUrl: string
@@ -330,6 +333,7 @@ function CatalogEditorSurfaceContent() {
     openPortalImage,
     previewConfig,
     previewSectionRef,
+    privateAiStatus,
     products,
     promoItems,
     publicPortalUrl,
@@ -358,6 +362,10 @@ function CatalogEditorSurfaceContent() {
     uploadPromoItemMedia,
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
+  // Until the server's stored values arrive, the fields show nothing and are
+  // locked, so nothing can be typed over a value the editor has not seen.
+  const privateAiLocked = privateAiStatus !== 'loaded'
+  const privateAiNotice = privateAiStatus === 'failed' ? copy('failed_to_load_data', 'Failed to load data') : copy('loading', 'Loading...')
   // The seller-identity fields the public site's legal pages print, named
   // in the words of their own inputs below so the owner never has to guess
   // which of the five is empty. This summary is the ONLY place the gap is
@@ -1148,12 +1156,14 @@ function CatalogEditorSurfaceContent() {
                     className="mt-1 w-full"
                     buttonClassName="h-10 w-full"
                     menuClassName="min-w-[18rem]"
+                    disabled={privateAiLocked}
                     options={toAiProviderOptions(
                       aiProviders,
                       copy('assistantProviderAuto', 'Automatic (best available)', 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)'),
                       copy('noModel', 'No model'),
                     )}
                   />
+                  {privateAiLocked ? <p className="mt-1 text-xs text-slate-500">{privateAiNotice}</p> : null}
                 </div>
               </div>
 
@@ -1172,7 +1182,7 @@ function CatalogEditorSurfaceContent() {
                   <label htmlFor="portal-ai-prompt" className="text-sm font-medium text-slate-700">{copy('assistantPrompt', 'Extra prompt instructions')}</label>
                   <InfoHint label={copy('assistantPrompt', 'Extra prompt instructions')} text={copy('assistantPromptHint', 'Optional store-specific rules, such as tone or what categories to prioritize.')} />
                 </div>
-                <textarea id="portal-ai-prompt" className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
+                <textarea id="portal-ai-prompt" className="input mt-1 resize-none" rows={4} value={editorDraft.customer_portal_ai_prompt || ''} disabled={privateAiLocked} placeholder={privateAiLocked ? privateAiNotice : undefined} onChange={(event) => setDraft('customer_portal_ai_prompt', event.target.value)} />
               </div>
 
             </div>

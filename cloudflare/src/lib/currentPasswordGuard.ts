@@ -2,6 +2,7 @@ import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import bcrypt from 'bcryptjs'
 import { checkRateLimit, releaseRateLimitSlot } from './rateLimit'
+import { currentSessionLimitFamily } from './auth'
 import type { Env } from '../index'
 
 // The ONE current-password re-check (U-profile3, 27 Sep 2026): change
@@ -19,11 +20,17 @@ import type { Env } from '../index'
 // target account id, so an admin's wrong guesses on your profile, or anyone
 // holding one of your sessions, filled YOUR allowance and your own password
 // change answered 429. The key is now:
-//   - acting on your own account: the SESSION doing it (a hash of its
-//     cookie, never the token itself). A stolen or unattended session can
-//     spend only its own 10 guesses per 15 minutes -- it cannot mint more
-//     sessions without the password -- and every other session of yours,
-//     including a fresh sign-in, keeps its full allowance.
+//   - acting on your own account: the SIGN-IN the session descends from
+//     (lib/auth.ts currentSessionLimitFamily). A cookie alone was not
+//     enough (S-auth4): POST /api/auth/session-duration mints a new
+//     session from an existing one with no password and leaves the old
+//     cookie valid, so a per-cookie key handed a stolen session 10 more
+//     guesses per session it minted. Re-issued sessions now carry their
+//     sign-in's id (user_sessions.limit_family_id, migration 0201), so a
+//     stolen or unattended session and everything minted from it share ONE
+//     allowance of 10 guesses per 15 minutes. A new family needs a real
+//     sign-in -- the password, an OTP sign-in, or a linked Google account --
+//     and every other sign-in of yours keeps its full allowance.
 //   - acting on someone else (an admin on your profile): the actor + target
 //     pair, so that admin exhausts only their own allowance against you.
 // No account-wide ceiling on top: it would hand back exactly the lockout X5
@@ -46,9 +53,18 @@ export async function currentPasswordLimitKey(c: Context<any>, actorId: number |
   const actor = Number(actorId || 0)
   const target = Number(targetId || 0)
   if (actor && actor !== target) return `actor:${actor}:target:${target}`
+  let family: number | null = null
+  try {
+    family = await currentSessionLimitFamily(c)
+  } catch (_) {
+    // Only before migration 0201 is applied (no limit_family_id column):
+    // fall back to the per-cookie key rather than fail every password check.
+    // Deploy order is migration first, so this is a transition path only.
+  }
+  if (family) return `family:${family}`
   const token = getCookie(c, SESSION_COOKIE_NAME)
   // Distinct derivation from lib/auth.ts's token_hash, so a rate-limit row
-  // can never be matched back to a session row.
+  // can never be matched back to a session token.
   if (token) return `session:${(await sha256Hex(`current-password:${token}`)).slice(0, 40)}`
   return `uid:${target}`
 }

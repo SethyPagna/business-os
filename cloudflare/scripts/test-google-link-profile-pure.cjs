@@ -11,6 +11,10 @@
 //     different signed-in user, is refused and records nothing);
 //   - a Google identity already linked to another user is refused;
 //   - unlink needs the current password.
+// S-auth4e: STARTING a link needs the current password too (a borrowed or
+// stolen session must not be able to attach the thief's Google account for
+// lasting access), and an account that must change a publicly known
+// password (S-auth4b) cannot start or finish a link at all.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -55,6 +59,8 @@ const usersRoute = load('routes/users.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
+  // The last-administrator guard is proven by test-last-admin-guard-pure.cjs; this fixture has no admin rows.
+  '../lib/adminControlGuard': { planAdminControlWrite: async () => ({ guard: { sql: 'SELECT 1', params: {} } }), isAdminControlGuardAbort: () => false, lastAdminRequiredBody: () => ({}) },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() }, revokeUserSessions: noop },
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({}), audit: noop },
   '../lib/permissions': { isAdminControlUser: (u) => u?.isAdmin === true },
@@ -65,7 +71,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, getClientIp: () => '127.0.0.1' },
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/googleOauth': googleOauth,
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
@@ -75,7 +81,7 @@ const usersRoute = load('routes/users.ts', {
 // started by `stateUserId`, and the consent returns `googleUser`.
 let stateUserId
 let googleUser
-const sessionsByToken = { 'tok-owner': { id: 1, username: 'owner' }, 'tok-cashier': { id: 2, username: 'cashier' } }
+const sessionsByToken = { 'tok-owner': { id: 1, username: 'owner' }, 'tok-cashier': { id: 2, username: 'cashier' }, 'tok-flagged': { id: 2, username: 'cashier', must_change_password: 1 } }
 function sessionFromCookie(c) {
   const match = /bos_session=([^;]+)/.exec(c.req.header('Cookie') || '')
   return match ? (sessionsByToken[match[1]] || null) : null
@@ -107,7 +113,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, getClientIp: () => '127.0.0.1' },
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': { recordFailedLogin: noop, getLoginLockoutState: async () => ({ locked: false }), clearLoginLockout: noop },
@@ -244,6 +250,63 @@ async function check(name, fn) {
     const right = await unlink('cashier-pass')
     assert.equal(right.status, 200, await right.text())
     assert.equal(googleSubjectOf(2), null)
+  })
+
+  // S-auth4e ------------------------------------------------------------------
+  const kv = new Map()
+  const startEnv = () => ({
+    ...READY_ENV, DB: db,
+    BUSINESS_OS_ADMIN_URL: 'https://admin.example', BUSINESS_OS_PUBLIC_URL: 'https://example.com',
+    CACHE: { async put(k, v) { kv.set(k, v) }, async get(k) { return kv.get(k) || null }, async delete(k) { kv.delete(k) } },
+  })
+  const start = (cookieToken, body) => authRoute.request('/oauth/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(cookieToken ? { Cookie: `bos_session=${cookieToken}` } : {}) },
+    body: JSON.stringify({ provider: 'google', mode: 'link', redirectTo: 'https://admin.example/profile', ...body }),
+  }, startEnv(), ctx)
+
+  await check('starting a link without the current password is refused and sets no PKCE cookie', async () => {
+    const res = await start('tok-cashier', {})
+    assert.equal(res.status, 403)
+    const body = await res.json()
+    assert.equal(body.url, undefined, 'no consent URL')
+    assert.equal(body.code, 'current_password_required')
+    assert.doesNotMatch(res.headers.get('set-cookie') || '', /bos_google_pkce/)
+  })
+
+  await check('starting a link with a wrong current password is refused', async () => {
+    const res = await start('tok-cashier', { currentPassword: 'nope' })
+    assert.equal(res.status, 403)
+    assert.equal((await res.json()).url, undefined)
+  })
+
+  await check('starting a link with the right current password returns the consent URL', async () => {
+    const res = await start('tok-cashier', { currentPassword: 'cashier-pass' })
+    assert.equal(res.status, 200, await res.clone().text())
+    assert.match((await res.json()).url, /^https:\/\/accounts\.google\.com\//)
+  })
+
+  await check('an account that must change its password cannot start a link, even with it', async () => {
+    const res = await start('tok-flagged', { currentPassword: 'cashier-pass' })
+    assert.equal(res.status, 403)
+    const body = await res.json()
+    assert.equal(body.code, 'password_change_required')
+    assert.equal(body.url, undefined)
+  })
+
+  await check('an account that must change its password cannot finish a link', async () => {
+    const { status } = await callback('tok-flagged')
+    assert.equal(status, 400)
+    assert.equal(googleSubjectOf(2), null)
+  })
+
+  await check('control: Google sign-in (login mode) needs no password or session', async () => {
+    const res = await authRoute.request('/oauth/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', mode: 'login', redirectTo: 'https://admin.example/' }),
+    }, startEnv(), ctx)
+    assert.equal(res.status, 200, await res.clone().text())
+    assert.ok((await res.json()).url)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

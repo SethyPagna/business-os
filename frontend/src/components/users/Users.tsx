@@ -31,10 +31,12 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import DeviceApprovals from './DeviceApprovals.tsx'
+import PasswordResetRequests from './PasswordResetRequests.tsx'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
 import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
+import { lastAdminRequiredError, lastAdminRequiredMessage } from './lastAdminErrors.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -329,6 +331,8 @@ export default function Users() {
   }, [t])
 
   const [users, setUsers] = useState<UserRecord[]>([])
+  // S-auth4c: bumped after an admin reset so the request panel reloads.
+  const [resetRequestsVersion, setResetRequestsVersion] = useState(0)
   const [roles, setRoles] = useState<RoleRecord[]>([])
   const [tab, setTab] = useState<UsersTab>('users')
   const [modal, setModal] = useState<UsersModal>(null)
@@ -798,7 +802,7 @@ export default function Users() {
         : await runUserMutation(() => getUsersApi().createUser({ ...payload, password: userForm.password }), 'Create user')
 
       if (result?.success === false) {
-        notify(result.error || 'Failed to save user', 'error')
+        notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')
         return
       }
 
@@ -812,12 +816,14 @@ export default function Users() {
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
-            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (undoResult?.success === false) throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
             const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot, actor, replayScope)), 'Redo user update')
-            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (redoResult?.success === false) throw new Error(lastAdminRequiredMessage(redoResult, tr) || redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
         })
@@ -829,7 +835,7 @@ export default function Users() {
       setUserForm(INITIAL_USER_FORM)
       await load()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save user'), 'error')
+      notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')
     } finally {
       finishSingleAction(saveUserInFlightRef)
       setSaving(false)
@@ -902,6 +908,7 @@ export default function Users() {
         return
       }
       const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
+      if (adminReset) setResetRequestsVersion((version) => version + 1)
       const persistence = await persistChangedPassword({
         username: String(selectedUser.username || '').trim(),
         displayName: String(selectedUser.name || selectedUser.username || '').trim(),
@@ -954,7 +961,7 @@ export default function Users() {
         : await runRoleMutation(() => getUsersApi().createRole(payload), 'Create role')
 
       if (result?.success === false) {
-        notify(result.error || 'Failed to save role', 'error')
+        notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save role', 'error')
         return
       }
 
@@ -965,12 +972,14 @@ export default function Users() {
           label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const undoResult = await runRoleMutation(() => getUsersApi().updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
-            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (undoResult?.success === false) throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore role')
             await load({ silent: true })
           },
           redo: async () => {
             const redoResult = await runRoleMutation(() => getUsersApi().updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot)), 'Redo role update')
-            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply role changes')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (redoResult?.success === false) throw new Error(lastAdminRequiredMessage(redoResult, tr) || redoResult.error || 'Failed to reapply role changes')
             await load({ silent: true })
           },
         })
@@ -1001,7 +1010,7 @@ export default function Users() {
       setRoleForm(INITIAL_ROLE_FORM)
       await load()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save role'), 'error')
+      notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save role'), 'error')
     } finally {
       finishSingleAction(saveRoleInFlightRef)
       setSaving(false)
@@ -1158,6 +1167,24 @@ export default function Users() {
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
           {loadError}
         </div>
+      ) : null}
+
+      {tab === 'users' && canManage ? (
+        <PasswordResetRequests
+          t={t}
+          notify={notify}
+          refreshKey={resetRequestsVersion}
+          onReset={(userId) => {
+            const target = users.find((candidate) => Number(candidate.id) === Number(userId))
+            if (!target || !canManageTargetUser(target)) {
+              notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
+              return
+            }
+            setSelectedUser(target)
+            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+            setModal('resetPw')
+          }}
+        />
       ) : null}
 
       {tab === 'users' ? (

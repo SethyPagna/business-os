@@ -55,7 +55,9 @@ async function main() {
   await check('control: failures still spend it -- eight failures around a success refuse the next attempt', async () => {
     const h = createAuthHarness()
     h.addUser({ id: 703, username: 'till', name: 'Front Till', email: 'till@shop.test', password: 'till-password' })
-    const ip = (n) => `203.0.113.${n}`
+    // One network: since S-auth4d the ceiling is per account AND network
+    // (test-login-lockout-per-network-pure.cjs covers the account-wide one).
+    const ip = () => '203.0.113.1'
     for (let i = 0; i < 5; i++) assert.equal((await h.request('/login', 'POST', { username: 'till', password: 'wrong' }, { ip: ip(i) })).status, 401)
     assert.equal((await h.request('/login', 'POST', { username: 'till', password: 'till-password' }, { ip: ip(10) })).status, 200, 'clears the lockout, not the window')
     for (let i = 0; i < 3; i++) assert.equal((await h.request('/login', 'POST', { username: 'till', password: 'wrong' }, { ip: ip(20 + i) })).status, 401)

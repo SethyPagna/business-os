@@ -59,14 +59,24 @@ sqlite.exec(`
     additional_cash_usd REAL, additional_cash_khr REAL, closed_at TEXT, closing_counted_usd REAL, closing_counted_khr REAL,
     cancelled_at TEXT, cancelled_by_user_name TEXT, cancel_reason TEXT, parent_shift_id INTEGER
   );
-  CREATE TABLE fees (id INTEGER PRIMARY KEY, branch_id INTEGER, fee_date TEXT, fee_type TEXT, amount_usd REAL, amount_khr REAL, created_at TEXT);
+  CREATE TABLE fees (id INTEGER PRIMARY KEY, branch_id INTEGER, fee_date TEXT, fee_type TEXT, amount_usd REAL, amount_khr REAL, created_at TEXT, sale_id INTEGER);
   CREATE TABLE returns (id INTEGER PRIMARY KEY, branch_id INTEGER, created_at TEXT, status TEXT, return_scope TEXT, reason TEXT, total_refund_usd REAL, total_refund_khr REAL);
+  CREATE TABLE sales (id INTEGER PRIMARY KEY, branch_id INTEGER, created_at TEXT, sale_status TEXT, delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL);
   INSERT INTO settings VALUES ('business_name', 'Leang Cosmetics'), ('telegram_chat_id', '-1001234567890');
   -- The shift's day and branch: 5.00 + 4,000៛ of expenses...
-  INSERT INTO fees VALUES (1, 1, '2026-09-23', 'expense', 5, 4000, '2026-09-23T03:00:00Z');
+  INSERT INTO fees VALUES (1, 1, '2026-09-23', 'expense', 5, 4000, '2026-09-23T03:00:00Z', NULL);
   -- ...and nothing from another branch or another day.
-  INSERT INTO fees VALUES (2, 2, '2026-09-23', 'expense', 99, 0, '2026-09-23T03:00:00Z');
-  INSERT INTO fees VALUES (3, 1, '2026-09-22', 'expense', 77, 0, '2026-09-22T03:00:00Z');
+  INSERT INTO fees VALUES (2, 2, '2026-09-23', 'expense', 99, 0, '2026-09-23T03:00:00Z', NULL);
+  INSERT INTO fees VALUES (3, 1, '2026-09-22', 'expense', 77, 0, '2026-09-22T03:00:00Z', NULL);
+  -- The courier money paid on the day's sales on the branch: 2.50 + 2.00
+  -- (the second one at 00:30 local on the 23rd). The kernel stub below
+  -- answers the same 4.50. Another branch, another day and a cancelled
+  -- sale stay out of the Expenses.
+  INSERT INTO sales VALUES (1, 1, '2026-09-23T04:00:00Z', 'completed', 2.5, NULL);
+  INSERT INTO sales VALUES (2, 1, '2026-09-22T17:30:00Z', 'completed', 2, NULL);
+  INSERT INTO sales VALUES (3, 2, '2026-09-23T04:00:00Z', 'completed', 60, NULL);
+  INSERT INTO sales VALUES (4, 1, '2026-09-22T04:00:00Z', 'completed', 70, NULL);
+  INSERT INTO sales VALUES (5, 1, '2026-09-23T05:00:00Z', 'cancelled', 80, NULL);
   -- Two customer returns taken on the day (local UTC+7; 17:30Z on the 22nd is
   -- 00:30 on the 23rd), one cancelled return, one on another branch.
   INSERT INTO returns VALUES (1, 1, '2026-09-22T17:30:00Z', 'completed', 'customer', 'Damaged', 7.5, 0);
@@ -305,7 +315,9 @@ async function main() {
   check('the expenses clause is reportRecordRange(\'expenses\')', feesSql.includes(`WHERE ${expensesRange}`), `${feesSql}\n${expensesRange}`)
   check('the returns clause is reportRecordRange(\'returns\')', returnsSql.includes(`AND ${returnsRange}`), `${returnsSql}\n${returnsRange}`)
   check('the returns and expenses figures leave the other branch, day and cancelled rows out',
-    figures.returns.count === 2 && figures.returns.refundUsd === 10 && figures.otherExpenseUsd === 5 && figures.otherExpenseKhr === 4000, JSON.stringify(figures))
+    figures.returns.count === 2 && figures.returns.refundUsd === 10
+      && JSON.stringify(figures.expenses) === JSON.stringify({ fees: { usd: 5, khr: 4000 }, deliveryFees: { usd: 0, khr: 0 }, courier: { usd: 4.5, khr: 0 } }),
+    JSON.stringify(figures))
 
   // ---- 2. Paid path: a delayed queue message ------------------------------
   const paid = closedShift()

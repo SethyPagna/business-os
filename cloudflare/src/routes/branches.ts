@@ -415,22 +415,22 @@ app.post('/transfer', async (c) => {
     SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr
     FROM products WHERE id = @id
   `).get<{ id: number; name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null }>({ id: productId })
-  if (!product) return c.json({ error: 'Product not found' }, 404)
+  if (!product) return c.json({ error: 'Product not found', code: 'transfer_product_missing' }, 404)
   const fromStock = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: fromBranchId })
   const available = fromStock ? Number(fromStock.quantity) || 0 : 0
-  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
+  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
   let sourceBatch: { id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null } | null = null
   if (batchId) {
     sourceBatch = (await db.prepare(
       `SELECT id, lot_code, received_at, expiry_date, notes FROM product_batches WHERE id = @batchId AND variant_product_id = @productId AND is_active = 1`,
     ).get<{ id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; notes: string | null }>({ batchId, productId })) ?? null
-    if (!sourceBatch) return c.json({ error: 'Received date not found for this product' }, 404)
+    if (!sourceBatch) return c.json({ error: 'Received date not found for this product', code: 'transfer_lot_missing' }, 404)
     const batchStock = await db.prepare(
       'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
     ).get<{ quantity: number }>({ batchId, branchId: fromBranchId })
     const batchAvailable = batchStock ? Number(batchStock.quantity) || 0 : 0
-    if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch' }, 400)
+    if (quantity > batchAvailable) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
   }
 
   const [fromBranch, toBranch, canonicalTransferRows, mergeTarget] = await Promise.all([
@@ -456,7 +456,7 @@ app.post('/transfer', async (c) => {
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
-  if (directionError) return c.json({ error: directionError }, 400)
+  if (directionError) return c.json({ error: directionError, code: 'transfer_direction_invalid' }, 400)
 
   const destProductId = mergeTarget?.id ?? productId
   const destProductName = mergeTarget?.name ?? product.name
@@ -657,14 +657,14 @@ app.post('/transfer-bulk', async (c) => {
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
-  if (bulkDirectionError) return c.json({ error: bulkDirectionError }, 400)
+  if (bulkDirectionError) return c.json({ error: bulkDirectionError, code: 'transfer_direction_invalid' }, 400)
 
   const productById = new Map(products.map((product) => [product.id, product]))
   const stockByProductId = new Map(stockRows.map((row) => [row.product_id, Number(row.quantity) || 0]))
 
   const missing = items.filter((item) => !productById.has(item.productId))
   if (missing.length) {
-    return c.json({ error: 'One or more selected products no longer exist', productIds: missing.map((item) => item.productId) }, 404)
+    return c.json({ error: 'One or more selected products no longer exist', productIds: missing.map((item) => item.productId), code: 'transfer_product_missing' }, 404)
   }
 
   const insufficient = items
@@ -681,6 +681,7 @@ app.post('/transfer-bulk', async (c) => {
       .join(', ')
     return c.json({
       error: `Insufficient stock for: ${detail}`,
+      code: 'transfer_insufficient_stock',
       items: insufficient.map((item) => ({
         productId: item.productId,
         productName: productById.get(item.productId)?.name || null,
@@ -713,11 +714,11 @@ app.post('/transfer-bulk', async (c) => {
     for (const item of batchItems) {
       const batchRow = batchRowById.get(item.batchId)
       if (!batchRow || batchRow.variant_product_id !== item.productId) {
-        return c.json({ error: `Received date not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}` }, 404)
+        return c.json({ error: `Received date not found for product ${productById.get(item.productId)?.name || `#${item.productId}`}`, code: 'transfer_lot_missing' }, 404)
       }
       const batchAvailable = batchStockById.get(item.batchId) || 0
       if (item.quantity > batchAvailable) {
-        return c.json({ error: `Insufficient stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})` }, 400)
+        return c.json({ error: `Insufficient stock for ${productById.get(item.productId)?.name || `#${item.productId}`} (need ${item.quantity}, have ${batchAvailable})`, code: 'transfer_insufficient_stock' }, 400)
       }
       batchById.set(item.batchId, { id: batchRow.id, lot_code: batchRow.lot_code, received_at: batchRow.received_at, expiry_date: batchRow.expiry_date, notes: batchRow.notes })
     }

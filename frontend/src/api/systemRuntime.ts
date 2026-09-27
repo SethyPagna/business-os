@@ -65,10 +65,13 @@ export async function resetSection(section: string): Promise<unknown> {
   )
 }
 
-export async function factoryReset(): Promise<unknown> {
+// The Worker enforces the typed phrase and the caller's current password
+// itself (routes/system.ts POST /factory-reset); the browser's own checks in
+// ResetData.tsx are only the first line.
+export async function factoryReset(confirmation: { confirm: string; currentPassword: string }): Promise<unknown> {
   return route(
     'data:factoryReset',
-    () => apiFetch('POST', '/api/system/factory-reset', undefined, LONG_SYSTEM_ACTION_TIMEOUT_MS),
+    () => apiFetch('POST', '/api/system/factory-reset', confirmation, LONG_SYSTEM_ACTION_TIMEOUT_MS),
     null,
     true,
   )

@@ -90,7 +90,8 @@ const reviews = load('routes/reviewQueue.ts').default
 const writer = load('lib/productWrites.ts')
 const frontendWriter = loadFrontend('components/products/helpers/productWriteHelpers.ts')
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
-const admin = { id: 1, username: 'admin', name: 'Admin', tier: 'full' }
+// Administrator control comes from the role, not the name (FX-sec).
+const admin = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', tier: 'full' }
 const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: JSON.stringify({ product_cost_edit: true, product_cost_view: true }) }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)

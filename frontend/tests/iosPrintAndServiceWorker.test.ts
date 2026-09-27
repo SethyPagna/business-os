@@ -120,7 +120,9 @@ check('"All" prints the card and the full receipt one after the other', () => {
   // installed app printed one of the two and left Print disabled (Sep 23 2026).
   const body = stripComments(functionBody(receipt, 'const exportBothSeparately = async', 'const shellStyleFor'))
   assert.doesNotMatch(body, /Promise\.all/, 'the two renditions must not be exported concurrently')
-  assert.match(body, /for \(const variant of \['compact', 'full'\] as const\) \{\s*try \{\s*if \(mode === 'print' && variant === 'full'\) await printFrameReleased\(\)\s*await exportReceiptVariant\(printTools, mode, variant\)/,
+  // Q13 added the Cancel check before each rendition and the QR hooks
+  // argument; the ordering this pins is unchanged.
+  assert.match(body, /for \(const variant of \['compact', 'full'\] as const\) \{\s*if \(qrExport\.hooks\.signal\.aborted\) break\s*try \{\s*if \(mode === 'print' && variant === 'full'\) await printFrameReleased\(\)\s*await exportReceiptVariant\(printTools, mode, variant, qrExport\.hooks\)/,
     'each rendition finishes before the next one starts, and a print waits until the card\'s print sheet has closed')
   assert.match(body, /failure = failure \?\? error/, 'a failed rendition still lets the other one through')
 })

@@ -134,7 +134,8 @@ const products = load('routes/products.ts', {
 const app = new Hono()
 app.route('/api/products', products)
 
-const ADMIN = { id: 1, username: 'admin', name: 'Admin', permissions: '{}' }
+// Administrator control comes from the role, not the name (FX-sec).
+const ADMIN = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
 // A products manager with merge_duplicates but no cost grants.
 const MANAGER = { id: 2, username: 'mgr', name: 'Manager', role: 'staff', permissions: JSON.stringify({ products: true, inventory: true }) }
 const COST_EDITOR = { ...MANAGER, id: 3, username: 'cost', permissions: JSON.stringify({ products: true, inventory: true, product_cost_view: true, product_cost_edit: true }) }

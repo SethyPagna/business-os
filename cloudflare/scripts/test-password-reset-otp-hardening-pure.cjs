@@ -90,10 +90,12 @@ async function main() {
   await check('failed reset codes feed the sign-in lockout by account id', async () => {
     const h = seeded()
     const bad = await wrongCode(h)
+    // One network: the lockout is per account AND network since S-auth4d.
+    const network = freshIp()
     for (const identifier of ['dara', 'dara@shop.test', 'DARA', 'Dara@shop.test', 'dara']) {
-      await h.request('/password-reset/otp', 'POST', { identifier, otp: bad, newPassword: 'new-password-1' }, { ip: freshIp() })
+      await h.request('/password-reset/otp', 'POST', { identifier, otp: bad, newPassword: 'new-password-1' }, { ip: network })
     }
-    const login = await h.request('/login', 'POST', { username: 'Dara Sok', password: 'wrong' }, { ip: freshIp() })
+    const login = await h.request('/login', 'POST', { username: 'Dara Sok', password: 'wrong' }, { ip: network })
     assert.equal(login.status, 429, 'the 6th failure against the account (5 at reset + 1 at login) locks it')
     assert.equal(login.body.locked, true)
   })

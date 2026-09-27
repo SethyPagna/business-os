@@ -24,6 +24,20 @@
 #   secret-names  which secrets the production Worker has: NAMES and binding
 #                 types only, read with GET requests (Cloudflare never returns
 #                 a secret's value). Changes nothing.
+#   settings-upsert
+#                 sets the owner's Telegram forum-topic ids and no other
+#                 setting. settings: key=value pairs, keys from the Worker's
+#                 own TELEGRAM_TOPIC_KEYS (cloudflare/src/lib/telegram.ts),
+#                 values Telegram topic ids (digits only); anything else is
+#                 refused before D1 is touched. A DRY RUN unless apply is
+#                 ticked: it reads the current values and records the plan.
+#                 With apply, one D1 batch upserts those keys exactly as the
+#                 Settings screen does, writes the audit row and bumps the
+#                 settings cache version; then every topic key and the audit
+#                 row are read back. The previous values are in the encrypted
+#                 files, as a settings input that puts them back. The settings
+#                 input is read from the run's event payload, never from an
+#                 expression, so no topic id reaches the log.
 #
 # THIS REPOSITORY IS PUBLIC, and so are its Actions logs, job summaries and
 # artifacts. The log and summary carry counts, byte totals, pass/fail and
@@ -48,6 +62,7 @@ on:
           - d1-export
           - r2-apac-copy
           - secret-names
+          - settings-upsert
       mode:
         description: r2-apac-copy only. Before the switch - copy (mirrors; its prune deletes only DESTINATION keys the old bucket lacks) or verify-only (compares, writes nothing). After the switch - topup (copies missing or older objects; never overwrites newer, never prunes or deletes). No mode writes or deletes the old bucket.
         required: true
@@ -62,6 +77,16 @@ on:
         required: false
         default: ''
         type: string
+      settings:
+        description: settings-upsert only - key=value pairs separated by spaces, for example telegram_topic_sales=12 telegram_topic_stock=34 (keys from the Worker TELEGRAM_TOPIC_KEYS; values are Telegram topic ids, digits only)
+        required: false
+        default: ''
+        type: string
+      apply:
+        description: settings-upsert only - tick to write the settings. Unticked is a dry run that reads the current values and records the plan, and writes nothing.
+        required: true
+        default: false
+        type: boolean
       confirm:
         description: Type the task name again, exactly, to confirm
         required: true
@@ -279,6 +304,64 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ops-secret-names
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  settings-upsert:
+    name: settings-upsert
+    needs: gate
+    if: inputs.task == 'settings-upsert'
+    runs-on: windows-latest
+    environment: production
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'settings-upsert', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type settings-upsert in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Install packages (cloudflare)
+        working-directory: cloudflare
+        run: npm ci --no-audit --no-fund
+
+      # Reads the settings input from the event payload file (GitHub sets
+      # GITHUB_EVENT_PATH), so no topic id is in this step's env or its log.
+      # Logs counts, PASS/FAIL, problem and Cloudflare error codes and the
+      # encrypted file sizes; values, keys and rows go into those files.
+      - name: Set the Telegram topic ids (a dry run unless apply is ticked)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_APPLY: ${{ inputs.apply }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-settings-upsert.mjs
+
+      - name: Upload the encrypted files
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-settings-upsert
           path: ${{ runner.temp }}/ops-out/*.enc.json
           retention-days: 3
           if-no-files-found: ignore

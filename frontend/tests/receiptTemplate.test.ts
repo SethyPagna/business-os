@@ -336,7 +336,11 @@ await runTest('text_contrast survives a parseReceiptTemplate/serializeReceiptTem
 })
 
 await runTest('receipt asset inlining uses bounded workers', () => {
-  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  // The inliner moved into receiptAssetLoader.ts (U-print, Sep 26 2026) so it
+  // shares one deadline; printReceipt.ts only delegates to it.
+  const printSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  assert.match(printSource, /import \{ inlineReceiptAssets \} from '\.\/receiptAssetLoader\.ts'/)
+  const utilSource = fs.readFileSync(new URL('../src/utils/receiptAssetLoader.ts', import.meta.url), 'utf8')
   assert.match(utilSource, /const RECEIPT_ASSET_INLINE_CONCURRENCY = 3/)
   assert.match(utilSource, /async function mapReceiptAssets/)
   assert.match(utilSource, /Math\.min\(RECEIPT_ASSET_INLINE_CONCURRENCY, list\.length\)/)

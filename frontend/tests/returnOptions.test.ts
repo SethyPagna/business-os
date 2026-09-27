@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import './returnMoneyV1Flow.test.ts'
 import './returnMoneyV1Transport.test.ts'
 import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import {
   STOCK_ACTION_OPTIONS, normalizeStockAction, stockActionOption,
   returnLineNeedsLotPick, formatBatchDate, describeBatchOption,
@@ -151,10 +152,103 @@ runTest('no surface offers "any stock" -- a lot is named or the product has none
   assert.match(backendKernelSource, /requiresLotPick/)
 })
 
+// The refund a return line pays is decided by the REAL server code, run here:
+// the two pricing callbacks of routes/returns.ts (`refundPrices` for POST /,
+// `editRefundPrices` for PATCH /:id) are lifted out of the route by the
+// TypeScript AST and executed against the REAL kernel declarations of
+// lib/returnsStock.ts (resolveRefundUnitPrice, matchRefundSaleLine,
+// RefundSaleLineError). So this pins what the code DOES -- it survives a
+// rewrite of the route's shape, and it fails if either path ever pays the
+// client-posted price for a line the sale recorded. A callback that goes
+// missing, is assigned twice, or reads a variable not supplied below throws
+// here: a loud red, never a silent pass.
+type RefundPrice = { unitUsd: number; unitKhr: number }
+type RefundLine = (item: Record<string, unknown>) => RefundPrice
+type ServerRefundPricing = {
+  post: (scope: Record<string, unknown>) => RefundLine
+  patch: (scope: Record<string, unknown>) => RefundLine
+}
+
+function loadServerRefundPricing(): ServerRefundPricing {
+  const routeText = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
+  const route = ts.createSourceFile('returns.ts', routeText, ts.ScriptTarget.Latest, true)
+  const kernel = ts.createSourceFile('returnsStock.ts', backendKernelSource, ts.ScriptTarget.Latest, true)
+  const callbacks = new Map<string, string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)
+      && (node.left.text === 'refundPrices' || node.left.text === 'editRefundPrices')
+      && ts.isCallExpression(node.right) && ts.isPropertyAccessExpression(node.right.expression)
+      && node.right.expression.name.text === 'map' && node.right.arguments.length === 1) {
+      assert.equal(callbacks.has(node.left.text), false, `routes/returns.ts assigns ${node.left.text} more than once`)
+      callbacks.set(node.left.text, node.right.arguments[0].getText(route))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(route)
+  for (const name of ['refundPrices', 'editRefundPrices']) {
+    assert.ok(callbacks.has(name), `routes/returns.ts no longer prices lines as ${name} = <lines>.map(...)`)
+  }
+  const declarations = (file: ts.SourceFile, names: string[]) => file.statements
+    .filter((node) => (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && names.includes(node.name?.text || ''))
+    .map((node) => node.getText(file).replace(/^export /, ''))
+  const kernelCode = declarations(kernel, ['resolveRefundUnitPrice', 'matchRefundSaleLine', 'RefundSaleLineError'])
+  assert.equal(kernelCode.length, 3, 'lib/returnsStock.ts lost a refund kernel declaration')
+  const helperCode = declarations(route, ['toNumber'])
+  assert.equal(helperCode.length, 1, 'routes/returns.ts lost its toNumber helper')
+  const program = [...kernelCode, ...helperCode, `return {
+    post: ({ v1QuoteBySaleItem, saleMeta, saleItemBatchInfo, soldLines }) => (${callbacks.get('refundPrices')}),
+    patch: ({ existing, body, saleItemBatchInfoForEdit, editSalePriceLines }) => (${callbacks.get('editRefundPrices')}),
+  }`].join('\n')
+  const compiled = ts.transpileModule(program, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  return new Function(compiled)() as ServerRefundPricing
+}
+
 runTest('the refund is the ORIGINAL sale line price, resolved on the server', () => {
-  assert.match(backendKernelSource, /export function resolveRefundUnitPrice/)
+  const pricing = loadServerRefundPricing()
+  const price = (result: RefundPrice) => [result.unitUsd, result.unitKhr]
+  const refused = (run: () => unknown, code: string) =>
+    assert.throws(run, (error: { code?: unknown }) => error?.code === code, `expected the server to refuse with ${code}`)
+  // One sale: product 1 on line 1 at 10.01 / 40,040; product 2 on lines 2
+  // and 3 at two different prices. Every return line posts 999.99.
+  const soldLines = [
+    { id: 1, product_id: 1, applied_price_usd: 10.01, applied_price_khr: 40040 },
+    { id: 2, product_id: 2, applied_price_usd: 4, applied_price_khr: 16000 },
+    { id: 3, product_id: 2, applied_price_usd: 4.5, applied_price_khr: 18000 },
+  ]
+  const saleItemBatchInfo = new Map(soldLines.map((line) => [line.id,
+    { batch_id: null, applied_price_usd: line.applied_price_usd, applied_price_khr: line.applied_price_khr }]))
+  const posted = { applied_price_usd: 999.99, applied_price_khr: 3999960 }
+  const goodwill = { applied_price_usd: 5, applied_price_khr: 20000 }
+
+  // POST /api/returns on a legacy (v0) sale: the recorded line, never the posted price.
+  const legacy = pricing.post({ v1QuoteBySaleItem: new Map(), saleMeta: { id: 1 }, saleItemBatchInfo, soldLines })
+  assert.deepEqual(price(legacy({ sale_item_id: 1, product_id: 1, ...posted })), [10.01, 40040], 'a sale-item line refunds the recorded price')
+  assert.deepEqual(price(legacy({ product_id: 1, ...posted })), [10.01, 40040], 'a product-matched line is capped at the recorded price')
+  assert.deepEqual(price(legacy({ product_id: 1, ...goodwill })), [5, 20000], 'a lower goodwill refund is kept')
+  assert.deepEqual(price(legacy({ product_id: 1 })), [10.01, 40040], 'an omitted price is the recorded price')
+  assert.deepEqual(price(legacy({ sale_item_id: 3, product_id: 2, ...posted })), [4.5, 18000])
+  refused(() => legacy({ product_id: 2, ...posted }), 'return_refund_price_ambiguous')
+  // A v1 return is priced from its authoritative quote line first.
+  const v1 = pricing.post({ v1QuoteBySaleItem: new Map([[1, { applied_price_usd: 9.5, applied_price_khr: 38000 }]]),
+    saleMeta: { id: 1 }, saleItemBatchInfo, soldLines })
+  assert.deepEqual(price(v1({ sale_item_id: 1, product_id: 1, ...posted })), [9.5, 38000], 'the v1 quote line prices a v1 return')
+  // A return with no sale: a named sale line's price, else the posted price.
+  const unlinked = pricing.post({ v1QuoteBySaleItem: new Map(), saleMeta: null, saleItemBatchInfo, soldLines: [] })
+  assert.deepEqual(price(unlinked({ sale_item_id: 1, product_id: 1, ...posted })), [10.01, 40040])
+  assert.deepEqual(price(unlinked({ product_id: 9, applied_price_usd: 7, applied_price_khr: 28000 })), [7, 28000])
+
+  // PATCH /api/returns/:id re-prices the edited lines by the same rule.
+  const edit = pricing.patch({ existing: { sale_id: 1 }, body: { items: [] }, saleItemBatchInfoForEdit: saleItemBatchInfo, editSalePriceLines: soldLines })
+  assert.deepEqual(price(edit({ sale_item_id: 1, product_id: 1, ...posted })), [10.01, 40040], 'an edit never restates what was paid')
+  assert.deepEqual(price(edit({ product_id: 1, ...posted })), [10.01, 40040])
+  assert.deepEqual(price(edit({ product_id: 1, ...goodwill })), [5, 20000])
+  refused(() => edit({ product_id: 2, ...posted }), 'return_refund_price_ambiguous')
+  refused(() => edit({ ...posted }), 'return_refund_sale_line_required')
+  const editUnlinked = pricing.patch({ existing: { sale_id: null }, body: { items: [] }, saleItemBatchInfoForEdit: saleItemBatchInfo, editSalePriceLines: [] })
+  assert.deepEqual(price(editUnlinked({ sale_item_id: 1, ...posted })), [10.01, 40040])
+  assert.deepEqual(price(editUnlinked({ applied_price_usd: 7, applied_price_khr: 28000 })), [7, 28000])
+
   const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
-  assert.match(routeSource, /const refundPrices = returnItems\.map\(\(item\) => \{[\s\S]*?const exact = v1QuoteBySaleItem\.get\(Number\(item\.sale_item_id\)\)[\s\S]*?return exact \? \{ unitUsd: exact\.applied_price_usd, unitKhr: exact\.applied_price_khr \} : resolveRefundUnitPrice\(/)
   assert.match(routeSource, /const totalRefundUsd = customerReturnV1Plan\?\.quote\.total_refund_usd\s*\?\?/, 'v1 refunds use the authoritative net entitlement, not a rounded unit projection')
   // the header's refund total is derived, never taken from the payload
   assert.match(routeSource, /total_refund_usd: totalRefundUsd,/)

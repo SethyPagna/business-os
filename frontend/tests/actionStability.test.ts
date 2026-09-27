@@ -365,7 +365,7 @@ await runTest('reset data and factory reset use guarded bounded actions', () => 
   // "regex updated to accept the extended guard condition" precedent as
   // Part 241's ProductForm.tsx save-guard change.
   assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode[\s\S]*?\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(confirmation\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(resetInFlightRef\)[\s\S]*setWorking\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(factoryResetInFlightRef\)[\s\S]*setWorking\(false\)/)
 })

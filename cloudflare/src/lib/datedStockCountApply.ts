@@ -3,102 +3,114 @@
 // the plan computation, per that file's own stated boundary ("does no
 // I/O ... those are the caller's job").
 //
-// Deliberately does NOT re-derive its own batch FIFO logic. For the
-// batch-tracked portion of a group (only ever present when the plan
-// decided this group qualifies -- see computeBatchPlanForGroup's own
-// comment on why a rerun gets none), this replays each date's movement
-// through the SAME real functions the interactive UI already uses and
-// already trusts -- `receiveBatchStock` for an add (it does its own
-// date-based match-or-create, so it naturally reproduces the plan's
-// batchTopUps/batchCreates split) and `removeStockAcrossBatches` for a
-// remove (fresh FIFO against live batches at write time, not the plan's
-// earlier snapshot -- deliberately more correct than trusting the
-// plan's own batchId assignments if anything else touched this
-// product's batches between preview and apply). This avoids maintaining
-// two independent FIFO implementations that could quietly drift apart
-// (see this project's standing "no zombie/duplicate code" rule) --
-// plan.batchTopUps/batchCreates/batchDrains/batchDeactivations exist
-// for PREVIEW purposes (showing the user what will happen before they
-// confirm), not as literal apply-time instructions.
+// H-stock 1 (2026-09-27): the plan's deltas are relative to a baseline
+// with this importer's own superseded movements UNDONE. The apply used to
+// delete those movements without undoing their stock effect, so every
+// re-apply of the same file added the prior run's effect again (stock 7,
+// count 10, apply twice -> 13). And it wrote one D1 call per movement, so a
+// failure mid-run left stock half-applied.
 //
-// A group with no batch actions in the plan (a rerun, or a group with
-// no existingBatches supplied) applies through the plain aggregate
-// branch_stock/products.stock_quantity path instead, same fallback the
-// interactive /adjust route already uses for a non-batch-tracked
-// product.
+// Now the whole apply is ONE db.batch, in this order:
+//   1. per product+branch, a guard that the set of prior, un-reverted
+//      movements this importer recorded is still exactly what the plan saw
+//      (a concurrent apply of the same file, or a ledger revert since
+//      preview, fails the batch -- nothing is written);
+//   2. the superseded rows and their provenance deleted -- in the same
+//      batch that reverses their effect below, never without it;
+//   3. every lot's ONE net change: minus the superseded movements' lot
+//      effects (their recorded provenance, migration 0035), plus this
+//      run's own lot actions, plus the plan's settlement moves
+//      (batchRebalances). A lot this run creates takes its first receipt
+//      through the shared planReceiveBatchStock. Increases are written
+//      before decreases and every decrease is guarded and strict;
+//   4. branch_stock moved by the NET of (new movements - superseded
+//      movements), minus what the receipts in 3 already added, guarded
+//      and strict the same way; the reversed receipts' received units come
+//      off their lots; then products.stock_quantity recomputed from
+//      branch_stock;
+//   5. the new movement rows and their provenance.
+// So applying the same file twice lands exactly on the counted quantity,
+// with or without lots, and a failure anywhere leaves stock untouched.
+//
+// Transition table, one product+branch (P = prior run's signed effect of
+// the dates being replaced, N = this run's signed effect, S = live stock):
+//   first apply      P = 0          S -> S + N          = count
+//   re-apply         P = prior N    S -> S - P + N'      = count (N' = N)
+//   apply after a    P (still live) S -> S - P + N'      = count
+//     real sale      -- the sale stays in S; only this importer's own
+//                       effect is swapped.
+//   reverted prior   excluded from P (its counter-movement already undid
+//     movement       it) and left in the ledger with that counter-movement.
+// The lots follow the SAME arithmetic (FX-stock F2): lot L -> L - p(L) +
+// n(L) + s(L), where p/n are P/N's provenance on L and s the settlement.
+// Summed over the lots, p is P, n is N and s is 0, so sum(lots) moves by
+// exactly what branch_stock moves by, at every re-apply, whatever a sale
+// took from which lot in between. Nothing is floored on either side: the
+// plan lands every lot at zero or above, and a lot or branch that changed
+// under it (a sale between plan and write) fails its guard -- 409,
+// nothing written -- instead of being clamped into a fork. 39146f46
+// clamped the lot reversal at zero but not the aggregate one, so a sale
+// from the count's own lot left sum(lots) above branch_stock for good.
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
-import type { StockCountPlan, StockCountPlanMovement } from './datedStockCountImport'
-import { receiveBatchStock, removeStockAcrossBatches } from './productBatches'
+import { DATED_STOCK_COUNT_REASON, type StockCountPlan, type StockCountPlanMovement, type PlannedBatchAction } from './datedStockCountImport'
+import {
+  planReceiveBatchStock, planUnreceiveBatchStock, prepareReceiptLotTarget, type StockWriteStatement,
+} from './productBatches'
 import { validateCanonicalImportBranchIds, withCanonicalImportBranchWriteGuard } from './importBranchAuthority'
 
 function groupKey(productId: number, branchId: number): string {
   return `${productId}:${branchId}`
 }
 
-async function applyPlainStockDelta(db: D1Compat, productId: number, branchId: number, delta: number): Promise<void> {
-  await db.batch([
-    {
-      // Two clamps, both against MAX(0, ...): the INSERT seed floors a
-      // no-existing-row REMOVE (delta < 0) to 0 (nothing to remove), and the
-      // conflict update floors an existing row that a remove would take
-      // negative. The conflict update references the bound @delta directly,
-      // NOT excluded.quantity -- excluded carries the already-floored INSERT
-      // value (0 for any remove), so using it would drop every remove on an
-      // existing row. Previously the raw INSERT seed could store a negative
-      // row silently; migration 0058's CHECK(quantity >= 0) now rejects that,
-      // which this floors to match.
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, MAX(0, @delta))
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity + @delta)`,
-      params: { productId, branchId, delta },
-    },
-    {
-      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) + @delta), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId, delta },
-    },
-  ])
+// Thrown when the atomic batch refused because what the plan was computed
+// from changed before it could be written. Nothing was applied.
+export class DatedStockCountConflictError extends Error {
+  constructor() {
+    super('The stock count history for these products changed while this import was being applied. Nothing was changed; preview and apply again.')
+    this.name = 'DatedStockCountConflictError'
+  }
 }
 
-async function insertMovementRow(db: D1Compat, movement: StockCountPlanMovement, userId: number | null, userName: string | null, batchId: number | null = null): Promise<number> {
-  const result = await db.prepare(`
-    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-    VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, @createdAt, @batchId)
-  `).run({
-    productId: movement.productId,
-    productName: movement.productName,
-    branchId: movement.branchId,
-    branchName: movement.branchName,
-    movementType: movement.movementType,
-    quantity: movement.quantity,
-    reason: movement.reason,
-    userId,
-    userName,
-    // 0084: single-lot attribution, resolved by the caller from this
-    // movement's own recorded batch actions.
-    batchId,
-    // Dated to the movement's own snapshot date, not import time -- this
-    // is a RECONCILIATION import, the whole point is a historically
-    // accurate movement log, not a pile of movements all timestamped to
-    // whenever the file happened to get uploaded.
-    createdAt: `${movement.date} 00:00:00`,
-  })
-  return Number(result.lastInsertRowid)
+// A decrease the plan computed against live stock: first a guard that the
+// row still holds it (a 0 fails the whole batch; see the error mapping),
+// then a plain subtraction. Never clamped -- a clamp on one ledger and not
+// the other is exactly the fork FX-stock F2 closes (see the header).
+function guardedDecrease(table: 'branch_stock' | 'branch_batch_stock', rowSql: string, params: Record<string, unknown>): StockWriteStatement[] {
+  const touched = table === 'branch_batch_stock' ? `, updated_at = datetime('now')` : ''
+  return [
+    {
+      sql: `INSERT INTO stock_session_guards (guard_value)
+            SELECT CASE WHEN EXISTS (SELECT 1 FROM ${table} WHERE ${rowSql} AND quantity >= @need) THEN 1 ELSE 0 END`,
+      params,
+    },
+    { sql: `UPDATE ${table} SET quantity = quantity - @need${touched} WHERE ${rowSql}`, params },
+  ]
 }
 
-// Records this movement's own batch-level provenance (migration 0035),
-// so a later rerun of this same importer can find and reverse only ITS
-// OWN prior batch effects (datedStockCountImport.ts's
-// reconstructBatchBaseline) instead of being unable to tell them apart
-// from a real sale/adjustment that happened since. No-op for a movement
-// that didn't touch any tracked batch (a plain group, or a batch-tracked
-// group's shortfall remainder that fell through to the plain aggregate
-// -- that portion has nothing batch-specific to record).
-async function insertBatchActions(db: D1Compat, movementId: number, actions: { batchId: number; quantity: number }[]): Promise<void> {
-  if (!actions.length) return
-  await db.batch(actions.map((action) => ({
-    sql: `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity) VALUES (@movementId, @batchId, @quantity)`,
-    params: { movementId, batchId: action.batchId, quantity: action.quantity },
-  })))
+function branchDeltaStatements(productId: number, branchId: number, delta: number): StockWriteStatement[] {
+  const params = { productId, branchId, delta, need: -delta }
+  if (delta < 0) return guardedDecrease('branch_stock', 'product_id = @productId AND branch_id = @branchId', params)
+  return [{
+    sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
+          ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + excluded.quantity`,
+    params,
+  }]
+}
+
+// A lot this run creates has no id until the batch runs; every statement
+// that names it resolves it by the (product, batch_key) identity the
+// receipt planner chose.
+type LotRef = { kind: 'id'; batchId: number } | { kind: 'key'; productId: number; batchKey: string }
+
+function lotIdSql(ref: LotRef, paramPrefix: string, params: Record<string, unknown>): string {
+  if (ref.kind === 'id') {
+    params[`${paramPrefix}Id`] = ref.batchId
+    return `@${paramPrefix}Id`
+  }
+  params[`${paramPrefix}P`] = ref.productId
+  params[`${paramPrefix}K`] = ref.batchKey
+  return `(SELECT id FROM product_batches WHERE variant_product_id = @${paramPrefix}P AND batch_key = @${paramPrefix}K)`
 }
 
 export interface ApplyDatedStockCountPlanResult {
@@ -116,6 +128,7 @@ export async function applyDatedStockCountPlan(
   const branchIds = [...new Set([
     ...plan.finalBranchStock.map((row) => row.branchId),
     ...plan.movementsToCreate.map((row) => row.branchId),
+    ...plan.supersededMovements.map((row) => row.branchId),
     ...plan.batchTopUps.map((row) => row.branchId),
     ...plan.batchCreates.map((row) => row.branchId),
     ...plan.batchDrains.map((row) => row.branchId),
@@ -125,92 +138,238 @@ export async function applyDatedStockCountPlan(
   if (branchAuthorityError) throw new Error(branchAuthorityError)
   const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
 
+  const statements: StockWriteStatement[] = []
+  let usesSessionGuards = false
+
+  // 1. Freshness guards (see the header). stock_session_guards'
+  // CHECK(guard_value = 1) is the repo's in-batch assertion: a 0 aborts the
+  // whole batch. The un-reverted rule matches datedStockCountRoute.ts.
+  for (const fingerprint of plan.groupFingerprints) {
+    usesSessionGuards = true
+    statements.push({
+      sql: `INSERT INTO stock_session_guards (guard_value)
+            SELECT CASE WHEN COUNT(*) = @movementCount AND COALESCE(SUM(m.id), 0) = @movementIdSum THEN 1 ELSE 0 END
+            FROM inventory_movements m
+            WHERE m.reason = @reason AND m.product_id = @productId AND m.branch_id = @branchId
+              AND NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || m.id)`,
+      params: { ...fingerprint, reason: DATED_STOCK_COUNT_REASON },
+    })
+  }
+
+  // Per group: net aggregate delta and what the lot receipts add on their own.
+  const netByGroup = new Map<string, { productId: number; branchId: number; net: number; receiptAdds: number; lots: boolean }>()
+  const group = (productId: number, branchId: number) => {
+    const key = groupKey(productId, branchId)
+    let entry = netByGroup.get(key)
+    if (!entry) {
+      entry = { productId, branchId, net: 0, receiptAdds: 0, lots: false }
+      netByGroup.set(key, entry)
+    }
+    return entry
+  }
+
+  // Per lot and branch: the ONE net stock change this apply makes to it, and
+  // the units newly received onto it (step 3 writes both).
+  const lotNets = new Map<string, { ref: LotRef; branchId: number; stock: number; received: number }>()
+  const lotNet = (ref: LotRef, branchId: number) => {
+    const key = `${ref.kind === 'id' ? `id:${ref.batchId}` : `key:${ref.productId}:${ref.batchKey}`}@${branchId}`
+    let net = lotNets.get(key)
+    if (!net) {
+      net = { ref, branchId, stock: 0, received: 0 }
+      lotNets.set(key, net)
+    }
+    return net
+  }
+
+  // 2. Reverse the superseded movements -- aggregate and lots by the same
+  // full amounts -- and delete them. A prior receipt (+) comes back off its
+  // lot and out of the lot's received units; a prior drain (-) goes back
+  // onto its lot.
+  const unreceive: StockWriteStatement[] = []
+  for (const prior of plan.supersededMovements) {
+    const entry = group(prior.productId, prior.branchId)
+    entry.net -= prior.signedQuantity
+    for (const action of prior.batchActions || []) {
+      entry.lots = true
+      const quantity = Number(action.quantity)
+      if (!(Math.abs(quantity) > 0)) continue
+      lotNet({ kind: 'id', batchId: action.batchId }, prior.branchId).stock -= quantity
+      if (quantity > 0) unreceive.push(...planUnreceiveBatchStock({ batchId: action.batchId, quantity, totalCostUsd: null }))
+    }
+  }
   if (plan.movementsToDelete.length) {
-    // D1/SQLite has no array bind -- build the IN(...) list as its own
-    // positional-safe placeholders rather than a single array param, and
-    // split it so no one statement exceeds D1's 100-parameter limit.
+    // D1 has no array bind and a 100-parameter limit per statement.
     for (const chunk of chunkForBinding(plan.movementsToDelete)) {
       const { sql, params } = buildInClause('id', chunk)
-      await guardedDb.prepare(`DELETE FROM inventory_movements WHERE id IN (${sql})`).run(params)
       // No FK cascade (migration 0035's own comment) -- this importer owns
-      // both tables, so it deletes a superseded movement's provenance rows
-      // itself, same "delete what you own" step this DELETE already does
-      // for the movement row.
-      await guardedDb.prepare(`DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`).run(params)
+      // both tables and deletes a superseded movement's provenance itself.
+      statements.push({ sql: `DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`, params })
+      statements.push({ sql: `DELETE FROM inventory_movements WHERE id IN (${sql})`, params })
     }
   }
 
-  const batchTrackedGroupKeys = new Set<string>()
-  for (const entry of [...plan.batchTopUps, ...plan.batchCreates, ...plan.batchDrains]) {
-    batchTrackedGroupKeys.add(groupKey(entry.productId, entry.branchId))
+  // 3. This run's lot actions, then the settlement. A lot this run creates
+  // resolves its identity now (a read) through the same receipt-target rule
+  // every other receipt uses; its FIRST receipt goes through
+  // planReceiveBatchStock, whose own guard re-checks that target inside the
+  // batch and which also moves branch_stock (counted in receiptAdds). Every
+  // other action on a lot -- an existing one, or a new one after its
+  // creation -- joins that lot's net.
+  const newLotKeys = new Map<string, string>() // `${product}:${date}` -> batch_key
+  const newLotRef = (productId: number, date: string, label: string): LotRef => {
+    const batchKey = newLotKeys.get(`${productId}:${date}`)
+    if (!batchKey) throw new Error(`No received date resolved for ${label} on ${date}`)
+    return { kind: 'key', productId, batchKey }
   }
-
-  // Group movements by product+branch, preserving each group's own
-  // earliest-to-latest order (already guaranteed by the plan).
-  const movementsByGroup = new Map<string, StockCountPlanMovement[]>()
+  const refFor = (movement: StockCountPlanMovement, action: PlannedBatchAction): LotRef =>
+    action.batchId != null ? { kind: 'id', batchId: action.batchId } : newLotRef(movement.productId, action.date, movement.productName)
+  const receipts: StockWriteStatement[] = []
   for (const movement of plan.movementsToCreate) {
-    const key = groupKey(movement.productId, movement.branchId)
-    const bucket = movementsByGroup.get(key)
-    if (bucket) bucket.push(movement)
-    else movementsByGroup.set(key, [movement])
-  }
-
-  let movementsApplied = 0
-  for (const [key, movements] of movementsByGroup) {
-    const batchTracked = batchTrackedGroupKeys.has(key)
-    for (const movement of movements) {
-      // This movement's own batch-level provenance -- which real
-      // product_batches row(s) it touched and by how much (signed).
-      // Recorded alongside the movement row so a later rerun can
-      // reverse exactly this, and nothing else (see
-      // datedStockCountImport.ts's reconstructBatchBaseline).
-      let batchActions: { batchId: number; quantity: number }[] = []
-      if (batchTracked) {
-        if (movement.movementType === 'add') {
-          const received = await receiveBatchStock(guardedDb, {
+    const entry = group(movement.productId, movement.branchId)
+    entry.net += movement.movementType === 'add' ? movement.quantity : -movement.quantity
+    for (const action of movement.batchActions) {
+      entry.lots = true
+      const quantity = Number(action.quantity)
+      if (!(Math.abs(quantity) > 0)) continue
+      if (action.batchId == null && quantity > 0) {
+        const lotKey = `${movement.productId}:${action.date}`
+        if (!newLotKeys.has(lotKey)) {
+          const target = await prepareReceiptLotTarget(db, { productId: movement.productId, receivedDate: action.date })
+          newLotKeys.set(lotKey, target.batchKey)
+          usesSessionGuards = true
+          receipts.push(...planReceiveBatchStock({
             productId: movement.productId,
             branchId: movement.branchId,
-            quantity: movement.quantity,
-            receivedDate: movement.date,
-          })
-          batchActions = [{ batchId: received.batchId, quantity: movement.quantity }]
-        } else {
-          const drained = await removeStockAcrossBatches(guardedDb, {
-            productId: movement.productId,
-            branchId: movement.branchId,
-            quantity: movement.quantity,
-          })
-          batchActions = drained.batchQuantities
-          // Same shortfall handling as the interactive /adjust route:
-          // whatever the tracked batches couldn't cover still needs to
-          // come off the plain aggregate, or branch_stock ends up too
-          // high relative to what the count actually said. Nothing
-          // batch-specific to record for the shortfall portion -- it
-          // never touched a batch row.
-          if (drained.remainder > 0) {
-            await applyPlainStockDelta(guardedDb, movement.productId, movement.branchId, -drained.remainder)
-          }
+            quantity,
+            receivedDate: action.date,
+            receiptLotTarget: target,
+          }).statements)
+          entry.receiptAdds += quantity
+          continue
         }
-      } else {
-        const delta = movement.movementType === 'add' ? movement.quantity : -movement.quantity
-        await applyPlainStockDelta(guardedDb, movement.productId, movement.branchId, delta)
       }
-      // 0084: stamp the movement's batch_id when exactly ONE lot covered
-      // its whole quantity (action quantities are signed; the movement's is
-      // a magnitude). A multi-lot spread or a shortfall remainder stays
-      // NULL -- the full per-lot detail is in the actions table either way.
-      const singleLotBatchId = batchActions.length === 1 && Math.abs(batchActions[0].quantity) === movement.quantity
-        ? batchActions[0].batchId : null
-      const movementId = await insertMovementRow(guardedDb, movement, actor.userId, actor.userName, singleLotBatchId)
-      await insertBatchActions(guardedDb, movementId, batchActions)
-      movementsApplied += 1
+      const net = lotNet(refFor(movement, action), movement.branchId)
+      net.stock += quantity
+      if (quantity > 0) net.received += quantity
     }
   }
+  // Plans built before FX-stock F2 carry no settlement.
+  for (const move of plan.batchRebalances || []) {
+    const quantity = Number(move.quantity)
+    if (!(Math.abs(quantity) > 0)) continue
+    group(move.productId, move.branchId).lots = true
+    const ref: LotRef = move.batchId != null ? { kind: 'id', batchId: move.batchId } : newLotRef(move.productId, move.date, `product ${move.productId}`)
+    lotNet(ref, move.branchId).stock += quantity
+  }
 
+  // Receipts, then every lot increase (activating the lot first -- 0154:
+  // positive lot stock needs an active lot), then every lot decrease.
+  statements.push(...receipts)
+  const decreases: StockWriteStatement[] = []
+  for (const net of lotNets.values()) {
+    const params: Record<string, unknown> = { branchId: net.branchId, stock: net.stock, received: net.received, need: -net.stock }
+    const idSql = lotIdSql(net.ref, 'lot', params)
+    if (net.received > 0) {
+      statements.push({
+        sql: `UPDATE product_batches SET is_active = 1, received_quantity = COALESCE(received_quantity, 0) + @received,
+                updated_at = CURRENT_TIMESTAMP WHERE id = ${idSql}`,
+        params,
+      })
+    }
+    if (net.stock > 0) {
+      statements.push(
+        { sql: `UPDATE product_batches SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ${idSql} AND is_active IS NOT 1`, params },
+        {
+          sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (${idSql}, @branchId, @stock)
+                ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = branch_batch_stock.quantity + excluded.quantity,
+                  updated_at = datetime('now')`,
+          params,
+        },
+      )
+    } else if (net.stock < 0) {
+      usesSessionGuards = true
+      decreases.push(...guardedDecrease('branch_batch_stock', `batch_id = ${idSql} AND branch_id = @branchId`, params))
+    }
+  }
+  statements.push(...decreases)
+
+  // 4. Aggregate: net of new minus superseded, less what the receipts in 3
+  // already put on branch_stock; then the reversed receipts' received units
+  // off their lots (after the stock writes, so an emptied lot is seen as
+  // empty); then the product total from its branches.
+  const productIds = new Set<number>()
+  for (const entry of netByGroup.values()) {
+    productIds.add(entry.productId)
+    const remaining = entry.net - entry.receiptAdds
+    if (remaining < 0) usesSessionGuards = true
+    if (remaining !== 0) statements.push(...branchDeltaStatements(entry.productId, entry.branchId, remaining))
+  }
+  statements.push(...unreceive)
+  for (const productId of productIds) {
+    statements.push({
+      sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
+              updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params: { productId },
+    })
+  }
+
+  // 5. Movement rows + provenance. inventory_movements is AUTOINCREMENT and
+  // the batch is one transaction, so MAX(id) straight after the INSERT is
+  // that row's id.
+  for (const movement of plan.movementsToCreate) {
+    const single = movement.batchActions.length === 1 && Math.abs(movement.batchActions[0].quantity) === movement.quantity
+      ? movement.batchActions[0] : null
+    const params: Record<string, unknown> = {
+      productId: movement.productId,
+      productName: movement.productName,
+      branchId: movement.branchId,
+      branchName: movement.branchName,
+      movementType: movement.movementType,
+      quantity: movement.quantity,
+      reason: movement.reason,
+      userId: actor.userId,
+      userName: actor.userName,
+      // Dated to the snapshot's own date -- a reconciliation import's
+      // movement log is historical, not "whenever the file was uploaded".
+      createdAt: `${movement.date} 00:00:00`,
+    }
+    // 0084: stamp the movement's batch_id when exactly ONE lot covered its
+    // whole quantity; a multi-lot spread or a shortfall stays NULL.
+    const batchIdSql = single ? lotIdSql(refFor(movement, single), 'lot', params) : 'NULL'
+    statements.push({
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, @createdAt, ${batchIdSql})`,
+      params,
+    })
+    movement.batchActions.forEach((action, index) => {
+      if (!(Math.abs(action.quantity) > 0)) return
+      const actionParams: Record<string, unknown> = { quantity: action.quantity }
+      const idSql = lotIdSql(refFor(movement, action), `a${index}`, actionParams)
+      statements.push({
+        sql: `INSERT INTO dated_stock_count_batch_actions (movement_id, batch_id, quantity)
+              VALUES ((SELECT MAX(id) FROM inventory_movements), ${idSql}, @quantity)`,
+        params: actionParams,
+      })
+    })
+  }
+
+  if (usesSessionGuards) statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
+
+  try {
+    await guardedDb.batch(statements)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/guard_value|stock_session_guards/i.test(message)) throw new DatedStockCountConflictError()
+    throw error
+  }
+
+  let lotGroups = 0
+  for (const entry of netByGroup.values()) if (entry.lots) lotGroups += 1
+  const movementGroups = new Set(plan.movementsToCreate.map((m) => groupKey(m.productId, m.branchId)))
   return {
     movementsDeleted: plan.movementsToDelete.length,
-    movementsApplied,
-    batchTrackedGroups: batchTrackedGroupKeys.size,
-    plainGroups: movementsByGroup.size - batchTrackedGroupKeys.size,
+    movementsApplied: plan.movementsToCreate.length,
+    batchTrackedGroups: lotGroups,
+    plainGroups: [...movementGroups].filter((key) => !netByGroup.get(key)?.lots).length,
   }
 }

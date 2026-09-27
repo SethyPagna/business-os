@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ReceiptQrSocialLink } from '../receipt-settings/constants'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink'
+import { receiptQrDataUrls } from '../../utils/receiptQrCache.ts'
+import { receiptQrAttrs } from '../../utils/receiptQrReadiness.ts'
 
 export interface ReceiptQrEntry {
   key: string
@@ -11,43 +13,46 @@ export interface ReceiptQrEntry {
 interface ReceiptQrCodesProps {
   entries: ReceiptQrEntry[]
   scanLabel: string
+  /** Shown in a tile whose QR could not be generated. */
+  failedLabel: string
+  retryLabel: string
 }
 
-// Small in-memory cache so re-rendering the same receipt (e.g. switching
-// language tabs) doesn't regenerate identical QR images every time.
-const qrDataUrlCache = new Map<string, string>()
-let qrcodeModulePromise: Promise<typeof import('qrcode')> | null = null
+// Generation, the session cache and in-flight sharing live in
+// utils/receiptQrCache.ts: the tiles mount with the receipt preview, so the QR
+// images are usually ready before Print is tapped. "Usually" is not enough
+// (Q13): each tile also announces its state through receiptQrAttrs, and the
+// print pipeline waits on that (utils/receiptQrReadiness.ts) instead of
+// cloning whatever the tile shows at the moment of the tap.
 
-function loadQrcodeModule(): Promise<typeof import('qrcode')> {
-  if (!qrcodeModulePromise) qrcodeModulePromise = import('qrcode')
-  return qrcodeModulePromise
+type TileGeneration = { status: 'pending' | 'error'; dataUrl: null } | { status: 'ready'; dataUrl: string }
+
+function readyOrPending(url: string): TileGeneration {
+  const cached = receiptQrDataUrls.peek(url)
+  return cached ? { status: 'ready', dataUrl: cached } : { status: 'pending', dataUrl: null }
 }
 
-async function generateQrDataUrl(url: string): Promise<string> {
-  const cached = qrDataUrlCache.get(url)
-  if (cached) return cached
-  const QRCode = await loadQrcodeModule()
-  const dataUrl = await QRCode.toDataURL(url, {
-    errorCorrectionLevel: 'M',
-    margin: 1,
-    width: 240,
-    color: { dark: '#111827', light: '#ffffff' },
-  })
-  qrDataUrlCache.set(url, dataUrl)
-  return dataUrl
-}
-
-function QrTile({ entry }: { entry: ReceiptQrEntry }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(() => qrDataUrlCache.get(entry.url) || null)
+function QrTile({ entry, failedLabel, retryLabel }: { entry: ReceiptQrEntry; failedLabel: string; retryLabel: string }) {
+  const [generation, setGeneration] = useState<TileGeneration>(() => readyOrPending(entry.url))
+  // Bumped by Retry: re-runs the effect below for the same URL.
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    if (!entry.url) return undefined
-    generateQrDataUrl(entry.url)
-      .then((url) => { if (!cancelled) setDataUrl(url) })
-      .catch(() => { if (!cancelled) setDataUrl(null) })
+    const initial = readyOrPending(entry.url)
+    setGeneration(initial)
+    if (initial.status === 'ready') return undefined
+    // One automatic retry (owner rule): a transient failure, such as the
+    // qrcode chunk failing to load once, must not reach the cashier. The cache
+    // never remembers a failure, so the second get() really regenerates.
+    receiptQrDataUrls.get(entry.url)
+      .catch(() => receiptQrDataUrls.get(entry.url))
+      .then(
+        (dataUrl) => { if (!cancelled) setGeneration({ status: 'ready', dataUrl }) },
+        () => { if (!cancelled) setGeneration({ status: 'error', dataUrl: null }) },
+      )
     return () => { cancelled = true }
-  }, [entry.url])
+  }, [entry.url, attempt])
 
   // N33 (owner, Sep 6 2026, reading a printed 80mm receipt): "for the qr code
   // and the qr code name, keep them closer to each other, less margin." They
@@ -61,10 +66,22 @@ function QrTile({ entry }: { entry: ReceiptQrEntry }) {
   // column that has run off the paper is not an evenly spaced one.
   return (
     <div className="flex w-full max-w-[80px] flex-col items-center gap-0.5 text-center">
-      <div className="flex w-full max-w-[68px] items-center justify-center bg-white">
-        {dataUrl
-          ? <img src={dataUrl} alt={entry.label} width={68} height={68} className="h-auto w-full" />
-          : <div className="h-[68px] w-full animate-pulse bg-gray-100" />}
+      <div className="flex w-full max-w-[68px] items-center justify-center bg-white" {...receiptQrAttrs('generated', generation.status)}>
+        {generation.status === 'ready'
+          ? <img src={generation.dataUrl} alt={entry.label} width={68} height={68} className="h-auto w-full" />
+          : generation.status === 'error'
+            // Only ever on screen: printing refuses while any tile is here.
+            // min-h rather than a fixed height, so a Khmer label keeps the
+            // vertical room its stacked glyphs need.
+            ? (
+              <div role="alert" className="flex min-h-[68px] w-full flex-col items-center justify-center gap-1 border border-dashed border-red-300 p-1 text-center">
+                <span className="text-[9px] leading-normal text-red-700">{failedLabel}</span>
+                <button type="button" className="rounded border border-red-300 px-1.5 py-0.5 text-[9px] font-medium leading-normal text-red-700 hover:bg-red-50" onClick={() => setAttempt((value) => value + 1)}>
+                  {retryLabel}
+                </button>
+              </div>
+            )
+            : <div className="h-[68px] w-full animate-pulse bg-gray-100" />}
       </div>
       <div className="w-full truncate text-[9px] font-medium leading-tight text-gray-600">{entry.label}</div>
     </div>
@@ -78,7 +95,7 @@ function QrTile({ entry }: { entry: ReceiptQrEntry }) {
  * untouched (no network re-fetch, no CORS taint) when the receipt is
  * rendered to PDF/image/print.
  */
-export default function ReceiptQrCodes({ entries, scanLabel }: ReceiptQrCodesProps) {
+export default function ReceiptQrCodes({ entries, scanLabel, failedLabel, retryLabel }: ReceiptQrCodesProps) {
   const visible = entries.filter((entry) => entry.url)
   if (!visible.length) return null
   return (
@@ -89,7 +106,7 @@ export default function ReceiptQrCodes({ entries, scanLabel }: ReceiptQrCodesPro
           and the row gap no longer has to carry the padding the tiles used to
           add underneath themselves (N33). */}
       <div className="grid grid-cols-3 justify-items-center gap-x-1 gap-y-2">
-        {visible.map((entry) => <QrTile key={entry.key} entry={entry} />)}
+        {visible.map((entry) => <QrTile key={entry.key} entry={entry} failedLabel={failedLabel} retryLabel={retryLabel} />)}
       </div>
     </div>
   )
@@ -111,4 +128,29 @@ export function normalizeQrSocialLinksForReceipt(links: ReceiptQrSocialLink[] | 
       // app isn't installed.
       url: normalizeSocialQrUrl(String(link.url || '').trim()).url,
     }))
+}
+
+/**
+ * The ABA payment QR on the 80x50 card: an image the shop uploaded or linked,
+ * so unlike the tiles above it is fetched, not generated. It announces its
+ * state like a tile (receiptQrAttrs) and the print waits for it while it loads,
+ * however slowly, up to the owner's 30 s ceiling (Q13). When the image errors
+ * -- a dead link, or a URL that is not an image -- the block collapses: no
+ * gap, no broken-image icon, and the print leaves it out and warns.
+ *
+ * Mount it with `key={src}` so a changed URL starts again from pending.
+ */
+export function ReceiptPaymentQr({ src, alt }: { src: string; alt: string }) {
+  const [state, setState] = useState<'pending' | 'ready' | 'error'>('pending')
+  return (
+    <div {...receiptQrAttrs('payment', state)} hidden={state === 'error'} className={state === 'error' ? undefined : 'flex justify-center pt-1'}>
+      <img
+        src={src}
+        alt={alt}
+        className="h-16 w-16 object-contain"
+        onLoad={() => setState('ready')}
+        onError={() => setState('error')}
+      />
+    </div>
+  )
 }
