@@ -55,7 +55,9 @@ function createAuthHarness(options = {}) {
   const audits = []
   const users = new Map()
   let sessionUserId = null
-  const env = { DB: raw, CACHE: cacheKv, APP_ENCRYPTION_KEY: '' }
+  // A usable key, as production has: without one lib/secretCrypto.ts refuses
+  // every secret write, so /otp/setup could never enrol.
+  const env = { DB: raw, CACHE: cacheKv, APP_ENCRYPTION_KEY: 'd'.repeat(64) }
 
   const overrides = {
     '../lib/db': { getDb: () => db },

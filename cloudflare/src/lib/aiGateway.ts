@@ -4,6 +4,10 @@
 // APP_ENCRYPTION_KEY passed through explicitly (no module-level env access
 // in a Worker).
 import { decryptSecret, maskApiKey } from './secretCrypto'
+
+// Missing, or stored encrypted under an APP_ENCRYPTION_KEY that is now unset
+// or different: say what fixes it instead of a bare "unavailable".
+const UNREADABLE_API_KEY_MESSAGE = 'Provider API key cannot be read. Re-enter the API key (check APP_ENCRYPTION_KEY if this keeps happening).'
 import { assertSafeOutboundUrl } from './netSecurity'
 
 function trim(value: unknown): string {
@@ -258,7 +262,7 @@ export async function callChatProvider(providerConfig: any, messages: Array<{ ro
   const provider = trim(providerConfig?.provider).toLowerCase()
   const meta = getProviderMeta(provider)
   const apiKey = await decryptSecret(providerConfig?.api_key_encrypted || '', encryptionKey)
-  if (!apiKey) throw new Error('Provider API key is unavailable')
+  if (!apiKey) throw new Error(UNREADABLE_API_KEY_MESSAGE)
 
   const model = trim((options.model as string) || providerConfig?.default_model)
   if (!model) throw new Error('Choose a model before testing or chatting')
@@ -335,7 +339,7 @@ export async function testProviderConfig(providerConfig: any, encryptionKey: str
   if (trim(providerConfig?.provider_type).toLowerCase() === 'embed') {
     const provider = trim(providerConfig?.provider).toLowerCase()
     const apiKey = await decryptSecret(providerConfig?.api_key_encrypted || '', encryptionKey)
-    if (!apiKey) throw new Error('Provider API key is unavailable')
+    if (!apiKey) throw new Error(UNREADABLE_API_KEY_MESSAGE)
     const model = trim(providerConfig?.default_model)
     if (!model) throw new Error('Choose a model before testing this embedding provider')
 

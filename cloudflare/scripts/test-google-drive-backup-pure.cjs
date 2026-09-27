@@ -44,6 +44,7 @@ const stubs = {
   './secretCrypto': {
     decryptSecret: async (value) => value === 'access-enc' ? 'access-token' : 'refresh-token',
     encryptSecret: async (value) => `enc:${value}`,
+    upgradeLegacySecret: async () => null,
   },
   './backup': {
     listCloudflareBackups: async () => {

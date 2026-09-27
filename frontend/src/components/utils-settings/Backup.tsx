@@ -135,6 +135,8 @@ interface DoctorCheck {
   ok?: boolean
   status?: string
   message?: string
+  // checks.secretEncryption only (admin-only): is APP_ENCRYPTION_KEY usable.
+  configured?: boolean
   writeReadDelete?: {
     ok?: boolean
     error?: string
@@ -657,6 +659,21 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
         <DoctorStatusPill label="Google login" check={google_login} />
         <DoctorStatusPill label="Backup packages" check={checks.backup} />
         <DoctorStatusPill label="Secrets" check={{ ok: true, message: copy('secrets_redacted', 'Present/missing only; values are redacted.') }} />
+        {/* Admin-only readout (the Worker omits it for everyone else): is
+            APP_ENCRYPTION_KEY usable? A boolean, never the value. Without it
+            every secret write is refused (cloudflare lib/secretCrypto.ts). */}
+        {checks.secretEncryption ? (
+          <DoctorStatusPill
+            label={copy('secret_encryption_label', 'Encryption key')}
+            check={{
+              ok: checks.secretEncryption.configured === true,
+              status: checks.secretEncryption.configured === true ? 'ok' : 'needs_attention',
+              message: checks.secretEncryption.configured === true
+                ? copy('secret_encryption_configured', 'APP_ENCRYPTION_KEY is set. Stored API keys and tokens are encrypted.')
+                : copy('secret_encryption_missing', 'APP_ENCRYPTION_KEY is missing or invalid. Saving AI provider keys, connecting Google Drive and turning on two-factor sign-in are blocked until it is set.'),
+            }}
+          />
+        ) : null}
       </div>
 
       {doctor ? (
