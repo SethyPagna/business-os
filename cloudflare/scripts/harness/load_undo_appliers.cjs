@@ -130,7 +130,7 @@ function loadUndoAppliers(d1, { audit = async () => {} } = {}) {
   } finally {
     Module._load = original
   }
-  return { undoAppliers: mod.exports, branchWrites: stubs['./branchWrites'] }
+  return { undoAppliers: mod.exports, branchWrites: stubs['./branchWrites'], db: dbAdapter }
 }
 
 module.exports = { loadUndoAppliers }

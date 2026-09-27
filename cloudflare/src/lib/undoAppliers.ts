@@ -94,8 +94,27 @@ export interface UndoApplierOutcome {
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void | UndoApplierOutcome>
 
+// A replay refused to protect newer data answers 409 with one of these stable
+// machine codes, so the client can restate it in the operator's language
+// (frontend/src/api/actionHistoryTransport.ts). The English message stays for
+// action_history.last_error and API callers.
+export const UNDO_RECORD_CHANGED_CODE = 'undo_record_changed'
+export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
+
 export class UndoConflictError extends Error {
   readonly statusCode = 409
+  readonly code?: string
+
+  constructor(message: string, code?: string) {
+    super(message)
+    if (code) this.code = code
+  }
+}
+
+// The machine code of a coded replay refusal, or null for any other error, so
+// the route never forwards a code from an error that is not a refusal.
+export function undoConflictCode(error: unknown): string | null {
+  return error instanceof UndoConflictError && error.code ? error.code : null
 }
 
 // Every applier declares the permission section its replay writes under, and
@@ -668,7 +687,7 @@ async function assertMergeStateUnchanged(
   // fingerprintPending until a complete expected value is stored.
   if (transactionGuards && !expected) throw new UndoConflictError('This group merge is missing its safety fingerprint.')
   if (expected && await mergeStateFingerprint(db, reversals, transactionGuards) !== expected) {
-    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.')
+    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
   }
 }
 
@@ -763,7 +782,7 @@ async function replayAtomicSaleAddItems(
   const revision = await db.prepare('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS revision')
     .get<{ revision: number }>([saleId])
   if (Number(revision?.revision) !== expectedRevision) {
-    throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.')
+    throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
   }
 
   const currentSale=await db.prepare('SELECT * FROM sales WHERE id=?').get<Record<string,unknown>>([saleId])
@@ -951,7 +970,7 @@ async function replayAtomicSaleAddItems(
     await db.batch(statements)
   } catch (error) {
     if (/constraint|guard_value/i.test(String(error))) {
-      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.')
+      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
     }
     throw error
   }
@@ -1611,7 +1630,7 @@ async function assertSupplierBackfillLotsUnchanged(
     .all<{ id: number }>({ lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId) })
   if (stale.length) {
     const noun = stale.length === 1 ? 'lot was' : 'lots were'
-    throw new UndoConflictError(`${stale.length} ${noun} re-attributed after this change, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'} without overwriting that edit. Nothing was changed.`)
+    throw new UndoConflictError(`${stale.length} ${noun} re-attributed after this change, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
   }
 }
 
@@ -1635,7 +1654,7 @@ async function runSupplierBackfillBatch(
     await db.batch([supplierBackfillGuardStatement(r, direction), ...stmts])
   } catch (error) {
     if (/JSON path error|supplier_backfill_lot_changed/i.test(String((error as Error)?.message ?? error))) {
-      throw new UndoConflictError(`A lot was re-attributed while this change was being ${direction === 'undo' ? 'undone' : 'redone'}. Nothing was changed.`)
+      throw new UndoConflictError(`A lot was re-attributed while this change was being ${direction === 'undo' ? 'undone' : 'redone'}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
     }
     throw error
   }
@@ -2288,7 +2307,7 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
 async function branchReplayExpectedFields(
   db: ReturnType<typeof getDb>, id: number, ctx: UndoApplierContext,
 ): Promise<BranchWriteFields> {
-  const refuse = () => new UndoConflictError('This branch edit has no recorded result to check against, so it cannot be replayed safely. Edit the branch directly instead.')
+  const refuse = () => new UndoConflictError('This branch edit has no recorded result to check against, so it cannot be replayed safely. Edit the branch directly instead.', UNDO_RECORD_CHANGED_CODE)
   if (!ctx.historyId) throw refuse()
   const row = await db.prepare('SELECT undo_payload, redo_payload FROM action_history WHERE id = ?')
     .get<{ undo_payload: string | null; redo_payload: string | null }>([ctx.historyId])
@@ -2444,7 +2463,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
         if (savedFingerprint && !sameSaleStateFingerprint(await saleStateFingerprint(db, saleId),savedFingerprint)) {
-          throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.')
+          throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
         }
         const removal = planSaleLineRemoval({
           saleId,
@@ -2605,12 +2624,12 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       const verb = ctx.direction === 'undo' ? 'undone' : 'redone'
       const stale = staleBranchReplayFields(existing, expected)
       if (stale.length) {
-        throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`)
+        throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
       }
       const replayFields = completeBranchReplayFields(fields, existing)
       if (branchReplayDropsDefault(replayFields, existing)
         && !(await db.prepare(OTHER_CANONICAL_BRANCH_SQL).get<{ id: number }>([id]))) {
-        throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`)
+        throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`, UNDO_NO_DEFAULT_BRANCH_CODE)
       }
       try {
         await db.batch([
@@ -2622,7 +2641,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // Every guard in this batch (identity, staleness, one default) aborts
         // through the same NOT NULL on branches.name.
         if (/NOT NULL constraint failed: branches\.name/i.test(String((error as Error)?.message ?? error))) {
-          throw new UndoConflictError(`This branch changed while the change was being ${verb}. Nothing was changed.`)
+          throw new UndoConflictError(`This branch changed while the change was being ${verb}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
         }
         throw error
       }
