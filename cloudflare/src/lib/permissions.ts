@@ -95,18 +95,23 @@ export function getMergedPermissions(user: PermissionUser): Record<string, Permi
   return { ...mergedView(user) }
 }
 
-// Ported from backend/src/middleware.ts's isAdminControlUser(). The
-// reserved `admin` username, the `admin` role code, or an explicit
-// `permissions.all` grant are all treated as full administrator control --
-// used to gate user/role management, backup restore, and other
+// Ported from backend/src/middleware.ts's isAdminControlUser(). The `admin`
+// role code or an effective `permissions.all` grant is full administrator
+// control -- used to gate user/role management, backup restore, and other
 // destructive-by-default operations beyond the normal per-key permission
 // check below.
+//
+// The username is deliberately NOT an input (FX-sec, 27 Sep 2026). It used
+// to be: `username === 'admin'` alone granted everything, so whoever held
+// that name -- by self-rename once the seeded account was renamed away, or
+// by an admin creating it -- held every admin gate. The seeded account is
+// created with the admin role (lib/coreDataInvariants.ts), so the role code
+// already covers it. routes/users.ts also reserves the name.
 export function isAdminControlUser(user: PermissionUser): boolean {
   if (!user) return false
-  const username = String(user.username || '').trim().toLowerCase()
   const roleCode = String(user.role_code || '').trim().toLowerCase()
   const merged = mergedView(user)
-  return username === 'admin' || roleCode === 'admin' || merged.all === true
+  return roleCode === 'admin' || merged.all === true
 }
 
 // Mirrors the original's special-cased aliases for the *settings* sub-
