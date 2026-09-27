@@ -6,6 +6,7 @@ import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
+import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -621,6 +622,9 @@ app.put('/users/:id', async (c) => {
   const markDeleted = !!body.delete_user
   const nextIsActive = markDeleted ? 0 : (body.is_active ?? Number(existing.is_active || 0))
   const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : body.permissions
+  // Never leave zero active administrators (FX-sec2, lib/adminControlGuard.ts).
+  const adminGuard = await planAdminControlWrite(db, { user: { id, roleId: body.role_id || null, permissions: JSON.stringify(nextPermissions), active: Number(nextIsActive) === 1 } })
+  if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
 
   try {
     const updateUserStatement = {
@@ -648,6 +652,7 @@ app.put('/users/:id', async (c) => {
     }
     await db.batch([
       updateUserStatement,
+      adminGuard.guard,
       ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(id), username) : []),
     ])
     // Deactivation must kill the currently-issued sessions as well. Otherwise
@@ -691,6 +696,7 @@ app.put('/users/:id', async (c) => {
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to update user' }, 500)
   }
@@ -911,6 +917,9 @@ app.put('/roles/:id', async (c) => {
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
     const permissions = JSON.stringify(body.permissions || {})
+    // A custom role with `all` makes its holders administrators (FX-sec2).
+    const adminGuard = await planAdminControlWrite(db, { role: { id, permissions } })
+    if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
     const updatedAt = new Date().toISOString()
     const details = JSON.stringify({ name })
     // A role IS its permission set, so the row has to carry the permissions
@@ -952,7 +961,7 @@ app.put('/roles/:id', async (c) => {
               (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
             WHERE changes() = 1`,
       params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChange },
-    }])
+    }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)
     if (updatedRows !== 1) {
@@ -968,6 +977,7 @@ app.put('/roles/:id', async (c) => {
       'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
     ).get({ id })) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: message.includes('UNIQUE') ? 'Role already exists' : (message || 'Failed to update role') }, 500)
   }

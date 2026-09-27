@@ -72,6 +72,7 @@ const app = load('routes/users.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
+  '../lib/adminControlGuard': load('lib/adminControlGuard.ts', { './permissions': permissions }),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() }, revokeUserSessions: noop },
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({}), audit: noop },
   '../lib/permissions': permissions,
