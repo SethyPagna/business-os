@@ -84,6 +84,17 @@ export interface PlannedBatchAction {
   quantity: number
 }
 
+// A lot move that belongs to no movement: computeBatchPlanForGroup's
+// settlement (see there). Signed; `batchId` null names the lot this same
+// run creates for `date`.
+export interface PlannedLotRebalance {
+  productId: number
+  branchId: number
+  batchId: number | null
+  date: string
+  quantity: number
+}
+
 // Every prior, un-reverted movement this importer recorded for one
 // product+branch as the plan saw it. The apply batch re-counts the same
 // set first and refuses (nothing written) when it no longer matches: a
@@ -165,6 +176,11 @@ export interface StockCountPlan {
   // mark these product_batches rows inactive (same as any other
   // FIFO-drain-to-empty, matching removeStockAcrossBatches's convention).
   batchDeactivations: { productId: number; branchId: number; batchId: number }[]
+  // FX-stock F2: lot-only moves the apply layer writes with no movement of
+  // their own -- units a sale took out of a superseded movement's receipt,
+  // charged to the group's other lots so the lot ledger lands on the same
+  // total as branch_stock (computeBatchPlanForGroup's settlement).
+  batchRebalances: PlannedLotRebalance[]
 }
 
 export const DATED_STOCK_COUNT_REASON = 'Dated stock count import'
@@ -194,12 +210,21 @@ function groupKey(productId: number, branchId: number): string {
 // same run nets out to never being created at all (there's nothing to
 // persist -- it never existed for any real duration from the caller's
 // point of view).
+//
+// FX-stock F2: a reconstructed lot can start BELOW zero (see
+// reconstructBatchBaseline) and the lots then sum to exactly the aggregate
+// baseline, so every step below moves the lot total by the same delta the
+// aggregate moves by: a receipt adds it to one lot, and a drain takes it
+// from lots holding stock (they always cover it: the positive lots hold at
+// least the running total). What can be left at the end is a lot still
+// below zero -- see the settlement.
 function computeBatchPlanForGroup(
   productId: number,
   branchId: number,
   deltas: { date: string; delta: number }[],
   existingBatches: ExistingBatchState[],
-): { topUps: BatchTopUp[]; creates: BatchCreate[]; drains: BatchDrain[]; deactivations: { productId: number; branchId: number; batchId: number }[]; actionsByDelta: PlannedBatchAction[][] } {
+  priorReceiptLots: ReadonlySet<number> = new Set(),
+): { topUps: BatchTopUp[]; creates: BatchCreate[]; drains: BatchDrain[]; deactivations: { productId: number; branchId: number; batchId: number }[]; actionsByDelta: PlannedBatchAction[][]; rebalances: PlannedLotRebalance[] } {
   type Lot = { kind: 'existing'; batchId: number; date: string; remaining: number } | { kind: 'new'; date: string; remaining: number }
 
   const queue: Lot[] = existingBatches
@@ -209,8 +234,14 @@ function computeBatchPlanForGroup(
   const topUpTotals = new Map<number, number>() // batchId -> cumulative added this run
   const drainTotals = new Map<number, number>() // batchId -> cumulative removed this run
 
+  // Several lots can share a date (a supplier receipt and this count's own
+  // lot). A re-apply receives onto the lot the superseded run received
+  // into, so the count's units stay on their own lot -- refilling what a
+  // sale took from it -- instead of moving to whichever same-date lot sorts
+  // first (FX-stock F2).
   function findOrCreateLotForDate(date: string): Lot {
-    const existing = queue.find((lot) => lot.date === date)
+    const existing = queue.find((lot) => lot.date === date && lot.kind === 'existing' && priorReceiptLots.has(lot.batchId))
+      || queue.find((lot) => lot.date === date)
     if (existing) return existing
     const created: Lot = { kind: 'new', date, remaining: 0 }
     queue.push(created)
@@ -250,6 +281,32 @@ function computeBatchPlanForGroup(
     }
   }
 
+  // Settlement (FX-stock F2). A lot still below zero owes units a sale took
+  // out of a superseded movement's own receipt: they were really sold, so
+  // they came out of stock this group still holds. They come off the
+  // group's other lots, oldest first (the same FIFO a drain walks), and
+  // the owing lot lands on zero -- a zero-sum move, so the lot total still
+  // equals the aggregate. Only lots that already held less than
+  // branch_stock (untracked legacy stock) can fail to cover it; the
+  // uncovered rest came out of that untracked stock (the drain shortfall's
+  // own convention), so the owing lot still lands on zero and the lots
+  // never exceed branch_stock.
+  const rebalances: PlannedLotRebalance[] = []
+  for (const owing of queue) {
+    if (owing.remaining >= 0) continue
+    let owed = -owing.remaining
+    for (const source of queue) {
+      if (owed <= 0) break
+      if (source === owing || source.remaining <= 0) continue
+      const take = Math.min(owed, source.remaining)
+      source.remaining -= take
+      owed -= take
+      rebalances.push({ productId, branchId, batchId: source.kind === 'existing' ? source.batchId : null, date: source.date, quantity: -take })
+    }
+    rebalances.push({ productId, branchId, batchId: owing.kind === 'existing' ? owing.batchId : null, date: owing.date, quantity: -owing.remaining })
+    owing.remaining = 0
+  }
+
   const topUps: BatchTopUp[] = []
   for (const [batchId, quantity] of topUpTotals) {
     if (quantity > 0) topUps.push({ productId, branchId, batchId, date: existingBatches.find((b) => b.batchId === batchId)!.date, quantity })
@@ -267,7 +324,7 @@ function computeBatchPlanForGroup(
     .filter((lot): lot is Lot & { kind: 'new' } => lot.kind === 'new' && lot.remaining > 0)
     .map((lot) => ({ productId, branchId, date: lot.date, quantity: lot.remaining }))
 
-  return { topUps, creates, drains, deactivations, actionsByDelta }
+  return { topUps, creates, drains, deactivations, actionsByDelta, rebalances }
 }
 
 // Un-does THIS group's own prior batch actions from its current batch
@@ -283,14 +340,28 @@ function computeBatchPlanForGroup(
 // reflects them on a rerun. Any OTHER change to a batch since (a real
 // sale, a manual adjustment, an unrelated receive) is left alone, same
 // "only reverse this importer's own past effect" scope the aggregate
-// side already limits itself to. Floors at 0 defensively -- a correctly
-// functioning rerun should never produce a negative reconstructed
-// baseline, but this guards against silently going negative if it ever
-// does (matches this codebase's standing MAX(0, ...) stock-floor
-// convention elsewhere).
+// side already limits itself to.
+//
+// NOT floored (FX-stock F2). A sale that drew units out of the lot a prior
+// run received into leaves that lot below zero here, and it must: the
+// aggregate baseline (`baseline -= existing.signedQuantity`) goes below
+// the live figure by the same full amount, and the two sides are the same
+// arithmetic or the ledgers fork. Flooring this side alone kept the sold
+// units on the lot while the aggregate reversed them (39146f46: a re-apply
+// after such a sale left sum(lots) above branch_stock for good, so the till
+// offered units the server refused). The lot gets refilled by this run's
+// own receipt for that date or settled from the other lots at the end
+// (computeBatchPlanForGroup); nothing below zero is ever written.
+//
+// A lot the provenance names that the caller did not load is still
+// reversed (it holds nothing here, so it starts below zero or, for a
+// reversed drain, gets its units back) with no date of its own; the route
+// loads those lots, inactive ones included, so this is only a fallback.
 function reconstructBatchBaseline(
   groupBatches: ExistingBatchState[],
   deletedMovements: ExistingCountMovement[],
+  productId: number,
+  branchId: number,
 ): ExistingBatchState[] {
   const priorDeltaByBatch = new Map<number, number>()
   for (const movement of deletedMovements) {
@@ -299,9 +370,13 @@ function reconstructBatchBaseline(
     }
   }
   if (priorDeltaByBatch.size === 0) return groupBatches
-  return groupBatches.map((batch) => ({
+  const loaded = new Set(groupBatches.map((batch) => batch.batchId))
+  const unloaded: ExistingBatchState[] = [...priorDeltaByBatch.keys()]
+    .filter((batchId) => !loaded.has(batchId))
+    .map((batchId) => ({ batchId, productId, branchId, date: '', quantity: 0 }))
+  return [...groupBatches, ...unloaded].map((batch) => ({
     ...batch,
-    quantity: Math.max(0, batch.quantity - (priorDeltaByBatch.get(batch.batchId) || 0)),
+    quantity: batch.quantity - (priorDeltaByBatch.get(batch.batchId) || 0),
   }))
 }
 
@@ -353,6 +428,7 @@ export function computeDatedStockCountPlan(
   const batchCreates: BatchCreate[] = []
   const batchDrains: BatchDrain[] = []
   const batchDeactivations: { productId: number; branchId: number; batchId: number }[] = []
+  const batchRebalances: PlannedLotRebalance[] = []
 
   for (const [key, groupEntries] of groups) {
     const [productIdStr, branchIdStr] = key.split(':')
@@ -425,14 +501,17 @@ export function computeDatedStockCountPlan(
     // replay below starts from the right lot quantities instead of
     // double-counting a previous run's own batch effects.
     const groupBatches = batchesByKey.get(key) || []
-    const reconstructed = reconstructBatchBaseline(groupBatches, deletedMovements)
-    const batchPlan = computeBatchPlanForGroup(productId, branchId, deltas, reconstructed)
+    const reconstructed = reconstructBatchBaseline(groupBatches, deletedMovements, productId, branchId)
+    const priorReceiptLots = new Set(deletedMovements.flatMap((movement) =>
+      (movement.batchActions || []).filter((action) => action.quantity > 0).map((action) => action.batchId)))
+    const batchPlan = computeBatchPlanForGroup(productId, branchId, deltas, reconstructed, priorReceiptLots)
     batchTopUps.push(...batchPlan.topUps)
     batchCreates.push(...batchPlan.creates)
     batchDrains.push(...batchPlan.drains)
     batchDeactivations.push(...batchPlan.deactivations)
+    batchRebalances.push(...batchPlan.rebalances)
     for (const { deltaIndex, movement } of groupMovements) movement.batchActions = batchPlan.actionsByDelta[deltaIndex] || []
   }
 
-  return { movementsToDelete, supersededMovements, groupFingerprints, movementsToCreate, finalBranchStock, batchTopUps, batchCreates, batchDrains, batchDeactivations }
+  return { movementsToDelete, supersededMovements, groupFingerprints, movementsToCreate, finalBranchStock, batchTopUps, batchCreates, batchDrains, batchDeactivations, batchRebalances }
 }

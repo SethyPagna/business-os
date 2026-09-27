@@ -338,7 +338,12 @@ async function main() {
 
   await testAsync('a superseded movement\'s batch-action rows are deleted alongside it (no orphaned provenance after a rerun)', async () => {
     const { rawDb, db } = freshDb()
-    seedProduct(rawDb, { id: 7, name: 'Widget Pro', stockQuantity: 0 })
+    // The superseded +10 really sits on lot 999 (FX-stock F2: the apply now
+    // reverses a lot effect strictly, so a fixture whose provenance names
+    // units that were never there is refused rather than clamped).
+    seedProduct(rawDb, { id: 7, name: 'Widget Pro', stockQuantity: 10 })
+    rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, received_quantity) VALUES (999, 7, '7:a', 'a', '2026-08-01', 1, 10)").run()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (999, 1, 10)').run()
     const oldMovementId = rawDb.prepare(
       `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, created_at)
        VALUES (7, 'Widget Pro', 1, 'Shop', 'add', 10, 'Dated stock count import', '2026-08-01 00:00:00')`
