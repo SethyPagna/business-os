@@ -54,8 +54,8 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
 await runTest('browser startup and reconnect refresh reads without replaying retained sales', () => {
   assert.doesNotMatch(webApiSource, /discardPendingSyncQueue\?\.\(\)/)
   assert.doesNotMatch(webApiSource, /module\.syncPendingSalesQueue\(/)
-  assert.match(webApiSource, /loadOfflineSnapshotTransportModule\(\)[\s\S]*module\.refreshOfflineDeviceSnapshot\(\{ force \}\)/)
-  assert.match(webApiSource, /sync:reconnected/)
+  // F1: reconnect no longer refreshes the retired offline snapshot at all.
+  assert.doesNotMatch(webApiSource, /loadOfflineSnapshotTransportModule|refreshOfflineDeviceSnapshot/)
   assert.match(webApiSource, /addEventListener\('online'/)
 })
 
