@@ -269,7 +269,12 @@ function makeDb() {
       async batch(items) {
         sql.exec('BEGIN')
         try {
-          const out = items.map((item) => { const result = sql.prepare(item.text).run(...item.params); return { success: true, meta: { changes: result.changes } } })
+          // Real D1 batch() answers a read with its rows on .results (the
+          // backup writer reads its MAX(rowid) bounds this way).
+          const out = items.map((item) => {
+            if (/^\s*(SELECT|WITH)\b/i.test(item.text)) return { success: true, results: sql.prepare(item.text).all(...item.params) }
+            const result = sql.prepare(item.text).run(...item.params); return { success: true, meta: { changes: result.changes } }
+          })
           sql.exec('COMMIT')
           return out
         } catch (error) {
