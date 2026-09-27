@@ -44,3 +44,5 @@ Use subagents for bounded context isolation and noisy reads. Use full parallel s
 Use `agent-team/schemas/task-envelope.schema.json` and `agent-team/schemas/result.schema.json` for durable cross-tool handoffs. A “green” claim without command, scope, exit code, expected result, and observed result is invalid. Handoffs between tools must pin `base_sha`, `head_sha`, branch/worktree, commits, dirty state, and uncompleted work.
 
 Run `node agent-team/scripts/test-team-state.mjs` after changing coordination, claim, production-guard, or envelope-validation behavior.
+
+Run `node agent-team/scripts/test-verify.mjs` after changing `verify.mjs` or `verify-lib.mjs`.
