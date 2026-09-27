@@ -4106,6 +4106,7 @@
   "receipt_language_km_desc": "Khmer only",
   "receipt_language_title": "Receipt Language",
   "receipt_number": "Receipt #",
+  "receipt_number_conflict": "Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.",
   "receipt_or_sale_id": "Receipt Number or Sale ID",
   "receipt_order": "Section Order",
   "receipt_order_drag_hint": "🖐️ Drag rows to reorder receipt sections. Use ↑↓ arrows or drag. Insert divider lines anywhere to visually separate sections on the receipt.",
