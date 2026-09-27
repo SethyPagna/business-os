@@ -54,6 +54,9 @@ for (const { key, sentence } of refusals) {
 
 const rules = {}
 new Function('exports', 'require', compile(read('../src/api/branchRuleErrors.ts')))(rules, () => ({}))
+// U-transfer3: Inventory's transferErrorMessage reads a definitive refusal first.
+const refusalHelpers = {}
+new Function('exports', 'require', compile(read('../src/api/transferRunRefusal.ts')))(refusalHelpers, (id) => (id === './branchRuleErrors.ts' ? rules : {}))
 const tKm = (key) => km[key]
 const tEn = (key) => en[key]
 
@@ -135,6 +138,7 @@ async function main() {
   const makeTr = (pack) => (key, fallback) => pack[key] || fallback
   const transferErrorMessageFor = (pack) => extractConst(inventory, 'const transferErrorMessage =', '\n\n  const completeInventoryTransfer', {
     localizeBranchRuleError: rules.localizeBranchRuleError, tr: makeTr(pack),
+    localizeTransferError: refusalHelpers.localizeTransferError,
   })
   for (const refusal of refusals) {
     for (const pack of [km, en]) {

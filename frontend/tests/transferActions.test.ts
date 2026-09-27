@@ -19,6 +19,23 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, {
   throw new Error(`Unexpected import ${id}`)
 }, module)
 const { prepareTransferRun, loadTransferRun, saveTransferRun, executeTransferRun, transferStock, transferStockBulk, getBranchSummary } = module.exports
+// U-transfer3: Inventory now executes through api/transferRunRecovery.ts,
+// which wraps the executor above; load the real modules, not a stub.
+function compileModule(url: URL, resolve: (id: string) => unknown) {
+  const compiled = { exports: {} as any }
+  new Function('exports', 'require', 'module', ts.transpileModule(fs.readFileSync(url, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText)(compiled.exports, (id: string) => {
+    const found = resolve(id)
+    if (!found) throw new Error(`Unexpected import ${id}`)
+    return found
+  }, compiled)
+  return compiled.exports
+}
+const ruleErrors = compileModule(new URL('../src/api/branchRuleErrors.ts', import.meta.url), () => null)
+const refusalModule = compileModule(new URL('../src/api/transferRunRefusal.ts', import.meta.url), (id) => (id === './branchRuleErrors.ts' ? ruleErrors : null))
+const recoveryModule = compileModule(new URL('../src/api/transferRunRecovery.ts', import.meta.url), (id) => (
+  id === './branchTransport.ts' ? module.exports : id === './transferRunRefusal.ts' ? refusalModule : null))
 function store() {
   const rows = new Map<string, string>()
   return { getItem: (key: string) => rows.get(key) ?? null, setItem: (key: string, value: string) => { rows.set(key, value) }, removeItem: (key: string) => { rows.delete(key) } }
@@ -36,6 +53,7 @@ for (const kind of ['submit', 'undo', 'redo']) for (const direction of [[1, 2], 
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText)(inv.exports, (id: string) => {
       if (id === './branchTransport.ts') return module.exports
+      if (id === './transferRunRecovery.ts') return recoveryModule
       if (id === './requestIds.ts') return { ensureClientRequestId }
       if (id === '../utils/deviceInfo.ts') return { getClientDeviceInfo: () => ({ device_name: 'changed after reload' }) }
       // P4-B: inventoryWriteTransport.ts's commitFastStockIn() reuses
