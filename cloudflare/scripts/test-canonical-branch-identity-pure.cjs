@@ -209,7 +209,10 @@ async function main() {
     assert.ok(put.indexOf('prepareCanonicalBranchUpdate') < put.indexOf('maybeQueueForReview'))
     assert.match(put, /branchUpdateStatements\(id, body, current\)/)
     assert.match(review, /branchUpdateStatements\(id, body, current\)/)
-    assert.match(undo, /branchUpdateStatements\(id, fields, existing\)/)
+    // FX-undo: the replay writes the payload completed from the current row
+    // (so an older snapshot cannot blank a column), still through the one
+    // identity-guarded writer.
+    assert.match(undo, /branchUpdateStatements\(id, replayFields, existing\)/)
     assert.equal((review.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2)
     assert.equal((route.match(/resolveCanonicalTransferPair\(/g) || []).length, 2)
     assert.equal((route.match(/await planTransferOperation\(/g) || []).length, 2, 'both branch transfer routes delegate their final atomic plan')
