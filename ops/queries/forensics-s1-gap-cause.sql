@@ -3,18 +3,29 @@
 -- 46197..46199; the dated-count audit has no run at all).
 -- inventory_movements.id is AUTOINCREMENT: a rolled-back write never leaves a
 -- hole, so every hole is rows that were WRITTEN between gap_after_at and
--- gap_before_at and DELETED later. The only deleters in the Worker since
--- 1 Sep (git grep "DELETE FROM inventory_movements" at 6abd34da, 426b2344 and
--- HEAD; no migration deletes movements):
+-- gap_before_at and DELETED later. (Correction 27 Sep: that bracket holds
+-- only when both neighbours' created_at is their insert time. Legacy rows from
+-- trg_legacy_inventory_effect_apply carry the OLD system's time instead; see
+-- forensics-s1-gap1-legacy-window.) The deleters in the Worker since 1 Sep
+-- (git grep "DELETE FROM inventory_movements" at d558dcfb, 6abd34da, 426b2344
+-- and HEAD; no migration deletes movements):
 --   dated_rerun     datedStockCountApply.ts (a re-run deletes the earlier run's rows)
 --   merge_undo      undoAppliers.ts applyMergeReversal (deletes the merge's
 --                   'adjustment' fold rows; ids kept in the snapshot's
---                   adjustmentMovementIds, or matched by a reason marker)
+--                   adjustmentMovementIds, or matched by a reason marker).
+--                   Added by 7651025a (2026-08-31 18:00 UTC); the build
+--                   recorded live on 1 Sep, d558dcfb, has no such delete.
 --   return_rollback routes/returns.ts POST catch block (before the atomic
 --                   create): deletes the failed return's 'return' /
 --                   replacement_out / damage_in rows AND its returns row, whose
 --                   AUTOINCREMENT id is then a hole in returns.id
 --   system wipe     routes/system.ts (deletes every movement; not a hole)
+--   backup restore  lib/backup.ts restoreCloudflareBackup: DELETE FROM every
+--                   backed-up table, then re-inserts the backup. Rows written
+--                   between the backup and the restore become holes in every
+--                   AUTOINCREMENT table. NOT detected here (the literal grep
+--                   missed its DELETE FROM ${table}; the other dynamic
+--                   deleters never name inventory_movements).
 -- Anything else is an out-of-band delete (manual SQL) -> 'unexplained'.
 -- One row per hole. Read-only. Ids, dates, types and counts only.
 --   gap_after_id, gap_before_id, missing_ids, gap_after_at, gap_before_at,
