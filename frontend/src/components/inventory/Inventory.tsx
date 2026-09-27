@@ -86,7 +86,7 @@ import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
 import type { QueryParams } from '../../api/query.ts'
 import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
-import { inventoryTransferEditForm, isRefusedTransferRun, localizeTransferRefusal, transferRefusalFromError } from '../../api/transferRunRefusal.ts'
+import { inventoryTransferEditForm, isRefusedTransferRun, localizeTransferError, localizeTransferRefusal } from '../../api/transferRunRefusal.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -1817,9 +1817,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   }, [t])
 
 
-  // A definitive refusal is translated even when the Worker sent plain English
-  // ("Insufficient stock in source branch"); anything else as before.
-  const transferErrorMessage = (error: unknown) => localizeTransferRefusal(transferRefusalFromError(error), (key) => tr(key, '')) || localizeBranchRuleError(
+  // A transfer failure is translated even when the Worker sent plain English
+  // ("Insufficient stock in source branch"); wording only -- whether the saved
+  // run may be edited is decided by isRefusedTransferRun, never by this text.
+  const transferErrorMessage = (error: unknown) => localizeTransferError(error, (key) => tr(key, '')) || localizeBranchRuleError(
     error instanceof Error ? error.message : tr('stock_transfer_failed', 'Stock transfer failed'), (key) => tr(key, ''),
   ) || tr('stock_transfer_failed', 'Stock transfer failed')
 
@@ -1878,12 +1879,13 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       if (transferAuthorityRef.current.actorId !== actorId || !transferAuthorityRef.current.allowed) throw new Error(tr('access_denied', 'Access denied'))
       try { await completeInventoryTransfer(run) }
       catch (error) {
-        // U-transfer3: the server REFUSED it (recorded on the saved run), so
-        // nothing moved and the open form still holds every value. Clear the
-        // saved run here so the form unlocks for the operator to fix the
-        // number, instead of locking it behind a Retry that answers the same.
+        // U-transfer3: the server REFUSED it with an answer that proves
+        // nothing moved (recorded on the saved run, never after an unknown
+        // result -- R-transfer3), and the open form still holds every value.
+        // Clear the saved run here so the form unlocks for the operator to fix
+        // the number, instead of locking it behind a Retry that answers the same.
         const refused = api.loadInventoryTransfer(actorId)
-        if (refused?.refusal && refused.requests[0].body.client_request_id === run.requests[0].body.client_request_id) {
+        if (refused && isRefusedTransferRun(refused) && refused.requests[0].body.client_request_id === run.requests[0].body.client_request_id) {
           api.saveInventoryTransfer(actorId, null)
           if (transferAuthorityRef.current.actorId === actorId) setPendingTransfer(null)
           unlocked = true

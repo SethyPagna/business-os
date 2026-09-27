@@ -63,16 +63,37 @@ function store() {
 }
 const httpError = (status: number, message: string, extra: Record<string, unknown> = {}) => Object.assign(new Error(message), { status, code: null }, extra)
 
-test('only a definitive 4xx is a refusal; every unknown result stays retry-only', () => {
+// R-transfer3: only the codes the transfer routes emit AFTER finding no
+// idempotency receipt prove nothing was applied (the allowlist in
+// api/transferRunRefusal.ts, pinned to the route sources by
+// cloudflare/scripts/test-transfer-refusal-after-receipt-pure.cjs).
+const coded = (status: number, code: string, message = code) => httpError(status, message, { code })
+test('only an allowlisted post-receipt refusal is definitive; everything else is an unknown result', () => {
   const refused = [
-    httpError(400, 'Insufficient stock in source branch'),
-    httpError(404, 'Received date not found for this product'),
-    httpError(409, 'The selected received date no longer has enough stock.', { code: 'transfer_selected_lot_short' }),
-    httpError(409, 'The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.', { code: 'transfer_stock_changed' }),
-    httpError(403, 'Transferring stock requires Full Access to Branches'),
+    coded(400, 'transfer_insufficient_stock', 'Insufficient stock in source branch'),
+    coded(404, 'transfer_product_missing', 'Product not found'),
+    coded(404, 'transfer_lot_missing', 'Received date not found for this product'),
+    coded(400, 'transfer_direction_invalid', 'Transfers must go between the Shop and the Warehouse'),
+    coded(409, 'canonical_branch_configuration_invalid'),
+    coded(409, 'transfer_selected_lot_short', 'The selected received date no longer has enough stock.'),
+    coded(409, 'transfer_stock_changed', 'The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.'),
+    coded(409, 'transfer_too_many_lots'),
   ]
-  for (const error of refused) assert.ok(transferRefusalFromError(error), `${(error as any).status} ${error.message} is a refusal`)
+  for (const error of refused) assert.ok(transferRefusalFromError(error), `${(error as any).status} ${(error as any).code} is a refusal`)
+  assert.deepEqual([...refusal.DEFINITIVE_TRANSFER_REFUSAL_CODES].sort(), refused.map((error) => (error as any).code).sort(), 'every allowlisted code is covered above')
   const unknown = [
+    // Answered BEFORE the receipt lookup: says nothing about an earlier send.
+    httpError(403, 'You do not have permission to perform this action'),
+    httpError(403, 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.'),
+    httpError(400, 'Could not read request body.', { code: 'request_body_unreadable' }),
+    httpError(409, 'Refresh the app before transferring stock.', { code: 'client_upgrade_required' }),
+    httpError(400, 'Missing required fields'),
+    httpError(400, 'An existing received date must be selected.', { code: 'invalid_batch_id' }),
+    // An older Worker's uncoded refusals: not provable, so locked (the base behaviour).
+    httpError(400, 'Insufficient stock in source branch'),
+    httpError(404, 'Product not found'),
+    httpError(413, 'Payload too large'),
+    httpError(408, 'Request timeout'),
     Object.assign(new Error('Request timed out after 90s'), { code: 'request_timeout', outcome: 'unknown' }),
     Object.assign(new Error('Failed to fetch'), { code: 'write_outcome_unknown', outcome: 'unknown' }),
     httpError(500, 'Something went wrong', { outcome: 'unknown' }),
@@ -86,8 +107,86 @@ test('only a definitive 4xx is a refusal; every unknown result stays retry-only'
     Object.assign(new Error('Server is offline.'), { code: 'write_requires_live_server' }),
     new Error('Lost reply'),
     null,
+    // Mutant M4 (outcome check removed): an allowlisted code on an unknown outcome.
+    Object.assign(coded(409, 'transfer_stock_changed', 'x'), { outcome: 'unknown' }),
+    // Mutant M5 (5xx counted as a refusal): allowlisted codes on 5xx / other statuses.
+    coded(500, 'transfer_stock_changed'),
+    coded(503, 'transfer_insufficient_stock'),
+    coded(403, 'transfer_product_missing'),
   ]
-  for (const error of unknown) assert.equal(transferRefusalFromError(error), null, `${String((error as any)?.message)} is NOT a refusal`)
+  for (const error of unknown) assert.equal(transferRefusalFromError(error), null, `${(error as any)?.status} ${(error as any)?.code} ${String((error as any)?.message)} is NOT a refusal`)
+  assert.equal(transferRefusalFromError(Object.assign(coded(409, 'transfer_stock_changed'), { outcome: 'not_dispatched' })), null)
+})
+
+// The refuter's sequences (R-transfer3): the first send APPLIES and its reply
+// is lost; the Retry is answered before the receipt lookup (403 after a
+// permission revoke, or 400 request_body_unreadable). That answer must not
+// unlock Edit; once the cause clears, Retry under the SAME key replays.
+for (const [label, preReceiptAnswer] of [
+  ['403 permission revoked', () => httpError(403, 'You do not have permission to perform this action')],
+  ['400 request_body_unreadable', () => httpError(400, 'Could not read request body.', { code: 'request_body_unreadable' })],
+] as const) {
+  test(`R-transfer3: lost reply, then ${label} on Retry: no Edit, and stock moves once`, async () => {
+    const storage = store()
+    const server = { answerBeforeReceipt: false, receipts: new Set<string>(), moved: 0, loseReply: true }
+    const send = async (request: any) => {
+      if (server.answerBeforeReceipt) throw preReceiptAnswer()
+      const key = request.body.client_request_id
+      if (server.receipts.has(key)) return { success: true, transferredCount: 1, replayed: true }
+      server.receipts.add(key); server.moved += Number(request.body.quantity)
+      if (server.loseReply) { server.loseReply = false; throw Object.assign(new Error('Failed to fetch'), { outcome: 'unknown', code: 'write_outcome_unknown' }) }
+      return { success: true, transferredCount: 1 }
+    }
+    const checkpoint = (next: unknown) => saveTransferRun(7, next, storage)
+    const run = prepareTransferRun(7, [{ bulk: false, body: { productId: 11, fromBranchId: 1, toBranchId: 2, quantity: 5, reason: 'restock' } }])
+    saveTransferRun(7, run, storage)
+    await assert.rejects(recovery.executeTransferRun(run, checkpoint, send), /Failed to fetch/)
+    assert.equal(server.moved, 5)
+    server.answerBeforeReceipt = true
+    await assert.rejects(recovery.executeTransferRun(loadTransferRun(7, storage), checkpoint, send))
+    const saved = loadTransferRun(7, storage)
+    assert.equal(isRefusedTransferRun(saved), false, `${label} on a Retry is not a refusal: Edit is not offered`)
+    assert.equal(saved.refusal, undefined)
+    assert.equal(saved.outcomeUnknown, true, 'the run is marked unknown for good')
+    // The Discard dialog therefore shows the may-already-be-applied warning (refusedRun is null).
+    server.answerBeforeReceipt = false
+    const done = await recovery.executeTransferRun(saved, checkpoint, send)
+    assert.equal(done.next, 1)
+    assert.equal(server.moved, 5, 'EXPECTED moved=5: the Retry replayed the receipt under the same key')
+  })
+}
+
+test('R-transfer3 (b): once a run had an unknown outcome, even a proving refusal never offers Edit again', async () => {
+  const storage = store()
+  const checkpoint = (next: unknown) => saveTransferRun(7, next, storage)
+  const answers: Array<() => never> = [
+    () => { throw Object.assign(new Error('Failed to fetch'), { outcome: 'unknown', code: 'write_outcome_unknown' }) },
+    () => { throw coded(400, 'transfer_insufficient_stock', 'Insufficient stock in source branch') },
+  ]
+  const run = prepareTransferRun(7, [{ bulk: false, body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'r' } }])
+  saveTransferRun(7, run, storage)
+  await assert.rejects(recovery.executeTransferRun(run, checkpoint, async () => answers[0]()))
+  await assert.rejects(recovery.executeTransferRun(loadTransferRun(7, storage), checkpoint, async () => answers[1]()))
+  const saved = loadTransferRun(7, storage)
+  assert.equal(isRefusedTransferRun(saved), false, 'unknown is sticky')
+  assert.equal(saved.outcomeUnknown, true)
+  assert.equal(saved.refusal, undefined, 'no refusal is even recorded on a run that had an unknown outcome')
+  // A tab closed mid-send: the run was saved as dispatched and nothing came back.
+  const closed = { ...prepareTransferRun(8, [{ bulk: false, body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'r' } }]), dispatched: true }
+  const rows = store()
+  saveTransferRun(8, closed, rows)
+  await assert.rejects(recovery.executeTransferRun(closed, (next: unknown) => saveTransferRun(8, next, rows), async () => answers[1]()))
+  assert.equal(isRefusedTransferRun(loadTransferRun(8, rows)), false, 'a send that died with the tab is an unknown result')
+  // A fresh run refused on its first send IS editable.
+  const fresh = prepareTransferRun(9, [{ bulk: false, body: { productId: 1, fromBranchId: 1, toBranchId: 2, quantity: 2, reason: 'r' } }])
+  const freshRows = store()
+  saveTransferRun(9, fresh, freshRows)
+  await assert.rejects(recovery.executeTransferRun(fresh, (next: unknown) => saveTransferRun(9, next, freshRows), async () => answers[1]()))
+  assert.equal(isRefusedTransferRun(loadTransferRun(9, freshRows)), true)
+  // A run saved by the earlier build with a 403 recorded as a refusal is locked again.
+  assert.equal(isRefusedTransferRun({ ...fresh, refusal: { status: 403, code: null, message: 'You do not have permission to perform this action' } }), false)
+  assert.equal(isRefusedTransferRun({ ...fresh, refusal: { status: 400, code: null, message: 'Insufficient stock in source branch' } }), false)
+  assert.equal(isRefusedTransferRun({ ...fresh, outcomeUnknown: true, refusal: { status: 400, code: 'transfer_insufficient_stock', message: 'x' } }), false)
 })
 
 test('the executor records a refusal and strips it before any re-dispatch (double-apply guard)', async () => {
@@ -99,7 +198,7 @@ test('the executor records a refusal and strips it before any re-dispatch (doubl
   const send = async (request: any) => {
     dispatches += 1
     const key = request.body.client_request_id
-    if (mode === 'refuse') throw httpError(400, 'Insufficient stock in source branch')
+    if (mode === 'refuse') throw coded(400, 'transfer_insufficient_stock', 'Insufficient stock in source branch')
     if (!receipts.has(key)) { receipts.set(key, JSON.stringify(request.body)); stock.from -= 4; stock.to += 4 }
     if (mode === 'apply-then-lose-reply') { mode = 'apply'; throw Object.assign(new Error('Lost reply'), { outcome: 'unknown', code: 'write_outcome_unknown' }) }
     return { success: true, transferredCount: 1 }
@@ -135,11 +234,14 @@ test('the executor records a refusal and strips it before any re-dispatch (doubl
 
 test('a refusal the storage cannot record still surfaces the server error unchanged', async () => {
   const run = prepareTransferRun(7, [{ bulk: false, body: { productId: 1, quantity: 1, fromBranchId: 1, toBranchId: 2, reason: 'r' } }])
-  const error = httpError(404, 'Product not found')
-  await assert.rejects(recovery.executeTransferRun(run, () => { throw new Error('storage full') }, async () => { throw error }), (thrown: unknown) => thrown === error)
+  const error = coded(404, 'transfer_product_missing', 'Product not found')
+  // The pre-dispatch checkpoint succeeds; recording the refusal afterwards fails.
+  let checkpoints = 0
+  await assert.rejects(recovery.executeTransferRun(run, () => { checkpoints += 1; if (checkpoints > 1) throw new Error('storage full') }, async () => { throw error }), (thrown: unknown) => thrown === error)
+  assert.equal(checkpoints, 2)
 })
 
-test('a refused run whose stripped state cannot be saved sends nothing', async () => {
+test('a run whose pre-dispatch state cannot be saved sends nothing', async () => {
   let sent = 0
   const run = { ...prepareTransferRun(7, [{ bulk: false, body: { productId: 1, quantity: 1 } }]), refusal: { status: 400, code: null, message: 'x' } }
   await assert.rejects(recovery.executeTransferRun(run, () => { throw new Error('storage full') }, async () => { sent += 1; return {} }), /storage full/)
@@ -197,6 +299,11 @@ test('the refusal reason is shown in the operator language, including plain-Engl
     km.transfer_refused_insufficient_items.replace('{detail}', 'Tea (need 5, have 3)'))
   assert.equal(localizeTransferRefusal({ status: 409, code: 'transfer_selected_lot_short', message: en.transfer_selected_lot_short }, tKm), km.transfer_selected_lot_short)
   assert.equal(localizeTransferRefusal({ status: 400, code: null, message: 'Some new server sentence' }, tKm), 'Some new server sentence', 'unknown text is shown as sent')
+  // Wording is independent of the Edit decision: an old Worker's uncoded 400 is
+  // still translated for Inventory's banner, while it no longer unlocks Edit.
+  assert.equal(refusal.localizeTransferError(httpError(400, 'Insufficient stock in source branch'), tKm), km.transfer_refused_insufficient)
+  assert.equal(transferRefusalFromError(httpError(400, 'Insufficient stock in source branch')), null)
+  assert.equal(refusal.localizeTransferError(null, tKm), '')
   for (const key of ['transfer_run_refused', 'transfer_run_refused_reason', 'transfer_run_refusal_label', 'transfer_run_edit', 'transfer_run_edit_hint',
     'transfer_run_discard_title', 'transfer_run_discard_refused', 'transfer_run_discard_unknown', 'transfer_refused_insufficient',
     'transfer_refused_insufficient_items', 'transfer_refused_product_missing', 'transfer_refused_lot_missing']) {
@@ -263,7 +370,8 @@ function refusedBranchRun(storage: ReturnType<typeof store>) {
     ...prepareTransferRun(7, [
       { bulk: true, body: { fromBranchId: 2, toBranchId: 1, reason: 'Restock shop', items: [{ productId: 7, quantity: 12, batchId: 71 }, { productId: 8, quantity: 4 }] } },
     ]),
-    refusal: { status: 400, code: null, message: 'Insufficient stock in source branch' },
+    dispatched: true,
+    refusal: { status: 400, code: 'transfer_insufficient_stock', message: 'Insufficient stock in source branch' },
   }
   saveTransferRun(7, run, storage)
   return run
@@ -350,7 +458,9 @@ test('an unreadable saved run can be discarded too (it locked the form just as p
 const inventory = read('../src/components/inventory/Inventory.tsx')
 
 test('Inventory: a refused submit unlocks the open form; an unknown result keeps the lock', async () => {
-  for (const outcome of ['refused', 'unknown'] as const) {
+  // 'legacy' = a run an earlier build saved with a 403 recorded as a refusal:
+  // it must NOT unlock (R-transfer3).
+  for (const outcome of ['refused', 'unknown', 'legacy'] as const) {
     const storage = new Map<string, any>()
     const run = { ...prepareTransferRun(5, [{ bulk: false, body: { productId: 7, quantity: 12, fromBranchId: '2', toBranchId: '1', reason: 'r', userId: 5 } }]), context: { kind: 'submit', productName: 'Tea', original: {}, entryId: 'e' } }
     let pending: unknown = 'unset'
@@ -366,9 +476,11 @@ test('Inventory: a refused submit unlocks the open form; an unknown result keeps
       loadInventoryWriteTransport: async () => api,
       setPendingTransfer: (value: unknown) => { pending = value }, setTransferRetryError: (value: string) => { panel = value },
       transferErrorMessage: (error: Error) => error.message,
+      isRefusedTransferRun,
       completeInventoryTransfer: async (saved: any) => {
         // What the recording executor does on each outcome.
-        if (outcome === 'refused') { api.saveInventoryTransfer('5', { ...saved, refusal: { status: 400, code: null, message: 'Insufficient stock in source branch' } }); throw httpError(400, 'Insufficient stock in source branch') }
+        if (outcome === 'refused') { api.saveInventoryTransfer('5', { ...saved, dispatched: true, refusal: { status: 400, code: 'transfer_insufficient_stock', message: 'Insufficient stock in source branch' } }); throw coded(400, 'transfer_insufficient_stock', 'Insufficient stock in source branch') }
+        if (outcome === 'legacy') { api.saveInventoryTransfer('5', { ...saved, refusal: { status: 403, code: null, message: 'Branch transfers require Full Access to Inventory' } }); throw httpError(403, 'Branch transfers require Full Access to Inventory') }
         throw Object.assign(new Error('Lost reply'), { outcome: 'unknown' })
       },
     }
@@ -381,7 +493,7 @@ test('Inventory: a refused submit unlocks the open form; an unknown result keeps
     } else {
       assert.ok(storage.get('run'), 'unknown: the retry identity is kept')
       assert.equal(pending, run, 'unknown: the form stays locked behind Retry')
-      assert.equal(panel, 'Lost reply')
+      assert.equal(panel, outcome === 'legacy' ? 'Branch transfers require Full Access to Inventory' : 'Lost reply')
     }
   }
 })

@@ -8,39 +8,75 @@ import type { PendingTransferRun } from './branchTransport.ts'
 import { localizeBranchRuleError } from './branchRuleErrors.ts'
 
 export type TransferRunRefusal = { status: number; code: string | null; message: string }
-export type RecoverableTransferRun = PendingTransferRun & { refusal?: TransferRunRefusal }
+export type RecoverableTransferRun = PendingTransferRun & {
+  refusal?: TransferRunRefusal
+  /** Set (and saved) before the run's first request goes out. */
+  dispatched?: boolean
+  /**
+   * Sticky: some request of this run once ended with no known result (lost
+   * reply, 5xx, timeout, a non-proving 4xx, or the tab closed mid-send). Such
+   * a run is never offered for Edit again -- only Retry under the same keys,
+   * or Discard with the "may already have been applied" warning.
+   */
+  outcomeUnknown?: boolean
+}
 
-// A 4xx that does NOT prove the transfer was refused for good. 401/403 from
-// the edge, an auth hand-off, timeouts and rate limits say nothing about the
-// transfer itself. idempotency_conflict means SOMETHING is recorded under
-// this key already, so it is treated as an unknown result, never as a refusal.
-const NOT_A_REFUSAL_CODES = new Set([
-  'edge_interference', 'cloudflare_access_required', 'invalid_session', 'actor_session_quarantined',
-  'signout_actor_changed', 'stale_read_scope', 'api_version_mismatch', 'write_requires_live_server',
-  'write_outcome_unknown', 'request_timeout', 'maintenance_active', 'release_upgrade_in_progress',
-  'idempotency_conflict', 'write_conflict',
+/**
+ * R-transfer3: the ONLY answers that prove a transfer request moved nothing.
+ * Each is emitted by /branches/transfer, /branches/transfer-bulk or
+ * /inventory/transfer strictly AFTER the route looked up the request's
+ * idempotency receipt and found none (or, for the planner's refusals, after it
+ * looked again inside the failed batch's catch) -- and the receipt is written
+ * in the same atomic batch as the stock movement. So the key was never
+ * applied, and sending the lines again under a new key moves them once.
+ *
+ * Everything else is an UNKNOWN result, including every uncoded 4xx: the
+ * routes answer 403 (permission revoked), 400 (request_body_unreadable, field
+ * validation), 409 client_upgrade_required and 503 BEFORE the receipt lookup,
+ * so such an answer to a Retry says nothing about whether an earlier send of
+ * the same key was applied. Pinned against the route sources by
+ * cloudflare/scripts/test-transfer-refusal-after-receipt-pure.cjs.
+ */
+export const DEFINITIVE_TRANSFER_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'transfer_product_missing',
+  'transfer_insufficient_stock',
+  'transfer_lot_missing',
+  'transfer_direction_invalid',
+  'canonical_branch_configuration_invalid',
+  'transfer_stock_changed',
+  'transfer_selected_lot_short',
+  'transfer_too_many_lots',
 ])
-const NOT_A_REFUSAL_STATUSES = new Set([401, 408, 425, 429])
+/** The statuses those codes are sent with; any other status is not a refusal. */
+const DEFINITIVE_TRANSFER_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 404, 409])
+
+function isDefinitiveRefusal(status: number, code: string | null): boolean {
+  return DEFINITIVE_TRANSFER_REFUSAL_STATUSES.has(status) && !!code && DEFINITIVE_TRANSFER_REFUSAL_CODES.has(code)
+}
 
 /**
  * The refusal a failed transfer request proves, or null when the result is
- * unknown (network, timeout, 5xx, maintenance, edge/auth interference) and
- * the saved run must stay retry-only.
+ * unknown and the saved run must stay retry-only.
  */
 export function transferRefusalFromError(error: unknown): TransferRunRefusal | null {
   if (!error || typeof error !== 'object') return null
   const source = error as { status?: unknown; code?: unknown; outcome?: unknown; message?: unknown }
   if (source.outcome === 'unknown' || source.outcome === 'not_dispatched') return null
   const status = Number(source.status)
-  if (!Number.isInteger(status) || status < 400 || status > 499 || NOT_A_REFUSAL_STATUSES.has(status)) return null
   const code = typeof source.code === 'string' && source.code ? source.code : null
-  if (code && NOT_A_REFUSAL_CODES.has(code)) return null
+  if (!Number.isInteger(status) || !isDefinitiveRefusal(status, code)) return null
   return { status, code, message: typeof source.message === 'string' ? source.message : '' }
 }
 
+/**
+ * A saved run that may be edited: it carries a proving refusal and never had
+ * an unknown outcome. The stored refusal is re-checked, so a run saved by an
+ * earlier build that recorded e.g. a 403 as a refusal is locked again.
+ */
 export function isRefusedTransferRun(run: unknown): run is RecoverableTransferRun & { refusal: TransferRunRefusal } {
-  const refusal = (run as RecoverableTransferRun | null)?.refusal
-  return !!refusal && Number.isInteger(refusal.status) && refusal.status >= 400 && refusal.status <= 499
+  const saved = run as RecoverableTransferRun | null
+  const refusal = saved?.refusal
+  return !!refusal && !saved?.outcomeUnknown && Number.isInteger(refusal.status) && isDefinitiveRefusal(refusal.status, refusal.code)
 }
 
 export type TransferRunEditState = {
@@ -126,6 +162,21 @@ export function localizeTransferRefusal(refusal: TransferRunRefusal | null | und
     if (match && translated && translated !== key) return translated.replace('{detail}', match[1] || '')
   }
   return refusal.message
+}
+
+/**
+ * Any failed transfer's message in the operator's language, whether or not it
+ * proves a refusal -- wording only, never a decision about the saved run.
+ */
+export function localizeTransferError(error: unknown, t: Translate): string {
+  const source = (error && typeof error === 'object' ? error : {}) as { status?: unknown; code?: unknown; message?: unknown }
+  const message = typeof source.message === 'string' ? source.message : ''
+  if (!message.trim()) return ''
+  return localizeTransferRefusal({
+    status: Number(source.status) || 0,
+    code: typeof source.code === 'string' && source.code ? source.code : null,
+    message,
+  }, t)
 }
 
 export type InventoryTransferEditForm = {

@@ -13,14 +13,25 @@
 //
 // The transition table this module enforces, per saved run:
 //
-//   state              event                      next state         stock
-//   pending (no refusal) Retry -> 2xx            cleared            moved once (receipt)
-//   pending (no refusal) Retry -> unknown/5xx    pending            maybe moved; key kept
-//   pending (no refusal) Retry -> definitive 4xx refused            not moved (batch rolled back)
-//   refused            Retry                      refusal stripped BEFORE dispatch, then as pending
-//   refused            Edit                       cleared, lines back in the form (new key on send)
-//   refused            Discard (confirm)          cleared            none
-//   pending            Discard (confirm + warning) cleared           none by us; may already have moved
+//   state                event                        next state      stock
+//   new                  send (saved dispatched first)
+//                        -> 2xx                       cleared         moved once (receipt)
+//                        -> proving refusal           refused         not moved (no receipt)
+//                        -> anything else             unknown         maybe moved; key kept
+//   refused              Retry                        refusal stripped BEFORE dispatch, then as sent
+//   refused              Edit                         cleared, lines back in the form (new key on send)
+//   refused              Discard (confirm)            cleared         none
+//   unknown (sticky)     Retry -> 2xx                 cleared         moved once (replayed receipt)
+//   unknown (sticky)     Retry -> anything else       unknown         Edit is NEVER offered
+//   unknown              Discard (confirm + warning)  cleared         none by us; may already have moved
+//   sent, tab closed     reload                       unknown (sent and no refusal on record)
+//
+// "Proving refusal" is api/transferRunRefusal.ts's allowlist: codes the
+// transfer routes emit only after finding no idempotency receipt for the key
+// (R-transfer3). A 403 or an unreadable-body 400 is answered BEFORE that
+// lookup, so on a Retry it says nothing about an earlier, lost send: it is an
+// unknown result, and offering Edit there resent applied lines under a new
+// key (moved 10 for a transfer of 5).
 //
 // A recorded refusal never outlives a later dispatch: executeTransferRun
 // below strips it (and persists the stripped run) before the first request
@@ -47,12 +58,20 @@ export async function executeTransferRun<T extends RecoverableTransferRun>(
   checkpoint: (next: T) => void,
   send?: (request: PendingTransferRun['requests'][number]) => Promise<unknown>,
 ): Promise<T> {
-  let latest = run
-  if (run.refusal) {
-    // Persist the stripped run first; if that cannot be saved, nothing is sent.
-    latest = withoutRefusal(run)
-    checkpoint(latest)
-  }
+  // R-transfer3 (b): a run that was sent before and is still saved WITHOUT a
+  // recorded refusal ended with no known result -- a lost reply, a 5xx, a
+  // non-proving 4xx, or a tab closed mid-send. That is sticky: whatever a
+  // later Retry answers, the run is never offered for Edit again.
+  const unknownBefore = !!run.outcomeUnknown || (!!run.dispatched && !run.refusal)
+  let latest = {
+    ...withoutRefusal(run),
+    dispatched: true,
+    ...(unknownBefore ? { outcomeUnknown: true } : {}),
+  } as T
+  // Persisted BEFORE the first request: a refusal never outlives a later
+  // dispatch, and a send that dies with the tab is known to have been sent.
+  // If this cannot be saved, nothing is sent.
+  checkpoint(latest)
   try {
     return await executeSavedTransferRun(latest, (next) => {
       latest = next as T
@@ -60,11 +79,12 @@ export async function executeTransferRun<T extends RecoverableTransferRun>(
     }, send) as T
   } catch (error) {
     const refusal = transferRefusalFromError(error)
-    if (refusal) {
-      // The operator must see the server's answer even if this record fails;
-      // an unrecorded refusal only means Edit appears after the next Retry.
-      try { checkpoint({ ...latest, refusal }) } catch { /* keep the original error */ }
-    }
+    // The operator must see the server's answer even if this record fails.
+    // A failed record of a refusal leaves the run "sent, no refusal", which
+    // the next call reads as unknown -- the safe direction.
+    try {
+      checkpoint(refusal && !latest.outcomeUnknown ? { ...latest, refusal } : { ...latest, outcomeUnknown: true })
+    } catch { /* keep the original error */ }
     throw error
   }
 }

@@ -138,7 +138,7 @@ async function main() {
   const makeTr = (pack) => (key, fallback) => pack[key] || fallback
   const transferErrorMessageFor = (pack) => extractConst(inventory, 'const transferErrorMessage =', '\n\n  const completeInventoryTransfer', {
     localizeBranchRuleError: rules.localizeBranchRuleError, tr: makeTr(pack),
-    localizeTransferRefusal: refusalHelpers.localizeTransferRefusal, transferRefusalFromError: refusalHelpers.transferRefusalFromError,
+    localizeTransferError: refusalHelpers.localizeTransferError,
   })
   for (const refusal of refusals) {
     for (const pack of [km, en]) {
