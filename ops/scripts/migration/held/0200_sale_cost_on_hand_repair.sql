@@ -10,6 +10,11 @@
 -- itself the "apply" decision. It needs 0195 (catalog_cost_on_hand) applied
 -- first AND the post-0195 Worker serving for at least 2 hours (the deploy
 -- window below), so the window's lines are settled before the plan reads them.
+-- The file enforces both: its first statement aborts the whole migration
+-- when catalog_cost_repair_0195_backup is missing ("no such table"), or --
+-- on a database holding any sale or return -- empty or younger than 2 hours;
+-- nothing is written. A database with no sale and no return (a fresh one
+-- applying the whole chain at once) has nothing to repair and passes.
 --
 -- ============================== OWNER-RUN AUDIT ==========================
 -- Read-only. Run AFTER 0195 is live and BEFORE deciding to apply this file,
@@ -38,11 +43,17 @@
 --         be, affected but cannot be proven (listed row by row in C);
 --         bucket 'after_window' -> lines after the window still matching the
 --         buggy average: must be 0 (a non-zero count means the old Worker
---         served longer than the window; stop and report);
---         'already_correct' is informational.
+--         served longer than the window; stop and report -- the file
+--         refuses to apply while any exists);
+--         'already_correct' (came from the buggy average, which equalled
+--         the on-hand cost) and 'unaffected' (every other line in scope)
+--         are informational;
+--         'unbucketed' -> lines in scope the plan failed to place: must be 0
+--         (the file refuses to apply otherwise).
 --
 -- C. Every listed line (row-level: for the encrypted ops export only, never
---    a public log; its per-bucket counts equal B):
+--    a public log; its per-bucket counts equal B for every bucket but
+--    'unaffected', which it leaves out):
 --   node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command "$(sed -n '/^-- 2\. /,/;$/p' ../ops/scripts/audit/sale-cost-on-hand-audit.sql | grep -v '^--')" --json
 --   Read: kind, bucket, reason, receipt/return number, recorded_cost_usd ->
 --         correct_cost_usd (the best estimate for the review buckets).
@@ -60,8 +71,17 @@
 -- Owner decisions: 2026-09-26 "past sales whose recorded cost came from the
 -- buggy average must be corrected"; 2026-09-27 "we did some sales, and
 -- previous sales, make sure they are fixed with the correct cost price ...
--- nothing lost/corrupted, everything recoverable". This is a bug repair. It
--- writes ONLY sale_items.cost_price_usd and return_items.cost_price_usd.
+-- nothing lost/corrupted, everything recoverable". This is a bug repair.
+-- Besides its own three tables it UPDATEs ONLY sale_items.cost_price_usd and
+-- return_items.cost_price_usd. Those UPDATEs fire the existing revision
+-- triggers, which is intended and the only other write: every rewritten
+-- sale line bumps sale_write_revisions for its sale
+-- (sale_revision_sale_items_update, 0120); every rewritten return line bumps
+-- return_write_revisions for its return (return_revision_items_update, 0125)
+-- and, for a sale-linked return, sale_write_revisions for that sale
+-- (sale_revision_return_items_update, 0120). Open sale and return editors
+-- therefore see a new revision and reload rather than save over the repair.
+-- The recovery statements bump them again the same way.
 -- Never price, revenue, quantity, status, receipts, KHR costs, movements,
 -- stock, loyalty or snapshots.
 --
@@ -111,9 +131,31 @@
 -- Era: era_start = 2026-09-16 14:04:42; fix_at = 0195's apply time
 -- (catalog_cost_repair_0195_backup.created_at); era_end = fix_at + 2 hours,
 -- covering an old Worker still serving after the migration applied.
+-- A line snapshots the STORED catalog figure (products.cost_price_usd), and
+-- before 0195 only these writers set it ("setters"): a receipt (a
+-- batch-stamped 'add'/'stock_in' movement), a lot edit (audit_logs
+-- 'batch_update'; it re-derives only since ee46a74e, 2026-09-19, which is why
+-- every edit is only a CANDIDATE moment), a manual cost entry
+-- (product_cost_entries) -- each wrote the buggy average over the lot state
+-- at that moment -- and an app merge, which wrote the keeper the merge
+-- scalar (resolveMergedCostDetail over the keeper's and the duplicate's
+-- stored costs, or the reviewer's chosen cost). A lot deactivation (DELETE
+-- /batches), a receipt revert that retires its lot, a transfer's new lot and
+-- a merge changed the lot set WITHOUT re-deriving, so the stored figure --
+-- and every line snapshotting it -- stayed on a stale average.
 -- A line is a candidate only when its recorded cost is positive and EQUALS
--- the buggy average recomputed as of its own time (either variant, either
--- rounding) over the lot state RECONSTRUCTED for that time:
+-- one of these producers (any variant, either rounding):
+--   'buggy_average'        the buggy average over the lot state at the
+--                          line's own time;
+--   'stale_buggy_average'  the buggy average over the lot state at a setter
+--                          moment of its product in [since, line time];
+--   'stale_merge_cost'     the merge scalar of an app merge INTO its product
+--                          in [since, line time] (keeperPricingBefore and the
+--                          duplicate's frozen cost, or keeperChoice's cost);
+-- where since = era_start for a line before fix_at, and fix_at for a line in
+-- the deploy window (0195 re-derived every active product at fix_at, so only
+-- an old-Worker setter after it can have written a buggy figure again).
+-- Every lot state is RECONSTRUCTED for its moment:
 --   - owner: a lot, a sale/return line or a manual cost entry re-pointed by a
 --     product merge after the line (undo_snapshots 'product.merge',
 --     'product.merge.bulk', 'product.merge.group.child', not 'reversed':
@@ -123,13 +165,20 @@
 --     (audit_logs 'batch_update' carrying unit_cost_usd); a lot edited only
 --     after the line, or touched after it with a cost that no longer matches
 --     its first receipt movement, is read at that receipt cost;
---   - active: a lot inactive now but last updated after the line (a merge
---     fold or write-off, a deactivation) was active at the line.
--- The match is the proof the figure came from that formula, not a legacy
--- import, a merge plan or a hand-typed cost -- and it is what keeps a line
+--   - active: a lot inactive now but last updated after the moment (a merge
+--     fold or write-off, a deactivation) was active at it.
+-- The match is the proof the figure came from the buggy era's producers, not
+-- a legacy import or a hand-typed cost -- and it is what keeps a line
 -- written correctly after the fix (window included) from ever being touched:
--- a correct figure that also equals the buggy mean is 'already_correct' and
+-- a correct figure that also equals a buggy figure is 'already_correct' and
 -- is not written.
+-- Scope: every sale line (product set, cost > 0) of a sale created in
+-- [era_start, era_end), wherever its movement falls; every line added to an
+-- older sale by a movement from era_start; every walk-in customer return
+-- line in the era; and every customer return line (product set, cost > 0)
+-- of a sale with a line in the plan. Each is placed in exactly one bucket
+-- (the plan's primary key is (kind, item_id)); a line the plan fails to
+-- place is written as 'unbucketed' and the file aborts before any UPDATE.
 --
 -- ============================== THE CORRECT COST =========================
 -- 0195's rule applied to the shelf AT THE LINE, not today:
@@ -177,11 +226,26 @@
 --                           why -- the 0109-style SQL re-point that moved lines
 --                           and movements but left the lots; priced over that
 --                           lot's product as the best estimate);
---                           and return lines following a line not rewritten;
---   'after_window'       -- matches after era_end: a deploy-lag tell, must be 0;
---   'already_correct'    -- informational.
--- A line not listed either did not come from the buggy average (its lot state
--- is known and the mean does not match) or already holds the on-hand cost.
+--                           'recorded_cost_unexplained' (in scope, matches no
+--                           producer, differs from the on-hand cost, and its
+--                           product had a setter or merge in [since, line
+--                           time] -- or it is a deploy-window line);
+--                           'no_matching_sale_line' (a sale-linked return
+--                           line whose sale has no line it could copy);
+--                           and return lines following a sale line not
+--                           rewritten ('follows_unrepaired_sale_line',
+--                           'sale_lines_of_product_now_differ');
+--   'after_window'       -- matches after era_end: a deploy-lag tell; the file
+--                           aborts while any exists;
+--   'already_correct'    -- matched a producer, which equalled the on-hand cost;
+--   'unaffected'         -- everything else in scope: 'recorded_equals_on_hand',
+--                           'no_lot_cost_at_line', 'catalog_cost_set_before_era'
+--                           (no setter or merge of its product in the era
+--                           before the line: the figure is not the bug's),
+--                           'return_cost_not_copied_from_sale', 'follows_sale_line',
+--                           'after_deploy_window' (a later line of an era sale);
+--   'unbucketed'         -- a line in scope the plan failed to place; the file
+--                           aborts while any exists.
 --
 -- ============================== LIMITS ===================================
 --   - Lot cost edits made outside the batch editor (stock-in line edits,
@@ -201,7 +265,21 @@
 --     lots it touched fail the reconcile check and their lines are listed as
 --     'ledger_unverified', never rewritten.
 --   - A walk-in return is timed at returns.created_at and positioned at its
---     first 'return' movement; a later edit of it is not re-timed.
+--     first 'return' movement of the same product written no earlier than
+--     60 seconds before it. The product and time bounds are required:
+--     'return' is also written by a cancelled sale with a SALE id in
+--     reference_id (lib/movementReference.ts), so a return id alone can name
+--     an older cancellation's restock. A later edit of it is not re-timed.
+--   - Lot edits before ee46a74e did not re-derive the stored figure; every
+--     edit is therefore a candidate setter moment, never a required one. A
+--     match against a moment that did not in fact set the figure would need
+--     the recorded cost to coincide with a buggy average of that product.
+--   - After fix_at the 0195 triggers keep the stored figure current except
+--     on a lot UPDATE: DELETE /batches and a receipt revert that retired a
+--     lot with nothing on hand left the fallback on the retired lot's cost
+--     until the next stock write (fixed in app code with U-cost3). Such a
+--     line after the window is not detectable here (it matches no buggy
+--     producer) and is not in scope.
 --   - A 0109-style SQL merge leaves no snapshot; only a line whose own lot
 --     (sale_items.batch_id) sits on another product reveals it. Such a line
 --     is listed ('sold_lot_belongs_to_another_product'), never rewritten; a
@@ -224,11 +302,17 @@
 --   The audit's first statement: R, W, RL, RW and every D.
 --
 -- ============================== IN-FILE ASSERTIONS =======================
--- After the writes, each "INSERT INTO branches(name) SELECT NULL WHERE
--- <violation>" statement aborts the whole migration (branches.name is NOT
--- NULL) if: a rewritten line does not hold its new cost; a rewritten-bucket
--- plan row has no backup; a backup's new cost is not positive or equals the
--- old; or a backup names a line outside the rewritten buckets.
+-- Each "INSERT INTO branches(name) SELECT NULL WHERE <violation>" statement
+-- aborts the whole migration (branches.name is NOT NULL); D1 rolls back
+-- everything, the plan included. Before any write: 0195 not applied, or its
+-- deploy window not yet over while sales or returns exist (the first
+-- statement). After the plan, before
+-- any backup or UPDATE: an 'after_window' line, or an 'unbucketed' line.
+-- After the writes: a backed-up line still holds its OLD cost (a line
+-- changed since its backup -- e.g. after a recovery -- is left alone, not an
+-- abort); a rewritten-bucket plan row has no backup; a backup's new cost is
+-- not positive or equals the old; or a backup names a line outside the
+-- rewritten buckets.
 --
 -- ============================== POST ASSERTIONS ==========================
 --   SELECT bucket, COUNT(*), ROUND(SUM(quantity * (new_cost_price_usd - old_cost_price_usd)), 4)
@@ -241,8 +325,9 @@
 --     D(returns_sale_linked) + D(returns_walk_in).
 --   SA and RE again: identical (revenue, refunds, statuses untouched).
 --   The audit's first statement again: repair, window, returns_sale_linked
---   and returns_walk_in all 0 lines (a rewritten line no longer matches the
---   buggy average); the review buckets unchanged.
+--   and returns_walk_in all 0 lines (a rewritten line now holds the on-hand
+--   cost: it moves to 'unaffected', whose count grows by exactly R + W + RL
+--   + RW); the review buckets unchanged; unbucketed 0.
 --
 -- ============================== RECOVERY =================================
 -- Owner-approved only. Puts back the pre-0200 cost of every line that still
@@ -252,9 +337,11 @@
 --     + (SELECT COUNT(*) FROM return_items ri JOIN sale_cost_repair_0200_return_items x ON x.return_item_id = ri.id WHERE ri.cost_price_usd IS NOT x.new_cost_price_usd);
 -- Statements:
 --   UPDATE sale_items SET cost_price_usd = (SELECT r.old_cost_price_usd FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id)
---     WHERE id IN (SELECT r.sale_item_id FROM sale_cost_repair_0200 r WHERE r.new_cost_price_usd IS sale_items.cost_price_usd);
+--     WHERE id IN (SELECT sale_item_id FROM sale_cost_repair_0200)
+--       AND EXISTS (SELECT 1 FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id AND r.new_cost_price_usd IS sale_items.cost_price_usd);
 --   UPDATE return_items SET cost_price_usd = (SELECT x.old_cost_price_usd FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id)
---     WHERE id IN (SELECT x.return_item_id FROM sale_cost_repair_0200_return_items x WHERE x.new_cost_price_usd IS return_items.cost_price_usd);
+--     WHERE id IN (SELECT return_item_id FROM sale_cost_repair_0200_return_items)
+--       AND EXISTS (SELECT 1 FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id AND x.new_cost_price_usd IS return_items.cost_price_usd);
 -- The backup and plan tables are never dropped by code; they are the audit
 -- trail. Their value columns are declared without a type, so each old value
 -- is stored exactly as read and the recovery is byte-exact.
@@ -262,7 +349,15 @@
 -- Re-running this file changes nothing: the tables are IF NOT EXISTS, the
 -- inserts OR IGNORE, and a line is only rewritten while it still holds the
 -- backed-up old figure. If the plan exceeds D1's limits the migration fails as
--- a whole and nothing is written; run the audit first to size it.
+-- a whole and nothing is written; run the audit first to size it
+-- (ops/queries/sale-cost-0200-sizing.sql is the guard-checked short form).
+-- Every UPDATE is keyed on the backup table's primary key (id IN (...) plus a
+-- correlated EXISTS on the same key), never a per-row scan of the backups.
+
+-- guard: 0195 applied (the table exists and is filled) and its deploy window is over,
+-- unless the database has no sale or return at all (a fresh one: nothing to repair)
+INSERT INTO branches(name) SELECT NULL WHERE (SELECT COUNT(*) = 0 OR datetime('now') < datetime(MIN(datetime(created_at)), '+2 hours')
+  FROM catalog_cost_repair_0195_backup) AND (EXISTS (SELECT 1 FROM sales) OR EXISTS (SELECT 1 FROM returns));
 
 CREATE TABLE IF NOT EXISTS sale_cost_repair_0200_plan (
   kind TEXT NOT NULL,
@@ -331,6 +426,24 @@ merge_rev AS MATERIALIZED (
     JOIN json_each(CASE WHEN json_valid(us.payload_json) THEN us.payload_json ELSE '{}' END, '$.reversals') r
    WHERE us.kind = 'product.merge.bulk' AND us.status <> 'reversed' AND datetime(us.created_at) >= '2026-09-16 14:04:42'
 ),
+merge_ev AS MATERIALIZED (
+  SELECT m.ord, m.at, CAST(json_extract(m.rev, '$.keeperId') AS INTEGER) AS keeper_id,
+    CAST(json_extract(m.rev, '$.keeperPricingBefore.cost_price_usd') AS REAL) AS keeper_before,
+    (SELECT pd.cost_price_usd FROM products pd WHERE pd.id = CAST(json_extract(m.rev, '$.dupId') AS INTEGER)) AS dup_cost,
+    CAST(json_extract(m.rev, '$.keeperChoice.cost.cost_price_usd') AS REAL) AS chosen
+  FROM merge_rev m
+),
+merge_b AS MATERIALIZED (
+  SELECT v.keeper_id, v.at,
+    ROUND(AVG(v.c), 4) AS b1,
+    CAST(AVG(v.c) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
+    CASE WHEN MAX(v.c) > 2 * MIN(v.c) THEN MAX(v.c) ELSE ROUND(AVG(v.c), 4) END AS b2
+  FROM (SELECT ord, keeper_id, at, keeper_before AS c FROM merge_ev UNION SELECT ord, keeper_id, at, dup_cost FROM merge_ev) v
+  WHERE v.c > 0
+  GROUP BY v.ord, v.keeper_id, v.at
+  UNION ALL
+  SELECT keeper_id, at, chosen, chosen, chosen FROM merge_ev WHERE chosen > 0
+),
 row_move AS MATERIALIZED (
   SELECT 'sale_items' AS tbl, CAST(i.value AS INTEGER) AS row_id, CAST(json_extract(m.rev, '$.dupId') AS INTEGER) AS dup_id, m.at, m.ord
     FROM merge_rev m JOIN json_each(m.rev, '$.reparentedSaleItemIds') i
@@ -376,6 +489,7 @@ sale_lines AS MATERIALIZED (
 ),
 items AS MATERIALIZED (
   SELECT 'sale' AS kind, sm.item_id AS ik, sm.item_id, sm.sale_id, NULL AS return_id, sm.product_now, sm.quantity, sm.recorded,
+    sm.sale_at AS born,
     COALESCE((SELECT datetime(im.created_at) FROM inventory_movements im WHERE im.id = COALESCE(sm.mv_id, sm.mv_any)), sm.sale_at) AS t,
     COALESCE(sm.mv_id, sm.mv_any,
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= sm.sale_at),
@@ -388,8 +502,10 @@ items AS MATERIALIZED (
         WHERE im.reference_id = sl.sale_id AND im.movement_type = 'sale' AND im.product_id = sl.product_now) AS mv_any
     FROM sale_lines sl) sm
   UNION ALL
-  SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at),
-    COALESCE((SELECT MIN(im.id) FROM inventory_movements im WHERE im.reference_id = r.id AND im.movement_type = 'return'),
+  SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at), datetime(r.created_at),
+    COALESCE((SELECT MIN(im.id) FROM inventory_movements im
+        WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
+          AND datetime(im.created_at) >= datetime(r.created_at, '-60 seconds')),
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= datetime(r.created_at)),
       (SELECT COALESCE(MAX(im.id), 0) + 1 FROM inventory_movements im))
   FROM return_items ri JOIN returns r ON r.id = ri.return_id
@@ -399,7 +515,8 @@ items AS MATERIALIZED (
 item_ctx AS MATERIALIZED (
   SELECT x.*,
     CASE WHEN x.lot_owner <> COALESCE(x.moved_dup, x.product_now) THEN x.lot_owner ELSE COALESCE(x.moved_dup, x.product_now) END AS prod_at,
-    x.moved_dup IS NOT NULL AS moved, COALESCE(x.lot_owner <> COALESCE(x.moved_dup, x.product_now), 0) AS orphan
+    x.moved_dup IS NOT NULL AS moved, COALESCE(x.lot_owner <> COALESCE(x.moved_dup, x.product_now), 0) AS orphan,
+    CASE WHEN x.t >= x.fix_at THEN x.fix_at ELSE '2026-09-16 14:04:42' END AS since
   FROM (SELECT it.*, p.fix_at, p.era_end,
       (SELECT COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > it.t
           ORDER BY rm.ord LIMIT 1), pb.variant_product_id)
@@ -410,30 +527,63 @@ item_ctx AS MATERIALIZED (
         WHERE rm.tbl = CASE it.kind WHEN 'sale' THEN 'sale_items' ELSE 'return_items' END
           AND rm.row_id = it.item_id AND rm.at > it.t ORDER BY rm.ord LIMIT 1) AS moved_dup
     FROM items it JOIN params p
-    WHERE it.t >= '2026-09-16 14:04:42' AND it.t < p.scan_end) x
+    WHERE (it.t >= '2026-09-16 14:04:42' OR it.born >= '2026-09-16 14:04:42')
+      AND (it.t < p.scan_end OR it.born < p.era_end)) x
+),
+lot_touch AS MATERIALIZED (
+  SELECT im.batch_id AS lot_id, datetime(im.created_at) AS at
+    FROM inventory_movements im
+   WHERE im.movement_type IN ('add', 'stock_in') AND im.quantity > 0 AND im.batch_id IS NOT NULL
+     AND im.created_at >= '2026-09-16 14:04:42'
+  UNION
+  SELECT CAST(a.entity_id AS INTEGER), datetime(a.created_at)
+    FROM audit_logs a
+   WHERE a.action = 'batch_update' AND a.entity = 'product_batch' AND datetime(a.created_at) >= '2026-09-16 14:04:42'
+     AND (json_type(CASE WHEN json_valid(a.details) THEN a.details END, '$.unit_cost_usd') IS NOT NULL
+       OR json_type(CASE WHEN json_valid(a.details) THEN a.details END, '$.is_active') IS NOT NULL)
+),
+setter AS MATERIALIZED (
+  SELECT DISTINCT o.p, o.at FROM (
+    SELECT COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lt.lot_id AND rm.at > lt.at
+        ORDER BY rm.ord LIMIT 1), pb.variant_product_id) AS p, lt.at
+      FROM lot_touch lt JOIN product_batches pb ON pb.id = lt.lot_id
+    UNION
+    SELECT COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id
+        AND rm.at > datetime(pce.created_at) ORDER BY rm.ord LIMIT 1), pce.product_id), datetime(pce.created_at)
+      FROM product_cost_entries pce WHERE datetime(pce.created_at) >= '2026-09-16 14:04:42') o
+  WHERE o.p IN (SELECT prod_at FROM item_ctx) AND o.at IS NOT NULL
+),
+anchor AS MATERIALIZED (
+  SELECT ik AS ak, prod_at AS p, t AS at FROM item_ctx
+  UNION ALL
+  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at FROM setter s
 ),
 pce_at AS MATERIALIZED (
-  SELECT ic.ik, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM item_ctx ic JOIN product_cost_entries pce ON pce.product_id = ic.prod_at
-   WHERE datetime(pce.created_at) <= ic.t
-     AND NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id AND rm.at > ic.t)
+  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
+    FROM anchor a JOIN product_cost_entries pce ON pce.product_id = a.p
+   WHERE datetime(pce.created_at) <= a.at
+     AND NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id AND rm.at > a.at)
   UNION
-  SELECT ic.ik, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM item_ctx ic
-    JOIN row_move rm ON rm.tbl = 'product_cost_entries' AND rm.dup_id = ic.prod_at AND rm.at > ic.t
+  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
+    FROM anchor a
+    JOIN row_move rm ON rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.at
     JOIN product_cost_entries pce ON pce.id = rm.row_id
-   WHERE datetime(pce.created_at) <= ic.t
+   WHERE datetime(pce.created_at) <= a.at
      AND NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_cost_entries' AND r2.row_id = rm.row_id
-       AND r2.at > ic.t AND r2.ord < rm.ord)
+       AND r2.at > a.at AND r2.ord < rm.ord)
 ),
 pce_top AS MATERIALIZED (
-  SELECT ik, cost_usd, baseline_batch_id FROM (
-    SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.ik ORDER BY x.id DESC) AS rn FROM pce_at x)
+  SELECT ak, cost_usd, baseline_batch_id FROM (
+    SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.ak ORDER BY x.id DESC) AS rn FROM pce_at x)
   WHERE rn = 1
 ),
+anchor_me AS MATERIALIZED (
+  SELECT a.ak, a.p, a.at,
+    pt.ak IS NOT NULL AS has_me, pt.cost_usd AS me_cost, COALESCE(pt.baseline_batch_id, 0) AS me_baseline
+  FROM anchor a LEFT JOIN pce_top pt ON pt.ak = a.ak
+),
 item_me AS MATERIALIZED (
-  SELECT ic.*,
-    pt.ik IS NOT NULL AS has_me, pt.cost_usd AS me_cost, COALESCE(pt.baseline_batch_id, 0) AS me_baseline,
+  SELECT ic.*, am.has_me, am.me_cost, am.me_baseline,
     EXISTS (SELECT 1 FROM product_cost_entries pce
       WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t) AS now_has_me,
     (SELECT pce.cost_usd FROM product_cost_entries pce
@@ -441,17 +591,17 @@ item_me AS MATERIALIZED (
     COALESCE((SELECT pce.baseline_batch_id FROM product_cost_entries pce
       WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1), 0) AS now_me_baseline,
     EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = ic.prod_at AND rm.at > ic.t) AS me_moved
-  FROM item_ctx ic LEFT JOIN pce_top pt ON pt.ik = ic.ik
+  FROM item_ctx ic JOIN anchor_me am ON am.ak = ic.ik
 ),
-item_lot AS MATERIALIZED (
-  SELECT m.ik, pb.id AS lot_id
-    FROM item_me m JOIN product_batches pb ON pb.variant_product_id = m.prod_at
-   WHERE NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > m.t)
+anchor_lot AS MATERIALIZED (
+  SELECT a.ak, pb.id AS lot_id
+    FROM anchor a JOIN product_batches pb ON pb.variant_product_id = a.p
+   WHERE NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > a.at)
   UNION
-  SELECT m.ik, rm.row_id
-    FROM item_me m JOIN row_move rm ON rm.tbl = 'product_batches' AND rm.dup_id = m.prod_at AND rm.at > m.t
+  SELECT a.ak, rm.row_id
+    FROM anchor a JOIN row_move rm ON rm.tbl = 'product_batches' AND rm.dup_id = a.p AND rm.at > a.at
    WHERE NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_batches' AND r2.row_id = rm.row_id
-       AND r2.at > m.t AND r2.ord < rm.ord)
+       AND r2.at > a.at AND r2.ord < rm.ord)
 ),
 lot_base AS MATERIALIZED (
   SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
@@ -460,30 +610,30 @@ lot_base AS MATERIALIZED (
     (SELECT im.unit_cost_usd FROM inventory_movements im
       WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
     (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at
-  FROM product_batches pb WHERE pb.id IN (SELECT lot_id FROM item_lot)
+  FROM product_batches pb WHERE pb.id IN (SELECT lot_id FROM anchor_lot)
 ),
 lot_at AS MATERIALIZED (
-  SELECT il.ik, il.lot_id, m.t, m.pos, m.has_me, m.me_cost, m.me_baseline, lb.created, lb.received_at,
-    CASE WHEN lb.is_active = 1 OR lb.updated_at > m.t THEN 1 ELSE 0 END AS active_t,
+  SELECT al.ak, al.lot_id, am.at, am.has_me, am.me_cost, am.me_baseline, lb.created, lb.received_at,
+    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
     COALESCE(
-      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = il.lot_id AND le.at <= m.t ORDER BY le.id DESC LIMIT 1),
-      CASE WHEN lb.last_edit_at > m.t THEN COALESCE(lb.receipt_cost, lb.cost_now)
-           WHEN lb.updated_at > m.t AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
+      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = al.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
+      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
+           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
              THEN lb.receipt_cost END,
       lb.cost_now) AS cost_t,
-    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > m.t)
-      OR lb.last_edit_at > m.t
-      OR (lb.updated_at > m.t AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
-      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = il.lot_id AND rm.at > m.t)
+    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
+      OR lb.last_edit_at > am.at
+      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
+      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = al.lot_id AND rm.at > am.at)
     THEN 1 ELSE 0 END AS changed
-  FROM item_lot il JOIN item_me m ON m.ik = il.ik JOIN lot_base lb ON lb.lot_id = il.lot_id
+  FROM anchor_lot al JOIN anchor_me am ON am.ak = al.ak JOIN lot_base lb ON lb.lot_id = al.lot_id
 ),
 bset AS MATERIALIZED (
-  SELECT la.ik, 'h' AS v, la.cost_t AS cost
+  SELECT la.ak, 'h' AS v, la.cost_t AS cost
     FROM lot_at la
-   WHERE la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.t AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
+   WHERE la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
   UNION
-  SELECT m.ik, 'h', m.me_cost FROM item_me m WHERE m.has_me = 1 AND m.me_cost > 0
+  SELECT am.ak, 'h', am.me_cost FROM anchor_me am WHERE am.has_me = 1 AND am.me_cost > 0
   UNION
   SELECT m.ik, 'n', pb.unit_cost_usd
     FROM item_me m JOIN product_batches pb ON pb.variant_product_id = m.product_now
@@ -493,18 +643,28 @@ bset AS MATERIALIZED (
   UNION
   SELECT m.ik, 'n', m.now_me_cost FROM item_me m WHERE m.now_has_me = 1 AND m.now_me_cost > 0
 ),
+anchor_b AS MATERIALIZED (
+  SELECT ak, v,
+    ROUND(AVG(cost), 4) AS b1,
+    CAST(AVG(cost) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
+    CASE WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost) ELSE ROUND(AVG(cost), 4) END AS b2
+  FROM bset GROUP BY ak, v
+),
 item_match AS MATERIALIZED (
   SELECT m.ik,
-    MAX(CASE WHEN b.v = 'h' AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006) THEN 1 ELSE 0 END) AS h_match,
-    MAX(CASE WHEN b.v = 'n' AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006) THEN 1 ELSE 0 END) AS n_match,
-    MAX(CASE WHEN b.v = 'h' THEN b.b1 END) AS buggy_mean_usd
-  FROM item_me m JOIN (
-    SELECT ik, v,
-      ROUND(AVG(cost), 4) AS b1,
-      CAST(AVG(cost) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
-      CASE WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost) ELSE ROUND(AVG(cost), 4) END AS b2
-    FROM bset GROUP BY ik, v) b ON b.ik = m.ik
-  GROUP BY m.ik
+    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h'
+      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS h_match,
+    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'n'
+      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS n_match,
+    EXISTS (SELECT 1 FROM anchor a JOIN anchor_b b ON b.ak = a.ak AND b.v = 'h'
+      WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t
+        AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS s_match,
+    EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = m.prod_at AND mb.at >= m.since AND mb.at <= m.t
+      AND (ABS(m.recorded - mb.b1) < 0.00006 OR ABS(m.recorded - mb.b1h) < 0.00006 OR ABS(m.recorded - mb.b2) < 0.00006)) AS m_match,
+    EXISTS (SELECT 1 FROM anchor a WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t)
+      OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = m.prod_at AND me.at >= m.since AND me.at <= m.t) AS has_setter,
+    (SELECT b.b1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h') AS buggy_mean_usd
+  FROM item_me m
 ),
 cand_lots AS MATERIALIZED (
   SELECT lot_id FROM lot_base
@@ -554,85 +714,107 @@ weighted AS MATERIALIZED (
   FROM (
     SELECT o.ik, CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END AS cost, o.q AS qty
     FROM (
-      SELECT la.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline, SUM(e.qty) AS q
-        FROM lot_at la JOIN ev e ON e.lot_id = la.lot_id AND e.pos < la.pos
+      SELECT ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline, SUM(e.qty) AS q
+        FROM item_ctx ic JOIN lot_at la ON la.ak = ic.ik JOIN ev e ON e.lot_id = la.lot_id AND e.pos < ic.pos
        WHERE la.active_t = 1
-       GROUP BY la.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline) o
+       GROUP BY ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline) o
     WHERE o.q > 0 AND (CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END) > 0)
   GROUP BY ik
 ),
 lot_agg AS MATERIALIZED (
-  SELECT ik,
-    MAX(CASE WHEN active_t = 1 AND created <= t AND bad = 1 THEN 1 ELSE 0 END) AS unverified,
-    MAX(CASE WHEN changed = 1 AND created <= t THEN 1 ELSE 0 END) AS lot_changed,
+  SELECT ak,
+    MAX(CASE WHEN active_t = 1 AND created <= at AND bad = 1 THEN 1 ELSE 0 END) AS unverified,
+    MAX(CASE WHEN changed = 1 AND created <= at THEN 1 ELSE 0 END) AS lot_changed,
     MAX(CASE WHEN fb_rank = 1 AND eligible = 1 THEN cost_t END) AS fallback
   FROM (
-    SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ik, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
+    SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
     FROM (
       SELECT la.*, bl.lot_id IS NOT NULL AS bad,
-        CASE WHEN la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.t AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
+        CASE WHEN la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
           THEN 1 ELSE 0 END AS eligible
-      FROM lot_at la LEFT JOIN bad_lots bl ON bl.lot_id = la.lot_id) y)
-  GROUP BY ik
+      FROM lot_at la LEFT JOIN bad_lots bl ON bl.lot_id = la.lot_id
+      WHERE la.ak < 1000000000000) y)
+  GROUP BY ak
 ),
 classified_items AS MATERIALIZED (
   SELECT g.*,
     CASE
-      WHEN g.t >= g.era_end THEN CASE WHEN g.h_match = 1 AND g.differs = 1 THEN 'after_window' END
+      WHEN g.t >= g.era_end THEN CASE WHEN g.matched = 1 AND g.differs = 1 THEN 'after_window'
+        WHEN g.born < g.era_end THEN 'unaffected' END
       WHEN g.orphan = 1 AND g.differs = 1 THEN 'needs_owner_review'
-      WHEN g.h_match = 1 AND g.correct IS NULL THEN 'needs_owner_review'
-      WHEN g.h_match = 1 AND g.unverified = 1 THEN 'ledger_unverified'
-      WHEN g.h_match = 1 AND g.differs = 0 THEN 'already_correct'
-      WHEN g.h_match = 1 AND g.kind = 'return' THEN 'returns_walk_in'
-      WHEN g.h_match = 1 AND g.t >= g.fix_at THEN 'window'
-      WHEN g.h_match = 1 THEN 'repair'
-      WHEN g.differs = 0 THEN NULL
+      WHEN g.matched = 1 AND g.correct IS NULL THEN 'needs_owner_review'
+      WHEN g.matched = 1 AND g.unverified = 1 THEN 'ledger_unverified'
+      WHEN g.matched = 1 AND g.differs = 0 THEN 'already_correct'
+      WHEN g.matched = 1 AND g.kind = 'return' THEN 'returns_walk_in'
+      WHEN g.matched = 1 AND g.t >= g.fix_at THEN 'window'
+      WHEN g.matched = 1 THEN 'repair'
+      WHEN g.differs = 0 THEN 'unaffected'
       WHEN g.n_match = 1 OR g.uncertain = 1 THEN 'needs_owner_review'
+      WHEN g.t < g.fix_at AND g.has_setter = 0 THEN 'unaffected'
+      ELSE 'needs_owner_review'
     END AS bucket,
     CASE
-      WHEN g.t >= g.era_end THEN 'buggy_average_after_deploy_window'
+      WHEN g.t >= g.era_end THEN CASE WHEN g.matched = 1 AND g.differs = 1 THEN 'buggy_average_after_deploy_window' ELSE 'after_deploy_window' END
       WHEN g.orphan = 1 AND g.differs = 1 THEN 'sold_lot_belongs_to_another_product'
-      WHEN g.h_match = 1 AND g.correct IS NULL THEN 'no_derivable_cost'
-      WHEN g.h_match = 1 AND g.unverified = 1 THEN 'lot_ledger_does_not_reconcile'
-      WHEN g.h_match = 1 AND g.differs = 0 THEN 'buggy_average_equalled_on_hand'
-      WHEN g.h_match = 1 AND g.t >= g.fix_at THEN 'buggy_average_deploy_window'
-      WHEN g.h_match = 1 THEN 'buggy_average'
+      WHEN g.matched = 1 AND g.correct IS NULL THEN 'no_derivable_cost'
+      WHEN g.matched = 1 AND g.unverified = 1 THEN 'lot_ledger_does_not_reconcile'
+      WHEN g.matched = 1 AND g.differs = 0 THEN 'buggy_average_equalled_on_hand'
+      WHEN g.matched = 1 AND g.kind = 'sale' AND g.t >= g.fix_at THEN g.producer || '_deploy_window'
+      WHEN g.matched = 1 THEN g.producer
+      WHEN g.differs = 0 THEN CASE WHEN g.correct IS NULL THEN 'no_lot_cost_at_line' ELSE 'recorded_equals_on_hand' END
       WHEN g.n_match = 1 THEN 'matches_only_todays_lot_state'
-      ELSE 'lot_history_changed_after_sale'
+      WHEN g.uncertain = 1 THEN 'lot_history_changed_after_sale'
+      WHEN g.t < g.fix_at AND g.has_setter = 0 THEN 'catalog_cost_set_before_era'
+      ELSE 'recorded_cost_unexplained'
     END AS reason
   FROM (
-    SELECT f.*, CASE WHEN f.correct IS NULL OR ABS(f.recorded - f.correct) < 0.00005 THEN 0 ELSE 1 END AS differs
+    SELECT f.*, CASE WHEN f.correct IS NULL OR ABS(f.recorded - f.correct) < 0.00005 THEN 0 ELSE 1 END AS differs,
+      CASE WHEN f.h_match = 1 OR f.s_match = 1 OR f.m_match = 1 THEN 1 ELSE 0 END AS matched,
+      CASE WHEN f.h_match = 1 THEN 'buggy_average' WHEN f.s_match = 1 THEN 'stale_buggy_average' ELSE 'stale_merge_cost' END AS producer
     FROM (
-      SELECT m.kind, m.item_id, m.sale_id, m.return_id, m.product_now AS product_id, m.quantity, m.recorded, m.t, m.pos,
+      SELECT m.kind, m.item_id, m.sale_id, m.return_id, m.product_now AS product_id, m.quantity, m.recorded, m.t, m.born, m.pos,
         m.fix_at, m.era_end, COALESCE(w.w, la.fallback) AS correct, COALESCE(w.on_hand_units, 0) AS on_hand_units,
-        COALESCE(mt.h_match, 0) AS h_match, COALESCE(mt.n_match, 0) AS n_match, mt.buggy_mean_usd,
+        COALESCE(mt.h_match, 0) AS h_match, COALESCE(mt.s_match, 0) AS s_match, COALESCE(mt.m_match, 0) AS m_match,
+        COALESCE(mt.n_match, 0) AS n_match, COALESCE(mt.has_setter, 0) AS has_setter, mt.buggy_mean_usd,
         COALESCE(la.unverified, 0) AS unverified, m.orphan,
         CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(la.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
       FROM item_me m LEFT JOIN weighted w ON w.ik = m.ik LEFT JOIN item_match mt ON mt.ik = m.ik
-      LEFT JOIN lot_agg la ON la.ik = m.ik) f) g
+      LEFT JOIN lot_agg la ON la.ak = m.ik) f) g
+),
+sale_scope AS MATERIALIZED (
+  SELECT DISTINCT sale_id FROM classified_items WHERE kind = 'sale' AND bucket IS NOT NULL
 ),
 linked AS MATERIALIZED (
   SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
     datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product,
-    COUNT(*) AS n_affected,
+    COUNT(sc.id) AS n_lines,
     SUM(CASE WHEN c.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
-    MIN(c.correct) AS min_correct, MAX(c.correct) AS max_correct, MIN(c.item_id) AS first_line_id,
-    MAX(c.buggy_mean_usd) AS buggy_mean_usd,
-    (SELECT COUNT(*) FROM sale_items s2 WHERE s2.sale_id = r.sale_id AND (s2.id = ri.sale_item_id
-      OR (ri.sale_item_id IS NULL AND s2.product_id = ri.product_id
-        AND (ri.branch_id IS NULL OR s2.branch_id IS NULL OR s2.branch_id = ri.branch_id)))) AS n_lines,
-    NOT EXISTS (SELECT 1 FROM sale_items s2 WHERE s2.sale_id = r.sale_id AND (s2.id = ri.sale_item_id
-      OR (ri.sale_item_id IS NULL AND s2.product_id = ri.product_id
-        AND (ri.branch_id IS NULL OR s2.branch_id IS NULL OR s2.branch_id = ri.branch_id)))
-      AND NOT (ABS(s2.cost_price_usd - ri.cost_price_usd) < 0.00006)) AS all_equal
-  FROM classified_items c
-  JOIN sale_items sc ON sc.id = c.item_id
-  JOIN returns r ON r.sale_id = c.sale_id
-  JOIN return_items ri ON ri.return_id = r.id AND ri.cost_price_usd IS NOT NULL
-   AND (ri.sale_item_id = c.item_id OR (ri.sale_item_id IS NULL AND ri.product_id = sc.product_id
+    SUM(CASE WHEN c.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
+    SUM(CASE WHEN ABS(sc.cost_price_usd - ri.cost_price_usd) < 0.00006 THEN 0 ELSE 1 END) AS n_unequal,
+    MIN(c.correct) AS min_correct, MAX(c.correct) AS max_correct, MIN(sc.id) AS first_line_id,
+    MAX(c.buggy_mean_usd) AS buggy_mean_usd
+  FROM sale_scope ss
+  JOIN returns r ON r.sale_id = ss.sale_id
+  JOIN return_items ri ON ri.return_id = r.id
+  LEFT JOIN sale_items sc ON sc.sale_id = r.sale_id AND (sc.id = ri.sale_item_id OR (ri.sale_item_id IS NULL AND sc.product_id = ri.product_id
      AND (ri.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = ri.branch_id)))
-  WHERE c.kind = 'sale' AND c.bucket IN ('repair', 'window', 'ledger_unverified', 'needs_owner_review')
-  GROUP BY ri.id, r.id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd, r.created_at, ri.sale_item_id, ri.branch_id
+  LEFT JOIN classified_items c ON c.kind = 'sale' AND c.item_id = sc.id
+  WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
+  GROUP BY ri.id, r.id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd, r.created_at, ri.sale_item_id
+),
+scope AS MATERIALIZED (
+  SELECT 'sale' AS kind, si.id AS item_id, si.sale_id, NULL AS return_id, si.product_id, si.quantity, si.cost_price_usd AS recorded,
+    datetime(s.created_at) AS t
+  FROM sales s JOIN sale_items si ON si.sale_id = s.id JOIN params p
+  WHERE si.product_id IS NOT NULL AND si.cost_price_usd > 0
+    AND datetime(s.created_at) >= '2026-09-16 14:04:42' AND datetime(s.created_at) < p.era_end
+  UNION ALL
+  SELECT 'return', ri.id, r.sale_id, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at)
+  FROM returns r JOIN return_items ri ON ri.return_id = r.id JOIN params p
+  WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
+    AND ((r.sale_id IS NULL AND ri.sale_item_id IS NULL
+        AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end)
+      OR r.sale_id IN (SELECT sale_id FROM sale_scope))
 ),
 classified AS MATERIALIZED (
   SELECT kind, item_id, sale_id, return_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units, t, bucket, reason
@@ -641,16 +823,36 @@ classified AS MATERIALIZED (
   SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
     COALESCE((SELECT c2.correct FROM classified_items c2 WHERE c2.kind = 'sale' AND c2.item_id = l.first_line_id), l.min_correct),
     l.buggy_mean_usd, NULL, NULL, l.t,
-    CASE WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked' ELSE 'needs_owner_review' END,
-    CASE WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
+    CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
+         WHEN l.n_unequal > 0 THEN 'unaffected'
+         WHEN l.n_review > 0 THEN 'needs_owner_review'
+         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
+         WHEN l.n_repaired > 0 THEN 'needs_owner_review'
+         ELSE 'unaffected' END,
+    CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
+         WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
+         WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
+         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
            THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
-         WHEN l.n_repaired = l.n_lines THEN 'sale_lines_of_product_now_differ'
-         ELSE 'follows_unrepaired_sale_line' END
-  FROM linked l WHERE l.all_equal = 1
+         WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
+         ELSE 'follows_sale_line' END
+  FROM linked l
+  UNION ALL
+  SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
+    'unbucketed', 'in_scope_line_not_classified'
+  FROM scope s
+  WHERE NOT EXISTS (SELECT 1 FROM classified_items c WHERE c.kind = s.kind AND c.item_id = s.item_id AND c.bucket IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM linked l WHERE s.kind = 'return' AND l.return_item_id = s.item_id)
 )
 -- plan:stop
 SELECT kind, item_id, sale_id, return_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units, t, bucket, reason
 FROM classified;
+
+-- assert: no in-scope line left unbucketed
+INSERT INTO branches(name) SELECT NULL WHERE EXISTS (SELECT 1 FROM sale_cost_repair_0200_plan WHERE bucket = 'unbucketed');
+
+-- assert: no line after the deploy window still carries a buggy figure (the old Worker served longer than the window)
+INSERT INTO branches(name) SELECT NULL WHERE EXISTS (SELECT 1 FROM sale_cost_repair_0200_plan WHERE bucket = 'after_window');
 
 INSERT OR IGNORE INTO sale_cost_repair_0200 (sale_item_id, sale_id, product_id, quantity, old_cost_price_usd, new_cost_price_usd,
   buggy_mean_usd, ledger_position, on_hand_units, bucket, reason)
@@ -668,18 +870,20 @@ WHERE p.kind = 'return' AND p.bucket IN ('returns_sale_linked', 'returns_walk_in
   AND ABS(ri.cost_price_usd - p.recorded_cost_usd) < 0.00006;
 
 UPDATE sale_items SET cost_price_usd = (SELECT r.new_cost_price_usd FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id)
-WHERE id IN (SELECT r.sale_item_id FROM sale_cost_repair_0200 r WHERE r.old_cost_price_usd IS sale_items.cost_price_usd);
+WHERE id IN (SELECT sale_item_id FROM sale_cost_repair_0200)
+  AND EXISTS (SELECT 1 FROM sale_cost_repair_0200 r WHERE r.sale_item_id = sale_items.id AND r.old_cost_price_usd IS sale_items.cost_price_usd);
 
 UPDATE return_items SET cost_price_usd = (SELECT x.new_cost_price_usd FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id)
-WHERE id IN (SELECT x.return_item_id FROM sale_cost_repair_0200_return_items x WHERE x.old_cost_price_usd IS return_items.cost_price_usd);
+WHERE id IN (SELECT return_item_id FROM sale_cost_repair_0200_return_items)
+  AND EXISTS (SELECT 1 FROM sale_cost_repair_0200_return_items x WHERE x.return_item_id = return_items.id AND x.old_cost_price_usd IS return_items.cost_price_usd);
 
--- assert: every rewritten sale line holds its new cost
+-- assert: no backed-up sale line still holds its old cost
 INSERT INTO branches(name) SELECT NULL WHERE EXISTS (SELECT 1 FROM sale_cost_repair_0200 r JOIN sale_items si ON si.id = r.sale_item_id
-  WHERE si.cost_price_usd IS NOT r.new_cost_price_usd);
+  WHERE si.cost_price_usd IS r.old_cost_price_usd);
 
--- assert: every rewritten return line holds its new cost
+-- assert: no backed-up return line still holds its old cost
 INSERT INTO branches(name) SELECT NULL WHERE EXISTS (SELECT 1 FROM sale_cost_repair_0200_return_items x JOIN return_items ri ON ri.id = x.return_item_id
-  WHERE ri.cost_price_usd IS NOT x.new_cost_price_usd);
+  WHERE ri.cost_price_usd IS x.old_cost_price_usd);
 
 -- assert: every rewritten-bucket plan row has its backup
 INSERT INTO branches(name) SELECT NULL WHERE EXISTS (SELECT 1 FROM sale_cost_repair_0200_plan p
