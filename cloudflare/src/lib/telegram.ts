@@ -10,14 +10,14 @@ import {
 import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
   getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
-  recognizedExpr, shiftWindowWhere, type SalesFilters,
+  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, loadShiftReconciliation, shiftDeliveryFeeExpenses, shiftExpenses, shiftFilters, summarizeShiftCash,
-  type ShiftMoney, type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
+  shiftExpenses, shiftFilters, summarizeShiftCash, type ShiftMoney, type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -360,7 +360,6 @@ export async function sendTelegramTest(env: Env): Promise<void> {
 /** One business day (UTC+7) of a UTC timestamp column, as a bound clause. */
 const dayClause = (column: string): string => localDateRangeClause(column, '@date', '@date')
 
-type MoneyBucket = { count: number; usd: number; khr: number } | null | undefined
 type UnitBucket = { count: number; quantity: number } | null | undefined
 /** Kernel-derived, so it carries what the kernel knows and the old SUM did not:
  *  how many receipts were VOIDED, and how much was refunded. Profit, delivery
@@ -374,12 +373,17 @@ type UnitBucket = { count: number; quantity: number } | null | undefined
 type SalesBucket = {
   count: number; usd: number; cancelled: number; refundUsd: number
   profitUsd: number; deliveryFeeUsd: number; creditUsd: number
-  // The courier money actually paid out over the day, and how many sales
-  // recorded any (a missing cost is NULL, never 0 -- deliveryActualCostExpr,
-  // which is why the count exists). It rides along for ONE reason: the day
-  // header and the shift header print the same word "Expenses", so they have
-  // to add up the same two things. See expenseTotals() below.
-  deliveryCostUsd: number; deliveryCostRecorded: number
+  // The courier money actually paid out on the day's sales, in both
+  // currencies: courierPayoutsWhere (lib/shiftReconciliation.ts), the query
+  // the shift report's delivery cost reads, which leaves out a payout that is
+  // also recorded as a linked delivery fee (the fees below carry that one).
+  // NOT the kernel's delivery_actual_cost_usd: that total is the raw column,
+  // unguarded, and the old day summary counted such a payout twice. It rides
+  // along for ONE reason: the day summary and the shift report print the same
+  // word "Expenses", so they have to split and add up the same things. See
+  // expenseTotals() below. The riel half is optional only for callers without
+  // a database (the pure tests); absent means none.
+  deliveryCostUsd: number; deliveryCostKhr?: number
   /**
    * Stock removed entirely over the window, priced at cost -- the owner's
    * "if remove directly it also counts toward losses. as cost price no
@@ -394,7 +398,13 @@ type SalesBucket = {
    *  price. this is impossible find issue and fix". Never dropped silently. */
   removalLossUnvaluedRows?: number
 }
-type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
+/** The day's fees: every one (`usd`/`khr`) and the subset typed 'delivery'
+ *  (`deliveryUsd`/`deliveryKhr`), off ONE scan (FEE_SPLIT_COLUMNS). The subset
+ *  is optional only for callers without a database (the pure tests): absent
+ *  means no fee is known to be delivery-typed. /fees prints `usd`/`khr`, the
+ *  total of the fee records it lists. */
+type FeeBucket = { count: number; usd: number; khr: number; deliveryUsd?: number; deliveryKhr?: number } | null | undefined
+type DayStats = { date: string; sales: SalesBucket; fees: FeeBucket; stockIn: UnitBucket; stockOut: UnitBucket }
 type CashierRow = { cashier: string; count: number; usd: number }
 
 /** One business day as kernel filters. The shift report next door already
@@ -417,9 +427,14 @@ const dayFilters = (date: string): SalesFilters => ({ startDate: date, endDate: 
 // dollars when the riel side is zero.
 async function dayStats(env: Env, date: string): Promise<DayStats> {
   const db = getDb(env)
-  const [totals, fees, stockIn, stockOut] = await Promise.all([
+  // The kernel's own "active sales on this day" clause, so the courier half
+  // is read over exactly the sales the revenue above is.
+  const courierWhere = whereActiveSales('sales', dayFilters(date))
+  const [totals, fees, courier, stockIn, stockOut] = await Promise.all([
     getSalesTotals(env, dayFilters(date)),
-    db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fee_date = @date').get<{ count: number; usd: number; khr: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date = @date`)
+      .get<{ count: number; usd: number; khr: number; delivery_usd: number; delivery_khr: number }>({ date }),
+    courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
     // 'stock_in' is the legacy string the unified stock-in session used to
     // write (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) --
     // without it this digest under-counted every session committed through
@@ -438,10 +453,12 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       // never subtracted from anything (the owner: "just use credit ...
       // instead of $-n ... just $n").
       creditUsd: totals.pending_revenue_usd,
-      // Same call, same two fields the shift report reads -- so the two
-      // reports' "Expenses" is one sum with one source, not a lookalike.
-      deliveryCostUsd: totals.delivery_actual_cost_usd,
-      deliveryCostRecorded: totals.delivery_actual_cost_count,
+      // The courier half of the delivery cost, off the SAME query the shift
+      // report's delivery cost reads (courierPayoutsWhere), over this day's
+      // sales -- not the kernel's raw delivery_actual_cost_usd, which counts
+      // a payout that is also a linked delivery fee a second time.
+      deliveryCostUsd: courier.usd,
+      deliveryCostKhr: courier.khr,
       // Stock destroyed outright, at cost. Same kernel field the Reports hub
       // and the Dashboard read, so the three surfaces cannot disagree. Note
       // the `stockOut` line below is NOT this figure: it counts quantity over
@@ -449,7 +466,10 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       removalLossUsd: totals.removal_loss_usd,
       removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
     },
-    fees,
+    fees: fees && {
+      count: Number(fees.count) || 0, usd: Number(fees.usd) || 0, khr: Number(fees.khr) || 0,
+      deliveryUsd: Number(fees.delivery_usd) || 0, deliveryKhr: Number(fees.delivery_khr) || 0,
+    },
     stockIn,
     stockOut,
   }
@@ -492,30 +512,64 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
   localizeTelegramValue(`${Number(count) || 0} ${noun}`)
 
 /**
- * "Expenses" -- the ONE definition, shared by the shift report and the day
- * summary because they print the same word for it.
+ * "Expenses" -- the ONE split, shared by the shift report, the day summary
+ * and the Reports overview because they print the same words for it:
+ * composeShiftFigures (lib/shiftReconciliation.ts), the function the in-app
+ * shift report renders.
  *
- * They did not share it until Sep 7 2026: the day header added up the fees
- * table alone while the shift header added the fees to the courier money
- * actually paid out, so a single-shift day showed `/shift` "Expenses: $17.00"
- * against `/report` "Expenses: $9.50" and nothing on either message said why.
+ *   Actual delivery cost = courier payouts on the sales + fees typed 'delivery'
+ *   Other expenses       = every remaining fee
+ *   Total                = the two, in both currencies
  *
- * An UNRECORDED courier cost is NULL, never $0.00 (deliveryActualCostExpr in
- * salesAnalytics.ts) -- `recorded` is the count of sales that carry one, and a
- * zero there keeps delivery out of the total entirely rather than claiming
- * delivery was free.
+ * That is the owner's rule (24 Sep 2026, memory shop-paid-delivery-cancels-out):
+ * the delivery money the business counts is what the courier was actually
+ * paid -- on the sale, or by hand and entered as a delivery expense -- and it
+ * is counted once. courierPayoutsWhere leaves out a payout that is also
+ * recorded as a linked delivery fee, so the fee is that payout's one count.
  *
- * ARITHMETIC ONLY (Sep 21 2026). It used to hand back two rendered lines as
- * well; each report now draws its own Expenses SECTION -- the shift lists the
- * individual expenses, the day summary has no per-fee rows to list -- so the
- * shared thing is the sum, not the layout. One definition, two renderings,
- * no second way of adding delivery to fees.
+ * History. Until Sep 7 2026 the day header added up the fees table alone. The
+ * shift report then moved delivery-typed fees into the delivery cost (H-io #2,
+ * 27 Sep 2026) while this function still added the kernel's raw courier
+ * dollars to ALL fees, so at one close `/shift` said delivery $13.00 and the
+ * overview and `/report` said $3.00 plus $14.00 other (R-telegram E2, 27 Sep
+ * 2026) -- and a payout that was also a linked fee counted twice, and the
+ * riel half of the courier money was dropped. An UNRECORDED courier cost is
+ * NULL and sums as nothing; a half that is zero prints no row.
+ *
+ * ARITHMETIC ONLY (Sep 21 2026). Each report draws its own Expenses SECTION --
+ * the shift lists the individual expenses, the day summary and the overview
+ * have no per-fee rows to list (expenseSectionRows) -- so the shared thing is
+ * the split, not the layout.
  */
-function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { courierUsd: number; otherUsd: number; otherKhr: number; totalUsd: number } {
-  const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
-  const otherUsd = round2(Number(input.otherUsd) || 0)
-  const otherKhr = Number(input.otherKhr) || 0
-  return { courierUsd, otherUsd, otherKhr, totalUsd: round2(otherUsd + courierUsd) }
+type ExpenseInput = Partial<ShiftMoney> | null | undefined
+type ExpenseSplit = { deliveryCost: ShiftMoney; other: ShiftMoney; total: ShiftMoney }
+function expenseTotals(input: { fees: ExpenseInput; deliveryFees: ExpenseInput; courier: ExpenseInput }): ExpenseSplit {
+  const split = composeShiftFigures({
+    opening: null, counted: null, totals: null,
+    expenses: input.fees, deliveryFees: input.deliveryFees, courier: input.courier,
+  })
+  const deliveryCost = split.delivery_cost
+  const other = split.other_expenses
+  return { deliveryCost, other, total: { usd: round2(deliveryCost.usd + other.usd), khr: deliveryCost.khr + other.khr } }
+}
+const hasMoney = (value: ShiftMoney): boolean => value.usd !== 0 || value.khr !== 0
+
+/**
+ * The Expenses rows of the day summary and the Reports overview -- the same
+ * rows on both. The two component lines print only when the total really has
+ * two parts: with one part the total IS that part, and printing it twice under
+ * two names is the repeated figure the owner asked us to take out.
+ */
+function expenseSectionRows(expenses: ExpenseSplit): string[] {
+  const rows: string[] = []
+  if (hasMoney(expenses.deliveryCost) && hasMoney(expenses.other)) {
+    rows.push(
+      labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)),
+      labeled('expensesOther', money(expenses.other.usd, expenses.other.khr)),
+    )
+  }
+  if (hasMoney(expenses.total)) rows.push(labeled('total', money(expenses.total.usd, expenses.total.khr)))
+  return rows
 }
 
 // ---- The sectioned layout (owner, Sep 21 2026) -----------------------------
@@ -646,13 +700,14 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   }
 
   // Expenses is computed first because the Sales section needs one figure out
-  // of it: the courier money. See the Expenses comment below.
+  // of it: the courier money. See the Expenses comment below. The fees
+  // switch takes the fees table's rows -- the delivery-typed ones included --
+  // and the sales switch takes the courier money paid on the sales.
   const showExpenses = categories?.fees !== false
   const expenses = expenseTotals({
-    otherUsd: showExpenses ? stats.fees?.usd : 0,
-    otherKhr: showExpenses ? stats.fees?.khr : 0,
-    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
-    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
+    fees: showExpenses ? { usd: stats.fees?.usd, khr: stats.fees?.khr } : null,
+    deliveryFees: showExpenses ? { usd: stats.fees?.deliveryUsd, khr: stats.fees?.deliveryKhr } : null,
+    courier: showSales ? { usd: stats.sales?.deliveryCostUsd, khr: stats.sales?.deliveryCostKhr } : null,
   })
 
   // Sales -- Revenue and Profit print even at $0.00: a day that took
@@ -666,8 +721,9 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // under Expenses with the shop's own fees. With Expenses switched off
     // there is no section to report it in, so it stays here, beside the fee
     // the customer was charged, rather than disappearing with a switch that
-    // was only ever about the fees table.
-    if (!showExpenses && expenses.courierUsd > 0) sales.push(labeled('deliveryCost', usd(expenses.courierUsd)))
+    // was only ever about the fees table. With the fees switched off the
+    // split's delivery cost is exactly that courier money, in both currencies.
+    if (!showExpenses && hasMoney(expenses.deliveryCost)) sales.push(labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)))
     if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
     // Directly below Not Paid, the owner's "also add one row below unpaid in
     // reports as well". One number, no sentence. Like Not Paid it is a
@@ -682,16 +738,11 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
   }
 
-  // Expenses -- the SAME sum the shift report prints, through the same
-  // function: the fees of the day plus the courier money actually paid out.
-  const expenseRows: string[] = []
-  // The two component lines print only when the total really has two parts.
-  // With one part the total IS that part, and printing it twice under two
-  // names is the repeated figure the owner asked us to take out.
-  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
-    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
-  }
-  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
+  // Expenses -- the SAME split the shift report prints, through the same
+  // function (composeShiftFigures, via expenseTotals): the delivery cost is
+  // the courier money paid on the day's sales plus the fees typed 'delivery',
+  // the other expenses are every remaining fee, and the total is both.
+  const expenseRows = expenseSectionRows(expenses)
   // OFF means gone -- no heading and no `N/A` placeholder. It used to stay
   // alive whenever Sales was on, so a shop that switched Expenses off was
   // still sent the Expenses heading with `· N/A` under it on every quiet
@@ -1438,8 +1489,9 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
 // GET /api/reports/overview?startDate=D&endDate=D&branchId=B answers. Every
 // sales figure is the kernel's (getSalesTotals, getSalesGroupedTotals by
 // payment method -- the same calls that route makes); nothing is re-derived.
-// "Expenses" is expenseTotals(), the one sum the shift report and the day
-// summary print under that word.
+// "Expenses" is expenseTotals(), the one delivery/other split
+// (composeShiftFigures) the shift report and the day summary print under that
+// word, over the day's fees and the courier money paid on the day's sales.
 //
 // HOW IT IS SCHEDULED (the same on both plans; the plan is not the axis).
 //   1. The close commits. Then a `telegram_scheduled_sends` row (migration
@@ -1508,7 +1560,10 @@ export type ShiftOverviewFigures = {
   deliveryFeeUsd: number; creditUsd: number; refundUsd: number
   invoices: number; cancelled: number
   paymentMethods: Array<{ method: string; count: number; usd: number }>
-  otherExpenseUsd: number; otherExpenseKhr: number; deliveryCostUsd: number; deliveryCostRecorded: number
+  /** expenseTotals' three inputs for the day and branch: every fee, the fees
+   *  typed 'delivery', and the courier money paid on the sales
+   *  (courierPayoutsWhere) -- the same three the shift report splits. */
+  expenses: { fees: ShiftMoney; deliveryFees: ShiftMoney; courier: ShiftMoney }
   returns: { count: number; refundUsd: number; refundKhr: number }
 }
 
@@ -1553,16 +1608,13 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
 
+  // The day summary's split and rows, switches applied the same way.
   const expenses = expenseTotals({
-    otherUsd: showExpenses ? figures.otherExpenseUsd : 0, otherKhr: showExpenses ? figures.otherExpenseKhr : 0,
-    deliveryCostUsd: showSales ? figures.deliveryCostUsd : 0, deliveryCostRecorded: showSales ? figures.deliveryCostRecorded : 0,
+    fees: showExpenses ? figures.expenses.fees : null,
+    deliveryFees: showExpenses ? figures.expenses.deliveryFees : null,
+    courier: showSales ? figures.expenses.courier : null,
   })
-  const expenseRows: string[] = []
-  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
-    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
-  }
-  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  section('expenses', expenseRows, showExpenses)
+  section('expenses', expenseSectionRows(expenses), showExpenses)
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
@@ -1584,14 +1636,18 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
   const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
   if (filters.branchId != null) params.branchId = filters.branchId
   const db = getDb(env)
-  const [totals, payments, fees, returned] = await Promise.all([
+  // The courier half over the kernel's own sale set for these filters.
+  const courierWhere = whereActiveSales('sales', filters)
+  const [totals, payments, fees, returned, courier] = await Promise.all([
     getSalesTotals(env, filters),
     getSalesGroupedTotals(env, filters, 'payment_method'),
-    db.prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees
-      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`).get<{ usd: number; khr: number }>(params),
+    db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
+      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`)
+      .get<{ usd: number; khr: number; delivery_usd: number; delivery_khr: number }>(params),
     db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS khr FROM returns
       WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
         AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
+    courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
   ])
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
@@ -1607,8 +1663,11 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
         usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
       }),
     ),
-    otherExpenseUsd: Number(fees?.usd) || 0, otherExpenseKhr: Number(fees?.khr) || 0,
-    deliveryCostUsd: totals.delivery_actual_cost_usd, deliveryCostRecorded: totals.delivery_actual_cost_count,
+    expenses: {
+      fees: { usd: Number(fees?.usd) || 0, khr: Number(fees?.khr) || 0 },
+      deliveryFees: { usd: Number(fees?.delivery_usd) || 0, khr: Number(fees?.delivery_khr) || 0 },
+      courier,
+    },
     returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
   }
 }

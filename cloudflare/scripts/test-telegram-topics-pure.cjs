@@ -78,7 +78,7 @@ function makeDb(settingsRows) {
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sales (id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, receipt_number TEXT,
       subtotal_usd REAL, discount_usd REAL, membership_discount_usd REAL, tax_usd REAL, total_usd REAL, total_khr REAL,
-      delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER, delivery_actual_cost_usd REAL,
+      delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER, delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL,
       delivery_contact_id INTEGER, delivery_contact_name TEXT, branch_id INTEGER, branch_name TEXT,
       customer_id INTEGER, customer_name TEXT, customer_phone TEXT, cashier_id INTEGER, cashier_name TEXT,
       payment_method TEXT, amount_paid_usd REAL, source_return_id INTEGER);
