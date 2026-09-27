@@ -116,6 +116,10 @@ async function googleSignIn(h, google, subject, deviceId) {
   return { status: res.status, payload: JSON.parse(match[1]) }
 }
 
+// The fields buildUserPayload serializes.
+const SERIALIZED = ['id', 'username', 'name', 'organizationId', 'roleId', 'permissions', 'role_code', 'role_permissions']
+const pick = (user, keys) => Object.fromEntries(keys.map((key) => [key, user ? user[key] : undefined]))
+
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8').replace(/\r\n/g, '\n')
 function between(source, start, end) {
   const from = source.indexOf(start)
@@ -196,7 +200,11 @@ async function main() {
     const password = await passwordSignIn(h, 'owner', 'owner-pass', 'dev-owner')
     const unlinked = await h.request('/oauth/unlink', 'POST', { currentPassword: 'owner-pass' }, { actorId: 15 })
     assert.equal(unlinked.status, 200, JSON.stringify(unlinked.body))
-    assert.deepEqual(unlinked.body.user, password.body.user)
+    // Unlinking answers with the serialized account, not a sign-in: a field a
+    // sign-in answer adds on top of buildUserPayload is not expected here.
+    assert.deepEqual(pick(unlinked.body.user, SERIALIZED), pick(password.body.user, SERIALIZED))
+    assert.equal(unlinked.body.user.role_code, 'admin')
+    assert.equal(unlinked.body.user.role_permissions, '{"all":true}')
     assert.equal(h.userRow(15).google_subject, null, 'control: the link is gone')
   })
 
