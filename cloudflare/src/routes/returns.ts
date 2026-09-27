@@ -15,7 +15,7 @@ import { bumpVersion, bumpVersions } from '../lib/cache'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { planReceiveBatchStock, planRemoveStockFromBatch, readFifoLotAvailabilityForCart, allocateAcrossLots, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import {
-  normalizeStockAction, resolveRefundUnitPrice, planReturnLot, ReturnLotRequiredError,
+  normalizeStockAction, resolveRefundUnitPrice, matchRefundSaleLine, RefundSaleLineError, planReturnLot, ReturnLotRequiredError,
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
@@ -1429,6 +1429,7 @@ app.post('/', async (c) => {
   let soldLines: Array<{
     id: number; product_id: number | null; product_name: string | null; quantity: number
     branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
+    applied_price_usd: number | null; applied_price_khr: number | null
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
@@ -1448,7 +1449,7 @@ app.post('/', async (c) => {
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     returnItems = body.items.map((item) => {
@@ -1562,13 +1563,31 @@ app.post('/', async (c) => {
   const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
   const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
   const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
-  const refundPrices = returnItems.map((item) => {
-    const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
-    return exact ? { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr } : resolveRefundUnitPrice({
-      saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
-      postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+  // A return against a sale is priced from that sale's own lines, matched the
+  // same way the quantity cap matched them: by sale_item_id, else by product_id.
+  // Only a return with no sale at all falls back to the posted price.
+  let refundPrices: Array<{ unitUsd: number; unitKhr: number }>
+  try {
+    refundPrices = returnItems.map((item) => {
+      const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
+      if (exact) return { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr }
+      if (!saleMeta) {
+        return resolveRefundUnitPrice({
+          saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
+          postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
+        })
+      }
+      const match = matchRefundSaleLine(soldLines, item)
+      return resolveRefundUnitPrice({
+        saleLine: match?.line ?? null, matchedBy: match?.matchedBy,
+        postedUsd: item.applied_price_usd == null ? null : toNumber(item.applied_price_usd),
+        postedKhr: item.applied_price_khr == null ? null : toNumber(item.applied_price_khr),
+      })
     })
-  })
+  } catch (error) {
+    if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
   const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
   const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
@@ -2738,12 +2757,40 @@ app.patch('/:id', async (c) => {
 
   // The refund per line: the ORIGINAL sale line's price, always -- an edit is
   // not a chance to restate what the customer paid. A manual return (no sale
-  // line) has only the posted price to go on.
-  const editRefundPrices = newItems.map((item) => resolveRefundUnitPrice({
-    saleLine: item.sale_item_id ? saleItemBatchInfoForEdit.get(Number(item.sale_item_id)) ?? null : null,
-    postedUsd: toNumber(item.applied_price_usd, 0),
-    postedKhr: toNumber(item.applied_price_khr, 0),
-  }))
+  // line) has only the posted price to go on. A return against a sale is
+  // priced from that sale's lines, matched exactly as POST / matches them:
+  // by sale_item_id, else by product_id (capped at the recorded price).
+  const editSalePriceLines = existing.sale_id
+    ? await db.prepare('SELECT id,product_id,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+      .all<{ id: number; product_id: number | null; applied_price_usd: number | null; applied_price_khr: number | null }>([existing.sale_id])
+    : []
+  let editRefundPrices: Array<{ unitUsd: number; unitKhr: number; fromSaleLine: boolean }>
+  try {
+    editRefundPrices = newItems.map((item) => {
+      if (!existing.sale_id) {
+        return resolveRefundUnitPrice({
+          saleLine: item.sale_item_id ? saleItemBatchInfoForEdit.get(Number(item.sale_item_id)) ?? null : null,
+          postedUsd: toNumber(item.applied_price_usd, 0),
+          postedKhr: toNumber(item.applied_price_khr, 0),
+        })
+      }
+      // Same rule POST / enforces through its quantity cap: a posted line on
+      // a sale must name a sale item or a product, or there is no recorded
+      // price to hold it to.
+      if (Array.isArray(body.items) && !(Number(item.sale_item_id) > 0) && !(Number(item.product_id) > 0)) {
+        throw new RefundSaleLineError('return_refund_sale_line_required', 'Each return line needs a sale item or product')
+      }
+      const match = matchRefundSaleLine(editSalePriceLines, item)
+      return resolveRefundUnitPrice({
+        saleLine: match?.line ?? null, matchedBy: match?.matchedBy,
+        postedUsd: item.applied_price_usd == null ? null : toNumber(item.applied_price_usd, 0),
+        postedKhr: item.applied_price_khr == null ? null : toNumber(item.applied_price_khr, 0),
+      })
+    })
+  } catch (error) {
+    if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
 
   const editLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of newItems) {
