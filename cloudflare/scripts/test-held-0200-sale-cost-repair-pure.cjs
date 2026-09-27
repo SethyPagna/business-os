@@ -22,9 +22,12 @@
 //   5. Recovery (the header's statements, verbatim): byte-identical cost
 //      columns, and a line edited after 0200 is left alone.
 //   6. Held: the file is NOT in cloudflare/migrations (a deploy applies every
-//      waiting file there); its number sorts after 0195 and after every file
-//      in the chain, so moving it in unchanged applies it last; the whole
-//      chain plus it applies to a fresh database.
+//      waiting file there); its number sorts after every chain file that
+//      touches a table it reads or writes (0195 among them), so moving it in
+//      unchanged runs it after all of them. It need not be the last file: a
+//      chain file numbered above it must touch none of those tables, and the
+//      whole chain plus it applies to a fresh database in either order, to
+//      the same schema.
 //   7. Owner-run audit: every command in the header is --command (never
 //      --file), and each one cut from the audit file is exactly that audit
 //      statement and runs, returning the numbers the header says to read.
@@ -339,20 +342,47 @@ check('recovery: the header statements restore both cost columns byte-identical;
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s1.lineId).c, 11.8333, 'the rest is restored')
 })
 
-check('held: not in cloudflare/migrations; sorts after 0195 and after every chain file; the chain plus it applies to a fresh database', () => {
+// The tables a migration names: its SQL with comments and string literals
+// blanked (a quoted name is data, e.g. the merge payload's '$.table' values).
+const namedIn = (text) => {
+  const sql = text.replace(/'(?:[^']|'')*'|--[^\n]*|\/\*[\s\S]*?\*\//g, ' ')
+  return (table) => new RegExp(`\\b${table}\\b`, 'i').test(sql)
+}
+
+check('held: not in cloudflare/migrations; sorts after every chain file touching a table it reads or writes (0195 among them), not necessarily last; the chain plus it applies to a fresh database in either order', () => {
   const chain = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
+  const chainText = (f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')
   assert.ok(!chain.some((f) => /sale_cost_on_hand_repair/.test(f)), 'the repair must not sit in the deploy chain')
   assert.ok(!chain.some((f) => f.startsWith('0200_')), 'slot 0200 is this held file, not a chain file')
   assert.ok(chain.includes('0195_catalog_cost_on_hand.sql'), '0195 stays in the chain')
   assert.ok(!loadAll().some((sql) => /CREATE TABLE sale_cost_repair_/.test(sql)), 'the full chain creates no repair table')
   assert.match(heldName, /^\d{4}_[a-z0-9_]+\.sql$/, 'wrangler migration file name shape')
-  // Moved in unchanged, it sorts after 0195 and after the whole current chain.
+  // Moved in unchanged, it takes its place by number (wrangler orders
+  // migration files by their leading number).
   const movedIn = [...chain, heldName].sort()
-  assert.ok(movedIn.indexOf(heldName) > movedIn.indexOf('0195_catalog_cost_on_hand.sql'))
-  assert.equal(movedIn[movedIn.length - 1], heldName, 'applied last')
-  const fresh = openDb(loadAll()).db
+  assert.ok(movedIn.indexOf(heldName) > movedIn.indexOf('0195_catalog_cost_on_hand.sql'), 'it reads the backup 0195 creates, so it must sort after 0195')
+  // What it depends on: every chain file that names a table the repair names,
+  // the tables read from the migrated schema itself.
+  const fresh = openDb(chain.map(chainText)).db
+  const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
+  const touched = tables.filter(namedIn(migrationText))
+  const dependencies = chain.filter((f) => touched.some(namedIn(chainText(f))))
+  assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
+  assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
+  const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
+  assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
+    `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
+    'It need not be the last file, but a file numbered above it must touch none of those tables: wrangler applies whatever is ' +
+    'unapplied in file-number order, so where that file is already applied (production) the repair runs after it, and on a ' +
+    'fresh database it runs before it -- the two orders agree only when they cannot interact. Otherwise number the repair ' +
+    'above that file in the owner-approved move.')
+  // The chain plus it: production's order (every chain file already applied) ...
   fresh.exec(migrationText)
   assert.equal(fresh.prepare('SELECT COUNT(*) n FROM sale_cost_repair_0200').get().n, 0, 'fresh database: nothing to repair')
+  // ... and a fresh database's once it is moved in (file-number order).
+  const byNumber = openDb(movedIn.map((f) => (f === heldName ? migrationText : chainText(f)))).db
+  const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
+  assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
 })
 
