@@ -804,6 +804,49 @@ async function main() {
     ], [D])
   })
 
+  // FX-stock4 X1 (R-stock3 test gap): the re-apply takes from the OLDEST lot
+  // first, in both of its walks -- the drain of a lower count, and the
+  // settlement of a lot a sale overdrew. No test pinned the settlement order,
+  // so a newest-first settlement (R-stock3's settle-lifo mutant) passed
+  // everything; the drain order was pinned only inside longer scenarios, so
+  // it gets its own direct test too. The
+  // lot quantities are compared with the inactive marks stripped: this pins
+  // WHICH lot the units come off, not when an empty lot is hidden.
+  const lotQuantities = (rawDb, productId) => ledger(rawDb, productId).lots.replace(/\(inactive\)/g, '')
+
+  await test('X1: a corrected count drains the oldest lot first: receive 5 @08-01 and 5 @09-01, count 09-10 = 7, corrected to 4: lots 0 / 4 (newest-first: 4 / 0)', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 130
+    addProduct(rawDb, P)
+    await runSteps(rawDb, P, [
+      ['receive 5 @08-01', () => receive(db, P, 5, '2026-08-01'), { branch: 5 }],
+      ['receive 5 @09-01', () => receive(db, P, 5, '2026-09-01'), { branch: 10 }],
+      ['count 09-10 = 7', () => applyCount(db, P, [['2026-09-10', 7]]), { branch: 7, lotSum: 7 }],
+      ['re-applied', () => applyCount(db, P, [['2026-09-10', 7]]), { branch: 7, lotSum: 7 }],
+      ['corrected 09-10 = 4', () => applyCount(db, P, [['2026-09-10', 4]]), { branch: 4, lotSum: 4 }],
+    ])
+    assert.strictEqual(lotQuantities(rawDb, P), '2026-08-01=0 2026-09-01=4', 'the drain walked oldest first')
+  })
+
+  await test('X1: a corrected count settles an overdrawn lot from the oldest lot first: receipt 7 @08-01, count 08-16 = 10, sale 9, receipts 4 @08-10 and 4 @09-01, corrected 08-16 = 3: lots 0 / 0 / 0 / 3 (newest-first: 0 / 1 / 0 / 2)', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 131
+    addProduct(rawDb, P)
+    await runSteps(rawDb, P, [
+      ['receipt 7 @08-01', () => receive(db, P, 7, '2026-08-01'), { branch: 7 }],
+      ['count 08-16 = 10 (+3 on its own lot)', () => applyCount(db, P, [['2026-08-16', 10]]), { branch: 10, lots: '2026-08-01=7 2026-08-16=3' }],
+      ['FIFO sale 9 (7 + 2 of the count lot)', () => sell(db, rawDb, P, 9), { branch: 1, lotSum: 1 }],
+      ['receipt 4 @08-10', () => receive(db, P, 4, '2026-08-10'), { branch: 5 }],
+      ['receipt 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 9 }],
+      // Reversing the count's +3 leaves its lot owing 2 (the sale took 2 of
+      // them); the -3 to reach 3 drains the 08-10 lot to 1, and the 2 owed
+      // are settled from the oldest lot that still holds any: 08-10's last
+      // 1, then 1 from 09-01.
+      ['corrected 08-16 = 3', () => applyCount(db, P, [['2026-08-16', 3]]), { branch: 3, lotSum: 3 }],
+    ])
+    assert.strictEqual(lotQuantities(rawDb, P), '2026-08-01=0 2026-08-10=0 2026-08-16=0 2026-09-01=3', 'the settlement walked oldest first')
+  })
+
   await test('seeded random walk: receipts, FIFO sales, counts, re-applies, corrections, soft-deletes and reverts keep lots == branch at every step', async () => {
     const { rawDb, db } = freshDb()
     const SEQUENCES = 120
