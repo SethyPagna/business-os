@@ -120,7 +120,9 @@ runTest('guest startup ignores expected unauthorized websocket probes', () => {
   assert.match(appContextSource, /ensureSyncUpdateCacheListener\(\)[\s\S]*const onUpdate = \(e: Event\) =>/)
   assert.match(httpSource, /export function ensureSyncUpdateCacheListener\(\): void/)
   assert.doesNotMatch(httpSource, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('sync:update'/)
-  assert.match(appContextSource, /const quickCheck = window\.setTimeout\(poll, 100\)[\s\S]*pollTimer = window\.setInterval\(poll, pollRate\)/)
+  // F2: one status read at registration, then sync:status events only.
+  assert.match(appContextSource, /const connectedAtRegistration = isWSConnected\(\)/)
+  assert.doesNotMatch(appContextSource, /window\.setInterval\(poll/)
   assert.match(websocketSource, /export function ensureWebSocketLifecycleListeners\(\): void \{[\s\S]*!hasStoredAuthSession\(\)[\s\S]*window\.addEventListener\('auth:unauthorized'/)
   assert.match(websocketSource, /export function resumeWS\(\): void \{[\s\S]*wsSuppressReconnectUntil = 0[\s\S]*reconnectAttempts = 0[\s\S]*reconnectWS\(\)/)
   assert.doesNotMatch(websocketSource, /window\.addEventListener\('online'[\s\S]{0,160}connectWS/)

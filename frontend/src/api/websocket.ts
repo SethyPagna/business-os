@@ -17,7 +17,10 @@ let wsPingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectAttempts = 0
 let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
-let wsIntentionalClose = false
+// Per socket, not one shared flag: a flag set for a socket that is then
+// replaced (disconnect + immediate reconnect) used to leak onto the next one
+// and swallow its first genuine drop as "intentional", so it never reconnected.
+const intentionallyClosedSockets = new WeakSet<WebSocket>()
 let wsLifecycleListenersRegistered = false
 let wsDeferredConnectTimer: ReturnType<typeof setTimeout> | null = null
 let wsLastPongAt = 0
@@ -103,7 +106,6 @@ export function connectWS(): void {
 
   try {
     logWs('debug', 'attempting connect to', wsUrl)
-    wsIntentionalClose = false
     ws = new WebSocket(wsUrl)
   } catch (e) {
     logWs('warn', 'connect error (constructor):', e)
@@ -111,7 +113,15 @@ export function connectWS(): void {
     return
   }
 
+  // Handlers below belong to this socket only. resumeWS() replaces a stale
+  // socket before the old one's close event arrives; without this check that
+  // late close cleared the NEW socket's ping timer, nulled `ws` and announced
+  // "disconnected" while the new socket was open. AppContext trusts the
+  // sync:status events instead of polling, so a false one would stick.
+  const socket = ws
+
   ws.onopen = () => {
+    if (ws !== socket) return
     logWs('debug', 'connected')
     const reconnected = reconnectAttempts > 0
     reconnectAttempts = 0
@@ -161,6 +171,7 @@ export function connectWS(): void {
   }
 
   ws.onclose = (ev: CloseEvent) => {
+    if (ws !== socket) return
     clearPingTimer()
     const code = ev?.code || 0
     const reason = ev?.reason || ''
@@ -169,10 +180,7 @@ export function connectWS(): void {
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
     wsLastPongAt = 0
-    if (wsIntentionalClose) {
-      wsIntentionalClose = false
-      return
-    }
+    if (intentionallyClosedSockets.has(socket)) return
     if (code === 4001) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: {
@@ -193,7 +201,7 @@ export function connectWS(): void {
 
   ws.onerror = (err: Event) => {
     logWs('warn', 'error', err)
-    try { ws?.close() } catch (_) {}
+    try { socket.close() } catch (_) {}
   }
 }
 
@@ -214,10 +222,9 @@ export function disconnectWS(): void {
   wsLastPongAt = 0
   if (ws) {
     if (ws.readyState === WebSocket.OPEN) {
-      wsIntentionalClose = true
+      intentionallyClosedSockets.add(ws)
       ws.close(1000, 'manual-reconnect')
     } else if (ws.readyState === WebSocket.CONNECTING) {
-      wsIntentionalClose = false
       ws.onerror = null
       ws.onclose = null
       try { ws.close() } catch (_) {}
@@ -291,7 +298,7 @@ export function ensureWebSocketLifecycleListeners(): void {
     wsSuppressReconnectUntil = Date.now() + 60_000
     reconnectAttempts = 0
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      wsIntentionalClose = true
+      intentionallyClosedSockets.add(ws)
       try { ws.close(1000, 'auth-required') } catch (_) {}
     }
   })
