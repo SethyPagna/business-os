@@ -691,6 +691,322 @@ async function assertMergeStateUnchanged(
   }
 }
 
+// FX-undo2 (R-undo C11): the LEGACY product.merge / product.merge.bulk undo,
+// for snapshots recorded before 357bc6de7 (2026-09-05) and so carrying no
+// mergedStateFingerprint (every later recorder stores one, or
+// fingerprintPending until it has one, and a redo always does). That undo
+// writes ABSOLUTE values -- the keeper's branch stock and folded-into lots from
+// their before-images, its prices and its cover -- so it first derives from the
+// snapshot what the fold (routes/products.ts foldDuplicateProductInto as it
+// stood then) left behind, and proves both products still hold exactly that:
+//   * their activity: the discarded row inactive, the keeper active;
+//   * every branch_stock row of both: the keeper's before-image plus the
+//     discarded row's stock (unless it was written off), none on the other;
+//   * every lot the fold touched: its product, its activity where the fold set
+//     it, and the per-branch stock of each lot whose stock the snapshot holds;
+//   * the keeper's selling and wholesale prices: the higher of the saved
+//     before-price and the discarded row's own (resolveMergedPricing);
+//   * the keeper's cover, when this actor's undo would restore it.
+// A whole-catalog run is undone newest fold first, so each fold's in-batch
+// check is derived from the state the folds after it restore. Cost is not
+// compared: 0175/0195 re-derive it from lots, as step 8 of the undo does. A
+// snapshot that cannot be read this way, or whose undo would also write what
+// this derivation does not cover (catalog, barcode, parent links, promotion
+// lists, lot allocations -- written only by fingerprinted recorders), is
+// refused, never guessed.
+type LegacyMergeStock = Map<number, number>
+
+interface LegacyMergeFold {
+  keeperId: number
+  dupId: number
+  moveStock: boolean
+  keeperStock: LegacyMergeStock
+  dupStock: LegacyMergeStock
+  repointed: number[]
+  folded: Array<{ dupLot: number; keeperLot: number; dupStock: LegacyMergeStock; keeperStock: LegacyMergeStock }>
+  writtenOff: Array<{ lot: number; stock: LegacyMergeStock }>
+  // Exactly what the undo writes back (buildMergeReversalStatements step 1).
+  prices: { su: number; sk: number; wu?: number; wk?: number } | null
+  cover: string | null
+}
+
+interface LegacyMergeModel {
+  active: Map<number, number>
+  stock: Map<number, LegacyMergeStock>
+  lots: Map<number, { product: number; active: number | null }>
+  lotStock: Map<number, LegacyMergeStock>
+  // dupId: the discarded row whose price or cover the fold may have adopted;
+  // null once an undo has written the saved value back.
+  prices: Map<number, { dupId: number | null; su: number; sk: number; wu?: number; wk?: number }>
+  covers: Map<number, { dupId: number | null; before: string | null }>
+}
+
+const LEGACY_MERGE_EPSILON = 0.00005
+
+const positiveId = (value: unknown): number | null => {
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function legacyMergeStock(rows: unknown): LegacyMergeStock | null {
+  if (!Array.isArray(rows)) return null
+  const stock: LegacyMergeStock = new Map()
+  for (const row of rows) {
+    const branchId = positiveId((row as { branch_id?: unknown } | null)?.branch_id)
+    const quantity = legacyFiniteNumber((row as { quantity?: unknown } | null)?.quantity)
+    if (branchId === null || quantity === null || stock.has(branchId)) return null
+    stock.set(branchId, quantity)
+  }
+  return stock
+}
+
+function legacyMergeFold(r: MergeReversal): LegacyMergeFold | null {
+  if (!r || typeof r !== 'object') return null
+  const keeperId = positiveId(r.keeperId)
+  const dupId = positiveId(r.dupId)
+  if (keeperId === null || dupId === null || keeperId === dupId) return null
+  // Present (or non-empty) only on fingerprinted snapshots; the undo would
+  // write them, and nothing below derives what they must match.
+  const listed = (value: unknown) => value != null && (!Array.isArray(value) || value.length > 0)
+  if (r.keeperCatalogBefore || r.keeperBarcodeBefore !== undefined || r.keeperParentIdBefore != null
+    || listed(r.promotionRulesBefore) || listed(r.reparentedChildProductIds)) return null
+  const keeperStock = legacyMergeStock(r.keeperStockBefore)
+  const dupStock = legacyMergeStock(r.dupStockBefore)
+  if (!keeperStock || !dupStock || !Array.isArray(r.repointedBatches) || !Array.isArray(r.foldedBatches)) return null
+  const repointed: number[] = []
+  for (const batch of r.repointedBatches) {
+    const id = positiveId(batch?.id)
+    if (id === null) return null
+    repointed.push(id)
+  }
+  const folded: LegacyMergeFold['folded'] = []
+  for (const batch of r.foldedBatches) {
+    const dupLot = positiveId(batch?.dupBatchId)
+    const keeperLot = positiveId(batch?.keeperBatchId)
+    const lotDupStock = legacyMergeStock(batch?.dupStockBefore)
+    const lotKeeperStock = legacyMergeStock(batch?.keeperStockBefore)
+    if (dupLot === null || keeperLot === null || dupLot === keeperLot || !lotDupStock || !lotKeeperStock
+      || listed(batch?.saleAllocationIds) || listed(batch?.returnAllocationIds)) return null
+    folded.push({ dupLot, keeperLot, dupStock: lotDupStock, keeperStock: lotKeeperStock })
+  }
+  const writtenOff: LegacyMergeFold['writtenOff'] = []
+  if (r.writtenOffBatches != null) {
+    if (!Array.isArray(r.writtenOffBatches)) return null
+    for (const batch of r.writtenOffBatches) {
+      const lot = positiveId(batch?.batchId)
+      const stock = legacyMergeStock(batch?.stockBefore)
+      if (lot === null || !stock) return null
+      writtenOff.push({ lot, stock })
+    }
+  }
+  let prices: LegacyMergeFold['prices'] = null
+  const pricing = r.keeperPricingBefore
+  if (pricing) {
+    if (typeof pricing !== 'object' || Array.isArray(pricing)) return null
+    const wholesaleUsd = pricing.wholesale_price_usd ?? pricing.special_price_usd
+    const wholesaleKhr = pricing.wholesale_price_khr ?? pricing.special_price_khr
+    prices = {
+      su: Number(pricing.selling_price_usd) || 0,
+      sk: Number(pricing.selling_price_khr) || 0,
+      ...(wholesaleUsd !== undefined || wholesaleKhr !== undefined
+        ? { wu: Number(wholesaleUsd) || 0, wk: Number(wholesaleKhr) || 0 }
+        : {}),
+    }
+  }
+  const cover = r.keeperImagePathBefore ?? null
+  if (cover !== null && typeof cover !== 'string') return null
+  return {
+    keeperId, dupId, moveStock: r.stockDisposition !== 'write_off', keeperStock, dupStock,
+    repointed, folded, writtenOff, prices, cover,
+  }
+}
+
+function legacyMergeFoldLots(fold: LegacyMergeFold): number[] {
+  return [...new Set([
+    ...fold.repointed,
+    ...fold.folded.flatMap((batch) => [batch.dupLot, batch.keeperLot]),
+    ...fold.writtenOff.map((batch) => batch.lot),
+  ])]
+}
+
+const addLegacyMergeStock = (base: LegacyMergeStock, added: LegacyMergeStock): LegacyMergeStock => {
+  const sum = new Map(base)
+  for (const [branchId, quantity] of added) sum.set(branchId, (sum.get(branchId) ?? 0) + quantity)
+  return sum
+}
+
+// What the folds left behind, applied in their recorded order (a later fold
+// of the same keeper recorded the earlier one's result as its before-image).
+function legacyMergeApplied(folds: LegacyMergeFold[]): LegacyMergeModel {
+  const model: LegacyMergeModel = {
+    active: new Map(), stock: new Map(), lots: new Map(), lotStock: new Map(), prices: new Map(), covers: new Map(),
+  }
+  for (const fold of folds) {
+    model.active.set(fold.dupId, 0)
+    model.active.set(fold.keeperId, 1)
+    model.stock.set(fold.keeperId, fold.moveStock ? addLegacyMergeStock(fold.keeperStock, fold.dupStock) : new Map(fold.keeperStock))
+    model.stock.set(fold.dupId, new Map())
+    for (const lot of fold.repointed) model.lots.set(lot, { product: fold.keeperId, active: null })
+    for (const batch of fold.folded) {
+      model.lots.set(batch.dupLot, { product: fold.dupId, active: 0 })
+      model.lotStock.set(batch.dupLot, new Map())
+      model.lots.set(batch.keeperLot, { product: fold.keeperId, active: null })
+      model.lotStock.set(batch.keeperLot, addLegacyMergeStock(batch.keeperStock, batch.dupStock))
+    }
+    for (const batch of fold.writtenOff) {
+      model.lots.set(batch.lot, { product: fold.dupId, active: 0 })
+      model.lotStock.set(batch.lot, new Map())
+    }
+    if (fold.prices) model.prices.set(fold.keeperId, { dupId: fold.dupId, ...fold.prices })
+    model.covers.set(fold.keeperId, { dupId: fold.dupId, before: fold.cover })
+  }
+  return model
+}
+
+// The same writes buildMergeReversalStatements makes for one fold.
+function legacyMergeUndone(model: LegacyMergeModel, fold: LegacyMergeFold, canChangeProductImages: boolean): void {
+  model.active.set(fold.dupId, 1)
+  if (fold.prices) model.prices.set(fold.keeperId, { dupId: null, ...fold.prices })
+  if (canChangeProductImages) model.covers.set(fold.keeperId, { dupId: null, before: fold.cover })
+  const restore = (current: LegacyMergeStock | undefined, dupBefore: LegacyMergeStock, keeperBefore: LegacyMergeStock) => {
+    const keeper = new Map(current ?? [])
+    for (const branchId of dupBefore.keys()) {
+      if (keeperBefore.has(branchId)) keeper.set(branchId, keeperBefore.get(branchId)!)
+      else keeper.delete(branchId)
+    }
+    return keeper
+  }
+  const putBack = (current: LegacyMergeStock | undefined, before: LegacyMergeStock) => {
+    const stock = new Map(current ?? [])
+    for (const [branchId, quantity] of before) stock.set(branchId, quantity)
+    return stock
+  }
+  model.stock.set(fold.keeperId, restore(model.stock.get(fold.keeperId), fold.dupStock, fold.keeperStock))
+  model.stock.set(fold.dupId, putBack(model.stock.get(fold.dupId), fold.dupStock))
+  for (const lot of fold.repointed) model.lots.set(lot, { product: fold.dupId, active: model.lots.get(lot)?.active ?? null })
+  for (const batch of fold.folded) {
+    model.lots.set(batch.dupLot, { product: fold.dupId, active: 1 })
+    model.lotStock.set(batch.keeperLot, restore(model.lotStock.get(batch.keeperLot), batch.dupStock, batch.keeperStock))
+    model.lotStock.set(batch.dupLot, putBack(model.lotStock.get(batch.dupLot), batch.dupStock))
+  }
+  for (const batch of fold.writtenOff) {
+    model.lots.set(batch.lot, { product: fold.dupId, active: 1 })
+    model.lotStock.set(batch.lot, putBack(model.lotStock.get(batch.lot), batch.stock))
+  }
+}
+
+// The model, for these products and lots, as one boolean SQL expression over
+// JSON lists (a fixed number of bound values, whatever the size of the run).
+// Stock is compared as non-zero quantities, so a zero row and no row agree.
+function legacyMergeExpectation(
+  model: LegacyMergeModel, productIds: number[], lotIds: number[], canChangeProductImages: boolean,
+): { sql: string; params: Record<string, unknown> } {
+  const nonZero = (quantity: number) => Math.abs(quantity) >= LEGACY_MERGE_EPSILON
+  const products = productIds.filter((id) => model.active.has(id)).map((id) => ({ id, a: model.active.get(id) }))
+  const stock = products.flatMap(({ id }) => [...(model.stock.get(id) ?? [])]
+    .filter(([, quantity]) => nonZero(quantity)).map(([branchId, quantity]) => ({ p: id, b: branchId, q: quantity })))
+  const lots = lotIds.filter((id) => model.lots.has(id))
+    .map((id) => ({ id, p: model.lots.get(id)!.product, a: model.lots.get(id)!.active }))
+  const stockLots = lotIds.filter((id) => model.lotStock.has(id))
+  const lotStock = stockLots.flatMap((id) => [...model.lotStock.get(id)!]
+    .filter(([, quantity]) => nonZero(quantity)).map(([branchId, quantity]) => ({ l: id, b: branchId, q: quantity })))
+  const prices = productIds.filter((id) => model.prices.has(id)).map((id) => {
+    const { dupId, ...values } = model.prices.get(id)!
+    return { k: id, d: dupId, ...values }
+  })
+  const covers = canChangeProductImages
+    ? productIds.filter((id) => model.covers.has(id)).map((id) => ({ k: id, d: model.covers.get(id)!.dupId, before: model.covers.get(id)!.before }))
+    : []
+  // resolveMergedPricing: the higher of the two rows, a blank row skipped.
+  const merged = (column: string, key: string) => `(CASE WHEN d.id IS NULL OR d.${column} IS NULL OR d.${column} = ''
+      THEN json_extract(e.value, '$.${key}') ELSE MAX(json_extract(e.value, '$.${key}'), CAST(d.${column} AS REAL)) END)`
+  const priceDiffers = (column: string, key: string) => `ABS(COALESCE(k.${column}, 0) - ${merged(column, key)}) >= @epsilon`
+  return {
+    sql: `(NOT EXISTS (SELECT 1 FROM json_each(@products) e LEFT JOIN products p ON p.id = json_extract(e.value, '$.id')
+        WHERE p.id IS NULL OR COALESCE(p.is_active, 0) <> json_extract(e.value, '$.a'))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@stock) e
+        WHERE ABS(COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = json_extract(e.value, '$.p')
+          AND bs.branch_id = json_extract(e.value, '$.b')), 0) - json_extract(e.value, '$.q')) >= @epsilon)
+      AND NOT EXISTS (SELECT 1 FROM branch_stock bs
+        WHERE bs.product_id IN (SELECT json_extract(value, '$.id') FROM json_each(@products))
+          AND ABS(COALESCE(bs.quantity, 0)) >= @epsilon
+          AND NOT EXISTS (SELECT 1 FROM json_each(@stock) e
+            WHERE json_extract(e.value, '$.p') = bs.product_id AND json_extract(e.value, '$.b') = bs.branch_id))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@lots) e LEFT JOIN product_batches pb ON pb.id = json_extract(e.value, '$.id')
+        WHERE pb.id IS NULL OR pb.variant_product_id IS NOT json_extract(e.value, '$.p')
+          OR (json_extract(e.value, '$.a') IS NOT NULL AND COALESCE(pb.is_active, 0) <> json_extract(e.value, '$.a')))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@lotStock) e
+        WHERE ABS(COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = json_extract(e.value, '$.l')
+          AND bbs.branch_id = json_extract(e.value, '$.b')), 0) - json_extract(e.value, '$.q')) >= @epsilon)
+      AND NOT EXISTS (SELECT 1 FROM branch_batch_stock bbs
+        WHERE bbs.batch_id IN (SELECT value FROM json_each(@stockLots))
+          AND ABS(COALESCE(bbs.quantity, 0)) >= @epsilon
+          AND NOT EXISTS (SELECT 1 FROM json_each(@lotStock) e
+            WHERE json_extract(e.value, '$.l') = bbs.batch_id AND json_extract(e.value, '$.b') = bbs.branch_id))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@prices) e JOIN products k ON k.id = json_extract(e.value, '$.k')
+        LEFT JOIN products d ON d.id = json_extract(e.value, '$.d')
+        WHERE ${priceDiffers('selling_price_usd', 'su')} OR ${priceDiffers('selling_price_khr', 'sk')}
+          OR (json_extract(e.value, '$.wu') IS NOT NULL AND ${priceDiffers('wholesale_price_usd', 'wu')})
+          OR (json_extract(e.value, '$.wk') IS NOT NULL AND ${priceDiffers('wholesale_price_khr', 'wk')}))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@covers) e JOIN products k ON k.id = json_extract(e.value, '$.k')
+        LEFT JOIN products d ON d.id = json_extract(e.value, '$.d')
+        WHERE COALESCE(k.image_path, '') IS NOT COALESCE(CASE
+            WHEN COALESCE(json_extract(e.value, '$.before'), '') <> '' THEN json_extract(e.value, '$.before')
+            WHEN COALESCE(d.image_path, '') <> '' THEN d.image_path
+            ELSE json_extract(e.value, '$.before') END, '')))`,
+    params: {
+      products: JSON.stringify(products),
+      stock: JSON.stringify(stock),
+      lots: JSON.stringify(lots),
+      lotStock: JSON.stringify(lotStock),
+      stockLots: JSON.stringify(stockLots),
+      prices: JSON.stringify(prices),
+      covers: JSON.stringify(covers),
+      epsilon: LEGACY_MERGE_EPSILON,
+    },
+  }
+}
+
+// Checks the derived state of the whole run now, and returns one in-batch
+// twin per fold (index = the fold's position) that aborts that fold's undo
+// batch through a malformed JSON path if its products change in between. Null
+// for a fingerprinted snapshot, which assertMergeStateUnchanged has checked.
+async function assertLegacyMergeUnchanged(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected: string | undefined, canChangeProductImages: boolean,
+): Promise<AtomicMergeStatement[] | null> {
+  if (expected) return null
+  const folds: LegacyMergeFold[] = []
+  for (const reversal of reversals) {
+    const fold = legacyMergeFold(reversal)
+    if (!fold) {
+      throw new UndoConflictError('This merge was saved without the details needed to check the two products are unchanged, so it cannot be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+    }
+    folds.push(fold)
+  }
+  const model = legacyMergeApplied(folds)
+  const whole = legacyMergeExpectation(
+    model,
+    [...new Set(folds.flatMap((fold) => [fold.keeperId, fold.dupId]))],
+    [...new Set(folds.flatMap(legacyMergeFoldLots))],
+    canChangeProductImages,
+  )
+  const row = await db.prepare(`SELECT CASE WHEN ${whole.sql} THEN 1 ELSE 0 END AS ok`).get<{ ok: number }>(whole.params)
+  if (Number(row?.ok) !== 1) {
+    throw new UndoConflictError('These products changed after the merge (stock, lots, prices or cover image), so it can no longer be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+  }
+  const guards: AtomicMergeStatement[] = new Array(folds.length)
+  for (let i = folds.length - 1; i >= 0; i--) {
+    const fold = folds[i]
+    const scoped = legacyMergeExpectation(model, [fold.keeperId, fold.dupId], legacyMergeFoldLots(fold), canChangeProductImages)
+    guards[i] = {
+      sql: `SELECT CASE WHEN ${scoped.sql} THEN 1 ELSE json_extract('[1]', '$[product_merge_changed]') END AS product_merge_guard`,
+      params: scoped.params,
+    }
+    legacyMergeUndone(model, fold, canChangeProductImages)
+  }
+  return guards
+}
+
 async function saleStateFingerprint(db: ReturnType<typeof getDb>, saleId: number): Promise<string> {
   const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown>>([saleId])
   const lines = await db.prepare('SELECT * FROM sale_items WHERE sale_id = ? ORDER BY id').all<Record<string, unknown>>([saleId])
@@ -1579,9 +1895,24 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   return stmts
 }
 
-async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<void> {
+async function applyMergeReversal(
+  env: Env, r: MergeReversal, canChangeProductImages = true, legacyGuard?: AtomicMergeStatement,
+): Promise<void> {
   const db = getDb(env)
-  await db.batch(await buildMergeReversalStatements(env, r, canChangeProductImages))
+  const statements = await buildMergeReversalStatements(env, r, canChangeProductImages)
+  if (!legacyGuard) {
+    await db.batch(statements)
+    return
+  }
+  // assertLegacyMergeUnchanged's in-batch twin runs first, inside the batch.
+  try {
+    await db.batch([legacyGuard, ...statements])
+  } catch (error) {
+    if (/JSON path error|product_merge_changed/i.test(String((error as Error)?.message ?? error))) {
+      throw new UndoConflictError('These products changed while the merge was being undone, so the undo stopped before overwriting that change.', UNDO_RECORD_CHANGED_CODE)
+    }
+    throw error
+  }
 }
 
 // Undo a whole bulk merge: replay each fold's reversal in REVERSE application
@@ -1590,9 +1921,11 @@ async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductIm
 // first restores the keeper to the exact state the next-oldest reversal was
 // captured against. Each reversal runs in its own batch (validating the two
 // products still exist); a cleanup undo is a rare admin op, not a hot path.
-async function applyBulkMergeReversal(env: Env, reversals: MergeReversal[], canChangeProductImages = true): Promise<void> {
+async function applyBulkMergeReversal(
+  env: Env, reversals: MergeReversal[], canChangeProductImages = true, legacyGuards?: AtomicMergeStatement[] | null,
+): Promise<void> {
   for (let i = reversals.length - 1; i >= 0; i--) {
-    await applyMergeReversal(env, reversals[i], canChangeProductImages)
+    await applyMergeReversal(env, reversals[i], canChangeProductImages, legacyGuards?.[i])
   }
 }
 
@@ -2807,7 +3140,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
-        await applyMergeReversal(ctx.env, reversal, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
+        const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
+        const legacyGuards = await assertLegacyMergeUnchanged(db, [reversal], reversal.mergedStateFingerprint, canChangeImages)
+        await applyMergeReversal(ctx.env, reversal, canChangeImages, legacyGuards?.[0])
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
@@ -2883,7 +3218,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, reversals, mergedStateFingerprint)
-        await applyBulkMergeReversal(ctx.env, reversals, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
+        const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
+        const legacyGuards = await assertLegacyMergeUnchanged(db, reversals, mergedStateFingerprint, canChangeImages)
+        await applyBulkMergeReversal(ctx.env, reversals, canChangeImages, legacyGuards)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')

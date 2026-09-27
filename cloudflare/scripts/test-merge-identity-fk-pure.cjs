@@ -382,12 +382,15 @@ async function main() {
       'undo cannot restore a rule the reversal never recorded')
     assert.deepEqual(reversal.reparentedChildProductIds, [400])
 
-    // ...and the undo, run through the REAL applier over a real snapshot row.
-    live.db.prepare(`INSERT INTO undo_snapshots (id, kind, status, payload_json) VALUES (1, 'product.merge', 'applied', @p)`)
-      .run({ p: JSON.stringify(reversal) })
-    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: 1 })
+    // ...and the undo, run through the REAL applier over a snapshot row the REAL
+    // recorder wrote. Every recorder stores the merged-state fingerprint; a row
+    // without one is a pre-fingerprint (legacy) merge, which never carried
+    // promotion rules or re-parented children, so the applier now refuses a
+    // hand-built fingerprint-less row of this shape (FX-undo2, R-undo C11).
+    const { snapshotId } = await undoAppliers.recordMergeUndoSnapshot({}, { id: 1, name: 'tester' }, reversal)
+    const applier = undoAppliers.resolveUndoApplier({ applier: 'product.merge', snapshot_id: snapshotId })
     assert.ok(applier, 'the product.merge applier must be registered')
-    await applier.run({ applier: 'product.merge', snapshot_id: 1 }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
+    await applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 1, name: 'tester' }, direction: 'undo' })
     assert.equal(ruleRow(10).product_ids, '[200,777]', 'undo restores the scope list byte for byte')
     assert.equal(ruleRow(11).product_ids, '[100,200]')
     assert.equal(ruleRow(12).product_ids, '[777]')
