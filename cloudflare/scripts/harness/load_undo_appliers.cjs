@@ -43,7 +43,7 @@ function unexpected(name) {
   return () => { throw new Error(`Unexpected ${name} replay in the undo staleness harness`) }
 }
 
-function loadUndoAppliers(d1, { audit = async () => {} } = {}) {
+function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false } = {}) {
   const dbAdapter = {
     prepare(sql) {
       const st = d1.prepare(sql)
@@ -118,6 +118,11 @@ function loadUndoAppliers(d1, { audit = async () => {} } = {}) {
   for (const name of ['branchWrites', 'customerGenderRestoration', 'saleMoneyPrecision', 'productMergeLineage',
     'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'actorSnapshot', 'productMerge']) {
     stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
+  }
+  // A test that drives the sale add-items replay asks for the real line planner
+  // and amendment ledger. saleLineAddition first: saleAmendments imports it.
+  if (realSaleModules) {
+    for (const name of ['saleLineAddition', 'saleAmendments']) stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
   }
   const original = Module._load
   Module._load = (request, parent, isMain) => MONEY_PRECISION_REQUESTS.includes(request) ? moneyPrecision

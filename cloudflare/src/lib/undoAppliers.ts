@@ -715,6 +715,113 @@ export function sameSaleStateFingerprint(currentJson: string, expectedJson: stri
   } catch { return false }
 }
 
+// FX-undo2 (R-undo C10): the LEGACY sale.add_items replay, for snapshots the
+// old POST /sales/:id/items recorded on 2026-09-04..05 before the atomic path
+// (no operation id, no sale revision; the oldest without saleStateFingerprint
+// either). Both directions write ABSOLUTE values -- an undo restores
+// moneyBefore, a redo restores moneyAfter -- so each first proves the sale is
+// still exactly as the other direction left it, derived from the snapshot:
+//   undo: the money columns equal moneyAfter, every recorded line is still on
+//         the sale as recorded, and the lines sum to moneyAfter's subtotal
+//         (that route summed the subtotal from the sale's own lines);
+//   redo: the money columns equal moneyBefore, no recorded line is on the
+//         sale, and its lines sum to moneyAfter's subtotal less the recorded
+//         lines this redo adds back.
+// A snapshot too incomplete to derive that from is refused, never guessed.
+const LEGACY_ADD_ITEMS_REQUIRED_MONEY = ['subtotal_usd', 'subtotal_khr', 'total_usd', 'total_khr', 'change_usd', 'change_khr']
+// Optional keys saleMoneyUpdateStatement also writes when a snapshot has them.
+const LEGACY_ADD_ITEMS_OPTIONAL_MONEY = ['exchange_rate', 'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd',
+  'change_is_actual', 'change_exchange_rate', 'discount_khr', 'tax_khr', 'delivery_fee_khr', 'membership_discount_khr']
+const LEGACY_ADD_ITEMS_EPSILON = 0.00005
+// The legacy subtotal was round2(existing lines + round2(added lines)).
+const LEGACY_ADD_ITEMS_SUM_TOLERANCE = 0.0101
+
+function legacyFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function legacySaleAddItemsExpectation(
+  reversal: SaleAddItemsReversal, direction: 'undo' | 'redo',
+): { sql: string; params: Record<string, unknown> } | null {
+  const saleId = Number(reversal?.saleId)
+  const money = (direction === 'undo' ? reversal?.moneyAfter : reversal?.moneyBefore) as unknown as Record<string, unknown> | undefined
+  const subtotalAfter = legacyFiniteNumber(reversal?.moneyAfter?.subtotal_usd)
+  const lines = Array.isArray(reversal?.lines) ? reversal.lines : []
+  if (!Number.isInteger(saleId) || saleId <= 0 || !money || typeof money !== 'object' || subtotalAfter === null || !lines.length) return null
+  const params: Record<string, unknown> = { saleId, epsilon: LEGACY_ADD_ITEMS_EPSILON, sumTolerance: LEGACY_ADD_ITEMS_SUM_TOLERANCE }
+  const moneyTerms: string[] = []
+  for (const column of [...LEGACY_ADD_ITEMS_REQUIRED_MONEY, ...LEGACY_ADD_ITEMS_OPTIONAL_MONEY]) {
+    const present = Object.prototype.hasOwnProperty.call(money, column)
+    const value = present ? legacyFiniteNumber(money[column]) : null
+    if (LEGACY_ADD_ITEMS_REQUIRED_MONEY.includes(column) ? value === null : present && value === null && money[column] !== null) return null
+    if (!present) continue
+    params[`m_${column}`] = value
+    moneyTerms.push(`ABS(COALESCE(s.${column}, 0) - COALESCE(@m_${column}, 0)) < @epsilon`)
+  }
+  const recorded: Array<{ id: number; productId: number; quantity: number; total: number }> = []
+  let recordedTotal = 0
+  for (const line of lines) {
+    const id = Number(line?.saleItemId)
+    const productId = Number(line?.productId)
+    const quantity = legacyFiniteNumber(line?.quantity)
+    const total = legacyFiniteNumber(line?.lineTotalUsd)
+    if (!Number.isInteger(id) || id <= 0 || recorded.some((r) => r.id === id)
+      || !Number.isInteger(productId) || productId <= 0 || quantity === null || total === null) return null
+    recorded.push({ id, productId, quantity, total })
+    recordedTotal += total
+  }
+  params.lines = JSON.stringify(recorded)
+  params.lineSum = direction === 'undo' ? subtotalAfter : subtotalAfter - recordedTotal
+  let lineTerm: string
+  if (direction === 'undo') {
+    params.lineCount = recorded.length
+    lineTerm = `(SELECT COUNT(*) FROM json_each(@lines) j JOIN sale_items si ON si.id = json_extract(j.value, '$.id')
+        WHERE si.sale_id = @saleId AND si.product_id = json_extract(j.value, '$.productId')
+          AND ABS(COALESCE(si.quantity, 0) - json_extract(j.value, '$.quantity')) < @epsilon
+          AND ABS(COALESCE(si.total_usd, 0) - json_extract(j.value, '$.total')) < @epsilon) = @lineCount`
+  } else {
+    lineTerm = `NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = @saleId
+        AND si.id IN (SELECT json_extract(value, '$.id') FROM json_each(@lines)))`
+  }
+  return {
+    sql: `(EXISTS (SELECT 1 FROM sales s WHERE s.id = @saleId AND ${moneyTerms.join(' AND ')})
+      AND ${lineTerm}
+      AND ABS((SELECT COALESCE(SUM(total_usd), 0) FROM sale_items WHERE sale_id = @saleId) - @lineSum) <= @sumTolerance)`,
+    params,
+  }
+}
+
+// Checks the derived state now and returns its in-batch twin, which aborts the
+// replay's whole batch through a malformed JSON path (the supplier.backfill
+// guard mechanism) if the sale changes between this check and the write.
+async function assertLegacySaleAddItemsUnchanged(
+  db: ReturnType<typeof getDb>, reversal: SaleAddItemsReversal, direction: 'undo' | 'redo',
+): Promise<{ sql: string; params: Record<string, unknown> }> {
+  const verb = direction === 'undo' ? 'undone' : 'redone'
+  const expectation = legacySaleAddItemsExpectation(reversal, direction)
+  if (!expectation) {
+    throw new UndoConflictError(`These added items were saved without the totals needed to check the sale is unchanged, so they cannot be ${verb} safely. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+  }
+  const row = await db.prepare(`SELECT CASE WHEN ${expectation.sql} THEN 1 ELSE 0 END AS ok`).get<{ ok: number }>(expectation.params)
+  if (Number(row?.ok) !== 1) {
+    throw new UndoConflictError(direction === 'undo'
+      ? 'This sale was edited after the items were added, so this can no longer be undone safely.'
+      : 'This sale was edited after these items were removed, so they can no longer be added back safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+  }
+  return {
+    sql: `SELECT CASE WHEN ${expectation.sql} THEN 1 ELSE json_extract('[1]', '$[sale_add_items_changed]') END AS sale_add_items_guard`,
+    params: expectation.params,
+  }
+}
+
+function legacySaleAddItemsRaceError(error: unknown, direction: 'undo' | 'redo'): unknown {
+  return /JSON path error|sale_add_items_changed/i.test(String((error as Error)?.message ?? error))
+    ? new UndoConflictError(`This sale changed while the added items were being ${direction === 'undo' ? 'removed' : 'added back'}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+    : error
+}
+
 type AtomicSaleAddItemsReversal = SaleAddItemsReversal & {
   operationId?: unknown
   saleStateRevision?: unknown
@@ -2465,6 +2572,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         if (savedFingerprint && !sameSaleStateFingerprint(await saleStateFingerprint(db, saleId),savedFingerprint)) {
           throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
         }
+        // With or without a fingerprint, the state the undo overwrites is
+        // derived from the snapshot and re-checked inside the batch.
+        const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'undo')
         const removal = planSaleLineRemoval({
           saleId,
           lines: reversal.lines || [],
@@ -2482,6 +2592,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // the afternoon.
         const undoGroupId = crypto.randomUUID()
         await db.batch([
+          saleGuard,
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
           ...(reversal.lineMoneyBefore
@@ -2506,10 +2617,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userId: ctx.user?.id ?? null,
             userName: actorSnapshot(ctx.user),
           })),
-        ])
+        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('These items are already on the sale; there is nothing to redo.')
+        // A redo writes moneyAfter over the sale, so it too must find the sale
+        // exactly as the undo left it (R-undo C10: it was never checked).
+        const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'redo')
         // Re-add through the SAME production planner, drawing the exact lots
         // the original addition drew from (plannedLineFromRecord) rather than
         // re-running FIFO -- undo put those units back into those lots, so
@@ -2530,9 +2644,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // never explains.
         const redoGroupId = crypto.randomUUID()
         const residualGuards = planUnlottedSaleLineGuards(plan.lines)
-        const results = await db.batch([
+        const leading = [
+          saleGuard,
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
           ...residualGuards,
+        ]
+        const results = await db.batch([
+          ...leading,
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
@@ -2557,9 +2675,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userName: actorSnapshot(ctx.user),
           })),
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        ]) as Array<{ meta?: { last_row_id?: number } }>
+        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
-          const statementIndex = 1 + residualGuards.length + plan.saleItemStatementIndexByLine[lineIndex]
+          const statementIndex = leading.length + plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
         })
         const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
@@ -2570,13 +2688,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         }
         // The re-inserted rows have NEW ids -- persist them so a later undo
         // deletes the rows that actually exist, not the ones this redo
-        // replaced.
-        const nextReversal: SaleAddItemsReversal = {
+        // replaced. A saved fingerprint names those ids and the amendment
+        // head, which this redo just moved, so it is re-taken too; kept as it
+        // was, it could never match again and the next undo would be refused.
+        const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
+        const nextReversal: SaleAddItemsReversal & { saleStateFingerprint?: string } = {
           ...reversal,
           lines: (reversal.lines || []).map((line, lineIndex) => ({
             ...line,
             saleItemId: Number(saleItemIdByLine[lineIndex] || 0) || line.saleItemId,
           })),
+          ...(savedFingerprint ? { saleStateFingerprint: await saleStateFingerprint(db, saleId) } : {}),
         }
         await db.prepare("UPDATE undo_snapshots SET payload_json = @payload, status = 'applied', updated_at = CURRENT_TIMESTAMP WHERE id = @id")
           .run({ payload: JSON.stringify(nextReversal), id: snapshotId })
