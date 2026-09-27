@@ -1040,8 +1040,6 @@ let _lastHealthProbeResult: ServerHealthProbeResult | null = null
 let _lastHealthProbeAt = 0
 let healthLifecycleListenersRegistered = false
 
-export function isServerOnline(): boolean { return _serverOnline }
-
 function setServerHealth(online: boolean): void {
   if (online === _serverOnline) return
   _serverOnline = online

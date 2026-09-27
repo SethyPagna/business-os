@@ -740,7 +740,6 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
-    if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
     if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
     if (normalized.endsWith('/src/api/requestIds.ts')) return 'request-ids'

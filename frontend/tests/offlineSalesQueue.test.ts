@@ -20,7 +20,6 @@ const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.me
 const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
 const pendingSyncTransportSource = fs.readFileSync(new URL('../src/api/pendingSyncTransport.ts', import.meta.url), 'utf8')
-const offlineSnapshotTransportSource = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
@@ -59,17 +58,14 @@ await runTest('browser startup and reconnect refresh reads without replaying ret
   assert.match(webApiSource, /addEventListener\('online'/)
 })
 
-await runTest('online device snapshots refresh local mirrors for server-offline reopening', () => {
-  assert.match(methodsSource, /export async function refreshOfflineDeviceSnapshot/)
-  assert.match(methodsSource, /loadOfflineSnapshotTransport\(\)/)
-  assert.doesNotMatch(methodsSource, /offline_device_snapshot_meta/)
-  assert.match(offlineSnapshotTransportSource, /offline_device_snapshot_meta/)
-  assert.match(offlineSnapshotTransportSource, /getSettingsSnapshot\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getProducts\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getBranches\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getSales\(\{\}\)/)
-  assert.match(offlineSnapshotTransportSource, /getReturnsSnapshot\(\)/)
-  assert.match(offlineSnapshotTransportSource, /getInventoryMovements\(\{ pageSize: 5000 \}\)/)
+// Offline mode is cancelled (owner, 26 Sep 2026). The device snapshot made
+// eleven serial GETs whose rows localMirrors.ts discards on any http(s)
+// origin; F1 removed its only caller, so the transport, the registry wrapper
+// and its chunk rule are gone too (R-F1F3 F-11).
+await runTest('the retired offline device snapshot has no transport, wrapper or loader left', () => {
+  assert.equal(fs.existsSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url)), false)
+  assert.doesNotMatch(methodsSource, /offlineSnapshotTransport|refreshOfflineDeviceSnapshot|offline_device_snapshot_meta/)
+  assert.doesNotMatch(webApiSource, /offlineSnapshotTransport|refreshOfflineDeviceSnapshot/)
 })
 
 await runTest('offline mode banner stays visible while offline and announces sync timestamps', () => {

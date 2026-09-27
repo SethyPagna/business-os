@@ -16,10 +16,9 @@
 // search (use the picker's pattern) -- a whole-table download is never the
 // answer, and this test fails the moment one reappears.
 //
-// The app-level offline mirror in src/api/offlineSnapshotTransport.ts is
-// the one remaining unfiltered reader (the offline copy has to come from
-// somewhere); it is checked here too, so its long-interval guard cannot be
-// quietly dropped back onto the five-minute maintenance loop.
+// The app-level offline customer mirror (src/api/offlineSnapshotTransport.ts)
+// was the last bulk reader; it is retired with offline mode (R-F1F3 F-11), so
+// the transport layer is held to the no-argument sweep at the bottom alone.
 //
 // Run: node tests/customerListTransportCallers.test.ts
 import assert from 'node:assert/strict'
@@ -260,64 +259,11 @@ check('the Contacts page reads one page at a time', () => {
   assert.match(query[1], /\bpageSize:/, 'the Contacts list query must stay paginated')
 })
 
-// --- the offline mirror -------------------------------------------------
-
-const snapshot = sources.get('api/offlineSnapshotTransport.ts') as string
-
-check('the offline mirror keeps its own long refresh interval', () => {
-  const interval = /OFFLINE_CUSTOMER_MIRROR_MIN_INTERVAL_MS\s*=\s*([^\n]+)/.exec(snapshot)
-  assert.ok(interval, 'offlineSnapshotTransport.ts should define OFFLINE_CUSTOMER_MIRROR_MIN_INTERVAL_MS')
-  const ms = Number(new Function(`return (${interval[1].replace(/_/g, '')})`)())
-  assert.ok(
-    Number.isFinite(ms) && ms >= 60 * 60_000,
-    `the customers mirror must not ride a short loop -- expected >= 1h, found ${interval[1]}`,
-  )
-  assert.ok(
-    /runOfflineSnapshotStep\(\s*'customers'[\s\S]*?skipWhen:\s*customerMirrorSkipReason/.test(snapshot),
-    'the customers snapshot step must stay guarded by customerMirrorSkipReason',
-  )
-  const skipReason = /async function customerMirrorSkipReason\(([\s\S]*?)\n}/.exec(snapshot)
-  assert.ok(skipReason, 'offlineSnapshotTransport.ts should define customerMirrorSkipReason')
-  assert.match(
-    skipReason[1],
-    /shouldPersistLocalMirror\('customers'/,
-    'the guard must not download a copy this device is going to throw away'
-    + ' (customers is a live-server sensitive mirror -- see platform/storage/storagePolicy.ts)',
-  )
-  assert.match(
-    skipReason[1],
-    /isCustomerMirrorFresh\(\)/,
-    'the guard must still keep a recent copy instead of re-downloading it',
-  )
-  assert.ok(
-    /await db\.table\('customers'\)\.count\(\)/.test(snapshot),
-    'a missing or empty mirror must still refresh immediately, whatever the timestamp says',
-  )
-})
-
-check('the offline mirror asks for the bounded picker shape', () => {
-  // The mirror is the one reader left that fetches more than a handful of
-  // customers. It must stay on `fields=picker` (picker columns, no loyalty
-  // aggregation) with an explicit row cap -- dropping either turns the
-  // five-minutely snapshot back into the whole-table download this lane
-  // removed.
-  assert.match(
-    snapshot,
-    /[`'"]\/api\/customers\?fields=picker&limit=\$\{OFFLINE_CUSTOMER_MIRROR_LIMIT\}/,
-    'the customers mirror read must stay the bounded fields=picker shape with an explicit limit',
-  )
-  const limit = /OFFLINE_CUSTOMER_MIRROR_LIMIT\s*=\s*(\d+)/.exec(snapshot)
-  assert.ok(limit, 'offlineSnapshotTransport.ts should define OFFLINE_CUSTOMER_MIRROR_LIMIT')
-  assert.ok(
-    Number(limit[1]) > 0 && Number(limit[1]) <= 5000,
-    `the offline customers copy must stay bounded by the server ceiling (CONTACT_PICKER_MAX_LIMIT = 5000), found ${limit[1]}`,
-  )
-})
+// --- the transport layer ----------------------------------------------
 
 check('nothing in the transport layer reads the list unfiltered', () => {
-  // The mirror was the last no-argument caller in here; it now goes
-  // straight to the bounded fields=picker endpoint (checked above), so
-  // this sweep has no exemptions left and must not grow one.
+  // The retired offline customer mirror was the last bulk reader in here,
+  // so this sweep has no exemptions left and must not grow one.
   const offenders: string[] = []
   for (const [rel, source] of sources) {
     if (!rel.startsWith(TRANSPORT_DIR)) continue
