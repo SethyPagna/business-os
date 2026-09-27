@@ -3717,6 +3717,7 @@
   "portalPromotionsViewProduct": "View",
   "portalPublishing": "Publishing",
   "portalSettingsConflict": "Website settings changed on another device while you were editing. Your changes here are still safe — just click Save again to apply them.",
+  "portalSettingsLoading": "Wait for the website settings to finish loading before saving.",
   "portalSubmissionSettings": "Submission settings",
   "portalTheme": "Website theme",
   "portalUploadPending": "Wait for media uploads to finish before saving the website.",
