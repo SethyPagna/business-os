@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import bcrypt from 'bcryptjs'
 import { getDb } from '../lib/db'
-import { createSession, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
+import { createSession, currentSessionLimitFamily, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
@@ -733,10 +733,29 @@ app.post('/otp/verify', async (c) => {
 // the caller's *current* cookie is left valid (no revoke) since the
 // response also sets the new cookie in the same round trip and there's no
 // second in-flight request racing to hand off here in the Workers port.
+//
+// Because the old cookie stays valid, every call yields one more live
+// session with no password. The new session therefore inherits the caller's
+// sign-in family (lib/auth.ts currentSessionLimitFamily) so it shares, not
+// renews, that sign-in's current-password allowance (S-auth4), and the route
+// itself is capped per family as defence in depth. The frontend calls it
+// only when someone saves the "Default login duration" setting.
+const SESSION_DURATION_LIMIT_BUCKET = 'auth:session_duration'
+const SESSION_DURATION_LIMIT_MAX = 10
+const SESSION_DURATION_LIMIT_WINDOW_MS = 15 * 60 * 1000
 app.post('/session-duration', requireAuth, async (c) => {
   const body = await c.req.json<{ sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
   const user = c.get('user')
   if (!user?.id) return c.json({ error: 'Please sign in again to continue.' }, 401)
+
+  // Deliberately not caught: without migration 0201 this throws, and a 500
+  // is better than minting a session that escapes its family's allowance.
+  const limitFamilyId = await currentSessionLimitFamily(c)
+  if (!limitFamilyId) return c.json({ error: 'Please sign in again to continue.' }, 401)
+  const cap = await checkRateLimit(c.env, SESSION_DURATION_LIMIT_BUCKET, `family:${limitFamilyId}`, SESSION_DURATION_LIMIT_MAX, SESSION_DURATION_LIMIT_WINDOW_MS)
+  if (!cap.allowed) {
+    return c.json({ error: 'Too many login duration changes. Please try again later.', code: 'session_duration_rate_limited', retryAfterSeconds: cap.retryAfterSeconds }, 429)
+  }
 
   const session = await createSession(c.env, user.id, {
     sessionDuration: body.sessionDuration,
@@ -745,6 +764,7 @@ app.post('/session-duration', requireAuth, async (c) => {
     deviceTz: body.deviceTz,
     userAgent: c.req.header('user-agent'),
     ip: c.req.header('cf-connecting-ip') || undefined,
+    limitFamilyId,
   })
   setSessionCookie(c, session.token, session.expiresAt)
 
