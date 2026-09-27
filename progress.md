@@ -13,7 +13,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock could not be transferred at all; a saved draft plus a failed lot load dead-ended | [x] deployed 27 Sep as `c35af63b` (Deploy run 36271249835; R-transfer2 certified: 540 cf + 570 fe files green individually). Follow-up U-transfer3: a refused saved transfer run locks the form (Edit/Discard) → Part 634 |
 | CP-2 | S-auth, U-profile + U-profile2 (+ U-profile3 fixes), U-records2, S-uploads2a/2b (+ S-uploads3 fixes), U-cost + 0195 | [~] integration `claude/cp2-20260927` @ `90cffc6f`; R-uploads2 certified with exceptions → S-uploads3; R-cost: code confirmed, 0200 incomplete → U-cost2; U-profile3 running → Part 634 |
 | CP-3 | U-cost past-sale repair 0200 (owner authorised 27 Sep once complete: audit, backup, repair, verify), U-print2 (Q13: never print a placeholder; ABA QR waits), U-confirm + U-broadcast (certified), U-sync (certified with exceptions), U-ops2 (ops tools, R2 top-up without an upload freeze), U-drain/K5, S-secrets, K1/K3 | [~] → Part 634 |
-| CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC; official-names Excel (needs the product list: VPN blocks the export) | [!] owner-gated |
+| CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC (done 27 Sep, `0ecf871d`); official-names Excel (batches 01–04 researched; the rest need a fresh web-search budget) | [!] owner-gated |
 
 ### All workstreams — one line each; the details are in the session log and in local Records (`Records/Recovery/LANES.md`)
 - [x] Investigations, read-only: I1 I3 I5 I7 I8 I9, A1–A3, C3 A/B plan, M-offline map, C-cache plan, C-comply gap, A-profile audit, SEC-1 (secrets/history), SEC-2 (authz), SEC-3 (injection/leaks)
@@ -30,7 +30,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [x] D1 `business-os` and `business-os-import` already run in APAC (read-only `d1 info`).
 - [x] Worker placement pinned to Singapore (`aws:ap-southeast-1`); Smart Placement had left calls at the requesting edge (`local-MRS`) — `3b8d37a9`
 - [x] Live `Cf-Placement: remote-SIN` verified after CP-1 (26 Sep) → Part 633
-- [~] R2 `business-os-assets` is in EEUR (2,807 objects, 1.38 GB): zero-loss move plan + scripts being prepared (nothing run); execution after the first deploy
+- [x] R2 moved to APAC 27 Sep: copy 36276031042 + verify-only 36277493318 (2,900 objects, 1.45 GB, identical); switch deployed as `0ecf871d` (Deploy run 36283563411, both hosts); top-up 36285297729 PASS (only a backup set written by the old cron; no upload missed). Old EEUR bucket untouched, kept until the owner decides (candidate off-site backup copy) → Part 635
 
 ### Owner decisions (25 Sep 2026)
 - Cost = quantity-weighted average over lots still on hand; 0-cost lots excluded; nothing on hand → newest received lot cost; 4dp round-up kept. Replaces the distinct-cost mean.
@@ -46,7 +46,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 ### Data safety (nothing lost or corrupted)
 - [x] Before any remote migration: the release kit records the D1 Time Travel restore point and key-table counts (kept in local Records, never in the public Actions log) → Part 633
 - [ ] Every data-changing migration writes a backup table first and carries tested recovery SQL (round-trip test: migrate → recover → byte-identical)
-- [ ] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
+- [x] R2 move is copy-only; per-object etag + count + bytes verified before switching; old bucket untouched
 - [x] Recovery checkout and Codex worktrees untouched; no force pushes; exact-path commits only
 
 ### Checkpoint 1 — admin (lanes run in parallel)
