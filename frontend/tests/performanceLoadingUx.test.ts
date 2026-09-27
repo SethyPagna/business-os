@@ -2638,10 +2638,10 @@ assert.match(
 )
 // 15s (not the old 3s): this is an occasional diagnostics read, not a feed
 // anything depends on staying seconds-fresh -- see the interval's own comment.
-assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics refresh should still poll after startup, at the debloated 15s interval')
-assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
+assert.match(serverPage, /return startVisibleInterval\(\(\) => \{ void fetchServerLog\(\) \}, 15000\)/, 'server diagnostics refresh should still poll after startup, at the debloated 15s interval')
+assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*return startVisibleInterval\(\(\) => \{ void fetchServerLog\(\) \}, 15000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
 assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250/, 'server online count should wait briefly after first route-ready work without adding a fake 1.8s delay')
-assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
+assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*startVisibleInterval\(\(\) => \{ void check\(\) \}, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
 // SETTINGS_OTP_STATUS_TIMEOUT_MS / getSettingsApi().otpStatus: removed along
 // with the rest of the dead OTP-modal machinery in Settings.tsx (see the
 // doesNotMatch assertion above) -- this page no longer checks OTP status at
