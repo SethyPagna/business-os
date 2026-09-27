@@ -26,6 +26,9 @@ function binding(sql, writes) {
   }
   return { prepare: text => statement(text), async batch(items) {
     return sql.transaction(() => items.map(s => {
+      // Real D1 batch() answers a read with its rows on .results (the backup
+      // writer's MAX(rowid) bounds are read this way).
+      if (/^\s*(SELECT|WITH)\b/i.test(s.text)) return { success: true, results: sql.prepare(s.text).all(...s.params) }
       writes.push(s.text)
       const result = sql.prepare(s.text).run(...s.params)
       return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }

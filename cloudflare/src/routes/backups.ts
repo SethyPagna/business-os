@@ -6,6 +6,7 @@ import { hasPermission } from '../lib/permissions'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import {
   CLOUDFLARE_BACKUP_KEEP,
+  assetsBucketLabel,
   createCloudflareBackup,
   getSystemJob,
   linkCloudflareBackupJob,
@@ -60,7 +61,7 @@ app.get('/', async (c) => {
       runtime: 'cloudflare-workers',
       intervalHours: 6,
       keep: CLOUDFLARE_BACKUP_KEEP,
-      destination: 'R2 business-os-assets/backups/cloudflare/',
+      destination: `R2 ${assetsBucketLabel(c.env)}/backups/cloudflare/`,
     },
   })
 })

@@ -407,6 +407,41 @@ async function tableExists(env: Env, table: string): Promise<boolean> {
   return !!row
 }
 
+// Every backed-up table's rowid upper bound, read in ONE D1 batch (one
+// implicit transaction) before the first row is written. The dump then pages
+// each table up to that bound, so every table is cut at the same instant and
+// a row inserted mid-dump cannot straddle the document. An empty table has no
+// bound (null) and is written with no rows.
+async function captureRowidUpperBounds(env: Env, tables: readonly string[]): Promise<Map<string, number | null>> {
+  const bounds = new Map<string, number | null>()
+  if (!tables.length) return bounds
+  const results = await env.DB.batch(tables.map((table) => env.DB.prepare(`SELECT MAX(rowid) AS upper FROM ${qid(table)}`)))
+  tables.forEach((table, index) => {
+    // A missing result must never read as "empty table": that would write a
+    // backup with no rows for a table that has them. Fail the backup instead.
+    const rows = results[index]?.results
+    if (!Array.isArray(rows) || rows.length !== 1) throw new Error(`Backup could not read the row bound of ${table}; no backup was written.`)
+    const value = (rows[0] as { upper?: number | null }).upper
+    bounds.set(table, value == null ? null : Number(value))
+  })
+  return bounds
+}
+
+// The cursor column is aliased so it can never collide with a real column
+// and is removed before serialisation; the remaining keys keep their order,
+// so each row's JSON is byte-identical to the old `SELECT *` page.
+const BACKUP_ROWID_ALIAS = '__bos_rowid'
+
+// Label written into the manifest's r2.bucket. An R2 binding carries no name
+// at runtime, so both wrangler configs pin it as [vars] ASSETS_BUCKET_NAME
+// beside the [[r2_buckets]] ASSETS binding (test-backup-keyset-native.cjs
+// keeps the two equal in each file). Informational only: nothing reads it
+// back to choose a bucket -- restore always uses the bound ASSETS bucket.
+export function assetsBucketLabel(env: Env): string {
+  const value = (env as Env & { ASSETS_BUCKET_NAME?: unknown }).ASSETS_BUCKET_NAME
+  return typeof value === 'string' && value.trim() ? value.trim() : 'ASSETS'
+}
+
 async function tableColumns(env: Env, table: string): Promise<string[]> {
   const result = await env.DB.prepare(`PRAGMA table_info(${qid(table)})`).all<{ name: string }>()
   return (result.results || []).map((row) => row.name).filter(Boolean)
@@ -706,38 +741,52 @@ async function writeBackupDocument(
     await writer.write(`"source":${JSON.stringify(source)},`)
     await writer.write('"runtime":"cloudflare-workers","tables":{')
 
+    const present: string[] = []
     for (const table of tables) {
-      if (!(await tableExists(env, table))) continue
+      if (await tableExists(env, table)) present.push(table)
+    }
+    const upperBounds = await captureRowidUpperBounds(env, present)
+
+    for (const table of present) {
       const columns = await tableColumns(env, table)
       await writer.write(`${tableCount ? ',' : ''}${JSON.stringify(table)}:{"columns":${JSON.stringify(columns)},"rows":[`)
       tableCount += 1
 
-      // Paged so a single large table is never fully resident. Ordered by
-      // rowid so paging is stable -- without an ORDER BY, SQLite may return
-      // rows in a different order between pages and a row could be emitted
-      // twice or skipped.
-      let offset = 0
+      // Paged so a single large table is never fully resident. Keyset, not
+      // OFFSET: OFFSET re-walks every earlier row on each page (quadratic in
+      // table size) and, worse, a row deleted from an already-written page
+      // shifts the next page by one so a live row is silently skipped. The
+      // rowid cursor seeks straight to the next page and is immune to both.
+      // No backed-up table is WITHOUT ROWID (asserted by the keyset test);
+      // one that was would fail loudly on MAX(rowid) rather than be skipped.
+      const upper = upperBounds.get(table) ?? null
+      let after: number | null = null
       let rowsInTable = 0
-      for (;;) {
-        const page = await env.DB
-          .prepare(`SELECT * FROM ${qid(table)} ORDER BY rowid LIMIT ? OFFSET ?`)
-          .bind(TABLE_PAGE_SIZE, offset)
-          .all<Record<string, unknown>>()
+      while (upper !== null) {
+        const page: D1Result<Record<string, unknown>> = await (after === null
+          ? env.DB
+            .prepare(`SELECT rowid AS "${BACKUP_ROWID_ALIAS}", * FROM ${qid(table)} WHERE rowid <= ? ORDER BY rowid LIMIT ?`)
+            .bind(upper, TABLE_PAGE_SIZE)
+          : env.DB
+            .prepare(`SELECT rowid AS "${BACKUP_ROWID_ALIAS}", * FROM ${qid(table)} WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`)
+            .bind(after, upper, TABLE_PAGE_SIZE)
+        ).all<Record<string, unknown>>()
         const rows = page.results || []
         if (!rows.length) break
         for (const row of rows) {
-          await writer.write(`${rowsInTable ? ',' : ''}${JSON.stringify(row)}`)
+          const { [BACKUP_ROWID_ALIAS]: cursor, ...values } = row
+          after = Number(cursor)
+          await writer.write(`${rowsInTable ? ',' : ''}${JSON.stringify(values)}`)
           rowsInTable += 1
         }
         if (rows.length < TABLE_PAGE_SIZE) break
-        offset += TABLE_PAGE_SIZE
       }
       rowCount += rowsInTable
       await writer.write(']}')
     }
 
     await writer.write('},"r2":')
-    await writer.write(JSON.stringify({ bucket: 'business-os-assets', assets, assetsPrefix, copiedKeys, assetCopyProgress }))
+    await writer.write(JSON.stringify({ bucket: assetsBucketLabel(env), assets, assetsPrefix, copiedKeys, assetCopyProgress }))
     await writer.write(',"summary":')
     await writer.write(JSON.stringify({
       tableCount,

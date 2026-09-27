@@ -11,7 +11,7 @@ async function main() {
     audit: `export const audit=async(env,...args)=>{env.events.push({kind:'audit',args})}`,
     permissions: `export const hasPermission=()=>true`,
     acquisitionCostAccess: `export const canViewAcquisitionCosts=()=>true;export const canEditAcquisitionCosts=()=>true`,
-    backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};
+    backup: `export const CLOUDFLARE_BACKUP_KEEP=1;export const assetsBucketLabel=()=>'ASSETS';export const createCloudflareBackup=()=>{};export const getSystemJob=()=>{};export const linkCloudflareBackupJob=()=>{};export const listCloudflareBackups=()=>{};export const pruneCloudflareBackups=()=>{};export const validateCloudflareBackup=()=>{};
       export const storeSystemJob=async(env,job)=>{env.events.push({kind:'job',job});return job};
       export const restoreCloudflareBackup=async(env,key,progress)=>{env.restoreCalls++;await progress({phase:'assets'});if(env.replaceAfterRestore)env.replace();return {key}};`,
   }

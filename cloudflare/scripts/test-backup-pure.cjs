@@ -112,7 +112,9 @@ for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudfla
 //   SELECT name FROM sqlite_master WHERE type = ? AND name = ?  (tableExists)
 //   PRAGMA table_info("table")                                  (tableColumns)
 //   SELECT * FROM "table"                                       (read all rows)
-//   SELECT * FROM "table" ORDER BY rowid LIMIT ? OFFSET ?       (paged read)
+//   SELECT MAX(rowid) AS upper FROM "table"                     (row bound, via .batch)
+//   SELECT rowid AS "__bos_rowid", * FROM "table" WHERE ... ORDER BY rowid LIMIT ?  (keyset page)
+// A row's rowid here is its 1-based position in the fixture array.
 //   DELETE FROM "table"  /  INSERT INTO "table" (...) VALUES (...) (restore, via .batch)
 // ---------------------------------------------------------------------
 function makeFakeD1(schema) {
@@ -134,14 +136,20 @@ function makeFakeD1(schema) {
       const table = schema[m[1]]
       return { all: () => ({ results: table ? table.rows.slice() : [] }) }
     }
-    // Paged read, used by the streamed backup writer. Real paging is what
-    // keeps a large table from ever being fully resident, so the fake has
-    // to honour LIMIT/OFFSET rather than returning everything -- otherwise
-    // a writer that ignored its own paging would still pass here.
-    if ((m = sql.match(/^SELECT \* FROM "([^"]+)" ORDER BY rowid LIMIT \? OFFSET \?$/))) {
+    // Row bound captured (in one batch) before the streamed writer's first row.
+    if ((m = sql.match(/^SELECT MAX\(rowid\) AS upper FROM "([^"]+)"$/))) {
       const table = schema[m[1]]
-      const [limit, offset] = values
-      return { all: () => ({ results: table ? table.rows.slice(offset, offset + limit) : [] }) }
+      return { all: () => ({ results: [{ upper: table && table.rows.length ? table.rows.length : null }] }) }
+    }
+    // Keyset page, used by the streamed backup writer. Real paging is what
+    // keeps a large table from ever being fully resident, so the fake has
+    // to honour the cursor, bound and LIMIT rather than returning everything
+    // -- otherwise a writer that ignored its own paging would still pass here.
+    if ((m = sql.match(/^SELECT rowid AS "__bos_rowid", \* FROM "([^"]+)" WHERE (rowid <= \?|rowid > \? AND rowid <= \?) ORDER BY rowid LIMIT \?$/))) {
+      const table = schema[m[1]]
+      const [after, upper, limit] = m[2] === 'rowid <= ?' ? [0, values[0], values[1]] : values
+      const rows = (table ? table.rows : []).map((row, index) => ({ __bos_rowid: index + 1, ...row }))
+      return { all: () => ({ results: rows.filter((row) => row.__bos_rowid > after && row.__bos_rowid <= upper).slice(0, limit) }) }
     }
     if ((m = sql.match(/^DELETE FROM "([^"]+)"$/))) {
       const table = schema[m[1]]
@@ -173,8 +181,11 @@ function makeFakeD1(schema) {
             first: async () => (bound.first ? bound.first() : null),
             run: async () => { if (bound.exec) bound.exec(); return { success: true } },
             _exec: () => (bound.exec ? bound.exec() : undefined),
+            _read: bound.all ? () => bound.all().results : undefined,
           }
         },
+        get _read() { const b = run(sql, []); return b.all ? () => b.all().results : undefined },
+        _exec: () => { const b = run(sql, []); if (b.exec) b.exec() },
         // .all()/.first()/.run() called directly with no .bind() -- backup.ts's
         // PRAGMA/SELECT * reads and the streaming restore's `DELETE FROM x`.run()
         // use this no-bind shape.
@@ -187,8 +198,12 @@ function makeFakeD1(schema) {
       // Real D1's batch takes an array of already-bound statement objects
       // (env.DB.prepare(sql).bind(...values)); backup.ts's restore builds
       // exactly that shape. Execute sequentially, same effect as a batch.
-      for (const statement of statements) statement._exec()
-      return statements.map(() => ({ success: true }))
+      // Reads answer with rows on .results, as real D1 does.
+      return statements.map((statement) => {
+        if (statement._read) return { success: true, results: statement._read() }
+        statement._exec()
+        return { success: true }
+      })
     },
   }
 }

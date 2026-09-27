@@ -406,6 +406,12 @@ BUSINESS_OS_ORGANIZATION_SLUG = "leangbeauty"
 # the organization in the database never stuck. Setting it here is what makes
 # the rename permanent.
 BUSINESS_OS_ORGANIZATION_NAME = "LeangBeauty"
+# Name of the bucket bound as ASSETS above. A binding carries no name at
+# runtime, so lib/backup.ts reads this for the r2.bucket label it writes into
+# every backup manifest and the /api/backups destination text. Label only --
+# nothing selects a bucket by it. Must equal the ASSETS bucket_name; the
+# keyset backup test enforces that in both wrangler files.
+ASSETS_BUCKET_NAME = "business-os-assets-apac"
 
 # Sentry ingest DSN. A DSN is a PUBLIC key by design -- it only permits
 # writing events into this one project, never reading them -- so it belongs
