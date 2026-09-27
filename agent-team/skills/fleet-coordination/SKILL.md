@@ -14,8 +14,6 @@ description: >-
   progress.md / the session log / CLAUDE.md, even when they don't name this skill.
 ---
 
-<!-- Generated from agent-team/skills/fleet-coordination/SKILL.md. -->
-
 # Fleet coordination for the shared business-os checkout
 
 **Harness mapping.** Written for Claude Code; every step has an equivalent elsewhere. `ListAgents`
