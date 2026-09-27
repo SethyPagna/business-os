@@ -31,8 +31,8 @@ export const saveTelegramTopicSetting: TelegramTopicWriter = async (env: Env, sa
   if (!keys.length) throw new Error('No Telegram topic setting named.')
 
   const db = getDb(env)
-  // sql-bound-params: bounded by construction -- at most the seven fixed
-  // TELEGRAM_TOPIC_KEYS, filtered above.
+  // sql-bound-params: bounded by construction -- at most one per entry of the
+  // fixed TELEGRAM_TOPIC_KEYS list, filtered above.
   const rows = await db.prepare(`SELECT key, value FROM settings WHERE key IN (${keys.map(() => '?').join(',')})`)
     .all<{ key: string; value: string }>([...keys])
   const before: Record<string, unknown> = Object.fromEntries(rows.map((row) => [row.key, row.value]))
