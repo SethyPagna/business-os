@@ -97,7 +97,7 @@ await test('discard cannot clear replaced rows, foreign mirror collisions or a c
 await test('all automatic sale triggers are absent and background registration is a no-op', () => {
   const web = source('web-api.ts'); const sw = source('public-runtime/service-worker.ts'); const runtime = source('api/syncRuntime.ts')
   const functionBody = (text: string, name: string) => { const parsed = ts.createSourceFile('test.ts', text, ts.ScriptTarget.Latest, true); return parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(parsed) || '' }
-  assert.doesNotMatch(functionBody(web, 'runOfflineMaintenance'), /syncPendingSalesQueue/)
+  assert.doesNotMatch(functionBody(web, 'ensureSessionRecoveryListeners'), /syncPendingSalesQueue/)
   assert.doesNotMatch(functionBody(sw, 'syncOutbox'), /replayQueuedSale\(/)
   assert.doesNotMatch(functionBody(sw, 'syncOutboxOnce'), /syncOutbox\(/)
   assert.doesNotMatch(functionBody(runtime, 'registerOutboxBackgroundSync'), /\.register\(|postMessage\(/)

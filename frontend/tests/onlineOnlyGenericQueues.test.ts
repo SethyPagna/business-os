@@ -5,7 +5,7 @@ import ts from 'typescript'
 const text = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const parsed = ts.createSourceFile('web-api.ts', text, ts.ScriptTarget.Latest, true)
 const names = ['queueBusinessOutboxOperation', 'queueOfflineFileChunks', 'syncUnlockedOfflineOutbox', 'syncUnlockedOfflineFileChunks']
-const functions = parsed.statements.filter((node) => ts.isFunctionDeclaration(node) && [...names, 'runOfflineMaintenance', 'ensureSessionRecoveryListeners'].includes(node.name?.text || '')).map((node) => node.getText(parsed)).join('\n')
+const functions = parsed.statements.filter((node) => ts.isFunctionDeclaration(node) && [...names, 'ensureSessionRecoveryListeners'].includes(node.name?.text || '')).map((node) => node.getText(parsed)).join('\n')
 const apiDeclaration = parsed.statements.flatMap((node) => ts.isVariableStatement(node) ? [...node.declarationList.declarations] : []).find((node) => node.name.getText(parsed) === 'staticApi')!
 const initializer = apiDeclaration.initializer!
 assert.ok(ts.isObjectLiteralExpression(initializer))
@@ -27,11 +27,12 @@ const dependencies = {
   getOfflineDb: forbidden, encryptOfflineVaultValue: forbidden, decryptOfflineVaultValue: forbidden,
   apiFetch: forbidden, registerOutboxBackgroundSync: forbidden, emitSyncQueueChanged: forbidden,
   scheduleOfflineVaultIdleLock: forbidden,
-  refreshOfflineSnapshotSoon: () => { reads++ }, refreshServiceWorkerSoon: () => { reads++ },
-  resumeWS() {}, startHealthCheck() {}, pingServerHealth: async () => ({}), dispatchSyncUpdates() {},
+  // F1: the recovery listeners no longer run an offline snapshot or worker
+  // update; what they still do is resume the socket and ping health.
+  resumeWS: () => { reads++ }, startHealthCheck() {}, pingServerHealth: async () => ({}), dispatchSyncUpdates() {},
   FOREGROUND_RECOVERY_THROTTLE_MS: 0, FOREGROUND_REFRESH_AFTER_MS: 45000, FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS: [],
 }
-const compiled = ts.transpileModule(`let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0;\n${functions}\nreturn { api: {${exposed.join(',')}}, runOfflineMaintenance, ensureSessionRecoveryListeners };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const compiled = ts.transpileModule(`let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0;\n${functions}\nreturn { api: {${exposed.join(',')}}, ensureSessionRecoveryListeners };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const runtime = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
 for (const currentActor of ['A', 'B']) {
   actor = currentActor
@@ -54,14 +55,13 @@ for (const online of [false, true]) {
   windowTarget.dispatchEvent(new Event('sync:reconnected'))
   documentTarget.dispatchEvent(new Event('visibilitychange'))
   windowTarget.dispatchEvent(new Event('pageshow'))
-  runtime.runOfflineMaintenance(true)
-  if (online) assert.ok(reads > priorReads, 'reconnect must preserve cached-read/app-shell refresh')
-  else assert.equal(reads, priorReads)
+  assert.ok(reads > priorReads, 'reconnect must still resume the live connection')
 }
 authenticated = false
 const priorReads = reads
+windowTarget.dispatchEvent(new Event('online'))
 windowTarget.dispatchEvent(new Event('sync:reconnected'))
-assert.equal(reads, priorReads)
+assert.equal(reads, priorReads, 'a signed-out tab runs no session recovery')
 assert.equal(forbiddenCalls, 0, 'reconnect cannot decrypt, post, queue, delete, or update retained work')
 assert.deepEqual(records, before)
-console.log('PASS exported generic queue admission/replay deny without writes; actual reconnect handlers refresh reads only')
+console.log('PASS exported generic queue admission/replay deny without writes; actual reconnect handlers resume the connection only')

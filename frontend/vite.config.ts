@@ -154,11 +154,19 @@ function emitBuildManifest(): Plugin {
         }
       }
       // The Khmer font is always eager too -- it is only cached opportunistically
-      // otherwise, and a deferred pass could still be running when the user
-      // switches to Khmer, briefly showing the wrong font (see the woff2 comment
-      // above for why this actually matters on iOS).
+      // otherwise, so the first switch to Khmer would briefly show the wrong
+      // font (see the woff2 comment above for why this actually matters on iOS).
       const eagerAssetUrls = offlineAssetUrls.filter((url) => eagerFromRoutes.has(url) || url.endsWith('.woff2'))
-      const deferredAssetUrls = offlineAssetUrls.filter((url) => !eagerAssetUrls.includes(url))
+      // F3 (27 Sep 2026): no `deferred` list any more. It named every other
+      // generated chunk, and the service worker fetched all of them right
+      // after each activation (precacheDeferredAssets) -- about 7.9 MB per
+      // device per deploy, for routes most devices never open. Offline
+      // selling is cancelled (owner, 26 Sep), so a route nobody has opened
+      // does not need to be on the device before they open it; it is fetched
+      // and cached the first time it is used, like any other hashed asset.
+      // The worker reads `precachePayload?.deferred` with an empty fallback,
+      // so a manifest without the field leaves that post-activate pass with
+      // nothing to do.
       this.emitFile({
         type: 'asset',
         fileName: 'business-os-build.json',
@@ -175,7 +183,6 @@ function emitBuildManifest(): Plugin {
           hash: buildHash,
           assets: offlineAssetUrls,
           eager: eagerAssetUrls,
-          deferred: deferredAssetUrls,
           required: [...required].sort(),
         }, null, 2),
       })
@@ -204,8 +211,8 @@ const routePreloadChunkNames = {
   // it: Receipt, printReceipt, file-api and settings-otp-modal import() it,
   // and only the lazy scanner chunk (vendor-zxing) imports it statically
   // (measured in the emitted graph) -- yet it was preloaded at
-  // fetchpriority=high on every admin cold load. It stays in the eager
-  // precache below, so an installed PWA still prints offline.
+  // fetchpriority=high on every admin cold load. (F3 later took it out of the
+  // eager precache too; see eagerPrecacheChunkNames.)
   //
   // I6-3: 'app-shared' (the /src/components/shared/ catch-all, 257 KB raw /
   // 76 KB gz) is a static import of AdminRoot and of PublicCatalogRoot, so
@@ -316,8 +323,8 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): st
 // shell chunks, the active language packs and the routes an offline POS
 // actually needs (POS itself plus the shared product/API chunks it
 // depends on) need to be ready before first paint; everything else is
-// precached lazily after the worker activates (see precacheDeferredAssets
-// in service-worker.ts). This reuses the SAME chunk-name lists already
+// fetched when first used (F3 removed the post-activate pass that used to
+// precache it all; see emitBuildManifest). This reuses the SAME chunk-name lists already
 // computed for route preloading (routePreloadChunkNames,
 // toRoutePreloadFiles) instead of a new classification mechanism.
 const eagerPrecacheChunkNames = [...new Set([
@@ -325,11 +332,11 @@ const eagerPrecacheChunkNames = [...new Set([
   ...routePreloadChunkNames.pos,
   'lang-en',
   'lang-km',
-  // Receipt printing (html2canvas) and receipt QR codes (qrcode) must work
-  // offline the first time after an install or update, before any page has
-  // pulled this chunk in. It left the admin preload list in I6-2; it did not
-  // leave the offline set.
-  'vendor',
+  // F3 (27 Sep 2026): the generic 'vendor' chunk (html2canvas, qrcode,
+  // @ffmpeg/ffmpeg) is no longer precached at install. It was here only so a
+  // receipt could print offline before any page had loaded it; offline
+  // selling is cancelled (owner, 26 Sep), so it is fetched on the first
+  // print or QR render instead, like every other lazy chunk.
 ])]
 
 // I6-1: language pack chunk per UI language code. The route preload script
