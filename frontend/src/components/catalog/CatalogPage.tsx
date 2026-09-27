@@ -230,6 +230,7 @@ type CatalogAppContext = {
   user?: LegacyCatalogRecord | null
   t: (key: string) => string
   language?: string
+  settings?: Record<string, unknown> | null
 }
 type CatalogSyncContext = { syncChannel?: { channel?: string } | null }
 
@@ -625,6 +626,25 @@ function resolvePortalActiveTab(config: PortalConfig, copy?: CopyFunction | null
 }
 
 /** Convert runtime portal config into editable key/value draft payload. */
+// The storefront's public /config no longer carries the merchant's private
+// AI prompt or the backing provider id (FX-sec; routes/portal.ts's
+// buildPublicPortalConfig). The editor reads both from the staff settings
+// map instead, so its draft -- and therefore the next save -- keeps them.
+const PRIVATE_AI_SETTING_KEYS = new Set(['customer_portal_ai_prompt', 'customer_portal_ai_provider_id'])
+
+function withPrivateAiSettings(config: PortalConfig, settings: Record<string, unknown> | null | undefined): PortalConfig {
+  if (!settings || typeof settings !== 'object') return config
+  const next = { ...config }
+  if (Object.prototype.hasOwnProperty.call(settings, 'customer_portal_ai_prompt')) {
+    next.aiPrompt = String(settings.customer_portal_ai_prompt ?? '')
+  }
+  if (Object.prototype.hasOwnProperty.call(settings, 'customer_portal_ai_provider_id')) {
+    const id = Number(settings.customer_portal_ai_provider_id || 0) || 0
+    next.aiProviderId = id > 0 ? id : null
+  }
+  return next
+}
+
 function buildDraft(config: PortalConfig): PortalDraft {
   return {
     business_name: config.businessName || '',
@@ -1226,7 +1246,10 @@ const DEFAULT_CONFIG = {
 
 /** Main portal page component: editor mode (staff) and public mode (customers). */
 export default function CatalogPage({ publicView = false }: { publicView?: boolean }) {
-  const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage } = useApp() as CatalogAppContext
+  const { hasPermission, navigateTo, saveSettings, notify, theme, toggleTheme, user, t, language: appLanguage, settings: appSettings } = useApp() as CatalogAppContext
+  // Read at load/save time, not captured per render (see withPrivateAiSettings).
+  const appSettingsRef = useRef(appSettings)
+  appSettingsRef.current = appSettings
   const { syncChannel } = useSync() as CatalogSyncContext
   const editorPageActive = useIsPageActive('catalog')
   const isPageActive = publicView || editorPageActive
@@ -1818,7 +1841,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const portalProducts = catalogPage?.items || bootstrapResult?.products || null
     if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load the website')
 
-    const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
+    const nextConfig = withPrivateAiSettings({ ...DEFAULT_CONFIG, ...(portalConfig || {}) }, appSettingsRef.current)
     const nextMeta = {
       categories: normalizeCatalogOptions(meta?.categories),
       brands: normalizeBrandOptions(meta?.brands),
@@ -2824,8 +2847,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
       }
+      // If the staff settings map has not loaded, the editor never saw the
+      // stored AI prompt/provider (the public config omits them), so an empty
+      // value there means "unknown", not "cleared": leave those keys out.
+      const privateAiKnown = !!appSettingsRef.current && Object.keys(appSettingsRef.current).length > 0
       const savePayload = Object.fromEntries(
-        Object.entries(fullSavePayload).filter(([key]) => canWriteSettingKey(key, hasPermission)),
+        Object.entries(fullSavePayload).filter(([key, value]) => canWriteSettingKey(key, hasPermission)
+          && (privateAiKnown || !PRIVATE_AI_SETTING_KEYS.has(key) || String(value ?? '') !== '')),
       )
       const result = await saveSettings(savePayload, { baselineSettings }) as LegacyCatalogRecord
       if (result?.conflict) {
