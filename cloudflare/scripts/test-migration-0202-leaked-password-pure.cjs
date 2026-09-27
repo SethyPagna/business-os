@@ -48,6 +48,17 @@ function load(rel, overrides = {}) {
   return mod.exports
 }
 
+// FX-sec (claude/fx-sec-20260927), which merges before this lane, adds
+// lib/adminControlGuard.ts and routes/users.ts imports it. Where the file
+// exists it is loaded REAL, over the same permissions the route is given; on
+// a tree without it nothing asks for it and this adds no entry.
+const withAdminControlGuard = (permissions) => ({
+  '../lib/permissions': permissions,
+  ...(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'adminControlGuard.ts'))
+    ? { '../lib/adminControlGuard': load('lib/adminControlGuard.ts', { './permissions': permissions }) }
+    : {}),
+})
+
 const MIGRATION_0202 = path.join(__dirname, '..', 'migrations', '0202_users_must_change_password.sql')
 // Before the fix there is no 0202 file; the column alone changes nothing in
 // the old code, so the test still runs there and fails on BEHAVIOUR.
@@ -115,7 +126,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
   '../lib/auth': authLib,
   '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({}), audit: auditSpy },
-  '../lib/permissions': { isAdminControlUser: (u) => Number(u?.id) === 1 },
+  ...withAdminControlGuard({ isAdminControlUser: (u) => Number(u?.id) === 1 }),
   '../lib/conflictControl': { assertUpdatedAtMatch: () => {}, getExpectedUpdatedAt: () => null, writeConflictResponse: () => ({}), WriteConflictError: class {} },
   '../durable-objects/broadcastHub': { broadcast: noop },
   '../lib/cache': { bumpVersion: noop },
