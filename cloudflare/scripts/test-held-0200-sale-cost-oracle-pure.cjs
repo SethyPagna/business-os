@@ -60,8 +60,12 @@
 //   7. E2 in the other direction: a walk-in line with no restock movement of
 //      its own (stock action 'none') whose return id equals a sale cancelled
 //      two days LATER is positioned at its own time, not at that restock.
-// Against the U-cost2 0200 (HELD_0200_SQL=<git show copy>) checks 1, 3, 5, 6
-// and 7 fail; against 66da324e's (a lower time bound only) check 7 fails.
+//   8. E5: a whole-database diff -- besides its own tables and the two cost
+//      columns only sale_write_revisions / return_write_revisions change, by
+//      one per rewritten line, and the header names every trigger that fires
+//      (read from the schema).
+// Against the U-cost2 0200 (HELD_0200_SQL=<git show copy>) checks 1, 3, 5, 6,
+// 7 and 8 fail; against 66da324e's (a lower time bound only) check 7 fails.
 //
 // Run (from cloudflare/): node scripts/test-held-0200-sale-cost-oracle-pure.cjs [--table] [--emit <dir>]
 //   --table        prints line / case / before / expected / after
@@ -441,6 +445,11 @@ const recoverySql = () => migrationText.split('\n-- Statements:\n')[1].split('\n
 function dump(raw, table) {
   return raw.prepare(`SELECT *, typeof(cost_price_usd) AS cost_type FROM ${table} ORDER BY id`).all().map((r) => ({ ...r }))
 }
+// Every table's rows, for a whole-database diff.
+function snapshotAll(raw) {
+  return Object.fromEntries(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
+    .map((t) => [t.name, raw.prepare(`SELECT * FROM "${t.name}"`).all().map((r) => JSON.stringify(r)).sort()]))
+}
 const tableExists = (raw, t) => !!raw.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)
 const plainDump = (raw, t) => tableExists(raw, t) ? raw.prepare(`SELECT * FROM ${t} ORDER BY 1, 2`).all().map((r) => ({ ...r })) : null
 
@@ -468,7 +477,9 @@ try { summaryBefore = auditSummary(H.raw) } catch (error) { summaryBefore = erro
 const before = { sale: dump(H.raw, 'sale_items'), return: dump(H.raw, 'return_items') }
 const oracle = { sale: dump(O.raw, 'sale_items'), return: dump(O.raw, 'return_items') }
 let applied = null
+const allBefore = snapshotAll(H.raw)
 try { apply(H.raw); applied = true } catch (error) { applied = error }
+const allAfter = snapshotAll(H.raw)
 const after = { sale: dump(H.raw, 'sale_items'), return: dump(H.raw, 'return_items') }
 const plan = tableExists(H.raw, 'sale_cost_repair_0200_plan')
   ? Object.fromEntries(H.raw.prepare('SELECT kind, item_id, bucket, reason, correct_cost_usd FROM sale_cost_repair_0200_plan').all().map((r) => [`${r.kind}:${r.item_id}`, r]))
@@ -543,6 +554,37 @@ check('only sale_items.cost_price_usd and return_items.cost_price_usd move; KHR 
   }
   const khr = after.return.find((x) => `return:${x.id}` === byCase['D-walkin-khr'].key)
   assert.equal(khr.cost_price_khr, 16400, 'KHR cost untouched')
+})
+
+// E5: the header's write claim, checked against the whole database. The
+// triggers that fire are read from the schema, so a trigger added later on
+// either table fails this until the header names it.
+check('E5: besides its own tables and the two cost columns, the only writes are the revision triggers the header names, one bump per rewritten line', () => {
+  if (applied !== true) throw applied
+  const own = ['sale_cost_repair_0200', 'sale_cost_repair_0200_return_items', 'sale_cost_repair_0200_plan']
+  const changed = Object.keys(allAfter).filter((t) => !own.includes(t) && JSON.stringify(allAfter[t]) !== JSON.stringify(allBefore[t] ?? []))
+  assert.deepEqual(changed, ['return_items', 'return_write_revisions', 'sale_items', 'sale_write_revisions'], 'tables written')
+  const firing = H.raw.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name IN ('sale_items', 'return_items')
+    AND upper(sql) LIKE '%AFTER UPDATE%' ORDER BY name`).all().map((r) => r.name)
+  assert.deepEqual(firing, ['return_revision_items_update', 'sale_revision_return_items_update', 'sale_revision_sale_items_update'])
+  const comments = migrationText.split('\n').filter((l) => l.startsWith('--')).join('\n')
+  for (const name of firing) assert.ok(comments.includes(name), `the header names ${name}`)
+  // One bump per rewritten line: a sale for each of its lines and each line of a return linked to it; a return for each of its lines.
+  const revisions = (rows, key) => Object.fromEntries(rows.map((r) => JSON.parse(r)).map((r) => [r[key], r.revision]))
+  const bumps = (table, key) => {
+    const b = revisions(allBefore[table], key), a = revisions(allAfter[table], key)
+    return Object.fromEntries(Object.keys(a).filter((k) => a[k] !== (b[k] ?? 0)).map((k) => [k, a[k] - (b[k] ?? 0)]))
+  }
+  const count = (sql) => Object.fromEntries(H.raw.prepare(sql).all().map((r) => [String(r.id), r.n]))
+  const saleExpected = count(`SELECT id, SUM(n) n FROM (
+      SELECT sale_id id, COUNT(*) n FROM sale_cost_repair_0200 GROUP BY sale_id
+      UNION ALL
+      SELECT r.sale_id, COUNT(*) FROM sale_cost_repair_0200_return_items x JOIN returns r ON r.id = x.return_id WHERE r.sale_id IS NOT NULL GROUP BY r.sale_id)
+    GROUP BY id`)
+  const returnExpected = count('SELECT return_id id, COUNT(*) n FROM sale_cost_repair_0200_return_items GROUP BY return_id')
+  assert.ok(Object.keys(saleExpected).length >= 8 && Object.keys(returnExpected).length >= 4, 'the fixture rewrites lines of several sales and returns')
+  assert.deepEqual(bumps('sale_write_revisions', 'sale_id'), saleExpected, 'sale revisions')
+  assert.deepEqual(bumps('return_write_revisions', 'return_id'), returnExpected, 'return revisions')
 })
 
 check('audit: every in-scope line in exactly one bucket; after apply the rewritten lines leave the rewritten buckets', () => {
