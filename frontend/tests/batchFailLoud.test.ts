@@ -123,7 +123,8 @@ check('the failed lookup self-heals -- retry is never left to the manual Try aga
     'coming back online should retry the tracked-batch lookup',
   )
   assert.ok(
-    /window\.setInterval\(retry, /.test(pos),
+    // F2: paused while the tab is hidden, one retry on return if due.
+    /startVisibleInterval\(retry, /.test(pos),
     'a safety interval should retry while the banner is up',
   )
   assert.ok(
