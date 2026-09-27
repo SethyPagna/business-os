@@ -220,6 +220,38 @@ const base = {
   assert.strictEqual(warehouse.sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits`).get().n, 0)
   assert.strictEqual(warehouse.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, beforeWarehouseStock)
 
+  // Receipt identity. The IMP- number used to hash only the sale group key
+  // (date + ordinal, e.g. "sale"), so a second import job carrying a sale
+  // group for the same date minted the SAME receipt number for a different
+  // sale (client_request_id is job-scoped, so nothing deduped it).
+  const twoJobs = setup()
+  await subject.applyUnifiedStockSale(twoJobs.db, { ...base, jobId: 'job-a', lines: [{ ...base.lines[0], quantity: 1 }] })
+  await subject.applyUnifiedStockSale(twoJobs.db, { ...base, jobId: 'job-b', lines: [{ ...base.lines[0], quantity: 1 }] })
+  assert.strictEqual(twoJobs.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 2, 'two jobs, two sales')
+  assert.deepStrictEqual(
+    twoJobs.sqlite.prepare(`SELECT receipt_number, COUNT(*) AS n FROM sales GROUP BY receipt_number HAVING COUNT(*) > 1`).all(),
+    [], 'two import jobs never share one receipt number')
+  for (const { receipt_number } of twoJobs.sqlite.prepare(`SELECT receipt_number FROM sales`).all()) {
+    assert.match(receipt_number, /^IMP-20260827-[0-9A-F]{8}$/, 'the IMP- format is unchanged')
+  }
+  const sameJobRetry = await subject.applyUnifiedStockSale(twoJobs.db, { ...base, jobId: 'job-a', lines: [{ ...base.lines[0], quantity: 1 }] })
+  assert.strictEqual(sameJobRetry.alreadyApplied, true, 'a same-job retry is still idempotent')
+
+  // In-transaction uniqueness: a sale committed with the pending number
+  // between planning and the batch fails the whole group, nothing written.
+  const receiptRace = setup()
+  const raceBatch = receiptRace.db.batch
+  receiptRace.db.batch = (statements) => {
+    const insert = statements.find(({ sql }) => /INSERT INTO sales \(/.test(sql))
+    receiptRace.sqlite.prepare(`INSERT INTO sales (receipt_number, client_request_id) VALUES (@r, 'peer')`).run({ r: insert.params.receiptNumber })
+    return raceBatch(statements)
+  }
+  await assert.rejects(() => subject.applyUnifiedStockSale(receiptRace.db, base), /receipt number/i)
+  assert.strictEqual(receiptRace.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 1, 'only the peer sale exists')
+  assert.strictEqual(receiptRace.sqlite.prepare(`SELECT COUNT(*) AS n FROM sale_items`).get().n, 0)
+  assert.strictEqual(receiptRace.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 10)
+  assert.strictEqual(receiptRace.sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits`).get().n, 0)
+
   console.log('PASS grouped stock sales are Shop-guarded, bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
 })().catch((error) => {
   console.error(error)
