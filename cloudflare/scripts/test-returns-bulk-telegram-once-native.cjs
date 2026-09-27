@@ -27,6 +27,12 @@
 // Each mode has a lone-request positive control (a delay alone still sends
 // exactly one message), so a fix that simply stopped announcing is red too.
 //
+// Undo/redo (R-telegram E7c), through the real routes/actionHistory.ts: undo
+// and redo of a grouped status change are each announced once, in the
+// returns topic, naming the return and who did it; a replay refused by the
+// route (repeated redo) or by the kernel (stale-generation undo) announces
+// nothing.
+//
 // Run (from cloudflare/): node scripts/test-returns-bulk-telegram-once-native.cjs
 const path = require('node:path')
 const fs = require('node:fs')
@@ -47,7 +53,7 @@ async function pricingKernel() {
 }
 
 const ENTRY = [
-  "import { Hono } from 'hono'; import returns from './src/routes/returns';",
+  "import { Hono } from 'hono'; import returns from './src/routes/returns'; import history from './src/routes/actionHistory';",
   'const calls = [];',
   'globalThis.fetch = async (input, init) => {',
   "  const url = String(typeof input === 'string' ? input : input.url);",
@@ -58,7 +64,7 @@ const ENTRY = [
   '  }',
   "  return new Response('blocked by test', { status: 599 });",
   '};',
-  "const app = new Hono(); app.route('/api/returns', returns);",
+  "const app = new Hono(); app.route('/api/returns', returns); app.route('/api/action-history', history);",
   "app.get('/test/calls', c => c.json(calls));",
   "app.post('/test/calls/reset', c => { calls.length = 0; return c.json({ ok: true }) });",
   'export default app;',
@@ -232,6 +238,47 @@ async function main() {
       checks += 1
       console.log(`PASS ${mode} sequential retry: replayed receipt, 0 messages`)
     }
+
+    // R-telegram E7c: undoing or redoing a grouped status change cancels or
+    // restores those returns, so it is announced like the original -- once,
+    // in the returns topic, naming who did it -- and a replay the kernel
+    // refuses announces nothing. Through the real routes/actionHistory.ts.
+    await reset()
+    const from = await statusOf(id)
+    const to = from === 'completed' ? 'cancelled' : 'completed'
+    const grouped = await call('/api/returns/bulk', await bulkBody('undo-announce', id, from, to))
+    assert.equal(grouped.status, 200, JSON.stringify(grouped.body))
+    const historyId = Number(grouped.body.actionHistoryId)
+    assert.ok(historyId > 0, `the grouped change is in history: ${JSON.stringify(grouped.body)}`)
+    assert.deepEqual(heads(await sends()), [HEAD[to]])
+    const returnNumber = (await db.prepare('SELECT return_number FROM returns WHERE id=?').bind(id).first()).return_number
+    const replay = (direction, generation) => call(`/api/action-history/${historyId}/${direction}`, { require_applied: true, expected_generation: generation })
+    for (const [direction, generation, status] of [['undo', 0, from], ['redo', 1, to]]) {
+      await reset()
+      const out = await replay(direction, generation)
+      assert.equal(out.status, 200, `${direction}: ${JSON.stringify(out.body)}`)
+      assert.equal(await statusOf(id), status, `${direction} put the return back to ${status}`)
+      const announced = await sends()
+      assert.deepEqual(heads(announced), [HEAD[status]], `${direction} must be announced exactly once in the returns topic, got ${announced.length}`)
+      const text = String(announced[0].body.text)
+      // The fixture session's username is 'fixture' (actorSnapshot).
+      assert.ok(text.includes(`· RET/លេខប្រគល់មកវិញ: ${returnNumber}`) && text.includes('· By/ដោយ: fixture'), `the ${direction} message names the return and who did it, in both languages:\n${text}`)
+      checks += 1
+      console.log(`PASS ${direction} of the grouped change: return ${status}, 1 message (${HEAD[status]})`)
+    }
+    // Two refusals, from the two places a replay is refused: the route's own
+    // history-status check (a repeated redo) and the kernel (an undo from a
+    // stale view: the history row IS undoable again, so it reaches the
+    // applier, whose generation guard throws). Neither may announce.
+    for (const [why, direction, generation] of [['a repeated redo (route refuses)', 'redo', 1], ['an undo from a stale view (kernel refuses)', 'undo', 0]]) {
+      await reset()
+      const refused = await replay(direction, generation)
+      assert.equal(refused.status, 409, `${why}: ${JSON.stringify(refused.body)}`)
+      assert.equal(await statusOf(id), to, `${why}: the return is unchanged`)
+      assert.deepEqual(await sends(), [], `${why}: a refused replay announces nothing`)
+    }
+    checks += 1
+    console.log('PASS refused replays (repeated redo; stale-generation undo): 409, return unchanged, 0 messages')
     console.log(`test-returns-bulk-telegram-once-native: ${checks} checks ok (Telegram intercepted in the worker; nothing sent)`)
   } finally {
     await mf.dispose()
