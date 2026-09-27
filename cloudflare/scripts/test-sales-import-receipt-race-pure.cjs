@@ -65,7 +65,14 @@ function fixture(hooks = {}) {
     },
     batch: async (statements) => {
       if (hooks.beforeBatch) await hooks.beforeBatch(db, statements)
-      return db.batch(statements)
+      const results = await db.batch(statements)
+      // lib/db.ts batch() runs under withD1Retry: a committed batch whose
+      // acknowledgement was lost is sent again, verbatim.
+      if (hooks.replayCommittedBatchOnce) {
+        hooks.replayCommittedBatchOnce = false
+        return db.batch(statements)
+      }
+      return results
     },
   }
   return { raw: db, route }
@@ -238,6 +245,35 @@ function own(db, rowNumber, jobId = 'job-1') {
     assert.match(String(error.message), /batch\/lot reference changed/)
     assert.equal(batches, 1, 'a non-receipt failure is not retried')
     console.log('PASS control: a stale batch/lot reference still fails as a reference change, without a receipt retry')
+  })
+
+  // 6. Control: a batch that THROWS for a non-receipt reason is rethrown as
+  //    itself on the first attempt -- a retry-on-any-error loop would re-run
+  //    it and report a receipt collision instead.
+  await scenario(6, async () => {
+    let batches = 0
+    const f = fixture({ beforeBatch() { batches += 1 } })
+    f.raw.exec("CREATE TRIGGER force_item_failure BEFORE INSERT ON sale_items BEGIN SELECT RAISE(ABORT,'forced sale item failure'); END")
+    const error = await applyHistoricalSaleImport(f.route, { jobId: 'job-1', rowNumber: 8, data: saleData(), nowIso: NOW, actor: ACTOR })
+      .then(() => null, (e) => e)
+    assert.ok(error, 'the forced failure must fail the row')
+    assert.match(String(error.message), /forced sale item failure/)
+    assert.equal(batches, 1, 'a non-receipt batch failure is not retried')
+    assert.equal(own(f.raw, 8), undefined)
+    console.log('PASS control: a non-receipt batch failure is rethrown unchanged after one attempt')
+  })
+
+  // 7. A committed batch re-sent after a lost acknowledgement (withD1Retry)
+  //    must stay an idempotent no-op: the receipt guard may not mistake the
+  //    row's OWN committed sale for a peer holding its number.
+  await scenario(7, async () => {
+    const f = fixture({ replayCommittedBatchOnce: true })
+    const result = await applyHistoricalSaleImport(f.route, { jobId: 'job-1', rowNumber: 9, data: saleData(), nowIso: NOW, actor: ACTOR })
+    assert.equal(result.alreadyApplied, false)
+    assert.equal(Number(f.raw.prepare('SELECT COUNT(*) AS n FROM sales').get().n), 1)
+    assert.equal(own(f.raw, 9).receipt_number, '20260828-143000')
+    assert.equal(Number(f.raw.prepare('SELECT COUNT(*) AS n FROM sale_items').get().n), 1)
+    console.log('PASS a lost-acknowledgement replay of a committed import batch is an idempotent success, not a receipt conflict')
   })
 
   if (failures.length) {

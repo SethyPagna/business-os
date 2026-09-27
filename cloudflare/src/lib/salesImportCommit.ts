@@ -330,8 +330,11 @@ export async function applyHistoricalSaleImport(
   // INSERT OR IGNORE would otherwise skip past. A taken number aborts the
   // whole batch (the json_extract idiom the POS guards use); the retry loop
   // below attributes the abort by re-probing the number, never by message.
+  // The row's OWN sale is excluded: lib/db.ts re-sends a committed batch
+  // whose acknowledgement was lost, and that re-send must stay a no-op.
   const receiptFreeGuard = `CASE WHEN NOT EXISTS (
       SELECT 1 FROM sales WHERE receipt_number = @receipt_number
+        AND client_request_id IS NOT @client_request_id
     ) THEN 1 ELSE json_extract('receipt_number_conflict', '$') END`
   const pendingRowParams: Record<string, unknown> = { ...common, receipt_number: receiptNumber }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
