@@ -1,21 +1,17 @@
 ---
 name: fleet-coordination
 description: >-
-  The operating playbook for the shared business-os checkout: coordinating many parallel Claude
-  Code sessions (worker / coordinator / final-reconciler roles on one shared git index), layered
-  verification of every task — source-shape checks, committed-HEAD certification, exhaustive
-  matrices, live API end-to-end, and live-browser screenshot→verify→fix→continue loops —
-  consistency audits of code logic, buttons, pages and sibling surfaces, reconciliation of parallel
-  lanes, the staged commit→push→deploy cycle (Stage 1 audit vs user-gated Stage 2), and the
-  docs/context discipline (progress.md board, session-log Parts, CLAUDE.md, ≤300K compaction).
-  Use it whenever you are about to touch any file in this checkout (the first move is to message
-  the live peer sessions and check the ChatGPT/Codex surface about the files you will take), and
-  whenever the user asks to coordinate or reconcile sessions, prevent collisions, verify /
-  validate / test / check anything ("does it actually work", "screenshot and verify", "test it in
-  the browser", "check consistency", "make sure every page / button / section…", "continue" after
-  a check), certify committed HEAD, run Stage 1 or Stage 2 or a deploy, compact or hand off
-  context, or update progress.md / the session log / CLAUDE.md — even when they don't name this
-  skill or say "sessions".
+  Operating playbook for the shared business-os checkout: parallel sessions on one git index
+  (worker, coordinator, final-reconciler), layered verification up to live API and browser
+  screenshot→verify→fix loops, consistency audits, lane reconciliation, the staged
+  commit→push→deploy cycle (Stage 1 audit, user-gated Stage 2) and docs/context discipline
+  (≤300K compaction). Use it before touching any file here (first message the live peer sessions
+  and check the ChatGPT/Codex surface about the files you will take), and whenever the user asks
+  to coordinate or reconcile sessions, prevent collisions, verify / validate / test / check
+  anything ("does it actually work", "screenshot and verify", "test it in the browser", "check
+  consistency", "make sure every page / button / section…", "continue" after a check), certify
+  committed HEAD, run Stage 1, Stage 2 or a deploy, compact or hand off context, or update
+  progress.md / the session log / CLAUDE.md, even when they don't name this skill.
 ---
 
 # Fleet coordination for the shared business-os checkout

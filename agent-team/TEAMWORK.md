@@ -45,4 +45,4 @@ Use `agent-team/schemas/task-envelope.schema.json` and `agent-team/schemas/resul
 
 Run `node agent-team/scripts/test-team-state.mjs` after changing coordination, claim, production-guard, or envelope-validation behavior.
 
-Run `node agent-team/scripts/test-verify.mjs` after changing `verify.mjs` or `verify-lib.mjs`.
+Run `node agent-team/scripts/test-verify.mjs` after changing `verify.mjs` or `verify-lib.mjs`, and `node agent-team/scripts/test-sync-adapters.mjs` after changing `sync-adapters.mjs`, `validate-team.mjs` or `skill-frontmatter.mjs`.

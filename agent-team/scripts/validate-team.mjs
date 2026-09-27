@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SKILL_DESCRIPTION_LIMIT, skillDescription, skillFrontMatter } from "./skill-frontmatter.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const manifest = JSON.parse(readFileSync(join(root, "agent-team/agents.json"), "utf8"));
@@ -30,9 +31,10 @@ const skillNames = readdirSync(join(root, "agent-team/skills"), { withFileTypes:
 for (const name of skillNames) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error(`Skill folder must be kebab-case: ${name}`);
   const skill = readFileSync(join(root, `agent-team/skills/${name}/SKILL.md`), "utf8").replaceAll("\r\n", "\n");
-  const front = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1];
-  if (!front || !front.includes(`name: ${name}\n`) || !/^description:/m.test(front)) throw new Error(`Invalid portable skill frontmatter: ${name}`);
-  if (front.length > 1400) throw new Error(`Skill description too long (keep it under ~1024 chars): ${name}`);
+  const front = skillFrontMatter(skill);
+  const description = skillDescription(skill);
+  if (!front || !front.includes(`name: ${name}\n`) || !description) throw new Error(`Invalid portable skill frontmatter: ${name}`);
+  if (description.length > SKILL_DESCRIPTION_LIMIT) throw new Error(`Skill description is ${description.length} chars, over the ${SKILL_DESCRIPTION_LIMIT}-char limit: ${name}`);
   if (skill.split("\n").length > 300) throw new Error(`Skill body over 300 lines; move detail to references/: ${name}`);
 }
 execFileSync(process.execPath, [join(root, "agent-team/scripts/sync-adapters.mjs"), "--check"], { cwd: root, stdio: "inherit" });
