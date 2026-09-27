@@ -17,7 +17,9 @@
 // summary, calling Cloudflare's REST API with GET (and one DELETE, of the
 // temporary Worker), running only fixed wrangler commands, and passing the
 // copy Worker's bearer secret only on wrangler's stdin and in a request
-// header.
+// header. settings-upsert is a dry run unless apply is exactly true, takes its
+// settings only from the run's event payload (never an expression), and sends
+// one write: the batch it built and re-verified, after the apply decision.
 //
 // The YAML is read with a strict subset reader: anything it cannot see into
 // (flow collections, anchors, folded blocks, tabs, duplicate keys, multi-line
@@ -238,7 +240,7 @@ function strings(node, at = [], out = []) {
 
 // ------------------------------------------------------ what ops.yml must be
 
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names']
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
@@ -290,10 +292,17 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-secret-names.mjs'),
     { kind: 'upload' },
   ],
+  // The settings input is read from the event payload file, so the job's only
+  // task-specific expression is the apply flag.
+  'settings-upsert': [
+    ...PRELUDE,
+    scriptStep('node ops/scripts/ops-settings-upsert.mjs', { OPS_APPLY: '${{ inputs.apply }}' }),
+    { kind: 'upload' },
+  ],
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
@@ -302,6 +311,7 @@ const RUNNER_SCRIPTS = [
   'ops/scripts/ops-r2.mjs',
   'ops/scripts/ops-r2-lib.mjs',
   'ops/scripts/ops-secret-names.mjs',
+  'ops/scripts/ops-settings-upsert.mjs',
 ]
 const WORKER_SCRIPTS = ['ops/r2-copy-worker/src/index.mjs', 'ops/r2-copy-worker/src/core.mjs']
 const BUILTINS = new Set(['node:crypto', 'node:fs', 'node:path', 'node:os', 'node:child_process', 'node:url'])
@@ -454,7 +464,7 @@ async function main() {
 
   await check('ops.yml: the task choices are the task jobs; confirm is required and has no default', () => {
     const inputs = WF.on.workflow_dispatch.inputs
-    assert.deepStrictEqual(Object.keys(inputs).sort(), ['confirm', 'mode', 'query', 'task'])
+    assert.deepStrictEqual(Object.keys(inputs).sort(), ['apply', 'confirm', 'mode', 'query', 'settings', 'task'])
     assert.deepStrictEqual(Object.keys(WF.jobs), ['gate', ...TASKS])
     assert.strictEqual(inputs.task.type, 'choice')
     assert.strictEqual(inputs.task.required, 'true')
@@ -463,6 +473,11 @@ async function main() {
     assert.deepStrictEqual(inputs.mode.options, driver.MODES)
     assert.strictEqual(inputs.mode.default, 'copy')
     assert.strictEqual(inputs.query.type, 'string')
+    assert.strictEqual(inputs.settings.type, 'string')
+    assert.strictEqual(inputs.settings.required, 'false')
+    assert.strictEqual(inputs.settings.default, '')
+    assert.strictEqual(inputs.apply.type, 'boolean')
+    assert.strictEqual(inputs.apply.default, 'false', 'a settings-upsert run is a dry run unless apply is ticked')
     assert.strictEqual(inputs.confirm.type, 'string')
     assert.strictEqual(inputs.confirm.required, 'true')
     assert.ok(!('default' in inputs.confirm), 'a default confirm word would confirm by itself')
@@ -639,7 +654,7 @@ async function main() {
 
   await check('ops.yml: nothing is interpolated into a shell script, and every expression is on the allowlist', () => {
     const allowed = new Set([
-      '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}',
+      '${{ inputs.task }}', '${{ inputs.confirm }}', '${{ inputs.query }}', '${{ inputs.mode }}', '${{ inputs.apply }}',
       SECRET_ENV.CLOUDFLARE_API_TOKEN, SECRET_ENV.CLOUDFLARE_ACCOUNT_ID, OUT_DIR, UPLOAD_PATH,
     ])
     for (const [where, value] of strings(WF)) {
@@ -653,6 +668,10 @@ async function main() {
     assert.deepStrictEqual(where('${{ inputs.confirm }}'), ['jobs.gate.steps.N.env.CONFIRM', ...TASKS.map((t) => `jobs.${t}.steps.N.env.CONFIRM`)])
     assert.deepStrictEqual(where('${{ inputs.query }}'), ['jobs.d1-export.steps.N.env.OPS_QUERY'])
     assert.deepStrictEqual(where('${{ inputs.mode }}'), ['jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE', 'jobs.r2-apac-copy.steps.N.env.OPS_R2_MODE'])
+    assert.deepStrictEqual(where('${{ inputs.apply }}'), ['jobs.settings-upsert.steps.N.env.OPS_APPLY'])
+    // The topic ids never pass through an expression or a step env (whose
+    // values the public log prints): the script reads the event payload file.
+    assert.deepStrictEqual(strings(WF).filter(([, v]) => /inputs\.settings|github\.event|OPS_SETTINGS/.test(v)).map(([w]) => w), [])
     const r2 = code['ops/scripts/ops-r2.mjs']
     assert.ok(r2.includes("  if (mode === 'copy' && !out.problems.length && !dest.present && dest.missing) {\n    const r = await create()") && count(r2, /\bcreate\(\)/g) === 1, 'only copy mode may create the destination bucket')
     assert.strictEqual(count(r2, /const mode = String\(process\.env\.OPS_R2_MODE \|\| 'copy'\)\.trim\(\)/g), 2, 'buckets and run both take the mode from the workflow input')
@@ -793,6 +812,7 @@ async function main() {
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",
       "ops/scripts/ops-r2.mjs: ['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION]",
       "ops/scripts/ops-r2.mjs: ['secret', 'put', 'COPY_TOKEN', ...config]",
+      'ops/scripts/ops-settings-upsert.mjs: wranglerArgs(sql)',
     ].sort())
     const r2 = code['ops/scripts/ops-r2.mjs']
     assert.strictEqual(count(r2, /const config = \['--config', WORKER_TOML\]/g), 1)
@@ -824,6 +844,27 @@ async function main() {
     assert.ok(code['ops/r2-copy-worker/src/index.mjs'].includes('fetch(request, env) {'), 'the Worker fetch is its own handler, not an outbound call')
   })
 
+  await check('settings-upsert: dry run unless apply is exactly true; one write, of the re-verified batch, after the decision; settings only from the event payload', () => {
+    const s = code['ops/scripts/ops-settings-upsert.mjs']
+    assert.strictEqual(count(s, /requireEnv\('OPS_APPLY'\)/g), 1)
+    assert.ok(s.includes("const apply = parseApplyFlag(requireEnv('OPS_APPLY'))"), 'the apply flag goes through parseApplyFlag')
+    assert.ok(s.includes("  if (raw === 'true') return true\n  if (raw === 'false') return false\n  throw new OpsError('apply-input-invalid'"), 'only true and false are accepted')
+    assert.ok(s.includes("  if (apply !== true) return 'dry-run'\n"), 'anything but a real true is a dry run')
+    assert.strictEqual(count(s, /process\.env\.GITHUB_EVENT_PATH/g), 1)
+    assert.ok(s.includes('rawInput = readSettingsInput(process.env.GITHUB_EVENT_PATH)'), 'the settings come from the event payload')
+    // Every D1 call: the state read (twice, through readState), the one write, the audit read-back.
+    const calls = [...s.matchAll(/\bd1\(((?:[^()]|\([^()]*\))*)\)/g)].map((m) => m[1]).sort()
+    assert.deepStrictEqual(calls, ['build.sql', 'buildAuditReadSql(report.write.auditId)', 'sql'].sort())
+    assert.strictEqual(count(s, /readState\(d1, stateSql, allowList\)/g), 2)
+    assert.ok(s.includes('const stateSql = buildStateSql(allowList)') && s.includes('d1: runD1,'), 'reads are the guarded state read; production D1 is runD1')
+    const checked = s.indexOf('report.batchCheck = batchShapeProblems(build.sql, allowList)')
+    const decided = s.indexOf("if (action !== 'write') {")
+    const saved = s.indexOf('const bytes = await checkpoint(report)')
+    const write = s.indexOf('const w = await d1(build.sql)')
+    assert.ok(checked > 0 && decided > checked && saved > decided && write > saved, 'the batch is re-verified, the action decided and the previous values saved, in that order, before the write')
+    assert.ok(s.includes('  let build = null\n') && s.includes('    build = buildBatch(plan, context)\n'), 'the written SQL is the builder output')
+  })
+
   await check('ops scripts: they import only each other and node built-ins, and read only listed environment variables', () => {
     for (const [file, text] of Object.entries(code)) {
       for (const m of text.matchAll(/\bfrom '([^']+)'/g)) {
@@ -851,7 +892,7 @@ async function main() {
         required.set(file, [...(required.get(file) || []), m[1].slice(1, -1)])
       }
     }
-    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_R2_MODE'])
+    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_R2_MODE'])
     assert.strictEqual(indexed, 1, 'process.env[name] only in requireEnv')
     assert.strictEqual(spread, 1, 'the environment is passed on only to wrangler')
     // Every step gives its script what the script requires.
