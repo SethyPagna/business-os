@@ -59,12 +59,15 @@ function sourceFiles(dir: string): string[] {
 
 // Native confirm() calls that remain, by file (relative to frontend/src).
 // Lower a number -- or delete the line -- when you replace one.
+//
+// FX-ui (27 Sep 2026) replaced every admin-side call with the shared dialog.
+// The one left is deliberate: CatalogAccountSection is the CUSTOMER storefront
+// (its own multi-language portal packs via getPortalLanguageText, not en/km), its
+// question is an informational sign-up reminder rather than an admin
+// mutation, and ConfirmDialog/Modal are admin chrome. Moving it needs a
+// storefront-styled dialog, which belongs to the public-website lane.
 const REMAINING: Record<string, number> = {
   'components/catalog/CatalogAccountSection.tsx': 1,
-  'components/products/Products.tsx': 5,
-  'components/products/import/BulkImportModal.tsx': 4,
-  'components/shared/BackgroundImportTracker.tsx': 1,
-  'components/utils-settings/Backup.tsx': 4,
 }
 
 runTest('positive control: every native form is counted, comments and a local confirm are not', () => {
