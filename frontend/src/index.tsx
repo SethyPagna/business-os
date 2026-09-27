@@ -98,6 +98,15 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
   // Reconnecting is the other moment a deploy missed while offline becomes
   // reachable.
   window.addEventListener('online', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
+
+  // The app's own reconnect signal: websocket.ts dispatches it when the live
+  // socket re-opens after a drop, http.ts when a failed health probe
+  // recovers. A deploy restarts the Durable Object behind that socket, so this
+  // is how an open till hears about a new build within seconds instead of on
+  // the next poll. No minimum gap on purpose: a check made seconds earlier
+  // saw the old sw.js. The socket's reconnect backoff bounds how often this
+  // fires, and `checking` folds the two emitters of one reconnect into one.
+  window.addEventListener('sync:reconnected', () => { check() })
 }
 
 // Asks a specific worker which build it is. Resolves to an empty string if it

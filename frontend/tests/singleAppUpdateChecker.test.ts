@@ -13,9 +13,10 @@ import ts from 'typescript'
 // origin) and a SECOND service-worker update check alongside index.tsx's own.
 // After F1 the recovery listeners still resume the socket, ping health and
 // refresh screens, but load no snapshot and never touch the worker; index.tsx
-// is the one update checker, and it must still fire on its interval and when
-// a long-lived till tab becomes visible again -- that is the only way the
-// "Restart now" bar reaches it.
+// is the one update checker, and it must still fire on its interval, when a
+// long-lived till tab becomes visible again, and on the app's own reconnect
+// signal (R-F1F3 F-03/F-09: F1 first deleted that reaction instead of moving
+// it) -- that is the only way the "Restart now" bar reaches the till.
 //
 // The web-api case runs the real listeners extracted from the source, so it is
 // red against c5b28762, where a focus event loads the snapshot transport and
@@ -199,18 +200,13 @@ await runTest('web-api no longer references the snapshot transport, a maintenanc
   assert.match(webApi, /startsWith\('BUSINESS_OS_OUTBOX_'\)/)
 })
 
-await runTest('index.tsx update checker fires on its interval and on visibility return in a long-lived tab', async () => {
+// The real watchForNewAppShell from index.tsx, bound to a fake browser.
+function loadAppShellWatcher(browser: ReturnType<typeof fakeBrowser>, navigatorState: { onLine: boolean }) {
   const index = read('src/index.tsx')
   const functions = topLevelFunctions('index.tsx', index, ['watchForNewAppShell'])
   assert.match(functions, /function watchForNewAppShell/)
   const POLL = topLevelConstValue(index, 'SERVICE_WORKER_UPDATE_POLL_MS')
   const MIN_GAP = topLevelConstValue(index, 'SERVICE_WORKER_UPDATE_MIN_GAP_MS')
-  assert.ok(POLL <= 15 * 60_000, 'an untouched till must be re-checked at least every 15 minutes')
-
-  const browser = fakeBrowser()
-  const navigatorState = { onLine: true }
-  let updates = 0
-  const registration = { update: async () => { updates += 1 } }
   const dependencies: Record<string, unknown> = {
     window: browser.window,
     document: browser.document,
@@ -221,7 +217,18 @@ await runTest('index.tsx update checker fires on its interval and on visibility 
   }
   const compiled = transpile(`${functions}\nreturn { watchForNewAppShell };`)
   const runtime = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
-  runtime.watchForNewAppShell(registration)
+  return { watchForNewAppShell: runtime.watchForNewAppShell as (registration: unknown) => void, POLL, MIN_GAP }
+}
+
+await runTest('index.tsx update checker fires on its interval and on visibility return in a long-lived tab', async () => {
+  const browser = fakeBrowser()
+  const navigatorState = { onLine: true }
+  const { watchForNewAppShell, POLL, MIN_GAP } = loadAppShellWatcher(browser, navigatorState)
+  assert.ok(POLL <= 15 * 60_000, 'an untouched till must be re-checked at least every 15 minutes')
+
+  let updates = 0
+  const registration = { update: async () => { updates += 1 } }
+  watchForNewAppShell(registration)
   const settle = () => new Promise((resolve) => setImmediate(resolve))
 
   assert.equal(browser.intervals.length, 1, 'exactly one update poll')
@@ -265,6 +272,78 @@ await runTest('index.tsx update checker fires on its interval and on visibility 
   browser.window.dispatchEvent(new Event('online'))
   await settle()
   assert.equal(updates, 5, 'reconnecting must check for a build shipped while offline')
+})
+
+// R-F1F3 F-03/F-09. A Worker deploy restarts the BroadcastHub Durable Object,
+// so every open tab's socket drops and websocket.ts dispatches
+// sync:reconnected a few seconds later (http.ts dispatches the same event
+// when a failed health probe recovers). Before F1 that event forced web-api's
+// second update check; F1 deleted that checker, and with it the only reaction,
+// so a visible till learned about a deploy on the next 15-minute tick at best.
+// The one checker must react itself: even seconds after another check (that
+// one saw the old sw.js), once per reconnect, and through one listener that
+// is never registered again however many events fire.
+await runTest('index.tsx update checker asks for the new build on every app reconnect, through one listener', async () => {
+  const browser = fakeBrowser()
+  const navigatorState = { onLine: true }
+  const { watchForNewAppShell, POLL } = loadAppShellWatcher(browser, navigatorState)
+
+  const registrations = new Map<string, number>()
+  for (const target of [browser.window, browser.document]) {
+    const add = target.addEventListener.bind(target)
+    target.addEventListener = (type: string, listener: EventListenerOrEventListenerObject | null, options?: AddEventListenerOptions | boolean) => {
+      registrations.set(type, (registrations.get(type) || 0) + 1)
+      add(type, listener, options)
+    }
+  }
+  const registrationCount = () => [...registrations.values()].reduce((sum, count) => sum + count, 0)
+
+  // update() stays pending until released, like a real sw.js fetch in flight.
+  let updates = 0
+  const inFlight: Array<() => void> = []
+  const registration = { update: () => { updates += 1; return new Promise<void>((resolve) => { inFlight.push(resolve) }) } }
+  const settle = async () => {
+    inFlight.splice(0).forEach((resolve) => resolve())
+    for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+
+  watchForNewAppShell(registration)
+  assert.equal(registrations.get('sync:reconnected'), 1, 'the update checker must listen for the app reconnect signal exactly once')
+  const registeredAtStart = registrationCount()
+
+  // The slow poll checks, and sees the build that is still live.
+  browser.advance(POLL)
+  browser.intervals[0].fn()
+  assert.equal(updates, 1)
+  await settle()
+
+  // The deploy lands; the socket drops and reconnects seconds later.
+  browser.advance(4_000)
+  browser.window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: 1 } }))
+  assert.equal(updates, 2, 'a reconnect seconds after another check must still ask the browser for the new build')
+
+  // The health probe reports the same reconnect while that check is in flight.
+  browser.window.dispatchEvent(new CustomEvent('sync:reconnected'))
+  assert.equal(updates, 2, 'one reconnect reported by both emitters is one check')
+  await settle()
+
+  // Every later reconnect checks again, once each.
+  for (let reconnect = 1; reconnect <= 5; reconnect += 1) {
+    browser.advance(10_000)
+    browser.window.dispatchEvent(new CustomEvent('sync:reconnected', { detail: { ts: reconnect } }))
+    await settle()
+    assert.equal(updates, 2 + reconnect, `reconnect ${reconnect + 1} must check exactly once`)
+  }
+
+  // Nothing registered anything after the watcher was armed.
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  browser.window.dispatchEvent(new Event('online'))
+  browser.advance(POLL)
+  browser.intervals.forEach(({ fn }) => fn())
+  await settle()
+  assert.equal(registrations.get('sync:reconnected'), 1, 'reconnect handling must not add a listener per event')
+  assert.equal(registrationCount(), registeredAtStart, 'no check or handler may register another listener')
+  assert.equal(browser.intervals.length, 1, 'no check or handler may arm another poll')
 })
 
 if (failed > 0) {

@@ -28,7 +28,9 @@ const dependencies = {
   apiFetch: forbidden, registerOutboxBackgroundSync: forbidden, emitSyncQueueChanged: forbidden,
   scheduleOfflineVaultIdleLock: forbidden,
   // F1: the recovery listeners no longer run an offline snapshot or worker
-  // update; what they still do is resume the socket and ping health.
+  // update; what they still do is resume the socket and ping health. The
+  // reconnect -> app-shell update check this test used to count moved to
+  // index.tsx's watchForNewAppShell (singleAppUpdateChecker.test.ts runs it).
   resumeWS: () => { reads++ }, startHealthCheck() {}, pingServerHealth: async () => ({}), dispatchSyncUpdates() {},
   FOREGROUND_RECOVERY_THROTTLE_MS: 0, FOREGROUND_REFRESH_AFTER_MS: 45000, FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS: [],
 }

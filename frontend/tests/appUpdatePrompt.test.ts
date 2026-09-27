@@ -37,14 +37,17 @@ assert.ok(
   'the watcher must be armed with the registration returned by register()',
 )
 
-// 2. All three re-check triggers must survive. Dropping any one reintroduces a
-//    class of client that never learns about a deploy: the interval covers a
-//    tab nobody touches, visibilitychange covers a tab returned to after
-//    hours, online covers a deploy that shipped while the till was offline.
+// 2. All four re-check triggers must survive. Dropping any one reintroduces a
+//    class of client that never learns about a deploy (or learns 15 minutes
+//    late): the interval covers a tab nobody touches, visibilitychange covers
+//    a tab returned to after hours, online covers a deploy that shipped while
+//    the till was offline, and sync:reconnected covers the socket drop a
+//    deploy itself causes (singleAppUpdateChecker.test.ts runs it).
 assert.match(index, /window\.setInterval\(/, 'a periodic re-check must exist for an untouched tab')
 assert.match(index, /SERVICE_WORKER_UPDATE_POLL_MS/, 'the poll interval must stay a named constant')
 assert.match(index, /addEventListener\('visibilitychange'/, 'returning to the tab must re-check')
 assert.match(index, /addEventListener\('online'/, 'reconnecting must re-check')
+assert.match(index, /window\.addEventListener\('sync:reconnected'/, 'the app reconnect signal after a deploy must re-check')
 
 // 3. The interval must skip a hidden tab, and no check may run while offline --
 //    an offline till would otherwise burn a failing fetch on every tick.
