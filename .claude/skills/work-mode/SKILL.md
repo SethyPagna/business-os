@@ -38,7 +38,7 @@ tool, use your harness's equivalent (table at the end).
 12. **Every correction becomes an artifact.** Missing knowledge → AGENTS.md/skill; missing procedure → skill; escaped bug → regression test; repeated review comment → a CI/source check.
 13. **Production is gated.** Deployments, remote migrations, secret sync and every remote D1 command (reads too) are production actions that need explicit user authorization; planning and review agents never run them (`AGENTS.md`, `deploy-provenance`). A harness's own user or session instructions may carry a specific owner grant; this skill never asserts one.
 14. **Small commits, often.** A usage limit can kill every agent at once; uncommitted work is the only thing that is lost (`lane-recovery`).
-15. **Code carries meaning, not comments.** Names, types and tests explain; comments are for tool directives only (`no-comments`).
+15. **Code carries meaning; comments carry only what code cannot.** Names, types and tests explain first; keep a short why comment for an owner decision, an external constraint, a counter-intuitive workaround or a tool directive; the Golden Rules' readability bar wins (`no-comments`).
 
 ## Playbooks
 
