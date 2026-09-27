@@ -15,7 +15,8 @@
 //  4. Server-Timing format, and only on authenticated responses.
 //  5. Sampling: every miss/bypass, hits at 10 %, weight 1/rate.
 //  6. Privacy: ids/names/phone in the path and query never reach the
-//     datapoint -- only the route template and numbers do.
+//     datapoint -- only the route template and numbers do. Clocks are
+//     injected so every double is exact and none is exempt from the scan.
 //  7. No binding / a throwing binding: no-op, response unchanged.
 //  8. Background separation: runBackground work is recorded under its own
 //     label and never added to the route; unwrapped waitUntil work that
@@ -245,23 +246,37 @@ check('sampling: misses and bypass always, hits at 10 % with weight 10', () => {
 })
 
 check('privacy: only the route template and numbers reach Analytics Engine', async () => {
+  // Both clocks are driven by hand, so every double is exact and the scan
+  // below covers all of them. On real clocks a wall time such as
+  // 0.0425000001 contains "42" and the check went red at random (R-A0 F3).
+  let requestClock = 1_000_000
+  let d1Clock = 5_000
   const dataset = sink()
-  const d1 = scriptedD1(() => ({ meta: { rows_read: 7, rows_written: 0, duration: 1 }, results: [{ name: 'Sok Dara', phone: '012345678' }] }))
+  const d1 = scriptedD1(() => { d1Clock += 3; return { meta: { rows_read: 7, rows_written: 0, duration: 1 }, results: [{ name: 'Sok Dara', phone: '012345678' }] } })
   const db = new dbModule.D1Compat(d1)
   const customers = new Hono()
-  customers.get('/:id', async (c) => { c.set('user', { id: 42, username: 'cashier-nita' }); return c.json(await db.prepare('SELECT').get()) })
-  const app = appWith((a) => a.route('/api/customers', customers), { random: () => 0 })
-  const res = await app.request('/api/customers/778899?phone=012345678&name=Sok%20Dara&amount=125.50', {}, { Business_OS_Analytics: dataset }, executionCtx())
+  customers.get('/:id', async (c) => {
+    c.set('user', { id: 42, username: 'cashier-nita' })
+    const row = await db.prepare('SELECT').get()
+    requestClock += 17
+    return c.json(row)
+  })
+  const app = appWith((a) => a.route('/api/customers', customers), { random: () => 0, now: () => requestClock })
+  performance.now = () => d1Clock
+  let res
+  try {
+    res = await app.request('/api/customers/778899?phone=012345678&name=Sok%20Dara&amount=125.50', {}, { Business_OS_Analytics: dataset }, executionCtx())
+  } finally {
+    delete performance.now
+  }
   assert.equal(res.status, 200)
   assert.equal(dataset.points.length, 1)
   const [point] = dataset.points
   assert.deepEqual(point.indexes, ['req_metrics'])
   assert.deepEqual(point.blobs, ['api', '/api/customers/:id', 'GET', '200', 'bypass', '', ''])
-  assert.equal(point.doubles.length, 11)
-  assert.equal(point.doubles[8], 1, 'D1 calls')
-  assert.ok(point.doubles.every((v) => typeof v === 'number' && Number.isFinite(v)))
-  assert.equal(point.doubles[2], 7, 'rows_read')
-  assert.equal(point.doubles[4], 1, 'statements')
+  // wall 17, D1 ms 1, rows_read 7, rows_written 0, statements 1, weight 1,
+  // failed 0, late 0, D1 calls 1, D1 wall 3, primary 0.
+  assert.deepEqual(point.doubles, [17, 1, 7, 0, 1, 1, 0, 0, 1, 3, 0])
   const serialized = JSON.stringify(point)
   for (const secret of ['778899', '012345678', 'Sok', 'Dara', '125.5', 'phone', 'name=', 'amount', 'cashier', '42']) {
     assert.ok(!serialized.includes(secret), `datapoint must not contain ${secret}: ${serialized}`)
