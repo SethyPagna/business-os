@@ -19,11 +19,22 @@ import type { Env } from '../index'
 
 export type BroadcastChannel = 'products' | 'units' | 'categories' | 'users' | 'roles' | 'branches' | 'inventory' | 'sales' | 'returns' | 'settings' | 'notifications' | 'customers' | 'suppliers' | 'deliveryContacts' | 'promotions' | 'portalSubmissions' | 'files' | 'fees' | 'pendingActions'
 
+// Keep-alive frames. The client (frontend/src/api/websocket.ts, WS_PING_FRAME)
+// sends exactly this ping string every 25 s per open tab. Answering it from
+// webSocketMessage() woke the hibernated object for every ping of every tab --
+// the bulk of this hub's billed wake-ups, since real broadcasts are rare by
+// comparison. The runtime auto-response below replies without waking the
+// object, but only on an exact string match, so the ping must stay byte for
+// byte identical to the client's. The client only reads `type` from the pong.
+export const WS_PING_FRAME = '{"type":"ping"}'
+export const WS_PONG_FRAME = '{"type":"pong"}'
+
 export class BroadcastHub {
   state: DurableObjectState
 
   constructor(state: DurableObjectState) {
     this.state = state
+    this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(WS_PING_FRAME, WS_PONG_FRAME))
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -66,7 +77,10 @@ export class BroadcastHub {
   }
 
   // Hibernatable WebSockets API callbacks -- the DO doesn't need to keep a
-  // handler registered per-connection between messages.
+  // handler registered per-connection between messages. The exact
+  // WS_PING_FRAME never reaches this handler (the auto-response answers it);
+  // this stays as the fallback for any other ping shape, such as a tab still
+  // running an older client build.
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     try {
       const data = JSON.parse(String(message || '{}')) as { type?: string }

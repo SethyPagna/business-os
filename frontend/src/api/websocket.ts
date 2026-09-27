@@ -25,6 +25,12 @@ let wsLastPongAt = 0
 const WS_BOOT_CONNECT_DELAY_MS = 1200
 const WS_PING_INTERVAL_MS = 25_000
 const WS_PONG_TIMEOUT_MS = 55_000
+// Byte for byte the frame the BroadcastHub answers through the Durable Object
+// runtime auto-response (cloudflare/src/durable-objects/broadcastHub.ts), which
+// replies without waking the hibernated hub. Any other shape, even the same JSON
+// with different spacing, would wake it for every ping of every open tab.
+// Pinned by cloudflare/scripts/test-broadcast-hub-autopong-pure.cjs.
+const WS_PING_FRAME = '{"type":"ping"}'
 
 function clearReconnectTimer(): void {
   if (!wsReconnectTimer) return
@@ -118,7 +124,7 @@ export function connectWS(): void {
     }
     // Send a ping every 25 s to prevent idle-timeout drops on reverse proxies
     // (Cloudflare Tunnel, Nginx, AWS ALB, etc. typically close idle WS after ~60 s).
-    // The backend already handles { type:'ping' } and replies { type:'pong' }.
+    // The hub auto-responds to WS_PING_FRAME with { type:'pong' } without waking.
     clearPingTimer()
     wsPingTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -129,7 +135,7 @@ export function connectWS(): void {
           try { ws.close(4000, 'pong-timeout') } catch (_) {}
           return
         }
-        ws.send(JSON.stringify({ type: 'ping' }))
+        ws.send(WS_PING_FRAME)
       }
     }, WS_PING_INTERVAL_MS)
   }
