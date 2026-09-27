@@ -425,6 +425,13 @@ check('a wrapped db records call count, wall-clock and meta.duration per call', 
 })
 
 check('a retried call counts both round trips but not the back-off sleep', async () => {
+  // Virtual time: a timer advances the clock by its delay and fires at once,
+  // so both 10 ms attempts and withD1Retry's 200 ms back-off are exact. On
+  // real timers a loaded machine stretched the attempts past any bound.
+  let virtualNow = 0
+  const realSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms = 0, ...args) => { virtualNow += ms; return realSetTimeout(fn, 0, ...args) }
+  performance.now = () => virtualNow
   let attempts = 0
   const d1 = {
     prepare() {
@@ -443,11 +450,17 @@ check('a retried call counts both round trips but not the back-off sleep', async
   const db = new dbModule.D1Compat(d1)
   let acc
   const app = appWith((a) => a.get('/api/retry', async (c) => { acc = metrics.requestMetricsOf(c); await db.prepare('Q').all(); return c.json({}) }))
-  await app.request('/api/retry', {}, {}, executionCtx())
+  try {
+    await app.request('/api/retry', {}, {}, executionCtx())
+  } finally {
+    globalThis.setTimeout = realSetTimeout
+    delete performance.now
+  }
+  assert.equal(virtualNow, 220, 'two 10 ms attempts and the 200 ms back-off ran')
   assert.equal(acc.d1Calls, 2)
   assert.equal(acc.failed, 1)
   assert.equal(acc.statements, 1)
-  assert.ok(acc.d1WallMs >= 15 && acc.d1WallMs < 150, `two ~10 ms attempts, not the 200 ms sleep: ${acc.d1WallMs}`)
+  assert.equal(acc.d1WallMs, 20, 'two 10 ms attempts, not the 200 ms back-off')
 })
 
 check('cachedJsonResponse marks miss, then hit, on the request', async () => {
