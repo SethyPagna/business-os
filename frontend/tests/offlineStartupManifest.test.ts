@@ -21,5 +21,7 @@ const manifest = JSON.parse(outputs.find(file => file.fileName === 'business-os-
 assert.deepEqual(manifest.required, ['/PublicCatalogRoot.js', '/entry.js', '/public-data.js', '/public.css', '/shared.css', '/shared.js'])
 for (const file of manifest.required) assert.ok(manifest.eager.includes(file), file)
 assert.ok(!manifest.required.includes('/optional.js'), 'unopened dynamic routes remain optional')
-assert.ok(manifest.deferred.includes('/optional.js'))
+// F3: unopened routes are fetched on first use, not precached after activation.
+assert.ok(!manifest.eager.includes('/optional.js'))
+assert.equal('deferred' in manifest, false)
 console.log('PASS actual build plugin requires cyclic-safe public startup JS/CSS closure, not optional dynamic routes')

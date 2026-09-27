@@ -14,6 +14,11 @@ import { fileURLToPath } from 'node:url'
 // background AFTER activation, at a lower concurrency, never blocking
 // install/activate/clients.claim().
 //
+// F3 (27 Sep 2026): the build no longer emits the deferred list, so that
+// background pass has nothing to fetch; the worker-side cases below still pin
+// its shape because service-worker.ts itself is unchanged (removing the dead
+// pass needs a regenerated public/sw.js alongside it).
+//
 // No DOM/ServiceWorker runtime is available in this harness, so this is a
 // source-assertion test in the project's existing style (see
 // tests/swNavigationStrategy.test.ts, tests/hotRowMemoBoundaries.test.ts).
@@ -47,18 +52,22 @@ runTest('vite.config.ts computes an eager precache chunk set from the existing r
   assert.match(viteConfig, /\.\.\.routePreloadChunkNames\.pos,/, 'the POS route chunks must be eager so an offline POS keeps working after an update')
   assert.match(viteConfig, /'lang-en',/, 'the English language pack must be eager')
   assert.match(viteConfig, /'lang-km',/, 'the Khmer language pack must be eager -- both packs, not an English-only fast path')
-  // I6-2: generic 'vendor' left the admin preload list, so it has to be named
-  // here or receipt printing and QR codes would stop working offline.
+  // F3 (27 Sep 2026): offline selling is cancelled, so the generic 'vendor'
+  // chunk (html2canvas, qrcode, ffmpeg) no longer has to be on the device
+  // before the first print. It is fetched on first use like any lazy chunk.
   const eagerListStart = viteConfig.indexOf('const eagerPrecacheChunkNames')
   const eagerList = viteConfig.slice(eagerListStart, viteConfig.indexOf('])]', eagerListStart))
-  assert.match(eagerList, /^\s*'vendor',\r?$/m, 'the print/QR vendor chunk must stay in the eager offline set')
+  assert.doesNotMatch(eagerList, /^\s*'vendor',\r?$/m, 'the print/QR/ffmpeg vendor chunk must not be precached at install')
 })
 
-runTest('vite.config.ts emits eager and deferred asset lists in the precache manifest, entry chunks always eager', () => {
+runTest('vite.config.ts emits the eager list but no deferred list in the precache manifest, entry chunks always eager', () => {
   assert.match(viteConfig, /toRoutePreloadFiles\(bundle, eagerPrecacheChunkNames\)/, 'the manifest must reuse toRoutePreloadFiles, not a new bundle-walking helper')
   assert.match(viteConfig, /output\.isEntry/, 'entry chunks must always be classified eager, matching the hard install gate')
   assert.match(viteConfig, /eager: eagerAssetUrls,/, 'the manifest JSON must carry the eager list')
-  assert.match(viteConfig, /deferred: deferredAssetUrls,/, 'the manifest JSON must carry the deferred list')
+  // F3: the deferred list named every other chunk and the worker fetched them
+  // all after each activation (~7.9 MB per device per deploy). Without it the
+  // worker's post-activate pass below receives an empty list.
+  assert.doesNotMatch(viteConfig, /deferred: deferredAssetUrls,/, 'the manifest must not hand the worker every other chunk to precache')
   // Positive control: the pre-fix manifest had only a flat `assets` list with
   // no split at all.
   assert.doesNotMatch(viteConfig, /source: JSON\.stringify\(\{ hash: buildHash, assets: offlineAssetUrls \}, null, 2\)/, 'the pre-fix flat unsplit manifest literal must be gone')
