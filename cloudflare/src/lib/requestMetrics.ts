@@ -11,7 +11,9 @@
 // the region that served the calls (meta.served_by_region; 'mixed' when they
 // differ) and how many were served by the primary, whether the response came
 // from the Cache API (hit | miss | bypass), and which feature flags the
-// request consulted. No SQL text or bound value is ever read or kept.
+// request consulted (none yet: nothing writes acc.flags until the C3v2 KV
+// flag reader lands with its first consumer). No SQL text or bound value is
+// ever read or kept.
 //
 // WHERE THE NUMBERS COME FROM
 //
@@ -32,7 +34,14 @@
 // NOT COUNTED: code that calls env.DB.prepare()/batch() directly instead of
 // going through D1Compat (lib/maintenance.ts, lib/productWrites.ts,
 // lib/backup.ts and a handful of route sites). Those statements are invisible
-// here until they move onto D1Compat.
+// here until they move onto D1Compat. The queue() consumers in index.ts run
+// outside any scope and are not counted either. A /api/sync replay
+// re-dispatches each op through app.request(), so every op is its own
+// request and the outer sync request shows almost no D1 work.
+//
+// Server-Timing goes to signed-in staff only. Its row counts can differ on a
+// route that reads a row before refusing, which hints whether the target
+// exists; accepted, since status and timing already differ there.
 //
 // BACKGROUND WORK NEVER MIXES INTO A ROUTE
 //
@@ -237,10 +246,6 @@ function writeDatapoint(env: Env | undefined, point: MetricsDatapoint): void {
 
 const store = new AsyncLocalStorage<RequestMetrics>()
 
-export function currentRequestMetrics(): RequestMetrics | undefined {
-  try { return store.getStore() } catch { return undefined }
-}
-
 // The hook db.ts and cache.ts look up by Symbol.for(REQUEST_METRICS_HOOK_KEY).
 // Every entry swallows its own errors: it runs inside a database call.
 export type RequestMetricsHook = {
@@ -253,16 +258,6 @@ const hook: RequestMetricsHook = {
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
 }
 ;(globalThis as unknown as Record<symbol, RequestMetricsHook>)[Symbol.for(REQUEST_METRICS_HOOK_KEY)] = hook
-
-/** Records which state a flag had for this request; first read wins. */
-export function noteFlagState(name: string, state: FlagState): FlagState {
-  const acc = currentRequestMetrics()
-  if (!acc) return state
-  const seen = acc.flags[name]
-  if (seen) return seen
-  if (!acc.sealed) acc.flags[name] = state
-  return state
-}
 
 /** Reads the accumulator a request middleware bound to this context. */
 export function requestMetricsOf(c: Context): RequestMetrics | undefined {
