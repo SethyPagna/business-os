@@ -28,20 +28,24 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', output)(
 )
 const { D1Compat } = loaded.exports
 
+// A single-row read. D1Compat.get() has read row 0 of all() since A0 (first()
+// returns no meta for the per-request metrics); first() is kept so the fake
+// still answers either call the same way, one attempt per call.
 function firstDb(failures) {
   let attempts = 0
+  const attempt = () => {
+    attempts += 1
+    const failure = failures.shift()
+    if (failure) throw failure
+  }
   return {
     get attempts() { return attempts },
     prepare() {
       return {
         bind() {
           return {
-            async first() {
-              attempts += 1
-              const failure = failures.shift()
-              if (failure) throw failure
-              return { ok: true }
-            },
+            async first() { attempt(); return { ok: true } },
+            async all() { attempt(); return { results: [{ ok: true }], meta: {} } },
           }
         },
       }

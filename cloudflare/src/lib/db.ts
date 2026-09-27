@@ -96,6 +96,52 @@ async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+// Per-request metrics (lib/requestMetrics.ts). Looked up through a global
+// Symbol.for hook, not imported, so this module keeps zero new dependencies
+// for the pure tests that load it on its own; an absent hook is a no-op. The
+// key must match REQUEST_METRICS_HOOK_KEY there (enforced by
+// scripts/test-request-metrics-pure.cjs).
+const REQUEST_METRICS_HOOK = Symbol.for('business-os.request-metrics.v1')
+// One entry per D1 round trip (an attempt): the wall-clock measured around
+// the call, and the per-statement metas it returned (null when it threw).
+// Never the SQL text or bound values.
+type D1MetricsHook = { d1Call(wallMs: number, metas: unknown[] | null): void }
+
+function metricsHook(): D1MetricsHook | undefined {
+  return (globalThis as unknown as Record<symbol, D1MetricsHook | undefined>)[REQUEST_METRICS_HOOK]
+}
+
+// Wall-clock around the call itself. In workerd the clock only advances
+// across I/O, which is exactly what this brackets, so wall minus D1's own
+// meta.duration is the Worker<->D1 network round trip.
+const clockMs = (): number => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now())
+
+// Times EACH attempt (so withD1Retry's back-off sleep is never counted as
+// round trip) and reports it to the request's metrics, if any.
+function timedAttempt<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[]): () => Promise<R> {
+  return async () => {
+    const hook = metricsHook()
+    if (!hook) return attempt()
+    const started = clockMs()
+    let result: R
+    try {
+      result = await attempt()
+    } catch (error) {
+      hook.d1Call(clockMs() - started, null)
+      throw error
+    }
+    hook.d1Call(clockMs() - started, metas(result))
+    return result
+  }
+}
+
+function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[]): Promise<R> {
+  return withD1Retry(timedAttempt(attempt, metas))
+}
+
+const metaOf = (result: { meta?: unknown }) => [result?.meta]
+const metasOf = (results: Array<{ meta?: unknown }>) => (Array.isArray(results) ? results.map((result) => result?.meta) : [])
+
 class D1CompatStatement {
   constructor(private readonly db: D1Database, private readonly sql: string) {}
 
@@ -104,18 +150,25 @@ class D1CompatStatement {
     return this.db.prepare(sql).bind(...values)
   }
 
+  // Row 0 of all(), not first(): first() returns no meta, so its rows could
+  // not be counted. It is the same request -- workerd's D1 first() sends the
+  // identical '/query' ROWS_AND_COLUMNS call as all(), maps it with the same
+  // toArrayOfObjects(), and returns results.at(0) or null -- so the database
+  // does the same work and the value is the same (parity proven in
+  // scripts/test-request-metrics-pure.cjs for no row, one row, many rows and
+  // null columns).
   async get<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined> {
-    const row = await withD1Retry(() => this.bound(params).first<T>())
-    return row ?? undefined
+    const result = await metered(() => this.bound(params).all<T>(), metaOf)
+    return result.results?.[0] ?? undefined
   }
 
   async all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> {
-    const result = await withD1Retry(() => this.bound(params).all<T>())
+    const result = await metered(() => this.bound(params).all<T>(), metaOf)
     return result.results ?? []
   }
 
   async run(params?: BindParams): Promise<{ changes: number; lastInsertRowid: number }> {
-    const result = await withD1Retry(() => this.bound(params).run())
+    const result = await metered(() => this.bound(params).run(), metaOf)
     return {
       changes: result.meta?.changes ?? 0,
       lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
@@ -170,7 +223,8 @@ export class D1Compat {
 
   async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     const prepared = this.prepareBatch(statements)
-    return withD1Retry(() => this.d1.batch(prepared))
+    // One meta per statement: a batch of N counts as N statements.
+    return metered(() => this.d1.batch(prepared), metasOf)
   }
 
   /** Explicit single-attempt atomic write. Only callers with durable idempotency
@@ -179,7 +233,8 @@ export class D1Compat {
    * Existing batch/read retry behavior deliberately remains unchanged.
    */
   async batchOnce(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
-    return this.d1.batch(this.prepareBatch(statements))
+    // Single attempt by contract: timed, never retried.
+    return timedAttempt(() => this.d1.batch(this.prepareBatch(statements)), metasOf)()
   }
 
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {
