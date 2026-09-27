@@ -21,10 +21,12 @@ Steps:
 1. `git worktree add --detach <scratch>/audit-head HEAD` — an isolated checkout of committed code
    only; excludes every session's uncommitted work and never touches the shared tree or its
    `node_modules`.
-2. Junction `node_modules` to skip a slow `npm ci` (Windows, no admin):
-   ```
-   cmd /c mklink /J <wt>\frontend\node_modules  <main>\frontend\node_modules
-   cmd /c mklink /J <wt>\cloudflare\node_modules <main>\cloudflare\node_modules
+2. Junction `node_modules` to skip a slow `npm ci` (Windows, no admin). Create it from
+   **PowerShell**, never with `cmd /c mklink` from Git Bash: that silently makes a mangled
+   drive-relative directory inside the shared checkout instead of a junction.
+   ```powershell
+   New-Item -ItemType Junction -Path <wt>\frontend\node_modules   -Target <main>\frontend\node_modules
+   New-Item -ItemType Junction -Path <wt>\cloudflare\node_modules -Target <main>\cloudflare\node_modules
    ```
    Junctions work for `tsc`, the vite build, and wrangler.
 3. Run **both** typechecks, the vite build, and both test suites **in the worktree**, each test
@@ -46,7 +48,9 @@ Steps:
 4. Fix a broken-HEAD dependency by committing **just the required piece** (e.g. the one shared
    prop), not the whole orphaned lane — the rest stays un-deployed. Then advance the worktree:
    `git -C <wt> checkout --detach <newHEAD>` and re-checkpoint green.
-5. Tear down: `cmd /c rmdir` the junctions **first**, then `git worktree remove --force <wt>`.
+5. Tear down: remove the junctions **first** with `cmd /c rmdir <wt>\frontend\node_modules` from
+   PowerShell, which removes the link only. Never use `Remove-Item -Recurse` on a junction: it
+   follows the link into the target. Then `git worktree remove --force <wt>`.
 
 This same isolated-worktree-at-HEAD is also the production-deploy method (see `deploy.md`) — with a
 real `npm ci` there instead of junctions, because the shipped bundle must build from clean,

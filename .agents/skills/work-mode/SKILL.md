@@ -77,10 +77,19 @@ tool, use your harness's equivalent (table at the end).
 
 ### checkpoint — assemble and ship a release
 1. `deploy-provenance`: prove what production runs.
-2. Fresh integration branch from main; merge only refuter-certified lanes, in the council's order.
-3. Resolve conflicts by union, never by choosing a side blindly; after merging run every test file alone (the full sweep: `gate.yml` on GitHub).
+2. Fresh integration branch from main; merge only refuter-certified lanes, in the council's order. Compose without touching any checkout: `git merge-tree --write-tree <cur> <lane>`, then `git commit-tree <tree> -p <cur> -p <lane>`, then push the sha to the candidate branch.
+3. Resolve conflicts by union, never by choosing a side blindly; after merging run every test file alone (the full sweep: `gate.yml` on GitHub). Dispatch `gate.yml` on a pre-candidate as soon as it composes, while refuters are still working. Cross-lane reds only show in the full sweep, and a later lane move costs just one recompose.
 4. Integrated refuter on the candidate.
 5. With explicit user authorization, deploy from the committed candidate after trading close; smoke test live; record provenance in progress.md.
+6. After the deploy, run the `scan` playbook on what shipped.
+
+### scan — deep full-codebase sweep (after every checkpoint deploy, or when asked)
+1. Build a compact known-issue index from the local bug records, refuter reports and the progress.md queue, so finders mark duplicates instead of re-reporting them.
+2. Run one read-only finder per dimension in parallel: money, stock, security, frontend runtime, i18n/UI conventions, performance, dead code, data integrity/tests. Each finder enumerates rather than samples, and cites path:line with a failure scenario. Each saves its report as it goes.
+3. An independent verifier per dimension tries to refute every new finding. Each high or critical finding that survives gets a second refuter that must reproduce it.
+4. Synthesize the survivors into disjoint fix lanes with next-checkpoint fitness, and dead code into a debloat list. Add a completeness critique: what no finder covered becomes the next scan's first target.
+5. Record the summary in progress.md (queue rows) and the session log. Turn repeated finding patterns into skill rules (`skill-wiki`).
+In Claude Code this is the named workflow `.claude/workflows/deep-scan.js`; elsewhere run the same stages with your harness's subagents.
 
 ### recover — after a usage limit, account switch or new session
 Load `lane-recovery` and follow it.
