@@ -41,7 +41,23 @@ function workerCode(name: string): string {
 const KEYS = {
   recordChanged: { undo: 'undo_refused_record_changed', redo: 'redo_refused_record_changed' },
   noDefaultBranch: { undo: 'undo_refused_no_default_branch', redo: 'redo_refused_no_default_branch' },
+  // FX-exc1 item 1: every other refusal the Worker answers with a code.
+  historyStale: { undo: 'undo_refused_history_stale', redo: 'redo_refused_history_stale' },
+  alreadyDone: { undo: 'undo_refused_already_done', redo: 'redo_refused_already_done' },
+  historyUnusable: { undo: 'undo_refused_history_unusable', redo: 'redo_refused_history_unusable' },
+  needsOriginalTab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
+  generic: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 } as const
+// Worker constant -> the pack keys the transport must restate it with.
+const CODE_KEYS = [
+  ['UNDO_RECORD_CHANGED_CODE', KEYS.recordChanged],
+  ['UNDO_NO_DEFAULT_BRANCH_CODE', KEYS.noDefaultBranch],
+  ['UNDO_HISTORY_STALE_CODE', KEYS.historyStale],
+  ['UNDO_ALREADY_DONE_CODE', KEYS.alreadyDone],
+  ['UNDO_HISTORY_UNUSABLE_CODE', KEYS.historyUnusable],
+  ['UNDO_NEEDS_ORIGINAL_TAB_CODE', KEYS.needsOriginalTab],
+  ['UNDO_REFUSED_CODE', KEYS.generic],
+] as const
 
 // --- the browser and network the transport expects --------------------------
 
@@ -134,7 +150,7 @@ await runCase('both packs carry the refusal in each direction; the Khmer is Khme
 
 await runCase('the transport maps exactly the codes the Worker sends', () => {
   const source = fs.readFileSync(path.join(FRONTEND, 'src', 'api', 'actionHistoryTransport.ts'), 'utf8')
-  for (const [constant, pair] of [['UNDO_RECORD_CHANGED_CODE', KEYS.recordChanged], ['UNDO_NO_DEFAULT_BRANCH_CODE', KEYS.noDefaultBranch]] as const) {
+  for (const [constant, pair] of CODE_KEYS) {
     const code = workerCode(constant)
     assert.match(source, new RegExp(`\\b${code}: \\{ undo: '${pair.undo}', redo: '${pair.redo}' \\}`), `${code} -> ${pair.undo} / ${pair.redo}`)
   }
@@ -161,6 +177,38 @@ for (const language of ['en', 'km'] as const) {
       assert.equal(error.message, pack[KEYS.noDefaultBranch[direction]])
     })
   }
+}
+
+await runCase('every new refusal names what was refused and that nothing changed, in both packs', () => {
+  for (const pair of [KEYS.historyStale, KEYS.alreadyDone, KEYS.historyUnusable, KEYS.needsOriginalTab, KEYS.generic]) {
+    for (const direction of ['undo', 'redo'] as const) {
+      const english = String(EN[pair[direction]])
+      assert.match(english, direction === 'undo' ? /\b[Uu]ndo(ne)?\b/ : /\b[Rr]edo(ne)?\b/, `en ${pair[direction]} names ${direction}`)
+      assert.match(english, /Nothing was changed\./, `en ${pair[direction]} says nothing changed`)
+      const khmer = String(KM[pair[direction]])
+      assert.ok(khmer.includes(direction === 'undo' ? 'ត្រឡប់វិញ' : 'ធ្វើឡើងវិញ'), `km ${pair[direction]} uses the pack's word for ${direction}`)
+      assert.ok(khmer.includes('គ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ'), `km ${pair[direction]} says nothing changed`)
+    }
+  }
+  assert.match(String(EN[KEYS.historyStale.undo]), /[Rr]efresh/, 'a stale entry says to refresh')
+  assert.ok(String(KM[KEYS.historyStale.undo]).includes('ផ្ទុក'), 'km stale entry says to refresh (reload)')
+})
+
+for (const language of ['en', 'km'] as const) {
+  const pack = language === 'km' ? KM : EN
+  await runCase(`${language}: each new refusal code is restated from the ${language} pack in both directions, keeping status and code`, async () => {
+    for (const [constant, pair] of CODE_KEYS.slice(2)) {
+      for (const direction of ['undo', 'redo'] as const) {
+        uiLanguage = language
+        const code = workerCode(constant)
+        nextRefusal = { status: 409, error: 'An English refusal from the Worker.', code }
+        const error = await rejection(direction === 'undo' ? transport.undoActionHistory(21) : transport.redoActionHistory(21))
+        assert.equal(error.message, pack[pair[direction]], `${code} ${direction}`)
+        assert.equal(error.status, 409)
+        assert.equal(error.code, code)
+      }
+    }
+  })
 }
 
 await runCase('a refusal without a refusal code, or with another code, keeps the server message untouched', async () => {

@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, undoConflictCode, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -380,7 +380,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const transferReplay = parseJson(existing.undo_payload)?.applier === TRANSFER_OPERATION_KIND
     const genderReplay = parseJson(existing.undo_payload)?.applier === CUSTOMER_GENDER_RESTORATION_KIND
     if (currentStatus !== expected && !stockReplay && !groupReplay && !productRemoveReplay && !transferReplay && !genderReplay) {
-      return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now` }, 409)
+      return c.json({ success: false, error: `Action is not ${direction === 'undo' ? 'undoable' : 'redoable'} right now`, code: UNDO_HISTORY_STALE_CODE }, 409)
     }
 
     // The payload for this direction: undo replays the undo_payload, redo the
@@ -416,6 +416,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       return c.json({
         success: false,
         error: 'This action was recorded without a server-replayable payload, so it can only be reversed from the tab that performed it.',
+        code: UNDO_NEEDS_ORIGINAL_TAB_CODE,
       }, 409)
     }
     let applied = false
@@ -430,9 +431,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         const code = Number((error as Error & { statusCode?: number })?.statusCode) // Preserve statusCode 409 as a conflict.
         const saleCustomerReplay = SALE_BULK_UPDATE_KINDS.has(applier.name) && (payload.action === 'customer' || payload.action === 'customer_name')
         const status = (stockReplay || saleCustomerReplay || genderReplay) && (code === 400 || code === 403 || code === 404 || code === 503) ? code : code === 409 ? 409 : 500
-        // A replay refused to protect newer data names its machine code, so the
-        // client can restate it in the operator's language.
-        const refusalCode = status === 409 ? undoConflictCode(error) : null
+        // Every 409 refusal names a machine code, so the client can restate it
+        // in the operator's language.
+        const refusalCode = status === 409 ? replayRefusalCode(error) : null
         return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
