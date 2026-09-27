@@ -115,6 +115,56 @@ async function main() {
     ])
   })
 
+  // FX-undo2 (R-undo C8, PROBE S1): routes/batches.ts writes a lot's
+  // supplier_name and supplier_id independently, so a later edit can rename
+  // the lot's supplier while leaving the id alone. The undo compared only the
+  // id and put the prior attribution back over that edit.
+  await check('DISCRIMINATING (C8): undo refuses when only a backfilled lot\'s supplier name was edited after the backfill', async () => {
+    const world = freshWorld()
+    const snap = await backfill(world, { id: 7, name: 'Acme Co' })
+    world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001")
+    await assertConflict(replay(world, snap, 'undo'), /1 lot was re-attributed after this change/)
+    assert.deepEqual(lots(world), [
+      { id: 5000, supplier_id: 7, supplier_name: 'Acme Co' },
+      { id: 5001, supplier_id: 7, supplier_name: 'Acme Warehouse' },
+    ], 'the later name survives and the untouched lot is not half-reverted')
+    assert.equal(snapshotStatus(world, snap), 'applied')
+  })
+
+  await check('control: a record-only supplier rename leaves the stamped name, which is still the same attribution', async () => {
+    const world = freshWorld()
+    const snap = await backfill(world, { id: 7, name: 'Acme Co' })
+    world.run("UPDATE suppliers SET name = 'Acme Corporation' WHERE id = 7")
+    await replay(world, snap, 'undo')
+    assert.deepEqual(lots(world), [
+      { id: 5000, supplier_id: null, supplier_name: null },
+      { id: 5001, supplier_id: null, supplier_name: 'Acme Co' },
+    ])
+  })
+
+  await check('control: the name is compared as the redo compares it (case and outer spaces aside)', async () => {
+    const world = freshWorld()
+    const snap = await backfill(world, { id: 7, name: 'Acme Co' })
+    world.run("UPDATE product_batches SET supplier_name = ' ACME CO ' WHERE id = 5000")
+    await replay(world, snap, 'undo')
+    assert.deepEqual(lots(world)[0], { id: 5000, supplier_id: null, supplier_name: null })
+  })
+
+  await check('control: after a redo stamps a renamed supplier, a later undo accepts that stamped name', async () => {
+    const world = freshWorld()
+    const snap = await backfill(world, { id: 7, name: 'Acme Co' })
+    await replay(world, snap, 'undo')
+    world.run("UPDATE suppliers SET name = 'Acme Corporation' WHERE id = 7")
+    await replay(world, snap, 'redo')
+    assert.equal(lots(world)[1].supplier_name, 'Acme Corporation', 'the redo stamps the current name')
+    world.run("UPDATE suppliers SET name = 'Acme Group' WHERE id = 7")
+    await replay(world, snap, 'undo')
+    assert.deepEqual(lots(world), [
+      { id: 5000, supplier_id: null, supplier_name: null },
+      { id: 5001, supplier_id: null, supplier_name: 'Acme Co' },
+    ])
+  })
+
   await check('undo refuses when a lot was re-attributed to another supplier after the backfill', async () => {
     const world = freshWorld()
     const snap = await backfill(world, { id: 7, name: 'Acme Co' })
@@ -163,6 +213,22 @@ async function main() {
     assert.deepEqual(lots(world), [
       { id: 5000, supplier_id: 7, supplier_name: 'Acme Co' },
       { id: 5001, supplier_id: 9, supplier_name: 'Gamma Ltd' },
+    ])
+  })
+
+  await check('DISCRIMINATING (C8): a name-only lot edit that lands between the check and the write aborts the whole batch', async () => {
+    const world = freshWorld()
+    const snap = await backfill(world, { id: 7, name: 'Acme Co' })
+    const batch = world.d1.batch.bind(world.d1)
+    world.d1.batch = async (statements) => {
+      world.d1.batch = batch
+      world.run("UPDATE product_batches SET supplier_name = 'Acme Warehouse' WHERE id = 5001")
+      return batch(statements)
+    }
+    await assertConflict(replay(world, snap, 'undo'), /re-attributed while this change was being undone/)
+    assert.deepEqual(lots(world), [
+      { id: 5000, supplier_id: 7, supplier_name: 'Acme Co' },
+      { id: 5001, supplier_id: 7, supplier_name: 'Acme Warehouse' },
     ])
   })
 

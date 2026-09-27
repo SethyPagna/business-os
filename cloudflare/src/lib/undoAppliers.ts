@@ -2036,12 +2036,14 @@ export async function recordSupplierBackfillSnapshot(
 
 // Staleness (FX-undo): a replay may only rewrite a lot that still carries the
 // attribution the recorded action left on it. An undo expects every lot to
-// still be attributed to the backfilled supplier (its name may have been
-// re-stamped by a supplier rename -- that is the same attribution); a redo
-// expects every lot to still hold the prior attribution the undo restored.
-// Anything else is a later edit (a batch edit, a supplier merge, another
-// backfill) that the replay must refuse rather than overwrite. A lot that no
-// longer exists counts as changed.
+// still be attributed to the backfilled supplier under the name the action
+// stamped (the snapshot's supplierName, which a redo keeps current) or the
+// supplier's current name (a rename that carried to its lots re-stamps them --
+// that is the same attribution); a redo expects every lot to still hold the
+// prior attribution the undo restored. Anything else is a later edit (a batch
+// edit, including one that changed only the lot's supplier name -- FX-undo2,
+// R-undo C8 -- a supplier merge, another backfill) that the replay must refuse
+// rather than overwrite. A lot that no longer exists counts as changed.
 function supplierBackfillLotsJson(r: SupplierBackfillReversal): string {
   return JSON.stringify((r.lots || []).filter((l) => Number(l.id) > 0).map((l) => ({
     id: Number(l.id),
@@ -2052,9 +2054,15 @@ function supplierBackfillLotsJson(r: SupplierBackfillReversal): string {
 
 function supplierBackfillLotMatchesSql(direction: 'undo' | 'redo'): string {
   return direction === 'undo'
-    ? 'b.supplier_id IS @supplierId'
+    ? `b.supplier_id IS @supplierId
+       AND lower(trim(COALESCE(b.supplier_name, ''))) IN (lower(trim(COALESCE(@supplierName, ''))),
+         (SELECT lower(trim(COALESCE(s.name, ''))) FROM suppliers s WHERE s.id = @supplierId))`
     : `b.supplier_id IS json_extract(l.value, '$.prevSupplierId')
        AND lower(trim(COALESCE(b.supplier_name, ''))) = lower(trim(COALESCE(json_extract(l.value, '$.prevSupplierName'), '')))`
+}
+
+function supplierBackfillStaleLotsParams(r: SupplierBackfillReversal): Record<string, unknown> {
+  return { lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId), supplierName: r.supplierName ?? null }
 }
 
 function supplierBackfillStaleLotsSql(direction: 'undo' | 'redo'): string {
@@ -2067,7 +2075,7 @@ async function assertSupplierBackfillLotsUnchanged(
   db: ReturnType<typeof getDb>, r: SupplierBackfillReversal, direction: 'undo' | 'redo',
 ): Promise<void> {
   const stale = await db.prepare(supplierBackfillStaleLotsSql(direction))
-    .all<{ id: number }>({ lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId) })
+    .all<{ id: number }>(supplierBackfillStaleLotsParams(r))
   if (stale.length) {
     const noun = stale.length === 1 ? 'lot was' : 'lots were'
     throw new UndoConflictError(`${stale.length} ${noun} re-attributed after this change, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
@@ -2081,7 +2089,7 @@ function supplierBackfillGuardStatement(r: SupplierBackfillReversal, direction: 
   return {
     sql: `SELECT CASE WHEN NOT EXISTS (${supplierBackfillStaleLotsSql(direction)})
       THEN 1 ELSE json_extract('[1]', '$[supplier_backfill_lot_changed]') END AS supplier_backfill_guard`,
-    params: { lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId) },
+    params: supplierBackfillStaleLotsParams(r),
   }
 }
 
