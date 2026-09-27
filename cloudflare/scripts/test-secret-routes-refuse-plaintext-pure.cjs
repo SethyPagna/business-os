@@ -15,6 +15,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const ts = require('typescript')
+const bcrypt = require('bcryptjs')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -27,7 +28,8 @@ function loadReal(relPath, overrides = {}) {
 function loadFile(sourcePath, overrides) {
   if (tsCache.has(sourcePath) && !Object.keys(overrides).length) return tsCache.get(sourcePath)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    // esModuleInterop: routes/auth.ts default-imports bcryptjs (a CJS module).
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
     fileName: sourcePath,
   }).outputText
   const nodeRequire = Module.createRequire(sourcePath)
@@ -170,20 +172,22 @@ async function main() {
   assert.equal(await secretCrypto.decryptSecret(upgraded.api_key_encrypted, KEY), 'sk-legacy-plain-abcdef')
 
   // ---- TOTP enrollment ---------------------------------------------------
-  // The actor enrolls themself (canManageOtpTarget: actor.id === target.id).
-  db.prepare("INSERT INTO users (username, name, password) VALUES ('owner', 'Owner', 'x')").run({})
+  // The actor enrolls themself (canManageOtpTarget: actor.id === target.id),
+  // so the route first re-proves the account with the current password.
+  const OWNER_PASSWORD = 'owner-password'
+  db.prepare("INSERT INTO users (username, name, password) VALUES ('owner', 'Owner', @hash)").run({ hash: bcrypt.hashSync(OWNER_PASSWORD, 4) })
   const target = await db.prepare("SELECT id FROM users WHERE username = 'owner' LIMIT 1").get()
   assert.ok(target, 'test user exists')
   ADMIN.id = target.id
   await db.prepare('UPDATE users SET otp_pending_secret = NULL WHERE id = @id').run({ id: target.id })
-  const refusedOtp = await call(authRoute, 'POST', '/otp/setup', { userId: target.id }, envWith(undefined))
+  const refusedOtp = await call(authRoute, 'POST', '/otp/setup', { userId: target.id, password: OWNER_PASSWORD }, envWith(undefined))
   assert.equal(refusedOtp.status, 400, `OTP setup without a key must be a 400 (got ${refusedOtp.status})`)
   assert.equal(refusedOtp.json.code, 'APP_ENCRYPTION_KEY_MISSING')
   assert.equal(refusedOtp.json.secret, undefined, 'no enrollment secret handed out when it cannot be stored')
   const pendingAfterRefusal = await db.prepare('SELECT otp_pending_secret FROM users WHERE id = @id').get({ id: target.id })
   assert.equal(pendingAfterRefusal.otp_pending_secret, null, 'refused setup stores no TOTP secret')
 
-  const okOtp = await call(authRoute, 'POST', '/otp/setup', { userId: target.id }, envWith(KEY))
+  const okOtp = await call(authRoute, 'POST', '/otp/setup', { userId: target.id, password: OWNER_PASSWORD }, envWith(KEY))
   assert.equal(okOtp.status, 200, JSON.stringify(okOtp.json))
   const pending = await db.prepare('SELECT otp_pending_secret FROM users WHERE id = @id').get({ id: target.id })
   assert.ok(secretCrypto.isEncryptedSecret(pending.otp_pending_secret), 'TOTP secret stored encrypted')

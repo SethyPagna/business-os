@@ -123,6 +123,9 @@ async function main() {
     GOOGLE_DRIVE_CLIENT_SECRET: 'client-secret',
     BUSINESS_OS_ADMIN_URL: 'https://admin.example.com',
   }
+  // The signed-in user completing the connect: completeDriveOauth refuses
+  // without one and records it for lib/driveSyncAuthority.ts (P1-2).
+  const AUTHORIZER_ID = 7
   const originalFetch = global.fetch
   const fetchLog = []
   global.fetch = async (url, init = {}) => {
@@ -139,7 +142,7 @@ async function main() {
     // Connect without a key: clear error, NOTHING stored.
     {
       const { drive, writes } = makeDrive({})
-      const result = await drive.completeDriveOauth({ ...baseEnv }, 'auth-code', 'verifier')
+      const result = await drive.completeDriveOauth({ ...baseEnv }, 'auth-code', 'verifier', AUTHORIZER_ID)
       assert.strictEqual(result.success, false)
       assert.match(result.error, /^APP_ENCRYPTION_KEY is not set/)
       assert.deepStrictEqual(writes, [], 'a refused connect must not store any token')
@@ -147,7 +150,7 @@ async function main() {
     // Connect with a key: both tokens stored encrypted.
     {
       const { drive, settings } = makeDrive({})
-      const result = await drive.completeDriveOauth({ ...baseEnv, APP_ENCRYPTION_KEY: KEY }, 'auth-code', 'verifier')
+      const result = await drive.completeDriveOauth({ ...baseEnv, APP_ENCRYPTION_KEY: KEY }, 'auth-code', 'verifier', AUTHORIZER_ID)
       assert.strictEqual(result.success, true)
       assert.ok(isEncryptedSecret(settings.get('drive_sync_refresh_token')))
       assert.ok(isEncryptedSecret(settings.get('drive_sync_access_token')))
