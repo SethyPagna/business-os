@@ -104,6 +104,9 @@ const PENDING = {
   // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
   // UndoApplierContext carries no waitUntil yet.
   'undoAppliers.ts': ['replayProductMergeGroup', 'replayProductRemove', 'APPLIERS'],
+  // /settopic runs inside POST /api/telegram/webhook, whose only reader is
+  // Telegram; the TelegramTopicWriter it is handed carries no waitUntil yet.
+  'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }
 const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, PENDING }
 const classOf = (file, unit) => Object.keys(classes).find((name) => (classes[name][file] || []).includes(unit))
