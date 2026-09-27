@@ -95,14 +95,17 @@ type Member = {
 type SaleStatusSnapshot = { saleId: number; before: string; after: string }
 type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
 
+// `code` names a business refusal the client restates in the operator's
+// language; without one the route answers the generic write_conflict /
+// invalid_bulk_action it always has.
 export class ReturnBulkError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409) {
+  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string) {
     super(message)
   }
 }
 
-function fail(message: string, status: 400 | 403 | 409 = 409): never {
-  throw new ReturnBulkError(message, status)
+function fail(message: string, status: 400 | 403 | 409 = 409, code?: string): never {
+  throw new ReturnBulkError(message, status, code)
 }
 
 function normalize(value: unknown, fallback = ''): string {
@@ -417,7 +420,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
         try {
           assertReturnCreateCapacity(soldLines, [], activeLines)
         } catch (error) {
-          fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409)
+          fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409, 'return_restore_over_capacity')
         }
       }
       continue

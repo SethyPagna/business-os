@@ -1210,7 +1210,7 @@ app.post('/bulk', async (c) => {
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     return c.json(result)
   } catch (error) {
-    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action' }, error.statusCode)
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action') }, error.statusCode)
     throw error
   }
 })

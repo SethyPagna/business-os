@@ -109,8 +109,11 @@ function activeReturned(f) {
 async function refused(f, id, key, label) {
   const before = state(f)
   await assert.rejects(helper.applyReturnBulkAction(f.env, user, restoreRequest(f, id, key)),
-    error => error instanceof Error && error.statusCode === 409 && /more units as returned than the sale sold/.test(error.message),
-    `${label}: the restore is refused`)
+    error => error instanceof Error && error.statusCode === 409 && /more units as returned than the sale sold/.test(error.message)
+      // The machine code the bulk route forwards, so the client can restate
+      // the refusal in the operator's language (en/km return_restore_over_capacity).
+      && error.code === 'return_restore_over_capacity',
+    `${label}: the restore is refused with code return_restore_over_capacity`)
   assert.equal(state(f), before, `${label}: a refused restore writes nothing`)
   assert.equal(activeReturned(f), 2, `${label}: still exactly the 2 sold units counted as returned`)
 }
