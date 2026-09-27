@@ -48,8 +48,7 @@ function load(rel, overrides = {}, sourcePath) {
   return mod.exports
 }
 
-const analytics = load('lib/analytics.ts')
-const metrics = load('lib/requestMetrics.ts', { './analytics': analytics }, process.env.REQUEST_METRICS_SOURCE)
+const metrics = load('lib/requestMetrics.ts', {}, process.env.REQUEST_METRICS_SOURCE)
 const dbModule = load('lib/db.ts', { './importMaintenanceFence': {} }, process.env.DB_SOURCE)
 const cacheModule = load('lib/cache.ts', {
   './db': { getDb: () => { throw new Error('no D1 expected') } },
@@ -108,7 +107,7 @@ check('hook key is identical in requestMetrics.ts, db.ts and cache.ts', () => {
     assert.ok(text.includes(`Symbol.for('${key}')`), `${rel} must look the hook up with Symbol.for('${key}')`)
   }
   const hook = globalThis[Symbol.for(key)]
-  assert.equal(typeof hook?.d1, 'function')
+  assert.equal(typeof hook?.d1Call, 'function')
   assert.equal(typeof hook?.cache, 'function')
 })
 
@@ -143,7 +142,8 @@ check('accumulator sums get/all/run and counts a batch per statement', async () 
   assert.equal(acc.rowsWritten, 3 + 1 + 2 + 4)
   assert.ok(Math.abs(acc.d1Ms - (0.25 + 1.5 + 0.5 + 0.1 + 0.2 + 0.3)) < 1e-9, `d1Ms ${acc.d1Ms}`)
   assert.equal(acc.failed, 1)
-  assert.ok(Number.isFinite(acc.rowsRead) && Number.isFinite(acc.d1Ms))
+  assert.equal(acc.d1Calls, 6, 'get, all, run, batch, batchOnce and the failed call: one round trip each')
+  assert.ok(Number.isFinite(acc.rowsRead) && Number.isFinite(acc.d1Ms) && Number.isFinite(acc.d1WallMs))
 })
 
 check('D1Compat outside any request scope is a silent no-op', async () => {
@@ -217,11 +217,15 @@ check('Server-Timing header format, authenticated responses only', async () => {
     a.get('/api/public', async (c) => { await db.prepare('Q').all(); return c.json({}) })
   })
   const priv = await app.request('/api/private', {}, {}, executionCtx())
-  assert.equal(priv.headers.get('Server-Timing'), 'd1;dur=6.3;desc="rr=24 rw=2 q=2", cache;desc="bypass"')
+  // d1w is real elapsed time (non-deterministic); everything else is exact.
+  assert.match(priv.headers.get('Server-Timing'),
+    /^d1;dur=6\.3;desc="rr=24 rw=2 q=2", d1n;desc="2", d1w;dur=\d+(\.\d)?, d1q;dur=6\.3, cache;desc="bypass"$/)
   const pub = await app.request('/api/public', {}, {}, executionCtx())
   assert.equal(pub.headers.get('Server-Timing'), null, 'no header without an authenticated user')
   const acc = metrics.createRequestMetrics('api', '')
-  assert.equal(metrics.serverTimingHeader(acc), 'd1;dur=0;desc="rr=0 rw=0 q=0", cache;desc="bypass"')
+  assert.equal(metrics.serverTimingHeader(acc), 'd1;dur=0;desc="rr=0 rw=0 q=0", d1n;desc="0", d1w;dur=0, d1q;dur=0, cache;desc="bypass"')
+  acc.d1Region = 'APAC'
+  assert.equal(metrics.serverTimingHeader(acc), 'd1;dur=0;desc="rr=0 rw=0 q=0", d1n;desc="0", d1w;dur=0, d1q;dur=0, d1r;desc="APAC", cache;desc="bypass"')
 })
 
 check('sampling: misses and bypass always, hits at 10 % with weight 10', () => {
@@ -252,8 +256,9 @@ check('privacy: only the route template and numbers reach Analytics Engine', asy
   assert.equal(dataset.points.length, 1)
   const [point] = dataset.points
   assert.deepEqual(point.indexes, ['req_metrics'])
-  assert.deepEqual(point.blobs, ['api', '/api/customers/:id', 'GET', '200', 'bypass', ''])
-  assert.equal(point.doubles.length, 8)
+  assert.deepEqual(point.blobs, ['api', '/api/customers/:id', 'GET', '200', 'bypass', '', ''])
+  assert.equal(point.doubles.length, 11)
+  assert.equal(point.doubles[8], 1, 'D1 calls')
   assert.ok(point.doubles.every((v) => typeof v === 'number' && Number.isFinite(v)))
   assert.equal(point.doubles[2], 7, 'rows_read')
   assert.equal(point.doubles[4], 1, 'statements')
@@ -323,7 +328,7 @@ check('background work gets its own label and never mixes into the route', async
   assert.equal(api.length, 1)
   assert.equal(api[0].doubles[4], 1)
   assert.equal(bg.length, 1)
-  assert.deepEqual(bg[0].blobs, ['bg', 'bg:telegram-drain', 'BG', 'ok', 'bypass', ''])
+  assert.deepEqual(bg[0].blobs, ['bg', 'bg:telegram-drain', 'BG', 'ok', 'bypass', '', ''])
   assert.equal(bg[0].doubles[4], 2)
   assert.equal(bg[0].doubles[2], 200)
   // A failing cron step is recorded as an error and rethrown unchanged.
@@ -332,6 +337,102 @@ check('background work gets its own label and never mixes into the route', async
   const cron = dataset.points.at(-1)
   assert.deepEqual(cron.blobs.slice(0, 4), ['bg', 'bg:cron:backup', 'BG', 'error'])
   assert.equal(cron.doubles[4], 1)
+})
+
+// Performance council addition: wall-clock around each D1 call next to
+// meta.duration, so d1w - d1q is the Worker<->D1 round trip; region/primary
+// when D1 reports them; no SQL text or bound value leaves the request.
+check('a wrapped db records call count, wall-clock and meta.duration per call', async () => {
+  const dataset = sink()
+  const SECRET_SQL = 'SELECT loyalty_secret FROM customers WHERE phone = @phone'
+  const regions = ['APAC', 'APAC', 'APAC', 'APAC']
+  let call = 0
+  const d1 = {
+    prepare(sql) {
+      return {
+        sql,
+        bind() { return this },
+        async all() {
+          await delay(25) // the "network": wall must cover it, meta.duration must not
+          const region = regions[call++]
+          return { results: [{ ok: 1 }], meta: { rows_read: 1, rows_written: 0, duration: 2, served_by_region: region, served_by_primary: true } }
+        },
+        async run() { throw new Error('unused') },
+      }
+    },
+    async batch(prepared) {
+      await delay(25)
+      const region = regions[call++]
+      return prepared.map(() => ({ results: [], meta: { rows_read: 0, rows_written: 1, duration: 1.5, served_by_region: region, served_by_primary: false } }))
+    },
+  }
+  const db = new dbModule.D1Compat(d1)
+  let acc
+  const app = appWith((a) => a.get('/api/t', async (c) => {
+    c.set('user', { id: 1 })
+    acc = metrics.requestMetricsOf(c)
+    await db.prepare(SECRET_SQL).all({ phone: '0999888777' })
+    await db.prepare(SECRET_SQL).get({ phone: '0999888777' })
+    await db.batch([{ sql: 'UPDATE a SET x = @x', params: { x: 'Sok Dara' } }, { sql: 'UPDATE b', params: {} }, { sql: 'UPDATE c' }])
+    return c.json({})
+  }), { random: () => 0 })
+  const res = await app.request('/api/t', {}, { Business_OS_Analytics: dataset }, executionCtx())
+  assert.equal(acc.d1Calls, 3, 'all + get + one batch = 3 calls (a batch is one round trip)')
+  assert.equal(acc.statements, 5, 'the batch still counts 3 statements')
+  assert.ok(Math.abs(acc.d1Ms - (2 + 2 + 1.5 * 3)) < 1e-9, `meta.duration sum ${acc.d1Ms}`)
+  assert.ok(acc.d1WallMs >= 3 * 20, `wall-clock covers the three 25 ms round trips: ${acc.d1WallMs}`)
+  assert.ok(acc.d1WallMs > acc.d1Ms, 'wall includes the round trip meta.duration does not')
+  assert.equal(acc.d1Region, 'APAC')
+  assert.equal(acc.d1Primary, 2, 'two calls reported served_by_primary')
+  const header = res.headers.get('Server-Timing')
+  assert.match(header, /d1n;desc="3"/)
+  assert.match(header, /d1q;dur=8\.5/)
+  assert.match(header, /d1r;desc="APAC"/)
+  const wallFromHeader = Number(header.match(/d1w;dur=([\d.]+)/)[1])
+  assert.ok(wallFromHeader >= 60, `d1w in header: ${wallFromHeader}`)
+  const [point] = dataset.points
+  assert.equal(point.blobs[6], 'APAC')
+  assert.equal(point.doubles[8], 3, 'double9 = D1 calls')
+  assert.ok(point.doubles[9] >= 60, 'double10 = D1 wall ms')
+  assert.ok(Math.abs(point.doubles[1] - 8.5) < 1e-9, 'double2 = meta.duration sum')
+  assert.equal(point.doubles[10], 2, 'double11 = primary-served calls')
+  for (const leaked of ['loyalty_secret', 'customers', 'phone', '0999888777', 'Sok', 'UPDATE']) {
+    assert.ok(!JSON.stringify(point).includes(leaked), `datapoint leaks ${leaked}`)
+    assert.ok(!header.includes(leaked), `header leaks ${leaked}`)
+  }
+  // Calls served from different regions report 'mixed'; odd region text is 'other'.
+  const mixed = metrics.createRequestMetrics('api', '')
+  metrics.addD1Call(mixed, 1, [{ served_by_region: 'APAC' }])
+  metrics.addD1Call(mixed, 1, [{ served_by_region: 'WEUR' }])
+  assert.equal(mixed.d1Region, 'mixed')
+  assert.equal(metrics.sanitizeRegion('select * from x'), 'other')
+  assert.equal(metrics.sanitizeRegion(undefined), '')
+})
+
+check('a retried call counts both round trips but not the back-off sleep', async () => {
+  let attempts = 0
+  const d1 = {
+    prepare() {
+      return {
+        bind() { return this },
+        async all() {
+          attempts++
+          await delay(10)
+          if (attempts === 1) throw new Error('D1_ERROR: internal error') // transient: withD1Retry sleeps 200 ms
+          return { results: [{ ok: 1 }], meta: { rows_read: 1, duration: 1 } }
+        },
+      }
+    },
+    async batch() { throw new Error('unused') },
+  }
+  const db = new dbModule.D1Compat(d1)
+  let acc
+  const app = appWith((a) => a.get('/api/retry', async (c) => { acc = metrics.requestMetricsOf(c); await db.prepare('Q').all(); return c.json({}) }))
+  await app.request('/api/retry', {}, {}, executionCtx())
+  assert.equal(acc.d1Calls, 2)
+  assert.equal(acc.failed, 1)
+  assert.equal(acc.statements, 1)
+  assert.ok(acc.d1WallMs >= 15 && acc.d1WallMs < 150, `two ~10 ms attempts, not the 200 ms sleep: ${acc.d1WallMs}`)
 })
 
 check('cachedJsonResponse marks miss, then hit, on the request', async () => {

@@ -3,10 +3,15 @@
 //
 // WHAT IT MEASURES
 //
-// For each /api/* request: how many D1 statements ran, the rows D1 says it read
-// and wrote (meta.rows_read / meta.rows_written), D1's own execution time
-// (meta.duration, summed), whether the response came from the Cache API
-// (hit | miss | bypass), and which feature flags the request consulted.
+// For each /api/* request: how many D1 round trips it made (a batch is one
+// call; a retried statement is two), how many statements ran, the rows D1 says
+// it read and wrote (meta.rows_read / meta.rows_written), D1's own execution
+// time (meta.duration, summed), the wall-clock measured around each call
+// (summed) -- wall minus meta.duration is the Worker<->D1 network round trip --
+// the region that served the calls (meta.served_by_region; 'mixed' when they
+// differ) and how many were served by the primary, whether the response came
+// from the Cache API (hit | miss | bypass), and which feature flags the
+// request consulted. No SQL text or bound value is ever read or kept.
 //
 // WHERE THE NUMBERS COME FROM
 //
@@ -55,7 +60,10 @@
 //   double1 wall ms             double2 D1 ms (sum of meta.duration)
 //   double3 rows_read           double4 rows_written
 //   double5 statements          double6 sample weight (1 / sample rate)
-//   double7 failed statements   double8 late statements (after seal)
+//   blob7 D1 region ('' unknown, 'mixed' when calls differ)
+//   double7 failed D1 calls     double8 late D1 calls (after seal)
+//   double9 D1 calls            double10 D1 wall ms (sum around each call)
+//   double11 D1 calls served by the primary
 //
 // Sampling: every miss and bypass, one hit in ten (weight 10), every
 // background run. Aggregate with SUM(_sample_interval * double6).
@@ -63,7 +71,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from 'hono'
 import type { Env } from '../index'
-import { recordAnalytics } from './analytics'
 
 export type CacheState = 'hit' | 'miss' | 'bypass'
 export type FlagState = 'off' | 'shadow' | 'on'
@@ -76,6 +83,10 @@ export type RequestMetrics = {
   rowsRead: number
   rowsWritten: number
   d1Ms: number
+  d1Calls: number
+  d1WallMs: number
+  d1Region: string
+  d1Primary: number
   failed: number
   cacheHits: number
   cacheMisses: number
@@ -92,7 +103,7 @@ const CONTEXT_KEY = 'requestMetrics'
 export function createRequestMetrics(kind: 'api' | 'bg', label: string, now: number = Date.now()): RequestMetrics {
   return {
     kind, label, startedAt: now,
-    statements: 0, rowsRead: 0, rowsWritten: 0, d1Ms: 0, failed: 0,
+    statements: 0, rowsRead: 0, rowsWritten: 0, d1Ms: 0, d1Calls: 0, d1WallMs: 0, d1Region: '', d1Primary: 0, failed: 0,
     cacheHits: 0, cacheMisses: 0, flags: {}, sealed: false, late: 0,
   }
 }
@@ -102,19 +113,38 @@ function finiteOrZero(value: unknown): number {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0
 }
 
-/** Adds one statement's D1 meta. A sealed accumulator only counts `late`. */
-export function addD1Meta(acc: RequestMetrics, meta: unknown): void {
-  if (acc.sealed) { acc.late += 1; return }
-  const m = (meta && typeof meta === 'object' ? meta : {}) as Record<string, unknown>
-  acc.statements += 1
-  acc.rowsRead += finiteOrZero(m.rows_read)
-  acc.rowsWritten += finiteOrZero(m.rows_written)
-  acc.d1Ms += finiteOrZero(m.duration)
+function metaRecord(meta: unknown): Record<string, unknown> {
+  return (meta && typeof meta === 'object' ? meta : {}) as Record<string, unknown>
 }
 
-export function addD1Failure(acc: RequestMetrics): void {
+/** Region codes are short identifiers (e.g. APAC); anything else is 'other'. */
+export function sanitizeRegion(region: unknown): string {
+  if (typeof region !== 'string' || !region) return ''
+  return /^[A-Za-z0-9_-]{1,16}$/.test(region) ? region : 'other'
+}
+
+/**
+ * One D1 round trip: the wall-clock measured around it and the per-statement
+ * metas it returned (a batch returns one per statement; null when it threw).
+ * A sealed accumulator only counts `late`.
+ */
+export function addD1Call(acc: RequestMetrics, wallMs: number, metas: unknown[] | null): void {
   if (acc.sealed) { acc.late += 1; return }
-  acc.failed += 1
+  acc.d1Calls += 1
+  acc.d1WallMs += finiteOrZero(wallMs)
+  if (metas === null) { acc.failed += 1; return }
+  for (const meta of metas) {
+    const m = metaRecord(meta)
+    acc.statements += 1
+    acc.rowsRead += finiteOrZero(m.rows_read)
+    acc.rowsWritten += finiteOrZero(m.rows_written)
+    acc.d1Ms += finiteOrZero(m.duration)
+  }
+  // Every statement of one call is served by the same database instance.
+  const first = metaRecord(metas[0])
+  const region = sanitizeRegion(first.served_by_region)
+  if (region) acc.d1Region = !acc.d1Region || acc.d1Region === region ? region : 'mixed'
+  if (first.served_by_primary === true) acc.d1Primary += 1
 }
 
 export function addCacheOutcome(acc: RequestMetrics, outcome: 'hit' | 'miss'): void {
@@ -141,7 +171,11 @@ function formatMs(ms: number): string {
 export function serverTimingHeader(acc: RequestMetrics): string {
   const rr = Math.round(acc.rowsRead)
   const rw = Math.round(acc.rowsWritten)
-  return `d1;dur=${formatMs(acc.d1Ms)};desc="rr=${rr} rw=${rw} q=${acc.statements}", cache;desc="${cacheStateOf(acc)}"`
+  // d1 = D1 execution time (meta.duration) with rows and statements; d1n = D1
+  // calls; d1w = wall-clock around them; d1q = meta.duration again, named for
+  // the council's d1w - d1q round-trip reading; d1r = serving region.
+  const region = acc.d1Region ? `, d1r;desc="${acc.d1Region}"` : ''
+  return `d1;dur=${formatMs(acc.d1Ms)};desc="rr=${rr} rw=${rw} q=${acc.statements}", d1n;desc="${acc.d1Calls}", d1w;dur=${formatMs(acc.d1WallMs)}, d1q;dur=${formatMs(acc.d1Ms)}${region}, cache;desc="${cacheStateOf(acc)}"`
 }
 
 export function sampleRate(state: CacheState): number {
@@ -176,18 +210,26 @@ export type MetricsDatapoint = {
 }
 
 export function datapointLabels(point: MetricsDatapoint): string[] {
-  return [point.kind, point.template, point.method, point.status, point.cache, point.flags]
+  return [point.kind, point.template, point.method, point.status, point.cache, point.flags, point.acc.d1Region]
 }
 
 export function datapointValues(point: MetricsDatapoint): number[] {
   const { acc } = point
-  return [point.wallMs, acc.d1Ms, acc.rowsRead, acc.rowsWritten, acc.statements, point.weight, acc.failed, acc.late]
+  return [point.wallMs, acc.d1Ms, acc.rowsRead, acc.rowsWritten, acc.statements, point.weight, acc.failed, acc.late,
+    acc.d1Calls, acc.d1WallMs, acc.d1Primary]
 }
 
 function writeDatapoint(env: Env | undefined, point: MetricsDatapoint): void {
-  if (!env || !env.Business_OS_Analytics) return
+  const dataset = env?.Business_OS_Analytics
+  if (!dataset) return
+  // Written directly rather than through lib/analytics.ts's recordAnalytics,
+  // whose 10-double cap is below this layout's 11; same shape and guards.
   try {
-    recordAnalytics(env, { kind: METRICS_ANALYTICS_KIND, labels: datapointLabels(point), values: datapointValues(point) })
+    dataset.writeDataPoint({
+      indexes: [METRICS_ANALYTICS_KIND],
+      blobs: datapointLabels(point).map((label) => String(label ?? '').slice(0, 200)),
+      doubles: datapointValues(point).map((value) => (Number.isFinite(Number(value)) ? Number(value) : 0)),
+    })
   } catch {
     // Never let an observation fail the request it observes.
   }
@@ -202,14 +244,12 @@ export function currentRequestMetrics(): RequestMetrics | undefined {
 // The hook db.ts and cache.ts look up by Symbol.for(REQUEST_METRICS_HOOK_KEY).
 // Every entry swallows its own errors: it runs inside a database call.
 export type RequestMetricsHook = {
-  d1(meta: unknown): void
-  d1Error(): void
+  d1Call(wallMs: number, metas: unknown[] | null): void
   cache(outcome: 'hit' | 'miss'): void
 }
 
 const hook: RequestMetricsHook = {
-  d1(meta) { try { const acc = store.getStore(); if (acc) addD1Meta(acc, meta) } catch { /* no-op */ } },
-  d1Error() { try { const acc = store.getStore(); if (acc) addD1Failure(acc) } catch { /* no-op */ } },
+  d1Call(wallMs, metas) { try { const acc = store.getStore(); if (acc) addD1Call(acc, wallMs, metas) } catch { /* no-op */ } },
   cache(outcome) { try { const acc = store.getStore(); if (acc) addCacheOutcome(acc, outcome) } catch { /* no-op */ } },
 }
 ;(globalThis as unknown as Record<symbol, RequestMetricsHook>)[Symbol.for(REQUEST_METRICS_HOOK_KEY)] = hook
