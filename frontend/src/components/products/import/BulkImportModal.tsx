@@ -2335,7 +2335,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     return (
       <div key={index} className={`rounded-xl border p-2 text-sm ${liveBarcodeBlocking ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
         <div className="flex flex-wrap items-start gap-2">
-          <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} className="mt-1" />
+          <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`${T('select', 'Select')} ${T('row_label', 'Row {n}').replace('{n}', String(index + 1))}`} className="mt-1" />
           <div className="min-w-[14rem] flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="detail-scroll-text font-medium text-gray-900 dark:text-white">{editedRow.name || 'Needs a product name'}</span>

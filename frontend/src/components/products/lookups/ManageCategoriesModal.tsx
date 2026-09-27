@@ -616,7 +616,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
                     checked={selectedIds.has(Number(category.id))}
                     onChange={() => toggleSelected(category.id)}
                     disabled={saving || deletingId != null}
-                    aria-label={`Select ${category.name}`}
+                    aria-label={`${t('select')} ${category.name}`}
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
                   <div className="min-w-0 flex-1">

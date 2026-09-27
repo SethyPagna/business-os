@@ -734,7 +734,7 @@ export default function ManageBrandsModal({
                       checked={selectedBrands.has(entry.name)}
                       onChange={() => toggleSelectedBrand(entry.name)}
                       disabled={busy}
-                      aria-label={`Select ${entry.name}`}
+                      aria-label={`${t('select')} ${entry.name}`}
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">

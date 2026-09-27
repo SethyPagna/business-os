@@ -608,7 +608,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
                     checked={selectedIds.has(Number(unit.id))}
                     onChange={() => toggleSelected(unit.id)}
                     disabled={saving || deletingId != null}
-                    aria-label={`Select ${unit.name}`}
+                    aria-label={`${t('select')} ${unit.name}`}
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: unit.color || DEFAULT_UNIT_COLOR }} />
                   <div className="min-w-0 flex-1">

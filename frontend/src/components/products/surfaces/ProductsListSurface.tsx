@@ -359,7 +359,7 @@ export default function ProductsListSurface({
                                 if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                               }}
                               onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                              aria-label={`Select ${section.label}`}
+                              aria-label={`${t('select')} ${section.label}`}
                             />
                           ) : null}
                         </td>
@@ -408,7 +408,7 @@ export default function ProductsListSurface({
                                         if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                                       }}
                                       onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                      aria-label={`Select ${group.name}`}
+                                      aria-label={`${t('select')} ${group.name}`}
                                     />
                                   ) : null}
                                 </td>
@@ -522,7 +522,7 @@ export default function ProductsListSurface({
                           if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                         }}
                         onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                        aria-label={`Select ${section.label}`}
+                        aria-label={`${t('select')} ${section.label}`}
                       />
                     ) : null}
                     <span className="min-w-0 truncate">{section.label}</span>
@@ -575,7 +575,7 @@ export default function ProductsListSurface({
                               if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                             }}
                             onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                            aria-label={`Select ${group.name}`}
+                            aria-label={`${t('select')} ${group.name}`}
                           />
                         </div>
                       ) : null}

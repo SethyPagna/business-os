@@ -1250,7 +1250,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                         if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
+                      aria-label={`${t('select')} ${section.label}`}
                     />
                     ) : null}
                     <span>{section.label}</span>
@@ -1296,7 +1296,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <td className={selectionModeActive ? 'px-3 py-2 w-10' : 'px-0 py-2 w-0'} onClick={e => e.stopPropagation()}>
               {selectionModeActive ? (
               <>
-              <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`${t('select')} ${contact.name}`}</label>
               <input id={`delivery-select-${contact.id}`} name={`delivery_select_${contact.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
               </>
               ) : null}
@@ -1328,7 +1328,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                       if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                     }}
                     onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
+                    aria-label={`${t('select')} ${section.label}`}
                   />
                   ) : null}
                   <span>{section.label}</span>
@@ -1377,7 +1377,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           >
             {selectionModeActive ? (
             <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(contact.id) }}>
-              <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`${t('select')} ${contact.name}`}</label>
               <input id={`delivery-card-select-${contact.id}`} name={`delivery_card_select_${contact.id}`} type="checkbox" className="w-5 h-5 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
             </div>
             ) : null}

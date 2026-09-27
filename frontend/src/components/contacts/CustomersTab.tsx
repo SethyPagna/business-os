@@ -1226,7 +1226,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                           if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                         }}
                         onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                        aria-label={`Select ${section.label}`}
+                        aria-label={`${t('select')} ${section.label}`}
                       />
                       ) : null}
                       <span>{section.label}</span>
@@ -1278,7 +1278,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               <td className={selectionModeActive ? 'w-10 px-3 py-2' : 'w-0 px-0 py-2'} onClick={(event) => event.stopPropagation()}>
                 {selectionModeActive ? (
                 <>
-                <label htmlFor={`customer-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <label htmlFor={`customer-select-${customerRow.id}`} className="sr-only">{`${t('select')} ${customerRow.name}`}</label>
                 <input id={`customer-select-${customerRow.id}`} name={`customer_select_${customerRow.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
                 </>
                 ) : null}
@@ -1335,7 +1335,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                         if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
+                      aria-label={`${t('select')} ${section.label}`}
                     />
                     ) : null}
                     <span>{section.label}</span>
@@ -1389,7 +1389,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             >
               {selectionModeActive ? (
               <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customerRow.id) }}>
-                <label htmlFor={`customer-card-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <label htmlFor={`customer-card-select-${customerRow.id}`} className="sr-only">{`${t('select')} ${customerRow.name}`}</label>
                 <input id={`customer-card-select-${customerRow.id}`} name={`customer_card_select_${customerRow.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
               </div>
               ) : null}

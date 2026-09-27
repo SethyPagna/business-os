@@ -1071,7 +1071,7 @@ export default function AuditLog() {
                               if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                             }}
                             onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                            aria-label={`Select ${section.label}`}
+                            aria-label={`${t('select')} ${section.label}`}
                           />
                           <span className="detail-scroll-text">{section.label}</span>
                         </label>
@@ -1099,7 +1099,7 @@ export default function AuditLog() {
                                     if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                                   }}
                                   onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                  aria-label={`Select ${group.label}`}
+                                  aria-label={`${t('select')} ${group.label}`}
                                 />
                                 <span>{group.label}</span>
                               </label>
@@ -1120,7 +1120,7 @@ export default function AuditLog() {
                               className="h-4 w-4 rounded"
                               checked={selectedIds.has(Number(log.id))}
                               onChange={() => toggleSelected(log.id)}
-                              aria-label={`Select ${sessionEntryLabel(log)}`}
+                              aria-label={`${t('select')} ${sessionEntryLabel(log)}`}
                             />
                           </td>
                           <td className="px-3 py-2">
@@ -1235,7 +1235,7 @@ export default function AuditLog() {
                       if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                     }}
                     onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
+                    aria-label={`${t('select')} ${section.label}`}
                   />
                   <span className="min-w-0 flex-1 detail-scroll-text">{section.label}</span>
                   <span className="shrink-0 normal-case tracking-normal text-slate-400">{section.ids.length}</span>
@@ -1260,7 +1260,7 @@ export default function AuditLog() {
                           if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                         }}
                         onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                        aria-label={`Select ${group.label}`}
+                        aria-label={`${t('select')} ${group.label}`}
                       />
                       <span className="min-w-0 detail-scroll-text">{group.label}</span>
                       <span className="shrink-0 text-slate-400">{group.items.length}</span>
@@ -1283,7 +1283,7 @@ export default function AuditLog() {
                             checked={selectedIds.has(Number(log.id))}
                             onChange={() => toggleSelected(log.id)}
                             onClick={(event) => event.stopPropagation()}
-                            aria-label={`Select ${sessionEntryLabel(log)}`}
+                            aria-label={`${t('select')} ${sessionEntryLabel(log)}`}
                           />
                           <span className="detail-scroll-text font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>

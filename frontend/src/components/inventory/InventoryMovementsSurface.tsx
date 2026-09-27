@@ -564,7 +564,7 @@ export default function InventoryMovementsSurface({
                           className="h-4 w-4 rounded"
                           checked={visibleMovementGroups.length > 0 && selectedMovementIds.size === visibleMovementGroups.length}
                           onChange={(event) => toggleAllMovementSelection(event.target.checked)}
-                          aria-label="Select all movement groups"
+                          aria-label={t('select_all')}
                         />
                       </th>
                     ) : null}
@@ -649,7 +649,7 @@ export default function InventoryMovementsSurface({
                                         checked={selectedMovementIds.has(group.id)}
                                         onChange={() => toggleMovementSelection(group.id)}
                                         onClick={(event) => event.stopPropagation()}
-                                        aria-label={`Select movement group ${group.id}`}
+                                        aria-label={`${t('select')} ${t('movement')} ${group.id}`}
                                       />
                                     </td>
                                   ) : null}
