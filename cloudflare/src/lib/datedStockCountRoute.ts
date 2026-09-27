@@ -127,6 +127,26 @@ export async function buildDatedStockCountPlan(
     })
     priorMovementRows.push(...rows)
   }
+  // A prior movement someone reverted from the stock ledger
+  // (lib/stockRevert.ts, reference_id 'revert:<id>') no longer holds its
+  // effect in live stock -- its counter-movement took it back. It is left
+  // alone: not deleted (that would orphan the counter-movement), not
+  // reversed again, and not part of the baseline reconstruction. The apply
+  // batch's per-group fingerprint uses the same rule (datedStockCountApply.ts).
+  if (priorMovementRows.length) {
+    const revertRefs = priorMovementRows.map((row) => `revert:${Number(row.id)}`)
+    const reverted = await selectInChunks(revertRefs, 0, (chunk) => {
+      const { sql: rIn, params: rParams } = buildInClause('r', chunk)
+      return db.prepare(`SELECT reference_id AS ref FROM inventory_movements WHERE reference_id IN (${rIn})`)
+        .all<{ ref: string }>(rParams)
+    })
+    const revertedIds = new Set(reverted.map((row) => Number(String(row.ref).slice('revert:'.length))))
+    if (revertedIds.size) {
+      const kept = priorMovementRows.filter((row) => !revertedIds.has(Number(row.id)))
+      priorMovementRows.length = 0
+      priorMovementRows.push(...kept)
+    }
+  }
   // This same importer's own batch-level provenance for those prior
   // movements (migration 0035) -- needed so reconstructBatchBaseline can
   // reverse only ITS OWN prior batch effects on a rerun, not just its
@@ -186,6 +206,27 @@ export async function buildDatedStockCountPlan(
       `SELECT id, variant_product_id AS productId, received_at AS receivedAt FROM product_batches WHERE variant_product_id IN (${pIn}) AND is_active = 1`,
     ).all<{ id: number; productId: number; receivedAt: string | null }>(pParams)
   })
+  // FX-stock F2: every lot the provenance of a movement this plan
+  // supersedes names (same product+branch, a date this request counts --
+  // computeDatedStockCountPlan's own rule), active or not. A lot a prior
+  // count drained may since have been emptied and soft-deleted; the
+  // re-apply puts those units back on exactly that lot
+  // (datedStockCountApply.ts), so the plan must see it too, or its lot
+  // simulation runs short by those units and the ledgers fork.
+  const countedDates = new Set(entries.map((e) => `${e.productId}:${e.branchId}:${e.date}`))
+  const supersededLots = existingCountMovements
+    .filter((m) => countedDates.has(`${m.productId}:${m.branchId}:${m.date}`))
+    .flatMap((m) => (m.batchActions || []).map((a) => ({ batchId: a.batchId, productId: m.productId, branchId: m.branchId })))
+  const loadedBatchIds = new Set(batchRows.map((b) => Number(b.id)))
+  const provenanceBatchIds = [...new Set(supersededLots.map((lot) => lot.batchId))].filter((id) => !loadedBatchIds.has(id))
+  if (provenanceBatchIds.length) {
+    batchRows.push(...await selectInChunks(provenanceBatchIds, 0, (chunk) => {
+      const { sql: idIn, params: idParams } = buildInClause('pb', chunk)
+      return db.prepare(
+        `SELECT id, variant_product_id AS productId, received_at AS receivedAt FROM product_batches WHERE id IN (${idIn})`,
+      ).all<{ id: number; productId: number; receivedAt: string | null }>(idParams)
+    }))
+  }
   const batchIds = batchRows.map((b) => Number(b.id))
   let existingBatches: ExistingBatchState[] = []
   if (batchIds.length) {
@@ -196,7 +237,16 @@ export async function buildDatedStockCountPlan(
       ).all<{ batchId: number; branchId: number; quantity: number }>(btParams)
     })
     const batchById = new Map(batchRows.map((b) => [Number(b.id), b]))
+    // received_at comes straight out of D1 as ISO.
+    const dateOf = (batch: { receivedAt: string | null }) =>
+      normalizeToIsoDate(batch.receivedAt, 'month-first') || String(batch.receivedAt || '').slice(0, 10)
+    // A lot loaded only because provenance names it joins only the group
+    // (its branch) that provenance names -- not every counted branch it has
+    // a row at, where it is inactive and no concern of this count.
+    const provenanceOnly = new Set(provenanceBatchIds)
+    const provenancePairs = new Set(supersededLots.map((lot) => `${lot.batchId}:${lot.branchId}`))
     existingBatches = batchStockRows
+      .filter((row) => !provenanceOnly.has(Number(row.batchId)) || provenancePairs.has(`${Number(row.batchId)}:${Number(row.branchId)}`))
       .filter((row) => pairKeys.has(`${batchById.get(Number(row.batchId))?.productId}:${row.branchId}`))
       .map((row) => {
         const batch = batchById.get(Number(row.batchId))!
@@ -204,11 +254,20 @@ export async function buildDatedStockCountPlan(
           batchId: Number(row.batchId),
           productId: Number(batch.productId),
           branchId: Number(row.branchId),
-          // received_at comes straight out of D1 as ISO.
-          date: normalizeToIsoDate(batch.receivedAt, 'month-first') || String(batch.receivedAt || '').slice(0, 10),
+          date: dateOf(batch),
           quantity: Number(row.quantity) || 0,
         }
       })
+    // Such a lot with no stock row at the movement's branch holds 0 there;
+    // it still has to be in the plan, with its own date.
+    const present = new Set(existingBatches.map((b) => `${b.batchId}:${b.branchId}`))
+    for (const lot of supersededLots) {
+      const batch = batchById.get(lot.batchId)
+      const key = `${lot.batchId}:${lot.branchId}`
+      if (!batch || Number(batch.productId) !== lot.productId || present.has(key)) continue
+      present.add(key)
+      existingBatches.push({ batchId: lot.batchId, productId: lot.productId, branchId: lot.branchId, date: dateOf(batch), quantity: 0 })
+    }
   }
 
   const plan = computeDatedStockCountPlan(datedEntries, existingCountMovements, currentStock, existingBatches)
