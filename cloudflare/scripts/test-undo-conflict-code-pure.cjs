@@ -51,6 +51,8 @@ function loadHistoryRoute(db, undoAppliers) {
     '../lib/transferOperation': { TRANSFER_OPERATION_KIND: 'stock.transfer', canReplayTransferPayload: () => false, notifyTransferOperation: notify },
     '../lib/stockLotAdjustment': { STOCK_LOT_SET_KIND: 'stock.quantity_set', notifyStockLotSet: notify },
     '../lib/stockInLineEdit': { STOCK_IN_LINE_EDIT_KIND: 'stock.session_line_edit', notifyStockInLineEdit: notify },
+    // FX-telegram announces a return status undo/redo from this route.
+    '../lib/telegram': { sendReturnStatusTelegramEvents: async () => {} },
   }
   const code = ts.transpileModule(fs.readFileSync(ROUTE, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
