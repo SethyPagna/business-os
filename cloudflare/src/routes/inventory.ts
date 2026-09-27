@@ -2472,9 +2472,9 @@ app.post('/transfer', async (c) => {
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
   const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
-  if (!product) return c.json({ error: 'Product not found' }, 404)
+  if (!product) return c.json({ error: 'Product not found', code: 'transfer_product_missing' }, 404)
   const available = await branchStockQty(c.env, productId, fromBranchId)
-  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
+  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
   const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
@@ -2503,7 +2503,7 @@ app.post('/transfer', async (c) => {
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
-  if (directionError) return c.json({ error: directionError }, 400)
+  if (directionError) return c.json({ error: directionError, code: 'transfer_direction_invalid' }, 400)
 
   // The provenance planner alone allocates FIFO lots and untracked stock,
   // guards their preimages, and builds the atomic ledger/movement/undo batch.
