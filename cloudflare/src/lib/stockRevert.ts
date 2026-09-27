@@ -356,7 +356,28 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     statements.push(...restoreBatchStockStatements(batchId, branchId, magnitude), ...aggregateDeltaStatements(productId, branchId, magnitude))
     usedBatchId = batchId
   } else {
+    // FX-stock4 N1. A removal no single lot covered carries no batch_id
+    // (0084), and this put its units back on branch_stock alone: receive 4
+    // and 8, count to 0, revert -> branch 12, lots 0. A dated stock count
+    // records what it took from each lot (0035), so each of those lots gets
+    // exactly that back; only what no lot held stays branch-only, as the
+    // removal left it. A lot a merge has left on another product is refused,
+    // as the stamped case above is. Other batch-less removals (a manual
+    // multi-lot remove, a revert's own FIFO drain) keep no per-lot record and
+    // still move branch_stock only.
+    const takes = await db.prepare(`
+      SELECT a.batch_id AS batchId, -a.quantity AS quantity, pb.variant_product_id AS productId
+      FROM dated_stock_count_batch_actions a
+      LEFT JOIN product_batches pb ON pb.id = a.batch_id
+      WHERE a.movement_id = @movementId AND a.quantity < 0
+      ORDER BY a.id
+    `).all<{ batchId: number; quantity: number; productId: number | null }>({ movementId: Number(m.id) })
+    if (takes.some((take) => Number(take.productId) !== productId)) {
+      return { ok: false, status: 400, error: 'This count took stock from a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.' }
+    }
+    for (const take of takes) statements.push(...restoreBatchStockStatements(Number(take.batchId), branchId, Number(take.quantity)))
     statements.push(...aggregateDeltaStatements(productId, branchId, magnitude))
+    usedBatchId = takes.length === 1 && Number(takes[0].quantity) === magnitude ? Number(takes[0].batchId) : null
   }
 
   const revertReason = `Revert of #${m.id}${m.reason ? `: ${m.reason}` : ` (${m.movement_type})`}`

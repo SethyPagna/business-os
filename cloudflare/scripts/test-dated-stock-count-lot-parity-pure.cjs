@@ -684,12 +684,134 @@ async function main() {
     assert.strictEqual(ledger(rawDb, D).lotSum, 0, 'twin holds nothing')
   })
 
+  // FX-stock4 N1 (R-stock3, pre-existing in production): a count that took
+  // from more than one lot carries no batch_id (0084), only its per-lot
+  // takes (dated_stock_count_batch_actions). Reverting it from the ledger put
+  // the units back on branch_stock alone: receive 4 and 8, count to 0,
+  // revert -> branch 12, lots 0. Each lot must get back what the count took.
+  const revert = (db, rawDb, movementId) => applyMovementRevert(db,
+    rawDb.prepare('SELECT * FROM inventory_movements WHERE id = @id').get({ id: movementId }), { userId: 1, userName: 'Admin' })
+  const countRow = (rawDb, productId, date) => rawDb.prepare(`SELECT id, batch_id AS batchId FROM inventory_movements
+    WHERE product_id = @p AND reason = 'Dated stock count import' AND substr(created_at, 1, 10) = @d ORDER BY id DESC LIMIT 1`).get({ p: productId, d: date })
+  const revertRowOf = (rawDb, movementId) => rawDb.prepare('SELECT id FROM inventory_movements WHERE reference_id = @ref').get({ ref: `revert:${movementId}` }).id
+
+  await test('N1: receive 4 and 8, count to 0 (one movement over two lots, no batch_id), revert: branch 12, lots 4 / 8 (production: lots 0); reverted again: refused, nothing moves; the revert reverted: 0 / 0', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 120
+    addProduct(rawDb, P)
+    let count = null
+    await runSteps(rawDb, P, [
+      ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
+      ['receive 8 @09-05', () => receive(db, P, 8, '2026-09-05'), { branch: 12, lots: '2026-09-01=4 2026-09-05=8' }],
+      ['count 09-20 = 0', async () => { await applyCount(db, P, [['2026-09-20', 0]]); count = countRow(rawDb, P, '2026-09-20') }, { branch: 0, lotSum: 0 }],
+      ['revert the count', () => revert(db, rawDb, count.id), { ok: true, branch: 12, lots: '2026-09-01=4 2026-09-05=8' }],
+      ['revert it again: refused', () => revert(db, rawDb, count.id), { ok: false, code: 'already_reverted', branch: 12, lots: '2026-09-01=4 2026-09-05=8' }],
+      ['revert the revert', () => revert(db, rawDb, revertRowOf(rawDb, count.id)), { ok: true, branch: 0, lotSum: 0 }],
+      ['that one again: refused', () => revert(db, rawDb, revertRowOf(rawDb, count.id)), { ok: false, code: 'already_reverted', branch: 0, lotSum: 0 }],
+    ])
+    assert.strictEqual(count.batchId, null, 'the count movement carries no batch_id (the N1 path)')
+  })
+
+  await test('N1: the count reverted, then re-applied, re-applied again, corrected, sold out: parity every step', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 121
+    addProduct(rawDb, P)
+    await runSteps(rawDb, P, [
+      ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
+      ['receive 8 @09-05', () => receive(db, P, 8, '2026-09-05'), { branch: 12 }],
+      ['count 09-20 = 0', () => applyCount(db, P, [['2026-09-20', 0]]), { branch: 0, lotSum: 0 }],
+      ['revert the count', () => revert(db, rawDb, countRow(rawDb, P, '2026-09-20').id), { ok: true, branch: 12, lotSum: 12 }],
+      ['count 09-20 = 0 re-applied', () => applyCount(db, P, [['2026-09-20', 0]]), { branch: 0, lotSum: 0 }],
+      ['re-applied again', () => applyCount(db, P, [['2026-09-20', 0]]), { branch: 0, lotSum: 0 }],
+      ['corrected 09-20 = 5', () => applyCount(db, P, [['2026-09-20', 5]]), { branch: 5, lotSum: 5 }],
+      ['sell 5', () => sell(db, rawDb, P, 5), { branch: 0, lotSum: 0 }],
+      ['sale 1 refused, the till shows none either', () => sell(db, rawDb, P, 1), { ok: false, available: 0, lotTotal: 0 }],
+    ])
+  })
+
+  await test('N1: the count left 2 behind and a sale took them before the revert: each lot gets back exactly what the count took (4 and 6), not what it holds now', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 122
+    addProduct(rawDb, P)
+    await runSteps(rawDb, P, [
+      ['receive 4 @09-01', () => receive(db, P, 4, '2026-09-01'), { branch: 4 }],
+      ['receive 8 @09-05', () => receive(db, P, 8, '2026-09-05'), { branch: 12 }],
+      ['count 09-20 = 2 (takes 4 and 6)', () => applyCount(db, P, [['2026-09-20', 2]]), { branch: 2, lotSum: 2 }],
+      ['sell 2', () => sell(db, rawDb, P, 2), { branch: 0, lotSum: 0 }],
+      ['revert the count', () => revert(db, rawDb, countRow(rawDb, P, '2026-09-20').id), { ok: true, branch: 10, lots: '2026-09-01=4 2026-09-05=6' }],
+      ['sell 10', () => sell(db, rawDb, P, 10), { branch: 0, lotSum: 0 }],
+    ])
+  })
+
+  await test('N1: the count also took untracked stock (more than its one lot held, so still no batch_id): the lot gets its 4 back, the untracked 3 stay branch-only, lots never above branch; reverted back: 0 / 0', async () => {
+    const { rawDb, db } = freshDb()
+    const P = 123
+    addProduct(rawDb, P)
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@p, 1, 3)').run({ p: P })
+    rawDb.prepare('UPDATE products SET stock_quantity = 3 WHERE id = @p').run({ p: P })
+    await receive(db, P, 4, '2026-09-01')
+    await applyCount(db, P, [['2026-09-20', 0]])
+    const count = countRow(rawDb, P, '2026-09-20')
+    assert.strictEqual(count.batchId, null, 'a lot that covered only part carries no batch_id')
+    const check = (label, expected) => {
+      const s = ledger(rawDb, P)
+      assert.deepStrictEqual({ branch: s.branch, lots: s.lots }, expected, `${label}: ${JSON.stringify({ branch: s.branch, lots: s.lots })}`)
+      assert.strictEqual(s.product, s.branchSum, `${label}: rollup`)
+      assert.ok(s.lotSum <= s.branch, `${label}: lots ${s.lotSum} above branch ${s.branch}`)
+    }
+    check('counted', { branch: 0, lots: '2026-09-01=0' })
+    const reverted = await revert(db, rawDb, count.id)
+    assert.strictEqual(reverted.ok, true, JSON.stringify(reverted))
+    assert.strictEqual(reverted.usedBatchId, null, 'the counter-movement is not stamped with a lot that covered only part')
+    check('reverted', { branch: 7, lots: '2026-09-01=4' })
+    const back = await revert(db, rawDb, revertRowOf(rawDb, count.id))
+    assert.strictEqual(back.ok, true, JSON.stringify(back))
+    check('revert reverted', { branch: 0, lots: '2026-09-01=0' })
+  })
+
+  await test('N1 after a merge: a count drained two of a twin\'s lots, the twin was folded into a keeper holding those lot keys; reverting the count is refused and nothing moves on either product', async () => {
+    const { rawDb, db } = freshDb()
+    const K = 124
+    const D = 125
+    addTwin(rawDb, K)
+    addTwin(rawDb, D)
+    const fold = loadFold(rawDb)
+    let count = null
+    await runSteps(rawDb, K, [
+      ['receive keeper 1 @09-01 and 1 @09-05', async () => { await receive(db, K, 1, '2026-09-01'); await receive(db, K, 1, '2026-09-05') }, { branch: 2 }],
+      ['receive twin 4 @09-01 and 8 @09-05', async () => { await receive(db, D, 4, '2026-09-01'); await receive(db, D, 8, '2026-09-05') }, { branch: 2 }],
+      ['count twin 09-20 = 0', async () => { await applyCount(db, D, [['2026-09-20', 0]]); count = countRow(rawDb, D, '2026-09-20') }, { branch: 2 }],
+      ['fold the twin into the keeper', () => fold(K, D, 'merge'), { branch: 2, lots: '2026-09-01=1 2026-09-05=1' }],
+      ['revert the count (now the keeper\'s): refused', () => revert(db, rawDb, count.id), { ok: false, status: 400, branch: 2, lots: '2026-09-01=1 2026-09-05=1' }],
+    ], [D])
+  })
+
+  await test('N1 after a merge that repointed the twin\'s lots (the keeper had no lot with those keys): the revert puts 4 / 8 back on those lots, now the keeper\'s', async () => {
+    const { rawDb, db } = freshDb()
+    const K = 126
+    const D = 127
+    addTwin(rawDb, K)
+    addTwin(rawDb, D)
+    const fold = loadFold(rawDb)
+    let count = null
+    await runSteps(rawDb, K, [
+      ['receive keeper 1 @09-03', () => receive(db, K, 1, '2026-09-03'), { branch: 1 }],
+      ['receive twin 4 @09-01 and 8 @09-05', async () => { await receive(db, D, 4, '2026-09-01'); await receive(db, D, 8, '2026-09-05') }, { branch: 1 }],
+      ['count twin 09-20 = 0', async () => { await applyCount(db, D, [['2026-09-20', 0]]); count = countRow(rawDb, D, '2026-09-20') }, { branch: 1 }],
+      ['fold the twin into the keeper', () => fold(K, D, 'merge'), { branch: 1, lotSum: 1 }],
+      ['revert the count', () => revert(db, rawDb, count.id), { ok: true, branch: 13, lots: '2026-09-01=4 2026-09-03=1 2026-09-05=8' }],
+      ['sell 13', () => sell(db, rawDb, K, 13), { branch: 0, lotSum: 0 }],
+    ], [D])
+  })
+
   await test('seeded random walk: receipts, FIFO sales, counts, re-applies, corrections, soft-deletes and reverts keep lots == branch at every step', async () => {
     const { rawDb, db } = freshDb()
     const SEQUENCES = 120
     const OPS = 14
     const DATES = ['2026-08-01', '2026-08-10', '2026-08-16', '2026-08-20', '2026-09-01']
     let steps = 0
+    let batchLessReverts = 0
+    let chainReverts = 0
     for (let seq = 0; seq < SEQUENCES; seq += 1) {
       let state = 0x9e3779b9 ^ (seq * 2654435761)
       const rnd = () => {
@@ -743,14 +865,25 @@ async function main() {
             trace.push(`soft-delete empty lot ${empty.id}`)
           }
         } else {
-          // Ledger revert of a count movement that one lot covered (the lot
-          // is stamped on the row). Refusals (units already sold) are fine.
-          const row = rawDb.prepare(`SELECT * FROM inventory_movements m WHERE m.product_id = @p AND m.reason = 'Dated stock count import'
-            AND m.batch_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || m.id)
-            ORDER BY m.id DESC LIMIT 1`).get({ p: P })
+          // Ledger revert of a count movement -- one lot covered (the lot is
+          // stamped on the row) or, FX-stock4 N1, several lots did (only its
+          // provenance names them) -- or of the latest such revert. A revert
+          // of a batch-less 'remove' revert is left out: that FIFO drain
+          // keeps no per-lot record (the N1 residual). Refusals are fine.
+          const chain = r >= 0.965
+          const row = chain
+            ? rawDb.prepare(`SELECT * FROM inventory_movements m WHERE m.product_id = @p AND m.reference_id LIKE 'revert:%'
+                AND (m.movement_type = 'add' OR m.batch_id IS NOT NULL)
+                AND NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || m.id)
+                ORDER BY m.id DESC LIMIT 1`).get({ p: P })
+            : rawDb.prepare(`SELECT * FROM inventory_movements m WHERE m.product_id = @p AND m.reason = 'Dated stock count import'
+                AND NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || m.id)
+                ORDER BY m.id DESC LIMIT 1`).get({ p: P })
           if (row) {
             const result = await applyMovementRevert(db, row, { userId: 1, userName: 'Admin' })
-            trace.push(`revert #${row.id} ${result.ok ? 'ok' : 'refused'}`)
+            if (result.ok && chain) chainReverts += 1
+            if (result.ok && !chain && row.batch_id == null) batchLessReverts += 1
+            trace.push(`${chain ? 'revert the revert' : 'revert'} #${row.id}${row.batch_id == null ? ' (no lot stamp)' : ''} ${result.ok ? 'ok' : 'refused'}`)
           }
         }
         steps += 1
@@ -760,7 +893,8 @@ async function main() {
         }
       }
     }
-    console.log(`  (${SEQUENCES} walks, ${steps} steps)`)
+    console.log(`  (${SEQUENCES} walks, ${steps} steps, ${batchLessReverts} batch-less count reverts, ${chainReverts} reverts of reverts)`)
+    assert.ok(batchLessReverts > 0 && chainReverts > 0, 'the walk must exercise both revert kinds')
   })
 
   console.log(`\n${passed} PASS, ${failed} FAIL`)
