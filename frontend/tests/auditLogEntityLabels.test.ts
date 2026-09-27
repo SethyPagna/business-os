@@ -73,11 +73,19 @@ const recordFor = (entity: string, before: unknown, after: unknown) => auditRows
  * that writes it, and a fixture built from a column that file genuinely
  * audits (products.ts PRODUCT_FIELD_AUDIT_COLUMNS, fees.ts FEE_AUDIT_COLUMNS,
  * contacts.ts contactDiffKeys, returns.ts returnUpdateValues, promotions.ts
- * the rule input, users.ts the user/role diffs, settings.ts the key list).
+ * the rule input, users.ts the user/role diffs, settings.ts the key list,
+ * lib/telegramTopicSetting.ts the /settopic save of one topic key).
  */
 const BEFORE_AFTER: Array<{
   entity: string
   writtenBy: string
+  /**
+   * The folder under cloudflare/src the writer lives in. Most are routes; a
+   * writer the webhook hands in (the /settopic save) lives in lib, and
+   * routes/telegram.ts and lib/telegram.ts share a name, so a file is only
+   * ever identified by folder AND name.
+   */
+  dir?: 'routes' | 'lib'
   before: Record<string, unknown>
   after: Record<string, unknown>
   /** A label that must appear once the pair is rendered. */
@@ -93,6 +101,10 @@ const BEFORE_AFTER: Array<{
   { entity: 'role', writtenBy: 'users.ts', before: { name: 'Cashier' }, after: { name: 'Senior cashier' }, expects: en.name },
   { entity: 'promotion_rule', writtenBy: 'promotions.ts', before: { title: 'Songkran' }, after: { title: 'Songkran 2026' }, expects: en.title },
   { entity: 'settings', writtenBy: 'settings.ts', before: { exchange_rate: 4000 }, after: { exchange_rate: 4100 }, expects: en.exchange_rate },
+  // A topic id set by /settopic, from nothing (General) to topic 12. The words
+  // are the Settings screen's own, heading first: "Shift reports" alone would
+  // not say it is WHERE shift reports go.
+  { entity: 'settings', writtenBy: 'telegramTopicSetting.ts', dir: 'lib', before: { telegram_topic_shift: '' }, after: { telegram_topic_shift: '12' }, expects: `${en.telegram_topics_title} - ${en.telegram_topic_shift_label}` },
   { entity: 'fee', writtenBy: 'fees.ts', before: { amount_usd: 5 }, after: { amount_usd: 6 }, expects: en.amount_usd },
   { entity: 'return', writtenBy: 'returns.ts', before: { reason: 'Damaged box' }, after: { reason: 'Wrong item' }, expects: en.reason },
 ]
@@ -108,7 +120,7 @@ const NAMED_ONLY = ['sale', 'sale_item', 'stock', 'stock_transfer', 'stock_sessi
 
 test('every entity with a before/after pair is written by the Worker file it claims', () => {
   for (const item of BEFORE_AFTER) {
-    const source = read(`../../cloudflare/src/routes/${item.writtenBy}`)
+    const source = read(`../../cloudflare/src/${item.dir ?? 'routes'}/${item.writtenBy}`)
     const writesEntity = item.entity === 'customer' || item.entity === 'supplier' || item.entity === 'delivery_contact'
       // contacts.ts audits under config.entity; the three configs declare it.
       ? source.includes(`entity: '${item.entity}'`)
@@ -160,6 +172,33 @@ test('every field label a fixture produces is readable in the Khmer pack too', (
   for (const item of BEFORE_AFTER) {
     const [row] = ENTITY_RECORDS_ADAPTER.fieldRows(recordFor(item.entity, item.before, item.after), kmCtx)
     assert.notEqual(row.label, item.expects, `${item.entity}'s field label '${row.label}' is still the English word in the Khmer pack`)
+    // Differing from the English pack word is not enough: the Title-Cased
+    // column ("Telegram Topic Shift") differs from it too, and is English.
+    assert.match(row.label, /[\u1780-\u17FF]/, `${item.entity}'s field label '${row.label}' has no Khmer in the Khmer pack`)
+  }
+})
+
+test('every Telegram topic key the Worker writes reads as its Settings words, in both packs', () => {
+  // Found, not listed: the fixed list both writers draw from (routes/settings.ts
+  // and the /settopic save validate against it). A family added there without a
+  // word here fails this case instead of reaching the Audit Log as Title Case.
+  const telegram = stripComments(read('../../cloudflare/src/lib/telegram.ts'))
+  const list = telegram.match(/export const TELEGRAM_TOPIC_KEYS = \[([\s\S]*?)\] as const/)
+  assert.ok(list, 'lib/telegram.ts no longer declares TELEGRAM_TOPIC_KEYS')
+  const families = [...list[1].matchAll(/'telegram_topic_([a-z_]+)'/g)].map((match) => match[1])
+  assert.ok(families.length >= 8, `expected the eight topic families, found ${families.join(', ')}`)
+  const kmCtx = { ...ctx, label: labelKm, t: (key: string) => km[key] || key }
+  for (const family of families) {
+    const field = `telegram_topic_${family}`
+    const packKey = `telegram_topic_${family}_label`
+    assert.equal(typeof en[packKey], 'string', `English is missing ${packKey}`)
+    assert.equal(typeof km[packKey], 'string', `Khmer is missing ${packKey}`)
+    const record = recordFor('settings', { [field]: '' }, { [field]: '12' })
+    const [enRow] = ENTITY_RECORDS_ADAPTER.fieldRows(record, ctx)
+    const [kmRow] = ENTITY_RECORDS_ADAPTER.fieldRows(record, kmCtx)
+    assert.equal(enRow.label, `${en.telegram_topics_title} - ${en[packKey]}`, `${field} in English`)
+    assert.equal(kmRow.label, `${km.telegram_topics_title} - ${km[packKey]}`, `${field} in Khmer`)
+    assert.equal(enRow.after, '12')
   }
 })
 
@@ -181,21 +220,23 @@ test('POSITIVE CONTROL: an unchanged save renders no change rows at all', () => 
 
 test('DRIFT GUARD: no Worker file writes before/after without a fixture here', () => {
   // Every file that builds an audit field pair, found rather than assumed.
-  const roots = ['../../cloudflare/src/routes', '../../cloudflare/src/lib']
+  // Named folder/file: routes/telegram.ts and lib/telegram.ts are two files,
+  // and covering one must not silently cover the other.
+  const roots = ['routes', 'lib']
   const writers: string[] = []
   for (const root of roots) {
-    const dir = fileURLToPath(new URL(root, import.meta.url))
+    const dir = fileURLToPath(new URL(`../../cloudflare/src/${root}`, import.meta.url))
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.ts')) continue
       const source = stripComments(readFileSync(`${dir}/${name}`, 'utf8'))
-      if (/changedFields\(|auditChangeColumns\(/.test(source)) writers.push(name)
+      if (/changedFields\(|auditChangeColumns\(/.test(source)) writers.push(`${root}/${name}`)
     }
   }
-  // audit.ts defines the helpers; every other writer must appear in the
+  // lib/audit.ts defines the helpers; every other writer must appear in the
   // fixture table above, and the table must not name a file that stopped
   // writing pairs.
-  const covered = new Set(BEFORE_AFTER.map((item) => item.writtenBy))
-  const unexpected = writers.filter((name) => name !== 'audit.ts' && !covered.has(name))
+  const covered = new Set(BEFORE_AFTER.map((item) => `${item.dir ?? 'routes'}/${item.writtenBy}`))
+  const unexpected = writers.filter((name) => name !== 'lib/audit.ts' && !covered.has(name))
   assert.deepEqual(unexpected, [], `these Worker files now write a before/after pair: ${unexpected.join(', ')} -- add their entity to BEFORE_AFTER and to AUDIT_ENTITY_LABELS`)
   for (const name of covered) {
     assert.ok(writers.includes(name), `the fixture table claims ${name} writes a pair, and it no longer does`)
