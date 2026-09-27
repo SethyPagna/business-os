@@ -57,7 +57,11 @@
 //   6. aborts (E3): a line after the window still carrying a buggy figure,
 //      and a 0195 applied less than 2 hours ago, each abort the migration
 //      with nothing written.
-// Against the U-cost2 0200 (HELD_0200_SQL=<git show copy>) checks 1, 3 and 6 fail.
+//   7. E2 in the other direction: a walk-in line with no restock movement of
+//      its own (stock action 'none') whose return id equals a sale cancelled
+//      two days LATER is positioned at its own time, not at that restock.
+// Against the U-cost2 0200 (HELD_0200_SQL=<git show copy>) checks 1, 3, 5, 6
+// and 7 fail; against 66da324e's (a lower time bound only) check 7 fails.
 //
 // Run (from cloudflare/): node scripts/test-held-0200-sale-cost-oracle-pure.cjs [--table] [--emit <dir>]
 //   --table        prints line / case / before / expected / after
@@ -118,7 +122,7 @@ function world(mode) {
 }
 
 // The event list. Every event runs on both worlds, in order.
-function replay({ afterWindow = false } = {}) {
+function replay({ afterWindow = false, lateCancel = false } = {}) {
   const H = world('hist'), O = world('oracle')
   const both = (fn) => [fn(H), fn(O)]
   const one = (fn) => { const [h, o] = both(fn); assert.deepEqual(h, o, 'ids agree across the pair'); return h }
@@ -206,6 +210,8 @@ function replay({ afterWindow = false } = {}) {
   // A customer return. Sale-linked: the cost is copied from the sale line
   // (recordedReturnCosts 'sale' source; sale_item_id NULL -> the one cost all
   // that product's lines share). Walk-in: the stored catalog cost at the return.
+  // restock: false is stock action 'none': routes/returns.ts writes the
+  // 'return' movement (and moves stock) only for a restocked line.
   const customerReturn = (name, at, { saleId = null, lines, currency = 'USD' }) => {
     const out = both((w) => {
       const khr = currency === 'KHR'
@@ -219,11 +225,15 @@ function replay({ afterWindow = false } = {}) {
           const costs = w.raw.prepare('SELECT DISTINCT cost_price_usd c FROM sale_items WHERE sale_id = ? AND product_id = ?').all(saleId, l.p)
           assert.equal(costs.length, 1, 'recordedReturnCosts: one shared cost'); cost = costs[0].c
         }
+        const restock = l.restock !== false
         const id = Number(w.raw.prepare(`INSERT INTO return_items(return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, applied_price_khr, cost_price_usd, cost_price_khr, total_usd, total_khr, return_to_stock, stock_action, branch_id, batch_id)
-          VALUES (?, ?, ?, ?, ?, 20, 82000, ?, ?, ?, ?, 1, 'restock', 1, ?)`).run(returnId, l.saleItemId || null, l.p, name, l.q, cost, l.khr ?? 41000, khr ? 0 : 20 * l.q, khr ? 82000 * l.q : 0, l.lot).lastInsertRowid)
-        w.raw.prepare(`INSERT INTO inventory_movements(product_id, branch_id, movement_type, quantity, unit_cost_usd, reference_id, batch_id, created_at)
-          VALUES (?, 1, 'return', ?, ?, ?, ?, ?)`).run(l.p, l.q, cost, returnId, l.lot, at)
-        stock(w, l.lot, l.q)
+          VALUES (?, ?, ?, ?, ?, 20, 82000, ?, ?, ?, ?, ?, ?, 1, ?)`).run(returnId, l.saleItemId || null, l.p, name, l.q, cost, l.khr ?? 41000, khr ? 0 : 20 * l.q, khr ? 82000 * l.q : 0,
+          restock ? 1 : 0, restock ? 'restock' : 'none', restock ? l.lot : null).lastInsertRowid)
+        if (restock) {
+          w.raw.prepare(`INSERT INTO inventory_movements(product_id, branch_id, movement_type, quantity, unit_cost_usd, reference_id, batch_id, created_at)
+            VALUES (?, 1, 'return', ?, ?, ?, ?, ?)`).run(l.p, l.q, cost, returnId, l.lot, at)
+          stock(w, l.lot, l.q)
+        }
         return id
       })
       w.settle()
@@ -297,6 +307,22 @@ function replay({ afterWindow = false } = {}) {
     apply0195()
     lot(pw, 30, d(26, '03:00:00'), 1, undefined, { oldWorker: true })
     sale('W-after-window', d(26, '03:00:00'), [{ p: pw, q: 1, lot: w1 }])
+    return { H, O, cases }
+  }
+
+  if (lateCancel) {
+    // The E2 late-cancellation fixture. Q: 3 x 10 + 1 x 30 -> stored 20, on
+    // hand 15. Sale #1 takes one unit; walk-in return #1 is stock action
+    // 'none' (no movement of its own): stored 20, on hand 50 / 3 = 16.6667.
+    // A 5 x 90 receipt follows, then sale #1 is cancelled two days after the
+    // return -- its restock 'return' movement names reference_id 1 and Q.
+    // Positioned there the line would read (20 + 30 + 450) / 8 = 62.5.
+    const pq = product('Q'); const q1 = lot(pq, 10, d(16, '15:00:00'), 3); lot(pq, 30, d(17), 1)
+    const sQ = sale('Q-cancelled-later', d(18), [{ p: pq, q: 1, lot: q1 }])
+    customerReturn('Q-walkin-none', d(20), { lines: [{ p: pq, q: 1, restock: false }] })
+    lot(pq, 90, d(21), 5)
+    cancelSale(sQ.saleId, pq, q1, 1, d(22))
+    apply0195()
     return { H, O, cases }
   }
 
@@ -617,6 +643,26 @@ check('abort: 0195 applied less than 2 hours ago, or missing, refuses the whole 
   assert.ok(/branches\.name/.test(applyAtomically(A.raw)?.message || ''), 'an empty backup table refuses too')
   A.raw.exec('DROP TABLE catalog_cost_repair_0195_backup')
   assert.ok(/no such table: catalog_cost_repair_0195_backup/.test(applyAtomically(A.raw)?.message || ''), 'without 0195 it refuses')
+})
+
+// E2, the other direction: 'P-walkin' collides with an EARLIER cancellation;
+// a walk-in line with no restock of its own collides with a LATER one. Only a
+// window on both sides of returns.created_at keeps that restock (written in
+// another request, days later) from positioning the line.
+check('E2: a walk-in line with no movement of its own is not positioned at a later cancellation of the same-numbered sale', () => {
+  const { H: L, O: LO, cases: lCases } = replay({ lateCancel: true })
+  const key = Object.keys(lCases).find((k) => lCases[k] === 'Q-walkin-none')
+  const id = Number(key.split(':')[1])
+  const ret = L.raw.prepare('SELECT r.id, r.created_at, ri.cost_price_usd c FROM return_items ri JOIN returns r ON r.id = ri.return_id WHERE ri.id = ?').get(id)
+  const cancel = L.raw.prepare("SELECT created_at FROM inventory_movements WHERE movement_type = 'return' AND reference_id = ? ORDER BY id").all(ret.id)
+  assert.deepEqual([cancel.length, cancel[0].created_at > ret.created_at], [1, true], 'the only return-typed movement naming the return id is the later cancellation')
+  const oracleCost = LO.raw.prepare('SELECT cost_price_usd c FROM return_items WHERE id = ?').get(id).c
+  assert.deepEqual([ret.c, oracleCost], [20, 16.6667], 'the fixture is discriminating')
+  const error = applyAtomically(L.raw)
+  if (error) throw error
+  const planRow = L.raw.prepare("SELECT bucket, correct_cost_usd FROM sale_cost_repair_0200_plan WHERE kind = 'return' AND item_id = ?").get(id)
+  assert.deepEqual([planRow.bucket, L.raw.prepare('SELECT cost_price_usd c FROM return_items WHERE id = ?').get(id).c], ['returns_walk_in', oracleCost],
+    `positioned at its own time, not at the cancellation (estimate ${planRow.correct_cost_usd})`)
 })
 
 // --emit <dir>: the HIST rows (state just before 0200) as SQL for a wrangler

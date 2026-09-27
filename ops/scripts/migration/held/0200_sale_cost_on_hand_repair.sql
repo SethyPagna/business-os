@@ -264,12 +264,15 @@
 --     with no batch-stamped 'return' movement is not in the lot ledger: the
 --     lots it touched fail the reconcile check and their lines are listed as
 --     'ledger_unverified', never rewritten.
---   - A walk-in return is timed at returns.created_at and positioned at its
---     first 'return' movement of the same product written no earlier than
---     60 seconds before it. The product and time bounds are required:
+--   - A walk-in return is timed at returns.created_at and positioned at the
+--     'return' movement of the same product written closest to it, within
+--     60 seconds either side; a line with none (stock action 'none' or
+--     'damaged' writes no 'return' movement) at the first movement at or
+--     after its time. The product and both time bounds are required:
 --     'return' is also written by a cancelled sale with a SALE id in
 --     reference_id (lib/movementReference.ts), so a return id alone can name
---     an older cancellation's restock. A later edit of it is not re-timed.
+--     an older -- or, for a line with no restock, a later -- cancellation's
+--     restock. A later edit of it is not re-timed.
 --   - Lot edits before ee46a74e did not re-derive the stored figure; every
 --     edit is therefore a candidate setter moment, never a required one. A
 --     match against a moment that did not in fact set the figure would need
@@ -514,9 +517,10 @@ items AS MATERIALIZED (
     FROM sale_lines sl) sm
   UNION ALL
   SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at), datetime(r.created_at),
-    COALESCE((SELECT MIN(im.id) FROM inventory_movements im
-        WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
-          AND datetime(im.created_at) >= datetime(r.created_at, '-60 seconds')),
+    COALESCE((SELECT m.id FROM (SELECT im.id, ABS(julianday(im.created_at) - julianday(r.created_at)) AS gap FROM inventory_movements im
+          WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
+            AND datetime(im.created_at) BETWEEN datetime(r.created_at, '-60 seconds') AND datetime(r.created_at, '+60 seconds')) m
+        ORDER BY m.gap, m.id LIMIT 1),
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= datetime(r.created_at)),
       (SELECT COALESCE(MAX(im.id), 0) + 1 FROM inventory_movements im))
   FROM return_items ri JOIN returns r ON r.id = ri.return_id

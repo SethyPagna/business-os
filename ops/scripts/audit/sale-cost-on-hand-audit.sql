@@ -136,9 +136,10 @@ items AS MATERIALIZED (
     FROM sale_lines sl) sm
   UNION ALL
   SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at), datetime(r.created_at),
-    COALESCE((SELECT MIN(im.id) FROM inventory_movements im
-        WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
-          AND datetime(im.created_at) >= datetime(r.created_at, '-60 seconds')),
+    COALESCE((SELECT m.id FROM (SELECT im.id, ABS(julianday(im.created_at) - julianday(r.created_at)) AS gap FROM inventory_movements im
+          WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
+            AND datetime(im.created_at) BETWEEN datetime(r.created_at, '-60 seconds') AND datetime(r.created_at, '+60 seconds')) m
+        ORDER BY m.gap, m.id LIMIT 1),
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= datetime(r.created_at)),
       (SELECT COALESCE(MAX(im.id), 0) + 1 FROM inventory_movements im))
   FROM return_items ri JOIN returns r ON r.id = ri.return_id
@@ -578,9 +579,10 @@ items AS MATERIALIZED (
     FROM sale_lines sl) sm
   UNION ALL
   SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at), datetime(r.created_at),
-    COALESCE((SELECT MIN(im.id) FROM inventory_movements im
-        WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
-          AND datetime(im.created_at) >= datetime(r.created_at, '-60 seconds')),
+    COALESCE((SELECT m.id FROM (SELECT im.id, ABS(julianday(im.created_at) - julianday(r.created_at)) AS gap FROM inventory_movements im
+          WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
+            AND datetime(im.created_at) BETWEEN datetime(r.created_at, '-60 seconds') AND datetime(r.created_at, '+60 seconds')) m
+        ORDER BY m.gap, m.id LIMIT 1),
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= datetime(r.created_at)),
       (SELECT COALESCE(MAX(im.id), 0) + 1 FROM inventory_movements im))
   FROM return_items ri JOIN returns r ON r.id = ri.return_id
@@ -1022,9 +1024,10 @@ items AS MATERIALIZED (
     FROM sale_lines sl) sm
   UNION ALL
   SELECT 'return', -ri.id, ri.id, NULL, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at), datetime(r.created_at),
-    COALESCE((SELECT MIN(im.id) FROM inventory_movements im
-        WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
-          AND datetime(im.created_at) >= datetime(r.created_at, '-60 seconds')),
+    COALESCE((SELECT m.id FROM (SELECT im.id, ABS(julianday(im.created_at) - julianday(r.created_at)) AS gap FROM inventory_movements im
+          WHERE im.reference_id = r.id AND im.movement_type = 'return' AND im.product_id = ri.product_id
+            AND datetime(im.created_at) BETWEEN datetime(r.created_at, '-60 seconds') AND datetime(r.created_at, '+60 seconds')) m
+        ORDER BY m.gap, m.id LIMIT 1),
       (SELECT MIN(im.id) FROM inventory_movements im WHERE im.created_at >= datetime(r.created_at)),
       (SELECT COALESCE(MAX(im.id), 0) + 1 FROM inventory_movements im))
   FROM return_items ri JOIN returns r ON r.id = ri.return_id
