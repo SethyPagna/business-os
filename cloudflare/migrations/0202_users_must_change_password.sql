@@ -7,9 +7,10 @@
 -- lib/passwordPolicy.ts now refuses to SET either one on every staff
 -- password writer, and POST /api/auth/login sets this flag when a correct
 -- sign-in used one. While it is 1, lib/auth.ts requireAuth refuses every
--- request except POST /api/users/<own id>/change-password (403
--- password_change_required); /bootstrap and /me carry it so the app shows the
--- forced change screen. Every password writer clears it.
+-- request except POST /api/users/<own id>/change-password and the app's
+-- sign-out probe GET /api/sync/owner (403 password_change_required);
+-- /bootstrap and /me carry it so the app shows the forced change screen.
+-- Every password writer clears it.
 --
 -- Purely additive: one column with a constant default, so every existing row
 -- reads 0 and nothing is forced until someone signs in with a known password.
