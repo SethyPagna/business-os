@@ -1,8 +1,9 @@
 // Returns -- customer returns in the range (GET /api/returns/report for the
 // by-day / by-reason / by-type breakdowns, GET /api/reports/business-summary/
-// returns for the per-return list). Refunds are summed in BOTH currencies
-// (Part 553): a return is recorded in USD or KHR, never converted, so every
-// money cell carries usd + khr and fmtMoney decides how to show them.
+// returns for the per-return list). A refund is ONE amount: the riel figure
+// the API also sends is the same refund at the return's own rate, not a
+// second payment, so only refund_usd reaches fmtMoney, which shows it in the
+// display currency like revenue (SCAN1 M3).
 import { useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
@@ -19,7 +20,7 @@ import { fmtInt, joinSummary, num, pct, reportQueryParams, round2, rowsToCsvObje
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps, type Tr } from './reportTypes.ts'
 import { usePagedReport } from './usePagedReport.ts'
 
-interface Money { count: number; refund_usd: number; refund_khr: number }
+interface Money { count: number; refund_usd: number }
 interface DayRow extends Money { date: string }
 interface ReasonRow extends Money { reason: string }
 interface TypeRow extends Money { return_type: string }
@@ -36,7 +37,6 @@ export interface ReturnRow {
   reason: string
   status: string
   refund_usd: number
-  refund_khr: number
 }
 type Mode = 'days' | 'reasons' | 'types' | 'each'
 
@@ -49,7 +49,7 @@ const MODES: Array<{ id: Mode; key: string; fallback: string }> = [
 
 function money(raw: unknown): Money {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  return { count: num(r.count), refund_usd: num(r.refund_usd), refund_khr: num(r.refund_khr) }
+  return { count: num(r.count), refund_usd: num(r.refund_usd) }
 }
 export function mapReturnRow(raw: unknown, index: number): ReturnRow {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
@@ -65,7 +65,6 @@ export function mapReturnRow(raw: unknown, index: number): ReturnRow {
     reason: String(r.reason || ''),
     status: String(r.status || ''),
     refund_usd: num(r.refund_usd),
-    refund_khr: num(r.refund_khr),
   }
 }
 /** Raw enum-ish values ("store_credit") read as words; unknown values stay as stored. */
@@ -74,15 +73,19 @@ export function humanize(value: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'
 }
 function sumMoney(rows: Money[]): Money {
-  return { count: rows.reduce((s, r) => s + r.count, 0), refund_usd: round2(rows.reduce((s, r) => s + r.refund_usd, 0)), refund_khr: Math.round(rows.reduce((s, r) => s + r.refund_khr, 0)) }
+  return { count: rows.reduce((s, r) => s + r.count, 0), refund_usd: round2(rows.reduce((s, r) => s + r.refund_usd, 0)) }
 }
 function matches(text: string, search: string): boolean {
   return !search || text.toLowerCase().includes(search.toLowerCase())
 }
+/** The refund money cell, shared with the Overview's by-reason fold. */
+export function refundColumn<Row extends { refund_usd: number }>(tr: Tr): ReportColumn<Row> {
+  return { key: 'refund', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd, emphasis: true }
+}
 function moneyColumns<Row extends Money>(tr: Tr, totalUsd: number): Array<ReportColumn<Row>> {
   return [
     { key: 'count', label: tr('rpt_count', 'Count'), kind: 'int', value: (r) => r.count },
-    { key: 'refund', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd, khr: (r) => r.refund_khr, emphasis: true },
+    refundColumn<Row>(tr),
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.refund_usd, totalUsd), defaultVisible: false },
   ]
 }
@@ -119,13 +122,13 @@ export default function ReturnsReport(p: ReportViewProps) {
   const each = useMemo(() => paged.rows.filter((r) => matches(`${r.return_number} ${r.sale_receipt_number} ${r.party} ${r.reason} ${humanize(r.type)}`, search)), [paged.rows, search])
 
   const totals: Money = mode === 'each'
-    ? { count: each.length, refund_usd: round2(each.reduce((s, r) => s + r.refund_usd, 0)), refund_khr: Math.round(each.reduce((s, r) => s + r.refund_khr, 0)) }
+    ? { count: each.length, refund_usd: round2(each.reduce((s, r) => s + r.refund_usd, 0)) }
     : mode === 'days' ? sumMoney(days) : mode === 'reasons' ? sumMoney(reasons) : sumMoney(types)
   const serverTotals = state.data?.totals ? money(state.data.totals) : null
   const summary = joinSummary([
     countLabel(totals.count, REPORT_NOUNS.return, tr, mode === 'each' && paged.hasMore),
-    `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd, totals.refund_khr)}`,
-    serverTotals && mode !== 'each' && search ? `${tr('rpt_of_total', 'of')} ${fmtInt(serverTotals.count)} · ${fmtMoney(serverTotals.refund_usd, serverTotals.refund_khr)}` : null,
+    `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}`,
+    serverTotals && mode !== 'each' && search ? `${tr('rpt_of_total', 'of')} ${fmtInt(serverTotals.count)} · ${fmtMoney(serverTotals.refund_usd)}` : null,
   ])
 
   const dayColumns: Array<ReportColumn<DayRow>> = [
@@ -148,7 +151,7 @@ export default function ReturnsReport(p: ReportViewProps) {
     { key: 'type', label: tr('type', 'Type'), value: (r) => humanize(r.type) },
     { key: 'reason', label: tr('reason', 'Reason'), value: (r) => r.reason },
     { key: 'status', label: tr('status', 'Status'), value: (r) => humanize(r.status), defaultVisible: false },
-    { key: 'refund', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd, khr: (r) => r.refund_khr, emphasis: true },
+    refundColumn<ReturnRow>(tr),
   ]
 
   const fileName = (ext: string) => `returns-report-${mode}-${filters.startDate || 'all'}_${filters.endDate || 'all'}.${ext}`
@@ -195,7 +198,7 @@ export default function ReturnsReport(p: ReportViewProps) {
           columns={eachColumns}
           rows={each}
           rowKey={(r) => `${r.id}:${r.return_number}`}
-          totalsRow={each.length > 1 ? { ...mapReturnRow({}, -1), return_number: labels.total, refund_usd: totals.refund_usd, refund_khr: totals.refund_khr } : null}
+          totalsRow={each.length > 1 ? { ...mapReturnRow({}, -1), return_number: labels.total, refund_usd: totals.refund_usd } : null}
           selectedKey={openRow ? `${openRow.id}:${openRow.return_number}` : null}
           onRowClick={(row, el) => {
             anchorRef.current = el
@@ -227,7 +230,7 @@ export default function ReturnsReport(p: ReportViewProps) {
                   { label: tr('type', 'Type'), value: humanize(openRow.type), kind: 'info' },
                   { label: tr('reason', 'Reason'), value: openRow.reason || '—', kind: 'info' },
                   { label: tr('status', 'Status'), value: humanize(openRow.status), kind: 'info' },
-                  { label: tr('refunds', 'Refunds'), value: fmtMoney(openRow.refund_usd, openRow.refund_khr), kind: 'total' },
+                  { label: tr('refunds', 'Refunds'), value: fmtMoney(openRow.refund_usd), kind: 'total' },
                 ],
               }]}
             />
