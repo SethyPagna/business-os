@@ -252,6 +252,22 @@ const base = {
   assert.strictEqual(receiptRace.sqlite.prepare(`SELECT quantity FROM branch_stock`).get().quantity, 10)
   assert.strictEqual(receiptRace.sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits`).get().n, 0)
 
+  // lib/db.ts re-sends a committed batch whose acknowledgement was lost; the
+  // receipt guard must not mistake the group's OWN sale for a peer.
+  const replayed = setup()
+  const replayBatch = replayed.db.batch
+  let replayOnce = true
+  replayed.db.batch = async (statements) => {
+    const results = await replayBatch(statements)
+    if (!replayOnce) return results
+    replayOnce = false
+    return replayBatch(statements)
+  }
+  const replayResult = await subject.applyUnifiedStockSale(replayed.db, base)
+  assert.strictEqual(replayResult.alreadyApplied, false)
+  assert.strictEqual(replayed.sqlite.prepare(`SELECT COUNT(*) AS n FROM sales`).get().n, 1, 'a re-sent committed batch is a no-op')
+  assert.strictEqual(replayed.sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id = 10 AND branch_id = 1`).get().quantity, 4)
+
   console.log('PASS grouped stock sales are Shop-guarded, bounded, FIFO, transaction-asserted, rollback-safe, and retry-idempotent')
 })().catch((error) => {
   console.error(error)
