@@ -61,14 +61,8 @@ function sourceFiles(dir: string): string[] {
 // Lower a number -- or delete the line -- when you replace one.
 const REMAINING: Record<string, number> = {
   'components/catalog/CatalogAccountSection.tsx': 1,
-  'components/products/DeleteConfirmModal.tsx': 1,
   'components/products/Products.tsx': 5,
-  'components/products/forms/BulkAddStockModal.tsx': 1,
-  'components/products/forms/StockAdjustModal.tsx': 1,
   'components/products/import/BulkImportModal.tsx': 4,
-  'components/products/lookups/ManageBrandsModal.tsx': 3,
-  'components/products/lookups/ManageCategoriesModal.tsx': 2,
-  'components/products/lookups/ManageUnitsModal.tsx': 2,
   'components/shared/BackgroundImportTracker.tsx': 1,
   'components/utils-settings/Backup.tsx': 4,
 }

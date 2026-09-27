@@ -8,6 +8,7 @@ import { buildProductGroups } from '../../../utils/productGrouping.ts'
 import InventoryStockModals from '../../inventory/InventoryStockModals'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal'
 import ConfirmDialog, { type ConfirmReviewItem } from '../../shared/ConfirmDialog'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import { type AppSelectOption } from '../../shared/AppSelect'
 import { useApp } from '../../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
@@ -202,6 +203,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
   costViewRef.current = canViewCosts
 
   const isKhmer = /[ក-៿]/.test(t('cancel') || '')
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const tr = useCallback((key: string, fallbackEn?: string, fallbackKm?: string): string => {
     const value = t(key)
     if (value && value !== key) return value
@@ -330,10 +332,17 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog, tr])
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
+    // Same review as Inventory's saved-reason delete (FX-ui), never window.confirm.
+    if (!(await askToConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('delete_saved_reason_confirm', 'Delete this saved reason?'),
+      items: [{ label: tr('reason', 'Reason'), value: entry.label }],
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog, tr])
+  }, [askToConfirm, inventoryReasons, saveReasonCatalog, tr])
 
   // --- adjust form (step 2) ---
   const [adjustForm, setAdjustForm] = useState<AdjustForm>(() => restoredDraft ? { ...restoredDraft.form, ...(!canViewCosts ? { cost_usd: '', cost_khr: '', unit_cost_usd: '' } : {}) } as unknown as AdjustForm : ({
@@ -1009,6 +1018,7 @@ export default function StockAdjustModal({ initialType = 'add', initialProduct =
           {failureNotice}
         </ConfirmDialog>
       ) : null}
+      {confirmDialog}
     </>
   )
 }

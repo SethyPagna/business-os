@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
@@ -194,6 +195,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   }
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { notify, user } = useApp()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
@@ -385,7 +387,12 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   const handleDelete = async (id: EntityId): Promise<void> => {
     if (saving || deletingId) return
     if (!beginSingleAction(deleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(t('confirm_delete'))) {
+    if (!(await askToConfirm({
+      title: t('confirm_delete') || 'Are you sure you want to delete this?',
+      message: unitsById.get(Number(id))?.name,
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -456,7 +463,12 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   const handleDeleteSelected = async (): Promise<void> => {
     if (saving || deletingId || selectedIds.size === 0) return
     if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(`Delete ${selectedIds.size} selected unit${selectedIds.size === 1 ? '' : 's'}?`)) {
+    if (!(await askToConfirm({
+      title: t('delete_selected') || 'Delete selected',
+      items: [{ label: t('units') || 'Units', value: selectedIds.size }],
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -637,6 +649,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
         </div>
       </div>
       <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </Modal>
   )
 }

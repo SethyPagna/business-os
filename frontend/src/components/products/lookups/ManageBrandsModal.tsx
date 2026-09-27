@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
@@ -204,6 +205,7 @@ export default function ManageBrandsModal({
   t,
 }: ManageBrandsModalProps) {
   const { settings, notify } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands', user })
   const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
@@ -408,11 +410,17 @@ export default function ManageBrandsModal({
       const targetAlreadyExists = allKnownBrandNames.some((entry) => normalizeLookup(entry) === toLookup && normalizeLookup(entry) !== fromLookup)
       const impact = await getRenameImpact('brand', from, to)
       const attached = Number(impact.products_primary || 0) + Number(impact.products_secondary || 0)
-      const confirmed = window.confirm(
-        targetAlreadyExists
-          ? `"${to}" already exists. Merge "${from}" into it and update ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`
-          : `Rename "${from}" to "${to}" and carry ${attached} exact linked product${attached === 1 ? '' : 's'}? Point-in-time audit history stays unchanged.`,
-      )
+      const confirmed = await askToConfirm({
+        title: targetAlreadyExists ? (t('brand_merge_title') || 'Merge brands?') : (t('brand_rename_title') || 'Rename brand?'),
+        message: targetAlreadyExists ? (t('brand_merge_note') || '"{name}" already exists, so these brands will merge.').replace('{name}', to) : undefined,
+        items: [
+          { label: t('before') || 'Before', value: from },
+          { label: t('after') || 'After', value: to },
+          { label: t('brand_linked_products') || 'Linked products updated', value: attached },
+        ],
+        note: t('brand_audit_unchanged') || 'Point-in-time audit history stays unchanged.',
+        confirmLabel: targetAlreadyExists ? (t('merge') || 'Merge') : (t('rename') || 'Rename'),
+      })
       if (!confirmed) return
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
@@ -492,9 +500,19 @@ export default function ManageBrandsModal({
       .map((name) => brandsByLookup.get(normalizeLookup(name)))
       .filter(Boolean)
     const affectedCount = affectedEntries.reduce((sum, entry) => sum + Number(entry.usage || 0), 0)
-    const clearAppliedBrands = affectedCount > 0
-      ? window.confirm(`${brandNames.length} brand${brandNames.length === 1 ? '' : 's'} are used by ${affectedCount} product(s). Clear those product brand fields too?`)
-      : window.confirm(`Delete ${brandNames.length} selected brand${brandNames.length === 1 ? '' : 's'}?`)
+    // Cancel aborts the whole delete either way, as the native prompts did.
+    const clearAppliedBrands = await askToConfirm({
+      title: t('brand_delete_title') || 'Delete brands?',
+      message: affectedCount > 0
+        ? (t('brand_delete_clears_products') || 'The brand is cleared on {count} product(s) that use it.').replace('{count}', String(affectedCount))
+        : undefined,
+      items: [
+        { label: t('brand') || 'Brand', value: brandNames.join(', ') },
+        { label: t('brand_linked_products') || 'Linked products updated', value: affectedCount },
+      ],
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    })
 
     if (!clearAppliedBrands) {
       finishNamedAction(actionInFlightRef, 'delete-brand')
@@ -841,6 +859,7 @@ export default function ManageBrandsModal({
           )}
         </div>
       </div>
+      {confirmDialog}
     </Modal>
   )
 }
