@@ -551,6 +551,66 @@ app.post('/password-reset/email', async (c) => {
   return c.json(GENERIC_RESET_REQUEST_RESPONSE)
 })
 
+// ---- Password reset by administrator approval (S-auth4c) ----
+//
+// The third recovery method, next to the emailed link (/password-reset/email)
+// and the authenticator code (/password-reset/otp): someone who has neither
+// asks an administrator. This records a pending request that administrators
+// see in Users (GET /api/users/password-reset-requests); the administrator
+// resolves it with the existing admin reset-password action, which marks the
+// request resolved, or dismisses it. Nothing about the account changes here.
+//
+// Same no-enumeration rule as /email: one identical answer whether the
+// identifier matched one active account, none, several, or was rate-limited.
+// Limits: per network and per typed identifier, so the admin list cannot be
+// flooded and one account cannot be spammed; a repeat while a request is
+// already pending adds nothing (partial unique index, migration 0203).
+const ADMIN_RESET_REQUEST_RESPONSE = {
+  success: true,
+  message: 'If this account exists, an administrator has been asked to reset its password.',
+}
+const ADMIN_RESET_REQUEST_IP_MAX = 5
+const ADMIN_RESET_REQUEST_IDENTIFIER_MAX = 3
+const ADMIN_RESET_REQUEST_WINDOW_MS = 60 * 60 * 1000
+
+app.post('/password-reset/admin-request', async (c) => {
+  const body = await c.req.json<{ identifier?: string; deviceName?: string }>().catch(() => ({} as { identifier?: string; deviceName?: string }))
+  const identifier = String(body.identifier || '').trim()
+  if (!identifier || identifier.length > 200) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+
+  const ip = getClientIp(c.req.raw)
+  const ipLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_ip', ip, ADMIN_RESET_REQUEST_IP_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  if (!ipLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+  const identifierLimit = await checkRateLimit(c.env, 'auth:password_reset_admin_identifier', identifier.toLowerCase(), ADMIN_RESET_REQUEST_IDENTIFIER_MAX, ADMIN_RESET_REQUEST_WINDOW_MS)
+  if (!identifierLimit.allowed) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+
+  const db = getDb(c.env)
+  // LIMIT 2: an identifier naming two accounts (a shared email) is ambiguous
+  // and records nothing, rather than asking about an arbitrary one.
+  const rows = await db.prepare(`
+    SELECT id, username FROM users
+    WHERE (lower(username) = lower(@identifier) OR lower(email) = lower(@identifier))
+      AND deleted_at IS NULL AND is_active = 1
+    LIMIT 2
+  `).all<{ id: number; username: string }>({ identifier })
+  if (rows.length !== 1) return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+  const user = rows[0]
+  try {
+    const inserted = await db.prepare(`
+      INSERT OR IGNORE INTO password_reset_requests (user_id, request_ip, device_name, status)
+      VALUES (@user_id, @ip, @device_name, 'pending')
+    `).run({ user_id: user.id, ip: ip || null, device_name: String(body.deviceName || '').trim().slice(0, 120) || null })
+    const changes = Number((inserted as { changes?: number; meta?: { changes?: number } })?.changes ?? (inserted as { meta?: { changes?: number } })?.meta?.changes ?? 0)
+    if (changes > 0) {
+      await audit(c.env, user.id, user.username, 'password_reset_admin_requested', 'user', user.id, { ip: ip || null })
+    }
+  } catch (error) {
+    // Before migration 0203: nothing to record into. Same answer regardless.
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  return c.json(ADMIN_RESET_REQUEST_RESPONSE)
+})
+
 app.post('/password-reset/complete', async (c) => {
   const body = await c.req.json<{ accessToken?: string; newPassword?: string }>().catch(() => ({} as { accessToken?: string; newPassword?: string }))
   const accessToken = String(body.accessToken || '').trim()

@@ -52,6 +52,15 @@ export function requestPasswordResetEmail(payload: AuthPayload = {}): Promise<un
   return apiFetch('POST', '/api/auth/password-reset/email', payload || {})
 }
 
+// S-auth4c: ask an administrator to reset the password. The Worker answers
+// the same thing whether or not the account exists (no enumeration).
+export function requestPasswordResetAdminApproval(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/password-reset/admin-request', {
+    deviceName: getClientDeviceInfo().deviceName || '',
+    ...(payload || {}),
+  })
+}
+
 export function completePasswordReset(payload: AuthPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/password-reset/complete', payload || {})
 }

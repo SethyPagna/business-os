@@ -17,6 +17,7 @@ import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
+import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
 import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
   beginTrackedRequest,
@@ -115,6 +116,7 @@ interface OauthCallbackResult extends LoginResult {
 
 interface VerificationCapabilities {
   success?: boolean
+  email?: boolean
   google_oauth?: boolean
   google_email_auth?: boolean
   google_login?: {
@@ -307,6 +309,10 @@ export default function Login() {
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
+  // S-auth4c: "Forgot password?" first asks HOW (authenticator code, email
+  // link, or an administrator), then shows that one form.
+  const [showResetChooser, setShowResetChooser] = useState(false)
+  const [showAdminReset, setShowAdminReset] = useState(false)
   const [recoveryAccessToken, setRecoveryAccessToken] = useState('')
   const [resetIdentifier, setResetIdentifier] = useState('')
   const [resetOtp, setResetOtp] = useState('')
@@ -317,6 +323,7 @@ export default function Login() {
     googleOauth: false,
     googleLoginAuth: false,
     googleLoginEmailAuth: false,
+    email: false,
   })
   const [organizationSearch, setOrganizationSearch] = useState('')
   const [organizationId, setOrganizationId] = useState('')
@@ -443,6 +450,7 @@ export default function Login() {
           googleOauth: result.google_oauth === true,
           googleLoginAuth: result.google_oauth === true || result.google_login?.enabled === true,
           googleLoginEmailAuth: result.google_email_auth === true,
+          email: result.email === true,
         })
       } catch (_) {}
     }
@@ -925,12 +933,53 @@ export default function Login() {
   const closeAuxMode = () => {
     setShowOtpReset(false)
     setShowEmailReset(false)
+    setShowResetChooser(false)
+    setShowAdminReset(false)
     setRecoveryAccessToken('')
     setError('')
     setResetInfo('')
     setResetOtp('')
     setResetNewPassword('')
     setResetConfirmPassword('')
+  }
+
+  // S-auth4c: the methods offered are the same for every account -- email
+  // only when the server can send it, the authenticator code and asking an
+  // administrator always. Offering per-account methods (has an authenticator?
+  // has an email?) would tell a stranger which accounts exist and how they
+  // are protected, so the form that follows answers the same either way.
+  const openResetMethod = (method: 'chooser' | 'email' | 'otp' | 'admin') => {
+    setShowResetChooser(method === 'chooser')
+    setShowEmailReset(method === 'email')
+    setShowOtpReset(method === 'otp')
+    setShowAdminReset(method === 'admin')
+    setRecoveryAccessToken('')
+    setError('')
+    setResetInfo('')
+  }
+
+  const handleRequestAdminReset = async () => {
+    if (passwordResetActionRef.current) return
+    if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username, name, email, or phone first.'))
+    setError('')
+    passwordResetActionRef.current = true
+    setLoading(true)
+    try {
+      const result = await withLoaderTimeout(
+        () => requestPasswordResetAdminApproval({ identifier: resetIdentifier.trim() }),
+        'Admin password reset request',
+      ) as PasswordResetResult | null
+      if (result?.success === false) {
+        setError(result.error || tr('reset_admin_request_failed', 'Could not send the request. Try again.'))
+        return
+      }
+      setResetInfo(tr('reset_admin_request_sent', 'If this account exists, an administrator has been asked to reset its password. Ask them to open Users.'))
+    } catch (requestError) {
+      setError(getErrorMessage(requestError, tr('reset_admin_request_failed', 'Could not send the request. Try again.')))
+    } finally {
+      passwordResetActionRef.current = false
+      setLoading(false)
+    }
   }
 
   return (
@@ -1003,7 +1052,7 @@ export default function Login() {
           ) : null}
         </div>
 
-        {!otpRequired && !deviceApprovalPending && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
+        {!otpRequired && !deviceApprovalPending && !showOtpReset && !showEmailReset && !showResetChooser && !showAdminReset && !recoveryAccessToken ? (
           <form onSubmit={handleLogin} className="min-w-0 max-w-full space-y-4">
             {/* Organization picker -- hidden once we've confirmed (via the
                 bootstrap fetch above) that this deployment is locked to a
@@ -1224,11 +1273,7 @@ export default function Login() {
               type="button"
               className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
               onClick={() => {
-                setShowEmailReset(true)
-                setShowOtpReset(false)
-                setRecoveryAccessToken('')
-                setError('')
-                setResetInfo('')
+                openResetMethod('chooser')
                 setResetIdentifier(username || '')
               }}
             >
@@ -1258,35 +1303,64 @@ export default function Login() {
               {loading ? tr('sending_reset_email', 'Sending reset email...') : tr('send_reset_email', 'Send reset email')}
             </button>
 
-            {/* The other two ways out, offered here rather than as peer
-                buttons on the sign-in form: this is the point at which the
-                person has said "I can't get in", so it is the point at
-                which the choice of method is meaningful. Email above is the
-                default because it needs nothing but the account; OTP only
-                works if an authenticator was already set up; and asking an
-                admin is the honest fallback when neither applies (this is
-                also where the old "needs an account created by your admin"
-                line belonged). */}
-            <div className="flex min-w-0 items-center justify-center gap-2 border-t border-gray-200 pt-3 dark:border-slate-700">
-              <span className="truncate text-xs text-gray-500 dark:text-gray-400">{tr('reset_other_ways', 'Other recovery')}</span>
-              <button
-                type="button"
-                className="shrink-0 text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300"
-                onClick={() => {
-                  setShowOtpReset(true)
-                  setShowEmailReset(false)
-                  setRecoveryAccessToken('')
-                  setError('')
-                  setResetInfo('')
-                }}
-              >
-                {tr('reset_password_with_otp', 'Reset with OTP')}
-              </button>
-              <InfoHint label={tr('reset_other_ways', 'Other recovery')} text={tr('reset_ask_admin_hint', 'No email or authenticator? Ask your admin to reset it for you.')} />
-            </div>
-
+            <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
+              {tr('reset_choose_another_way', 'Choose another way')}
+            </button>
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
           </div>
+        ) : null}
+
+        {/* S-auth4c: one recovery entry point, then a choice of method. The
+            list is the same for every account (see openResetMethod): email
+            only when this server can send it, the authenticator code and
+            asking an administrator always. */}
+        {!otpRequired && !deviceApprovalPending && showResetChooser && !recoveryAccessToken ? (
+          <div className="space-y-3">
+            <div className="text-center text-sm font-semibold text-primary-800 dark:text-primary-300">
+              {tr('reset_choose_method', 'How do you want to reset your password?')}
+            </div>
+            <button type="button" className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5" onClick={() => openResetMethod('otp')}>
+              <ShieldCheck className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">{tr('reset_method_authenticator', 'Code from my authenticator app')}</span>
+            </button>
+            {verificationCaps.email ? (
+              <button type="button" className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5" onClick={() => openResetMethod('email')}>
+                <Mail className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 truncate">{tr('reset_method_email', 'Email me a reset link')}</span>
+              </button>
+            ) : null}
+            <button type="button" className="btn-secondary flex w-full items-center justify-center gap-2 py-2.5" onClick={() => openResetMethod('admin')}>
+              <LockKeyhole className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">{tr('reset_method_admin', 'Ask an administrator')}</span>
+            </button>
+            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
+          </div>
+        ) : null}
+
+        {!otpRequired && !deviceApprovalPending && showAdminReset && !recoveryAccessToken ? (
+          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleRequestAdminReset() }}>
+            <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
+              <span>{tr('reset_method_admin', 'Ask an administrator')}</span>
+              <InfoHint label={tr('reset_method_admin', 'Ask an administrator')} text={tr('reset_admin_notice', 'An administrator sees your request in Users and sets a new password for you.')} />
+            </div>
+            <div>
+              <label htmlFor="admin-reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                {tr('username_or_email', 'Username or email')}
+              </label>
+              <input id="admin-reset-identifier" name="admin_reset_identifier" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} />
+            </div>
+
+            {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
+            {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
+
+            <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
+              {loading ? tr('reset_admin_request_sending', 'Sending request...') : tr('reset_admin_request_send', 'Send request')}
+            </button>
+            <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
+              {tr('reset_choose_another_way', 'Choose another way')}
+            </button>
+            <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
+          </form>
         ) : null}
 
         {!otpRequired && !deviceApprovalPending && showOtpReset ? (
@@ -1358,6 +1432,9 @@ export default function Login() {
               </button>
             </div>
 
+            <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
+              {tr('reset_choose_another_way', 'Choose another way')}
+            </button>
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
           </form>
         ) : null}
