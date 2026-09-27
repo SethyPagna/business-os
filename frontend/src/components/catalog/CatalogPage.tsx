@@ -1,6 +1,7 @@
 import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
@@ -1092,11 +1093,6 @@ function removePortalTranslateWidgetHostLocal(): void {
   Array.from(document.querySelectorAll(`#${PORTAL_TRANSLATE_WIDGET_HOST_ID}`)).forEach((node) => node.remove())
 }
 
-function isDocumentVisible() {
-  if (typeof document === 'undefined') return true
-  return document.visibilityState !== 'hidden'
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
@@ -1883,8 +1879,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
     }
 
-    const timer = window.setInterval(() => {
-      if (!isDocumentVisible()) return
+    // Paused while the tab is hidden; one refresh on return if one came due.
+    const stopAutoRefresh = startVisibleInterval(() => {
       refreshPortalView({ showSpinner: false }).catch(() => {})
     }, Math.max(5, Number(previewConfig.refreshSeconds || 20)) * 1000)
 
@@ -1892,7 +1888,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       invalidateTrackedRequest(portalBootstrapRequestRef)
       invalidateTrackedRequest(portalProductsRequestRef)
       invalidateTrackedRequest(loadRequestRef)
-      window.clearInterval(timer)
+      stopAutoRefresh()
     }
   }, [isPageActive, publicView, previewConfig.refreshSeconds])
 

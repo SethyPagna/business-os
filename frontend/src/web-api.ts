@@ -22,6 +22,7 @@ import {
   hasStoredUserSession,
 } from './api/syncRuntime.ts'
 import { STORAGE_KEYS }            from './constants.ts'
+import { runWhenVisible, startVisibleInterval } from './utils/visibilityPolling.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
 import {
   shouldSuppressRuntimeError,
@@ -82,6 +83,7 @@ let initialOfflineMaintenanceScheduled = false
 let lastServiceWorkerUpdateAt = 0
 let offlineSnapshotTimer: number = 0
 let offlineSnapshotIdleId: number = 0
+let offlineSnapshotCancelWait: (() => void) | null = null
 let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
@@ -379,11 +381,18 @@ function refreshOfflineSnapshotSoon(force = false): void {
     window.cancelIdleCallback(offlineSnapshotIdleId)
     offlineSnapshotIdleId = 0
   }
+  offlineSnapshotCancelWait?.()
+  offlineSnapshotCancelWait = null
   const run = () => {
     offlineSnapshotTimer = 0
     offlineSnapshotIdleId = 0
     if (document.visibilityState === 'hidden') {
-      refreshOfflineSnapshotSoon(force)
+      // Wait for the tab to be shown. This used to re-arm its 30 s timer for
+      // as long as the tab stayed hidden (F2: nothing polls a hidden tab).
+      offlineSnapshotCancelWait = runWhenVisible(() => {
+        offlineSnapshotCancelWait = null
+        refreshOfflineSnapshotSoon(force)
+      })
       return
     }
     loadOfflineSnapshotTransportModule()
@@ -422,9 +431,11 @@ function runOfflineMaintenance(force = false): void {
 function startOfflineMaintenanceLoop(): void {
   if (typeof window === 'undefined' || offlineMaintenanceStarted) return
   offlineMaintenanceStarted = true
-  window.setInterval(() => {
+  // Paused while the tab is hidden. No catch-up tick of its own: showing the
+  // tab already runs runOfflineMaintenance through recoverForegroundSession.
+  startVisibleInterval(() => {
     runOfflineMaintenance(false)
-  }, OFFLINE_REFRESH_INTERVAL_MS)
+  }, OFFLINE_REFRESH_INTERVAL_MS, { refreshOnVisible: false })
 }
 
 function scheduleInitialOfflineMaintenance(): void {

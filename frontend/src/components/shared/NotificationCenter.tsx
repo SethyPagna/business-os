@@ -21,6 +21,7 @@ import {
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
@@ -465,7 +466,9 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
     refreshTimerRef.current = window.setTimeout(() => {
       refreshTimerRef.current = null
-      if (aliveRef.current) {
+      // A hidden tab skips this read (F2); the visibilitychange listener
+      // below reloads the summary, and reschedules, when the tab is shown.
+      if (aliveRef.current && document.visibilityState !== 'hidden') {
         void loadSummary(true)
       }
     }, delayMs)
@@ -588,10 +591,10 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       }
     }
     void loadImportJobs()
-    const interval = window.setInterval(loadImportJobs, NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
+    const stopPolling = startVisibleInterval(() => { void loadImportJobs() }, NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
     return () => {
       cancelled = true
-      window.clearInterval(interval)
+      stopPolling()
     }
   }, [tr, visibilityActive])
 

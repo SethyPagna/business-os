@@ -19,6 +19,7 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTimezoneLabel } from '../../utils/formatters.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from '../../api/offlineQueueOwnership.ts'
 
@@ -277,8 +278,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
       return undefined
     }
     fetchServerTime()
-    const timer = setInterval(fetchServerTime, 15000)
-    return () => clearInterval(timer)
+    return startVisibleInterval(() => { void fetchServerTime() }, 15000)
   }, [active, fetchServerTime])
   useEffect(() => () => {
     invalidateTrackedRequest(fetchRequestRef)
@@ -476,8 +476,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
     // 15s, not 3s -- this debug log is an occasional diagnostics read, not a
     // live feed anything depends on staying under a few seconds stale; 3s
     // was 5x the request volume this view actually needs.
-    const timer = setInterval(fetchServerLog, 15000)
-    return () => clearInterval(timer)
+    return startVisibleInterval(() => { void fetchServerLog() }, 15000)
   }, [active, syncUrl, autoRefresh, fetchServerLog])
 
   const badge = {
@@ -746,10 +745,10 @@ export default function ServerPage() {
     }
 
     const initialTimer = window.setTimeout(check, SERVER_ONLINE_CHECK_READY_DELAY_MS)
-    const timer = setInterval(check, 10000)
+    const stopPolling = startVisibleInterval(() => { void check() }, 10000)
     return () => {
       window.clearTimeout(initialTimer)
-      clearInterval(timer)
+      stopPolling()
     }
   }, [isActive, syncUrl, syncConnected])
   useEffect(() => () => {
