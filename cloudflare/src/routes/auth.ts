@@ -451,7 +451,7 @@ app.post('/login', async (c) => {
       // follow-up request to become correctly authorized.
       role_code: user.role_code,
       role_permissions: user.role_permissions,
-      must_change_password: signedInWithLeakedPassword ? 1 : 0,
+      must_change_password: (signedInWithLeakedPassword || await accountMustChangePassword(c.env, user.id)) ? 1 : 0,
     },
     sessionExpiresAt: session.expiresAt,
   })
@@ -817,7 +817,7 @@ app.post('/otp/verify', async (c) => {
   // their grants on the ROLE, and a login payload without them resolves to
   // no permissions whenever the bootstrap re-fetch can't run.
   return c.json({
-    user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions },
+    user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions, must_change_password: (await accountMustChangePassword(c.env, user.id)) ? 1 : 0 },
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
   })
@@ -1123,6 +1123,21 @@ function normalizeOauthMode(mode: unknown): 'login' | 'link' {
 
 function trim(value: unknown): string {
   return String(value ?? '').trim()
+}
+
+// S-auth4b: every sign-in payload carries the account's must_change_password
+// flag, which the app reads to show its forced change screen instead of
+// mounting behind 403s. POST /login set it from this sign-in only; the
+// authenticator step (/otp/verify) and Google sign-in did not carry it.
+// Before migration 0202 there is no column and nothing is forced.
+async function accountMustChangePassword(env: Env, userId: number): Promise<boolean> {
+  try {
+    const row = await getDb(env).prepare('SELECT must_change_password AS flag FROM users WHERE id = ?').get<{ flag: number | null }>([userId])
+    return Number(row?.flag || 0) === 1
+  } catch (error) {
+    if (/no such column/i.test(String((error as Error)?.message || error))) return false
+    throw error
+  }
 }
 
 function buildUserPayload(user: {
@@ -1440,7 +1455,7 @@ app.get('/oauth/callback', async (c) => {
         await audit(c.env, synced.id, synced.username, 'login', 'user', synced.id, { method: 'google', email: googleUser.email, google_subject: googleSubject })
         const session = await createSession(c.env, synced.id, { deviceName: statePayload.deviceName || 'Google OAuth', deviceId: statePayload.deviceId, userAgent: c.req.header('user-agent') || undefined, ip: c.req.header('cf-connecting-ip') || undefined })
         setSessionCookie(c, session.token, session.expiresAt)
-        callbackPayload = { success: true, provider: 'google', user: buildUserPayload(synced), sessionExpiresAt: session.expiresAt, authMode: 'cookie' }
+        callbackPayload = { success: true, provider: 'google', user: { ...buildUserPayload(synced), must_change_password: (await accountMustChangePassword(c.env, synced.id)) ? 1 : 0 }, sessionExpiresAt: session.expiresAt, authMode: 'cookie' }
       }
     }
 
