@@ -78,7 +78,13 @@ check('source lock: GET /auth/bootstrap strips before responding', () => {
   assert.ok(/from '\.\.\/lib\/settingsSensitive'/.test(src), 'auth.ts must import the shared redaction')
   const bootstrapAt = src.indexOf("app.get('/bootstrap'")
   assert.ok(bootstrapAt > -1, 'expected the /bootstrap route')
-  assert.ok(/stripSensitiveSettings\(/.test(src.slice(bootstrapAt, bootstrapAt + 900)), 'the bootstrap settings map must pass through stripSensitiveSettings')
+  // Whole route body (up to the next route), not a fixed window: the parallel
+  // settings read added above the redaction pushed it past the old 900 chars.
+  const nextRouteAt = src.indexOf('\napp.', bootstrapAt + 1)
+  const bootstrapBody = src.slice(bootstrapAt, nextRouteAt > -1 ? nextRouteAt : undefined)
+  assert.ok(/const settings = stripSensitiveSettings\(/.test(bootstrapBody), 'the bootstrap settings map must pass through stripSensitiveSettings')
+  assert.ok(/\bsettings,/.test(bootstrapBody.slice(bootstrapBody.indexOf('const settings = stripSensitiveSettings('))), 'the response must carry the STRIPPED settings')
+  assert.ok(!/settings:\s*Object\.fromEntries/.test(bootstrapBody), 'the raw settings map must not be returned')
 })
 
 console.log(`\n${passed} check(s) passed.`)

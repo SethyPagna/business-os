@@ -164,6 +164,19 @@ function toNumberValue(value: unknown, fallback = 0): number {
 
 const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
+// The form mirrors the whole settings map, but Google Drive rows are owned by
+// the Worker and the Drive panel's dedicated endpoints (connection, recorded
+// authoriser, last sync, last error). Resending them from this form would
+// overwrite live status with whatever was loaded, and for a non-administrator
+// the Worker refuses any change to them (P1-3), so a sync that ran after the
+// page loaded would block an unrelated save. Never send them from here.
+const SERVER_OWNED_SETTING_PREFIXES = ['drive_sync_']
+function withoutServerOwnedSettings<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(
+    Object.entries(record).filter(([key]) => !SERVER_OWNED_SETTING_PREFIXES.some((prefix) => key.trim().toLowerCase().startsWith(prefix))),
+  ) as T
+}
+
 const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
   en: {
     appearanceHintAccent: 'Buttons, active links, and highlights',
@@ -946,10 +959,10 @@ export default function Settings() {
       return
     }
     setSavingSettings(true)
-    const sanitizedForm = {
+    const sanitizedForm = withoutServerOwnedSettings({
       ...form,
       ui_app_favicon_image: sanitizePersistedMediaPath(form.ui_app_favicon_image, toStringValue(settings.ui_app_favicon_image)),
-    }
+    })
     // Frontend half of the low-stock write guard: the SAME function the Worker
     // runs on POST /api/settings (lowStockSettings.ts twins), so a bad amount
     // is named here against the field the owner just typed in instead of
@@ -1044,7 +1057,7 @@ export default function Settings() {
     }
     const normalizedMergedDraft = mergedDraft as SettingsRecord
     setForm(normalizedMergedDraft)
-    const result = await saveSettings(normalizedMergedDraft, {
+    const result = await saveSettings(withoutServerOwnedSettings(normalizedMergedDraft), {
       reason: 'settings-merged',
       source: 'settings:conflict-merge',
     })
@@ -2147,6 +2160,7 @@ export default function Settings() {
               {[
                 ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
                 ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
+                ['telegram_returns_enabled', t('telegram_cat_returns') || 'Customer returns', t('telegram_cat_returns_desc') || 'Return recorded, cancelled or restored: receipt, customer, items and refund'],
                 ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
@@ -2161,7 +2175,10 @@ export default function Settings() {
                   </div>
                   <input
                     type="checkbox"
-                    checked={String(form[key] ?? 'true') === 'true'}
+                    // Unset returns follows Sales -- the Worker's own default
+                    // (lib/telegram.ts getTelegramConfig): returns were sent as
+                    // sales alerts before they had a switch of their own.
+                    checked={String(form[key] ?? (key === 'telegram_returns_enabled' ? (form.telegram_sales_enabled ?? 'true') : 'true')) === 'true'}
                     onChange={(event) => setValue(key, event.target.checked ? 'true' : 'false')}
                     disabled={!canEditSettings}
                   />
@@ -2198,12 +2215,13 @@ export default function Settings() {
               </div>
               <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/70">
                 <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_topics_title') || 'Forum topics'}</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('telegram_topics_desc') || 'Send each message type to its own topic in a Telegram forum group. Leave a field empty to send to General.'}</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('telegram_topics_desc') || 'Send each message type to its own topic in a Telegram forum group. Leave a field empty to send it to the group itself (General).'}</div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {[
                     ['telegram_topic_shift', t('telegram_topic_shift_label') || 'Shift reports'],
                     ['telegram_topic_sales', t('telegram_topic_sales_label') || 'Sale invoices'],
                     ['telegram_topic_status', t('telegram_topic_status_label') || 'Status updates'],
+                    ['telegram_topic_returns', t('telegram_topic_returns_label') || 'Returns'],
                     ['telegram_topic_expenses', t('telegram_topic_expenses_label') || 'Expenses & fees'],
                     ['telegram_topic_stock', t('telegram_topic_stock_label') || 'Stock in/out'],
                     ['telegram_topic_reports', t('telegram_topic_reports_label') || "Day's summary"],
@@ -2217,7 +2235,7 @@ export default function Settings() {
                         className="input w-full"
                         inputMode="numeric"
                         autoComplete="off"
-                        placeholder={t('telegram_topic_placeholder') || 'Topic ID, or leave empty'}
+                        placeholder={t('telegram_topic_placeholder') || 'Empty = Group (General)'}
                         value={form[key] || ''}
                         onChange={(event) => setValue(key, event.target.value)}
                         disabled={!canEditSettings}
@@ -2227,6 +2245,9 @@ export default function Settings() {
                 </div>
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {t('telegram_topics_help') || 'To find a topic ID: open the topic in Telegram, tap Share, copy the link, and use the number after the last slash.'}
+                </p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {t('telegram_topics_command_help') || 'Or type /settopic <type> inside the topic, e.g. /settopic sales (group admins only). /settopic sales general sends it back to the group. Type /topics to see where each type goes.'}
                 </p>
               </div>
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">

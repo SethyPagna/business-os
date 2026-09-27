@@ -705,6 +705,8 @@ async function usersProfileRoute() {
   const db = openDb(MIGRATION_SQLS)
   db.exec('DELETE FROM audit_logs;')
   db.exec("INSERT INTO users (id, username, name, password, phone, email, avatar_path, is_active) VALUES (31, 'za', 'Za Sethy', 'x', '012345678', 'za@example.com', '/avatars/old.png', 1);")
+  // Avatar writes must name a library image (FX-sec), so register the new one.
+  db.exec("INSERT INTO file_assets (original_name, stored_name, public_path, media_type) VALUES ('new.png', 'new.png', '/avatars/new.png', 'image');")
   const auditLib = loadReal(workerSrc('lib/audit.ts'), { './db': { getDb: () => db } })
   const route = loadReal(workerSrc('routes/users.ts'), {
     hono: require('hono'),

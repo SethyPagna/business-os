@@ -1,6 +1,7 @@
 import { apiFetch, cacheInvalidateWithDerived, requireLiveServerWrite, route } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams } from './query.ts'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from './actorReadScope.ts'
+import type { InventoryMovementBalance } from './inventoryTransport.ts'
 
 type LookupReplacementPayload = {
   type?: unknown
@@ -241,6 +242,15 @@ export function getProductCostBreakdown(productId: number | string): Promise<unk
 export function getStockLedger(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   return apiFetch('GET', appendQuery('/api/products/stock-ledger', query))
+}
+
+// U-records: ONE ledger row's before -> after (branch pair + total pair), read
+// when its record float opens. Behind the ledger's own products-OR-inventory
+// gate (GET /api/products/stock-ledger/:id/balance), NOT the Movements tab's
+// Inventory-only route, so every user who can read the row can read its
+// balance. Fresh, like the ledger itself.
+export function getStockLedgerMovementBalance(id: string | number): Promise<InventoryMovementBalance | null> {
+  return apiFetch('GET', `/api/products/stock-ledger/${Math.trunc(Number(id))}/balance`) as Promise<InventoryMovementBalance | null>
 }
 
 // Server-grouped receiving sessions. Summaries are paged independently from

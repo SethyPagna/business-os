@@ -218,8 +218,9 @@ async function verifyRealSettlementRoute(migration) {
     await db.batch(objects.filter(o => o.type === 'table').map(o => db.prepare(o.sql)))
     // Current settlement queries and seed rows include the additive money
     // contract. Apply its exact migration while retaining the old pattern
-    // CHECKs so the before/after 0156 regression remains meaningful.
-    for (const file of ['0158_sale_return_money_precision.sql', '0159_sale_item_pricing_snapshot.sql', '0160_customer_return_refund_snapshot.sql']) {
+    // CHECKs so the before/after 0156 regression remains meaningful. The
+    // seeded users row likewise carries 0202's must_change_password column.
+    for (const file of ['0158_sale_return_money_precision.sql', '0159_sale_item_pricing_snapshot.sql', '0160_customer_return_refund_snapshot.sql', '0202_users_must_change_password.sql']) {
       await db.batch(split(fs.readFileSync(path.join(migrations, file), 'utf8')).map(sql => db.prepare(sql)))
     }
     const inserts = []

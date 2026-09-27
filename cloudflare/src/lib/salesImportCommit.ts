@@ -24,6 +24,11 @@ type SaleImportData = Record<string, unknown> & {
 
 export type HistoricalSaleCommitResult = { alreadyApplied: boolean; clientRequestId: string }
 
+// Re-mints after losing an in-batch receipt race before failing the row; each
+// retry re-runs the whole atomic batch, so the bound caps a burst's cost.
+// Same bound as POST /api/sales.
+const RECEIPT_NUMBER_RETRY_LIMIT = 3
+
 const pendingGuard = `(SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key) = 'pending'`
 
 const currentBatchReferencesGuard = `NOT EXISTS (
@@ -195,12 +200,22 @@ export async function applyHistoricalSaleImport(
   const suppliedReceipt = typeof d.receipt_number === 'string' ? d.receipt_number.trim() : ''
   const ownReceipt = normalizeClientReceiptNumber(suppliedReceipt)
   const mintMoment = new Date(createdAt)
-  const receiptNumber = ownReceipt || await uniqueBusinessDateTimeNumber(
+  // receipt_number carries no UNIQUE index, so the probe only picks a
+  // CANDIDATE: the write batch re-asserts uniqueness in-transaction
+  // (receiptFreeGuard below) and a lost race re-mints, bounded by
+  // RECEIPT_NUMBER_RETRY_LIMIT. A supplied business-format number already
+  // held by another sale (an export re-imported under a new job, or a POS
+  // sale in the same second) is displaced the same way: the sale gets a
+  // fresh id and the supplied one survives as legacy_receipt_number.
+  const receiptNumberTaken = async (candidate: string) =>
+    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  const mintReceiptNumber = () => uniqueBusinessDateTimeNumber(
     '',
-    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
+    receiptNumberTaken,
     Number.isNaN(mintMoment.getTime()) ? new Date(input.nowIso) : mintMoment,
   )
-  const legacyReceiptNumber = ownReceipt ? null : suppliedReceipt || null
+  let receiptNumber = ownReceipt && !(await receiptNumberTaken(ownReceipt)) ? ownReceipt : await mintReceiptNumber()
+  let legacyReceiptNumber = receiptNumber === ownReceipt ? null : suppliedReceipt || null
   const importedCustomerId = Number(d.customer_id)
   const hasImportedCustomer = Number.isSafeInteger(importedCustomerId) && importedCustomerId > 0
   const importedCustomerReference = hasImportedCustomer
@@ -234,11 +249,12 @@ export async function applyHistoricalSaleImport(
     || importedMembershipDiscountUsd !== 0
     || importedMembershipDiscountKhr !== 0
     || importedMembershipPoints !== 0)
-  const creationSnapshotJson = buildSaleCreationSnapshot({
+  // A function of the receipt number: a receipt-race retry rebuilds it.
+  const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
     origin: 'sales_import',
     recordedAt: input.nowIso,
     saleAt: createdAt,
-    receiptNumber,
+    receiptNumber: snapshotReceiptNumber,
     actor: input.actor,
     cashierId: d.cashier_id,
     cashierName: d.cashier_name,
@@ -270,6 +286,7 @@ export async function applyHistoricalSaleImport(
       pointsRedeemed: importedMembershipPoints,
     } : effectiveImportedCustomerId ? undefined : null,
   })
+  const creationSnapshotJson = buildCreationSnapshotFor(receiptNumber)
 
   const common = {
     job_id: jobId,
@@ -308,11 +325,23 @@ export async function applyHistoricalSaleImport(
       END`
   const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
+  // In-transaction receipt uniqueness, on the FIRST statement so every
+  // attempt evaluates it -- even over a pre-existing 'pending' row that the
+  // INSERT OR IGNORE would otherwise skip past. A taken number aborts the
+  // whole batch (the json_extract idiom the POS guards use); the retry loop
+  // below attributes the abort by re-probing the number, never by message.
+  // The row's OWN sale is excluded: lib/db.ts re-sends a committed batch
+  // whose acknowledgement was lost, and that re-send must stay a no-op.
+  const receiptFreeGuard = `CASE WHEN NOT EXISTS (
+      SELECT 1 FROM sales WHERE receipt_number = @receipt_number
+        AND client_request_id IS NOT @client_request_id
+    ) THEN 1 ELSE json_extract('receipt_number_conflict', '$') END`
+  const pendingRowParams: Record<string, unknown> = { ...common, receipt_number: receiptNumber }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [{
     sql: `INSERT OR IGNORE INTO import_sales_commits (job_id, group_key, row_number, status)
           SELECT @job_id, @group_key, @row_number, 'pending'
-          WHERE ${currentHistoricalReferencesGuard}`,
-    params: common,
+          WHERE (${receiptFreeGuard}) AND ${currentHistoricalReferencesGuard}`,
+    params: pendingRowParams,
   }, {
     sql: `INSERT INTO sales (
             receipt_number, cashier_id, cashier_name, branch_id, branch_name,
@@ -365,6 +394,10 @@ export async function applyHistoricalSaleImport(
       creation_snapshot_json: creationSnapshotJson,
     },
   }]
+  const saleInsertParams = statements[1].params
+  const returnReasonFor = (reasonReceiptNumber: string) =>
+    `Imported as ${d.sale_status} (receipt ${reasonReceiptNumber}${legacyReceiptNumber ? `, source ${legacyReceiptNumber}` : ''})`
+  const returnStockParams: Array<Record<string, unknown>> = []
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
   for (const item of normalizedItems) {
@@ -390,13 +423,14 @@ export async function applyHistoricalSaleImport(
 
     const returnedQuantity = Number(item.returned_quantity) || 0
     if (!isReturnGroup || returnedQuantity <= 0) continue
-    const stockParams = {
+    const stockParams: Record<string, unknown> = {
       ...common,
       ...item,
       returned_quantity: returnedQuantity,
       updated_at: input.nowIso,
-      reason: `Imported as ${d.sale_status} (receipt ${receiptNumber}${legacyReceiptNumber ? `, source ${legacyReceiptNumber}` : ''})`,
+      reason: returnReasonFor(receiptNumber),
     }
+    returnStockParams.push(stockParams)
     statements.push({
       sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at
             WHERE id = @product_id AND ${writeGuard}`,
@@ -437,7 +471,34 @@ export async function applyHistoricalSaleImport(
             AND ${currentHistoricalReferencesGuard}`,
     params: common,
   })
-  await db.batch(statements)
+  // Receipt-race retry. A failed batch rolled back completely, so re-running
+  // it with a fresh number re-evaluates every guard from scratch. Retry ONLY
+  // when the failure is attributable to the receipt number: this row's sale
+  // is absent and another sale now holds the number. Anything else is
+  // rethrown unchanged.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await db.batch(statements)
+      break
+    } catch (batchError) {
+      const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
+        WHERE client_request_id = @client_request_id AND client_request_id <> '' LIMIT 1`)
+        .get({ client_request_id: clientRequestId })
+      if (ownSale || !(await receiptNumberTaken(receiptNumber))) throw batchError
+      if (attempt >= RECEIPT_NUMBER_RETRY_LIMIT) {
+        throw new Error(`Sale on row ${rowNumber} lost its receipt number ${receiptNumber} to another sale saved at the same moment; nothing was written for this row. Apply the import again.`)
+      }
+      receiptNumber = await mintReceiptNumber()
+      // A supplied number that lost the race is displaced like one that was
+      // already taken at the probe: it survives as the source key.
+      legacyReceiptNumber = receiptNumber === ownReceipt ? null : suppliedReceipt || null
+      saleInsertParams.legacy_receipt_number = legacyReceiptNumber
+      pendingRowParams.receipt_number = receiptNumber
+      saleInsertParams.receipt_number = receiptNumber
+      saleInsertParams.creation_snapshot_json = buildCreationSnapshotFor(receiptNumber)
+      for (const params of returnStockParams) params.reason = returnReasonFor(receiptNumber)
+    }
+  }
 
   const committed = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key

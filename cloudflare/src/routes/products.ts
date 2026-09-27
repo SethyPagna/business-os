@@ -14,11 +14,11 @@ import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogTe
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
-import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, type StockLedgerView } from '../lib/stockLedgerQuery'
+import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
 import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
 import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
@@ -30,6 +30,7 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
@@ -1576,23 +1577,28 @@ app.get('/stock-in-session-lines', async (c) => {
   // every line still on screen -- never a query per line. A zero-quantity
   // create has no movement and gets null; so does every line if the lookup
   // fails -- the receipt stays readable and shows "—", not a guessed balance.
-  let balances = new Map<number, { before_qty: number; after_qty: number }>()
+  // Owner, 26 Sep: both pairs -- the line's branch, then the total across
+  // branches (before_qty/after_qty stay the total, for compatibility) -- and
+  // the active-branch count, so the float collapses to one line once the
+  // business runs a single branch.
+  let balances = new Map<number, MovementStockBalance>()
+  let activeBranchCount: number | null = null
   try {
-    balances = await loadMovementStockBalances(db, rows.slice(0, 2000).map((row) => Number(row.id)))
+    ({ balances, activeBranchCount } = await loadMovementStockBalances(db, rows.slice(0, 2000).map((row) => Number(row.id))))
   } catch {
     balances = new Map()
+    activeBranchCount = null
   }
   rows = rows.map((row) => {
     const balance = balances.get(Number(row.id))
     return {
       ...row,
       batch_receipt_session_count: receiptCounts.get(Number(row.batch_id)) ?? 0,
-      before_qty: balance ? balance.before_qty : null,
-      after_qty: balance ? balance.after_qty : null,
+      ...movementBalanceFields(balance),
     }
   })
   const truncated = exceededLineLimit || rows.length > 2000
-  return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated })
+  return c.json({ rows: truncated ? rows.slice(0, 2000) : rows, truncated, active_branch_count: activeBranchCount })
 })
 
 app.get('/stock-ledger', async (c) => {
@@ -1655,6 +1661,21 @@ app.get('/stock-ledger', async (c) => {
   })
 })
 
+// U-records: ONE Stock Changes row's before -> after, branch pair and total
+// pair, for the row's record float. Same helper and wire shape as the
+// Movements tab's GET /api/inventory/movements/:id/balance, but behind THIS
+// tab's gate (products OR inventory view, canReadProductDetail -- the same
+// grant /stock-ledger itself needs). The inventory route requires Inventory
+// view, so a Products-only user who can read the ledger row would otherwise
+// be refused its balance.
+app.get('/stock-ledger/:id/balance', async (c) => {
+  if (!canReadProductDetail(c.get('user'))) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  const id = Number.parseInt(String(c.req.param('id') || ''), 10)
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
+  const { balances, activeBranchCount } = await loadMovementStockBalances(getDb(c.env), [id])
+  return c.json({ id, ...movementBalanceFields(balances.get(id)), active_branch_count: activeBranchCount })
+})
+
 // P3 (Part 387): whole-catalog price adjustment, run server-side as
 // set-based UPDATEs -- the explicit "ALL products in the system" scope the
 // bulk price modal offers next to its selection scope. Never materializes
@@ -1706,11 +1727,25 @@ app.post('/bulk-price-adjust', async (c) => {
     return c.json({ count: row?.n || 0 })
   }
 
-  const statements = fields.map((field) => ({
-    sql: `UPDATE products SET ${field} = MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2})), updated_at = CURRENT_TIMESTAMP
+  const nextValueSql = (field: string) => `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
+    sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
           WHERE is_active = 1 AND (${fieldCondition(field)})`,
     params: { delta },
   }))
+  // U-cost: the 0195 triggers re-derive cost_price_usd at every stock
+  // movement and honour only a cost with a product_cost_entries row, so a
+  // bare adjust held until the next sale. Record the entry the product form
+  // records, for every row whose cost moves, in the same atomic batch and
+  // BEFORE the UPDATEs (it reads the preimage).
+  const costNext = (field: 'cost_price_usd' | 'cost_price_khr') => fields.includes(field)
+    ? `CASE WHEN ${fieldCondition(field)} THEN ${nextValueSql(field)} ELSE ${field} END` : null
+  if (fields.includes('cost_price_usd') || fields.includes('cost_price_khr')) {
+    statements.unshift({
+      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: 'is_active = 1' }),
+      params: { delta, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
+    })
+  }
   // This scope deliberately never materializes ids, so there is no per-row
   // before/after to record and no undo. The honest before/after at this scope
   // is the catalog total per adjusted field: one aggregate read on each side
@@ -1725,7 +1760,7 @@ app.post('/bulk-price-adjust', async (c) => {
   // top level, so the old read was always undefined -> 0: the response said
   // "changed: 0" for every adjustment and the toast quietly fell back to the
   // preview count. Same shape every other reader in this Worker uses.
-  const changed = Math.max(0, ...results.map((r) => Number(
+  const changed = Math.max(0, ...results.slice(statements.length - fields.length).map((r) => Number(
     (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
   ) || 0))
   const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
@@ -1843,8 +1878,18 @@ async function foldCreateIntoExisting(
   }
   if (Object.keys(updates).length) {
     const setSql = Object.keys(updates).map((key) => `${key} = @${key}`).join(', ')
-    await db.prepare(`UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
-      .run({ ...updates, id: duplicate.id })
+    const write = { sql: `UPDATE products SET ${setSql}, updated_at = CURRENT_TIMESTAMP WHERE id = @id`, params: { ...updates, id: duplicate.id } }
+    // U-cost: the folded cost was typed into the product form, so it records
+    // the form's product_cost_entries row -- the 0195 triggers re-derive
+    // cost_price_usd at every stock movement and honour only a cost with
+    // one, so a bare write held until the next sale. Before the UPDATE (it
+    // reads the preimage) in one batch; nothing when the cost is unmoved.
+    const costEntry = typedCostEntryBeforeWriteStatement(duplicate.id, {
+      ...(updates.cost_price_usd !== undefined ? { usd: updates.cost_price_usd as number } : {}),
+      ...(updates.cost_price_khr !== undefined ? { khr: updates.cost_price_khr as number } : {}),
+    }, { id: actorId(user), name: actorSnapshot(user) })
+    if (costEntry) await db.batch([costEntry, write])
+    else await db.prepare(write.sql).run(write.params)
   }
   await audit(env, user?.id ?? null, actorSnapshot(user), 'fold', 'product', duplicate.id, {
     reason: 'create_identity_fold', requestedName: name, incomingBarcode: body.barcode, updates, costOutliers,
@@ -3379,10 +3424,15 @@ export async function foldDuplicateProductInto(
       const source = plan.members.find((candidate) => candidate.id === Number(row.id))
       return Boolean(source && Object.entries(source.money).every(([field, value]) => Number(row[field] ?? 0) === Number(value ?? 0)))
     }
+    // U-cost: a resumed cluster's earlier folds moved lots, so the 0195
+    // triggers may have re-derived the keeper's USD cost from its on-hand lots.
+    const keeperDerivedCost = atomicHistory.resumedCluster
+      ? (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId)
+      : null
     const keeperMatches = atomicHistory.reviewedRedo
-      ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore) : reviewedRedoSourceMatches(canonicalBefore))
+      ? (atomicHistory.resumedCluster ? productMergePlanKeeperMatches(plan, canonicalBefore, keeperDerivedCost) : reviewedRedoSourceMatches(canonicalBefore))
       : atomicHistory.resumedCluster
-        ? productMergePlanKeeperMatches(plan, canonicalBefore)
+        ? productMergePlanKeeperMatches(plan, canonicalBefore, keeperDerivedCost)
         : productMergePlanSourceMemberMatches(plan, canonicalBefore)
     const parentEffect = reviewedAuthorityValid ? atomicHistory.reviewedMemberParentEffect : undefined
     // The prepared pricing projection omits parent_id. The reviewed caller
@@ -3943,6 +3993,11 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   statements.push(
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: canonicalId } },
     { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@id),updated_at=CURRENT_TIMESTAMP WHERE id=@id', params: { id: dup.id } },
+    // U-cost (owner ruling 2026-09-25, 0195): the keeper's catalog cost is the
+    // quantity-weighted mean of the lots it now holds. Re-pointing a lot fires
+    // no trigger, so without this the plan's merged figure would stand until
+    // the next stock movement. No-op when nothing is derivable.
+    { sql: catalogCostRecomputeIfChangedSql('id = @id', { stampUpdatedAt: false }), params: { id: canonicalId } },
   )
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
@@ -4043,6 +4098,8 @@ type DuplicatePreviewCatalog = {
   complexLinkedProductIds: Set<number>
   appliedPlansByKeeperId: Map<number, ProductMergeClusterPlan[]>
   planHistoryUnavailable: boolean
+  /** U-cost: derived on-hand cost of each keeper with an applied plan; absent on scoped catalogs. */
+  keeperDerivedCostById?: Map<number, number | null>
 }
 
 const MERGE_DUPLICATES_MULTI_PREFLIGHT_MAX_PRODUCT_IDS = 600
@@ -4239,10 +4296,35 @@ async function readDuplicatePreviewCatalog(
       } catch { planHistoryUnavailable = true }
     }
   }
+  // U-cost: a resumed cluster's keeper holds the derived on-hand cost, not
+  // necessarily its plan's merged figure (productMergePlanKeeperMatches).
+  // Read only for keepers whose stored row matches none of their plans on the
+  // plan figure (usually none), so the preview's read budget is unchanged.
+  const keeperDerivedCostById = await readDerivedCatalogCosts(db, [...appliedPlansByKeeperId.entries()]
+    .filter(([keeperId, plans]) => !plans.some((plan) => productMergePlanKeeperMatches(plan, moneyByProductId.get(keeperId) || {})))
+    .map(([keeperId]) => keeperId))
   return {
     moneyByProductId, cachedStockByProductId, stockByProductId, activeBatchCountByProductId,
-    complexLinkedProductIds, appliedPlansByKeeperId, planHistoryUnavailable,
+    complexLinkedProductIds, appliedPlansByKeeperId, planHistoryUnavailable, keeperDerivedCostById,
   }
+}
+
+/**
+ * U-cost (0195): the catalog USD cost each product's lots derive right now
+ * (CATALOG_COST_DERIVE_SQL; null = nothing derivable, the stored value stands).
+ * A merge keeper's cost is re-derived after every fold, so plan checks accept
+ * this figure as well as the plan's merged one.
+ */
+async function readDerivedCatalogCosts(db: ReturnType<typeof getDb>, ids: readonly number[]): Promise<Map<number, number | null>> {
+  const out = new Map<number, number | null>()
+  if (!ids.length) return out
+  const rows = await selectInChunks([...new Set(ids)], 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`SELECT id, ${CATALOG_COST_DERIVE_SQL} AS derived FROM products WHERE id IN (${sql})`)
+      .all<{ id: number; derived: number | null }>(params)
+  })
+  for (const row of rows) out.set(Number(row.id), row.derived == null ? null : Number(row.derived))
+  return out
 }
 
 type DuplicateProductGroup = Awaited<ReturnType<typeof findDuplicateProductGroups>>[number]
@@ -4671,7 +4753,7 @@ app.get('/merge-duplicates/preview', async (c) => {
       )
       const hasPlanConflict = Boolean(persistedPlan) && (
         [group.canonical.id, ...duplicateIds].some((id) => !persistedPlan!.memberIds.includes(id))
-        || !productMergePlanKeeperMatches(persistedPlan!, canonicalCost)
+        || !productMergePlanKeeperMatches(persistedPlan!, canonicalCost, previewCatalog.keeperDerivedCostById?.get(group.canonical.id))
         || duplicateIds.some((id) => !productMergePlanSourceMemberMatches(persistedPlan!, costById.get(id) || {}))
       )
       const economics = persistedPlan && !hasPlanConflict
@@ -5112,7 +5194,8 @@ app.post('/merge-duplicates', async (c) => {
       const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
       const hasOutsider = ids.some((id) => !approved.plan.memberIds.includes(id))
       const keeperMatches = approved.resumed
-        ? productMergePlanKeeperMatches(approved.plan, currentById.get(canonicalId) || {})
+        ? productMergePlanKeeperMatches(approved.plan, currentById.get(canonicalId) || {},
+          (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId))
         : productMergePlanSourceMemberMatches(approved.plan, currentById.get(canonicalId) || {})
       const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(approved.plan, currentById.get(dup.id) || {}))
       if (hasOutsider || !keeperMatches || !sourcesMatch) {
@@ -5135,7 +5218,8 @@ app.post('/merge-duplicates', async (c) => {
       if (persistedPlan) {
         const currentById = new Map(moneyRows.map((row) => [Number(row.id), row]))
         const hasOutsider = ids.some((id) => !persistedPlan.memberIds.includes(id))
-        const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {})
+        const keeperMatches = productMergePlanKeeperMatches(persistedPlan, currentById.get(canonicalId) || {},
+          (await readDerivedCatalogCosts(db, [canonicalId])).get(canonicalId))
         const sourcesMatch = group.duplicates.every((dup) => productMergePlanSourceMemberMatches(persistedPlan, currentById.get(dup.id) || {}))
         if (hasOutsider || !keeperMatches || !sourcesMatch) {
           for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, code: 'merge_cluster_plan_conflict', error: 'This partially saved identity group changed after its original plan. Review it before resuming; no further member was merged.' })
@@ -7241,9 +7325,13 @@ async function productConflictCommittedParentEffect(
   } catch { throw fail() }
 }
 
-function productConflictKeeperPostFoldMatches(plan: ProductConflictActionFinalPlan, row: Record<string, unknown> | undefined): boolean {
+function productConflictKeeperPostFoldMatches(
+  plan: ProductConflictActionFinalPlan,
+  row: Record<string, unknown> | undefined,
+  derivedCostUsd?: number | null,
+): boolean {
   if (!row || Number(row.id) !== Number(plan.keeper_id) || Number(row.is_active) !== 1) return false
-  return productMergePlanKeeperMatches(plan.cluster_plan, row)
+  return productMergePlanKeeperMatches(plan.cluster_plan, row, derivedCostUsd)
     && String(row.barcode ?? '') === plan.selected.barcode.value
     && String(row.category ?? '') === String(plan.selected.category.value ?? '')
     && String(row.categories ?? '') === String(plan.selected.category.categories ?? '')
@@ -7717,6 +7805,8 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
     throw new ProductConflictActionApplyStop('image_permission_required', 'This reviewed group now changes product images.', 403)
   }
   const firstFold = !group.action_history_id
+  // U-cost: the prior fold's lot moves re-derived the keeper's USD cost.
+  const keeperDerivedCost = firstFold ? null : (await readDerivedCatalogCosts(db, [plan.keeper_id])).get(plan.keeper_id)
   const preparedSnapshot = await readProductMergeCaseSnapshot(db, plan.keeper_id, member.product_id, MERGE_REPARENT_TABLES)
   if (!firstFold) {
     const prior = [...members].reverse().find((candidate) => candidate.role === 'merged'
@@ -7738,7 +7828,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
   if (!productConflictOriginalMemberMatches(detail, member.product_id, duplicate, parentEffect)
     || (firstFold
       ? !productConflictOriginalMemberMatches(detail, plan.keeper_id, keeper)
-      : !productConflictKeeperPostFoldMatches(plan, keeper))
+      : !productConflictKeeperPostFoldMatches(plan, keeper, keeperDerivedCost))
     || !productConflictActionStockMatches(preparedSnapshot.canonicalStockBefore, expectedKeeperStock)) {
     throw new ProductConflictActionApplyStop('merge_state_conflict', 'A reviewed product changed after finalization.', 409)
   }
@@ -9068,21 +9158,27 @@ app.post('/upload-image', async (c) => {
   if (file.size === 0) return c.json({ success: false, error: 'Uploaded file is empty' }, 400)
 
   const originalName = sanitizeOriginalFileName(file.name || 'image')
-  const mimeType = file.type || 'application/octet-stream'
-  const mediaType = getMediaType(mimeType, originalName)
+  const claimedMimeType = file.type || 'application/octet-stream'
+  const mediaType = getMediaType(claimedMimeType, originalName)
   if (mediaType !== 'image') return c.json({ success: false, error: 'Only image files are accepted here' }, 400)
 
+  // S-uploads (compliance audit P1-2): stored under the public uploads/
+  // prefix, so the content-type and extension come from the bytes
+  // (JPEG/PNG/WebP/GIF/AVIF only), never from the client's claim.
   const buffer = new Uint8Array(await file.arrayBuffer())
+  let detected: DetectedUploadFormat
   try {
-    validateUploadedBuffer(buffer, mimeType, originalName)
+    detected = validateUploadedBuffer(buffer, claimedMimeType, originalName)
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message }, 400)
   }
+  if (!isPublicImageFormat(detected)) return c.json({ success: false, error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
+  const mimeType = detected.mime
   if (buffer.byteLength > MAX_PRODUCT_IMAGE_UPLOAD_BYTES) {
     return c.json({ success: false, error: 'Image could not be normalized within the upload safety limit.' }, 400)
   }
 
-  const storedName = buildUniqueStoredName(originalName)
+  const storedName = buildUniqueStoredName(originalName, detected.extension)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
   // K3: same on-upload normalization every other image entry point gets.

@@ -6,13 +6,16 @@ import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
+import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
-import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
-import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
+import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
+import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 
@@ -27,11 +30,9 @@ import { actorSnapshot } from '../lib/actorSnapshot'
 //   repairGoogleIdentityForUser, provider-disconnect, auth-methods
 //   provider probing). The Docker backend's own isGoogleAuthConfigured()
 //   always returns false in this build -- every one of those code paths is
-//   already dead in the source we're porting from. Endpoints that only
-//   existed to serve that flow (auth-methods, provider-disconnect) are
-//   kept as honest stubs returning the same "not configured"/local-only
-//   shape the original returns when the feature is off, so the frontend
-//   doesn't 404.
+//   already dead in the source we're porting from. (Superseded: the Worker
+//   has its own Google OAuth link flow in routes/auth.ts, and auth-methods
+//   below now reports it -- see the comment there.)
 // - Avatar upload -- ported below (`POST /users/avatar-upload`), reusing
 //   the same R2 object storage + file_assets bookkeeping as
 //   routes/files.ts's generic upload endpoint, with the same request shape
@@ -76,6 +77,28 @@ function isValidEmail(value: unknown): boolean {
 
 function normalizePhoneLookup(value: unknown): string {
   return String(value || '').replace(/[^\d+]/g, '')
+}
+
+// Re-entering a current password (change password, profile save; Google
+// unlink in routes/auth.ts) goes through lib/currentPasswordGuard.ts: an
+// atomic reserve-then-release allowance that counts wrong passwords only,
+// keyed per session (own account) or per actor+target (an admin on someone
+// else), so nobody else can lock a user out of their own password change.
+// A wrong password answers 400, never 401 -- the client reads a 401 on an
+// authenticated /api path as a possibly dead session and signs out.
+async function refuseWrongCurrentPassword(c: Ctx, userId: number | string, currentPassword: string, passwordHash: string): Promise<Response | null> {
+  const actor = c.get('user')
+  const verdict = await verifyCurrentPassword(c, { actorId: actor?.id ?? userId, targetId: userId }, currentPassword, passwordHash)
+  if (verdict.ok) return null
+  if (verdict.rateLimited) {
+    return c.json({
+      success: false,
+      error: CURRENT_PASSWORD_RATE_LIMITED_ERROR,
+      code: 'current_password_rate_limited',
+      retryAfterSeconds: verdict.retryAfterSeconds,
+    }, 429)
+  }
+  return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
 }
 
 function conflictResult(error: unknown) {
@@ -150,6 +173,39 @@ function isPrimaryAdmin(row: { username?: string | null } | undefined): boolean 
   return normalizeLookup(row?.username) === 'admin'
 }
 
+// The name "admin" is reserved (FX-sec, 27 Sep 2026). It used to be an
+// administrator credential by itself (lib/permissions.ts); that is gone, but
+// the name still reads as the seeded root account everywhere (is_primary_admin,
+// the seed/reseed lookup in lib/coreDataInvariants.ts), so nobody may take it.
+// The row that already holds it keeps it. Every username writer -- create,
+// admin edit, self-service profile -- runs through here.
+function refuseReservedUsername(c: Ctx, username: string, currentUsername: string | null): Response | null {
+  if (normalizeLookup(username) !== 'admin') return null
+  if (currentUsername != null && normalizeLookup(currentUsername) === 'admin') return null
+  return c.json({ success: false, error: 'The username "admin" is reserved.', code: 'username_reserved' }, 400)
+}
+
+// users.avatar_path is rendered as <img src> on every avatar surface, so a
+// new value must name a stored IMAGE in the file library -- the same rule as
+// PUT /users/:id/avatar below. Applied to every form writer (create, admin
+// edit, profile save), which used to store any string they were sent.
+// `undefined` = the key was absent: keep the current value. The value the
+// account already has is accepted unchanged, so the forms (which always send
+// the current value back) never block an unrelated edit on an older path.
+type AvatarDecision = { ok: true; value: string | null } | { ok: false; response: Response }
+async function resolveAvatarWrite(c: Ctx, raw: unknown, currentPath: string | null): Promise<AvatarDecision> {
+  const current = String(currentPath || '').trim() || null
+  if (raw === undefined) return { ok: true, value: current }
+  const next = String(raw ?? '').trim()
+  if (!next) return { ok: true, value: null }
+  if (next === current) return { ok: true, value: current }
+  const asset = await getDb(c.env).prepare(
+    "SELECT id FROM file_assets WHERE public_path = @path AND media_type = 'image' LIMIT 1",
+  ).get<{ id: number }>({ path: next })
+  if (asset) return { ok: true, value: next }
+  return { ok: false, response: c.json({ success: false, error: 'That image is not in the file library.', code: 'avatar_not_in_library' }, 400) }
+}
+
 function canManageTarget(actor: SessionUser, target: SecurityContextRow | undefined): boolean {
   if (!actor || !target) return false
   if (Number(actor.id) === Number(target.id)) return true
@@ -187,7 +243,8 @@ function sanitizeUserRow(row: Record<string, unknown> | undefined) {
   const userPermissions = parseJsonSafe(row.permissions)
   const merged = { ...rolePermissions, ...userPermissions } as Record<string, boolean>
   const primaryAdmin = isPrimaryAdmin(row as { username?: string })
-  const hasAdmin = !!(merged.all || primaryAdmin || normalizeLookup(row.role_code) === 'admin')
+  // Same rule as lib/permissions.ts's isAdminControlUser: never the name.
+  const hasAdmin = !!(merged.all === true || normalizeLookup(row.role_code) === 'admin')
   const { role_permissions: _rp, role_code: _rc, ...rest } = row
   return {
     ...rest,
@@ -272,9 +329,16 @@ app.get('/users/:id/profile', async (c) => {
   return c.json({ success: true, ...sanitizeUserRow(row) })
 })
 
-// Google/provider auth is permanently disabled in this backend build (see
-// header comment) -- these two report that honestly instead of probing a
-// provider that was never configured.
+// Sign-in methods for My Profile. This used to be a hard-coded stub that
+// always answered "Google not connected, not ready" (and named the flag
+// google_connected while the profile reads google_linked), so the Connect /
+// Disconnect Google buttons could never appear even though the real link
+// flow exists in routes/auth.ts (POST /auth/oauth/start mode:'link' -> signed
+// single-use state carrying the signed-in user id -> GET /auth/oauth/callback
+// records google_subject on that user, refusing a Google identity already
+// linked to another user -> POST /auth/oauth/unlink behind the current
+// password). This now reports the stored link and whether this deployment
+// has everything the round trip needs.
 app.get('/users/:id/auth-methods', async (c) => {
   const actor = c.get('user')
   const targetId = Number(c.req.param('id') || 0)
@@ -282,9 +346,14 @@ app.get('/users/:id/auth-methods', async (c) => {
   if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
   if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
   const user = await getDb(c.env).prepare(
-    'SELECT email, email_verified, otp_enabled, is_active FROM users WHERE id = @id',
-  ).get<{ email: string | null; email_verified: number; otp_enabled: number; is_active: number }>({ id: targetId })
+    'SELECT email, email_verified, otp_enabled, is_active, google_subject, google_email, google_linked_at FROM users WHERE id = @id',
+  ).get<{
+    email: string | null; email_verified: number; otp_enabled: number; is_active: number
+    google_subject: string | null; google_email: string | null; google_linked_at: string | null
+  }>({ id: targetId })
   if (!user) return c.json({ success: false, error: 'User not found' }, 404)
+  const googleLinked = !!String(user.google_subject || '').trim()
+  const googleReady = isGoogleLinkReady(c.env)
   return c.json({
     success: true,
     local_password: true,
@@ -292,14 +361,20 @@ app.get('/users/:id/auth-methods', async (c) => {
     email_verified: Number(user.email_verified || 0) === 1,
     otp_enabled: Number(user.otp_enabled || 0) === 1,
     is_active: Number(user.is_active || 0) === 1,
-    google_connected: false,
-    google_ready: false,
-    linked_providers: [],
-    capabilities: { google_auth: false, google_oauth: false, google_email_auth: false, google_mfa_totp: false },
+    google_linked: googleLinked,
+    // Legacy name for the same fact; kept so an older cached client still reads it.
+    google_connected: googleLinked,
+    google_email: googleLinked ? (user.google_email || '') : '',
+    google_linked_at: googleLinked ? (user.google_linked_at || null) : null,
+    google_ready: googleReady,
+    linked_providers: googleLinked ? ['google'] : [],
+    capabilities: { google_auth: googleReady, google_oauth: googleReady, google_email_auth: false, google_mfa_totp: false },
   })
 })
 
-app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Google sign-in is not enabled on this deployment.' }, 400))
+// Google is disconnected through POST /api/auth/oauth/unlink (password
+// re-check, own account only); there is no other provider to disconnect.
+app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Use Disconnect Google in My Profile. No other sign-in provider is supported.' }, 400))
 
 app.post('/users/:id/contact-verification/request', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
 app.post('/users/:id/contact-verification/confirm', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
@@ -323,21 +398,28 @@ app.post('/users/avatar-upload', async (c) => {
   if (file.size === 0) return c.json({ error: 'Uploaded file is empty' }, 400)
 
   const originalName = sanitizeOriginalFileName(file.name || 'avatar.jpg')
-  const mimeType = file.type || 'image/jpeg'
-  const mediaType = getMediaType(mimeType, originalName)
+  const claimedMimeType = file.type || 'image/jpeg'
+  const mediaType = getMediaType(claimedMimeType, originalName)
   if (mediaType !== 'image') return c.json({ error: 'Avatar must be an image file' }, 400)
 
+  // S-uploads (compliance audit P1-2): avatars land under the public
+  // uploads/ prefix, so the stored content-type and extension are the ones
+  // detected from the bytes (JPEG/PNG/WebP/GIF/AVIF only), never the
+  // client's File.type or file-name suffix.
   const buffer = new Uint8Array(await file.arrayBuffer())
+  let detected: DetectedUploadFormat
   try {
-    validateUploadedBuffer(buffer, mimeType, originalName)
+    detected = validateUploadedBuffer(buffer, claimedMimeType, originalName)
   } catch (error) {
     return c.json({ error: (error as Error).message }, 400)
   }
+  if (!isPublicImageFormat(detected)) return c.json({ error: UNSUPPORTED_IMAGE_MESSAGE }, 400)
+  const mimeType = detected.mime
   if (buffer.byteLength > MAX_AVATAR_UPLOAD_BYTES) {
     return c.json({ error: 'Avatar image is too large to save (over 1MB after your browser attempted to compress it). Please try again, or pick a smaller image.' }, 400)
   }
 
-  const storedName = buildUniqueStoredName(originalName)
+  const storedName = buildUniqueStoredName(originalName, detected.extension)
   const objectKey = `uploads/${storedName}`
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
   // K3: same on-upload normalization every other image entry point gets.
@@ -366,6 +448,87 @@ app.post('/users/avatar-upload', async (c) => {
   return c.json({ path: publicPath, asset })
 })
 
+// -- Profile photo set / remove --------------------------------------------
+//
+// POST /users/avatar-upload above only STORES the image; nothing wrote it to
+// users.avatar_path except a full "Save profile", which asks a non-admin for
+// their current password. My Profile announced "Avatar uploaded" after the
+// store alone, so the photo silently vanished on the next load unless the
+// person also saved the whole form. These two routes make the photo its own
+// action: the account owner (or an admin who can manage them) sets or
+// removes it directly -- the same trust level as uploading it.
+//
+// Neither route ever deletes the photo it moves off (U-profile3, 27 Sep
+// 2026). Both used to delete the old R2 object and its file_assets row when
+// their own reference count found no other user; that count missed a
+// promotion, setting, product or other avatar pointing at the same file as
+// `uploads/NAME`, `/uploads/NAME?v=3` or an absolute URL, and deleted a photo
+// still on show. Owner rule: nothing may be lost. The old photo stays in the
+// Library, where an admin can delete it under the Library's in-use check
+// (lib/uploadReferences.ts, the one reference rule).
+
+function auditAvatarChange(c: Ctx, targetId: number, before: string | null, after: string | null) {
+  const actor = c.get('user')
+  return audit(c.env, actor?.id ?? null, actor?.name ?? null, 'update', 'user', targetId, { mode: 'avatar' }, changedFields(
+    { avatar_path: before },
+    { avatar_path: after },
+  ))
+}
+
+// PUT /users/:id/avatar { avatar_path } -- the path must name a stored IMAGE
+// in the file library (a fresh avatar upload or a picked library image).
+app.put('/users/:id/avatar', async (c) => {
+  const actor = c.get('user')
+  const targetId = Number(c.req.param('id') || 0)
+  if (!targetId) return c.json({ success: false, error: 'Invalid user id' }, 400)
+  const targetSecurity = await getUserSecurityContext(c, targetId)
+  if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
+  if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const avatarPath = String(body.avatar_path || '').trim()
+  if (!avatarPath) return c.json({ success: false, error: 'Choose an image first' }, 400)
+  const db = getDb(c.env)
+  const asset = await db.prepare(
+    "SELECT id FROM file_assets WHERE public_path = @path AND media_type = 'image' LIMIT 1",
+  ).get<{ id: number }>({ path: avatarPath })
+  if (!asset) return c.json({ success: false, error: 'That image is not in the file library.' }, 400)
+  const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
+  if (!current) return c.json({ success: false, error: 'User not found' }, 404)
+  const previousPath = String(current.avatar_path || '').trim()
+  // Re-setting the photo the account already has changes nothing: no write,
+  // no audit row.
+  if (previousPath === avatarPath) {
+    return c.json({ success: true, changed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  }
+  await db.prepare('UPDATE users SET avatar_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ path: avatarPath, id: targetId })
+  // The audit row carries the old path, so the replaced photo -- which stays
+  // in the Library -- can always be found and put back.
+  await auditAvatarChange(c, targetId, previousPath || null, avatarPath)
+  c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
+  return c.json({ success: true, changed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+})
+
+// DELETE /users/:id/avatar -- clears this account's pointer only. The photo
+// itself stays in the Library (see the note above PUT).
+app.delete('/users/:id/avatar', async (c) => {
+  const actor = c.get('user')
+  const targetId = Number(c.req.param('id') || 0)
+  if (!targetId) return c.json({ success: false, error: 'Invalid user id' }, 400)
+  const targetSecurity = await getUserSecurityContext(c, targetId)
+  if (!targetSecurity) return c.json({ success: false, error: 'User not found' }, 404)
+  if (!canManageTarget(actor, targetSecurity)) return c.json({ success: false, error: 'No permission' }, 403)
+  const db = getDb(c.env)
+  const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
+  if (!current) return c.json({ success: false, error: 'User not found' }, 404)
+  const previousPath = String(current.avatar_path || '').trim()
+  if (!previousPath) return c.json({ success: true, removed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+
+  await db.prepare('UPDATE users SET avatar_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: targetId })
+  await auditAvatarChange(c, targetId, previousPath, null)
+  c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
+  return c.json({ success: true, removed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+})
+
 // -- User CRUD (admin control) --------------------------------------------
 
 app.post('/users', async (c) => {
@@ -378,16 +541,21 @@ app.post('/users', async (c) => {
   const email = String(body.email || '').trim().toLowerCase() || null
   if (!username || !password) return c.json({ success: false, error: 'Username and password required' }, 400)
   if (passwordTooShort(password)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(password, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
   if (!isValidEmail(email)) return c.json({ success: false, error: 'Valid email required' }, 400)
   const roleId = Number(body.role_id)
   if (!Number.isInteger(roleId) || roleId <= 0) {
     return c.json({ success: false, error: 'A role is required when creating a user' }, 400)
   }
 
+  const reserved = refuseReservedUsername(c, username, null)
+  if (reserved) return reserved
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup })
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, null)
+  if (!avatar.ok) return avatar.response
 
   try {
     const { orgId, groupId } = await resolveDefaultOrg(c, actor)
@@ -402,7 +570,7 @@ app.post('/users', async (c) => {
       ) VALUES (@username, @name, @org, @group, @phone, @phone_lookup, 0, @email, 0, @avatar, @password, @permissions, @role_id, @is_active)
     `).run({
       username, name, org: orgId, group: groupId, phone, phone_lookup: phoneLookup,
-      email, avatar: String(body.avatar_path || '').trim() || null, password: hash,
+      email, avatar: avatar.value, password: hash,
       permissions: JSON.stringify(body.permissions || {}), role_id: roleId,
       is_active: body.is_active == null ? 1 : body.is_active,
     })
@@ -428,7 +596,7 @@ app.put('/users/:id', async (c) => {
 
   const db = getDb(c.env)
   const existing = await db.prepare(
-    'SELECT id, username, name, permissions, phone, email, role_id, deleted_at, is_active, updated_at FROM users WHERE id = @id',
+    'SELECT id, username, name, permissions, phone, email, avatar_path, role_id, deleted_at, is_active, updated_at FROM users WHERE id = @id',
   ).get<Record<string, unknown>>({ id })
   const existingSecurity = await getUserSecurityContext(c, id)
   if (!existing || !existingSecurity) return c.json({ success: false, error: 'User not found' }, 404)
@@ -441,16 +609,23 @@ app.put('/users/:id', async (c) => {
   }
   if (existing.deleted_at) return c.json({ success: false, error: 'User is deleted' }, 400)
   if (!canManageTarget(actor, existingSecurity)) return c.json({ success: false, error: 'Cannot modify another admin account' }, 403)
+  const reserved = refuseReservedUsername(c, username, String(existing.username ?? ''))
+  if (reserved) return reserved
 
   const name = String(body.name || username).trim()
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup }, id)
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, (existing.avatar_path as string | null) ?? null)
+  if (!avatar.ok) return avatar.response
 
   const markDeleted = !!body.delete_user
   const nextIsActive = markDeleted ? 0 : (body.is_active ?? Number(existing.is_active || 0))
   const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : body.permissions
+  // Never leave zero active administrators (FX-sec2, lib/adminControlGuard.ts).
+  const adminGuard = await planAdminControlWrite(db, { user: { id, roleId: body.role_id || null, permissions: JSON.stringify(nextPermissions), active: Number(nextIsActive) === 1 } })
+  if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
 
   try {
     const updateUserStatement = {
@@ -463,7 +638,7 @@ app.put('/users/:id', async (c) => {
     `,
       params: {
       username, name, phone, phone_lookup: phoneLookup, email,
-      avatar: String(body.avatar_path || '').trim() || null,
+      avatar: avatar.value,
       permissions: JSON.stringify(nextPermissions), role_id: body.role_id || null,
       is_active: nextIsActive, deleted_at: markDeleted ? new Date().toISOString() : null, id,
       },
@@ -478,12 +653,15 @@ app.put('/users/:id', async (c) => {
     }
     await db.batch([
       updateUserStatement,
+      adminGuard.guard,
       ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(id), username) : []),
     ])
     // Deactivation must kill the currently-issued sessions as well. Otherwise
     // an old cookie becomes valid again if the account is re-enabled before
     // that session expires, which defeats the meaning of an admin disable.
     if (Number(nextIsActive) === 0) {
+      // Revoke ALL (no keep): a disabled account keeps no session, even if
+      // an admin somehow deactivates themself.
       await revokeUserSessions(c.env, Number(id))
     }
     // An account edit changes who can do what; recording only "user #4 was
@@ -519,6 +697,7 @@ app.put('/users/:id', async (c) => {
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to update user' }, 500)
   }
@@ -557,16 +736,21 @@ app.put('/users/:id/profile', async (c) => {
   if (!adminOverride) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    if (!bcrypt.compareSync(currentPassword, String(user.password || ''))) {
-      return c.json({ success: false, error: 'Current password is incorrect' }, 401)
-    }
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, targetId, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
+
+  const reserved = refuseReservedUsername(c, username, String(user.username ?? ''))
+  if (reserved) return reserved
 
   const name = String(body.name || username).trim()
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup }, targetId)
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, (user.avatar_path as string | null) ?? null)
+  if (!avatar.ok) return avatar.response
 
   try {
     const updateProfileStatement = {
@@ -576,7 +760,7 @@ app.put('/users/:id/profile', async (c) => {
         avatar_path = @avatar, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
     `,
-      params: { username, name, phone, phone_lookup: phoneLookup, email, avatar: String(body.avatar_path || '').trim() || null, id: targetId },
+      params: { username, name, phone, phone_lookup: phoneLookup, email, avatar: avatar.value, id: targetId },
     }
     // Propagate a username change to every denormalized snapshot (see the admin
     // PUT above) -- same id-is-source-of-truth rule on the self-service path.
@@ -632,6 +816,7 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   const newPassword = String(body.newPassword || body.new_password || '').trim()
   if (!newPassword) return c.json({ success: false, error: 'New password required' }, 400)
   if (passwordTooShort(newPassword)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   if (options.requireAdminControl && !isAdminControlUser(actor)) {
     return c.json({ success: false, error: 'No permission' }, 403)
@@ -655,12 +840,24 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   if (options.requireCurrent) {
     const currentPassword = String(body.currentPassword || '')
     if (!currentPassword) return c.json({ success: false, error: 'Current password required' }, 400)
-    if (!bcrypt.compareSync(currentPassword, user.password)) return c.json({ success: false, error: 'Current password is incorrect' }, 401)
+    // Rate limited, 400 not 401 -- see refuseWrongCurrentPassword.
+    const refused = await refuseWrongCurrentPassword(c, user.id, currentPassword, String(user.password || ''))
+    if (refused) return refused
   }
 
   const hash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
-  await revokeUserSessions(c.env, targetId)
+  // A new password that is not publicly known ends a forced change.
+  await setPasswordMustChange(db, targetId, false)
+  // An administrator's reset answers any pending "ask an administrator"
+  // recovery request for this account (S-auth4c, migration 0203).
+  if (adminReset) await resolvePasswordResetRequests(db, targetId, Number(actor?.id || 0) || null, 'resolved')
+  // Changing YOUR OWN password keeps the session that made the change and
+  // signs out every other device. Resetting SOMEONE ELSE's password signs out
+  // all of theirs -- the actor's own sessions are a different user_id and are
+  // never touched either way.
+  const changingOwnPassword = Number(actor?.id || 0) === Number(targetId || 0)
+  await revokeUserSessions(c.env, targetId, { keepCurrentSessionOf: changingOwnPassword ? c : null })
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'reset_password', 'user', targetId, {
     mode: adminReset ? 'admin' : 'self_service',
   })
@@ -669,6 +866,66 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
 
 app.post('/users/:id/change-password', (c) => handlePasswordChange(c, { requireCurrent: true, requireAdminControl: false, requireSelf: true, allowInactive: false }))
 app.post('/users/:id/reset-password', (c) => handlePasswordChange(c, { requireCurrent: false, requireAdminControl: true, requireSelf: false, allowInactive: true }))
+
+// -- Password reset by administrator approval (S-auth4c) ----------------------
+//
+// Requests are recorded by the public POST /api/auth/password-reset/admin-request
+// (routes/auth.ts). Administrators see the pending ones here and answer each
+// with the existing reset-password action above (which resolves it) or
+// dismiss it. Before migration 0203 there is no table: the list is empty and
+// nothing fails.
+async function resolvePasswordResetRequests(db: ReturnType<typeof getDb>, userId: number | string, actorId: number | null, status: 'resolved' | 'dismissed', requestId?: number): Promise<number> {
+  try {
+    const result = await db.prepare(`
+      UPDATE password_reset_requests
+      SET status = @status, resolved_by = @actor_id, resolved_at = CURRENT_TIMESTAMP
+      WHERE user_id = @user_id AND status = 'pending'
+        AND (@request_id IS NULL OR id = @request_id)
+    `).run({ status, actor_id: actorId, user_id: Number(userId), request_id: requestId ?? null })
+    return Number((result as { changes?: number; meta?: { changes?: number } })?.changes ?? (result as { meta?: { changes?: number } })?.meta?.changes ?? 0)
+  } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return 0
+    throw error
+  }
+}
+
+app.get('/users/password-reset-requests', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  try {
+    const rows = await getDb(c.env).prepare(`
+      SELECT q.id, q.user_id, q.requested_at, q.device_name, u.username, u.name
+      FROM password_reset_requests q
+      JOIN users u ON u.id = q.user_id
+      WHERE q.status = 'pending' AND u.deleted_at IS NULL
+      ORDER BY q.requested_at DESC, q.id DESC
+      LIMIT 50
+    `).all<{ id: number; user_id: number; requested_at: string; device_name: string | null; username: string; name: string | null }>()
+    return c.json({ success: true, requests: rows })
+  } catch (error) {
+    if (/no such table/i.test(String((error as Error)?.message || error))) return c.json({ success: true, requests: [] })
+    throw error
+  }
+})
+
+app.post('/users/password-reset-requests/:requestId/dismiss', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  const requestId = Number(c.req.param('requestId'))
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) return c.json({ success: false, error: 'Request not found' }, 404)
+  const db = getDb(c.env)
+  let request: { user_id: number } | undefined
+  try {
+    request = await db.prepare("SELECT user_id FROM password_reset_requests WHERE id = @id AND status = 'pending'").get<{ user_id: number }>({ id: requestId })
+  } catch (error) {
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  if (!request) return c.json({ success: false, error: 'Request not found' }, 404)
+  const changed = await resolvePasswordResetRequests(db, request.user_id, Number(actor?.id || 0) || null, 'dismissed', requestId)
+  if (!changed) return c.json({ success: false, error: 'Request not found' }, 404)
+  await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'password_reset_admin_request_dismissed', 'user', request.user_id, { requestId })
+  return c.json({ success: true })
+})
 
 // -- Role CRUD (admin control) ---------------------------------------------
 
@@ -727,6 +984,9 @@ app.put('/roles/:id', async (c) => {
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
     const permissions = JSON.stringify(body.permissions || {})
+    // A custom role with `all` makes its holders administrators (FX-sec2).
+    const adminGuard = await planAdminControlWrite(db, { role: { id, permissions } })
+    if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
     const updatedAt = new Date().toISOString()
     const details = JSON.stringify({ name })
     // A role IS its permission set, so the row has to carry the permissions
@@ -768,7 +1028,7 @@ app.put('/roles/:id', async (c) => {
               (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
             WHERE changes() = 1`,
       params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChange },
-    }])
+    }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)
     if (updatedRows !== 1) {
@@ -784,6 +1044,7 @@ app.put('/roles/:id', async (c) => {
       'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
     ).get({ id })) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: message.includes('UNIQUE') ? 'Role already exists' : (message || 'Failed to update role') }, 500)
   }

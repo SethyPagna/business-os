@@ -1,5 +1,6 @@
 import type { Env } from '../index'
-import { buildUniqueStoredName, getMediaType, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { classifyUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { getDb } from '../lib/db'
 
 // Backs the offline "sync file upload" flow, ported from
@@ -25,6 +26,10 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 type Manifest = {
   uploadId: string
+  // S-uploads (F14): the authenticated user who opened the upload
+  // (routes/sync.ts passes it as x-upload-owner). /chunk and /complete from
+  // any other user are refused.
+  owner: string
   size: number
   chunkCount: number
   sha256: string
@@ -35,6 +40,14 @@ type Manifest = {
 async function sha256Hex(data: ArrayBuffer | Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', data instanceof Uint8Array ? data : new Uint8Array(data))
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+// A manifest staged before F14 has no owner and can never be completed --
+// it was reachable by any uploader. Mismatch answers 404, not 403, so the
+// existence of someone else's upload is not disclosed.
+function isOwner(manifest: Manifest, request: Request): boolean {
+  const owner = String(request.headers.get('x-upload-owner') || '').trim()
+  return !!owner && !!manifest.owner && manifest.owner === owner
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -52,6 +65,10 @@ export class SyncUploadSession {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
+    // Only routes/sync.ts reaches this DO, and it always names the
+    // authenticated user; a request without an owner is refused outright.
+    const owner = String(request.headers.get('x-upload-owner') || '').trim()
+    if (!owner) return jsonResponse({ success: false, code: 'upload_owner_required' }, 403)
 
     if (request.method === 'POST' && url.pathname === '/init') {
       return this.handleInit(request)
@@ -74,7 +91,11 @@ export class SyncUploadSession {
     const fileHash = String(manifestInput.sha256 || '').trim().toLowerCase()
     const chunkSize = Number(manifestInput.chunk_size ?? manifestInput.chunkSize ?? CHUNK_SIZE_BYTES)
 
-    if (!uploadId || !size || !chunkCount || !/^[a-f0-9]{64}$/.test(fileHash)) {
+    // chunkCount must be exactly what size implies: an inflated count would
+    // make /complete loop over (and allocate for) chunks that cannot exist.
+    if (!uploadId || !size || !chunkCount || !/^[a-f0-9]{64}$/.test(fileHash)
+      || !Number.isInteger(size) || size < 0 || !Number.isInteger(chunkCount)
+      || chunkCount !== Math.ceil(size / CHUNK_SIZE_BYTES)) {
       return jsonResponse({ success: false, code: 'invalid_manifest', error: 'File sync manifest is invalid.' }, 400)
     }
     if (chunkSize !== CHUNK_SIZE_BYTES) {
@@ -89,6 +110,7 @@ export class SyncUploadSession {
       size,
       chunkCount,
       sha256: fileHash,
+      owner: String(request.headers.get('x-upload-owner') || '').trim(),
       fileName: String(manifestInput.file_name || manifestInput.fileName || 'offline-upload.bin'),
       mime: String(manifestInput.mime || manifestInput.mime_type || manifestInput.mimeType || ''),
     }
@@ -105,6 +127,7 @@ export class SyncUploadSession {
   private async handleChunk(request: Request): Promise<Response> {
     const manifest = await this.state.storage.get<Manifest>('manifest')
     if (!manifest) return jsonResponse({ success: false, code: 'upload_not_found' }, 404)
+    if (!isOwner(manifest, request)) return jsonResponse({ success: false, code: 'upload_not_found' }, 404)
 
     const body = await request.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
     const chunkIndex = Number(body.chunk_index ?? body.chunkIndex ?? -1)
@@ -137,9 +160,10 @@ export class SyncUploadSession {
     return jsonResponse({ success: true, uploadId: manifest.uploadId, chunkIndex })
   }
 
-  private async handleComplete(_request: Request): Promise<Response> {
+  private async handleComplete(request: Request): Promise<Response> {
     const manifest = await this.state.storage.get<Manifest>('manifest')
     if (!manifest) return jsonResponse({ success: false, code: 'upload_not_found' }, 404)
+    if (!isOwner(manifest, request)) return jsonResponse({ success: false, code: 'upload_not_found' }, 404)
 
     const chunks: Uint8Array[] = []
     for (let index = 0; index < manifest.chunkCount; index += 1) {
@@ -151,6 +175,11 @@ export class SyncUploadSession {
     const total = new Uint8Array(manifest.size)
     let offset = 0
     for (const chunk of chunks) {
+      // Chunks larger in sum than the declared size are a mismatch, not a
+      // RangeError out of Uint8Array.set.
+      if (offset + chunk.byteLength > manifest.size) {
+        return jsonResponse({ success: false, code: 'file_hash_mismatch' }, 400)
+      }
       total.set(chunk, offset)
       offset += chunk.byteLength
     }
@@ -162,10 +191,27 @@ export class SyncUploadSession {
     // direct /api/files/upload path (see routes/files.ts) so a
     // reassembled offline upload shows up identically in the Files
     // library -- same public path pattern, same DB row shape.
+    //
+    // S-uploads (compliance audit P1-2): the same allowlist as the direct
+    // path runs on the REASSEMBLED buffer -- a per-chunk check would miss a
+    // signature split across chunks. The manifest's mime/file name are
+    // client claims and are ignored; content-type, extension and
+    // media_type come from the detected format. A rejected upload drops its
+    // staged chunks: it can never complete, so keeping them only costs DO
+    // storage.
+    let detected: DetectedUploadFormat
+    try {
+      detected = classifyUploadedBuffer(total)
+    } catch (error) {
+      await this.state.storage.deleteAll()
+      return jsonResponse({ success: false, code: 'unsupported_file_type', error: (error as Error).message }, 400)
+    }
     const originalName = sanitizeOriginalFileName(manifest.fileName || 'offline-upload.bin')
-    const mimeType = manifest.mime || 'application/octet-stream'
-    const mediaType = getMediaType(mimeType, originalName)
-    const storedName = buildUniqueStoredName(originalName)
+    const mimeType = detected.mime
+    const mediaType = detected.kind
+    const storedName = buildUniqueStoredName(originalName, detected.extension)
+    // Only images and videos get this far (owner ruling), same as
+    // routes/files.ts; both live under the public uploads/ prefix.
     const objectKey = `uploads/${storedName}`
 
     await this.env.ASSETS.put(objectKey, total, { httpMetadata: { contentType: mimeType } })

@@ -18,9 +18,9 @@
     <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
     <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
          storefront. All three absolute values name the PRIMARY host, for two
-         reasons: crawlers do not resolve relative URLs, and the alias host
-         leangcosmetics.dpdns.org serves this very same document -- an absolute
-         canonical is what folds the alias into leangbeauty.com without any
+         reasons: crawlers do not resolve relative URLs, and any alias
+         host that ever serves this very same document (www., a preview URL)
+         is folded into leangbeauty.com by an absolute canonical without any
          per-host work at all.
 
          The storefront's indexable URLs are the home page and the three
@@ -127,7 +127,10 @@
           '/server': true
         }
         var hostname = String(window.location && window.location.hostname || '').toLowerCase()
-        // Old-domain VISITS redirect to leangbeauty.com (Aug 28 2026). Only
+        // Alias-host VISITS redirect to the canonical host. The old
+        // leangcosmetics.* entries were removed when that domain was retired
+        // completely (Sep 26 2026): no route serves this document there any
+        // more, so they could never match. Only
         // page navigations go through this bootstrap -- API/upload fetches
         // never load index.html -- so existing integrations keep working
         // while people (and bookmarks/PWA opens) land on the new domain
@@ -135,11 +138,6 @@
         // DOM doubles (no location.replace) and any exotic browser on the
         // normal render path instead of a blank page.
         var redirectHosts = {
-          'leangcosmetics.dpdns.org': 'leangbeauty.com',
-          'admin.leangcosmetics.dpdns.org': 'admin.leangbeauty.com',
-          'leangcosmetics.com': 'leangbeauty.com',
-          'www.leangcosmetics.com': 'leangbeauty.com',
-          'admin.leangcosmetics.com': 'admin.leangbeauty.com',
           'www.leangbeauty.com': 'leangbeauty.com'
         }
         if (redirectHosts[hostname]) {

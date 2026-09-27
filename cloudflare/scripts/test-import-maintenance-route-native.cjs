@@ -28,8 +28,8 @@ async function main() {
     await db.prepare(`CREATE TABLE import_jobs(id TEXT PRIMARY KEY,type TEXT,status TEXT,phase TEXT,queue_driver TEXT,
       policy_json TEXT,summary_json TEXT,cancel_requested INTEGER DEFAULT 0,created_by_id INTEGER,created_by_name TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      processed_rows INTEGER DEFAULT 0,failed_rows INTEGER DEFAULT 0,last_error TEXT,details_pruned_at TEXT)`).run()
-    await db.prepare('CREATE TABLE import_job_files(id INTEGER PRIMARY KEY,job_id TEXT,kind TEXT,original_name TEXT)').run()
+      processed_rows INTEGER DEFAULT 0,failed_rows INTEGER DEFAULT 0,last_error TEXT,details_pruned_at TEXT,materialize_done INTEGER DEFAULT 0)`).run()
+    await db.prepare("CREATE TABLE import_job_files(id INTEGER PRIMARY KEY,job_id TEXT,kind TEXT,original_name TEXT,status TEXT DEFAULT 'stored')").run()
     await db.prepare('CREATE TABLE dispatch_probe(job_id TEXT,kind TEXT)').run()
     await db.prepare('CREATE TABLE audit_probe(id INTEGER PRIMARY KEY)').run()
     for (const [id, status] of [['start','pending'],['approve','awaiting_review'],['retry','failed']]) {

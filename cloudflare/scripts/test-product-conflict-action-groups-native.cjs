@@ -77,7 +77,10 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
   })
   const never = () => { throw new Error('unrelated undo branch invoked') }
   const snapshot = realMergeRuntime ? loadTs('lib/productMergeSnapshot.ts', { './db': {} }) : undefined
+  // U-cost: merge folds, their post-fold checks and undo read the cost derivation.
+  const catalogCost = loadTs('lib/catalogCostRecompute.ts', { './db': {} })
   const undo = realMergeRuntime ? loadTs('lib/undoAppliers.ts', {
+    './catalogCostRecompute': catalogCost,
     '../index': {}, './auth': {}, './db': { getDb: () => db }, './audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor, './productMerge': merge,
@@ -98,6 +101,7 @@ function loadRoute(nativeDb, realMergeRuntime = false) {
     '../lib/productDetailRule': detail, '../lib/sqlBinding': binding, '../lib/productIdentity': identity, '../lib/productMerge': merge,
     '../lib/productConflictMergeBatch': selected, '../lib/productConflictActionGroups': actionGroups, '../lib/permissions': permissions,
     '../lib/searchMatch': searchMatch,
+    '../lib/catalogCostRecompute': catalogCost,
     '../lib/productDelete': productDelete,
     ...(realMergeRuntime ? { '../lib/undoAppliers': undo, '../lib/productMergeSnapshot': snapshot, '../lib/actorSnapshot': actor } : {}),
     '../lib/audit': { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false }, '../lib/cache': { bumpVersion: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },

@@ -2729,7 +2729,7 @@ assert.match(
 )
 assert.match(
   otpModal,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*otpSetup\?\.\(\{ userId \}\)[\s\S]*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*otpSetup\?\.\(\{ userId, password, currentToken[\s\S]*'OTP setup',\s*OTP_SETUP_TIMEOUT_MS,\s*\)/,
   'OTP setup should timeout slow setup reads',
 )
 assert.match(
@@ -2774,7 +2774,7 @@ assert.doesNotMatch(
 )
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(confirmation\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,
   'factory reset should timeout slow destructive reset actions',
 )
 assert.match(

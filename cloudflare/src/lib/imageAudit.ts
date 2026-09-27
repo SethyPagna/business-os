@@ -101,7 +101,18 @@ export async function sweepImageAudit(env: Env): Promise<SweepResult> {
   // Reading ONE cursored page and advancing the cursor makes successive ticks
   // walk the whole library and wrap.
   const priorCursor = (await env.CACHE.get(IMAGE_AUDIT_CURSOR_KEY)) || undefined
-  const page = await env.ASSETS.list({ prefix: 'uploads/', cursor: priorCursor, limit: SWEEP_BATCH })
+  // A cursor is only valid for the bucket that issued it. When the ASSETS
+  // binding moves to another bucket (the APAC move), a stored cursor can be
+  // refused; the cursor is only cleared on success, so without this the sweep
+  // would fail on every tick forever. Drop it and restart from the top.
+  let page: R2Objects
+  try {
+    page = await env.ASSETS.list({ prefix: 'uploads/', cursor: priorCursor, limit: SWEEP_BATCH })
+  } catch (error) {
+    if (!priorCursor) throw error
+    await env.CACHE.delete(IMAGE_AUDIT_CURSOR_KEY)
+    page = await env.ASSETS.list({ prefix: 'uploads/', limit: SWEEP_BATCH })
+  }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
 
   for (const object of page.objects || []) {

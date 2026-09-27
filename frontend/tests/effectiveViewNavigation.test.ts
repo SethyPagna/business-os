@@ -40,7 +40,9 @@ for (const key of ['dashboard', 'pos', 'products', 'contacts']) {
 const downgraded = { role_permissions: { all: true }, permissions: { all: false, products: 'review', products_image_only: true } }
 assert.equal(pageAccess(downgraded)('products'), true)
 assert.equal(pageAccess({ ...downgraded, permissions: { ...downgraded.permissions, 'products:view': false } })('products'), false)
-for (const identity of [{ username: ' ADMIN ' }, { role_code: ' admin ' }]) {
+// Administrator identities: an effective all grant or the admin role code --
+// never the name alone (FX-sec).
+for (const identity of [{ role_permissions: { all: true } }, { role_code: ' admin ' }]) {
   assert.equal(pageAccess({ ...identity, permissions: { sales: false, 'sales:view': false } })('sales'), true)
 }
 

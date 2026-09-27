@@ -121,14 +121,19 @@ async function main() {
       fresh()
       beforeBatch = () => sqlite.exec(mutation === 'delete' ? 'DELETE FROM branch_stock WHERE product_id=1 AND branch_id=1'
         : mutation === 'delete-lot' ? 'DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1'
-        : mutation === 'deactivate-lot' ? 'UPDATE product_batches SET is_active=0 WHERE id=1'
+        // Since 0154 a stocked lot cannot be deactivated (the mutation itself
+        // used to throw here, so this case never reached a transfer guard):
+        // a lot retires only once empty.
+        : mutation === 'deactivate-lot' ? 'UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=1 AND branch_id=1; UPDATE product_batches SET is_active=0 WHERE id=1'
         : mutation === 'drain' ? 'UPDATE branch_stock SET quantity=0 WHERE product_id=1 AND branch_id=1'
           : 'UPDATE branches SET is_active=0 WHERE id=2')
       const response = await request(app, route, intent(1, 3, 'transfer_race_001', route.endsWith('bulk')))
-      assert.equal(response.status, 500)
+      // A guard refusal, not a server error: 409 with a code the client localizes.
+      assert.equal(response.status, 409, JSON.stringify(response))
+      assert.equal(response.body.code, 'transfer_stock_changed')
       assert.deepEqual(counts(), { transfer_operation_receipts: 0, audit_logs: 0, stock_transfers: 0, inventory_movements: 0 })
       assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM branch_stock WHERE branch_id=2').get().n, 0)
-      assert.equal(sqlite.prepare('SELECT SUM(quantity) AS n FROM branch_batch_stock').get().n, mutation === 'delete-lot' ? 20 : 30)
+      assert.equal(sqlite.prepare('SELECT SUM(quantity) AS n FROM branch_batch_stock').get().n, mutation.endsWith('-lot') ? 20 : 30)
       sqlite.close()
     })
     for (const change of [{ reason: '' }, { toBranchId: 1 }, { toBranchId: 3 }, { client_request_id: '' }]) await check(`${app}${route}: invalid ${Object.keys(change)[0]} refuses without writes`, async () => {
@@ -163,7 +168,8 @@ async function main() {
     fresh()
     beforeBatch = () => sqlite.exec('DELETE FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1')
     const result = await request('branches', '/transfer', { ...intent(1, 1, 'transfer_explicit_001', false), batchId: 1 })
-    assert.equal(result.status, 500)
+    assert.equal(result.status, 409, JSON.stringify(result))
+    assert.equal(result.body.code, 'transfer_stock_changed')
     assert.equal(counts().transfer_operation_receipts, 0)
     assert.equal(sqlite.prepare('SELECT SUM(quantity) AS n FROM branch_stock').get().n, 30)
     sqlite.close()
@@ -174,7 +180,15 @@ async function main() {
       const body = intent(1, route.endsWith('bulk') ? 3 : 1, `maintenance_${mode}_${route.endsWith('bulk') ? 'bulk' : 'single'}`, route.endsWith('bulk'))
       beforeBatch = () => sqlite.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(mode === 'corrupt' ? '{broken' : JSON.stringify({ mode }))
       const blocked = await request(app, route, body)
-      assert.notEqual(blocked.status, 200)
+      if (mode === 'corrupt') {
+        // A restore-guard trigger's json_extract(value,'$.mode') fails on the
+        // unparseable marker before the maintenance guard runs: blocked, but
+        // as the broken state it is, not as a transfer refusal.
+        assert.notEqual(blocked.status, 200)
+      } else {
+        assert.equal(blocked.status, 503, JSON.stringify(blocked))
+        assert.equal(blocked.body.code, 'maintenance_active')
+      }
       assert.deepEqual(counts(), { transfer_operation_receipts: 0, audit_logs: 0, stock_transfers: 0, inventory_movements: 0 })
       assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 10)
       sqlite.prepare("DELETE FROM system_flags WHERE key='maintenance'").run()

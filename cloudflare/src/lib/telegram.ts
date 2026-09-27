@@ -4,24 +4,28 @@ import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
-  parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
+  parseReportDate, resolveTopicFamilies, setTelegramLanguage, SHIFT_SECTION_EDGE, TELEGRAM_TOPIC_FAMILIES, telegramCommandReference, telegramUnauthorizedReply,
+  topicFamilyName, topicGroupName,
 } from './telegramLang'
-import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
+import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
   getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
-  recognizedExpr, shiftWindowWhere, type SalesFilters,
+  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  computeShiftReconciliation, loadShiftReconciliation, shiftExpenses, shiftFilters, summarizeShiftCash,
-  type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
+  shiftExpenses, shiftFilters, summarizeShiftCash, type ShiftMoney, type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
-export type TelegramEventType = 'sales' | 'status' | 'fees' | 'stock_in' | 'stock_out'
+// `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
+// restored -- get their own switch and their own forum topic. Until then a
+// customer return was sent as a `sales` event, into the Sale invoices topic.
+export type TelegramEventType = 'sales' | 'status' | 'returns' | 'fees' | 'stock_in' | 'stock_out'
 // `heading` lets a route name the event (a return is not a sale, a transfer
 // is not a plain stock-out) while `type` stays the user's enable switch.
 export type TelegramEvent = { type: TelegramEventType; lines: string[]; heading?: string }
@@ -45,14 +49,25 @@ type TelegramConfig = {
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
   topics: Record<TelegramTopicKey, number | undefined>
 }
-type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string }; message_thread_id?: number }
+type TelegramMessage = {
+  text?: string
+  from?: { id?: number | string; username?: string; first_name?: string; last_name?: string }
+  // Set when a group admin posts anonymously ("Remain anonymous"): the
+  // message then comes FROM the group itself, sender_chat.id === chat.id.
+  sender_chat?: { id?: number | string }
+  chat?: { id?: number | string }
+  message_thread_id?: number
+  // True only for a message inside a forum topic. A reply in a non-forum
+  // supergroup also carries message_thread_id, so the id alone is not proof.
+  is_topic_message?: boolean
+}
 type TelegramUpdate = { message?: TelegramMessage }
 
 // The owner's Telegram forum topics: one settings key per message family,
 // read the same way every other Telegram setting is (generic key/value, no
 // migration). Empty means "send to General", exactly as before this existed.
 export const TELEGRAM_TOPIC_KEYS = [
-  'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status',
+  'telegram_topic_shift', 'telegram_topic_sales', 'telegram_topic_status', 'telegram_topic_returns',
   'telegram_topic_expenses', 'telegram_topic_stock', 'telegram_topic_reports', 'telegram_topic_alerts',
 ] as const
 export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
@@ -61,7 +76,7 @@ export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
 // this module and never grows from request or database input.
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
-  'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
+  'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -75,6 +90,16 @@ export function parseTelegramTopicId(value: string | undefined | null): number |
   if (!/^\d+$/.test(trimmed)) return undefined
   const parsed = Number(trimmed)
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+/**
+ * The WRITE rule for a telegram_topic_* value: digits, or empty for General.
+ * routes/settings.ts validates a Settings save with it and
+ * lib/telegramTopicSetting.ts validates a `/settopic` save with it, so the two
+ * ways of setting a topic cannot accept different values.
+ */
+export function isTelegramTopicSettingValue(raw: string): boolean {
+  return raw === '' || /^\d+$/.test(raw)
 }
 
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
@@ -203,6 +228,10 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     // remain available when a less noisy chat is preferred.
     categories: {
       sales: isEnabled(values.telegram_sales_enabled, true), status: isEnabled(values.telegram_status_enabled, true),
+      // Unset follows the Sales switch: a customer return was a `sales` event
+      // until 27 Sep 2026, so a shop that never touched the new switch keeps
+      // exactly the return alerts it had -- on with Sales, off with it.
+      returns: isEnabled(values.telegram_returns_enabled, isEnabled(values.telegram_sales_enabled, true)),
       fees: isEnabled(values.telegram_fees_enabled, true), stock_in: isEnabled(values.telegram_stock_in_enabled, true), stock_out: isEnabled(values.telegram_stock_out_enabled, true),
     },
     topics: Object.fromEntries(TELEGRAM_TOPIC_KEYS.map((key) => [key, parseTelegramTopicId(values[key])])) as Record<TelegramTopicKey, number | undefined>,
@@ -277,7 +306,7 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   // sales and status get their own topic each; fees, stock in and stock out
   // share the Expenses/Stock slots this event type maps onto.
   const eventTopic: Record<TelegramEventType, TelegramTopicKey> = {
-    sales: 'telegram_topic_sales', status: 'telegram_topic_status',
+    sales: 'telegram_topic_sales', status: 'telegram_topic_status', returns: 'telegram_topic_returns',
     fees: 'telegram_topic_expenses', stock_in: 'telegram_topic_stock', stock_out: 'telegram_topic_stock',
   }
   // S4-8: the ONE place every event message becomes bilingual. Doing it on
@@ -331,7 +360,6 @@ export async function sendTelegramTest(env: Env): Promise<void> {
 /** One business day (UTC+7) of a UTC timestamp column, as a bound clause. */
 const dayClause = (column: string): string => localDateRangeClause(column, '@date', '@date')
 
-type MoneyBucket = { count: number; usd: number; khr: number } | null | undefined
 type UnitBucket = { count: number; quantity: number } | null | undefined
 /** Kernel-derived, so it carries what the kernel knows and the old SUM did not:
  *  how many receipts were VOIDED, and how much was refunded. Profit, delivery
@@ -345,12 +373,17 @@ type UnitBucket = { count: number; quantity: number } | null | undefined
 type SalesBucket = {
   count: number; usd: number; cancelled: number; refundUsd: number
   profitUsd: number; deliveryFeeUsd: number; creditUsd: number
-  // The courier money actually paid out over the day, and how many sales
-  // recorded any (a missing cost is NULL, never 0 -- deliveryActualCostExpr,
-  // which is why the count exists). It rides along for ONE reason: the day
-  // header and the shift header print the same word "Expenses", so they have
-  // to add up the same two things. See expenseTotals() below.
-  deliveryCostUsd: number; deliveryCostRecorded: number
+  // The courier money actually paid out on the day's sales, in both
+  // currencies: courierPayoutsWhere (lib/shiftReconciliation.ts), the query
+  // the shift report's delivery cost reads, which leaves out a payout that is
+  // also recorded as a linked delivery fee (the fees below carry that one).
+  // NOT the kernel's delivery_actual_cost_usd: that total is the raw column,
+  // unguarded, and the old day summary counted such a payout twice. It rides
+  // along for ONE reason: the day summary and the shift report print the same
+  // word "Expenses", so they have to split and add up the same things. See
+  // expenseTotals() below. The riel half is optional only for callers without
+  // a database (the pure tests); absent means none.
+  deliveryCostUsd: number; deliveryCostKhr?: number
   /**
    * Stock removed entirely over the window, priced at cost -- the owner's
    * "if remove directly it also counts toward losses. as cost price no
@@ -365,7 +398,13 @@ type SalesBucket = {
    *  price. this is impossible find issue and fix". Never dropped silently. */
   removalLossUnvaluedRows?: number
 }
-type DayStats = { date: string; sales: SalesBucket; fees: MoneyBucket; stockIn: UnitBucket; stockOut: UnitBucket }
+/** The day's fees: every one (`usd`/`khr`) and the subset typed 'delivery'
+ *  (`deliveryUsd`/`deliveryKhr`), off ONE scan (FEE_SPLIT_COLUMNS). The subset
+ *  is optional only for callers without a database (the pure tests): absent
+ *  means no fee is known to be delivery-typed. /fees prints `usd`/`khr`, the
+ *  total of the fee records it lists. */
+type FeeBucket = { count: number; usd: number; khr: number; deliveryUsd?: number; deliveryKhr?: number } | null | undefined
+type DayStats = { date: string; sales: SalesBucket; fees: FeeBucket; stockIn: UnitBucket; stockOut: UnitBucket }
 type CashierRow = { cashier: string; count: number; usd: number }
 
 /** One business day as kernel filters. The shift report next door already
@@ -388,9 +427,14 @@ const dayFilters = (date: string): SalesFilters => ({ startDate: date, endDate: 
 // dollars when the riel side is zero.
 async function dayStats(env: Env, date: string): Promise<DayStats> {
   const db = getDb(env)
-  const [totals, fees, stockIn, stockOut] = await Promise.all([
+  // The kernel's own "active sales on this day" clause, so the courier half
+  // is read over exactly the sales the revenue above is.
+  const courierWhere = whereActiveSales('sales', dayFilters(date))
+  const [totals, fees, courier, stockIn, stockOut] = await Promise.all([
     getSalesTotals(env, dayFilters(date)),
-    db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees WHERE fee_date = @date').get<{ count: number; usd: number; khr: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date = @date`)
+      .get<{ count: number; usd: number; khr: number; delivery_usd: number; delivery_khr: number }>({ date }),
+    courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
     // 'stock_in' is the legacy string the unified stock-in session used to
     // write (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) --
     // without it this digest under-counted every session committed through
@@ -409,10 +453,12 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       // never subtracted from anything (the owner: "just use credit ...
       // instead of $-n ... just $n").
       creditUsd: totals.pending_revenue_usd,
-      // Same call, same two fields the shift report reads -- so the two
-      // reports' "Expenses" is one sum with one source, not a lookalike.
-      deliveryCostUsd: totals.delivery_actual_cost_usd,
-      deliveryCostRecorded: totals.delivery_actual_cost_count,
+      // The courier half of the delivery cost, off the SAME query the shift
+      // report's delivery cost reads (courierPayoutsWhere), over this day's
+      // sales -- not the kernel's raw delivery_actual_cost_usd, which counts
+      // a payout that is also a linked delivery fee a second time.
+      deliveryCostUsd: courier.usd,
+      deliveryCostKhr: courier.khr,
       // Stock destroyed outright, at cost. Same kernel field the Reports hub
       // and the Dashboard read, so the three surfaces cannot disagree. Note
       // the `stockOut` line below is NOT this figure: it counts quantity over
@@ -420,7 +466,10 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
       removalLossUsd: totals.removal_loss_usd,
       removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
     },
-    fees,
+    fees: fees && {
+      count: Number(fees.count) || 0, usd: Number(fees.usd) || 0, khr: Number(fees.khr) || 0,
+      deliveryUsd: Number(fees.delivery_usd) || 0, deliveryKhr: Number(fees.delivery_khr) || 0,
+    },
     stockIn,
     stockOut,
   }
@@ -463,30 +512,64 @@ const counted = (count: unknown, noun: 'movement(s)' | 'unit(s)'): string =>
   localizeTelegramValue(`${Number(count) || 0} ${noun}`)
 
 /**
- * "Expenses" -- the ONE definition, shared by the shift report and the day
- * summary because they print the same word for it.
+ * "Expenses" -- the ONE split, shared by the shift report, the day summary
+ * and the Reports overview because they print the same words for it:
+ * composeShiftFigures (lib/shiftReconciliation.ts), the function the in-app
+ * shift report renders.
  *
- * They did not share it until Sep 7 2026: the day header added up the fees
- * table alone while the shift header added the fees to the courier money
- * actually paid out, so a single-shift day showed `/shift` "Expenses: $17.00"
- * against `/report` "Expenses: $9.50" and nothing on either message said why.
+ *   Actual delivery cost = courier payouts on the sales + fees typed 'delivery'
+ *   Other expenses       = every remaining fee
+ *   Total                = the two, in both currencies
  *
- * An UNRECORDED courier cost is NULL, never $0.00 (deliveryActualCostExpr in
- * salesAnalytics.ts) -- `recorded` is the count of sales that carry one, and a
- * zero there keeps delivery out of the total entirely rather than claiming
- * delivery was free.
+ * That is the owner's rule (24 Sep 2026, memory shop-paid-delivery-cancels-out):
+ * the delivery money the business counts is what the courier was actually
+ * paid -- on the sale, or by hand and entered as a delivery expense -- and it
+ * is counted once. courierPayoutsWhere leaves out a payout that is also
+ * recorded as a linked delivery fee, so the fee is that payout's one count.
  *
- * ARITHMETIC ONLY (Sep 21 2026). It used to hand back two rendered lines as
- * well; each report now draws its own Expenses SECTION -- the shift lists the
- * individual expenses, the day summary has no per-fee rows to list -- so the
- * shared thing is the sum, not the layout. One definition, two renderings,
- * no second way of adding delivery to fees.
+ * History. Until Sep 7 2026 the day header added up the fees table alone. The
+ * shift report then moved delivery-typed fees into the delivery cost (H-io #2,
+ * 27 Sep 2026) while this function still added the kernel's raw courier
+ * dollars to ALL fees, so at one close `/shift` said delivery $13.00 and the
+ * overview and `/report` said $3.00 plus $14.00 other (R-telegram E2, 27 Sep
+ * 2026) -- and a payout that was also a linked fee counted twice, and the
+ * riel half of the courier money was dropped. An UNRECORDED courier cost is
+ * NULL and sums as nothing; a half that is zero prints no row.
+ *
+ * ARITHMETIC ONLY (Sep 21 2026). Each report draws its own Expenses SECTION --
+ * the shift lists the individual expenses, the day summary and the overview
+ * have no per-fee rows to list (expenseSectionRows) -- so the shared thing is
+ * the split, not the layout.
  */
-function expenseTotals(input: { otherUsd: unknown; otherKhr: unknown; deliveryCostUsd: unknown; deliveryCostRecorded: unknown }): { courierUsd: number; otherUsd: number; otherKhr: number; totalUsd: number } {
-  const courierUsd = Number(input.deliveryCostRecorded) > 0 ? round2(Number(input.deliveryCostUsd) || 0) : 0
-  const otherUsd = round2(Number(input.otherUsd) || 0)
-  const otherKhr = Number(input.otherKhr) || 0
-  return { courierUsd, otherUsd, otherKhr, totalUsd: round2(otherUsd + courierUsd) }
+type ExpenseInput = Partial<ShiftMoney> | null | undefined
+type ExpenseSplit = { deliveryCost: ShiftMoney; other: ShiftMoney; total: ShiftMoney }
+function expenseTotals(input: { fees: ExpenseInput; deliveryFees: ExpenseInput; courier: ExpenseInput }): ExpenseSplit {
+  const split = composeShiftFigures({
+    opening: null, counted: null, totals: null,
+    expenses: input.fees, deliveryFees: input.deliveryFees, courier: input.courier,
+  })
+  const deliveryCost = split.delivery_cost
+  const other = split.other_expenses
+  return { deliveryCost, other, total: { usd: round2(deliveryCost.usd + other.usd), khr: deliveryCost.khr + other.khr } }
+}
+const hasMoney = (value: ShiftMoney): boolean => value.usd !== 0 || value.khr !== 0
+
+/**
+ * The Expenses rows of the day summary and the Reports overview -- the same
+ * rows on both. The two component lines print only when the total really has
+ * two parts: with one part the total IS that part, and printing it twice under
+ * two names is the repeated figure the owner asked us to take out.
+ */
+function expenseSectionRows(expenses: ExpenseSplit): string[] {
+  const rows: string[] = []
+  if (hasMoney(expenses.deliveryCost) && hasMoney(expenses.other)) {
+    rows.push(
+      labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)),
+      labeled('expensesOther', money(expenses.other.usd, expenses.other.khr)),
+    )
+  }
+  if (hasMoney(expenses.total)) rows.push(labeled('total', money(expenses.total.usd, expenses.total.khr)))
+  return rows
 }
 
 // ---- The sectioned layout (owner, Sep 21 2026) -----------------------------
@@ -617,13 +700,14 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   }
 
   // Expenses is computed first because the Sales section needs one figure out
-  // of it: the courier money. See the Expenses comment below.
+  // of it: the courier money. See the Expenses comment below. The fees
+  // switch takes the fees table's rows -- the delivery-typed ones included --
+  // and the sales switch takes the courier money paid on the sales.
   const showExpenses = categories?.fees !== false
   const expenses = expenseTotals({
-    otherUsd: showExpenses ? stats.fees?.usd : 0,
-    otherKhr: showExpenses ? stats.fees?.khr : 0,
-    deliveryCostUsd: showSales ? stats.sales?.deliveryCostUsd : 0,
-    deliveryCostRecorded: showSales ? stats.sales?.deliveryCostRecorded : 0,
+    fees: showExpenses ? { usd: stats.fees?.usd, khr: stats.fees?.khr } : null,
+    deliveryFees: showExpenses ? { usd: stats.fees?.deliveryUsd, khr: stats.fees?.deliveryKhr } : null,
+    courier: showSales ? { usd: stats.sales?.deliveryCostUsd, khr: stats.sales?.deliveryCostKhr } : null,
   })
 
   // Sales -- Revenue and Profit print even at $0.00: a day that took
@@ -637,8 +721,9 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // under Expenses with the shop's own fees. With Expenses switched off
     // there is no section to report it in, so it stays here, beside the fee
     // the customer was charged, rather than disappearing with a switch that
-    // was only ever about the fees table.
-    if (!showExpenses && expenses.courierUsd > 0) sales.push(labeled('deliveryCost', usd(expenses.courierUsd)))
+    // was only ever about the fees table. With the fees switched off the
+    // split's delivery cost is exactly that courier money, in both currencies.
+    if (!showExpenses && hasMoney(expenses.deliveryCost)) sales.push(labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)))
     if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
     // Directly below Not Paid, the owner's "also add one row below unpaid in
     // reports as well". One number, no sentence. Like Not Paid it is a
@@ -653,16 +738,11 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
   }
 
-  // Expenses -- the SAME sum the shift report prints, through the same
-  // function: the fees of the day plus the courier money actually paid out.
-  const expenseRows: string[] = []
-  // The two component lines print only when the total really has two parts.
-  // With one part the total IS that part, and printing it twice under two
-  // names is the repeated figure the owner asked us to take out.
-  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
-    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
-  }
-  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
+  // Expenses -- the SAME split the shift report prints, through the same
+  // function (composeShiftFigures, via expenseTotals): the delivery cost is
+  // the courier money paid on the day's sales plus the fees typed 'delivery',
+  // the other expenses are every remaining fee, and the total is both.
+  const expenseRows = expenseSectionRows(expenses)
   // OFF means gone -- no heading and no `N/A` placeholder. It used to stay
   // alive whenever Sales was on, so a shop that switched Expenses off was
   // still sent the Expenses heading with `· N/A` under it on every quiet
@@ -968,6 +1048,17 @@ export type ShiftReportFigures = {
    *  shiftExpenses(...).details, already capped and folded there). */
   expenseDetails?: Array<{ label: string; usd: number; khr: number }>
   /**
+   * The delivery-cost / other-expenses split, straight off
+   * lib/shiftReconciliation.ts composeShiftFigures -- the SAME function the
+   * in-app shift report renders (shiftReportModel.ts delivery_actual_cost and
+   * shift_other_expenses). A fee typed 'delivery' is delivery cost there, so
+   * it is delivery cost here too, and expenseDetails then lists only the
+   * OTHER fees. Optional only for callers without a database (the pure
+   * tests): when absent the split is derived from the fields above through
+   * the same function, with no fee known to be delivery-typed.
+   */
+  expenseSplit?: { deliveryCost: ShiftMoney; otherExpenses: ShiftMoney }
+  /**
    * Stock removed entirely during the shift, at cost. Optional: absent means
    * the kernel could not scope the window to stock movements, not that
    * nothing was destroyed, so the row is omitted rather than printed as $0.00.
@@ -1148,27 +1239,40 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
     ]))
     : [EMPTY_SECTION]))
 
-  // 6. Expenses -- every expense paid out of this drawer as its own row, then
-  // the ONE total. The total is expenseTotals(): the fees plus the courier
-  // money actually paid out, the same sum the day summary prints, so the
-  // courier payout is a row here rather than a figure with no row.
-  const expenses = expenseTotals({
-    otherUsd: figures.otherExpenseUsd, otherKhr: figures.otherExpenseKhr,
-    deliveryCostUsd: figures.deliveryCostUsd, deliveryCostRecorded: figures.deliveryCostRecorded,
-  })
+  // 6. Expenses -- the delivery cost, then every OTHER expense paid out of
+  // this drawer as its own row, then the ONE total. The split is
+  // composeShiftFigures' (lib/shiftReconciliation.ts), the function the
+  // in-app shift report renders, so a fee typed 'delivery' is delivery cost
+  // on the phone exactly as it is in the app (H-io #2, 27 Sep 2026: this
+  // section used to count only the sale-level courier payout as delivery and
+  // list the delivery-typed fee under its own label). The total is still
+  // every fee plus the courier payout -- the split moves money between the
+  // two rows, never in or out of the section.
+  const split = figures.expenseSplit ?? (() => {
+    const derived = composeShiftFigures({
+      opening: null, counted: null, totals: null,
+      expenses: { usd: figures.otherExpenseUsd, khr: figures.otherExpenseKhr },
+      deliveryFees: null,
+      courier: { usd: figures.deliveryCostRecorded > 0 ? figures.deliveryCostUsd : 0, khr: 0 },
+    })
+    return { deliveryCost: derived.delivery_cost, otherExpenses: derived.other_expenses }
+  })()
   const expenseRows: string[] = []
-  if (expenses.courierUsd > 0) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [usd(expenses.courierUsd)]))
+  if (split.deliveryCost.usd || split.deliveryCost.khr) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('deliveryCost')}:`, [money(split.deliveryCost.usd, split.deliveryCost.khr)]))
   const details = figures.expenseDetails || []
   if (details.length) {
     for (const detail of details) expenseRows.push(...telegramRowLines(`${ROW_BULLET}${cleanLine(detail.label, 60)}:`, [money(detail.usd, detail.khr)]))
-  } else if (expenses.otherUsd || expenses.otherKhr) {
+  } else if (split.otherExpenses.usd || split.otherExpenses.khr) {
     // A caller that has the total but no per-expense rows still shows where
     // the money is, under the same word the day summary uses for it.
-    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(expenses.otherUsd, expenses.otherKhr)]))
+    expenseRows.push(...telegramRowLines(`${ROW_BULLET}${label('expensesOther')}:`, [money(split.otherExpenses.usd, split.otherExpenses.khr)]))
   }
   lines.push(sectionHeader('expenses', SHIFT_SECTION_EDGE))
   lines.push(...(expenseRows.length
-    ? [...expenseRows, labeled('total', money(expenses.totalUsd, expenses.otherKhr))]
+    ? [...expenseRows, labeled('total', money(
+      round2(split.deliveryCost.usd + split.otherExpenses.usd),
+      split.deliveryCost.khr + split.otherExpenses.khr,
+    ))]
     : [EMPTY_SECTION]))
 
   return lines.join('\n')
@@ -1220,14 +1324,23 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
   // 2026: the owner's reference layout has a section for each. They are the
   // SAME kernel entry points routes/reports.ts reads, so the phone message and
   // the Reports hub cannot disagree about a method's takings.
-  const [totals, counts, expenses, reconciliation, payments, couriers] = await Promise.all([
+  const [totals, counts, otherExpenses, deliveryFees, reconciliation, payments, couriers] = await Promise.all([
     getSalesTotals(env, filters),
     shiftInvoiceCounts(env, shift, nowMs),
-    shiftExpenses(env, shift, nowMs, { overflowLabel }),
+    // The per-expense rows list only the OTHER fees: the delivery-typed ones
+    // are inside the delivery cost row, as composeShiftFigures splits them.
+    shiftExpenses(env, shift, nowMs, { overflowLabel, excludeDeliveryFees: true }),
+    shiftDeliveryFeeExpenses(env, shift, nowMs),
     loadShiftReconciliation(env, shift, nowMs, { overflowLabel }),
     getPaymentMethodBreakdown(env, filters),
     getDeliveryContactTotals(env, filters),
   ])
+  // Every fee and every courier payout, as the drawer was reconciled against
+  // them -- the same two inputs loadShiftFigures hands composeShiftFigures.
+  const split = composeShiftFigures({
+    opening: null, counted: null, totals: null,
+    expenses: reconciliation.expenses, deliveryFees, courier: reconciliation.courier,
+  })
   return {
     invoices: counts.invoices,
     cancelled: counts.cancelled,
@@ -1260,9 +1373,11 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     // day summary and the Reports hub read, so the surfaces cannot disagree.
     removalLossUsd: totals.removal_loss_usd,
     removalLossUnvaluedRows: totals.removal_loss_unvalued_rows,
-    otherExpenseUsd: expenses.usd,
-    otherExpenseKhr: expenses.khr,
-    expenseDetails: expenses.details,
+    // Every fee paid out of the drawer (the reconciliation's own figure).
+    otherExpenseUsd: reconciliation.expenses.usd,
+    otherExpenseKhr: reconciliation.expenses.khr,
+    expenseDetails: otherExpenses.details,
+    expenseSplit: { deliveryCost: split.delivery_cost, otherExpenses: split.other_expenses },
     // Eight rows each at most -- a phone message is not a report page -- with
     // the tail folded into ONE "Other" row so the section still adds up to the
     // money above it.
@@ -1374,8 +1489,9 @@ export async function sendTelegramShiftReport(env: Env, shiftId: number, nowMs: 
 // GET /api/reports/overview?startDate=D&endDate=D&branchId=B answers. Every
 // sales figure is the kernel's (getSalesTotals, getSalesGroupedTotals by
 // payment method -- the same calls that route makes); nothing is re-derived.
-// "Expenses" is expenseTotals(), the one sum the shift report and the day
-// summary print under that word.
+// "Expenses" is expenseTotals(), the one delivery/other split
+// (composeShiftFigures) the shift report and the day summary print under that
+// word, over the day's fees and the courier money paid on the day's sales.
 //
 // HOW IT IS SCHEDULED (the same on both plans; the plan is not the axis).
 //   1. The close commits. Then a `telegram_scheduled_sends` row (migration
@@ -1444,7 +1560,10 @@ export type ShiftOverviewFigures = {
   deliveryFeeUsd: number; creditUsd: number; refundUsd: number
   invoices: number; cancelled: number
   paymentMethods: Array<{ method: string; count: number; usd: number }>
-  otherExpenseUsd: number; otherExpenseKhr: number; deliveryCostUsd: number; deliveryCostRecorded: number
+  /** expenseTotals' three inputs for the day and branch: every fee, the fees
+   *  typed 'delivery', and the courier money paid on the sales
+   *  (courierPayoutsWhere) -- the same three the shift report splits. */
+  expenses: { fees: ShiftMoney; deliveryFees: ShiftMoney; courier: ShiftMoney }
   returns: { count: number; refundUsd: number; refundKhr: number }
 }
 
@@ -1489,16 +1608,13 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
 
+  // The day summary's split and rows, switches applied the same way.
   const expenses = expenseTotals({
-    otherUsd: showExpenses ? figures.otherExpenseUsd : 0, otherKhr: showExpenses ? figures.otherExpenseKhr : 0,
-    deliveryCostUsd: showSales ? figures.deliveryCostUsd : 0, deliveryCostRecorded: showSales ? figures.deliveryCostRecorded : 0,
+    fees: showExpenses ? figures.expenses.fees : null,
+    deliveryFees: showExpenses ? figures.expenses.deliveryFees : null,
+    courier: showSales ? figures.expenses.courier : null,
   })
-  const expenseRows: string[] = []
-  if (expenses.courierUsd > 0 && (expenses.otherUsd > 0 || expenses.otherKhr > 0)) {
-    expenseRows.push(labeled('deliveryCost', usd(expenses.courierUsd)), labeled('expensesOther', money(expenses.otherUsd, expenses.otherKhr)))
-  }
-  if (expenses.totalUsd || expenses.otherKhr) expenseRows.push(labeled('total', money(expenses.totalUsd, expenses.otherKhr)))
-  section('expenses', expenseRows, showExpenses)
+  section('expenses', expenseSectionRows(expenses), showExpenses)
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
@@ -1520,14 +1636,18 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
   const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
   if (filters.branchId != null) params.branchId = filters.branchId
   const db = getDb(env)
-  const [totals, payments, fees, returned] = await Promise.all([
+  // The courier half over the kernel's own sale set for these filters.
+  const courierWhere = whereActiveSales('sales', filters)
+  const [totals, payments, fees, returned, courier] = await Promise.all([
     getSalesTotals(env, filters),
     getSalesGroupedTotals(env, filters, 'payment_method'),
-    db.prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees
-      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`).get<{ usd: number; khr: number }>(params),
+    db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
+      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`)
+      .get<{ usd: number; khr: number; delivery_usd: number; delivery_khr: number }>(params),
     db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS khr FROM returns
       WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
         AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
+    courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
   ])
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
@@ -1543,8 +1663,11 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
         usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
       }),
     ),
-    otherExpenseUsd: Number(fees?.usd) || 0, otherExpenseKhr: Number(fees?.khr) || 0,
-    deliveryCostUsd: totals.delivery_actual_cost_usd, deliveryCostRecorded: totals.delivery_actual_cost_count,
+    expenses: {
+      fees: { usd: Number(fees?.usd) || 0, khr: Number(fees?.khr) || 0 },
+      deliveryFees: { usd: Number(fees?.delivery_usd) || 0, khr: Number(fees?.delivery_khr) || 0 },
+      courier,
+    },
     returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
   }
 }
@@ -1683,8 +1806,9 @@ function unknownCommandReply(command: string): string {
  */
 export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
-  // Group chats deliver "/report@shop_bot"; strip the bot mention.
-  const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  // Group chats deliver "/report@shop_bot". Whose command it is was decided
+  // by handleTelegramWebhook (addressedToThisBot); here the @name is dropped.
+  const { command } = parseTelegramCommand(parts[0])
   const argument = parts.slice(1).join(' ')
 
   if (command === '/help' || command === '/start') return withLanguage(language, telegramCommandReference)
@@ -1704,6 +1828,181 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
 }
 
 
+// ---- Forum topics from inside Telegram (owner, 27 Sep 2026) ----------------
+// Settings → Telegram → Forum topics takes one topic id per message family,
+// and finding an id meant a Share link and its last number -- so none was
+// ever set and everything landed in General. `/settopic sales`, typed INSIDE
+// the Sales topic, stores that topic's own message_thread_id instead, and
+// `/settopic sales general` sends the family back to the group itself.
+//
+// WHO MAY RUN IT. Changing where the day's revenue is posted is a settings
+// change, so a `/settopic` that SAVES needs all three:
+//   1. an allow-listed chat (handleTelegramWebhook's boundary, unchanged);
+//   2. THE alerts chat -- config.chatId, the first telegram_chat_id of THIS
+//      deployment's settings -- because a thread id is only meaningful there,
+//      and a second approved chat must not be able to point the shop's
+//      reports at a topic of its own;
+//   3. a Telegram admin of that group (getChatMember), or an admin posting
+//      anonymously as the group.
+// Anyone in the alerts chat may READ: `/topics`, and `/settopic` with no
+// argument (this topic's id and the choices). Neither changes anything. Any
+// other chat, approved or not, gets a refusal naming no topic. Nothing here
+// knows a topic id in advance: every id is the one the admin is standing in.
+
+/** Everything the webhook needs from outside this module. */
+export type TelegramTopicSave = {
+  keys: TelegramTopicFamily['key'][]
+  /** The topic to send to, or null to send to the group (General). */
+  threadId: number | null
+  /** Who typed it, as the audit row names them: `telegram:@name`. */
+  actor: string
+  telegramUserId: string
+  chatId: string
+}
+export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave) => Promise<void>
+export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter }
+
+const TOPIC_COMMANDS = new Set(['/settopic', '/topics'])
+const TOPIC_ID_LABEL = () => bi('Topic ID', 'លេខសម្គាល់ប្រធានបទ')
+
+/** `/topics`: every family and where it goes now. Pure. */
+export function formatTopicsOverview(topics: Partial<Record<TelegramTopicKey, number | undefined>>): string {
+  return [
+    `📌 ${bi('Forum topics', 'ប្រធានបទក្នុងវេទិកា')}`,
+    ...TELEGRAM_TOPIC_FAMILIES.map((entry) => row(topicFamilyName(entry), topics[entry.key] ?? topicGroupName())),
+    '',
+    `${bi('Change it inside the topic', 'ប្ដូរនៅក្នុងប្រធានបទនោះ')}: /settopic sales`,
+    `${bi('Back to the group', 'ត្រឡប់ទៅក្រុមវិញ')}: /settopic sales general`,
+  ].join('\n')
+}
+
+/** Every family as a line the reader can copy: `· /settopic sales: Sale invoices`. */
+function topicChoiceLines(): string[] {
+  return [
+    ...TELEGRAM_TOPIC_FAMILIES.map((entry) => row(`/settopic ${entry.family}`, topicFamilyName(entry))),
+    `${bi('In Khmer too', 'ជាភាសាខ្មែរក៏បាន')}: /settopic លក់`,
+    `${bi('Back to the group', 'ត្រឡប់ទៅក្រុមវិញ')}: /settopic sales general`,
+  ]
+}
+
+/** `/settopic` with no argument: this topic's id, and the choices. Pure. */
+export function formatSetTopicUsage(threadId: number | undefined): string {
+  return [
+    threadId
+      ? `🧵 ${TOPIC_ID_LABEL()}: ${threadId}`
+      : `⚠️ ${bi('This is the group (General). Open a topic and type this there.', 'នេះជាក្រុម (General)។ សូមបើកប្រធានបទមួយ ហើយវាយនៅទីនោះ។')}`,
+    '',
+    ...topicChoiceLines(),
+  ].join('\n')
+}
+
+/**
+ * `/settopic` saved: says in plain words where each named family goes NOW --
+ * this topic (with its id), or the group. Pure.
+ */
+export function formatTopicSaved(families: readonly TelegramTopicFamily[], threadId: number | null): string {
+  return [
+    threadId
+      ? `✅ ${bi('This topic will now receive', 'ប្រធានបទនេះនឹងទទួល')}:`
+      : `✅ ${bi('These now go to the group', 'ទាំងនេះនឹងផ្ញើទៅក្រុមវិញ')}:`,
+    ...families.map((entry) => `${ROW_BULLET}${topicFamilyName(entry)}`),
+    threadId ? row(TOPIC_ID_LABEL(), threadId) : row(bi('Sent to', 'ផ្ញើទៅ'), topicGroupName()),
+  ].join('\n')
+}
+
+/** A word `/settopic` does not know. Pure. */
+export function formatUnknownTopicFamily(word: string): string {
+  const shown = firstCharacters(word, 24)
+  return [
+    `🤔 ${bi(`I do not know the type "${shown}".`, `មិនស្គាល់ប្រភេទ "${shown}" ទេ។`)}`,
+    '',
+    ...topicChoiceLines(),
+  ].join('\n')
+}
+
+/** `/settopic sales` typed in General: which topic would it even be? Pure. */
+export function formatTopicNeedsTopic(families: readonly TelegramTopicFamily[]): string {
+  const family = families[0]?.family || 'sales'
+  return [
+    `⚠️ ${bi(
+      `This is the group (General). Open the topic you want, then type /settopic ${family} there.`,
+      `នេះជាក្រុម (General)។ សូមបើកប្រធានបទដែលចង់បាន រួចវាយ /settopic ${family} នៅទីនោះ។`,
+    )}`,
+    `${bi('To send it to the group instead', 'ដើម្បីផ្ញើទៅក្រុមវិញ')}: /settopic ${family} general`,
+  ].join('\n')
+}
+
+const topicWrongChatReply = () => `🔒 ${bi('Topics can only be set in the shop\'s alerts group.', 'អាចកំណត់ប្រធានបទបានតែក្នុងក្រុមជូនដំណឹងរបស់ហាងប៉ុណ្ណោះ។')}`
+const topicNotAdminReply = () => `🔒 ${bi('Only a group admin can change where reports go.', 'មានតែអ្នកគ្រប់គ្រងក្រុមទេ ដែលអាចប្ដូរកន្លែងផ្ញើរបាយការណ៍។')}`
+const topicAdminUnknownReply = () => `⚠️ ${bi('Could not check your admin rights. Try again.', 'មិនអាចពិនិត្យសិទ្ធិអ្នកគ្រប់គ្រងបានទេ។ សូមព្យាយាមម្តងទៀត។')}`
+const topicSaveFailedReply = () => `⚠️ ${bi('Could not save. Try again, or set it in Settings → Telegram.', 'មិនអាចរក្សាទុកបានទេ។ សូមព្យាយាមម្តងទៀត ឬកំណត់នៅ Settings → Telegram។')}`
+
+/**
+ * Is the sender an admin of this group? `null` when Telegram could not say --
+ * the reply then asks to try again rather than claiming the sender is not one.
+ */
+async function isGroupAdmin(config: TelegramConfig, chatId: string, message: TelegramMessage): Promise<boolean | null> {
+  // "Remain anonymous" admins post as the group itself; only an admin can.
+  if (message.sender_chat?.id != null && String(message.sender_chat.id) === chatId) return true
+  const userId = message.from?.id
+  if (userId == null || userId === '') return false
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/getChatMember`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, user_id: userId }),
+    })
+    if (!response.ok) return null
+    const result = await response.json<{ ok?: boolean; result?: { status?: string } }>().catch(() => null)
+    if (!result?.ok) return null
+    return result.result?.status === 'creator' || result.result?.status === 'administrator'
+  } catch {
+    return null
+  }
+}
+
+function telegramActor(message: TelegramMessage, chatId: string): { actor: string; userId: string } {
+  if (message.sender_chat?.id != null && String(message.sender_chat.id) === chatId) return { actor: 'telegram:anonymous group admin', userId: '' }
+  const userId = String(message.from?.id ?? '')
+  const username = cleanLine(message.from?.username || '', 40)
+  const name = cleanLine([message.from?.first_name, message.from?.last_name].filter(Boolean).join(' '), 60)
+  return { actor: `telegram:${username ? `@${username}` : name || userId || 'unknown'}`, userId }
+}
+
+async function topicCommandReply(env: Env, config: TelegramConfig, message: TelegramMessage, text: string, deps: TelegramWebhookDeps): Promise<string> {
+  const parts = text.trim().split(/\s+/)
+  const { command } = parseTelegramCommand(parts[0])
+  const argument = parts.slice(1).join(' ')
+  const language = config.language
+  const chatId = String(message.chat?.id ?? '')
+  // Both topic commands answer ONLY in this deployment's own alerts chat
+  // (config.chatId, read from this Worker's own D1): a second approved chat
+  // neither sees nor changes where this shop's messages go.
+  if (chatId !== config.chatId) return withLanguage(language, topicWrongChatReply)
+  if (command === '/topics') return withLanguage(language, () => formatTopicsOverview(config.topics))
+
+  // A topic's id only exists inside a forum topic -- see TelegramMessage.
+  const threadId = message.is_topic_message ? Number(message.message_thread_id) || undefined : undefined
+  const { families, unknown, reset } = resolveTopicFamilies(argument)
+  if (unknown.length) return withLanguage(language, () => formatUnknownTopicFamily(unknown[0]))
+  if (!families.length) return withLanguage(language, () => formatSetTopicUsage(threadId))
+  // Sending a family back to the group needs no topic; pointing it at one does.
+  if (!reset && !threadId) return withLanguage(language, () => formatTopicNeedsTopic(families))
+  const target = reset ? null : threadId as number
+
+  const admin = await isGroupAdmin(config, chatId, message)
+  if (admin === null) return withLanguage(language, topicAdminUnknownReply)
+  if (!admin) return withLanguage(language, topicNotAdminReply)
+  if (!deps.saveTopics) return withLanguage(language, topicSaveFailedReply)
+  const { actor, userId } = telegramActor(message, chatId)
+  try {
+    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId })
+  } catch (error) {
+    console.warn(`Telegram /settopic could not save: ${error instanceof Error ? error.message : String(error)}`)
+    return withLanguage(language, topicSaveFailedReply)
+  }
+  return withLanguage(language, () => formatTopicSaved(families, target))
+}
+
 async function webhookSecretFromToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -1715,12 +2014,64 @@ export async function isTelegramWebhookRequest(env: Env, suppliedSecret: string 
   let different = 0; for (let index = 0; index < expected.length; index += 1) different |= expected.charCodeAt(index) ^ suppliedSecret.charCodeAt(index)
   return different === 0
 }
-export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): Promise<void> {
+/**
+ * `/Report@Shop_Bot` -> `{ command: '/report', addressee: 'shop_bot' }`. A
+ * group's command menu adds the bot's @name; a typed command may leave it off
+ * (addressee '').
+ */
+export function parseTelegramCommand(word: string): { command: string; addressee: string } {
+  const lower = String(word || '').toLowerCase()
+  const at = lower.indexOf('@')
+  return at < 0 ? { command: lower, addressee: '' } : { command: lower.slice(0, at), addressee: lower.slice(at + 1) }
+}
+
+// This bot's own @name, per token, once per isolate: it never changes while a
+// token is in use, and getMe is the only place Telegram states it.
+const ownBotNames = new Map<string, string>()
+async function ownBotUsername(token: string): Promise<string | null> {
+  const known = ownBotNames.get(token)
+  if (known) return known
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    })
+    if (!response.ok) return null
+    const result = await response.json<{ ok?: boolean; result?: { username?: string } }>().catch(() => null)
+    const name = String(result?.result?.username || '').toLowerCase()
+    if (!result?.ok || !name) return null
+    ownBotNames.set(token, name)
+    return name
+  } catch {
+    return null
+  }
+}
+
+/** The one command that WRITES. The rest only read. */
+const WRITE_COMMANDS = new Set(['/settopic'])
+
+/**
+ * Is a command that names a bot (`/settopic@name`) addressed to THIS one? With
+ * privacy mode off every bot in the group receives `/settopic@other_bot`, and
+ * the name is what says whose it is (R-telegram E4, 27 Sep 2026: it used to be
+ * stripped whatever bot it named, so this bot ran another bot's /settopic).
+ * When getMe cannot tell us our own name, a read runs as it always did -- the
+ * chat is still allow-listed -- but a write does not run on a guess.
+ */
+async function addressedToThisBot(token: string, command: string, addressee: string): Promise<boolean> {
+  if (!addressee) return true
+  const own = await ownBotUsername(token)
+  return own ? addressee === own : !WRITE_COMMANDS.has(command)
+}
+
+export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, deps: TelegramWebhookDeps = {}): Promise<void> {
   const message = update?.message; const text = String(message?.text || '').trim(); const chatId = String(message?.chat?.id || '')
   if (!text.startsWith('/') || !chatId) return
   const config = await getTelegramConfig(env)
   // No token means there is no way to reply at all, so say nothing.
   if (commandProblem(config)) return
+  const { command, addressee } = parseTelegramCommand(text.split(/\s+/)[0])
+  // Another bot's command is not ours to answer -- not even with a refusal.
+  if (!(await addressedToThisBot(config.token, command, addressee))) return
   // A typed command replies IN THE TOPIC IT WAS ASKED FROM -- the reader is
   // already looking at that thread -- rather than the configured push topic,
   // which is for alerts nobody asked for. General chat carries no thread id,
@@ -1732,6 +2083,10 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
   // nothing but its own chat id -- never a figure, a receipt or a product.
   if (!config.chatIds.includes(chatId)) {
     await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId, threadId)
+    return
+  }
+  if (TOPIC_COMMANDS.has(command)) {
+    await postTelegram(config, await topicCommandReply(env, config, message as TelegramMessage, text, deps), chatId, threadId)
     return
   }
   await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId, threadId)
@@ -2244,7 +2599,9 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
     db.prepare('SELECT product_name, quantity FROM return_replacement_items WHERE return_id = @returnId ORDER BY id').all<{ product_name: string | null; quantity: number }>({ returnId }).catch(() => []),
   ])
   return sendTelegramEvent(env, {
-    type: base.kind === 'supplier' ? 'stock_out' : 'sales',
+    // A customer return is the `returns` family (its own switch and topic);
+    // it is NOT also sent as a sale. A supplier return stays a stock-out.
+    type: base.kind === 'supplier' ? 'stock_out' : 'returns',
     heading: base.kind === 'supplier' ? '📤 Supplier return recorded' : '↩️ Return recorded',
     lines: formatReturnTelegramLines({
       ...base,
@@ -2260,4 +2617,102 @@ export async function sendReturnTelegramEvent(env: Env, returnId: number, base: 
       replacements: replacements.map((row) => ({ product: row.product_name || 'Item', quantity: Number(row.quantity) || 0 })),
     }),
   })
+}
+
+// ---- Return cancelled / restored (owner, 27 Sep 2026) ----------------------
+// A return changes status only through the grouped Returns action
+// (routes/returns.ts POST /bulk, field `status`) and its undo/redo
+// (routes/actionHistory.ts). Both call this AFTER the write committed, inside
+// waitUntil, with the ids that actually changed; this reads each return's
+// status NOW, so an undo of a cancel reports a restore without the caller
+// having to work out the direction.
+
+export type TelegramReturnStatusRow = {
+  returnNumber: string; receiptNumber?: string | null; party?: string | null; branch?: string | null
+  refundUsd?: number | null; refundKhr?: number | null
+}
+
+/**
+ * One message for one group of returns that moved the same way. Pure, so the
+ * pure tests pin it. One return reads like the "Return recorded" alert; a
+ * group lists one row per return, capped like every other item list.
+ */
+export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'supplier'; returns: TelegramReturnStatusRow[]; by?: string | null; nowMs?: number }): string[] {
+  const code = input.kind === 'supplier' ? 'SRET' : 'RET'
+  const partyLabel = input.kind === 'supplier' ? 'Supplier' : 'Customer'
+  const lines: string[] = [`Date: ${formatBusinessDateTime(null, input.nowMs ?? Date.now())}`]
+  if (input.returns.length === 1) {
+    const ret = input.returns[0]
+    const hasMoney = (Number(ret.refundUsd) || 0) !== 0 || (Number(ret.refundKhr) || 0) !== 0
+    lines.push(
+      `${code}: ${ret.returnNumber}`,
+      ret.receiptNumber ? `INV: ${ret.receiptNumber}` : '',
+      ret.party ? `${partyLabel}: ${ret.party}` : '',
+      ret.branch ? `Branch: ${ret.branch}` : '',
+      input.kind === 'customer' && hasMoney ? `Refund: ${money(ret.refundUsd, ret.refundKhr)}` : '',
+    )
+  } else {
+    // No cap needed: a grouped Returns action holds at most RETURN_BULK_LIMIT
+    // (25) returns, and the sender below never passes more than that.
+    for (const ret of input.returns) {
+      const hasMoney = (Number(ret.refundUsd) || 0) !== 0 || (Number(ret.refundKhr) || 0) !== 0
+      lines.push(...telegramRowLines(`• ${cleanLine(ret.returnNumber, 40)}`, [
+        ret.receiptNumber ? cleanLine(ret.receiptNumber, 40) : '',
+        ret.party ? cleanLine(ret.party, 60) : '',
+        input.kind === 'customer' && hasMoney ? money(ret.refundUsd, ret.refundKhr) : '',
+      ].filter(Boolean)))
+    }
+  }
+  if (input.by) lines.push(`By: ${input.by}`)
+  return lines.filter(Boolean)
+}
+
+export const RETURN_STATUS_HEADINGS = {
+  customer: { cancelled: '🚫 Return cancelled', completed: '♻️ Return restored' },
+  supplier: { cancelled: '🚫 Supplier return cancelled', completed: '♻️ Supplier return restored' },
+} as const
+
+type ReturnStatusDbRow = {
+  id: number; return_number: string | null; status: string | null; return_scope: string | null
+  receipt_number: string | null; customer_name: string | null; supplier_name: string | null
+  branch_name: string | null; total_refund_usd: number | null; total_refund_khr: number | null
+}
+
+/**
+ * Announce returns whose status just changed. Customer returns go out as the
+ * `returns` family, supplier returns as `stock_out` -- the same families their
+ * "recorded" alerts use. Never throws: a failed alert must not fail the write
+ * it describes (callers still wrap it in waitUntil + catch, like every event).
+ */
+export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readonly number[], by: string | null): Promise<void> {
+  const ids = [...new Set(returnIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 25)
+  if (!ids.length) return
+  const rows = await getDb(env).prepare(`
+    SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
+      b.name AS branch_name, r.total_refund_usd, r.total_refund_khr
+    FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
+    WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
+  `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })
+  const groups = new Map<string, { kind: 'customer' | 'supplier'; status: 'cancelled' | 'completed'; returns: TelegramReturnStatusRow[] }>()
+  for (const row of rows) {
+    const kind = String(row.return_scope || 'customer').toLowerCase() === 'supplier' ? 'supplier' : 'customer'
+    const status = String(row.status || 'completed').toLowerCase() === 'cancelled' ? 'cancelled' : 'completed'
+    const key = `${kind}:${status}`
+    const group = groups.get(key) ?? { kind, status, returns: [] }
+    group.returns.push({
+      returnNumber: row.return_number || String(row.id),
+      receiptNumber: row.receipt_number,
+      party: kind === 'supplier' ? row.supplier_name : row.customer_name,
+      branch: row.branch_name,
+      refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr,
+    })
+    groups.set(key, group)
+  }
+  for (const group of groups.values()) {
+    await sendTelegramEvent(env, {
+      type: group.kind === 'supplier' ? 'stock_out' : 'returns',
+      heading: RETURN_STATUS_HEADINGS[group.kind][group.status],
+      lines: formatReturnStatusTelegramLines({ kind: group.kind, returns: group.returns, by }),
+    }).catch((error) => console.error('[telegram] return status notification failed', error))
+  }
 }

@@ -212,10 +212,13 @@ export type PlanLimits = {
   // higher ones. scripts/test-stock-in-commit-d1-budget-pure.cjs re-measures
   // these on every run.
   //
-  // Per-request overhead outside the loop, worst case (cold isolate):
-  //   ensureCoreDataInvariantsOnce fast path 8 + maintenance flag 1 +
+  // Healthy cold-isolate overhead outside the loop now measures:
+  //   ensureCoreDataInvariantsOnce projection 1 + maintenance flag 1 +
   //   session lookup 1 + session touch 1 + session slide 1 + receipt-table
-  //   probe 1 = 13.
+  //   probe 1 = 6. Keep the original 13-call allowance (measured when the
+  //   invariant fast path used 8 reads), retaining 7 calls of headroom and
+  //   the same line caps. Repair of unhealthy core data is outside this
+  //   healthy-start budget.
   //
   // Per-line budget 33: the worst line's STATEMENT count, which is also above
   // its call count with a 25% margin (24 x 1.25 = 30) -- so the cap holds

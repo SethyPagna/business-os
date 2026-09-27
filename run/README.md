@@ -3,6 +3,17 @@
 Business OS runs entirely on Cloudflare now - there is no local server to
 start or stop, and no Docker. This folder only holds:
 
+- `run\release.bat` - **the release menu, for releasing without Claude.**
+  Network check, choose a version (built in a clean `Worktrees\release`
+  folder), every test, login check, restore point + row counts, database
+  updates, publish, live checks, undo, the product-name export and the R2
+  steps. Every production step asks first, and every run writes a log to
+  `Records\Deploys\<date>-<commit>\`. Open **Windows Terminal from the Start
+  menu** and run it there, not from inside Claude or Chrome: those go through
+  the VPN, and Cloudflare blocks the VPN. `run\release.bat -DryRun` prints
+  every command without running any. Setup, click by click:
+  `..\docs\setup\release-setup-guide.md`. Details: `..\DEPLOY.md`,
+  "Release without Claude".
 - `run\full-automation.bat` - full release pipeline: typecheck, build the
   frontend, apply remote D1 migrations, sync secrets (`cloudflare\.dev.vars`
   -> Cloudflare, allowlisted keys only), `wrangler deploy`, then a live

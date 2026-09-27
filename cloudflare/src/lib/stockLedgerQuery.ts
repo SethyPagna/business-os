@@ -95,9 +95,39 @@ export function movementSignedQuantitySql(movement: string): string {
   return `CASE WHEN ${movement}.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(${movement}.quantity, 0)) ELSE ABS(COALESCE(${movement}.quantity, 0)) END`
 }
 
+// A movement's INSTANT, for ordering. inventory_movements.created_at is a mix
+// of 'YYYY-MM-DD HH:MM:SS' (CURRENT_TIMESTAMP writers) and ISO
+// 'YYYY-MM-DDTHH:MM:SS.sssZ' (writers that stamp from JS). As raw strings an
+// ISO row sorts AFTER every space-form row of the same day ('T' > ' '), so a
+// sale synced late with an earlier ISO stamp was walked as the NEWEST
+// movement. strftime normalises both (UTC, milliseconds kept); a value it
+// cannot parse falls back to the raw string rather than vanishing.
+export function movementInstantSql(movement: string): string {
+  return `COALESCE(strftime('%Y-%m-%d %H:%M:%f', ${movement}.created_at), ${movement}.created_at)`
+}
+
+// The raw-string floor that keeps a walk a RANGE SEEK on
+// idx_inventory_movements_product_created_pg while it compares instants: any
+// row whose instant is at or after this one's has a raw created_at at or
+// after the day BEFORE this one's UTC date, whichever format either row uses
+// (the day of slack covers a stamp written with a local offset). The precise
+// instant comparison then runs on the rows the seek returns.
+function movementSeekFloorSql(movement: string): string {
+  return `COALESCE(date(${movement}.created_at, '-1 day'), '')`
+}
+
+// The two legs of a branch transfer (transferOperation.ts writes them, and
+// their reversal on undo, in ONE batch: same timestamp, contiguous ids, and
+// the same product unless the stock lands on another product row). Owner,
+// 26 Sep: Shop retires into Warehouse through exactly these rows.
+const TRANSFER_LIST = `'transfer_out', 'transfer_in'`
+function transferLegSql(movement: string): string {
+  return `${movement}.movement_type IN (${TRANSFER_LIST})`
+}
+
 // after_qty: walk BACKWARD from the product's CURRENT stock (the one
 // authoritative number) through every movement NEWER than this row;
-// before_qty = after_qty - signed delta (attachBeforeQty below).
+// before_qty = after_qty - the row's total delta (attachBeforeQty below).
 // Movements store no before/after; deriving from current stock stays
 // consistent even where pre-migration history is a snapshot with no
 // movement rows -- the oldest derived "before" then reads as the
@@ -105,35 +135,78 @@ export function movementSignedQuantitySql(movement: string): string {
 // number, never a fabricated one. Correlated per row over
 // idx_inventory_movements_product_created_pg.
 //
-// ONE expression for every surface that shows a movement's before -> after
-// (the Stock Changes ledger and a stock-in session line), so the same
-// movement can never read two different balances on two screens.
+// "Newer" is by instant (movementInstantSql), then id. The legs of ONE
+// transfer are one event: the product's total never passes through a state
+// where the stock has left Shop but not reached Warehouse, so no leg of a
+// transfer is newer than another, and every leg reads the total before and
+// after the WHOLE transfer (movementTotalDeltaSql) -- unchanged for a transfer
+// between branches of one product row, moved for one that lands on another
+// row. The branch pair is still walked leg by leg (a leg really moves its
+// branch).
+//
+// ONE definition for every surface that shows a movement's before -> after
+// (the Stock Changes ledger and every record float), so the same movement
+// can never read two different balances on two screens; the set-based
+// MOVEMENT_STOCK_BALANCES_SQL below is pinned equal to it.
 export function movementStockAfterSql(movement: string, product: string): string {
   return `COALESCE(${product}.stock_quantity, 0) - COALESCE((
         SELECT SUM(${movementSignedQuantitySql('mn')})
         FROM inventory_movements mn
         WHERE mn.product_id = ${movement}.product_id
-          AND (mn.created_at > ${movement}.created_at OR (mn.created_at = ${movement}.created_at AND mn.id > ${movement}.id))
+          AND mn.created_at >= ${movementSeekFloorSql(movement)}
+          AND (${movementInstantSql('mn')} > ${movementInstantSql(movement)}
+            OR (${movementInstantSql('mn')} = ${movementInstantSql(movement)} AND mn.id > ${movement}.id
+              AND NOT (${transferLegSql('mn')} AND ${transferLegSql(movement)})))
       ), 0)`
+}
+
+/** What the movement did to the product's TOTAL: its own signed quantity, or for a transfer leg the net of every leg of that transfer on the product. */
+export function movementTotalDeltaSql(movement: string): string {
+  return `CASE WHEN ${transferLegSql(movement)} THEN COALESCE((
+        SELECT SUM(${movementSignedQuantitySql('mt')})
+        FROM inventory_movements mt
+        WHERE mt.product_id = ${movement}.product_id
+          AND mt.created_at >= ${movementSeekFloorSql(movement)}
+          AND mt.created_at < COALESCE(date(${movement}.created_at, '+2 day'), '9999')
+          AND ${transferLegSql('mt')}
+          AND ${movementInstantSql('mt')} = ${movementInstantSql(movement)}
+      ), 0) ELSE ${movementSignedQuantitySql(movement)} END`
 }
 
 /**
  * U-records: before/after for an arbitrary set of movement ids (a stock-in
- * session's received lines), SET-BASED -- one statement for any number of
- * lines, never one correlated walk per line.
+ * session's received lines, a Movements-tab record), SET-BASED -- one
+ * statement for any number of lines, never one correlated walk per line.
+ *
+ * Owner, 26 Sep: before/after shows BOTH numbers -- the movement's own
+ * branch first ("Shop 10 -> 7"), the total across branches under it
+ * ("Total 18 -> 15"). Both pairs come out of the SAME statement:
+ *
+ *   total  -- the product's current stock_quantity minus the sum of every
+ *             STRICTLY NEWER movement of the product, ordered exactly as
+ *             movementStockAfterSql defines "newer" (instant, then id; the
+ *             legs of one transfer are ONE event -- a GROUPS frame over
+ *             event_id -- so a transfer between branches reads the total
+ *             unchanged on both legs).
+ *             Identical to the Stock Changes ledger's correlated expression
+ *             (proved on the real migration chain by
+ *             scripts/test-stock-in-line-balance-pure.cjs).
+ *   branch -- the same walk partitioned by (product, branch), starting from
+ *             that branch's branch_stock row. When the movement has no
+ *             branch, the branch has no branch_stock row (nothing to start
+ *             from), or a NEWER movement of the product has no branch (its
+ *             branch cannot be walked back through), the branch pair is
+ *             null: the caller shows "—", never a guess.
  *
  * The ids travel as ONE bound JSON array (@movementIds via json_each), so the
  * statement never chunks against D1's bound-parameter cap. For the products
- * those movements touch, it reads each product's movements from the oldest
- * requested one onward (a range scan of
- * idx_inventory_movements_product_created_pg) and runs the backward walk as a
- * window: the sum of every STRICTLY NEWER movement, ordered exactly as
- * movementStockAfterSql defines "newer" -- created_at, then id. after_qty is
- * the product's current stock minus that sum, identical to the ledger's
- * correlated expression (proved on the real migration chain by
- * scripts/test-stock-in-line-balance-pure.cjs). Rows go through
- * attachBeforeQty like the ledger's. A movement with no product or no
- * timestamp is simply absent -- its caller shows "—", never a guess.
+ * those movements touch it range-reads each product's movements from the day
+ * before the oldest requested one onward (movementSeekFloorSql, over
+ * idx_inventory_movements_product_created_pg) -- rows older than a target
+ * never enter its newer-than sums, so the slack costs only reading;
+ * the branch_stock read is the unique (product_id, branch_id) index. The
+ * count of ACTIVE branches rides along so a caller can collapse to one line
+ * once the business runs a single branch -- derived from data, not a flag.
  */
 export const MOVEMENT_STOCK_BALANCES_SQL = `
     WITH target AS (
@@ -142,26 +215,53 @@ export const MOVEMENT_STOCK_BALANCES_SQL = `
       WHERE m.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@movementIds))
     ),
     scope AS (
-      SELECT product_id, MIN(created_at) AS since
+      SELECT product_id, MIN(${movementSeekFloorSql('target')}) AS since
       FROM target
       WHERE product_id IS NOT NULL AND created_at IS NOT NULL
       GROUP BY product_id
     ),
-    walk AS (
-      SELECT mn.id, mn.product_id,
+    span AS (
+      SELECT mn.id, mn.product_id, mn.branch_id,
              ${movementSignedQuantitySql('mn')} AS signed_quantity,
-             SUM(${movementSignedQuantitySql('mn')}) OVER (
-               PARTITION BY mn.product_id
-               ORDER BY mn.created_at DESC, mn.id DESC
-               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-             ) AS newer_sum
+             ${movementInstantSql('mn')} AS instant,
+             CASE WHEN ${transferLegSql('mn')} THEN 1 ELSE 0 END AS transfer_leg
       FROM scope s
       JOIN inventory_movements mn ON mn.product_id = s.product_id AND mn.created_at >= s.since
+    ),
+    event AS (
+      SELECT sp.*,
+             CASE WHEN transfer_leg = 1 THEN MIN(id) OVER (PARTITION BY product_id, instant, transfer_leg) ELSE id END AS event_id,
+             CASE WHEN transfer_leg = 1 THEN SUM(signed_quantity) OVER (PARTITION BY product_id, instant, transfer_leg) ELSE signed_quantity END AS total_delta
+      FROM span sp
+    ),
+    walk AS (
+      SELECT id, product_id, branch_id, signed_quantity, total_delta,
+             SUM(signed_quantity) OVER (
+               PARTITION BY product_id
+               ORDER BY instant DESC, event_id DESC
+               GROUPS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS newer_sum,
+             SUM(signed_quantity) OVER (
+               PARTITION BY product_id, branch_id
+               ORDER BY instant DESC, id DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS branch_newer_sum,
+             SUM(CASE WHEN branch_id IS NULL THEN 1 ELSE 0 END) OVER (
+               PARTITION BY product_id
+               ORDER BY instant DESC, id DESC
+               ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+             ) AS newer_unbranched
+      FROM event
     )
-    SELECT w.id, w.signed_quantity, COALESCE(p.stock_quantity, 0) - COALESCE(w.newer_sum, 0) AS after_qty
+    SELECT w.id, w.branch_id, w.signed_quantity, w.total_delta,
+           COALESCE(p.stock_quantity, 0) - COALESCE(w.newer_sum, 0) AS after_qty,
+           CASE WHEN w.branch_id IS NULL OR bs.quantity IS NULL OR COALESCE(w.newer_unbranched, 0) > 0 THEN NULL
+                ELSE bs.quantity - COALESCE(w.branch_newer_sum, 0) END AS branch_after_qty,
+           (SELECT COUNT(*) FROM branches b WHERE COALESCE(b.is_active, 1) = 1) AS active_branch_count
     FROM walk w
     JOIN target t ON t.id = w.id
-    LEFT JOIN products p ON p.id = w.product_id`
+    LEFT JOIN products p ON p.id = w.product_id
+    LEFT JOIN branch_stock bs ON bs.product_id = w.product_id AND bs.branch_id = w.branch_id`
 
 /** The minimal D1 surface loadMovementStockBalances needs (lib/db.ts's D1Compat satisfies it). */
 export type MovementBalanceDb = {
@@ -169,17 +269,55 @@ export type MovementBalanceDb = {
 }
 
 /**
- * Stock before -> after for each movement id, in ONE statement regardless of
- * how many ids (the stock-in session-lines route; its speed test counts the
- * prepares). Ids without a derivable balance are absent from the map.
+ * One movement's stock before -> after, twice. before_qty/after_qty are the
+ * TOTAL pair (the name every existing reader already uses); the branch pair
+ * is null when it cannot be walked back (see MOVEMENT_STOCK_BALANCES_SQL).
  */
-export async function loadMovementStockBalances(db: MovementBalanceDb, movementIds: readonly number[]): Promise<Map<number, { before_qty: number; after_qty: number }>> {
-  const balances = new Map<number, { before_qty: number; after_qty: number }>()
+export type MovementStockBalance = {
+  before_qty: number
+  after_qty: number
+  branch_before_qty: number | null
+  branch_after_qty: number | null
+}
+
+/** The wire shape of a balance: both pairs, the total pair twice (before_qty/after_qty stay for compatibility). */
+export function movementBalanceFields(balance: MovementStockBalance | undefined): Record<string, number | null> {
+  return {
+    before_qty: balance ? balance.before_qty : null,
+    after_qty: balance ? balance.after_qty : null,
+    total_before_qty: balance ? balance.before_qty : null,
+    total_after_qty: balance ? balance.after_qty : null,
+    branch_before_qty: balance ? balance.branch_before_qty : null,
+    branch_after_qty: balance ? balance.branch_after_qty : null,
+  }
+}
+
+/**
+ * Stock before -> after for each movement id, branch and total, in ONE
+ * statement regardless of how many ids (the session-lines route's speed test
+ * counts the prepares). Ids without a derivable balance are absent from the
+ * map; activeBranchCount is null when nothing was read.
+ */
+export async function loadMovementStockBalances(db: MovementBalanceDb, movementIds: readonly number[]): Promise<{ balances: Map<number, MovementStockBalance>; activeBranchCount: number | null }> {
+  const balances = new Map<number, MovementStockBalance>()
   const ids = [...new Set(movementIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
-  if (!ids.length) return balances
-  const rows = await db.prepare(MOVEMENT_STOCK_BALANCES_SQL).all<{ id: number; signed_quantity: number; after_qty: number }>({ movementIds: JSON.stringify(ids) })
-  for (const row of attachBeforeQty(rows)) balances.set(Number(row.id), { before_qty: row.before_qty, after_qty: Number(row.after_qty) })
-  return balances
+  if (!ids.length) return { balances, activeBranchCount: null }
+  const rows = await db.prepare(MOVEMENT_STOCK_BALANCES_SQL).all<{ id: number; signed_quantity: number; total_delta: number; after_qty: number; branch_after_qty: number | null; active_branch_count: number }>({ movementIds: JSON.stringify(ids) })
+  let activeBranchCount: number | null = null
+  for (const row of attachBeforeQty(rows)) {
+    // the total moves by the whole event (attachBeforeQty reads total_delta);
+    // the branch moves by this leg alone
+    const signed = Number(row.signed_quantity || 0)
+    const branchAfter = row.branch_after_qty == null ? null : Number(row.branch_after_qty)
+    balances.set(Number(row.id), {
+      before_qty: row.before_qty,
+      after_qty: Number(row.after_qty),
+      branch_before_qty: branchAfter == null ? null : branchAfter - signed,
+      branch_after_qty: branchAfter,
+    })
+    if (activeBranchCount == null && row.active_branch_count != null) activeBranchCount = Number(row.active_branch_count)
+  }
+  return { balances, activeBranchCount }
 }
 
 // One join clause, shared by every statement below so the row list, the
@@ -259,7 +397,55 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
     ${whereSql}
   `
 
+  // The page is ordered by INSTANT (movementInstantSql), then id -- the order
+  // the before/after walk uses -- so each row's "before" is the next older
+  // row's "after". The raw created_at string is not that order: it mixes
+  // 'YYYY-MM-DD HH:MM:SS' and ISO '...T...Z', and within one day every ISO
+  // row sorts after every space-form row ('T' > ' ').
+  //
+  // Sorting the whole filtered history by an expression would give up the
+  // ordered index walk that makes LIMIT/OFFSET cheap, so the page is found
+  // in two index steps instead. Both forms are UTC and share the UTC date as
+  // their first 10 characters, and raw strings order the DATES correctly --
+  // they disagree with the instant only WITHIN a day. So the rows on each
+  // date are the same in both orders, position for position:
+  //   raw_page    the page in raw order, an ordered walk of
+  //               idx_inventory_movements_created_pg -> its dates [lo, hi];
+  //   page        the rows dated lo..hi (a range seek), sorted by instant,
+  //               skipping those that precede the page: @offset minus the
+  //               rows dated after hi (a range count) -- rows dated after hi
+  //               precede the page in both orders.
+  // Only the page's rows then run the correlated walk below.
+  const windowWhere = (extra: string) => `WHERE ${[...whereClauses, extra].join(' AND ')}`
   const rowsSql = `
+    WITH raw_page AS (
+      SELECT m.created_at${LEDGER_FROM}
+      ${whereSql}
+      ORDER BY m.created_at DESC, m.id DESC
+      LIMIT @limit OFFSET @offset
+    ),
+    day_window AS (
+      SELECT MIN(substr(created_at, 1, 10)) AS lo, MAX(substr(created_at, 1, 10)) AS hi,
+             MAX(created_at IS NULL) AS has_null
+      FROM raw_page
+    ),
+    -- two arms, not one OR, so the date range stays a seek; a NULL
+    -- created_at (the column allows it) sorts last in both orders
+    page_rows AS (
+      SELECT m.id, ${movementInstantSql('m')} AS instant${LEDGER_FROM}
+      ${windowWhere(`m.created_at >= (SELECT lo FROM day_window) AND m.created_at < (SELECT hi FROM day_window) || '~'`)}
+      UNION ALL
+      SELECT m.id, NULL AS instant${LEDGER_FROM}
+      ${windowWhere(`m.created_at IS NULL AND (SELECT has_null FROM day_window) = 1`)}
+    ),
+    page AS (
+      SELECT id, instant FROM page_rows
+      ORDER BY instant DESC, id DESC
+      LIMIT @limit OFFSET MAX(0, @offset - (
+        SELECT COUNT(*)${LEDGER_FROM}
+        ${windowWhere(`m.created_at >= (SELECT CASE WHEN hi IS NULL THEN '' ELSE hi || '~' END FROM day_window)`)}
+      ))
+    )
     SELECT
       m.id, m.product_id, m.product_name, p.barcode, p.unit, p.brand, p.category, p.tag_label,
       m.branch_id, ${movementBranchNameSql('m')} AS branch_name, m.movement_type, ABS(COALESCE(m.quantity, 0)) AS quantity,
@@ -276,10 +462,13 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
        FROM inventory_movements mx
        WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
-      ${movementStockAfterSql('m', 'p')} AS after_qty${LEDGER_FROM}
-    ${whereSql}
-    ORDER BY m.created_at DESC, m.id DESC
-    LIMIT @limit OFFSET @offset
+      ${movementTotalDeltaSql('m')} AS total_delta,
+      ${movementStockAfterSql('m', 'p')} AS after_qty
+    FROM page pg
+    JOIN inventory_movements m ON m.id = pg.id
+    LEFT JOIN products p ON p.id = m.product_id
+    LEFT JOIN product_batches b ON b.id = m.batch_id
+    ORDER BY pg.instant DESC, m.id DESC
   `
 
   // Stats summary: one row carrying the In vs Out record counts and
@@ -301,11 +490,13 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
 }
 
 // before_qty derivation shared by the route and the test: one place owns
-// the "before = after - signed" arithmetic.
-export function attachBeforeQty<T extends { signed_quantity?: unknown; after_qty?: unknown }>(rows: T[]): Array<T & { before_qty: number }> {
+// the "before = after - delta" arithmetic. The delta is the row's effect on
+// the TOTAL (total_delta: for a transfer leg, its whole transfer) when the
+// query selected it, else the row's own signed quantity.
+export function attachBeforeQty<T extends { signed_quantity?: unknown; after_qty?: unknown; total_delta?: unknown }>(rows: T[]): Array<T & { before_qty: number }> {
   return (rows || []).map((row) => {
-    const signed = Number(row.signed_quantity || 0)
+    const delta = row.total_delta == null ? Number(row.signed_quantity || 0) : Number(row.total_delta)
     const after = Number(row.after_qty || 0)
-    return { ...row, before_qty: after - signed }
+    return { ...row, before_qty: after - delta }
   })
 }

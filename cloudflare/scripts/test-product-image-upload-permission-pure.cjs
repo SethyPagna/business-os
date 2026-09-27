@@ -93,7 +93,14 @@ function loadProductsRoute(state) {
       buildUniqueStoredName: () => 'product-test.png',
       sanitizeOriginalFileName: (name) => String(name || 'image'),
     },
-    '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
+    // The byte classifier itself is covered by test-upload-allowlist-pure.cjs
+    // and test-upload-image-writers-native.cjs; here it only has to report the
+    // server-detected format the route now stores (S-uploads).
+    '../lib/uploadSecurity': {
+      validateUploadedBuffer: () => ({ kind: 'image', mime: 'image/png', extension: '.png' }),
+      isPublicImageFormat: (format) => !!format && format.kind === 'image',
+      UNSUPPORTED_IMAGE_MESSAGE: 'This file type is not supported.',
+    },
     '../lib/imageAudit': {
       enqueueImageNormalization: async () => { state.normalizationCalls++ },
     },

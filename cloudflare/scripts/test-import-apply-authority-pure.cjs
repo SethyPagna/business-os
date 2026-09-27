@@ -243,6 +243,7 @@ async function main() {
     // queue.ts registers the inline fallback runner at module load; this
     // test drives the CONSUMER, so the registration just has to not throw.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
+    './lib/importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},
@@ -272,6 +273,7 @@ async function main() {
     './lib/importMaintenanceFence': { getImportFencedDb: async () => activeState.db, isImportMaintenanceFenceError: () => false },
     // Same registration-only stub as the permanent-failure queue above.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
+    './lib/importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},

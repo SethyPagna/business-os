@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns, isSecretShapedAuditKey } from '../lib/audit'
-import { hasPermission } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { firstChangedAdminOnlySettingKey } from '../lib/settingsAdminKeys'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
@@ -26,7 +27,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
-import { TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
+import { isTelegramTopicSettingValue, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -86,13 +87,22 @@ async function getSettingsValues(env: Env, keys: string[]): Promise<Record<strin
 
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const rows = await db.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>()
+  // One round trip for both reads (perf F5). The second statement is exactly
+  // getSettingsUpdatedAt()'s unscoped branch, including its fallback to now
+  // when the table has no timestamp.
+  const [rowsResult, updatedAtResult] = await db.batch([
+    { sql: 'SELECT key, value FROM settings' },
+    { sql: 'SELECT MAX(updated_at) AS updated_at FROM settings' },
+  ])
+  const rows = (rowsResult?.results ?? []) as Array<{ key: string; value: string }>
+  const updatedAt = (updatedAtResult?.results?.[0] as { updated_at: string | null } | undefined)?.updated_at
+    || new Date().toISOString()
   const map: Record<string, string> = {}
   for (const row of rows) map[row.key] = row.value
   // Secret-bearing keys (Drive OAuth tokens etc.) never leave the Worker --
   // see lib/settingsSensitive.ts. requireAuth alone is not enough here:
   // every logged-in cashier gets this map.
-  return c.json({ ...stripSensitiveSettings(map), updatedAt: await getSettingsUpdatedAt(c.env) })
+  return c.json({ ...stripSensitiveSettings(map), updatedAt })
 })
 
 // Real, confirmed bug (traced from a live user report of "Portal settings
@@ -129,8 +139,32 @@ app.get('/meta', async (c) => {
 // this port invented and which the real frontend never calls). Any key in
 // the body except expectedUpdatedAt/expected_updated_at/updatedAt is
 // treated as a setting to write.
-const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at'])
+const METADATA_KEYS = new Set(['expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at', 'clearKeys'])
 const DEDICATED_ENDPOINT_SETTING_KEYS = new Set([POS_ADDRESS_PRESETS_KEY.toLowerCase()])
+
+// The website assistant's prompt and provider (FX-sec2, refuter R-sec F2).
+// The public portal config never carries them, so an editor that had not
+// loaded them sent them back blank and wiped the stored prompt. A blank
+// (empty, whitespace or null) value for these keys is left as stored unless
+// the request names the key in `clearKeys`, its explicit clear list.
+const CLEAR_ONLY_ON_REQUEST_SETTING_KEYS = new Set(['customer_portal_ai_prompt', 'customer_portal_ai_provider_id'])
+
+// Drops each unrequested blank from the body and returns the dropped keys.
+function keepUnclearedBlankSettings(body: Record<string, unknown>): string[] {
+  const clearKeys = new Set(Array.isArray(body.clearKeys) ? body.clearKeys.filter((key) => typeof key === 'string') : [])
+  const kept: string[] = []
+  for (const key of Object.keys(body)) {
+    const raw = body[key]
+    if (!CLEAR_ONLY_ON_REQUEST_SETTING_KEYS.has(key) || (raw != null && (typeof raw !== 'string' || raw.trim() !== ''))) continue
+    if (clearKeys.has(key)) {
+      body[key] = ''
+    } else {
+      delete body[key]
+      kept.push(key)
+    }
+  }
+  return kept
+}
 
 function isDedicatedEndpointSettingKey(key: string): boolean {
   return DEDICATED_ENDPOINT_SETTING_KEYS.has(String(key || '').trim().toLowerCase())
@@ -908,8 +942,11 @@ function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<Record<string, unknown>>()
+  const keptAsStored = keepUnclearedBlankSettings(body)
   const attemptedKeys = Object.keys(body).filter((key) => !METADATA_KEYS.has(key))
   if (attemptedKeys.length === 0) {
+    // Only unrequested blanks were sent: nothing to write, nothing changed.
+    if (keptAsStored.length) return c.json({ updatedAt: await getSettingsUpdatedAt(c.env), keys: [] })
     return c.json({ error: 'No settings provided' }, 400)
   }
 
@@ -948,6 +985,23 @@ app.post('/', async (c) => {
         ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
         : 'You do not have permission to perform this action',
     }, 403)
+  }
+
+  // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
+  // need administrator control to CHANGE here. An unchanged value -- the
+  // Settings form resending what it loaded -- is a no-op and stays allowed.
+  if (!isAdminControlUser(user)) {
+    const storedAdminOnly = await getSettingsValues(c.env, attemptedKeys)
+    const changedAdminOnlyKey = firstChangedAdminOnlySettingKey(attemptedKeys, storedAdminOnly, (key) => {
+      const raw = body[key]
+      return typeof raw === 'string' ? raw : JSON.stringify(raw)
+    })
+    if (changedAdminOnlyKey) {
+      return c.json({
+        error: `Only an administrator can change "${changedAdminOnlyKey}".`,
+        code: 'admin_control_setting_required',
+      }, 403)
+    }
   }
 
   // Registered seller identity is displayed by the public portal only after
@@ -1007,7 +1061,8 @@ app.post('/', async (c) => {
   for (const key of TELEGRAM_TOPIC_KEYS) {
     if (!attemptedKeys.includes(key)) continue
     const raw = String(body[key] ?? '').trim()
-    if (raw !== '' && !/^\d+$/.test(raw)) {
+    // The one write rule, shared with the Telegram /settopic save.
+    if (!isTelegramTopicSettingValue(raw)) {
       return c.json({
         error: 'Telegram topic ID must be a whole number, or left empty for General.',
         code: 'invalid_telegram_topic_id',

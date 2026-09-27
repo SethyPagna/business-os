@@ -80,7 +80,11 @@ async function main() {
     db().exec(`UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=1;
       UPDATE product_batches SET unit_cost_usd=4 WHERE id=1;
       INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at) VALUES(3,1,'second','second','2026-09-02');
-      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(3,1,9);`)
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(3,1,9);
+      -- U-cost 0195 triggers re-derive the catalog cost from on-hand lots when the
+      -- stock row above lands (only lot 1 has a cost: 4). Re-stamp the fixture figure
+      -- so the check still proves the planning-time product fallback, not derivation.
+      UPDATE products SET cost_price_usd=12.5 WHERE id=1;`)
     const result=await h.request('branches','/transfer',h.intent(1,1,'multiple_cost_snapshot',false))
     assert.equal(result.status,200,JSON.stringify(result))
     assert.deepEqual(costs().map(fields),[[4,51000,4,51000],[12.5,51000,18.75,76500],[4,51000,4,51000],[12.5,51000,18.75,76500]])
@@ -92,7 +96,7 @@ async function main() {
     await check('cost changes between planning and commit reject atomically',async()=>{
       seed(1); h.beforeBatch(()=>db().exec(mutation))
       const result=await h.request('branches','/transfer',h.intent(1,1,'raced_cost_snapshot',false))
-      assert.equal(result.status,500,JSON.stringify(result))
+      assert.equal(result.status,409,JSON.stringify(result)); assert.equal(result.body.code,'transfer_stock_changed')
       assert.equal(costs().length,0)
       assert.equal(db().prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n,0)
       assert.equal(db().prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,10)

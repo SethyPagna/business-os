@@ -118,6 +118,7 @@ function collectRows(
   keyPrefix: string,
   labelPrefix: string,
   rows: AuditFieldDiffRow[],
+  labelFor: (key: string) => string,
 ): void {
   const keys = new Set<string>([...Object.keys(before || {}), ...Object.keys(after || {})])
   for (const key of keys) {
@@ -125,7 +126,7 @@ function collectRows(
     const beforeValue = before ? before[key] : undefined
     const afterValue = after ? after[key] : undefined
     const fullKey = keyPrefix ? `${keyPrefix}.${key}` : key
-    const label = labelPrefix ? `${labelPrefix} - ${formatAuditFieldLabel(key)}` : formatAuditFieldLabel(key)
+    const label = labelPrefix ? `${labelPrefix} - ${labelFor(key)}` : labelFor(key)
 
     // A nested object is its own set of fields, not one line of text.
     if (depth < MAX_NESTED_DEPTH && (isPlainRecord(beforeValue) || isPlainRecord(afterValue))) {
@@ -137,6 +138,7 @@ function collectRows(
         fullKey,
         label,
         rows,
+        labelFor,
       )
       continue
     }
@@ -170,14 +172,24 @@ function collectRows(
  *
  * Passing only a new side (a create, a legacy details payload, the `details`
  * column of any row) is a legitimate call: it yields context rows.
+ *
+ * `labelFor` names one key (each segment of a nested one). The Audit Log page
+ * passes the reader's pack through the records floats' field vocabulary
+ * (entityRecords.ts entityFieldLabel), so the page and a record's own history
+ * name a column with the same words; without it a label is the Title-Cased
+ * column, which is English in every pack.
  */
-export function buildAuditFieldDiff(oldValue: string | null | undefined, newValue: string | null | undefined): AuditFieldDiffRow[] {
+export function buildAuditFieldDiff(
+  oldValue: string | null | undefined,
+  newValue: string | null | undefined,
+  labelFor: (key: string) => string = formatAuditFieldLabel,
+): AuditFieldDiffRow[] {
   const before = safeParseRecord(oldValue)
   const after = safeParseRecord(newValue)
   if (!before && !after) return []
 
   const rows: AuditFieldDiffRow[] = []
   // No old side at all: there is nothing these values changed FROM.
-  collectRows(before, after, !before, 0, '', '', rows)
+  collectRows(before, after, !before, 0, '', '', rows, labelFor)
   return rows.sort((a, b) => a.label.localeCompare(b.label))
 }

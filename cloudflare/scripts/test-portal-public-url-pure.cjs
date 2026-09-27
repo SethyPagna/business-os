@@ -10,8 +10,9 @@
 // resolved config.publicUrl), not a deliberate external-domain choice.
 //
 // The fix: portalPublicUrl now DROPS a stored override whose host is one of
-// this shop's own DEPRECATED hosts (kept in sync with frontend/index.html's
-// redirect map) and falls back to the live env url -- while still honoring a
+// this shop's own DEPRECATED hosts (a permanent denylist: leangcosmetics.dpdns.org
+// was retired completely on Sep 26 2026, which is exactly why a stored override
+// naming it must keep being REJECTED, not honored) and falls back to the live env url -- while still honoring a
 // GENUINE external funnel domain (any host not on the deprecated list), so the
 // documented override feature is preserved.
 //

@@ -118,6 +118,8 @@ function loadPreviewRoute(adapter) {
     '../lib/productDetailRule': detailRule,
     '../lib/productMerge': productMerge,
     '../lib/sqlBinding': sqlBinding,
+    // U-cost: the preview reads each resumable keeper's derived on-hand cost.
+    '../lib/catalogCostRecompute': loadTs(path.join('lib', 'catalogCostRecompute.ts'), { './db': {} }),
     '../lib/undoAppliers': {
       registerMergeFold: () => {},
       registerProductMergeGroupRedo: () => {},

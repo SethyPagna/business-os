@@ -130,7 +130,10 @@ function loadMergeHandler(adapter) {
   const actor = loadTs('lib/actorSnapshot.ts')
   const permissions = loadTs('lib/permissions.ts')
   const never = () => { throw new Error('unrelated undo branch invoked') }
+  // U-cost: merge folds and their undo re-derive the keeper's catalog cost.
+  const catalogCost = loadTs('lib/catalogCostRecompute.ts', { './db': {} })
   const undo = loadTs('lib/undoAppliers.ts', {
+    './catalogCostRecompute': catalogCost,
     '../index': {}, './auth': {}, './db': { getDb: () => adapter }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': permissions, './actorSnapshot': actor,
@@ -150,6 +153,7 @@ function loadMergeHandler(adapter) {
     '../lib/productDetailRule': detail, '../lib/productIdentity': identity, '../lib/productMerge': economics,
     '../lib/productMergeSnapshot': snapshots,
     '../lib/undoAppliers': undo, '../lib/sqlBinding': sqlBinding, '../lib/actorSnapshot': actor, '../lib/permissions': permissions,
+    '../lib/catalogCostRecompute': catalogCost,
   }).default
   const route = app.routes.find((entry) => entry.method === 'POST' && entry.path === '/merge-duplicates')
   assert.ok(route, 'real merge route must be registered')

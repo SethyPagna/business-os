@@ -72,7 +72,8 @@ function setup() {
   const fixture = setup()
   const groups = await fixture.plan([row(1, 3, 2, 1), row(2, 5, 1, 2), row(3, 3, 1, 2)])
   await engine.runD1BatchGroupsInChunks(fixture.db, groups)
-  assert.deepEqual(fixture.sqlite.prepare('SELECT stock_quantity,cost_price_usd,cost_price_khr FROM products').get(), { stock_quantity: 4, cost_price_usd: 4, cost_price_khr: 400 })
+  assert.deepEqual(fixture.sqlite.prepare('SELECT stock_quantity,cost_price_usd,cost_price_khr FROM products').get(), { stock_quantity: 4, cost_price_usd: 3.5, cost_price_khr: 400 },
+    'U-cost weighted on-hand cost: 3 units @ 3 and 1 @ 5 -> (9 + 5) / 4 = 3.5 (the distinct mean said 4)')
   assert.deepEqual(fixture.sqlite.prepare('SELECT branch_id,quantity FROM branch_stock ORDER BY branch_id').all(), [{ branch_id: 1, quantity: 2 }, { branch_id: 2, quantity: 2 }])
   assert.equal(fixture.sqlite.prepare('SELECT SUM(quantity) total FROM branch_batch_stock').get().total, 4)
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get().n, 2)
@@ -84,7 +85,7 @@ function setup() {
   const baseline = fixture.sqlite.prepare('SELECT MAX(id) id FROM product_batches').get().id
   fixture.sqlite.prepare('INSERT INTO product_cost_entries VALUES(1,1,9,@baseline)').run({ baseline })
   await fixture.apply([row(4, 3)])
-  assert.equal(fixture.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 6)
+  assert.equal(fixture.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 7.8, 'U-cost weighted: the override prices the 4 units it covered, (4 x 9 + 1 x 3) / 5')
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n, 1)
 
   const unknown = setup()

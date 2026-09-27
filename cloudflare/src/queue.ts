@@ -24,6 +24,7 @@ import { continueCloudflareBackupAssetCopy, type BackupQueueMessage } from './li
 import { runQueuedDriveRestoreStage, runQueuedDriveSync, type DriveSyncQueueMessage } from './lib/driveSyncQueue'
 import { normalizeStoredImage } from './lib/imageAudit'
 import { registerInlineImportRunner, type ImportQueueMessage } from './lib/queueDispatch'
+import { purgeImportIncomingFiles } from './lib/importIncomingFiles'
 
 type ImportJobMessage = ImportQueueMessage
 type MediaJobMessage = { assetKey: string; kind: 'optimize-video' | 'optimize-image' }
@@ -165,6 +166,10 @@ export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobM
         // THIS call site is genuinely terminal: Cloudflare has already given
         // up on the message, nothing will resume it.
         await db.prepare(`UPDATE import_jobs SET finished_at = CURRENT_TIMESTAMP WHERE id = @id AND finished_at IS NULL`).run({ id: jobId }).catch(() => { /* best-effort -- markJobFailed's own write already recorded the failure */ })
+        // S-uploads: definitively failed, so the job's temporary CSV/ZIP
+        // goes now (lib/importIncomingFiles.ts; never throws except for
+        // the maintenance fence, which retries this message).
+        await purgeImportIncomingFiles(env, db, jobId)
       }
     } catch (error) {
       if (isImportMaintenanceFenceError(error)) {

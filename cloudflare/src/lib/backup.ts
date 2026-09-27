@@ -3,6 +3,7 @@ import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
+import { containsEmbeddedMarkup, detectOtherMedia, detectUploadFormat, otherMediaContentType, otherMediaLooksLikeText } from './uploadSecurity'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -1232,6 +1233,144 @@ function restoreDependencyError(schema: RestoreSchema, documentTables: ReadonlyS
     + 'No database rows have been changed; unbacked live history will not be discarded.'
 }
 
+// ------------------------------------------------- restored asset bytes
+// S-uploads2a fix 4 (2026-09-27). The restore writes a backup's asset copies
+// back under uploads/, the public prefix /uploads/* serves on the admin
+// origin, so it is one more writer of uploads/ and goes through the gate
+// every upload goes through (uploadSecurity.ts classifyUploadedBuffer; since
+// S-uploads3 also the stored-media detection the purge keeps by, below).
+// Before, it copied back whatever bytes a backup held under whatever type
+// they had been stored with: a PDF, a web page or a polyglot image from a
+// backup taken before the allowlist came straight back into uploads/, and
+// a stored text/html was replayed. Owner rules: storage holds only images
+// and videos, and nothing may be lost. Now, for each copied key:
+//   - an image or video the upload gate accepts is written back with the
+//     type detected from its bytes, never the stored one;
+//   - anything else is NEVER written under uploads/. Its bytes are copied
+//     unchanged, stored metadata included, to quarantine/<time>/<its key>
+//     (the owner-run purge's layout; /uploads/* cannot reach quarantine/)
+//     and listed in the report's withheldAssets with the reason and where
+//     the bytes are. If that copy fails they stay in the backup's folder,
+//     and the entry says so. A live file under that key is left alone.
+//   - the document names the folder and the keys, and a Drive restore
+//     stages the document from outside: only a backup asset folder
+//     (backups/cloudflare/<name>/assets/) is read, and only uploads/ keys
+//     are written.
+// S-uploads3 (2026-09-27): parity with the owner-run purge. The gate for NEW
+// uploads refuses HEIC, BMP, camera raw, MP4 brands off its list (Canon
+// `CAEP`, `mp21`) and audio, but a stored one is somebody's photo or clip:
+// the purge keeps it, /uploads/* serves the photos and videos among it, and
+// a restore used to withhold it as not-media. Now whatever the purge keeps as
+// other media (uploadSecurity.ts detectOtherMedia -- the purge's own code,
+// held token-identical by scripts/test-upload-classifier-parity-pure.cjs) is
+// written back under uploads/ with a plain media type for its format
+// (otherMediaContentType; octet-stream when there is none), never the stored
+// one. Text that merely starts like media (otherMediaLooksLikeText), which
+// the purge lists for review, is withheld as not-media. New uploads stay as
+// strict as before: this is only the restore's judgement of stored bytes.
+// A copy up to RESTORE_ASSET_SCAN_MAX_BYTES is read and checked whole, as an
+// upload is (the embedded-markup scan needs every byte; Library uploads are
+// at most 25 MB). A larger one is judged by its first bytes and streamed,
+// re-read pinned to the etag that was judged, so the bytes written are the
+// bytes checked and never all held in memory. Only a video is written back
+// that way, and another media format (judged by its first bytes, as the
+// purge judges a large file): no Library image is that large, and one that
+// is cannot be checked in memory, so it is withheld.
+export const RESTORE_ASSET_SCAN_MAX_BYTES = 32 * 1024 * 1024
+const RESTORE_ASSET_HEAD_BYTES = 64 * 1024
+const RESTORE_QUARANTINE_ROOT = 'quarantine/'
+
+export type WithheldAssetReason =
+  | 'not-media' // not an image or video the Library stores
+  | 'image-with-code' // an image carrying web-page or script code
+  | 'empty'
+  | 'too-large-to-check' // an image over RESTORE_ASSET_SCAN_MAX_BYTES
+  | 'outside-uploads' // the backup lists a key outside uploads/; not read
+  | 'outside-backup-folder' // the backup names a folder that is not a backup asset folder; not read
+
+// keptAt: where the bytes are now -- the quarantine copy, the backup's own
+// copy when the quarantine copy failed, or null when nothing was read.
+export type WithheldAsset = { key: string; reason: WithheldAssetReason; keptAt: string | null }
+
+type AssetRestoreOutcome =
+  | { kind: 'restored' }
+  | { kind: 'missing' }
+  | { kind: 'withheld'; reason: WithheldAssetReason; keptAt: string }
+
+function isBackupAssetsFolder(prefix: string): boolean {
+  return prefix.startsWith(CLOUDFLARE_BACKUP_PREFIX) && /^[^/]+\/assets\/$/.test(prefix.slice(CLOUDFLARE_BACKUP_PREFIX.length))
+}
+
+function isUploadsKey(key: unknown): key is string {
+  return typeof key === 'string' && key.startsWith('uploads/') && key.length > 'uploads/'.length
+}
+
+// Reads the first `size` bytes of a body into one buffer and cancels the rest.
+async function readAssetBytes(body: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
+  const bytes = new Uint8Array(size)
+  const reader = body.getReader()
+  let offset = 0
+  let ended = false
+  try {
+    while (offset < size) {
+      const next = await reader.read()
+      if (next.done) { ended = true; break }
+      const take = Math.min(next.value.byteLength, size - offset)
+      bytes.set(next.value.subarray(0, take), offset)
+      offset += take
+    }
+  } finally {
+    if (!ended) await reader.cancel().catch(() => {})
+  }
+  if (offset !== size) throw new Error('Backed-up asset ended early.')
+  return bytes
+}
+
+// `whole` false: `bytes` are only the start of a copy too large to check;
+// `size` is the copy's full size.
+export function judgeRestoredAsset(bytes: Uint8Array, whole: boolean, size: number = bytes.length): { contentType: string } | { reason: WithheldAssetReason } {
+  if (whole && bytes.length === 0) return { reason: 'empty' }
+  const format = detectUploadFormat(bytes)
+  if (format) {
+    if (format.kind === 'video') return { contentType: format.mime }
+    if (!whole) return { reason: 'too-large-to-check' }
+    return containsEmbeddedMarkup(bytes) ? { reason: 'image-with-code' } : { contentType: format.mime }
+  }
+  const other = detectOtherMedia(bytes, size)
+  if (other && !otherMediaLooksLikeText(other, bytes, whole)) return { contentType: otherMediaContentType(other) }
+  return { reason: 'not-media' }
+}
+
+async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: string, quarantinePrefix: string): Promise<AssetRestoreOutcome> {
+  const object = await env.ASSETS.get(backedUpKey)
+  if (!object || !object.body) return { kind: 'missing' }
+  const whole = object.size <= RESTORE_ASSET_SCAN_MAX_BYTES
+  const bytes = await readAssetBytes(object.body, whole ? object.size : RESTORE_ASSET_HEAD_BYTES)
+  const verdict = judgeRestoredAsset(bytes, whole, object.size)
+  // What is written: the bytes checked, or the same object streamed again
+  // (null when it changed or went away since).
+  const content = async (): Promise<Uint8Array | ReadableStream | null> => {
+    if (whole) return bytes
+    const again = await env.ASSETS.get(backedUpKey, { onlyIf: { etagMatches: object.etag } })
+    return again && 'body' in again && again.body ? again.body : null
+  }
+  if ('contentType' in verdict) {
+    const data = await content()
+    if (!data) return { kind: 'missing' }
+    await env.ASSETS.put(originalKey, data, { httpMetadata: { contentType: verdict.contentType } })
+    return { kind: 'restored' }
+  }
+  const quarantineKey = `${quarantinePrefix}${originalKey}`
+  try {
+    const data = await content()
+    if (!data) return { kind: 'withheld', reason: verdict.reason, keptAt: backedUpKey }
+    await env.ASSETS.put(quarantineKey, data, { httpMetadata: object.httpMetadata, customMetadata: object.customMetadata })
+    return { kind: 'withheld', reason: verdict.reason, keptAt: quarantineKey }
+  } catch (_) {
+    return { kind: 'withheld', reason: verdict.reason, keptAt: backedUpKey }
+  }
+}
+
 export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
 
@@ -1410,20 +1549,30 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     // see createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap). A backup
     // taken before the asset-copy work, or one whose catalog exceeded the cap,
     // may have copiedKeys missing/incomplete; restoredAssets/missingAssets makes
-    // that visible instead of silently claiming every image came back.
+    // that visible instead of silently claiming every image came back. Each
+    // copy passes the upload gate first; what does not is withheld (see
+    // RESTORE_ASSET_SCAN_MAX_BYTES above).
     const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
     const lifecycle = await getCloudflareBackupState(env, backupName)
     const copiedKeys = lifecycle?.copiedKeys || r2Meta?.copiedKeys || []
     const assetsPrefix = lifecycle?.assetsPrefix || r2Meta?.assetsPrefix
     let restoredAssets = 0
     const missingAssets: string[] = []
+    const withheldAssets: WithheldAsset[] = []
     if (assetsPrefix) {
+      const folderIsBackup = isBackupAssetsFolder(assetsPrefix)
+      const quarantinePrefix = `${RESTORE_QUARANTINE_ROOT}${new Date().toISOString().replace(/[:.]/g, '-')}/`
       for (const originalKey of copiedKeys) {
+        if (!folderIsBackup || !isUploadsKey(originalKey)) {
+          withheldAssets.push({ key: String(originalKey), reason: folderIsBackup ? 'outside-uploads' : 'outside-backup-folder', keptAt: null })
+          continue
+        }
         try {
           const backedUpKey = `${assetsPrefix}${originalKey.replace(/^uploads\//, '')}`
-          const ok = await copyObject(env.ASSETS, backedUpKey, originalKey)
-          if (ok) restoredAssets += 1
-          else missingAssets.push(originalKey)
+          const outcome = await restoreBackedUpAsset(env, backedUpKey, originalKey, quarantinePrefix)
+          if (outcome.kind === 'restored') restoredAssets += 1
+          else if (outcome.kind === 'missing') missingAssets.push(originalKey)
+          else withheldAssets.push({ key: originalKey, reason: outcome.reason, keptAt: outcome.keptAt })
         } catch (_) {
           missingAssets.push(originalKey)
         }
@@ -1439,6 +1588,8 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       restoredAssets,
       assetsNotRestored: (lifecycle?.assets?.length || r2Meta?.assets?.length || 0) - restoredAssets,
       missingAssets: missingAssets.length ? missingAssets : undefined,
+      // New (S-uploads2a): copies not written back under uploads/.
+      withheldAssets: withheldAssets.length ? withheldAssets : undefined,
       schemaMigration: backupMigration,
       schemaMismatch: schemaMismatch || undefined,
       tablesNotInBackup: tablesNotInBackup.length ? tablesNotInBackup : undefined,

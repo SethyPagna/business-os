@@ -36,7 +36,7 @@ import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
-import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
+import { applyDatedStockCountPlan, DatedStockCountConflictError } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -54,7 +54,7 @@ import {
 } from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { planTransferOperation, TransferConflictError } from '../lib/transferOperation'
+import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -1067,9 +1067,11 @@ app.get('/movements', async (c) => {
 app.get('/movements/:id/balance', async (c) => {
   const id = Number.parseInt(String(c.req.param('id') || ''), 10)
   if (!Number.isSafeInteger(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
-  const { loadMovementStockBalances } = await import('../lib/stockLedgerQuery')
-  const balance = (await loadMovementStockBalances(getDb(c.env), [id])).get(id)
-  return c.json({ id, before_qty: balance ? balance.before_qty : null, after_qty: balance ? balance.after_qty : null })
+  const { loadMovementStockBalances, movementBalanceFields } = await import('../lib/stockLedgerQuery')
+  // Owner, 26 Sep: the branch pair and the total pair (before_qty/after_qty
+  // stay the total, for compatibility), plus the active-branch count.
+  const { balances, activeBranchCount } = await loadMovementStockBalances(getDb(c.env), [id])
+  return c.json({ id, ...movementBalanceFields(balances.get(id)), active_branch_count: activeBranchCount })
 })
 
 // ---- Reasons (saved as JSON in settings, matching the Docker backend) ----
@@ -2398,7 +2400,16 @@ app.post('/dated-stock-count/apply', async (c) => {
   const built = await buildDatedStockCountPlan(db, parsed.entries)
   if ('error' in built) return c.json({ success: false, error: built.error }, built.status)
 
-  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+  // One atomic batch (lib/datedStockCountApply.ts): a conflict means the
+  // prior-run history changed between plan and write -- e.g. a double
+  // submit -- and nothing was applied.
+  let result: Awaited<ReturnType<typeof applyDatedStockCountPlan>>
+  try {
+    result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+  } catch (error) {
+    if (error instanceof DatedStockCountConflictError) return c.json({ success: false, error: error.message, code: 'dated_stock_count_conflict' }, 409)
+    throw error
+  }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_import', 'inventory', null, {
     entryCount: parsed.entries.length,
@@ -2472,9 +2483,9 @@ app.post('/transfer', async (c) => {
     return c.json({ ...(transferReceiptResponse(previousReceipt) as Record<string, unknown>), replayed: true })
   }
   const product = await db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId })
-  if (!product) return c.json({ error: 'Product not found' }, 404)
+  if (!product) return c.json({ error: 'Product not found', code: 'transfer_product_missing' }, 404)
   const available = await branchStockQty(c.env, productId, fromBranchId)
-  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch' }, 400)
+  if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
   const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
@@ -2503,7 +2514,7 @@ app.post('/transfer', async (c) => {
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
-  if (directionError) return c.json({ error: directionError }, 400)
+  if (directionError) return c.json({ error: directionError, code: 'transfer_direction_invalid' }, 400)
 
   // The provenance planner alone allocates FIFO lots and untracked stock,
   // guards their preimages, and builds the atomic ledger/movement/undo batch.
@@ -2522,7 +2533,6 @@ app.post('/transfer', async (c) => {
     allocationSummaries = planned
     await ordinaryBusinessBatch(db, statements)
   } catch (error) {
-    if (error instanceof TransferConflictError) return c.json({ error: error.message, code: 'stock_conflict' }, 409)
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
@@ -2530,6 +2540,9 @@ app.post('/transfer', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    // Planner refusals and the batch's own guards: a 4xx, never a 500.
+    const refusal = transferRefusal(error)
+    if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
@@ -2684,7 +2697,7 @@ app.post('/movements/:id/revert', async (c) => {
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
   const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
-  if (!result.ok) return c.json({ error: result.error }, result.status)
+  if (!result.ok) return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,

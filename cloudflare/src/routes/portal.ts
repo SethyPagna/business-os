@@ -190,9 +190,12 @@ export async function loadSettingsMap(env: Env): Promise<SettingsMap> {
   return map
 }
 
-// Hostnames this shop has since migrated AWAY from -- kept in sync with the
-// old-domain redirect map in frontend/index.html (redirectHosts, Aug 28 2026
-// rebrand LeangCosmetics -> LeangBeauty). A stored customer_portal_public_url
+// Hostnames this shop has since migrated AWAY from (Aug 28 2026 rebrand
+// LeangCosmetics -> LeangBeauty; leangcosmetics.dpdns.org retired completely
+// Sep 26 2026 -- no route serves it any more). This is a DENYLIST, not an
+// allowlist: removing a retired host from it would make a stale stored
+// override pointing at a dead domain be honored again, so retired hosts stay
+// here permanently. A stored customer_portal_public_url
 // that still points at one of these is stale: it was almost always FROZEN
 // there by the portal editor round-tripping the then-current RESOLVED url back
 // into the setting (CatalogPage.tsx prefills the override input with
@@ -807,11 +810,23 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
   return `portal-query-v1:${productsVersion}:${settingsVersion}:${stockVersion}`
 }
 
+// The anonymous storefront's view of the config (FX-sec, 27 Sep 2026).
+// buildPortalConfig() also carries two INTERNAL AI settings the server needs
+// -- aiPrompt (the merchant's private system instructions, forwarded into the
+// model prompt by lib/portalAi.ts) and aiProviderId (which
+// ai_provider_configs row backs the chat). No visitor feature reads either,
+// and /config + /bootstrap used to publish both to anyone. The website
+// editor reads them from the staff settings map (GET /api/settings) instead.
+export function buildPublicPortalConfig(settings: SettingsMap, env: Env) {
+  const { aiPrompt: _aiPrompt, aiProviderId: _aiProviderId, ...publicConfig } = buildPortalConfig(settings, env)
+  return publicConfig
+}
+
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    return buildPortalConfig(settings, c.env)
+    return buildPublicPortalConfig(settings, c.env)
   }))
 })
 
@@ -819,7 +834,7 @@ app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    const config = buildPortalConfig(settings, c.env)
+    const config = buildPublicPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
       buildPortalMeta(c.env, showOutOfStockProducts),

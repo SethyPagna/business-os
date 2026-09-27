@@ -10,6 +10,10 @@ decisions, environment notes, and the live backlog.
 
 Entries are chronological, oldest first. Newest work is at the **bottom**.
 
+**Matching `progress.md` (from Part 633).** Each Part header names the progress IDs it moved, and ends with an
+"IDs" line using the same marks: `[x]` done · `[~]` in progress · `[ ]` not started · `[!]` blocked. Example:
+`IDs: U-db [x] · U-cost [~] · Q15 [ ]`. The matching progress.md item points back with "→ Part N".
+
 ## Known numbering collisions
 
 Two Part numbers were used twice, because those sessions did not check the highest
@@ -20491,3 +20495,61 @@ conflict / Records / stock-in edit asks N1-N6.
 - the deploy (owner's machine);
 - the branch deletions;
 - the Windows unpushed-work check.
+
+## Part 633 (26 Sep 2026, coordinator) — CP-1 and the transfer fix deployed through GitHub Actions; the uploads purge refuted before it ever ran
+
+**Ask:** deploy, with approvals delegated ("i want you to just do it without my need to approve it. i give permission"); fix the client's transfer bug; fix everything else while Shop → Store stays paused.
+
+**IDs moved:** CP-1 [x] · CP-1b [x] · CP-1c [~] (new) · CP-2 [~] · U-transfer [x] · K-deploykit [x] · S-auth certified · U-records2 certified · S-uploads [!] refuted → S-uploads2a/2b [~] · U-profile [~] refuting → U-profile2 [~] · U-transfer2 [~] (new)
+
+**What changed:**
+- Deploy kit (`c64eced5`): the safety snapshot counted rows with one UNION ALL term per table, and D1 caps compound SELECTs, so run 36227772137 stopped there. It now reads one row of scalar sub-counts. The rollback target is the Worker version id, not the deployment id. Row counts no longer reach the public Actions log.
+- CP-1 + CP-1b deployed from `main` = `claude/urgent-20260925` = `c64eced5` (run 36237752796): 0196 and 0197 applied, key-table counts unchanged, `/api/runtime/version` reports `c64eced5c231`, `Cf-Placement: remote-SIN`.
+- S-auth `5d1db8e0` (not deployed yet): a wrong password on self 2FA disable answered 401, which signs the app out, and was not rate limited. It now answers 400 and spends the self re-auth allowance. Admin 2FA recovery with a wrong password answers 400.
+
+**Found:**
+- The uploads purge script (`7437b308`) would have deleted real photos and videos stored under old names (`.jfif`, `.jpe`, `.bin`, no extension, `.m4v`, some `.mov`). It never ran. It is being rebuilt to judge by file contents, keep every photo and video, and move the rest into a recoverable quarantine instead of deleting.
+- K3's serving change would have stopped serving those legacy photos, and videos had no byte-range support (needed for iPhone playback).
+- Transfers still fail for any product whose lots add up to more than its branch stock: the Worker guard checks untracked stock even when none is needed. A saved draft plus a failed lot load dead-ends.
+- GitHub's runner is shown the site's bot challenge, so the kit skips its own live read in CI; the live version was read from outside instead.
+
+**Verified:** individual sweep at `c64eced5`, 1,107 files (2 load flakes green alone); CI gates green; live version and placement read after the deploy.
+
+**Not done:** CP-1c, CP-2, CP-3; R2 move, official-names Excel and cost audit (U-ops running); Shop → Store paused by the owner.
+
+## Part 634 (27 Sep 2026, coordinator) — CP-1c deployed; owner delegates ops runs and the cost repair; refuters split the next checkpoint
+
+- Owner (27 Sep): standing permission for ops runs, the R2 move, the 0200 cost repair and product rulings; dpdns left as is; no action on stray token copies. Permanent deletion and Shop→Store stay out.
+- CP-1c `c35af63b` (main 8a5e2720 + U-transfer2) certified by R-transfer2 and deployed via GitHub Actions run 36271249835; live `/api/runtime/version` revision `c35af63bb491` on both hosts. Closes the over-lotted transfer 500 and the draft + failed lot dead end.
+- R-transfer2 F1 (older bug): a definitively refused saved transfer run keeps the form disabled forever → U-transfer3 (Edit / Discard). F2 tolerance test gap → same lane.
+- CP-2 integration `claude/cp2-20260927`: S-uploads2a (8f241cbd), S-uploads2b (0d749358), U-cost (90cffc6f; 0195 in migrations, 0200 held).
+- R-uploads2: certified with exceptions — legacy videos under odd names 404 (breaks the serve-by-bytes ruling), pending imports reaped at 20 min (ruling 24 h), backup restore withholds HEIC/BMP/CAEP/mp21, event-handler markup passes the gate → S-uploads3; avatar fallback + Library CSP → U-profile3.
+- R-cost: 0195 and the typed-cost writers confirmed; the held 0200 repair is correct where it acts (dry run on local D1, rollback exact, idempotent) but misses sale-linked returns without sale_item_id, walk-in returns, lines whose lots were edited/merged, and the deploy window → U-cost2.
+- R-cp3: U-broadcast and U-confirm certified, U-sync certified with exceptions, U-print not certified on Q13 → U-print2 (owner rule: never print a placeholder; the ABA QR waits and is omitted only on a load error).
+- U-ops finished (ops.yml, encrypted exports, R2 copy Worker) → U-ops2 integrates it on main with a top-up mode (no upload freeze), secret status encrypted, ordinal confirm words.
+
+## Part 635 (27 Sep 2026, coordinator) — R2 moved to APAC; deep audit revises the data plan; CP-2 and CP-1d assembled
+
+- R2: copy + verify-only identical (2,900 objects, 1.45 GB). Pre-switch fix d59871e2: the image-audit sweep kept an R2 list cursor in KV that the new bucket may refuse, and clearing it only on success would have failed the sweep forever; a refused cursor is now dropped (discriminating test). Main 0ecf871d deployed (run 36283563411), both hosts on 0ecf871d90cb; storefront images 200 with a cache-busting query. Top-up 36285297729: 964 objects copied, all one backup set written by the old 07:00 cron; no uploads/ change missed. Old EEUR bucket untouched.
+- Deep audit (read-only, four reviewers) → C3v3 revision: the tables are sound; the waste is round trips and unused work. Biggest items: a leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded), sale create ~18–20 D1 trips, the report reader reading everything twice, OFFSET-paged backups in trading hours, `action_history` retention that may fail silently on referenced rows. Corrected: revisions and receipts must never be pruned; only undo snapshots and operation receipts are truly unbounded.
+- Lanes finished: U-cost2 (0200 now covers returns, the deploy window, merged/edited lots; oracle test; still held), S-uploads3 (six refuter findings), U-profile3 (profile findings + avatar fallback + Library CSP), U-transfer3 (refused saved transfer can be edited or discarded; F2 mutant test). A0 stopped at a usage limit.
+- CP-2 candidate `4ef22cb4` = CP-2 lanes + S-uploads3 + U-profile3 + U-cost2 + main 0ecf871d (keeps the APAC binding): cf tsc, fe typecheck, i18n, build green; 590 cf files with 2 load flakes green alone. Refuter running. CP-1d candidate `4e8cff9e` = main + U-transfer3; refuter running.
+- Official names: batches 01–04 researched (489 of 800 confirmed); the session web-search budget ran out; owner rulings recorded (duplicates keep the name as a conflict; space/case-only fixes rename; real naming differences keep the shop name).
+
+## Part 636 (27 Sep 2026, coordinator) — CP-2 live; AI council; full bug hunt; Telegram topics diagnosed
+
+- CP-2 `c5b28762` deployed (run 36292174516); both hosts report c5b287626f79. Smoke: admin + storefront 200, portal catalog 200, unauthenticated sale create 401, /uploads served with CSP sandbox + nosniff and Range → 206 (stored-XSS fix and video seeking now live).
+- AI council (three read-only members) revised C3v3 into C3v4: two plan items would have corrupted data as written (expiring undo snapshots deletes merge lineage; narrowing the product revision trigger breaks stock-session undo) and were corrected; receipt-number duplicates found (lane U-receipt); thumbnails moved up; D1 wall-clock probe added to A0.
+- Bug hunt BH-1 vs production: stock (dated count re-apply doubles stock; returns over-restore, edit-after-cancel, supplier received inflation, wrong-lot release; revert race), money (legacy refund price client-controlled), I/O (a receipt table missing from backups; Telegram vs in-app shift delivery split), platform (branch undo clobbers later edits), security (several hardening items; details kept in local Records until fixed), UI (Khmer gaps on POS/Sales; 42 native confirm dialogs). Fix lanes dispatched per file set; forensics lane classifies past-record impact and staff compensation before any repair.
+- Telegram topics: routing has been live since f0a34b3b, but production stores no topic ids (read-only ops runs 36294369300), so everything went to General. Owner supplied the topic ids (local Records); writing them needs a guarded ops settings task. Returns has no Telegram family yet (FX-telegram adds it + /settopic).
+- Owner credential follow-up recorded locally; a forced-change guard for known-leaked passwords is queued in S-auth4.
+- Debloat: 927 dead i18n keys (~160 KB), two dead frontend files; all dependencies used.
+- A usage limit stopped every agent at ~05:0xZ; resume state recorded in Records/Recovery/LANES.md.
+
+## Part 637 (28 Sep 2026, coordinator) — account switch recovered; CP-3a-1 live; CP-3a-2 composed
+
+- The previous account's lead and all of its agents stopped at ~00:37 local mid-work (subscription access error). Nothing was lost: lane worktrees, the 30-minute snapshots and the lane logs held everything. The lead resumed from the local handoff on the other account and restarted fresh agents in the same worktrees.
+- CP-3a-1 gate (run 36333054730) was red on one test: U-transfer3 added a refusal code to the three transfer-direction guards while `test-selling-branch-guard-pure.cjs` still pinned the old line. Behaviour was correct; the assertions now require the code (`5654fc71`, mutant-checked). Lesson: a lane refuter that runs only the lane's own tests misses a sibling source-shape test; the full sweep on GitHub caught it.
+- CP-3a-1 `39be7c38` = U-receipt + U-transfer3: gate 36336810696 all green; integration refuter certified with low exceptions (a Khmer till sees the receipt-number conflict in English; a lost race is retried once). Deploy run 36338734993 after the trading check showed no open shift; live revision 39be7c3885e2; row counts unchanged; signed-out smoke: protected API 401, storefront and portal config 200.
+- Since: FX-undo `b11b80d7` and FX-telegram `bad62678` certified with exceptions (forum topics + returns family; one Expenses split on /shift, /report and the overview for branch-tagged fees; no double announcements; commands addressed to another bot ignored). FX-returns2 `848eb292` (returns refusals coded in en/km), FX-sec2 `22a4f643` (users-route harnesses load the real password policy) and FX-stock3 `8b8d6f44` (a dated count re-apply keeps lots equal to branch stock; a revert refuses a movement a re-apply deleted) finished; their refuters are running.
+- CP-3a-2 composed as `64892378` (six lanes, no textual conflict, migrations 0201–0203, +41 keys in both packs); gate running. Owner questions carried: which "actual delivery cost" definition the in-app Reports hub should use when delivery-typed fees exist; fees without a branch in the Telegram overview.

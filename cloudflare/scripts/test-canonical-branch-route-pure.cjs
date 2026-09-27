@@ -407,7 +407,10 @@ async function main() {
     const result = await request('POST', '/transfer', {
       transfer_provenance_version: 1, productId: 10, fromBranchId: 2, toBranchId: 1, quantity: 2, reason: 'restock shop', client_request_id: 'transfer-interposed',
     })
-    assert.equal(result.status, 500)
+    // The in-batch authority guard shares the NOT NULL sentinel: a 409 the
+    // client can act on (its retry then meets the route's own 409 above).
+    assert.equal(result.status, 409, JSON.stringify(result.json))
+    assert.equal(result.json.code, 'transfer_stock_changed')
     assert.equal(sqlite.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=2').get().quantity, 5)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM branch_stock WHERE product_id=10 AND branch_id=1').get().total, 0)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS total FROM stock_transfers').get().total, 0)

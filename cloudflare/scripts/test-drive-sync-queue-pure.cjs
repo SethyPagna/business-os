@@ -13,6 +13,9 @@ const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
 const jobs = new Map()
 let driveResult = { success: true, fileId: 'drive-1', fileName: 'backup.json' }
 let stageResult = { success: true, backupKey: 'backups/cloudflare/drive-staged-file.json', manifestOnly: true }
+let authorityResult = { allowed: true, userId: 1 }
+let pushes = 0
+const recordedErrors = []
 const stubs = {
   './backup': {
     getSystemJob: async (_env, id) => jobs.get(id) || null,
@@ -23,9 +26,12 @@ const stubs = {
     },
   },
   './googleDrive': {
-    pushBackupToDrive: async () => driveResult,
+    pushBackupToDrive: async () => { pushes += 1; return driveResult },
     stageLatestDriveBackupToR2: async () => stageResult,
+    recordDriveSyncError: async (_env, message) => { recordedErrors.push(message) },
   },
+  // P1-2: the worker re-checks the connector's authoriser before every push.
+  './driveSyncAuthority': { checkDriveSyncAuthorizer: async () => authorityResult },
 }
 
 const originalLoad = Module._load
@@ -87,6 +93,20 @@ async function main() {
   )
   assert.strictEqual(jobs.get(failedJob.id).status, 'failed')
   assert.strictEqual(jobs.get(failedJob.id).error, 'temporary Drive outage')
+
+  // An authoriser who lost the grants (or never was recorded) stops the
+  // upload before any byte leaves: terminal failure, no retry, no push.
+  driveResult = { success: true, fileId: 'drive-2', fileName: 'backup.json' }
+  authorityResult = { allowed: false, reason: 'authorizer-lacks-grants', message: 'Google Drive sync is paused: reconnect.' }
+  const refusedJob = await moduleObj.exports.enqueueDriveSyncJob(env, 'scheduled')
+  const pushesBefore = pushes
+  await moduleObj.exports.runQueuedDriveSync(env, refusedJob.id)
+  assert.strictEqual(pushes, pushesBefore, 'a refused authoriser must not reach pushBackupToDrive')
+  assert.strictEqual(jobs.get(refusedJob.id).status, 'failed')
+  assert.strictEqual(jobs.get(refusedJob.id).error, 'Google Drive sync is paused: reconnect.')
+  assert.deepStrictEqual(recordedErrors, ['Google Drive sync is paused: reconnect.'])
+  assert.strictEqual(cache.has('system-active:google-drive-sync'), false, 'a refusal releases the lock too')
+  authorityResult = { allowed: true, userId: 1 }
 
   await assert.rejects(
     () => moduleObj.exports.enqueueDriveSyncJob({ CACHE: env.CACHE }, 'manual'),

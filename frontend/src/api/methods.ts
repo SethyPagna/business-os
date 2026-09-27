@@ -990,6 +990,14 @@ export const updateUserProfile = async (id, d) => {
   const { updateUserProfile: updateUserProfileRequest } = await loadUserAdminTransport()
   return updateUserProfileRequest(id, d)
 }
+export const setUserAvatar = async (id, avatarPath) => {
+  const { setUserAvatar: setUserAvatarRequest } = await loadUserAdminTransport()
+  return setUserAvatarRequest(id, avatarPath)
+}
+export const removeUserAvatar = async (id) => {
+  const { removeUserAvatar: removeUserAvatarRequest } = await loadUserAdminTransport()
+  return removeUserAvatarRequest(id)
+}
 export const disconnectUserAuthProvider = async (id, d) => {
   const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadUserAdminTransport()
   return disconnectUserAuthProviderRequest(id, d)
@@ -1155,8 +1163,8 @@ export async function resetSection(section) {
   return result
 }
 
-export async function factoryReset() {
-  const result = await callSystemRuntimeMethod('factoryReset')
+export async function factoryReset(confirmation) {
+  const result = await callSystemRuntimeMethod('factoryReset', confirmation)
   await invalidateClientRuntimeState('factory-reset')
   return result
 }

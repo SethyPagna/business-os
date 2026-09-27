@@ -6,6 +6,7 @@ import type { Env } from '../index'
 import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } from '../lib/backup'
 import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, disconnectDrive, driveSyncStatus, updateDrivePreferences } from '../lib/googleDrive'
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
+import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
@@ -1097,15 +1098,25 @@ app.get('/system/drive-sync/status', requireAuth, async (c) => {
   if (denied) return denied
   return c.json(await driveSyncStatus(c.env))
 })
+// P1-2: connecting a Drive destination, or leaving sync switched on, decides
+// where every scheduled FULL backup (costs included) is uploaded -- so both
+// need what taking a backup copy home needs: `backup` plus cost-view (see
+// lib/driveSyncAuthority.ts). Switching sync OFF stays a plain settings
+// action, so anyone who may manage settings can still stop the uploads.
+const DRIVE_SYNC_AUTHORITY_ERROR = { error: 'Backup and cost-view permission are required to connect or enable Google Drive sync.', code: 'drive_sync_authority_required' }
 app.post('/system/drive-sync/preferences', requireAuth, async (c) => {
   const denied = denyUnless(c, 'settings')
   if (denied) return denied
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  // updateDrivePreferences stores enabled='1' unless the body says
+  // `enabled: false`, so anything else is an enable.
+  if (body.enabled !== false && !canAuthorizeDriveSync(c.get('user'))) return c.json(DRIVE_SYNC_AUTHORITY_ERROR, 403)
   return c.json(await updateDrivePreferences(c.env, body))
 })
 app.post('/system/drive-sync/oauth/start', requireAuth, async (c) => {
   const denied = denyUnless(c, 'settings')
   if (denied) return denied
+  if (!canAuthorizeDriveSync(c.get('user'))) return c.json(DRIVE_SYNC_AUTHORITY_ERROR, 403)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   const result = await buildDriveOauthStartUrl(c.env, {
     userId: Number(c.get('user')?.id || 0),
@@ -1147,7 +1158,9 @@ app.get('/system/drive-sync/oauth/callback', async (c) => {
   if (!code) {
     return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message: 'Missing authorization code from Google.', status: 'error' }), 400)
   }
-  const result = await completeDriveOauth(c.env, code, stateResult.payload?.codeVerifier || '')
+  // The signed state carries the id of the user who passed the oauth/start
+  // gate; it is recorded as the authoriser and re-checked before each push.
+  const result = await completeDriveOauth(c.env, code, stateResult.payload?.codeVerifier || '', Number(stateResult.payload?.userId || 0))
   const status = result.success ? 'connected' : 'error'
   const message = result.success ? 'Google Drive connected. You can close this window.' : (result.error || 'Failed to connect Google Drive.')
   return c.html(driveOauthCallbackHtml({ targetUrl: stateTargetUrl, message, status }), result.success ? 200 : 400)

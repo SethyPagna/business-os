@@ -1,36 +1,175 @@
 import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
-import { meanMoney4 } from './moneyPrecision'
+import { weightedMeanMoney4 } from './moneyPrecision'
 
 // Catalog receipts are observed purchase prices, not an identity-merge
-// heuristic. Every distinct positive recorded price contributes equally,
-// even when prices differ by more than twofold. Do not change merge policy.
-function catalogCostMean(rows: Array<{ cost_price_usd: number | null }>): number | null {
-  const values = [...new Set(rows.flatMap(row => {
-    const value = row.cost_price_usd
-    return value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? [Number(value)] : []
-  }))]
-  return values.length ? meanMoney4(values) : null
+// heuristic. Owner ruling (2026-09-25, superseding the distinct-cost mean):
+// the catalog cost is the QUANTITY-WEIGHTED mean of what is on the shelf,
+// SUM(on-hand qty x unit cost) / SUM(on-hand qty), e.g. 2 left at 12.00 and 8
+// left at 12.50 -> 12.40. Nearest 4dp, half away from zero (the existing cost
+// rule; weightedMeanMoney4 rounds once, from the unrounded numerator).
+function weightedCatalogCost(terms: Array<{ cost: number; quantity: number }>): number | null {
+  const counted = terms.filter(term => term.quantity > 0 && term.cost > 0)
+  if (!counted.length) return null
+  const totalQuantity = counted.reduce((sum, term) => sum + term.quantity, 0)
+  return weightedMeanMoney4(counted.map(term => ({ amount: term.cost, factor: term.quantity })), totalQuantity)
 }
 
-// Shared by catalogCostRecomputeStatement (SQL) and getCatalogCostBreakdown
-// (JS, via a plain SELECT): "the latest manual cost entry for this product,
-// if it carries a real (non-zero) cost_usd" -- ONE definition of "latest",
-// reused everywhere the formula needs it so the SQL and JS selections cannot
-// drift apart. See recordManualCostEntry below for the writer.
-const LATEST_MANUAL_COST_ENTRY_ID_SQL = '(SELECT id FROM product_cost_entries WHERE product_id = @productId ORDER BY id DESC LIMIT 1)'
-
+// ---------------------------------------------------------------------------
+// THE catalog-cost formula, as ONE SQL scalar expression. Every writer
+// evaluates this exact text inside `UPDATE products ...` (via
+// catalogCostRecomputeStatement / recomputeCatalogCost), so `products.id`
+// below is the row being updated (a correlated reference). The pure breakdown
+// (buildCatalogCostBreakdown) restates it in JS so each row can say why it
+// counted; test-catalog-cost-on-hand-pure.cjs proves the two agree on a real
+// migrated SQLite.
+//
+// The formula, in order (owner ruling 2026-09-25, quantity-weighted):
+//   1. Terms = every lot of this row that is active, has a RECORDED unit cost
+//      (> 0 -- a 0 means "not recorded" and is left out of BOTH numerator and
+//      denominator), was received after the latest manual override's baseline,
+//      and is ON HAND, weighted by its on-hand quantity summed over every
+//      branch; plus the latest manual cost entry when positive, weighted by
+//      the on-hand quantity of the lots it overrode (active lots at or below
+//      its baseline -- the stock the owner re-priced; 2026-09-17 override
+//      baseline). Result = SUM(qty x cost) / SUM(qty), nearest 4dp.
+//   2. A lot whose remaining quantity is 0 no longer takes part (owner,
+//      2026-09-25, KIKO 3D Lip Gloss 05). branch_batch_stock carries
+//      CHECK(quantity >= 0) (0058), so the positive rows are the on-hand ones.
+//   3. Nothing on hand (sold out): the most recently RECEIVED such lot's cost
+//      (received_at, then id -- the last row of the breakdown list). This is
+//      the figure the formula held just before the last lot ran out under
+//      FIFO, and unlike "whatever was stored last" it is a pure function of
+//      the lots, so JS, SQL and a replayed undo can never disagree.
+//   4. Still nothing: NULL -- callers COALESCE to the stored column, so a
+//      free-goods or cost-less history never zeroes an existing figure.
+// ---------------------------------------------------------------------------
+const LATEST_MANUAL_ENTRY_ID_SQL = '(SELECT id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)'
 // Owner correction (2026-09-17, verbatim): "edit can override cost so before
 // might be (n+n1+n2)/3, after override just becomes n. this means if future
 // add stock have different price it will take from this n then add the new
-// cost price / by that number of cost price". The latest manual entry's
-// baseline_batch_id is the highest product_batches.id that already existed
-// when it was recorded -- a lot only counts again once its id is HIGHER than
-// that baseline. NULL when this product has no manual entry at all (formula
-// falls back to every active lot, unchanged). Same fragment reused by
-// catalogCostRecomputeStatement's SQL and mirrored by the plain SELECT
-// recomputeCatalogCost/buildCatalogCostBreakdown run for the same row.
-const LATEST_MANUAL_COST_ENTRY_BASELINE_SQL = '(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = @productId ORDER BY id DESC LIMIT 1)'
+// cost price / by that number of cost price". baseline_batch_id is the highest
+// product_batches.id that existed when the override was recorded; only lots
+// ABOVE it count again. NULL (no manual entry) means every lot is eligible.
+const LATEST_MANUAL_BASELINE_SQL = '(SELECT baseline_batch_id FROM product_cost_entries WHERE product_id = products.id ORDER BY id DESC LIMIT 1)'
+const ELIGIBLE_LOT_SQL = `pb.variant_product_id = products.id AND pb.is_active = 1
+        AND pb.unit_cost_usd IS NOT NULL AND pb.unit_cost_usd > 0
+        AND (pb.id > ${LATEST_MANUAL_BASELINE_SQL} OR ${LATEST_MANUAL_BASELINE_SQL} IS NULL)`
+const LOT_ON_HAND_QTY_SQL = '(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id AND bbs.quantity > 0)'
+const OVERRIDDEN_ON_HAND_QTY_SQL = `(SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs
+            JOIN product_batches ob ON ob.id = bbs.batch_id
+          WHERE ob.variant_product_id = products.id AND ob.is_active = 1
+            AND ob.id <= pce.baseline_batch_id AND bbs.quantity > 0)`
+// Nearest 4dp, half away from zero -- weightedMeanMoney4, which rounds the
+// exact decimal quotient. SQLite's ROUND() rounds the binary double, so an
+// exact tie (1.0001 and 1.0002, one each: 1.00015) can land either side
+// depending on the engine version. Every input here is positive, so this
+// adds the half and truncates, with a 1e-8-unit nudge: with 4dp costs a
+// non-tie quotient sits at least 1/(2 x total quantity) units from a tie,
+// far above double error and far above the nudge.
+const HALF_UP_4DP = (value: string) => `CAST(${value} * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0`
+
+export const CATALOG_COST_DERIVE_SQL = `COALESCE(
+    (SELECT CASE WHEN SUM(qty) > 0 THEN ${HALF_UP_4DP('SUM(qty * cost) / SUM(qty)')} END
+      FROM (SELECT pb.unit_cost_usd AS cost, ${LOT_ON_HAND_QTY_SQL} AS qty FROM product_batches pb
+        WHERE ${ELIGIBLE_LOT_SQL}
+        UNION ALL
+        SELECT pce.cost_usd AS cost, ${OVERRIDDEN_ON_HAND_QTY_SQL} AS qty FROM product_cost_entries pce
+        WHERE pce.id = ${LATEST_MANUAL_ENTRY_ID_SQL}
+          AND pce.cost_usd IS NOT NULL AND pce.cost_usd > 0)),
+    (SELECT pb.unit_cost_usd FROM product_batches pb
+      WHERE ${ELIGIBLE_LOT_SQL}
+      ORDER BY COALESCE(pb.received_at, '') DESC, pb.id DESC LIMIT 1))`
+
+const CATALOG_COST_SET_SQL = `cost_price_usd = COALESCE(${CATALOG_COST_DERIVE_SQL}, cost_price_usd),
+        purchase_price_usd = COALESCE(${CATALOG_COST_DERIVE_SQL}, purchase_price_usd)`
+
+/**
+ * True only when the formula would move EITHER stored column; NULL keeps both.
+ * purchase_price_usd mirrors cost_price_usd, and a path that restores only
+ * cost_price_usd (merge undo's keeper restore) must not leave the mirror on a
+ * figure a trigger wrote in between. The derivation is evaluated once.
+ */
+const CATALOG_COST_CHANGED_SQL = `EXISTS (SELECT 1 FROM (SELECT ${CATALOG_COST_DERIVE_SQL} AS derived) d
+        WHERE d.derived IS NOT NULL
+          AND (products.cost_price_usd IS NOT d.derived OR products.purchase_price_usd IS NOT d.derived))`
+
+/**
+ * The write-only-when-it-moves recompute, with `products.id` constrained by
+ * `idPredicateSql` (e.g. `id = @productId`). ONE text shared by the JS entry
+ * point, the undo paths, the 0195 triggers and the 0195 one-time repair, so an
+ * unchanged figure never bumps a product revision or updated_at on any path.
+ *
+ * `stampUpdatedAt: false` (the triggers and the repair) writes ONLY the two
+ * cost columns (owner, 2026-09-25: the migration touches nothing else). Under
+ * the weighted rule a partial sale of a mixed-cost product moves the figure,
+ * so stamping updated_at there would turn every such sale into an optimistic-
+ * concurrency conflict for an editor open on the product; the 0124 revision
+ * trigger still fires on the UPDATE, so sessions and caches see the change.
+ */
+export function catalogCostRecomputeIfChangedSql(idPredicateSql: string, { stampUpdatedAt = true }: { stampUpdatedAt?: boolean } = {}): string {
+  return `UPDATE products SET
+        ${CATALOG_COST_SET_SQL}${stampUpdatedAt ? `,
+        updated_at = CURRENT_TIMESTAMP` : ''}
+      WHERE ${idPredicateSql} AND ${CATALOG_COST_CHANGED_SQL}`
+}
+
+/** Statement form of the guarded recompute, for a caller's atomic batch. */
+export function catalogCostRecomputeIfChangedStatement(productId: number): { sql: string; params: Record<string, unknown> } {
+  return { sql: catalogCostRecomputeIfChangedSql('id = @productId'), params: { productId } }
+}
+
+const RESTORE_MODE_OFF_SQL = "NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance' AND json_extract(value, '$.mode') = 'restore')"
+
+/**
+ * The 0195 triggers (U-cost, supervisor decision 2026-09-25): the stored figure
+ * is weighted by the ON-HAND quantity of each lot, and ~40 statements across
+ * sale, void, return, transfer, removal, damage, set and undo move it. The
+ * database re-derives instead, firing ONLY when:
+ *   - a branch_batch_stock row's quantity changes, it is inserted positive, is
+ *     deleted while positive, or is re-pointed at another lot. The guarded
+ *     UPDATE then writes only when the figure moves: a product whose on-hand
+ *     lots all share one cost, or a completed transfer (each lot's total is
+ *     unchanged), writes nothing.
+ *   - a lot (product_batches row) is inserted or deleted -- the sold-out
+ *     fallback reads the newest lot, and a delete must name the product
+ *     through OLD because the row is already gone.
+ * Only the two cost columns are written (no updated_at, see
+ * catalogCostRecomputeIfChangedSql). Only ACTIVE product rows are re-derived: a removed or merged-away row is
+ * frozen history whose undo receipts compare it column for column, and it is
+ * never sold. Stands down in backup-restore mode, like the 0124 revision
+ * triggers.
+ * test-migration-0195-on-hand-cost-pure.cjs pins the migration text to this.
+ */
+export function catalogCostOnHandTriggerSql(): string {
+  const lotProducts = (ids: string) => `is_active = 1 AND id IN (SELECT variant_product_id FROM product_batches WHERE id IN (${ids}))`
+  const trigger = (name: string, event: string, when: string, idPredicate: string) => `CREATE TRIGGER ${name}
+${event}
+WHEN ${when}
+ AND ${RESTORE_MODE_OFF_SQL}
+BEGIN
+  ${catalogCostRecomputeIfChangedSql(idPredicate, { stampUpdatedAt: false })};
+END;
+`
+  return [
+    trigger('catalog_cost_on_hand_stock_insert_0195', 'AFTER INSERT ON branch_batch_stock',
+      'COALESCE(NEW.quantity, 0) > 0', lotProducts('NEW.batch_id')),
+    trigger('catalog_cost_on_hand_stock_update_0195', 'AFTER UPDATE OF quantity, batch_id ON branch_batch_stock',
+      '(COALESCE(OLD.quantity, 0) <> COALESCE(NEW.quantity, 0) OR OLD.batch_id IS NOT NEW.batch_id)',
+      lotProducts('OLD.batch_id, NEW.batch_id')),
+    trigger('catalog_cost_on_hand_stock_delete_0195', 'AFTER DELETE ON branch_batch_stock',
+      'COALESCE(OLD.quantity, 0) > 0', lotProducts('OLD.batch_id')),
+    trigger('catalog_cost_on_hand_lot_insert_0195', 'AFTER INSERT ON product_batches',
+      'NEW.variant_product_id IS NOT NULL', 'is_active = 1 AND id = NEW.variant_product_id'),
+    trigger('catalog_cost_on_hand_lot_delete_0195', 'AFTER DELETE ON product_batches',
+      'OLD.variant_product_id IS NOT NULL', 'is_active = 1 AND id = OLD.variant_product_id'),
+  ].join('\n')
+}
+
+/** The 0195 one-time repair: every ACTIVE product whose stored figure the formula moves. */
+export function catalogCostRepairAllSql(): string {
+  return `${catalogCostRecomputeIfChangedSql('is_active = 1', { stampUpdatedAt: false })};\n`
+}
 
 export type CatalogCostRecomputeResult = {
   productId: number
@@ -41,149 +180,63 @@ export type CatalogCostRecomputeResult = {
 }
 
 /**
- * Recomputes `products.cost_price_usd` (and its mirrored `purchase_price_usd`
- * twin -- see mirrorCostFields in routes/inventory.ts) as the mean of the
- * DISTINCT non-zero costs across the product row's own ACTIVE lots
- * (`product_batches.is_active = 1`, `unit_cost_usd` column) -- see
- * catalogCostMean above for the catalog-only averaging
- * rule (owner ruling, 2026-09-04 and 2026-09-16: distinct non-zero
- * costs add together and divide by the count of DIFFERENT costs).
+ * Re-derives `products.cost_price_usd` (and its mirrored `purchase_price_usd`
+ * twin -- see mirrorCostFields in routes/inventory.ts) from the formula in
+ * CATALOG_COST_DERIVE_SQL above, via the very same statement the batched
+ * writers use, then reports before/after. No second JS formula to drift.
  *
- * KHR is never touched: product_batches carries unit_cost_usd only -- no lot
- * ever recorded a KHR unit cost (migration 0065 added the USD column;
- * nothing ever added a KHR twin, and routes/inventory.ts's own receipt wire
- * only ever asks for a USD unit cost, see explicitReceiptMoney4('Unit cost')
- * above its call site) -- so there is no per-lot KHR figure to average.
- * `cost_price_khr`/`purchase_price_khr` are left exactly as they were.
+ * KHR is never touched: product_batches carries unit_cost_usd only, so there
+ * is no per-lot KHR figure to average.
  *
- * PURELY lot-derived, deliberately NOT folding in the row's own currently
- * stored cost_price_usd as one more candidate to average:
- *   - Self-reference drift: once cost_price_usd is itself a derived mean,
- *     feeding it back into its own next average lets that mean count as a
- *     second "purchase" forever after, nudging every later recompute toward
- *     wherever it last landed instead of what the active lots actually cost.
- *   - "No real active-lot cost yet" (every active lot's unit_cost_usd is
- *     0/NULL -- e.g. this receipt was the row's first and was free goods)
- *     must not ZERO an existing manually-priced or previously-derived
- *     figure: resolveMergedCostDetail's own "0 is not recorded" rule already
- *     protects a MERGE's distinct-cost set from a stray 0, but it cannot
- *     protect a scalar it was never shown -- so this function checks for a
- *     real (nonzero) result itself before writing, and otherwise leaves
- *     cost_price_usd exactly as it was.
+ * PURELY lot-derived (plus the latest manual override), deliberately NOT
+ * folding in the row's own stored cost_price_usd as a candidate: once it is
+ * itself a derived mean, feeding it back would let it count as a second
+ * "purchase" forever after. When the formula has no positive input at all it
+ * returns NULL and the stored figure is kept, never zeroed.
  *
- * Owner ruling (2026-09-16, verbatim): "check and make sure all the
- * actions add, edit, remove, set, etc... sessions, make sure if different
- * costs it adds and divide by number of different costs (excluding zero
- * and empty costs)". Every writer that records a NEW lot/batch cost
- * (inventory add-stock receipts -- routes/inventory.ts POST /adjust,
- * routes/batches.ts, and the unified stock-action commit in
- * stockActionCommit.ts) must call this afterwards so `products.cost_price_usd`
- * tracks what the shelf actually paid across every lot, not just whichever
- * receipt happened to write the scalar column last.
+ * Who keeps the stored figure current: receipts, lot cost edits, manual cost
+ * edits, stock-session and import receipts call this (or
+ * catalogCostRecomputeStatement) after writing the lot/entry. Writers that only
+ * move a lot's ON-HAND quantity across zero (sale, void, return restock,
+ * remove, set, transfer, damage, undo) are covered by the 0195 triggers
+ * (catalogCostOnHandTriggerSql below), and the undo paths that restore a
+ * product snapshot re-derive afterwards so a stale cost never wins.
+ * Historical sale/return cost snapshots (sale_items.cost_price_usd) are copied
+ * at sale time and are never rewritten by any of this.
  *
- * Deliberately PRODUCT-ROW scoped, not name-group scoped: sibling child
- * rows (rows with a different REAL barcode) are different articles with
- * their own cost, and only a merge/fold (create/edit identity fold,
- * merge-duplicates) combines rows -- that is a separate writer with its
- * own resolveMergedCostDetail call over the rows being folded together.
- *
- * Also skipped by every caller for a receipt that just CREATED a brand-new
- * row: that row's INSERT already set its cost_price_usd from the operator's
- * own explicit entry (unlocked pricing.cost_usd, or the plain create form),
- * which is the catalog-cost decision for a row that never had one before.
- *
- * Remove/set/transfer/return never record a cost, so no writer calls this
- * for them -- and if a remove drains a product's last costed active lot,
- * the catalog cost is deliberately left as the last-known figure (what the
- * shelf paid historically), never reset to 0.
+ * Deliberately PRODUCT-ROW scoped, not name-group scoped: sibling child rows
+ * (a different REAL barcode) are different articles with their own cost.
  */
 export async function recomputeCatalogCost(db: D1Compat, productId: number): Promise<CatalogCostRecomputeResult | null> {
-  const product = await db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
+  const readCost = () => db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
+  const product = await readCost()
   if (!product) return null
-
-  // The latest manual cost-price entry (routes/products.ts PUT /:id, via
-  // recordManualCostEntry below) is an OVERRIDE BASELINE, not one more
-  // candidate cost: older manual entries for this product are history only
-  // and never feed back into the formula, and neither do lots received
-  // BEFORE it (see product_cost_entries's own migration doc, 0177, and
-  // LATEST_MANUAL_COST_ENTRY_BASELINE_SQL above).
-  const latestManualEntry = await db.prepare(
-    'SELECT cost_usd, baseline_batch_id FROM product_cost_entries WHERE product_id = @id ORDER BY id DESC LIMIT 1',
-  ).get<{ cost_usd: number | null; baseline_batch_id: number | null }>({ id: productId })
-  const baseline = latestManualEntry ? Number(latestManualEntry.baseline_batch_id) || 0 : null
-
-  const lots = await db.prepare(
-    'SELECT unit_cost_usd FROM product_batches WHERE variant_product_id = @id AND is_active = 1 AND (@baseline IS NULL OR id > @baseline)',
-  ).all<{ unit_cost_usd: number | null }>({ id: productId, baseline })
-
   const before = { usd: Number(product.cost_price_usd) || 0, khr: Number(product.cost_price_khr) || 0 }
-  const candidates = lots.map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
-  if (latestManualEntry) candidates.push({ cost_price_usd: latestManualEntry.cost_usd })
-  const derivedUsd = catalogCostMean(candidates)
-  const outliers: MergedCostOutlier[] = []
 
-  // No positive recorded input: keep the existing figure rather than
-  // treating an absent or free-goods cost as an override.
-  const after = { usd: derivedUsd && derivedUsd > 0 ? derivedUsd : before.usd, khr: before.khr }
+  // Same formula as catalogCostRecomputeStatement, but writes (and stamps
+  // updated_at) only when the figure actually moves, so an unchanged
+  // recompute bumps no product revision -- the behaviour this entry point
+  // always had.
+  await db.prepare(catalogCostRecomputeIfChangedSql('id = @productId')).run({ productId })
+  const updated = await readCost()
+  const after = { usd: Number(updated?.cost_price_usd) || 0, khr: before.khr }
   const changed = after.usd !== before.usd
 
-  if (changed) {
-    await db.prepare(`
-      UPDATE products SET
-        cost_price_usd = @usd, purchase_price_usd = @usd,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = @id
-    `).run({ id: productId, usd: after.usd })
-  }
-
-  return { productId, before, after, changed, outliers }
+  return { productId, before, after, changed, outliers: [] }
 }
 
 /**
- * SQL-statement twin of {@link recomputeCatalogCost}, for callers that must
+ * SQL-statement form of {@link recomputeCatalogCost}, for callers that must
  * keep the recompute INSIDE the same atomic `db.batch()` as the receipt it
- * follows, rather than as a separate write afterwards.
- *
- * stockSession.ts's commit captures a live "after"/"expected" postimage of
- * every touched product (see `captureReplayState` / `stockReplayStateSql`)
- * as the LAST statement of the same batch that writes the lots -- that
- * postimage is what undo/redo later re-reads the table against to detect a
- * concurrent change. A recompute that ran as a separate write AFTER that
- * batch committed would silently invalidate every later undo/redo of that
- * session (the live row would no longer match its own "expected" snapshot).
- * So for this one caller the recompute has to be a statement inside the
- * batch, ahead of the postimage capture, not a follow-up async call.
- *
- * Same catalog-only averaging rule as catalogCostMean (distinct non-zero
- * `product_batches.unit_cost_usd` values for this product's active lots
- * received AFTER the latest manual entry's baseline (see
- * LATEST_MANUAL_COST_ENTRY_BASELINE_SQL -- a lot before that baseline no
- * longer counts, an OVERRIDE, not one more input to average in), UNIONed
- * with the latest `product_cost_entries` row for this product (a manual
- * cost-price edit, see recordManualCostEntry) if it carries a real cost --
- * older manual entries never rejoin the set, same JS/SQL selection as
- * recomputeCatalogCost above; mean rounded to 4 decimals), and the same "no real lot cost
- * yet" guard: if every active lot (and the latest manual entry) is 0/NULL,
- * the CASE falls through to the column's own current value, i.e. no
- * zeroing. Mirrors purchase_price_usd exactly like the JS twin.
+ * follows (stockSession.ts captures its undo postimage as the batch's last
+ * statement, so a follow-up write would invalidate every later undo/redo).
+ * The statement ends in a plain WHERE so callers may append `AND <guard>`.
  */
 export function catalogCostRecomputeStatement(productId: number): { sql: string; params: Record<string, unknown> } {
-  const derive = `(SELECT CASE
-      WHEN COUNT(*) = 0 THEN NULL
-      ELSE ROUND(SUM(cost) * 1.0 / COUNT(*), 4)
-    END FROM (SELECT DISTINCT unit_cost_usd AS cost FROM product_batches
-      WHERE variant_product_id = @productId AND is_active = 1
-        AND unit_cost_usd IS NOT NULL AND unit_cost_usd > 0
-        AND (id > ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} OR ${LATEST_MANUAL_COST_ENTRY_BASELINE_SQL} IS NULL)
-      UNION
-      SELECT cost_usd AS cost FROM product_cost_entries
-      WHERE id = ${LATEST_MANUAL_COST_ENTRY_ID_SQL}
-        AND cost_usd IS NOT NULL AND cost_usd > 0))`
   return {
     sql: `UPDATE products SET
-        cost_price_usd = COALESCE(${derive}, cost_price_usd),
-        purchase_price_usd = COALESCE(${derive}, purchase_price_usd)
+        ${CATALOG_COST_SET_SQL}
       WHERE id = @productId`,
     params: { productId },
   }
@@ -192,11 +245,12 @@ export function catalogCostRecomputeStatement(productId: number): { sql: string;
 /**
  * P10-6 (owner ruling, 2026-09-16, verbatim): "when clicked on cost price it
  * opens a page that tells us the calculated cost price (n_i + n_{i+1} + ... +
- * n_{i+k}) / i". GET /api/products/:id/cost-breakdown (routes/productCost.ts)
- * shows exactly that arithmetic -- so this is the SAME selection
- * recomputeCatalogCost uses (every one of the product row's own lots,
- * `product_batches.variant_product_id = id`, not name-group scoped) fed
- * through the SAME resolveMergedCostDetail, never a second formula.
+ * n_{i+k}) / i". Since 2026-09-25 the arithmetic is quantity-weighted
+ * (q_1 x n_1 + ... + q_k x n_k) / (q_1 + ... + q_k), and each row carries its
+ * weight and share. GET /api/products/:id/cost-breakdown (routes/productCost.ts)
+ * shows exactly that arithmetic -- the SAME selection as
+ * CATALOG_COST_DERIVE_SQL, restated in JS so each row can say why it did or
+ * did not count. Parity is pinned by test-catalog-cost-on-hand-pure.cjs.
  */
 export type CostBreakdownLotInput = {
   id: number
@@ -206,6 +260,8 @@ export type CostBreakdownLotInput = {
   branch_name: string | null
   unit_cost_usd: number | null
   is_active: number | boolean | null
+  /** SUM(branch_batch_stock.quantity) for this lot; null = no stock rows = nothing on hand. */
+  remaining_quantity: number | null
 }
 
 /** One manual cost-price edit (product_cost_entries row) -- see recordManualCostEntry. */
@@ -233,14 +289,37 @@ export type CostBreakdownInputRow = {
   recorded_at: string | null
   cost_usd: number | null
   cost_khr: number | null
-  excluded: 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | null
+  /** A lot's remaining on-hand quantity across branches; null on a manual row. */
+  remaining_quantity: number | null
+  /**
+   * The quantity this row weighs in the average: a counted lot's on-hand
+   * quantity, or for the latest manual override the on-hand quantity of the
+   * lots it re-priced. 0 on a row that does not count. (Owner, 2026-09-25.)
+   */
+  weight_quantity: number
+  /** weight_quantity / the total weight, 0..1; null when the row does not weigh in. */
+  share: number | null
+  /** The sold-out fallback: nothing is on hand, so the newest received lot's cost stands in. */
+  fallback: boolean
+  /**
+   * 'depleted': nothing left on hand, so the cost no longer describes the
+   * shelf (owner, 2026-09-25). 'duplicate' is retained for older payloads
+   * only -- under the weighted rule every on-hand lot counts.
+   */
+  excluded: 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | 'depleted' | null
 }
 
 export type CatalogCostBreakdown = {
   product_id: number
   inputs: CostBreakdownInputRow[]
+  /** The weighted terms, in row order: SUM(quantity x cost_usd) / SUM(quantity). */
+  weighted_terms: Array<{ cost_usd: number; quantity: number }>
+  /** SUM of weighted_terms' quantity; 0 when nothing is on hand. */
+  weighted_quantity: number
+  /** Legacy readers: the distinct counted costs. Not the calculation. */
   distinct_usd: number[]
   distinct_khr: number[]
+  /** The weighted mean (or the fallback lot's cost), 0 when there is neither. */
   mean_usd: number
   mean_khr: number
   outlier_guard: { fired: boolean; kept: number | null }
@@ -261,22 +340,33 @@ function costBreakdownManualLabel(entry: CostBreakdownManualInput): string {
   return entry.user_name ? `Manual · ${entry.user_name}` : 'Manual'
 }
 
+function positiveCost(value: number | null | undefined): number | null {
+  return value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null
+}
+
+/** Same order as CATALOG_COST_DERIVE_SQL's fallback: received_at, then id. */
+function compareLotsByReceipt(a: CostBreakdownLotInput, b: CostBreakdownLotInput): number {
+  // Binary string order, as SQLite compares TEXT -- not localeCompare.
+  const left = String(a.received_at || ''), right = String(b.received_at || '')
+  return left < right ? -1 : left > right ? 1 : a.id - b.id
+}
+
 /**
  * Pure assembler -- no D1 access, so it is unit-testable with fixture rows.
  * `product` carries the row's CURRENT stored cost_price_usd/khr, used only as
- * the fallback `result_usd` when no active lot/manual entry carries a real
- * cost (mirrors recomputeCatalogCost's own "no real lot cost yet" guard) and
- * as the (unformulaic) `result_khr` figure -- see the module doc on
- * catalogCostRecompute: product_batches carries no per-lot KHR column, so
- * KHR is never averaged here, only reported as the stored scalar.
+ * the last-resort `result_usd` when the formula has no positive input (the
+ * same COALESCE the SQL writers apply) and as the (unformulaic) `result_khr`.
  *
- * `manualEntries` is EVERY manual cost-price edit for the product (oldest
- * first), shown for the record -- but only the LATEST one participates in
- * the formula, same selection as recomputeCatalogCost/catalogCostRecomputeStatement,
- * and as an OVERRIDE BASELINE, not one more input: only active lots received
- * AFTER it (`id > latestManualEntry.baseline_batch_id`) join it in the mean.
- * Older manual entries are always reported `excluded: 'superseded'`; lots
- * from before the override are `excluded: 'overridden'`.
+ * `manualEntries` is EVERY manual cost-price edit for the product, shown for
+ * the record -- only the LATEST participates, as an OVERRIDE BASELINE: lots at
+ * or below its baseline stop counting at their own cost and their on-hand
+ * quantity is counted at the override's cost instead; lots received after it
+ * count at their own cost. Same selection as CATALOG_COST_DERIVE_SQL.
+ *
+ * Row order: everything that describes stock on hand (lots with remaining > 0
+ * and the manual entries) first, chronologically; depleted lots after them,
+ * also chronologically -- the owner reads the list top-down as "what the
+ * shelf holds", and sold-out history stays viewable underneath.
  */
 export function buildCatalogCostBreakdown(
   productId: number,
@@ -284,87 +374,109 @@ export function buildCatalogCostBreakdown(
   lots: CostBreakdownLotInput[],
   manualEntries: CostBreakdownManualInput[] = [],
 ): CatalogCostBreakdown {
-  const activeLots = lots.filter((lot) => !!lot.is_active)
   const latestManualEntry = manualEntries.length
     ? manualEntries.reduce((latest, entry) => (entry.id > latest.id ? entry : latest))
     : null
   const baseline = latestManualEntry ? Number(latestManualEntry.baseline_batch_id) || 0 : null
-  const candidates = activeLots
-    .filter((lot) => baseline === null || lot.id > baseline)
-    .map((lot) => ({ cost_price_usd: lot.unit_cost_usd }))
-  if (latestManualEntry) candidates.push({ cost_price_usd: latestManualEntry.cost_usd })
-  const derivedUsd = catalogCostMean(candidates)
+  const onHandOf = (lot: CostBreakdownLotInput) => Math.max(0, Number(lot.remaining_quantity) || 0)
+  const isOnHand = (lot: CostBreakdownLotInput) => onHandOf(lot) > 0
+  const eligibleLots = lots.filter((lot) => !!lot.is_active
+    && (baseline === null || lot.id > baseline)
+    && positiveCost(lot.unit_cost_usd) !== null)
+  const manualCost = latestManualEntry ? positiveCost(latestManualEntry.cost_usd) : null
+  // The stock the latest override re-priced: active lots at or below its baseline.
+  const overriddenOnHand = latestManualEntry && manualCost !== null
+    ? lots.filter((lot) => !!lot.is_active && lot.id <= (baseline ?? 0)).reduce((sum, lot) => sum + onHandOf(lot), 0)
+    : 0
 
-  // Lots and manual entries interleaved chronologically (manual entries,
-  // newest last -- same as a lot list already ordered by received date).
+  const lotWeight = new Map<CostBreakdownLotInput, number>(eligibleLots.filter(isOnHand).map((lot) => [lot, onHandOf(lot)]))
+  const terms: Array<{ cost: number; quantity: number }> = [...lotWeight].map(([lot, quantity]) => ({ cost: Number(lot.unit_cost_usd), quantity }))
+  if (manualCost !== null && overriddenOnHand > 0) terms.push({ cost: manualCost, quantity: overriddenOnHand })
+  const weightedMean = weightedCatalogCost(terms)
+  const totalWeight = weightedMean === null ? 0 : terms.reduce((sum, term) => sum + term.quantity, 0)
+  // Sold out: the most recently received eligible lot stands in (see step 3
+  // of CATALOG_COST_DERIVE_SQL).
+  const fallbackLot = weightedMean === null && eligibleLots.length
+    ? [...eligibleLots].sort(compareLotsByReceipt)[eligibleLots.length - 1]
+    : null
+
   type Combined = { kind: 'lot'; lot: CostBreakdownLotInput } | { kind: 'manual'; entry: CostBreakdownManualInput }
   const dateOf = (row: Combined) => (row.kind === 'lot' ? row.lot.received_at : row.entry.created_at) || ''
-  const combined: Combined[] = [
+  const describesShelf = (row: Combined) => row.kind === 'manual' || isOnHand(row.lot)
+  const chronological: Combined[] = [
     ...lots.map((lot): Combined => ({ kind: 'lot', lot })),
     ...manualEntries.map((entry): Combined => ({ kind: 'manual', entry })),
   ].sort((a, b) => dateOf(a).localeCompare(dateOf(b)))
+  const combined = [...chronological.filter(describesShelf), ...chronological.filter((row) => !describesShelf(row))]
 
-  const seenDistinct = new Set<number>()
+  const shareOf = (quantity: number) => (totalWeight > 0 ? quantity / totalWeight : null)
+  const weightedTerms: Array<{ cost_usd: number; quantity: number }> = []
   const inputs: CostBreakdownInputRow[] = combined.map((row) => {
     if (row.kind === 'lot') {
       const lot = row.lot
-      const label = costBreakdownLotLabel(lot)
       const cost = lot.unit_cost_usd != null && Number.isFinite(Number(lot.unit_cost_usd)) ? Number(lot.unit_cost_usd) : null
       const base = {
-        source: 'lot' as const, label, cost_usd: cost, cost_khr: null,
+        source: 'lot' as const, label: costBreakdownLotLabel(lot), cost_usd: cost, cost_khr: null,
         lot_code: lot.lot_code ?? null, batch_number: lot.batch_number != null ? Number(lot.batch_number) || null : null,
         received_at: lot.received_at ?? null, branch_name: lot.branch_name ?? null,
-        user_name: null, recorded_at: null,
+        user_name: null, recorded_at: null, remaining_quantity: Number(lot.remaining_quantity) || 0,
+        weight_quantity: 0, share: null, fallback: false,
       }
       if (!lot.is_active) return { ...base, excluded: 'inactive' }
       if (baseline !== null && lot.id <= baseline) return { ...base, excluded: 'overridden' }
       if (cost === null || cost <= 0) return { ...base, excluded: 'zero' }
-      if (seenDistinct.has(cost)) return { ...base, excluded: 'duplicate' }
-      seenDistinct.add(cost)
-      return { ...base, excluded: null }
+      if (lot === fallbackLot) return { ...base, fallback: true, excluded: null }
+      const quantity = lotWeight.get(lot)
+      if (quantity === undefined) return { ...base, excluded: 'depleted' }
+      weightedTerms.push({ cost_usd: cost, quantity })
+      return { ...base, weight_quantity: quantity, share: shareOf(quantity), excluded: null }
     }
     const entry = row.entry
-    const label = costBreakdownManualLabel(entry)
     const cost = entry.cost_usd != null && Number.isFinite(Number(entry.cost_usd)) ? Number(entry.cost_usd) : null
     const base = {
-      source: 'manual' as const, label, cost_usd: cost, cost_khr: entry.cost_khr ?? null,
+      source: 'manual' as const, label: costBreakdownManualLabel(entry), cost_usd: cost, cost_khr: entry.cost_khr ?? null,
       previous_cost_usd: entry.previous_cost_usd ?? null,
       lot_code: null, batch_number: null, received_at: null, branch_name: null,
-      user_name: entry.user_name ?? null, recorded_at: entry.created_at ?? null,
+      user_name: entry.user_name ?? null, recorded_at: entry.created_at ?? null, remaining_quantity: null,
+      weight_quantity: 0, share: null, fallback: false,
     }
     if (!latestManualEntry || entry.id !== latestManualEntry.id) return { ...base, excluded: 'superseded' }
     if (cost === null || cost <= 0) return { ...base, excluded: 'zero' }
-    if (seenDistinct.has(cost)) return { ...base, excluded: 'duplicate' }
-    seenDistinct.add(cost)
-    return { ...base, excluded: null }
+    // Every unit the override re-priced has been sold: it prices nothing now.
+    if (overriddenOnHand <= 0) return { ...base, excluded: 'depleted' }
+    weightedTerms.push({ cost_usd: cost, quantity: overriddenOnHand })
+    return { ...base, weight_quantity: overriddenOnHand, share: shareOf(overriddenOnHand), excluded: null }
   })
 
-  const distinctUsd = [...seenDistinct].sort((a, b) => a - b)
-  const meanUsd = distinctUsd.length ? meanMoney4(distinctUsd) : 0
-  const outlierFired = false
+  const fallbackCost = positiveCost(fallbackLot?.unit_cost_usd)
+  const derivedUsd = weightedMean ?? fallbackCost
   const resultUsd = derivedUsd != null ? derivedUsd : (Number(product.cost_price_usd) || 0)
+  const distinctUsd = [...new Set(weightedTerms.map((term) => term.cost_usd).concat(fallbackCost !== null ? [fallbackCost] : []))].sort((a, b) => a - b)
 
   return {
     product_id: productId,
     inputs,
+    weighted_terms: weightedTerms,
+    weighted_quantity: totalWeight,
     distinct_usd: distinctUsd,
     distinct_khr: [],
-    mean_usd: meanUsd,
+    mean_usd: derivedUsd ?? 0,
     mean_khr: 0,
-    outlier_guard: { fired: outlierFired, kept: outlierFired ? resultUsd : null },
+    outlier_guard: { fired: false, kept: null },
     result_usd: resultUsd,
     result_khr: Number(product.cost_price_khr) || 0,
   }
 }
 
-/** DB-backed wrapper: fetches the product row, every lot (active and inactive, for transparency) and every manual cost-price entry, then assembles via {@link buildCatalogCostBreakdown}. */
+/** DB-backed wrapper: fetches the product row, every lot (active and inactive, for transparency) with its remaining on-hand quantity, and every manual cost-price entry, then assembles via {@link buildCatalogCostBreakdown}. */
 export async function getCatalogCostBreakdown(db: D1Compat, productId: number): Promise<CatalogCostBreakdown | null> {
   const product = await db.prepare('SELECT cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return null
 
   const lots = await db.prepare(`
-    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, b.name AS branch_name
+    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, b.name AS branch_name,
+      (SELECT COALESCE(SUM(bbs.quantity), 0) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id) AS remaining_quantity
     FROM product_batches pb
     LEFT JOIN branches b ON b.id = pb.received_branch_id
     WHERE pb.variant_product_id = @id
@@ -445,6 +557,103 @@ export function planManualCostEntry(
       (SELECT COALESCE(MAX(id),0) FROM product_batches WHERE variant_product_id=@productId))
   `, params: { productId, costUsd: afterUsd ?? 0, costKhr: hasKhr ? afterKhr : null,
     previousCostUsd: before.cost_price_usd, userId: actor.id, userName: actor.name } }
+}
+
+/**
+ * A cost typed or imported through a path OTHER than the product form (the
+ * catalog-wide bulk price adjust, a product/inventory import, an approved
+ * review-queue edit). The 0195 triggers re-derive products.cost_price_usd at
+ * every stock movement, and the derivation only honours a cost that has a
+ * product_cost_entries row -- so a bare `UPDATE products SET cost_price_usd`
+ * holds only until the next sale. This records the SAME row the form's
+ * planManualCostEntry records (source 'manual', the actor, the baseline =
+ * the product's highest lot id right now, previous_cost_usd, cost_khr only
+ * when the write carries KHR, cost_usd NULL -> 0), and only when the write
+ * actually moves a cost column, so a same-value re-import writes nothing.
+ *
+ * Set-based and evaluated against the PREIMAGE: run it in the same atomic
+ * batch IMMEDIATELY BEFORE the UPDATE, with `nextUsdSql`/`nextKhrSql` the
+ * exact expressions (or bound params) that UPDATE writes, or null for a
+ * column it leaves alone. Unqualified columns in them resolve to `products`.
+ * Binds @costEntryUserId / @costEntryUserName (costEntryActorParams).
+ */
+export function typedCostEntriesBeforeWriteSql(input: { nextUsdSql: string | null; nextKhrSql: string | null; whereSql: string }): string {
+  const { nextUsdSql, nextKhrSql, whereSql } = input
+  const moved = [
+    nextUsdSql && `(${nextUsdSql}) IS NOT products.cost_price_usd`,
+    nextKhrSql && `(${nextKhrSql}) IS NOT products.cost_price_khr`,
+  ].filter(Boolean)
+  if (!moved.length) throw new Error('typedCostEntriesBeforeWriteSql needs at least one cost column')
+  return `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
+    SELECT products.id, COALESCE(${nextUsdSql ?? 'products.cost_price_usd'}, 0), ${nextKhrSql ?? 'NULL'}, products.cost_price_usd,
+      'manual', @costEntryUserId, @costEntryUserName,
+      (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
+    FROM products
+    WHERE (${whereSql}) AND (${moved.join(' OR ')})`
+}
+
+export function costEntryActorParams(actor: { id: number | null; name: string | null }): Record<string, unknown> {
+  return { costEntryUserId: actor.id ?? null, costEntryUserName: actor.name ?? null }
+}
+
+/**
+ * One product row's form of typedCostEntriesBeforeWriteSql: `usd`/`khr` are
+ * the values the following UPDATE binds (undefined = that UPDATE does not
+ * write the column). Null when neither column is written.
+ */
+export function typedCostEntryBeforeWriteStatement(
+  productId: number,
+  next: { usd?: number | null; khr?: number | null },
+  actor: { id: number | null; name: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  const hasUsd = next.usd !== undefined
+  const hasKhr = next.khr !== undefined
+  if (!hasUsd && !hasKhr) return null
+  return {
+    sql: typedCostEntriesBeforeWriteSql({
+      nextUsdSql: hasUsd ? '@costEntryUsd' : null,
+      nextKhrSql: hasKhr ? '@costEntryKhr' : null,
+      whereSql: 'products.id = @costEntryProductId',
+    }),
+    params: {
+      costEntryProductId: productId,
+      ...(hasUsd ? { costEntryUsd: next.usd } : {}),
+      ...(hasKhr ? { costEntryKhr: next.khr } : {}),
+      ...costEntryActorParams(actor),
+    },
+  }
+}
+
+/**
+ * The after-write form, for a writer that cannot place a statement before its
+ * own UPDATE (updateRow on a plan-less historical review-queue row): compares
+ * the row NOW against the preimage the caller read before writing.
+ */
+export function typedCostEntryAfterWriteStatement(
+  productId: number,
+  before: { cost_price_usd: number | null; cost_price_khr: number | null },
+  written: { usd: boolean; khr: boolean },
+  actor: { id: number | null; name: string | null },
+): { sql: string; params: Record<string, unknown> } | null {
+  if (!written.usd && !written.khr) return null
+  const moved = [
+    written.usd && 'products.cost_price_usd IS NOT @costEntryBeforeUsd',
+    written.khr && 'products.cost_price_khr IS NOT @costEntryBeforeKhr',
+  ].filter(Boolean)
+  return {
+    sql: `INSERT INTO product_cost_entries (product_id, cost_usd, cost_khr, previous_cost_usd, source, user_id, user_name, baseline_batch_id)
+    SELECT products.id, COALESCE(products.cost_price_usd, 0), ${written.khr ? 'products.cost_price_khr' : 'NULL'}, @costEntryBeforeUsd,
+      'manual', @costEntryUserId, @costEntryUserName,
+      (SELECT COALESCE(MAX(pb.id), 0) FROM product_batches pb WHERE pb.variant_product_id = products.id)
+    FROM products
+    WHERE products.id = @costEntryProductId AND (${moved.join(' OR ')})`,
+    params: {
+      costEntryProductId: productId,
+      costEntryBeforeUsd: before.cost_price_usd ?? null,
+      costEntryBeforeKhr: before.cost_price_khr ?? null,
+      ...costEntryActorParams(actor),
+    },
+  }
 }
 
 export async function recordManualCostEntry(

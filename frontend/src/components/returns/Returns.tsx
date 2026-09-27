@@ -69,6 +69,7 @@ import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import ReturnsListSurface from './ReturnsListSurface'
 import { RETURN_BULK_LIMIT, type ReturnBulkPayload, type ReturnBulkResult } from './helpers/returnBulkAction.ts'
+import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 import { RETURN_RECORDS_ADAPTER } from '../../utils/entityRecords.ts'
 const ReturnDetailModal = lazyRetry(() => import('./ReturnDetailModal'), 'returns-detail-modal')
@@ -925,9 +926,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       return result
     } catch (error) {
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') savePendingHistoryRequest(returnId, null)
+      // Undo/redo of a return edit on a return cancelled since then is refused
+      // (return_edit_cancelled); the action history shows this message.
+      const refusal = returnRefusalText(error, tr)
+      if (refusal && error instanceof Error) error.message = refusal
       throw error
     }
-  }, [loadReturns, savePendingHistoryRequest])
+  }, [loadReturns, savePendingHistoryRequest, tr])
 
   const restoreReturnSnapshot = useCallback(async (
     snapshot: ReturnRow,
@@ -1236,8 +1241,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     } catch (error) {
       // The same stable request stays in session storage when the outcome is
       // unknown. A retry therefore receives the server's original receipt
-      // instead of applying stock/refund effects twice.
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      // instead of applying stock/refund effects twice. A coded refusal (a
+      // restore that would over-count a legacy sale) is shown in the UI language.
+      notify(returnRefusalText(error, tr) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
       throw error
     } finally {
       finishSingleAction(bulkActionInFlightRef)
@@ -1651,7 +1657,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             ret={detailRet}
             onClose={closeReturnDetail}
             onMinimize={() => minimizeReturnDetail(detailRet)}
-            onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
+            onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE && isCountedReturn(detailRet) ? () => handleOpenEdit(detailRet) : undefined}
             onOpenRecords={() => setRecordsRet(detailRet)}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}

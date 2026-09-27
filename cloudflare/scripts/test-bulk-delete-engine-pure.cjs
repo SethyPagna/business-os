@@ -198,6 +198,9 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = m
     rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4202, 42, '42:b', 'b', '2026-02-01', 7, 1)").run()
     rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4201, 2, 1)').run()
     rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4202, 2, 3)').run()
+    // U-cost 0195 triggers derive the catalog cost from these lots as they land;
+    // re-blank it so this still exercises the engine's blank-cost fallback.
+    rawDb.prepare('UPDATE products SET cost_price_usd = NULL WHERE id = 42').run()
     const lotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [42], 'Bulk cleanup', { id: 7, name: 'Sok' })
     assert.strictEqual(lotFallback[0].params.unitCostUsd, 6.5, 'blank product cost uses the plan-time quantity-weighted lot cost')
     assert.strictEqual(lotFallback[0].params.totalCostUsd, 26)
@@ -206,6 +209,7 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = m
     rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (43, 2, 5)').run()
     rawDb.prepare("INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, unit_cost_usd, is_active) VALUES (4301, 43, '43:a', 'a', '2026-01-01', 8, 1)").run()
     rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4301, 2, 4)').run()
+    rawDb.prepare('UPDATE products SET cost_price_usd = NULL WHERE id = 43').run() // see product 42
     const partialLotFallback = await ENTITY_CONFIGS.products.buildExtraStatements(rawDb, [43], 'Bulk cleanup', { id: 7, name: 'Sok' })
     assert.strictEqual(partialLotFallback[0].params.unitCostUsd, null, 'priced lots covering only part of branch stock are unknown, not extrapolated')
     assert.strictEqual(partialLotFallback[0].params.totalCostUsd, null)

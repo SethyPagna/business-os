@@ -106,17 +106,24 @@ await check('source lock: /otp/verify gates in the right order -- challenge, loc
   const body = src.slice(routeAt, src.indexOf("app.post('", routeAt + 20))
   const challengeAt = body.indexOf('isLiveOtpChallenge(c.env, body.otpChallenge, body.userId)')
   const userSelectAt = body.indexOf('FROM users u')
-  const lockoutCheckAt = body.indexOf('getLoginLockoutState(c.env, user.username)')
-  const verifyAt = body.indexOf('verifyTotp(otpSecret')
-  const failFeedAt = body.indexOf('recordFailedLogin(c.env, user.username)')
+  const lockoutCheckAt = body.indexOf('getLoginLockoutState(c.env, usernameLockoutKey)')
+  // verifyTotpStep (the step-returning form the replay guard needs) since P1-1.
+  const verifyAt = body.search(/verifyTotp(?:Step)?\(otpSecret/)
+  const failFeedAt = body.indexOf('recordFailedLogin(c.env, usernameLockoutKey)')
   const deviceAt = body.indexOf('checkDeviceTrust(c.env, user.id, body.deviceId')
-  const clearAt = body.indexOf('clearLoginLockout(c.env, user.username)')
+  const clearAt = body.indexOf('clearLoginLockout(c.env, usernameLockoutKey)')
   const consumeAt = body.indexOf('consumeOtpChallenge(c.env, body.otpChallenge)')
   const sessionAt = body.indexOf('createSession(c.env, user.id')
   for (const [name, at] of [['challenge', challengeAt], ['user select', userSelectAt], ['lockout check', lockoutCheckAt], ['verify', verifyAt], ['fail feed', failFeedAt], ['device gate', deviceAt], ['lockout clear', clearAt], ['challenge consume', consumeAt], ['session', sessionAt]]) {
     assert.ok(at > -1, `expected the ${name} step in /otp/verify`)
   }
   assert.ok(challengeAt < userSelectAt, 'the challenge check must run before any DB read')
+  // S-auth4d: the lockout keys are the account's, scoped to this network, and
+  // the per-user allowance is spent only after the challenge check.
+  assert.ok(body.includes('const usernameLockoutKey = perNetworkLockoutKey(user.username, ip)'), 'the username lockout key is scoped to the network')
+  assert.ok(body.includes('const accountLockoutKey = perNetworkLockoutKey(userIdLockoutKey(user.id), ip)'), 'the account-id lockout key is scoped to the network')
+  const userLimitAt = body.indexOf("checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`")
+  assert.ok(userLimitAt > challengeAt, 'forged calls without a live challenge must not spend the per-user allowance')
   assert.ok(lockoutCheckAt < verifyAt, 'a locked account must not get a code compare')
   assert.ok(verifyAt < failFeedAt, 'failed codes must feed the escalating lockout')
   assert.ok(deviceAt < sessionAt, 'the device gate must run before the session is created')
