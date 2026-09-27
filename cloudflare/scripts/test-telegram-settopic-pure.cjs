@@ -297,7 +297,22 @@ globalThis.fetch = async (url, init) => {
     await run(inTopic('/settopic sales', { from: { id: 1087968824 }, sender_chat: { id: Number(ALERTS_CHAT) } }))
     assert.deepEqual(saves.map((s) => s.actor), ['telegram:anonymous group admin'], 'an anonymous admin posts as the group, and only an admin can')
     assert.equal(memberCalls.length, 0)
-    pass('admin gate: member refused, creator and anonymous admin allowed, a failed check refuses with "try again"')
+    // E7 (R-telegram): that pass is for a post made AS THIS GROUP. Any member
+    // can post as a channel they own, and a linked channel's posts arrive with
+    // its own sender_chat; neither is an admin act. The sender is then checked
+    // like anyone else (Telegram's Channel_Bot user, a plain member here). The
+    // second case uses the OTHER approved chat, so "any approved chat counts"
+    // fails here as well as "any sender_chat counts".
+    memberStatus = 'member'
+    for (const senderChat of [-1003333333333, Number(OTHER_APPROVED_CHAT)]) {
+      out = await run(inTopic('/settopic sales', { from: { id: 136817688 }, sender_chat: { id: senderChat } }))
+      assert.equal(saves.length, 0, `a post made as chat ${senderChat} must not save`)
+      assert.deepEqual(memberCalls, [{ chat_id: ALERTS_CHAT, user_id: 136817688 }], 'its sender is checked with Telegram like anyone else')
+      assert.equal(out.length, 1)
+      assert.ok(out[0].text.includes('Only a group admin can change where reports go.'), out[0].text)
+    }
+    memberStatus = 'administrator'
+    pass('admin gate: member refused, creator and anonymous admin allowed, a post made as another chat refused, a failed check refuses with "try again"')
 
     out = await run(inTopic('/settopic sales', { chat: { id: Number(OTHER_APPROVED_CHAT) } }))
     assert.equal(saves.length, 0); assert.equal(memberCalls.length, 0)
