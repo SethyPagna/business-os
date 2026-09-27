@@ -812,8 +812,8 @@ export async function removeStockFromBatch(db: D1Compat, input: {
       params: { productId: input.productId, branchId: input.branchId, quantity: input.quantity },
     },
     {
-      sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-      params: { productId: input.productId, quantity: input.quantity },
+      sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params: { productId: input.productId },
     },
   ])
 
@@ -1147,8 +1147,8 @@ export async function removeStockAcrossBatches(db: D1Compat, input: {
         params: { productId: input.productId, branchId: input.branchId, quantity: drained },
       },
       {
-        sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-        params: { productId: input.productId, quantity: drained },
+        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+        params: { productId: input.productId },
       },
     ])
   }

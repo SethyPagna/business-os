@@ -482,8 +482,8 @@ export function planLineQuantityIncrease(input: {
       params: { product_id: line.product_id, branch_id: line.branch_id, quantity: heldUnits },
     })
     statements.push({
-      sql: 'UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
-      params: { product_id: line.product_id, quantity: heldUnits },
+      sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
+      params: { product_id: line.product_id },
     })
     statements.push(saleMovementStatement({
       line,
@@ -671,8 +671,8 @@ export function planLineQuantityDecrease(input: {
       params: { product_id: line.product_id, branch_id: line.branch_id, quantity: totalReturned },
     })
     statements.push({
-      sql: 'UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
-      params: { product_id: line.product_id, quantity: totalReturned },
+      sql: 'UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id',
+      params: { product_id: line.product_id },
     })
     statements.push(saleMovementStatement({
       line,

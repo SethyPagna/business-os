@@ -271,8 +271,8 @@ export function planSaleStockTransition(input: {
         params: { product_id: item.product_id, branch_id: item.branch_id, quantity: delta },
       })
       statements.push({
-        sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-        params: { product_id: item.product_id, quantity: delta },
+        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+        params: { product_id: item.product_id },
       })
       // 0084: which lots this item's movement row actually touched -- the
       // row stamps a batch_id only when ONE lot covered the whole delta.
@@ -340,8 +340,8 @@ export function planSaleStockTransition(input: {
         params: { product_id: item.product_id, branch_id: item.branch_id, quantity: restore },
       })
       statements.push({
-        sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-        params: { product_id: item.product_id, quantity: restore },
+        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+        params: { product_id: item.product_id },
       })
       // 0084: same single-lot attribution rule as the deduct branch above.
       const restoredLots: Array<{ batchId: number; quantity: number }> = []

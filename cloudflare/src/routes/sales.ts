@@ -1612,9 +1612,11 @@ app.post('/', async (c) => {
         // branch_stock deduction above. Previously only branch_stock moved on
         // a sale, so Products/Inventory pages kept showing pre-sale numbers
         // until something else happened to touch that product's row.
+        // S7 (2026-09-27): recomputed from branch_stock, not moved by a
+        // clamped delta, so a rollup that had drifted cannot ratchet further.
         statements.push({
-          sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-          params: { product_id: item.product_id, quantity: item.quantity },
+          sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+          params: { product_id: item.product_id },
         })
       }
     }

@@ -249,6 +249,15 @@ async function main() {
       assert.equal(stats.quantityWrittenOff, 0)
     })
 
+    await check('S7 (2026-09-27): the discarded product stock_quantity rollup follows its branch_stock to 0 (merge)', () => {
+      // The fold deletes every branch_stock row of the discarded product. Its
+      // denormalized products.stock_quantity must go with them; production had
+      // an inactive merged-away row still carrying 8 with no branch rows.
+      const dup = one(d1, `SELECT stock_quantity, (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = ${DUP}) AS branch_sum FROM products WHERE id = ${DUP}`)
+      assert.equal(dup.branch_sum, 0)
+      assert.equal(dup.stock_quantity, 0, `discarded row still claims ${dup.stock_quantity} with no branch stock`)
+    })
+
     await check('the non-colliding lot MOVES with lot code, expiry, received date and branch intact', () => {
       const lot = one(d1, `SELECT variant_product_id, batch_key, lot_code, expiry_date, received_at, unit_cost_usd, is_active FROM product_batches WHERE id = 901`)
       assert.equal(lot.variant_product_id, KEEPER, 'the lot must now belong to the survivor')
@@ -343,6 +352,15 @@ async function main() {
       assert.equal(q(d1, `SELECT * FROM branch_stock WHERE product_id = ${DUP}`).length, 0)
       assert.equal(stats.quantityWrittenOff, 10)
       assert.equal(stats.quantityMoved, 0)
+    })
+
+    await check('S7 (2026-09-27): the discarded product stock_quantity rollup follows its branch_stock to 0 (write_off)', () => {
+      // The fold deletes every branch_stock row of the discarded product. Its
+      // denormalized products.stock_quantity must go with them; production had
+      // an inactive merged-away row still carrying 8 with no branch rows.
+      const dup = one(d1, `SELECT stock_quantity, (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = ${DUP}) AS branch_sum FROM products WHERE id = ${DUP}`)
+      assert.equal(dup.branch_sum, 0)
+      assert.equal(dup.stock_quantity, 0, `discarded row still claims ${dup.stock_quantity} with no branch stock`)
     })
 
     await check('the discarded row\'s lots are emptied and deactivated in place, never moved', () => {

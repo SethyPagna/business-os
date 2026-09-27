@@ -417,8 +417,8 @@ export function planSaleLineAddition(input: {
       params: { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits },
     })
     statements.push({
-      sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-      params: { product_id: line.productId, quantity: line.heldUnits },
+      sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+      params: { product_id: line.productId },
     })
     statements.push({
       sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
@@ -786,8 +786,8 @@ export function planSaleLineRemoval(input: {
         params: { product_id: line.productId, branch_id: line.branchId, quantity: line.heldUnits },
       })
       statements.push({
-        sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-        params: { product_id: line.productId, quantity: line.heldUnits },
+        sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @product_id), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
+        params: { product_id: line.productId },
       })
       statements.push({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
