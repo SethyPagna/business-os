@@ -769,7 +769,16 @@ export const SHIFT_SECTION_EDGE = '='
  */
 export const REPORT_SECTION_EDGE = '='
 
-type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true }
+/**
+ * `argument` is the usage marker of a command whose argument is not a day
+ * (`/settopic [type]`); a dated command keeps `dated` and its `[date]` marker.
+ */
+type CommandDoc = { command: string; icon: string; en: string; km: string; dated?: true; argument?: string }
+
+/** `/report [date]`, `/settopic [type]`, `/help` -- what the reader types. */
+export function commandUsage(doc: CommandDoc): string {
+  return `${doc.command}${doc.dated ? ' [date]' : doc.argument ? ` ${doc.argument}` : ''}`
+}
 
 /**
  * The shipped command set, in the order the reference lists them.
@@ -815,12 +824,96 @@ export const TELEGRAM_COMMANDS: readonly CommandDoc[] = [
     en: 'Products, units, health',
     km: 'ផលិតផល ឯកតា សុខភាពស្តុក',
   },
+  // Forum-topic setup (owner, 27 Sep 2026): typed INSIDE a topic of the
+  // alerts group, so nobody has to dig a topic id out of a Share link.
+  {
+    command: '/settopic', icon: '🧵', argument: '[type]',
+    en: 'Send a type to this topic',
+    km: 'ផ្ញើប្រភេទមួយមកប្រធានបទនេះ',
+  },
+  {
+    command: '/topics', icon: '📌',
+    en: 'Where each type is sent',
+    km: 'ប្រភេទនីមួយៗផ្ញើទៅណា',
+  },
   {
     command: '/help', icon: '❓',
     en: 'This list',
     km: 'បញ្ជីនេះ',
   },
 ]
+
+/**
+ * The eight message families a forum topic can receive, in the order
+ * Settings → Telegram → Forum topics lists them. `en`/`km` are the Settings
+ * screen's own labels (frontend lang packs, telegram_topic_<family>_label --
+ * scripts/test-telegram-settopic-pure.cjs fails if either drifts), so the bot
+ * and the app name a family with the same words. `family` is what `/settopic`
+ * takes; `aliases` are the other words a person plausibly types, Khmer
+ * included, so `/settopic លក់` works as well as `/settopic sales`.
+ */
+export type TelegramTopicFamily = {
+  family: string
+  key: 'telegram_topic_shift' | 'telegram_topic_sales' | 'telegram_topic_status' | 'telegram_topic_returns'
+    | 'telegram_topic_expenses' | 'telegram_topic_stock' | 'telegram_topic_reports' | 'telegram_topic_alerts'
+  en: string
+  km: string
+  aliases: readonly string[]
+}
+export const TELEGRAM_TOPIC_FAMILIES: readonly TelegramTopicFamily[] = [
+  { family: 'shift', key: 'telegram_topic_shift', en: 'Shift reports', km: 'របាយការណ៍វេន', aliases: ['shifts', 'វេន'] },
+  { family: 'sales', key: 'telegram_topic_sales', en: 'Sale invoices', km: 'វិក្កយបត្រលក់', aliases: ['sale', 'invoice', 'invoices', 'លក់', 'ការលក់'] },
+  { family: 'status', key: 'telegram_topic_status', en: 'Status updates', km: 'ការផ្លាស់ប្ដូរស្ថានភាព', aliases: ['statuses', 'ស្ថានភាព'] },
+  { family: 'returns', key: 'telegram_topic_returns', en: 'Returns', km: 'ការប្រគល់មកវិញ', aliases: ['return', 'refund', 'refunds', 'ប្រគល់', 'ប្រគល់មកវិញ'] },
+  { family: 'expenses', key: 'telegram_topic_expenses', en: 'Expenses & fees', km: 'ចំណាយ និងថ្លៃសេវា', aliases: ['expense', 'fees', 'fee', 'ចំណាយ'] },
+  { family: 'stock', key: 'telegram_topic_stock', en: 'Stock in/out', km: 'ស្តុកចូល/ចេញ', aliases: ['stockin', 'stockout', 'ស្តុក'] },
+  { family: 'reports', key: 'telegram_topic_reports', en: "Day's summary", km: 'សេចក្តីសង្ខេបប្រចាំថ្ងៃ', aliases: ['report', 'summary', 'daily', 'សង្ខេប', 'របាយការណ៍'] },
+  { family: 'alerts', key: 'telegram_topic_alerts', en: 'Test & alerts', km: 'សាកល្បង និងការជូនដំណឹង', aliases: ['alert', 'test', 'ជូនដំណឹង', 'ការជូនដំណឹង'] },
+]
+
+// Khmer keyboards put zero-width spaces between words; a typed `លក់` often
+// arrives with a U+200B in front. Strip those, and normalise, before comparing.
+function topicToken(value: string): string {
+  return value.normalize('NFC').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim().toLowerCase()
+}
+
+/**
+ * The words that send a family back to the group itself -- General, where
+ * everything went before topics existed: `/settopic sales general`.
+ */
+const TOPIC_RESET_WORDS = ['general', 'group', 'reset', 'none', 'off', 'ក្រុម']
+
+/** "Group (General)" -- how the bot names the no-topic choice everywhere. */
+export function topicGroupName(): string {
+  return pair('Group (General)', 'ក្រុម (General)')
+}
+
+/**
+ * `/settopic` arguments to families. Several may be named at once
+ * (`/settopic stock expenses`); an unrecognised word is returned in `unknown`
+ * rather than dropped, so the reply can say which word it did not know.
+ * `reset` is true when a reset word (TOPIC_RESET_WORDS) was among them.
+ */
+export function resolveTopicFamilies(argument: string): { families: TelegramTopicFamily[]; unknown: string[]; reset: boolean } {
+  const families: TelegramTopicFamily[] = []
+  const unknown: string[] = []
+  let reset = false
+  for (const raw of String(argument || '').split(/[\s,;]+/)) {
+    const token = topicToken(raw)
+    if (!token) continue
+    if (TOPIC_RESET_WORDS.some((word) => topicToken(word) === token)) { reset = true; continue }
+    const match = TELEGRAM_TOPIC_FAMILIES.find((entry) => entry.family === token || entry.key === token
+      || entry.aliases.some((alias) => topicToken(alias) === token))
+    if (!match) unknown.push(raw)
+    else if (!families.includes(match)) families.push(match)
+  }
+  return { families, unknown, reset }
+}
+
+/** `Sale invoices/វិក្កយបត្រលក់` -- a family's name in the chat's language mode. */
+export function topicFamilyName(entry: TelegramTopicFamily): string {
+  return pair(entry.en, entry.km)
+}
 
 /**
  * The designed, bilingual command reference. Pure, so
@@ -849,7 +942,7 @@ export function telegramCommandReference(): string {
     RULE,
   ]
   for (const doc of TELEGRAM_COMMANDS) {
-    lines.push(...referenceLines(`${doc.icon} ${doc.command}${doc.dated ? ' [date]' : ''}: `, doc.en, doc.km))
+    lines.push(...referenceLines(`${doc.icon} ${commandUsage(doc)}: `, doc.en, doc.km))
   }
   lines.push(
     RULE,

@@ -4,9 +4,10 @@ import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
-  parseReportDate, setTelegramLanguage, SHIFT_SECTION_EDGE, telegramCommandReference, telegramUnauthorizedReply,
+  parseReportDate, resolveTopicFamilies, setTelegramLanguage, SHIFT_SECTION_EDGE, TELEGRAM_TOPIC_FAMILIES, telegramCommandReference, telegramUnauthorizedReply,
+  topicFamilyName, topicGroupName,
 } from './telegramLang'
-import type { TelegramLabelKey, TelegramLanguage } from './telegramLang'
+import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
   getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
   recognizedExpr, shiftWindowWhere, type SalesFilters,
@@ -48,7 +49,18 @@ type TelegramConfig = {
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
   topics: Record<TelegramTopicKey, number | undefined>
 }
-type TelegramMessage = { text?: string; from?: { id?: number | string }; chat?: { id?: number | string }; message_thread_id?: number }
+type TelegramMessage = {
+  text?: string
+  from?: { id?: number | string; username?: string; first_name?: string; last_name?: string }
+  // Set when a group admin posts anonymously ("Remain anonymous"): the
+  // message then comes FROM the group itself, sender_chat.id === chat.id.
+  sender_chat?: { id?: number | string }
+  chat?: { id?: number | string }
+  message_thread_id?: number
+  // True only for a message inside a forum topic. A reply in a non-forum
+  // supergroup also carries message_thread_id, so the id alone is not proof.
+  is_topic_message?: boolean
+}
 type TelegramUpdate = { message?: TelegramMessage }
 
 // The owner's Telegram forum topics: one settings key per message family,
@@ -78,6 +90,16 @@ export function parseTelegramTopicId(value: string | undefined | null): number |
   if (!/^\d+$/.test(trimmed)) return undefined
   const parsed = Number(trimmed)
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+/**
+ * The WRITE rule for a telegram_topic_* value: digits, or empty for General.
+ * routes/settings.ts validates a Settings save with it and
+ * lib/telegramTopicSetting.ts validates a `/settopic` save with it, so the two
+ * ways of setting a topic cannot accept different values.
+ */
+export function isTelegramTopicSettingValue(raw: string): boolean {
+  return raw === '' || /^\d+$/.test(raw)
 }
 
 function isEnabled(value: string | undefined, fallback: boolean): boolean {
@@ -1746,6 +1768,181 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
 }
 
 
+// ---- Forum topics from inside Telegram (owner, 27 Sep 2026) ----------------
+// Settings → Telegram → Forum topics takes one topic id per message family,
+// and finding an id meant a Share link and its last number -- so none was
+// ever set and everything landed in General. `/settopic sales`, typed INSIDE
+// the Sales topic, stores that topic's own message_thread_id instead, and
+// `/settopic sales general` sends the family back to the group itself.
+//
+// WHO MAY RUN IT. Changing where the day's revenue is posted is a settings
+// change, so a `/settopic` that SAVES needs all three:
+//   1. an allow-listed chat (handleTelegramWebhook's boundary, unchanged);
+//   2. THE alerts chat -- config.chatId, the first telegram_chat_id of THIS
+//      deployment's settings -- because a thread id is only meaningful there,
+//      and a second approved chat must not be able to point the shop's
+//      reports at a topic of its own;
+//   3. a Telegram admin of that group (getChatMember), or an admin posting
+//      anonymously as the group.
+// Anyone in the alerts chat may READ: `/topics`, and `/settopic` with no
+// argument (this topic's id and the choices). Neither changes anything. Any
+// other chat, approved or not, gets a refusal naming no topic. Nothing here
+// knows a topic id in advance: every id is the one the admin is standing in.
+
+/** Everything the webhook needs from outside this module. */
+export type TelegramTopicSave = {
+  keys: TelegramTopicFamily['key'][]
+  /** The topic to send to, or null to send to the group (General). */
+  threadId: number | null
+  /** Who typed it, as the audit row names them: `telegram:@name`. */
+  actor: string
+  telegramUserId: string
+  chatId: string
+}
+export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave) => Promise<void>
+export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter }
+
+const TOPIC_COMMANDS = new Set(['/settopic', '/topics'])
+const TOPIC_ID_LABEL = () => bi('Topic ID', 'លេខសម្គាល់ប្រធានបទ')
+
+/** `/topics`: every family and where it goes now. Pure. */
+export function formatTopicsOverview(topics: Partial<Record<TelegramTopicKey, number | undefined>>): string {
+  return [
+    `📌 ${bi('Forum topics', 'ប្រធានបទក្នុងវេទិកា')}`,
+    ...TELEGRAM_TOPIC_FAMILIES.map((entry) => row(topicFamilyName(entry), topics[entry.key] ?? topicGroupName())),
+    '',
+    `${bi('Change it inside the topic', 'ប្ដូរនៅក្នុងប្រធានបទនោះ')}: /settopic sales`,
+    `${bi('Back to the group', 'ត្រឡប់ទៅក្រុមវិញ')}: /settopic sales general`,
+  ].join('\n')
+}
+
+/** Every family as a line the reader can copy: `· /settopic sales: Sale invoices`. */
+function topicChoiceLines(): string[] {
+  return [
+    ...TELEGRAM_TOPIC_FAMILIES.map((entry) => row(`/settopic ${entry.family}`, topicFamilyName(entry))),
+    `${bi('In Khmer too', 'ជាភាសាខ្មែរក៏បាន')}: /settopic លក់`,
+    `${bi('Back to the group', 'ត្រឡប់ទៅក្រុមវិញ')}: /settopic sales general`,
+  ]
+}
+
+/** `/settopic` with no argument: this topic's id, and the choices. Pure. */
+export function formatSetTopicUsage(threadId: number | undefined): string {
+  return [
+    threadId
+      ? `🧵 ${TOPIC_ID_LABEL()}: ${threadId}`
+      : `⚠️ ${bi('This is the group (General). Open a topic and type this there.', 'នេះជាក្រុម (General)។ សូមបើកប្រធានបទមួយ ហើយវាយនៅទីនោះ។')}`,
+    '',
+    ...topicChoiceLines(),
+  ].join('\n')
+}
+
+/**
+ * `/settopic` saved: says in plain words where each named family goes NOW --
+ * this topic (with its id), or the group. Pure.
+ */
+export function formatTopicSaved(families: readonly TelegramTopicFamily[], threadId: number | null): string {
+  return [
+    threadId
+      ? `✅ ${bi('This topic will now receive', 'ប្រធានបទនេះនឹងទទួល')}:`
+      : `✅ ${bi('These now go to the group', 'ទាំងនេះនឹងផ្ញើទៅក្រុមវិញ')}:`,
+    ...families.map((entry) => `${ROW_BULLET}${topicFamilyName(entry)}`),
+    threadId ? row(TOPIC_ID_LABEL(), threadId) : row(bi('Sent to', 'ផ្ញើទៅ'), topicGroupName()),
+  ].join('\n')
+}
+
+/** A word `/settopic` does not know. Pure. */
+export function formatUnknownTopicFamily(word: string): string {
+  const shown = firstCharacters(word, 24)
+  return [
+    `🤔 ${bi(`I do not know the type "${shown}".`, `មិនស្គាល់ប្រភេទ "${shown}" ទេ។`)}`,
+    '',
+    ...topicChoiceLines(),
+  ].join('\n')
+}
+
+/** `/settopic sales` typed in General: which topic would it even be? Pure. */
+export function formatTopicNeedsTopic(families: readonly TelegramTopicFamily[]): string {
+  const family = families[0]?.family || 'sales'
+  return [
+    `⚠️ ${bi(
+      `This is the group (General). Open the topic you want, then type /settopic ${family} there.`,
+      `នេះជាក្រុម (General)។ សូមបើកប្រធានបទដែលចង់បាន រួចវាយ /settopic ${family} នៅទីនោះ។`,
+    )}`,
+    `${bi('To send it to the group instead', 'ដើម្បីផ្ញើទៅក្រុមវិញ')}: /settopic ${family} general`,
+  ].join('\n')
+}
+
+const topicWrongChatReply = () => `🔒 ${bi('Topics can only be set in the shop\'s alerts group.', 'អាចកំណត់ប្រធានបទបានតែក្នុងក្រុមជូនដំណឹងរបស់ហាងប៉ុណ្ណោះ។')}`
+const topicNotAdminReply = () => `🔒 ${bi('Only a group admin can change where reports go.', 'មានតែអ្នកគ្រប់គ្រងក្រុមទេ ដែលអាចប្ដូរកន្លែងផ្ញើរបាយការណ៍។')}`
+const topicAdminUnknownReply = () => `⚠️ ${bi('Could not check your admin rights. Try again.', 'មិនអាចពិនិត្យសិទ្ធិអ្នកគ្រប់គ្រងបានទេ។ សូមព្យាយាមម្តងទៀត។')}`
+const topicSaveFailedReply = () => `⚠️ ${bi('Could not save. Try again, or set it in Settings → Telegram.', 'មិនអាចរក្សាទុកបានទេ។ សូមព្យាយាមម្តងទៀត ឬកំណត់នៅ Settings → Telegram។')}`
+
+/**
+ * Is the sender an admin of this group? `null` when Telegram could not say --
+ * the reply then asks to try again rather than claiming the sender is not one.
+ */
+async function isGroupAdmin(config: TelegramConfig, chatId: string, message: TelegramMessage): Promise<boolean | null> {
+  // "Remain anonymous" admins post as the group itself; only an admin can.
+  if (message.sender_chat?.id != null && String(message.sender_chat.id) === chatId) return true
+  const userId = message.from?.id
+  if (userId == null || userId === '') return false
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/getChatMember`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, user_id: userId }),
+    })
+    if (!response.ok) return null
+    const result = await response.json<{ ok?: boolean; result?: { status?: string } }>().catch(() => null)
+    if (!result?.ok) return null
+    return result.result?.status === 'creator' || result.result?.status === 'administrator'
+  } catch {
+    return null
+  }
+}
+
+function telegramActor(message: TelegramMessage, chatId: string): { actor: string; userId: string } {
+  if (message.sender_chat?.id != null && String(message.sender_chat.id) === chatId) return { actor: 'telegram:anonymous group admin', userId: '' }
+  const userId = String(message.from?.id ?? '')
+  const username = cleanLine(message.from?.username || '', 40)
+  const name = cleanLine([message.from?.first_name, message.from?.last_name].filter(Boolean).join(' '), 60)
+  return { actor: `telegram:${username ? `@${username}` : name || userId || 'unknown'}`, userId }
+}
+
+async function topicCommandReply(env: Env, config: TelegramConfig, message: TelegramMessage, text: string, deps: TelegramWebhookDeps): Promise<string> {
+  const parts = text.trim().split(/\s+/)
+  const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  const argument = parts.slice(1).join(' ')
+  const language = config.language
+  const chatId = String(message.chat?.id ?? '')
+  // Both topic commands answer ONLY in this deployment's own alerts chat
+  // (config.chatId, read from this Worker's own D1): a second approved chat
+  // neither sees nor changes where this shop's messages go.
+  if (chatId !== config.chatId) return withLanguage(language, topicWrongChatReply)
+  if (command === '/topics') return withLanguage(language, () => formatTopicsOverview(config.topics))
+
+  // A topic's id only exists inside a forum topic -- see TelegramMessage.
+  const threadId = message.is_topic_message ? Number(message.message_thread_id) || undefined : undefined
+  const { families, unknown, reset } = resolveTopicFamilies(argument)
+  if (unknown.length) return withLanguage(language, () => formatUnknownTopicFamily(unknown[0]))
+  if (!families.length) return withLanguage(language, () => formatSetTopicUsage(threadId))
+  // Sending a family back to the group needs no topic; pointing it at one does.
+  if (!reset && !threadId) return withLanguage(language, () => formatTopicNeedsTopic(families))
+  const target = reset ? null : threadId as number
+
+  const admin = await isGroupAdmin(config, chatId, message)
+  if (admin === null) return withLanguage(language, topicAdminUnknownReply)
+  if (!admin) return withLanguage(language, topicNotAdminReply)
+  if (!deps.saveTopics) return withLanguage(language, topicSaveFailedReply)
+  const { actor, userId } = telegramActor(message, chatId)
+  try {
+    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId })
+  } catch (error) {
+    console.warn(`Telegram /settopic could not save: ${error instanceof Error ? error.message : String(error)}`)
+    return withLanguage(language, topicSaveFailedReply)
+  }
+  return withLanguage(language, () => formatTopicSaved(families, target))
+}
+
 async function webhookSecretFromToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -1757,7 +1954,7 @@ export async function isTelegramWebhookRequest(env: Env, suppliedSecret: string 
   let different = 0; for (let index = 0; index < expected.length; index += 1) different |= expected.charCodeAt(index) ^ suppliedSecret.charCodeAt(index)
   return different === 0
 }
-export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): Promise<void> {
+export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, deps: TelegramWebhookDeps = {}): Promise<void> {
   const message = update?.message; const text = String(message?.text || '').trim(); const chatId = String(message?.chat?.id || '')
   if (!text.startsWith('/') || !chatId) return
   const config = await getTelegramConfig(env)
@@ -1774,6 +1971,11 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate): P
   // nothing but its own chat id -- never a figure, a receipt or a product.
   if (!config.chatIds.includes(chatId)) {
     await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId, threadId)
+    return
+  }
+  const command = String(text.split(/\s+/)[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  if (TOPIC_COMMANDS.has(command)) {
+    await postTelegram(config, await topicCommandReply(env, config, message as TelegramMessage, text, deps), chatId, threadId)
     return
   }
   await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId, threadId)

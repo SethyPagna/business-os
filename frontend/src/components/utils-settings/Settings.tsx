@@ -2215,7 +2215,7 @@ export default function Settings() {
               </div>
               <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 dark:border-gray-700 dark:bg-gray-800/70">
                 <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('telegram_topics_title') || 'Forum topics'}</div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('telegram_topics_desc') || 'Send each message type to its own topic in a Telegram forum group. Leave a field empty to send to General.'}</div>
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('telegram_topics_desc') || 'Send each message type to its own topic in a Telegram forum group. Leave a field empty to send it to the group itself (General).'}</div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {[
                     ['telegram_topic_shift', t('telegram_topic_shift_label') || 'Shift reports'],
@@ -2235,7 +2235,7 @@ export default function Settings() {
                         className="input w-full"
                         inputMode="numeric"
                         autoComplete="off"
-                        placeholder={t('telegram_topic_placeholder') || 'Topic ID, or leave empty'}
+                        placeholder={t('telegram_topic_placeholder') || 'Empty = Group (General)'}
                         value={form[key] || ''}
                         onChange={(event) => setValue(key, event.target.value)}
                         disabled={!canEditSettings}
@@ -2245,6 +2245,9 @@ export default function Settings() {
                 </div>
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   {t('telegram_topics_help') || 'To find a topic ID: open the topic in Telegram, tap Share, copy the link, and use the number after the last slash.'}
+                </p>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {t('telegram_topics_command_help') || 'Or type /settopic <type> inside the topic, e.g. /settopic sales (group admins only). /settopic sales general sends it back to the group. Type /topics to see where each type goes.'}
                 </p>
               </div>
               <div className="sm:col-span-2 flex flex-wrap gap-2 pt-1">

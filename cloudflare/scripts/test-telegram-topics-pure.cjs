@@ -308,16 +308,20 @@ const baseSettings = [
 
   // ---- backend validation: routes/settings.ts rejects a non-integer, non-
   // empty topic id with the invalid_telegram_topic_id code, for EVERY one of
-  // the seven keys (not just one hardcoded key that could silently drift from
+  // the eight keys (not just one hardcoded key that could silently drift from
   // TELEGRAM_TOPIC_KEYS if a new topic slot were ever added).
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
-  assert.match(settingsSource, /import \{ TELEGRAM_TOPIC_KEYS \} from '\.\.\/lib\/telegram'/, 'routes/settings.ts must import the shared topic key list, not its own copy')
+  assert.match(settingsSource, /import \{[^}]*\bTELEGRAM_TOPIC_KEYS\b[^}]*\} from '\.\.\/lib\/telegram'/, 'routes/settings.ts must import the shared topic key list, not its own copy')
   assert.match(settingsSource, /for \(const key of TELEGRAM_TOPIC_KEYS\)/, 'validation must loop over every topic key, not one hardcoded key')
   assert.match(settingsSource, /code: 'invalid_telegram_topic_id'/)
   // The same integer-or-empty rule the parser above enforces, checked
   // byte-for-byte so the two cannot silently diverge (one loosened, the
   // other not): a non-empty non-digit string is rejected.
-  assert.match(settingsSource, /raw !== '' && !\/\^\\d\+\$\/\.test\(raw\)/, 'validation must reject non-digit non-empty values, matching parseTelegramTopicId')
+  // Since 27 Sep 2026 the rule is ONE exported function, shared with the
+  // Telegram /settopic save (lib/telegramTopicSetting.ts), pinned by value.
+  assert.match(settingsSource, /if \(!isTelegramTopicSettingValue\(raw\)\)/, 'validation must use the shared topic value rule')
+  for (const good of ['', '7', '733']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
+  for (const bad of ['-5', '3.5', 'abc', ' 7x']) assert.equal(bare.isTelegramTopicSettingValue(bad), false, `${JSON.stringify(bad)} must be rejected`)
   console.log('PASS routes/settings.ts: every TELEGRAM_TOPIC_KEYS entry is validated integer-or-empty, rejected with invalid_telegram_topic_id')
 
   // ---- same role gate and audit treatment as the existing telegram_chat_id -
