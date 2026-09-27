@@ -164,8 +164,9 @@ export type Env = {
   // Dedicated secret for the login and Drive OAuth `state` HMAC; takes
   // precedence over AUTH_SESSION_SECRET and the client-secret fallback.
   OAUTH_STATE_SECRET?: string
-  // Initial password for the seeded 'admin' user, read only when that user
-  // does not exist yet (lib/coreDataInvariants.ts).
+  // Seed password for a first administrator, used only when no active
+  // admin-role user and no user named 'admin' exist
+  // (lib/coreDataInvariants.ts). Factory reset requires it (routes/system.ts).
   BUSINESS_OS_ADMIN_PASSWORD?: string
   // Google Drive OAuth (backup mirror) -- see lib/googleDrive.ts. Separate
   // OAuth client from the login one above, matching the legacy backend's
