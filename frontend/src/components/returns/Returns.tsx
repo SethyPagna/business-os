@@ -9,6 +9,7 @@ import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
@@ -366,6 +367,13 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const confirmDiscardRetry = (message: string) => askToConfirm({
+    title: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
+    message,
+    confirmLabel: tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង'),
+    danger: true,
+  })
   const { syncChannel } = useSync()
   // E2: Returns renders as a SECTION of the Sales hub now -- activity is
   // 'am I on the sales page', same re-key AuditLog/Users/Backup got in E3/E4.
@@ -1451,10 +1459,12 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
               .catch((error) => notify(String((error as { message?: unknown })?.message || error), 'error'))
           }}>{tr('retry_original_request', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={historyRestoreSaving} onClick={() => {
-            if (window.confirm(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) {
-              try { savePendingHistoryRequest(activePendingHistoryRequest.entityId, null) }
+            const entityId = activePendingHistoryRequest.entityId
+            void confirmDiscardRetry(tr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')).then((confirmed) => {
+              if (!confirmed) return
+              try { savePendingHistoryRequest(entityId, null) }
               catch (error) { notify(String((error as { message?: unknown })?.message || error), 'error') }
-            }
+            })
           }}>{tr('discard_retry', 'Discard retry')}</button>
         </div>
       ) : null}
@@ -1463,7 +1473,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           <span className="min-w-0 flex-1">{tr('return_bulk_pending', 'A previous bulk action has an unknown outcome. Retry that exact request or discard it after checking Returns and History.', 'សកម្មភាពជាក្រុមមុនមានលទ្ធផលមិនទាន់ច្បាស់។ សូមសាកល្បងសំណើដដែលឡើងវិញ ឬបោះបង់បន្ទាប់ពីពិនិត្យការត្រឡប់ និងប្រវត្តិ។')}</span>
           <button type="button" className="btn-secondary" disabled={bulkActionSaving} onClick={() => { void applyBulkAction(pendingBulkRequest).catch(() => {}) }}>{tr('retry_original_request', 'Retry original request', 'សាកល្បងសំណើដើមឡើងវិញ')}</button>
           <button type="button" className="btn-secondary" onClick={() => {
-            if (window.confirm(tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។'))) savePendingBulkRequest(null)
+            void confirmDiscardRetry(tr('discard_bulk_retry_warning', 'Discard this retry? The previous action may already have succeeded. Check Returns and History first.', 'បោះបង់ការសាកល្បងនេះ? សកម្មភាពមុនអាចបានជោគជ័យរួចហើយ។')).then((confirmed) => { if (confirmed) savePendingBulkRequest(null) })
           }} disabled={bulkActionSaving}>{tr('discard_retry', 'Discard retry', 'បោះបង់ការសាកល្បង')}</button>
         </div>
       ) : null}
@@ -1742,6 +1752,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           />
         </Suspense>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

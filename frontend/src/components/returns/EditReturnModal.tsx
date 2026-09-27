@@ -20,6 +20,7 @@ import {
   savePendingDirectMutation,
 } from '../../utils/directMutationRequest.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import type { PreparedReturnUpdateRequest } from '../../api/returnsTransport.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
@@ -155,6 +156,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
   }
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
 
   const OTHER_LABEL = T('reason_other', 'Other')
   const returnReasonPresets = useReturnReasonPresets(t)
@@ -511,7 +513,12 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                 {submitting ? `⏳ ${T('saving_label','Saving…')}` : T('retry_original_request', 'Retry original request')}
               </button>
               <button type="button" disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50" onClick={() => {
-                if (window.confirm(T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) clearPendingRequest()
+                void askToConfirm({
+                  title: T('discard_retry', 'Discard retry'),
+                  message: T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'),
+                  confirmLabel: T('discard_retry', 'Discard retry'),
+                  danger: true,
+                }).then((confirmed) => { if (confirmed) clearPendingRequest() })
               }}>
                 {T('discard_retry', 'Discard retry')}
               </button>
@@ -524,6 +531,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             </button>
           )}
         </div>
+        {confirmDialog}
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
     </div>,

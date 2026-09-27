@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Modal from '../shared/Modal.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { getReturnReasonPresets } from '../../api/returnsReadTransport.ts'
 import { getReturnReasonImpact, replaceReturnReason, saveReturnReasonPresets } from '../../api/returnsTransport.ts'
 import {
@@ -28,6 +29,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   const fallback = useMemo(() => buildDefaultReturnReasonPresets(t), [t])
   const [scope, setScope] = useState<ReturnReasonScope>('customer')
   const [presets, setPresets] = useState<ReturnReasonPresets>(fallback)
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -81,18 +83,24 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
       const linked = Number(impact.linked_records || 0)
       const targetNote = impact.target_exists ? ` ${tr('return_reason_merge_notice', 'The target already exists, so the presets will merge.')}` : ''
       const scopeLabel = tr(scope, scope === 'customer' ? 'Customer' : 'Supplier').toLocaleLowerCase()
-      const confirmMessage = [
-        tr('return_reason_replace_confirm_intro', '{count} live {scope} return(s) use "{from}".{targetNote}')
+      // Both answers save the rename: Confirm also rewrites the matching
+      // returns, Cancel renames only the saved choice -- what OK and Cancel
+      // meant on the native prompt this replaced, now spelled out per button.
+      const replaceLinked = linked > 0 && await askToConfirm({
+        title: tr('rename_reason_prompt', 'Rename saved reason'),
+        message: tr('return_reason_replace_confirm_intro', '{count} live {scope} return(s) use "{from}".{targetNote}')
           .replace('{count}', String(linked))
           .replace('{scope}', scopeLabel)
           .replace('{from}', from)
           .replace('{targetNote}', targetNote),
-        '',
-        tr('return_reason_replace_confirm_ok', 'OK: update those exact matches too.'),
-        tr('return_reason_replace_confirm_cancel', 'Cancel: rename only the saved preset.'),
-        tr('return_reason_replace_confirm_note', 'Audit and stock history remain unchanged.'),
-      ].join('\n')
-      const replaceLinked = linked > 0 && window.confirm(confirmMessage)
+        items: [
+          { label: tr('before', 'Before'), value: from },
+          { label: tr('after', 'After'), value: to },
+          { label: tr('confirm', 'Confirm'), value: tr('return_reason_replace_confirm_ok', 'OK: update those exact matches too.') },
+          { label: tr('cancel', 'Cancel'), value: tr('return_reason_replace_confirm_cancel', 'Cancel: rename only the saved preset.') },
+        ],
+        note: tr('return_reason_replace_confirm_note', 'Audit and stock history remain unchanged.'),
+      })
       const response = await replaceReturnReason({
         return_scope: scope,
         from,
@@ -113,7 +121,13 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   }
 
   const remove = async (value: string) => {
-    if (!window.confirm(tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value))) return
+    const confirmed = await askToConfirm({
+      title: tr('remove', 'Remove'),
+      message: tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value),
+      confirmLabel: tr('remove', 'Remove'),
+      danger: true,
+    })
+    if (!confirmed) return
     await persist(removeReturnReasonPreset(presets, scope, value), tr('return_reason_removed', 'Saved choice removed; existing returns were preserved.'))
   }
 
@@ -141,6 +155,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
           )) : <div className="rounded-lg border border-dashed border-slate-300 py-6 text-center text-sm text-slate-400 dark:border-slate-700">{tr('no_saved_reasons', 'No saved reasons yet for this workflow.')} {tr('return_reason_free_text_note', 'Free-text entry remains available.')}</div>}
         </div>
       </div>
+      {confirmDialog}
     </Modal>
   )
 }
