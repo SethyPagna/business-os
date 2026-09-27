@@ -278,6 +278,7 @@ export default function ManageBatchesModal({
   }
 
   return createPortal(
+    <>
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
@@ -521,8 +522,12 @@ export default function ManageBatchesModal({
             row, so there was no other footer action to keep. */}
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
-      {confirmDialog}
-    </div>,
+    </div>
+    {/* Beside the backdrop, not inside it: React bubbles the dialog's clicks
+        through the component tree, so inside it Confirm and Cancel also closed
+        Manage Received Dates. */}
+    {confirmDialog}
+    </>,
     document.body,
   )
 }

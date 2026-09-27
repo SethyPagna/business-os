@@ -95,5 +95,97 @@ runTest('no new native confirm() anywhere in frontend/src, and the remaining lis
   assert.deepEqual(found, REMAINING)
 })
 
+// The replacements go through useConfirmDialog, whose askToConfirm() returns a
+// promise so `if (!(await askToConfirm({...}))) return` keeps the native call's
+// control flow. Three ways a replacement can look right and still be wrong
+// (pinned in U-confirm, absorbed by FX-ui), each with its own control:
+//   1. an ask that is not awaited, chained or handed back -- a Promise is
+//      always truthy, so `if (!askToConfirm(...)) return` never cancels;
+//   2. a host that asks but never renders {confirmDialog} -- the promise never
+//      settles and the action silently hangs;
+//   3. {confirmDialog} inside a backdrop whose onClick closes the host --
+//      React bubbles the dialog's clicks through the component tree, so
+//      pressing Confirm or Cancel also closes the surface underneath.
+//      tests/overlayNestedFloatBubbling.test.ts pins the same rule for
+//      <XxxDialog> tags; a {confirmDialog} expression is invisible to it.
+
+function parseTsx(fileName: string, source: string): ts.SourceFile {
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+}
+
+/** askToConfirm(...) calls whose answer is dropped: not awaited, not .then-chained, not returned to a caller. */
+function unawaitedAsks(fileName: string, source: string): number[] {
+  const file = parseTsx(fileName, source)
+  const lines: number[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'askToConfirm') {
+      let outer: ts.Node = node
+      while (ts.isParenthesizedExpression(outer.parent)) outer = outer.parent
+      const parent = outer.parent
+      const used = ts.isAwaitExpression(parent)
+        || (ts.isPropertyAccessExpression(parent) && parent.name.text === 'then')
+        || (ts.isArrowFunction(parent) && parent.body === outer)
+        || ts.isReturnStatement(parent)
+      if (!used) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return lines
+}
+
+function jsxAttribute(element: ts.JsxOpeningLikeElement, name: string): ts.JsxAttribute | undefined {
+  return element.attributes.properties.find(
+    (property): property is ts.JsxAttribute => ts.isJsxAttribute(property) && property.name.getText() === name,
+  )
+}
+
+/** {confirmDialog} expressions reachable from a closing backdrop without crossing a click-stopper. */
+function confirmDialogInsideClosingBackdrop(fileName: string, source: string): number {
+  const file = parseTsx(fileName, source)
+  let hits = 0
+  const collect = (node: ts.Node): void => {
+    if (ts.isJsxElement(node) && /stopPropagation/.test(jsxAttribute(node.openingElement, 'onClick')?.getText(file) || '')) return
+    if (ts.isJsxExpression(node) && node.expression && ts.isIdentifier(node.expression) && node.expression.text === 'confirmDialog') hits += 1
+    ts.forEachChild(node, collect)
+  }
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxElement(node) && /fixed inset-0/.test(jsxAttribute(node.openingElement, 'className')?.getText(file) || '') && jsxAttribute(node.openingElement, 'onClick')) {
+      node.children.forEach(collect)
+      return
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return hits
+}
+
+runTest('positive controls: a dropped ask and a dialog inside a closing backdrop are caught', () => {
+  assert.deepEqual(unawaitedAsks('a.tsx', `if (!askToConfirm({ title: 'x' })) return\nvoid askToConfirm({ title: 'y' })`), [1, 2])
+  assert.deepEqual(unawaitedAsks('b.tsx', [
+    `if (!(await askToConfirm({ title: 'x' }))) return`,
+    `void askToConfirm({ title: 'y' }).then((ok) => ok)`,
+    `const ask = (m: string) => askToConfirm({ title: m })`,
+    `function f() { return askToConfirm({ title: 'z' }) }`,
+  ].join('\n')), [])
+  assert.equal(confirmDialogInsideClosingBackdrop('a.tsx', `const A = () => (<div className="fixed inset-0" onClick={close}><div onClick={(e) => e.stopPropagation()}>x</div>{confirmDialog}</div>)`), 1)
+  assert.equal(confirmDialogInsideClosingBackdrop('b.tsx', `const B = () => (<><div className="fixed inset-0" onClick={close}><div onClick={(e) => e.stopPropagation()}>{confirmDialog}</div></div>{confirmDialog}</>)`), 0)
+})
+
+runTest('every useConfirmDialog host uses the answer, renders the dialog, and keeps it outside closing backdrops', () => {
+  const hosts = sourceFiles(srcRoot).filter((file) => !file.endsWith('useConfirmDialog.tsx') && /\buseConfirmDialog\(/.test(fs.readFileSync(file, 'utf8')))
+  assert.ok(hosts.length >= 25, `expected the replaced surfaces to use the hook, found ${hosts.length}`)
+  const problems: string[] = []
+  for (const file of hosts) {
+    const rel = path.relative(srcRoot, file).split(path.sep).join('/')
+    const source = fs.readFileSync(file, 'utf8')
+    const dropped = unawaitedAsks(rel, source)
+    if (dropped.length) problems.push(`${rel}: askToConfirm() answer not used at line ${dropped.join(', ')}`)
+    if (!/\{confirmDialog\}/.test(source)) problems.push(`${rel}: asks but never renders {confirmDialog}`)
+    if (confirmDialogInsideClosingBackdrop(rel, source)) problems.push(`${rel}: {confirmDialog} sits inside a backdrop that closes on click`)
+  }
+  assert.deepEqual(problems, [])
+})
+
 if (failed) { console.error(`\n${failed} native-confirm guard test(s) failed`); process.exit(1) }
 console.log('PASS noNativeConfirm')
