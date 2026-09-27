@@ -1,0 +1,34 @@
+-- S-auth4b: force a password change after a sign-in with a publicly known
+-- password.
+--
+-- 'Admin123456!' (the old seed fallback) and 'admin123' (the local-dev demo
+-- seed) are in this repository's public git history, and at least one live
+-- account still used the first on 27 Sep 2026. History cannot be rewritten.
+-- lib/passwordPolicy.ts now refuses to SET either one on every staff
+-- password writer, and POST /api/auth/login sets this flag when a correct
+-- sign-in used one. While it is 1, lib/auth.ts requireAuth refuses every
+-- request except POST /api/users/<own id>/change-password (403
+-- password_change_required); /bootstrap and /me carry it so the app shows the
+-- forced change screen. Every password writer clears it.
+--
+-- Purely additive: one column with a constant default, so every existing row
+-- reads 0 and nothing is forced until someone signs in with a known password.
+-- No row is rewritten, no index (it is only read on the row already fetched
+-- by the session lookup).
+--
+-- Pre-assert:  SELECT COUNT(*) FROM pragma_table_info('users')
+--                WHERE name = 'must_change_password'
+--              -- expected 0
+-- Post-assert: the same query -- expected 1;
+--              SELECT COUNT(*) FROM users WHERE must_change_password <> 0
+--              -- expected 0 immediately after apply;
+--              SELECT COUNT(*) FROM users -- unchanged.
+-- Deploy order: EITHER, migration first preferred. Without the column the
+--              session lookup falls back to its old SELECT (once per
+--              isolate) and the flag writes are skipped, so the Worker runs
+--              but cannot force the change until this is applied.
+-- Recovery:    ALTER TABLE users DROP COLUMN must_change_password;
+--              (roll the Worker back first, or it reverts to the fallback
+--              above). Loses only which accounts were being forced.
+
+ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;

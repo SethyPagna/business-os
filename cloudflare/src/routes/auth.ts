@@ -11,7 +11,7 @@ import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
-import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
@@ -312,6 +312,17 @@ app.post('/login', async (c) => {
   const passwordMatches = bcrypt.compareSync(body.password, user.password)
   if (!passwordMatches) return invalidCredentials()
 
+  // S-auth4b: a right password that is publicly known (in git history) still
+  // signs in -- refusing it would lock the owner out -- but the account is
+  // marked must_change_password, and requireAuth then refuses everything but
+  // the self password change. Checked here, the one place the plaintext
+  // exists. The password itself is never logged or audited.
+  const signedInWithLeakedPassword = await passwordKnownLeaked(body.password, c.env)
+  if (signedInWithLeakedPassword) {
+    await setPasswordMustChange(getDb(c.env), user.id, true)
+    await audit(c.env, user.id, user.username, 'login_known_leaked_password', 'user', user.id, { mustChangePassword: true })
+  }
+
   // A right password is not a guess: hand back the network slot reserved
   // above, so shared tills behind one IP never fill the per-IP ceiling.
   await releaseRateLimitSlot(c.env, 'auth:login_ip', ip, ipLimit.slot)
@@ -425,6 +436,7 @@ app.post('/login', async (c) => {
       // follow-up request to become correctly authorized.
       role_code: user.role_code,
       role_permissions: user.role_permissions,
+      must_change_password: signedInWithLeakedPassword ? 1 : 0,
     },
     sessionExpiresAt: session.expiresAt,
   })
@@ -550,6 +562,9 @@ app.post('/password-reset/complete', async (c) => {
   if (passwordTooShort(newPassword)) {
     return c.json({ success: false, error: passwordMinLengthError() }, 400)
   }
+  if (await passwordKnownLeaked(newPassword, c.env)) {
+    return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
+  }
 
   const result = await consumePasswordResetLink(c.env, accessToken)
   if (!result.ok) {
@@ -562,6 +577,7 @@ app.post('/password-reset/complete', async (c) => {
 
   const passwordHash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
+  await setPasswordMustChange(db, user.id, false)
   // Reset means "I may have lost control of this account" -- every
   // existing session (including any an attacker holds) should stop working.
   await db.prepare('UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL').run([user.id])
@@ -917,6 +933,7 @@ app.post('/password-reset/otp', async (c) => {
   if (!identifier) return c.json({ error: 'Username or email is required' }, 400)
   if (!body.otp) return c.json({ error: 'OTP code is required' }, 400)
   if (!body.newPassword || passwordTooShort(body.newPassword)) return c.json({ error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(body.newPassword, c.env)) return c.json({ error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   // P1-1. This used to rate-limit only on `<ip>:<raw typed identifier>`,
   // so changing the letter case, typing the email instead of the username,
@@ -980,6 +997,7 @@ app.post('/password-reset/otp', async (c) => {
 
   const passwordHash = bcrypt.hashSync(String(body.newPassword), 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
+  await setPasswordMustChange(db, user.id, false)
   await revokeUserSessions(c.env, user.id)
   await clearLoginLockout(c.env, identifier)
   if (accountLockoutKey) await clearLoginLockout(c.env, accountLockoutKey)

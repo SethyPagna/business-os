@@ -13,7 +13,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
-import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -506,6 +506,7 @@ app.post('/users', async (c) => {
   const email = String(body.email || '').trim().toLowerCase() || null
   if (!username || !password) return c.json({ success: false, error: 'Username and password required' }, 400)
   if (passwordTooShort(password)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(password, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
   if (!isValidEmail(email)) return c.json({ success: false, error: 'Valid email required' }, 400)
   const roleId = Number(body.role_id)
   if (!Number.isInteger(roleId) || roleId <= 0) {
@@ -762,6 +763,7 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   const newPassword = String(body.newPassword || body.new_password || '').trim()
   if (!newPassword) return c.json({ success: false, error: 'New password required' }, 400)
   if (passwordTooShort(newPassword)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   if (options.requireAdminControl && !isAdminControlUser(actor)) {
     return c.json({ success: false, error: 'No permission' }, 403)
@@ -792,6 +794,8 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
 
   const hash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
+  // A new password that is not publicly known ends a forced change.
+  await setPasswordMustChange(db, targetId, false)
   // Changing YOUR OWN password keeps the session that made the change and
   // signs out every other device. Resetting SOMEONE ELSE's password signs out
   // all of theirs -- the actor's own sessions are a different user_id and are

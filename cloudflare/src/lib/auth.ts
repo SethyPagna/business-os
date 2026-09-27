@@ -71,6 +71,11 @@ export type SessionUser = {
   // `r.name AS role_name` correctly -- this just brings the session user's
   // own query in line with that.
   role_name?: string | null
+  // users.must_change_password (migration 0202): 1 once a sign-in used a
+  // publicly known password (lib/passwordPolicy.ts). requireAuth then refuses
+  // everything but the self password change; /bootstrap and /me carry it so
+  // the client shows the forced change screen. Absent before 0202.
+  must_change_password?: number | null
 }
 
 type SessionLookupRow = SessionUser & {
@@ -245,14 +250,17 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   return lookup
 }
 
+// Set once per isolate if users.must_change_password does not exist yet.
+let mustChangeColumnMissing = false
+
 async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string): Promise<SessionUser | null> {
   const tokenHash = await hashToken(token)
   const nowIso = new Date().toISOString()
 
   const db = getDb(c.env)
-  const row = await db.prepare(`
+  const lookupSql = (mustChangeColumn: string) => `
     SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
-           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name,${mustChangeColumn}
            s.created_at AS session_created_at, s.expires_at AS session_expires_at,
            s.last_seen_at AS session_last_seen_at
     FROM user_sessions s
@@ -264,7 +272,22 @@ async function lookupSessionUser<E extends { Bindings: Env } = { Bindings: Env }
       AND u.is_active = 1
       AND u.deleted_at IS NULL
     LIMIT 1
-  `).get<SessionLookupRow>({ token_hash: tokenHash, now: nowIso })
+  `
+  const lookupParams = { token_hash: tokenHash, now: nowIso }
+  let row: SessionLookupRow | undefined
+  if (mustChangeColumnMissing) {
+    row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+  } else {
+    try {
+      row = await db.prepare(lookupSql(' u.must_change_password,')).get<SessionLookupRow>(lookupParams)
+    } catch (error) {
+      // Worker deployed before migration 0202: every request would 500 on
+      // the missing column. Remember it for this isolate and read without it.
+      if (!/no such column/i.test(String((error as Error)?.message || error))) throw error
+      mustChangeColumnMissing = true
+      row = await db.prepare(lookupSql('')).get<SessionLookupRow>(lookupParams)
+    }
+  }
 
   if (!row) return null
 
@@ -438,6 +461,15 @@ export async function revokeUserSessions<E extends { Bindings: Env } = { Binding
 // middleware. Usage: app.use('/protected/*', requireAuth) or per-route:
 // app.get('/x', requireAuth, handler). Stores the resolved user on
 // c.set('user', ...) for handlers to read via c.get('user').
+// The one route a must-change account may use through requireAuth: POST
+// .../users/<own id>/change-password (routes/users.ts; it re-checks the
+// current password and that the target is the caller).
+export function allowedWhilePasswordMustChange(method: string, path: string, userId: number | string): boolean {
+  if (String(method).toUpperCase() !== 'POST') return false
+  const match = /\/users\/([^/]+)\/change-password\/?$/.exec(String(path || ''))
+  return !!match && Number(match[1]) === Number(userId)
+}
+
 export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: () => Promise<void>) {
   // A router stacked behind another one that already authenticated this
   // request (see getSessionUser's memo note) has nothing left to check.
@@ -464,6 +496,13 @@ export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user:
   // shared auth-recovery flow (AppContext.tsx's authRecoveryRef check)
   // had already re-confirmed the session was fine.
   if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
+  // Signed in with a publicly known password (S-auth4b): nothing but the
+  // self password change until it is changed. Sign-out, /me and /bootstrap
+  // do not pass through here. 403 with its own code, never 401 or the
+  // "sign in again" wording, so the client does not treat it as a lost session.
+  if (Number(user.must_change_password || 0) === 1 && !allowedWhilePasswordMustChange(c.req.method, c.req.path, user.id)) {
+    return c.json({ error: 'Your password is publicly known. Change it before continuing.', code: 'password_change_required' }, 403)
+  }
   c.set('user', user)
   await next()
 }
