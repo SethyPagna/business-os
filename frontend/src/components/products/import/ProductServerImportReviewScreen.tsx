@@ -8,6 +8,7 @@ import PaginationControls from '../../shared/PaginationControls'
 import { approveImportJob, getImportJob, getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards'
 import { importPollDelayMs } from '../../../utils/importPoll'
+import { visibleTimeout } from '../../../utils/visibilityPolling.ts'
 
 const PAGE_SIZE = 50
 
@@ -115,7 +116,8 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
 
   useEffect(() => {
     let cancelled = false
-    let timer: number | null = null
+    // The next status read waits for the tab to be visible (F2).
+    let cancelNextPoll: (() => void) | null = null
     let attempt = 0
     const poll = async () => {
       try {
@@ -127,16 +129,16 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
         setJobError(String(job?.last_error || job?.error_message || ''))
         if (job) onJob?.(job)
         if (!['awaiting_review', 'failed', 'cancelled', 'completed', 'completed_with_errors'].includes(nextStatus)) {
-          timer = window.setTimeout(poll, importPollDelayMs(attempt++))
+          cancelNextPoll = visibleTimeout(() => { void poll() }, importPollDelayMs(attempt++))
         }
       } catch (error) {
         if (cancelled) return
         setJobError(error instanceof Error ? error.message : tr('import_status_failed', 'Could not read import status.'))
-        timer = window.setTimeout(poll, importPollDelayMs(attempt++))
+        cancelNextPoll = visibleTimeout(() => { void poll() }, importPollDelayMs(attempt++))
       }
     }
     void poll()
-    return () => { cancelled = true; if (timer !== null) window.clearTimeout(timer) }
+    return () => { cancelled = true; cancelNextPoll?.() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId, jobRevision])
 
