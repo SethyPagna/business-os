@@ -774,7 +774,7 @@ export default function ReceiptSettings() {
             <ReceiptQrSettingsTab tpl={tpl} setT={setT} t={t} />
           )}
 
-          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={typedPreviewTargetRef} settings={settings} saveSettings={saveSettings} />}
+          {activeSection === 'print' && <PrintSettings t={t} previewTargetRef={typedPreviewTargetRef} settings={settings} saveSettings={saveSettings} notify={notify} />}
 
         </div>
       </div>
