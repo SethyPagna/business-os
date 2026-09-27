@@ -21,6 +21,10 @@
 --   orphan        each of those effects whose six-column tuple has fewer
 --                 surviving movements than effects: a candidate for the
 --                 deleted rows
+--   action        action_history rows (kept 180 days, unlike audit_logs'
+--                 21) created or updated from 2026-09-01 06:45:57 to the end
+--                 of 2 Sep: what else was done in the window, and whether it
+--                 was later undone. The label is not output.
 -- Columns:
 --   section, id (movement id), at (movement created_at | effect imported_at),
 --   occurred_at, kind, product_id, branch_id, batch_id, quantity,
@@ -31,6 +35,9 @@
 --   orphan:       n = effects sharing the tuple, orphan_n = how many of them
 --                 have no movement, ids = movements matching without the
 --                 reason (non-empty: the row may survive with an edited reason)
+--   action:       id = action_history.id, at = created_at, occurred_at = updated_at,
+--                 kind = status, source = entity, product_id = entity_id when
+--                 numeric, n = reversible
 -- ops:min-rows 1
 -- ops:max-rows 2000
 WITH mv AS MATERIALIZED (
@@ -54,7 +61,7 @@ tw AS MATERIALIZED (
     MIN(COALESCE(strftime('%Y-%m-%d %H:%M:%S', e.occurred_at), e.occurred_at)) AS occurred_at,
     MIN(CASE WHEN instr(e.source_key, ':') > 0 THEN substr(e.source_key, 1, instr(e.source_key, ':') - 1) ELSE e.source_key END) AS source
   FROM legacy_inventory_effects e
-  WHERE e.product_id IN (SELECT product_id FROM eff UNION SELECT product_id FROM mv)
+  WHERE e.product_id IN (SELECT product_id FROM eff) OR e.product_id IN (SELECT product_id FROM mv)
   GROUP BY e.product_id, e.branch_id, e.batch_id, e.movement_type, e.movement_quantity, e.reason
 ),
 em AS MATERIALIZED (
@@ -93,6 +100,20 @@ SELECT * FROM (
     e.movement_quantity, e.source, e.twins, e.twins - json_extract(e.hit, '$.strict'), json_extract(e.hit, '$.loose')
   FROM em e
   WHERE json_extract(e.hit, '$.strict') < e.twins
+  UNION ALL
+  SELECT * FROM (
+    SELECT 'action', h.id, COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.created_at), h.created_at),
+      COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.updated_at), h.updated_at), h.status,
+      CASE WHEN CAST(h.entity_id AS INTEGER) > 0 THEN CAST(h.entity_id AS INTEGER) END, NULL, NULL, NULL,
+      h.entity, h.reversible, NULL, NULL
+    FROM action_history h
+    WHERE (COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.created_at), h.created_at) >= '2026-09-01 06:45:57'
+        AND COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.created_at), h.created_at) < '2026-09-03 00:00:00')
+      OR (COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.updated_at), h.updated_at) >= '2026-09-01 06:45:57'
+        AND COALESCE(strftime('%Y-%m-%d %H:%M:%S', h.updated_at), h.updated_at) < '2026-09-03 00:00:00')
+    ORDER BY h.id
+    LIMIT 500
+  )
 )
-ORDER BY CASE section WHEN 'movement' THEN 0 WHEN 'effect_batch' THEN 1 ELSE 2 END, id, at, source, kind, product_id
+ORDER BY CASE section WHEN 'movement' THEN 0 WHEN 'effect_batch' THEN 1 WHEN 'orphan' THEN 2 ELSE 3 END, id, at, source, kind, product_id
 LIMIT 2000
