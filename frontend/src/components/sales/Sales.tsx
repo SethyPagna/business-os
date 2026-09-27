@@ -1308,7 +1308,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   ): Promise<void> => {
     const result = await handleStatusChange(saleId, saleStatus, notes, false, extra, false, null, history)
     if (result === true || (result && typeof result === 'object' && 'statusUpdatedAt' in result)) return
-    throw new Error(translateOr('action_failed', 'The sale status change did not complete. Retry the original action.'))
+    throw new Error(translateOr('sale_status_change_incomplete', 'The sale status change did not complete. Retry the original action.'))
   }
 
   const retryPendingDirectStatusRequest = async (): Promise<void> => {
@@ -2005,7 +2005,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     : field === 'payment_method'
       ? valueChoice(sale.payment_method, translateOr('none', 'None'))
       : field === 'delivery_contact'
-        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_delivery_contact', 'No driver'))
+        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_driver', 'No driver'))
         : linkedChoice(sale.customer_id, sale.customer_name, translateOr('no_customer', 'No customer'))
   const choicesForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice[] => {
     if (field !== 'payment_method') return [choiceForSale(sale, field)]
@@ -2047,7 +2047,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         const record = (result || {}) as Record<string, unknown>
         const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
         targetChoices = uniqueChoices([
-          linkedChoice(null, null, field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')),
+          linkedChoice(null, null, field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_driver', 'No driver')),
           ...sourceChoices,
           ...(rows as Array<Record<string, unknown>>).map((row) => linkedChoice(row.id, row.name, translateOr('none', 'None'))),
         ])
@@ -2101,7 +2101,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       if (searchVersion !== bulkTargetSearchVersionRef.current) return
       setBulkChangePrompt((current) => {
         if (!current || current.field !== prompt.field) return current
-        const emptyLabel = current.field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')
+        const emptyLabel = current.field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_driver', 'No driver')
         return {
           ...current,
           targetChoices: uniqueChoices([

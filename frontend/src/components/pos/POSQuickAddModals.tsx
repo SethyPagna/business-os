@@ -4,7 +4,6 @@ import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputK
 import type { ContactDuplicateCheck, ContactDuplicateMatch } from '../contacts/contactDuplicates.ts'
 
 type Translator = (key: string) => string
-type PosCopy = (en: string, km?: string) => string
 
 type CustomerFormState = {
   address: string
@@ -35,7 +34,6 @@ type POSQuickAddModalsProps = {
   onOpenCustomerAddressPresets: () => void
   newCustomerForm: CustomerFormState
   newDeliveryForm: DeliveryFormState
-  posCopy: PosCopy
   savingCustomer: boolean
   savingDelivery: boolean
   setNewCustomerForm: Dispatch<SetStateAction<CustomerFormState>>
@@ -99,7 +97,6 @@ export default function POSQuickAddModals({
   onOpenCustomerAddressPresets,
   newCustomerForm,
   newDeliveryForm,
-  posCopy,
   savingCustomer,
   savingDelivery,
   setNewCustomerForm,
@@ -136,9 +133,9 @@ export default function POSQuickAddModals({
           </div>
           <div>
             <label htmlFor="pos-quick-customer-membership" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-              {posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span>
+              {t('customer_membership_id')} <span className="font-normal text-gray-400">({t('optional')})</span>
             </label>
-            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" />
+            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={t('membership_auto_generated_if_blank')} autoComplete="off" />
           </div>
         </QuickAddModal>
       ) : null}

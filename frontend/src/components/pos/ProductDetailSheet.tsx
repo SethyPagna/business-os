@@ -790,7 +790,7 @@ export default function ProductDetailSheet({
               type="button"
               className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0"
               onClick={() => onOpenImageLightbox(product, 0)}
-              aria-label={posCopy('Preview product images')}
+              aria-label={posCopy('Preview product images', 'មើលរូបភាពទំនិញ')}
             >
               {primaryImage ? <ProductImage src={primaryImage} alt={displayName} className="w-full h-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-400" />}
             </button>
