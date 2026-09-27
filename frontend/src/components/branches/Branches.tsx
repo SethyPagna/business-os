@@ -32,6 +32,7 @@ import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
+import { replayBranchEdit, type BranchReplayRequest } from './branchHistoryReplay.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -790,6 +791,29 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     withLoaderTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS)
   ), [])
 
+  // The in-tab Undo / Redo of a branch edit (the history row has no server id
+  // yet, or its create failed) restores `restore` only while the branch still
+  // holds `expected`, as the server applier does -- see branchHistoryReplay.ts.
+  const branchReplayRequest = useCallback((direction: 'undo' | 'redo', restore: BranchRecord, expected: BranchRecord): BranchReplayRequest => {
+    const label = direction === 'undo' ? 'Undo branch edit' : 'Redo branch edit'
+    return {
+      id: restore.id,
+      fields: buildBranchPayload(restore),
+      expected,
+      readBranch: async (id) => {
+        const result = await withLoaderTimeout(() => branchApi.getBranches(), label, BRANCHES_LIST_TIMEOUT_MS)
+        return Array.isArray(result)
+          ? result.filter(isBranchRecord).find((branch) => String(branch.id) === String(id)) || null
+          : null
+      },
+      writeBranch: (id, body) => runBranchMutation(() => branchApi.updateBranch(id, body as BranchTransportPayload), label),
+      refusal: direction === 'undo'
+        ? tr('undo_refused_record_changed', 'Someone changed this record after this action, so Undo was refused to protect the newer data.')
+        : tr('redo_refused_record_changed', 'Someone changed this record after this action, so Redo was refused to protect the newer data.'),
+      failure: direction === 'undo' ? 'Failed to restore branch' : 'Failed to reapply branch changes',
+    }
+  }, [branchApi, buildBranchPayload, runBranchMutation, tr])
+
   /**
    * 5. Branch Stock Expansion
    * 5.1 Lazy-load stock per branch on first open.
@@ -933,19 +957,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
         refresh: async () => { await load() },
         undo: async () => {
-          const result = await runBranchMutation(
-            () => branchApi.updateBranch(existingSnapshot.id, buildBranchPayload(existingSnapshot)),
-            'Undo branch edit',
-          )
-          if (result?.success === false) throw new Error(result.error || 'Failed to restore branch')
+          await replayBranchEdit(branchReplayRequest('undo', existingSnapshot, nextSnapshot))
           await load()
         },
         redo: async () => {
-          const result = await runBranchMutation(
-            () => branchApi.updateBranch(nextSnapshot.id, buildBranchPayload(nextSnapshot)),
-            'Redo branch edit',
-          )
-          if (result?.success === false) throw new Error(result.error || 'Failed to reapply branch changes')
+          await replayBranchEdit(branchReplayRequest('redo', nextSnapshot, existingSnapshot))
           await load()
         },
       })
