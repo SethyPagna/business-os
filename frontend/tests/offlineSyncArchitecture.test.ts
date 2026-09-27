@@ -81,7 +81,8 @@ await runTest('online maintenance keeps the offline mirror and app shell fresh w
   assert.match(webApiSource, /const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000/)
   assert.match(webApiSource, /const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000/)
   assert.match(webApiSource, /startOfflineMaintenanceLoop/)
-  assert.match(webApiSource, /window\.setInterval/)
+  // F2: the maintenance loop is paused while the tab is hidden.
+  assert.match(webApiSource, /startVisibleInterval\(\(\) => \{\s*runOfflineMaintenance\(false\)\s*\}, OFFLINE_REFRESH_INTERVAL_MS/)
   assert.match(webApiSource, /refreshOfflineSnapshotSoon/)
   assert.match(webApiSource, /document\.visibilityState === 'hidden'/)
   assert.match(webApiSource, /registration\.update\?\.\(\)/)
