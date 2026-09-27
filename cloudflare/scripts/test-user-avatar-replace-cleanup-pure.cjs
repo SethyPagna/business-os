@@ -1,15 +1,19 @@
-// Replacing a profile photo left the old file in storage: PUT
-// /users/:id/avatar moved the pointer and never looked back, while DELETE
-// cleaned up. Every re-crop of a photo leaked one R2 object + file_assets row.
+// Replacing a profile photo (PUT /users/:id/avatar).
+//
+// c22c19fe made every replace delete the old R2 object + file_assets row when
+// its own reference count found nothing; that count missed non-canonical
+// references and deleted photos still on show (refuter X1/X2). U-profile3
+// (27 Sep 2026), owner rule "nothing may be lost": a replace moves the
+// pointer, audits the old path, and NEVER deletes the old photo -- it stays
+// in the Library, where an admin deletes it under the Library's in-use check.
 //
 // Drives the real routes/users.ts PUT /users/:id/avatar over in-memory
 // SQLite with a fake R2 bucket and pins:
-//   - the replaced avatar upload is deleted (object + file_assets row) when
-//     nothing else references it -- DELETE's exact rule;
-//   - it is kept when another user, a product, a gallery row, a promotion or
-//     a setting still references it, or when it is a general library file;
-//   - re-setting the same path is a no-op (no write, no audit, no delete);
-//   - there is still ONE reference check in users.ts, shared by both routes.
+//   - the replaced photo is kept (object + file_assets row), whoever replaces
+//     it and whatever its source;
+//   - the pointer change is audited with the old path, so it can be restored;
+//   - re-setting the same path is a no-op (no write, no audit);
+//   - users.ts has no object-delete path for avatars at all.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -77,6 +81,7 @@ const app = load('routes/users.ts', {
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
@@ -118,58 +123,35 @@ async function check(name, fn) {
 }
 
 ;(async () => {
-  await check('replacing an unshared avatar upload deletes the old object and its file_assets row', async () => {
+  await check('replacing a photo keeps the old object and its file_assets row', async () => {
     actor = { id: 2, username: 'cashier' }
     const { status, body } = await put(2, '/uploads/new20.webp')
     assert.equal(status, 200, JSON.stringify(body))
+    assert.equal(body.changed, true)
     assert.equal(avatarOf(2), '/uploads/new20.webp')
-    assert.deepEqual(r2Deleted, ['uploads/old10.webp'])
-    assert.equal(assetExists(10), false, 'old file_assets row gone')
-    assert.equal(assetExists(20), true, 'the new photo is untouched')
-    assert.equal(body.previousObjectDeleted, true)
-    const deleted = fileDeleteAudits()
-    assert.equal(deleted.length, 1, 'the object deletion is audited')
-    assert.equal(deleted[0][5], 10)
-    assert.equal(deleted[0][6].reason, 'avatar_replaced')
+    assert.deepEqual(r2Deleted, [])
+    assert.equal(assetExists(10), true, 'the old photo stays in the Library')
+    assert.equal(assetExists(20), true)
+    assert.equal(fileDeleteAudits().length, 0)
   })
 
-  await check('an admin replacing someone else\'s photo cleans up the same way', async () => {
+  await check('the replace is audited with the old path, so it can be put back', async () => {
+    actor = { id: 2, username: 'cashier' }
+    await put(2, '/uploads/new20.webp')
+    const pointer = audits.find((a) => a[3] === 'update' && a[4] === 'user')
+    assert.ok(pointer)
+    assert.deepEqual(pointer[7], { before: { avatar_path: '/uploads/old10.webp' }, after: { avatar_path: '/uploads/new20.webp' } })
+    // ...and putting it back works: the kept file is still a library image.
+    assert.equal((await put(2, '/uploads/old10.webp')).status, 200)
+    assert.equal(avatarOf(2), '/uploads/old10.webp')
+  })
+
+  await check('an admin replacing another account photo, or a library-file photo, deletes nothing either', async () => {
     actor = { id: 1, username: 'owner', isAdmin: true }
     assert.equal((await put(2, '/uploads/new20.webp')).status, 200)
-    assert.deepEqual(r2Deleted, ['uploads/old10.webp'])
-  })
-
-  await check('the old avatar is kept while another user still shows it', async () => {
-    db.prepare("UPDATE users SET avatar_path = '/uploads/old10.webp' WHERE id = 3").run()
-    actor = { id: 2, username: 'cashier' }
-    const { status, body } = await put(2, '/uploads/new20.webp')
-    assert.equal(status, 200)
-    assert.equal(avatarOf(2), '/uploads/new20.webp')
-    assert.equal(avatarOf(3), '/uploads/old10.webp')
     assert.deepEqual(r2Deleted, [])
     assert.equal(assetExists(10), true)
-    assert.equal(body.previousObjectDeleted, false)
-  })
-
-  await check('the old avatar is kept while a product, gallery row, promotion or setting references it', async () => {
-    actor = { id: 2, username: 'cashier' }
-    for (const seed of [
-      "INSERT INTO products(id,image_path) VALUES(1,'/uploads/old10.webp')",
-      "INSERT INTO product_images(id,image_path) VALUES(1,'/uploads/old10.webp')",
-      "INSERT INTO promotions(id,image_path) VALUES(1,'/uploads/old10.webp?v=2')",
-      "INSERT INTO settings(key,value) VALUES('store_logo','{\"logo\":\"/uploads/old10.webp\"}')",
-    ]) {
-      reset()
-      db.prepare(seed).run()
-      const { status } = await put(2, '/uploads/new20.webp')
-      assert.equal(status, 200, seed)
-      assert.equal(avatarOf(2), '/uploads/new20.webp', seed)
-      assert.deepEqual(r2Deleted, [], seed)
-      assert.equal(assetExists(10), true, seed)
-    }
-  })
-
-  await check('a general library file that was the photo is never deleted, only replaced', async () => {
+    reset()
     db.prepare("UPDATE users SET avatar_path = '/uploads/lib11.jpg' WHERE id = 2").run()
     actor = { id: 2, username: 'cashier' }
     assert.equal((await put(2, '/uploads/new20.webp')).status, 200)
@@ -177,32 +159,21 @@ async function check(name, fn) {
     assert.equal(assetExists(11), true)
   })
 
-  await check('re-setting the same path is a no-op: no delete, no write, no audit', async () => {
+  await check('re-setting the same path is a no-op: no write, no audit', async () => {
     db.prepare("UPDATE users SET updated_at = '2026-09-01 00:00:00' WHERE id = 2").run()
     actor = { id: 2, username: 'cashier' }
     const { status, body } = await put(2, '/uploads/old10.webp')
     assert.equal(status, 200, JSON.stringify(body))
-    assert.equal(avatarOf(2), '/uploads/old10.webp')
+    assert.equal(body.changed, false)
     assert.deepEqual(r2Deleted, [])
-    assert.equal(assetExists(10), true)
     assert.equal(audits.length, 0)
     assert.equal(db.prepare('SELECT updated_at FROM users WHERE id = 2').get({}).updated_at, '2026-09-01 00:00:00')
   })
 
-  await check('control: a first photo (nothing before) deletes nothing', async () => {
-    actor = { id: 3, username: 'manager' }
-    assert.equal((await put(3, '/uploads/new20.webp')).status, 200)
-    assert.deepEqual(r2Deleted, [])
-  })
-
-  await check('users.ts keeps ONE avatar reference check, shared by PUT and DELETE', async () => {
+  await check('users.ts has no avatar object-delete path left', async () => {
     const source = fs.readFileSync(usersSource, 'utf8')
-    const refChecks = source.match(/FROM product_images WHERE image_path = @path/g) || []
-    assert.equal(refChecks.length, 1, 'a second copy of the reference check was written')
-    const putBlock = source.slice(source.indexOf("app.put('/users/:id/avatar'"), source.indexOf("app.delete('/users/:id/avatar'"))
-    const deleteBlock = source.slice(source.indexOf("app.delete('/users/:id/avatar'"), source.indexOf('// -- User CRUD'))
-    assert.match(putBlock, /deleteOrphanAvatarObject\(c, previousPath, 'avatar_replaced'\)/)
-    assert.match(deleteBlock, /deleteOrphanAvatarObject\(c, previousPath, 'avatar_removed'\)/)
+    assert.doesNotMatch(source, /ASSETS\.delete\(/)
+    assert.doesNotMatch(source, /DELETE FROM file_assets/)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

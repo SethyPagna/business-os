@@ -54,7 +54,7 @@ import {
 } from '../lib/canonicalBranchIdentity'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { planTransferOperation, TransferConflictError } from '../lib/transferOperation'
+import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
 import { RESOLVED_BRANCH_NAME_COLUMN, movementBranchNameSql, withResolvedBranchName } from '../lib/movementBranchName'
 import { RESOLVED_ACTOR_NAME_COLUMN, movementActorNameSql, withResolvedActorName } from '../lib/movementActorName'
 import { movementReferenceSelectSql } from '../lib/movementReference'
@@ -2524,7 +2524,6 @@ app.post('/transfer', async (c) => {
     allocationSummaries = planned
     await ordinaryBusinessBatch(db, statements)
   } catch (error) {
-    if (error instanceof TransferConflictError) return c.json({ error: error.message, code: 'stock_conflict' }, 409)
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
     if (retryReceipt) {
       if (retryReceipt.request_digest !== requestDigest || retryReceipt.request_json !== requestJson) {
@@ -2532,6 +2531,9 @@ app.post('/transfer', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    // Planner refusals and the batch's own guards: a 4xx, never a 500.
+    const refusal = transferRefusal(error)
+    if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))

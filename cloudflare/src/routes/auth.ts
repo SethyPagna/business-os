@@ -12,6 +12,7 @@ import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
+import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
@@ -21,7 +22,9 @@ import { requiresDeviceApproval, checkDeviceTrust } from '../lib/deviceTrust'
 import {
   buildGoogleOauthStartUrl,
   exchangeGoogleOauthCode,
+  getGoogleLoginOrigins,
   getGoogleLoginPublicConfig,
+  getGoogleLoginRedirectUris,
   getGoogleUserFromTokens,
   matchGooglePkceVerifier,
   normalizeReturnTarget,
@@ -965,6 +968,34 @@ app.post('/password-reset/otp', async (c) => {
   return c.json({ success: true, message: 'Password reset successfully.', username: user.username })
 })
 
+// Google can only FINISH on the host its callback is registered on
+// (GOOGLE_LOGIN_REDIRECT_URI, admin.leangbeauty.com). The PKCE cookie that
+// /oauth/start sets and the session cookie are both host-only, so a flow
+// started on the storefront host (leangbeauty.com/login serves the same
+// admin app) reached the admin-host callback with neither: "This browser did
+// not start this Google sign-in", every time. On an allowed origin that is
+// not the callback's, start therefore hands back the same page on the
+// callback host instead of a consent URL -- the client already navigates to
+// whatever `url` it gets -- and sets no cookie; Google starts from there.
+// Any other origin (local dev) is left as it was.
+function googleStartHostHandoff(env: Env, requestUrl: string, redirectTo: unknown, mode: 'login' | 'link'): string | null {
+  let callbackOrigin: string
+  let requestOrigin: string
+  try {
+    callbackOrigin = new URL(getGoogleLoginRedirectUris(env)[0] || '').origin
+    requestOrigin = new URL(requestUrl).origin
+  } catch (_) {
+    return null
+  }
+  if (requestOrigin === callbackOrigin) return null
+  const allowed = new Set(getGoogleLoginOrigins(env).map((origin) => { try { return new URL(origin).origin } catch (_) { return '' } }))
+  if (!allowed.has(requestOrigin)) return null
+  const target = normalizeReturnTarget(env, trim(redirectTo) || undefined, mode)
+  let pathname = '/'
+  try { pathname = new URL(target.path, callbackOrigin).pathname || '/' } catch (_) {}
+  return `${callbackOrigin}${pathname}`
+}
+
 function normalizeOauthMode(mode: unknown): 'login' | 'link' {
   return trim(mode).toLowerCase() === 'link' ? 'link' : 'login'
 }
@@ -1037,6 +1068,8 @@ app.post('/oauth/start', async (c) => {
     return c.json({ error: 'Only Google login is supported.' }, 400)
   }
   const oauthMode = normalizeOauthMode(body.mode)
+  const handoffUrl = googleStartHostHandoff(c.env, c.req.url, body.redirectTo, oauthMode)
+  if (handoffUrl) return c.json({ url: handoffUrl, mode: oauthMode, handoff: true })
   let currentUserId = 0
   if (oauthMode === 'link') {
     const sessionUser = await getSessionUser(c)
@@ -1286,15 +1319,14 @@ app.post('/oauth/unlink', requireAuth, async (c) => {
   const user = await db.prepare('SELECT id, username, name, password FROM users WHERE id = ?').get<{ id: number; username: string; name: string; password: string }>([actorId])
   if (!user) return c.json({ error: 'User not found.' }, 404)
   if (!body.currentPassword) return c.json({ error: 'Current password is required to unlink Google.' }, 403)
-  // Same failure-only allowance (bucket, key, limit) as routes/users.ts's
-  // refuseWrongCurrentPassword: guesses here and there count together.
-  const unlinkLimitKey = `uid:${actorId}`
-  const unlinkLimit = await peekRateLimit(c.env, 'auth:current_password', unlinkLimitKey, 10, 15 * 60 * 1000)
-  if (!unlinkLimit.allowed) {
-    return c.json({ error: 'Too many wrong current-password attempts. Please try again later.', code: 'current_password_rate_limited', retryAfterSeconds: unlinkLimit.retryAfterSeconds }, 429)
+  // The one current-password re-check (lib/currentPasswordGuard.ts): the
+  // same atomic, failure-only, per-session allowance as change password and
+  // the profile save in routes/users.ts.
+  const verdict = await verifyCurrentPassword(c, { actorId, targetId: actorId }, String(body.currentPassword), user.password)
+  if (!verdict.ok && verdict.rateLimited) {
+    return c.json({ error: CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
   }
-  if (!bcrypt.compareSync(String(body.currentPassword), user.password)) {
-    await recordRateLimitEvent(c.env, 'auth:current_password', unlinkLimitKey)
+  if (!verdict.ok) {
     return c.json({ error: 'Current password is required to unlink Google.' }, 403)
   }
   await db.prepare(`

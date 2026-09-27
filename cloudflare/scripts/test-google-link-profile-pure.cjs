@@ -64,6 +64,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, getClientIp: () => '127.0.0.1' },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/googleOauth': googleOauth,
   '../index': {},
@@ -105,6 +106,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/permissions': { isAdminControlUser: () => false },
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {}, getClientIp: () => '127.0.0.1' },
+  '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
   '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
@@ -184,6 +186,13 @@ async function check(name, fn) {
     // AUTH_SESSION_SECRET still signs state, but the code exchange needs the client secret.
     assert.equal((await authMethods(2, noSecret)).body.google_ready, false)
     assert.equal((await authMethods(2, {})).body.google_ready, false)
+    // U-profile3 (refuter M6): everything but a redirect URI -- none
+    // configured and no app origin to derive one from -- is NOT ready: the
+    // consent URL could not name where Google sends the user back.
+    const { GOOGLE_LOGIN_REDIRECT_URI: _r, ...noRedirect } = READY_ENV
+    assert.equal((await authMethods(2, noRedirect)).body.google_ready, false, 'no redirect URI, not ready')
+    // Control: a derivable redirect (the admin origin) is enough.
+    assert.equal((await authMethods(2, { ...noRedirect, BUSINESS_OS_ADMIN_URL: 'https://admin.example' })).body.google_ready, true)
   })
 
   await check('auth-methods of another user stays refused for a non-admin', async () => {

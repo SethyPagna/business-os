@@ -20516,3 +20516,22 @@ conflict / Records / stock-in edit asks N1-N6.
 **Verified:** individual sweep at `c64eced5`, 1,107 files (2 load flakes green alone); CI gates green; live version and placement read after the deploy.
 
 **Not done:** CP-1c, CP-2, CP-3; R2 move, official-names Excel and cost audit (U-ops running); Shop → Store paused by the owner.
+
+## Part 634 (27 Sep 2026, coordinator) — CP-1c deployed; owner delegates ops runs and the cost repair; refuters split the next checkpoint
+
+- Owner (27 Sep): standing permission for ops runs, the R2 move, the 0200 cost repair and product rulings; dpdns left as is; no action on stray token copies. Permanent deletion and Shop→Store stay out.
+- CP-1c `c35af63b` (main 8a5e2720 + U-transfer2) certified by R-transfer2 and deployed via GitHub Actions run 36271249835; live `/api/runtime/version` revision `c35af63bb491` on both hosts. Closes the over-lotted transfer 500 and the draft + failed lot dead end.
+- R-transfer2 F1 (older bug): a definitively refused saved transfer run keeps the form disabled forever → U-transfer3 (Edit / Discard). F2 tolerance test gap → same lane.
+- CP-2 integration `claude/cp2-20260927`: S-uploads2a (8f241cbd), S-uploads2b (0d749358), U-cost (90cffc6f; 0195 in migrations, 0200 held).
+- R-uploads2: certified with exceptions — legacy videos under odd names 404 (breaks the serve-by-bytes ruling), pending imports reaped at 20 min (ruling 24 h), backup restore withholds HEIC/BMP/CAEP/mp21, event-handler markup passes the gate → S-uploads3; avatar fallback + Library CSP → U-profile3.
+- R-cost: 0195 and the typed-cost writers confirmed; the held 0200 repair is correct where it acts (dry run on local D1, rollback exact, idempotent) but misses sale-linked returns without sale_item_id, walk-in returns, lines whose lots were edited/merged, and the deploy window → U-cost2.
+- R-cp3: U-broadcast and U-confirm certified, U-sync certified with exceptions, U-print not certified on Q13 → U-print2 (owner rule: never print a placeholder; the ABA QR waits and is omitted only on a load error).
+- U-ops finished (ops.yml, encrypted exports, R2 copy Worker) → U-ops2 integrates it on main with a top-up mode (no upload freeze), secret status encrypted, ordinal confirm words.
+
+## Part 635 (27 Sep 2026, coordinator) — R2 moved to APAC; deep audit revises the data plan; CP-2 and CP-1d assembled
+
+- R2: copy + verify-only identical (2,900 objects, 1.45 GB). Pre-switch fix d59871e2: the image-audit sweep kept an R2 list cursor in KV that the new bucket may refuse, and clearing it only on success would have failed the sweep forever; a refused cursor is now dropped (discriminating test). Main 0ecf871d deployed (run 36283563411), both hosts on 0ecf871d90cb; storefront images 200 with a cache-busting query. Top-up 36285297729: 964 objects copied, all one backup set written by the old 07:00 cron; no uploads/ change missed. Old EEUR bucket untouched.
+- Deep audit (read-only, four reviewers) → C3v3 revision: the tables are sound; the waste is round trips and unused work. Biggest items: a leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded), sale create ~18–20 D1 trips, the report reader reading everything twice, OFFSET-paged backups in trading hours, `action_history` retention that may fail silently on referenced rows. Corrected: revisions and receipts must never be pruned; only undo snapshots and operation receipts are truly unbounded.
+- Lanes finished: U-cost2 (0200 now covers returns, the deploy window, merged/edited lots; oracle test; still held), S-uploads3 (six refuter findings), U-profile3 (profile findings + avatar fallback + Library CSP), U-transfer3 (refused saved transfer can be edited or discarded; F2 mutant test). A0 stopped at a usage limit.
+- CP-2 candidate `4ef22cb4` = CP-2 lanes + S-uploads3 + U-profile3 + U-cost2 + main 0ecf871d (keeps the APAC binding): cf tsc, fe typecheck, i18n, build green; 590 cf files with 2 load flakes green alone. Refuter running. CP-1d candidate `4e8cff9e` = main + U-transfer3; refuter running.
+- Official names: batches 01–04 researched (489 of 800 confirmed); the session web-search budget ran out; owner rulings recorded (duplicates keep the name as a conflict; space/case-only fixes rename; real naming differences keep the shop name).

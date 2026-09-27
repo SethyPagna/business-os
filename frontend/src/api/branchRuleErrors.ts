@@ -26,10 +26,19 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
     'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',
     'canonical_branch_configuration_invalid',
   ],
+  // TRANSFER_REFUSALS in cloudflare/src/lib/transferOperation.ts: what the
+  // three transfer routes answer when the planner or the batch's guards refuse.
+  ['The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.', 'transfer_stock_changed'],
+  ['The selected received date no longer has enough stock.', 'transfer_selected_lot_short'],
+  ['This transfer has too many received dates. Split it into smaller transfers.', 'transfer_too_many_lots'],
+  ['Maintenance is in progress. No stock was transferred; try again shortly.', 'transfer_maintenance_active'],
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
+  transfer_stock_changed: 'transfer_stock_changed',
+  transfer_selected_lot_short: 'transfer_selected_lot_short',
+  transfer_too_many_lots: 'transfer_too_many_lots',
 }
 
 type BranchRuleErrorLike = {

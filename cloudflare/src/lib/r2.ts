@@ -116,10 +116,12 @@ export async function listObjects(bucket: R2Bucket, prefix: string) {
 //               always .webp), plus the legacy photo extensions below. The
 //               extension wins over whatever type the uploader stored; with
 //               nosniff a browser will not reinterpret a .jpg as HTML.
-//   sniffed     `.bin` and extensionless keys (SNIFFED_UPLOAD_EXTENSIONS):
-//               the key says nothing, so the object's FIRST BYTES decide.
-//               An allowed image is inline as the detected type; anything
-//               else is a 404. The stored (uploader's) type is never read.
+//   sniffed     `.bin`, extensionless, .m4v/.3gp/.3g2 keys
+//               (SNIFFED_UPLOAD_EXTENSIONS): the key says nothing reliable,
+//               so the object's FIRST BYTES decide. An allowed image is
+//               inline as the detected type, a video an attachment as the
+//               detected type (as for .mp4); anything else is a 404. The
+//               stored (uploader's) type is never read.
 //   attachment  types a CURRENT flow still serves from /uploads (see
 //               ATTACHMENT_UPLOAD_TYPES). Correct media type so <video>/<img>
 //               keep working, but Content-Disposition: attachment so a
@@ -167,10 +169,17 @@ const ATTACHMENT_UPLOAD_TYPES: Readonly<Record<string, string>> = {
 // camera blobs), and older writers kept no extension at all -- many of these
 // are real photos. They are decided by their first bytes, and served only as
 // one of these image types.
-const SNIFFED_UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['', '.bin'])
+// S-uploads3 (owner, 27 Sep 2026: storage holds images and videos, and a
+// legacy file under an unusual name is served by its bytes when it is media):
+// legacy VIDEOS under these names (and under the phone-video extensions .m4v,
+// .3gp and .3g2, which no map above names) are served too, exactly like a
+// .mp4/.webm/.mov key: the detected video type, as an attachment. Anything
+// else under these names is still a 404.
+const SNIFFED_UPLOAD_EXTENSIONS: ReadonlySet<string> = new Set(['', '.bin', '.m4v', '.3gp', '.3g2'])
 const SNIFFED_INLINE_TYPES: ReadonlySet<string> = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/heic', 'image/heif',
 ])
+const SNIFFED_ATTACHMENT_TYPES: ReadonlySet<string> = new Set(['video/mp4', 'video/quicktime', 'video/webm'])
 // Covers every signature detectUploadFormat reads (12 bytes) and an ISO-BMFF
 // ftyp box's compatible-brand list.
 const SNIFF_BYTES = 64
@@ -198,7 +207,9 @@ export function uploadServePolicy(key: string, sniffedContentType?: string | nul
   const ext = keyExtension(key)
   if (SNIFFED_UPLOAD_EXTENSIONS.has(ext)) {
     const sniffed = String(sniffedContentType || '').split(';')[0].trim().toLowerCase()
-    return SNIFFED_INLINE_TYPES.has(sniffed) ? { kind: 'inline', contentType: sniffed } : { kind: 'deny' }
+    if (SNIFFED_INLINE_TYPES.has(sniffed)) return { kind: 'inline', contentType: sniffed }
+    if (SNIFFED_ATTACHMENT_TYPES.has(sniffed)) return { kind: 'attachment', contentType: sniffed }
+    return { kind: 'deny' }
   }
   if (INLINE_UPLOAD_TYPES[ext]) return { kind: 'inline', contentType: INLINE_UPLOAD_TYPES[ext] }
   if (ATTACHMENT_UPLOAD_TYPES[ext]) return { kind: 'attachment', contentType: ATTACHMENT_UPLOAD_TYPES[ext] }
@@ -233,8 +244,10 @@ function isoBmffImageType(bytes: Uint8Array): string | null {
 
 /**
  * What a sniffed key's object may be served as, from its first bytes: an
- * allowlisted image (uploadSecurity's own detection), a legacy HEIC/HEIF
- * photo, or null (404). `found: false` when the key does not exist. One
+ * allowlisted image or video (uploadSecurity's own detection), a legacy
+ * HEIC/HEIF photo, a legacy MP4-family or QuickTime video the owner-run purge
+ * keeps as media (detectOtherMedia, e.g. a Canon `CAEP` clip; audio is not
+ * served), or null (404). `found: false` when the key does not exist. One
  * small ranged read, paid only by sniffed keys -- every extension-typed key
  * (the image hot path) never comes here. `meta` is that read's object
  * metadata (full size, ETag), enough to answer a HEAD without another read.
@@ -255,13 +268,23 @@ async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ fo
   try {
     // Lazy: keeps this module free of load-time imports for the callers and
     // tests that load it standalone. Fails closed if it cannot load.
-    const { detectUploadFormat, isPublicImageFormat } = await import('./uploadSecurity')
+    const { detectUploadFormat, isPublicImageFormat, detectOtherMedia, otherMediaLooksLikeText } = await import('./uploadSecurity')
     const detected = detectUploadFormat(bytes)
     if (detected && isPublicImageFormat(detected)) return { found: true, contentType: detected.mime, meta }
+    // A photo brand wins over a video reading of the same ftyp, as before.
+    const photo = isoBmffImageType(bytes)
+    if (photo) return { found: true, contentType: photo, meta }
+    if (detected && detected.kind === 'video') return { found: true, contentType: detected.mime, meta }
+    const size = typeof meta.size === 'number' ? meta.size : bytes.length
+    const other = detectOtherMedia(bytes, size)
+    if (other && !otherMediaLooksLikeText(other, bytes, bytes.length >= size)) {
+      if (other.format === 'QuickTime') return { found: true, contentType: 'video/quicktime', meta }
+      if (other.format.startsWith('MP4 family')) return { found: true, contentType: 'video/mp4', meta }
+    }
   } catch {
     return { found: true, contentType: null }
   }
-  return { found: true, contentType: isoBmffImageType(bytes), meta }
+  return { found: true, contentType: null, meta }
 }
 
 /**
@@ -513,7 +536,8 @@ export async function serveStoredObject(
   // The edge cache holds whole 200s; a range is always answered from R2.
   if (cache && cacheKey && !range) {
     const cached = await cache.match(cacheKey)
-    // A sniffed key's entry is reused only when it holds an image type: one
+    // A sniffed key's entry is reused only when it holds an image or video
+    // type (served with nosniff + the sandbox CSP either way): one
     // this code cached holds the type its bytes were detected as, and an
     // older entry with any other type is re-judged from the bytes below.
     if (cached && (!sniffed || uploadServePolicy(key, cached.headers.get('content-type')).kind !== 'deny')) {
@@ -536,7 +560,7 @@ export async function serveStoredObject(
     }
   }
   // A sniffed key is typed from its bytes BEFORE the conditional read, so a
-  // 304 is only ever sent for an object that is an allowed image.
+  // 304 is only ever sent for an object that is an allowed image or video.
   let sniffedType: string | null = null
   let sniffedMeta: R2Object | undefined
   if (sniffed) {

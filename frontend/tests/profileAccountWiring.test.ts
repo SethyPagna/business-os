@@ -34,27 +34,32 @@ function block(source: string, start: string, end: string): string {
   return source.slice(from, to)
 }
 
+// The upload / attach / remove behaviour is driven for real in
+// avatarFlow.test.ts (U-profile3: the refuter's M16/M17 mutants survived the
+// source-shape locks that stood here). What stays here is the one shape the
+// flow cannot see: the modal hands it the cropped DATA URL.
+const flowSource = read('../src/components/users/avatarFlow.ts')
+
 await runTest('avatar upload goes to /users/avatar-upload (data URL), not the Library-gated file upload', () => {
   const save = block(profile, 'const saveAvatarFromEditor = async', 'const removeAvatar = async')
   // A File object is routed by uploadUserAvatar to /api/files/upload, which
   // refuses anyone without Library/Products access -- e.g. a cashier.
-  assert.doesNotMatch(save, /uploadUserAvatar\(\{\s*file\s*\}\)/)
-  assert.match(save, /uploadUserAvatar\(\{ filePath: dataUrl, fileName: 'avatar\.png' \}\)/)
+  assert.ok(save.includes('const dataUrl = await blobToDataUrl(blob)'))
+  assert.match(save, /uploadAndAttachAvatar\(\s*getProfileApi\(\),\s*requireCurrentUserId\(\),\s*dataUrl,/)
+  assert.ok(flowSource.includes("api.uploadUserAvatar({ filePath: dataUrl, fileName: 'avatar.png' })"))
+  assert.doesNotMatch(flowSource, /uploadUserAvatar\(\{\s*file\s*\}\)/)
 })
 
-await runTest('an uploaded avatar is attached to the account before "Avatar uploaded" is announced', () => {
+await runTest('the attached avatar carries the fresh updated_at into both profile copies', () => {
   const save = block(profile, 'const saveAvatarFromEditor = async', 'const removeAvatar = async')
-  const attachAt = save.indexOf('getProfileApi().setUserAvatar(')
-  const notifyAt = save.indexOf("tr('avatar_uploaded'")
-  assert.ok(attachAt > -1, 'setUserAvatar must be called')
-  assert.ok(attachAt < notifyAt, 'success is only announced after the account holds the photo')
-  assert.match(save, /updated_at: saved\?\.updated_at/, 'the fresh updated_at is carried so a later Save profile is not a stale write')
+  assert.ok(save.includes('setProfile((current) => ({ ...(current || {}), ...nextAvatar }))'))
+  assert.ok(save.includes('setSavedProfile((current) => ({ ...(current || {}), ...nextAvatar }))'))
+  assert.ok(save.includes('profile?.updated_at ?? null'), 'the profile\'s own updated_at is the fallback')
+  assert.ok(flowSource.includes('updated_at: saved.updated_at ?? fallbackUpdatedAt'))
 })
 
-await runTest('the photo can be removed, behind the shared confirm dialog', () => {
-  assert.match(profile, /getProfileApi\(\)\.removeUserAvatar\(requireCurrentUserId\(\)\)/)
-  assert.match(profile, /<ConfirmDialog[\s\S]*?onConfirm=\{\(\) => \{ void removeAvatar\(\) \}\}/)
-  assert.match(profile, /onRemove=\{\(\) => \{\s*setAvatarViewerOpen\(false\)\s*setAvatarRemoveConfirmOpen\(true\)/)
+await runTest('the photo is removed through the account route', () => {
+  assert.ok(profile.includes('getProfileApi().removeUserAvatar(requireCurrentUserId())'))
 })
 
 await runTest('avatar transport: PUT and DELETE /api/users/:id/avatar, exposed through methods', () => {

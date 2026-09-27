@@ -1,6 +1,7 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtDate } from '../../utils/formatters'
 import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './permissionDefinitions'
+import { UserAvatarImage } from './UserAvatar.tsx'
 
 type TranslateFunction = (key: string) => string
 
@@ -84,7 +85,7 @@ export default function UserDetailSheet({ user, roles, canManage, canRecoverOtp,
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
-              {user.avatar_path ? <img src={user.avatar_path} alt={user.name || 'Avatar'} className="h-10 w-10 object-cover" /> : (user.name?.[0]?.toUpperCase() || 'U')}
+              <UserAvatarImage src={user.avatar_path} alt={user.name || 'Avatar'} className="h-10 w-10 object-cover" fallback={(user.name?.[0]?.toUpperCase() || 'U')} />
             </div>
             <div>
               <div className="font-bold text-gray-900 dark:text-white">{user.name}</div>

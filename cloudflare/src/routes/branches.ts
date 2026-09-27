@@ -50,7 +50,7 @@ import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchR
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { planTransferOperation } from '../lib/transferOperation'
+import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
 import { findTransferReceipt, normalizeTransferRequestId, transferReceiptResponse, transferRequestDigest } from '../lib/transferOperationReceipt'
 
 async function sha256Hex(input: string): Promise<string> {
@@ -465,13 +465,14 @@ app.post('/transfer', async (c) => {
   const responsePayload = mergeTarget
     ? { success: true, mergedIntoProductId: destProductId, mergedIntoProductName: destProductName, destBatchId, replayed: false }
     : { success: true, destBatchId, replayed: false }
-  const { statements } = await planTransferOperation(db, {
-    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
-    fromBranchId, toBranchId, reason,
-    lines: [{ productId, destProductId, quantity, batchId }], response: responsePayload,
-  })
-
   try {
+    // Planned inside the try: the planner's refusals and the batch's guards
+    // answer as the same 4xx (transferRefusal), never a 500.
+    const { statements } = await planTransferOperation(db, {
+      user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+      fromBranchId, toBranchId, reason,
+      lines: [{ productId, destProductId, quantity, batchId }], response: responsePayload,
+    })
     await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
@@ -481,6 +482,8 @@ app.post('/transfer', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    const refusal = transferRefusal(error)
+    if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
@@ -731,13 +734,14 @@ app.post('/transfer-bulk', async (c) => {
     const lot = item.batchId == null ? null : batchById.get(item.batchId)
     if (lot) { receivedDateByItemIndex.set(index, lot.received_at); lotCodeByItemIndex.set(index, lot.lot_code) }
   }
-  const { statements } = await planTransferOperation(db, {
-    user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
-    fromBranchId, toBranchId, reason,
-    lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
-    response: responsePayload,
-  })
   try {
+    // Planned inside the try, as in /transfer: every refusal is a 4xx.
+    const { statements } = await planTransferOperation(db, {
+      user, requestId: clientRequestId, requestJson, digest: requestDigest, scope: 'branches',
+      fromBranchId, toBranchId, reason,
+      lines: items.map(item => ({ ...item, destProductId: mergeTargets.get(item.productId)?.id ?? item.productId })),
+      response: responsePayload,
+    })
     await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
   } catch (error) {
     const retryReceipt = await findTransferReceipt(db, user.id, clientRequestId)
@@ -747,6 +751,8 @@ app.post('/transfer-bulk', async (c) => {
       }
       return c.json({ ...(transferReceiptResponse(retryReceipt) as Record<string, unknown>), replayed: true })
     }
+    const refusal = transferRefusal(error)
+    if (refusal) return c.json(refusal.body, refusal.status)
     throw error
   }
 

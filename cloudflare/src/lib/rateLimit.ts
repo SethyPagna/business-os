@@ -76,8 +76,12 @@ export async function releaseRateLimitSlot(env: Env, bucket: string, clientKey: 
 // shared till logins sign in many times an hour, and every success would
 // spend the same allowance as a guess. peekRateLimit only reads the window;
 // recordRateLimitEvent spends a slot, called by the route on a failure.
-// Two concurrent failures can both pass a peek at max-1 -- an overshoot of a
-// few requests, which the escalating lockout (lib/loginLockout) still caps.
+// Peek + record is NOT atomic: parallel failures can all pass a peek before
+// any is recorded. Its one caller is POST /login's per-account ceiling,
+// where the escalating lockout (lib/loginLockout) is the backstop -- that
+// lockout applies to sign-in ONLY. Anything else that needs a hard,
+// failure-only ceiling reserves with checkRateLimit and gives the slot back
+// on success with releaseRateLimitSlot (see lib/currentPasswordGuard.ts).
 export async function peekRateLimit(
   env: Env,
   bucket: string,

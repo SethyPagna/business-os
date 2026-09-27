@@ -113,7 +113,13 @@ interface FileAsset {
   canDelete?: boolean
   // Breakdown behind usageCount, so the UI can say exactly what's using a
   // locked file ("Used by 2 products") instead of a generic "in use".
-  usage?: { products?: number; gallery?: number; avatars?: number; promotions?: number; settings?: number }
+  usage?: {
+    products?: number; gallery?: number; avatars?: number; promotions?: number; settings?: number
+    // Only a delete refusal carries these (lib/uploadReferences.ts): text
+    // that embeds the file, share screenshots, unfinished imports, open
+    // review-queue writes.
+    descriptions?: number; submissions?: number; imports?: number; pending?: number
+  }
 }
 
 interface FilesResponse {
@@ -1145,7 +1151,18 @@ export default function FilesPage() {
       setDeleteUnlockChecked(false)
       await loadFiles({ refreshMeta: true })
     } catch (error) {
-      notify(getErrorMessage(error, 'Delete failed'), 'error')
+      const refusal = error as { status?: number; forceable?: boolean; usage?: FileAsset['usage'] | null }
+      if (refusal?.status === 409 && refusal.forceable && refusal.usage && !locked) {
+        // The server's reference check (every stored form of the path, every
+        // table) found a use the list did not show. Keep the dialog open in
+        // its locked form so the reason is visible and the deliberate
+        // unlock-anyway path is still there.
+        setDeleteConfirmAsset({ ...asset, canDelete: false, usage: refusal.usage })
+        setDeleteUnlockChecked(false)
+        notify(tr('file_in_use', 'This file is still in use.'), 'error')
+      } else {
+        notify(getErrorMessage(error, 'Delete failed'), 'error')
+      }
     } finally {
       deleteInFlightRef.current = false
       setDeletingAssetId(null)

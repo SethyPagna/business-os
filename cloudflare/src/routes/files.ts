@@ -8,6 +8,8 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { buildUniqueStoredName, normalizePhysicalStorageSummary, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { sanitizeMediaPath } from '../lib/media'
+import { findUploadReferences } from '../lib/uploadReferences'
+import { UPLOAD_CONTENT_SECURITY_POLICY } from '../lib/r2'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { classifyUploadedBuffer, extensionForImageMime, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { audit } from '../lib/audit'
@@ -494,6 +496,10 @@ app.get('/:id/download', async (c) => {
   headers.set('Content-Length', String(object.size))
   headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`)
   headers.set('X-Content-Type-Options', 'nosniff')
+  // The stored mime_type can be text/html or SVG on legacy rows. Attachment
+  // alone is a browser convention; the same sandbox CSP /uploads/* serves
+  // with (lib/r2.ts applySafeUploadHeaders) keeps it inert if one renders.
+  headers.set('Content-Security-Policy', UPLOAD_CONTENT_SECURITY_POLICY)
   headers.set('Cache-Control', 'private, no-store')
   return new Response(object.body, { headers })
 })
@@ -685,31 +691,19 @@ app.delete('/:id', async (c) => {
   // type ("CONFIRM DELETE"), checked here too so a force-delete can't
   // happen from a stale client that never actually showed that prompt.
   const body = await c.req.json<{ force?: boolean; confirmText?: string }>().catch(() => ({}) as { force?: boolean; confirmText?: string })
-  const [usageBreakdown, settingValues, promotionReferences] = await Promise.all([
-    db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM products WHERE image_path = @publicPath) AS product_count,
-      (SELECT COUNT(*) FROM product_images WHERE image_path = @publicPath) AS gallery_count,
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @publicPath) AS avatar_count
-    `).get<{ product_count: number; gallery_count: number; avatar_count: number }>({ publicPath: asset.public_path }),
-    db.prepare('SELECT value FROM settings').all<{ value: string }>(),
-    loadPromotionImageReferences(db, [asset.public_path]),
-  ])
-  const settingsUsage = isPathReferencedInSettings(settingValues, asset.public_path) ? 1 : 0
-  const promotionsUsage = promotionReferences.get(asset.public_path)?.length || 0
-  const usageCount = Number(usageBreakdown?.product_count || 0) + Number(usageBreakdown?.gallery_count || 0) + Number(usageBreakdown?.avatar_count || 0) + promotionsUsage + settingsUsage
+  // The one reference rule (lib/uploadReferences.ts): every table that can
+  // hold an upload path, every stored form of it (`uploads/NAME` without the
+  // slash, `?v=3`, an absolute URL, percent-encoded, JSON-escaped). The
+  // canonical-only counts this used to run let a file referenced in any
+  // other form be deleted as "not in use".
+  const references = await findUploadReferences(db, asset)
+  const { total: usageCount, ...usageBreakdown } = references
   if (usageCount > 0) {
     const forceRequested = body.force === true && String(body.confirmText || '').trim().toUpperCase() === 'CONFIRM DELETE'
     if (!forceRequested) {
       return c.json({
         error: 'This file is still in use and cannot be deleted.',
-        usage: {
-          products: Number(usageBreakdown?.product_count || 0),
-          gallery: Number(usageBreakdown?.gallery_count || 0),
-          avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: promotionsUsage,
-          settings: settingsUsage,
-        },
+        usage: usageBreakdown,
         forceable: true,
       }, 409)
     }
@@ -723,15 +717,7 @@ app.delete('/:id', async (c) => {
   await audit(c.env, user.id, user.username || null, 'delete', 'file', id, {
     original_name: asset.original_name,
     forced: usageCount > 0,
-    usage: usageCount > 0
-      ? {
-          products: Number(usageBreakdown?.product_count || 0),
-          gallery: Number(usageBreakdown?.gallery_count || 0),
-          avatars: Number(usageBreakdown?.avatar_count || 0),
-          promotions: promotionsUsage,
-          settings: settingsUsage,
-        }
-      : undefined,
+    usage: usageCount > 0 ? usageBreakdown : undefined,
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id }))
   return c.json(asset)

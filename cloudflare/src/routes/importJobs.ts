@@ -347,6 +347,16 @@ app.get('/queue/status', async (c) => {
 // cutoff checks and remain authoritative if a worker refreshes a candidate
 // after this read.
 const STALLED_IMPORT_JOB_REAP_MINUTES = 20
+// A job nobody has STARTED yet ('pending': created, CSV maybe still being
+// chosen or uploaded) is not stalled -- no worker owns it, and the person
+// may come back to it. Owner rule (27 Sep 2026): a never-started import is
+// reaped after 24 hours, the same age at which lib/importIncomingFiles.ts's
+// sweep removes a never-started job's file (STALE_INCOMING_MAX_AGE_HOURS;
+// kept equal by test-import-job-reaper-never-started-pure.cjs). Reaping it at
+// 20 minutes made it terminal, and the sweep's 1-hour terminal grace then
+// deleted its uploaded CSV long before 24 hours (S-uploads3, R-uploads2).
+// Defined here, not imported: the route is loaded standalone by its tests.
+const NEVER_STARTED_IMPORT_JOB_REAP_HOURS = 24
 
 export async function reapStalledImportJobs(env: Env): Promise<void> {
   const db = await getImportFencedDb(env)
@@ -354,15 +364,20 @@ export async function reapStalledImportJobs(env: Env): Promise<void> {
     SELECT
       EXISTS(
         SELECT 1 FROM import_jobs
-        WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+        WHERE status IN ('queued', 'analyzing', 'running', 'applying', 'approved')
           AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
       ) AS active_stale,
+      EXISTS(
+        SELECT 1 FROM import_jobs
+        WHERE status = 'pending'
+          AND updated_at < datetime('now', '-${NEVER_STARTED_IMPORT_JOB_REAP_HOURS} hours')
+      ) AS never_started_stale,
       EXISTS(
         SELECT 1 FROM import_jobs
         WHERE status = 'cancelling'
           AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
       ) AS cancelling_stale
-  `).get<{ active_stale: number; cancelling_stale: number }>().catch(() => undefined)
+  `).get<{ active_stale: number; never_started_stale: number; cancelling_stale: number }>().catch(() => undefined)
 
   // Reaping is best-effort housekeeping. If this probe fails, let the list
   // query run and report its own result/error instead of masking list data.
@@ -373,9 +388,18 @@ export async function reapStalledImportJobs(env: Env): Promise<void> {
       UPDATE import_jobs
       SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
           last_error = 'Stalled: no progress update received for over ${STALLED_IMPORT_JOB_REAP_MINUTES} minutes (the background worker likely crashed or was reset mid-import). Safe to retry.'
-      WHERE status IN ('pending', 'queued', 'analyzing', 'running', 'applying', 'approved')
+      WHERE status IN ('queued', 'analyzing', 'running', 'applying', 'approved')
         AND updated_at < datetime('now', '-${STALLED_IMPORT_JOB_REAP_MINUTES} minutes')
     `).run().catch(() => { /* best-effort housekeeping -- a failed reap shouldn't break the list endpoint */ })
+  }
+  if (Number(candidates.never_started_stale || 0) > 0) {
+    await db.prepare(`
+      UPDATE import_jobs
+      SET status = 'failed', phase = 'failed', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+          last_error = 'Never started: this import was created but not started within ${NEVER_STARTED_IMPORT_JOB_REAP_HOURS} hours, so it was closed. Start a new import to try again.'
+      WHERE status = 'pending'
+        AND updated_at < datetime('now', '-${NEVER_STARTED_IMPORT_JOB_REAP_HOURS} hours')
+    `).run().catch(() => {})
   }
   if (Number(candidates.cancelling_stale || 0) > 0) {
     await db.prepare(`

@@ -11,7 +11,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
-import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
+import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { passwordTooShort, passwordMinLengthError } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
@@ -77,31 +78,25 @@ function normalizePhoneLookup(value: unknown): string {
   return String(value || '').replace(/[^\d+]/g, '')
 }
 
-// Re-entering your own current password (change password, self-service
-// profile save; POST /api/auth/oauth/unlink spends the same bucket) is
-// limited per account, counting WRONG passwords only: without it a stolen
-// session is an unlimited password-guessing oracle, and counting successes
-// would lock out someone who simply saves their profile often. Peek before
-// the bcrypt compare, record after a miss. A wrong password answers 400,
-// never 401 -- the client reads a 401 on an authenticated /api path as a
-// possibly dead session and runs its sign-out recovery.
-const CURRENT_PASSWORD_LIMIT_BUCKET = 'auth:current_password'
-const CURRENT_PASSWORD_LIMIT_MAX = 10
-const CURRENT_PASSWORD_LIMIT_WINDOW_MS = 15 * 60 * 1000
-
+// Re-entering a current password (change password, profile save; Google
+// unlink in routes/auth.ts) goes through lib/currentPasswordGuard.ts: an
+// atomic reserve-then-release allowance that counts wrong passwords only,
+// keyed per session (own account) or per actor+target (an admin on someone
+// else), so nobody else can lock a user out of their own password change.
+// A wrong password answers 400, never 401 -- the client reads a 401 on an
+// authenticated /api path as a possibly dead session and signs out.
 async function refuseWrongCurrentPassword(c: Ctx, userId: number | string, currentPassword: string, passwordHash: string): Promise<Response | null> {
-  const clientKey = `uid:${Number(userId)}`
-  const limit = await peekRateLimit(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
-  if (!limit.allowed) {
+  const actor = c.get('user')
+  const verdict = await verifyCurrentPassword(c, { actorId: actor?.id ?? userId, targetId: userId }, currentPassword, passwordHash)
+  if (verdict.ok) return null
+  if (verdict.rateLimited) {
     return c.json({
       success: false,
-      error: 'Too many wrong current-password attempts. Please try again later.',
+      error: CURRENT_PASSWORD_RATE_LIMITED_ERROR,
       code: 'current_password_rate_limited',
-      retryAfterSeconds: limit.retryAfterSeconds,
+      retryAfterSeconds: verdict.retryAfterSeconds,
     }, 429)
   }
-  if (bcrypt.compareSync(currentPassword, passwordHash)) return null
-  await recordRateLimitEvent(c.env, CURRENT_PASSWORD_LIMIT_BUCKET, clientKey)
   return c.json({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }, 400)
 }
 
@@ -427,8 +422,15 @@ app.post('/users/avatar-upload', async (c) => {
 // person also saved the whole form. These two routes make the photo its own
 // action: the account owner (or an admin who can manage them) sets or
 // removes it directly -- the same trust level as uploading it.
-
-type AvatarAssetRow = { id: number; stored_name: string; public_path: string; source: string | null; media_type: string | null }
+//
+// Neither route ever deletes the photo it moves off (U-profile3, 27 Sep
+// 2026). Both used to delete the old R2 object and its file_assets row when
+// their own reference count found no other user; that count missed a
+// promotion, setting, product or other avatar pointing at the same file as
+// `uploads/NAME`, `/uploads/NAME?v=3` or an absolute URL, and deleted a photo
+// still on show. Owner rule: nothing may be lost. The old photo stays in the
+// Library, where an admin can delete it under the Library's in-use check
+// (lib/uploadReferences.ts, the one reference rule).
 
 function auditAvatarChange(c: Ctx, targetId: number, before: string | null, after: string | null) {
   const actor = c.get('user')
@@ -436,35 +438,6 @@ function auditAvatarChange(c: Ctx, targetId: number, before: string | null, afte
     { avatar_path: before },
     { avatar_path: after },
   ))
-}
-
-// The ONE rule for dropping a photo's stored object once an account stops
-// using it (DELETE clears it, PUT replaces it). Call it after the account's
-// pointer has moved off `path`. The object is deleted only when it can
-// belong to nobody else: it came from an avatar upload (source 'avatar',
-// never a general library file someone picked) and no user, product, gallery
-// row, promotion or setting still points at it. Anything else is kept.
-async function deleteOrphanAvatarObject(c: Ctx, path: string, reason: 'avatar_removed' | 'avatar_replaced'): Promise<boolean> {
-  const actor = c.get('user')
-  const db = getDb(c.env)
-  const asset = await db.prepare(
-    'SELECT id, stored_name, public_path, source, media_type FROM file_assets WHERE public_path = @path LIMIT 1',
-  ).get<AvatarAssetRow>({ path })
-  if (!asset || asset.source !== 'avatar') return false
-  const refs = await db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM users WHERE avatar_path = @path)
-      + (SELECT COUNT(*) FROM products WHERE image_path = @path)
-      + (SELECT COUNT(*) FROM product_images WHERE image_path = @path)
-      + (SELECT COUNT(*) FROM promotions WHERE instr(image_path, @path) = 1)
-      + (SELECT COUNT(*) FROM settings WHERE instr(value, @path) > 0) AS total
-  `).get<{ total: number }>({ path })
-  if (Number(refs?.total || 0) !== 0) return false
-  await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
-  await db.prepare('DELETE FROM file_assets WHERE id = @id').run({ id: asset.id })
-  await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'delete', 'file', asset.id, { original_path: asset.public_path, reason })
-  c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id: asset.id }))
-  return true
 }
 
 // PUT /users/:id/avatar { avatar_path } -- the path must name a stored IMAGE
@@ -488,23 +461,20 @@ app.put('/users/:id/avatar', async (c) => {
   if (!current) return c.json({ success: false, error: 'User not found' }, 404)
   const previousPath = String(current.avatar_path || '').trim()
   // Re-setting the photo the account already has changes nothing: no write,
-  // no audit row, and above all no cleanup of the file it still uses.
+  // no audit row.
   if (previousPath === avatarPath) {
-    return c.json({ success: true, changed: false, previousObjectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+    return c.json({ success: true, changed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
   }
   await db.prepare('UPDATE users SET avatar_path = @path, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ path: avatarPath, id: targetId })
+  // The audit row carries the old path, so the replaced photo -- which stays
+  // in the Library -- can always be found and put back.
   await auditAvatarChange(c, targetId, previousPath || null, avatarPath)
-  // The replaced photo is cleaned up under exactly DELETE's rule.
-  const previousObjectDeleted = previousPath ? await deleteOrphanAvatarObject(c, previousPath, 'avatar_replaced') : false
   c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
-  return c.json({ success: true, changed: true, previousObjectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  return c.json({ success: true, changed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 })
 
-// DELETE /users/:id/avatar -- clears the photo. The stored object is deleted
-// too, but only when it can belong to nobody else: it came from an avatar
-// upload (source 'avatar', never a general library file someone picked) and
-// no user, product, gallery row, promotion or setting still points at it.
-// Anything else keeps the object and only clears this account's pointer.
+// DELETE /users/:id/avatar -- clears this account's pointer only. The photo
+// itself stays in the Library (see the note above PUT).
 app.delete('/users/:id/avatar', async (c) => {
   const actor = c.get('user')
   const targetId = Number(c.req.param('id') || 0)
@@ -516,14 +486,12 @@ app.delete('/users/:id/avatar', async (c) => {
   const current = await db.prepare('SELECT avatar_path FROM users WHERE id = @id AND deleted_at IS NULL').get<{ avatar_path: string | null }>({ id: targetId })
   if (!current) return c.json({ success: false, error: 'User not found' }, 404)
   const previousPath = String(current.avatar_path || '').trim()
-  if (!previousPath) return c.json({ success: true, removed: false, objectDeleted: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  if (!previousPath) return c.json({ success: true, removed: false, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 
   await db.prepare('UPDATE users SET avatar_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id: targetId })
   await auditAvatarChange(c, targetId, previousPath, null)
-
-  const objectDeleted = await deleteOrphanAvatarObject(c, previousPath, 'avatar_removed')
   c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id: targetId }))
-  return c.json({ success: true, removed: true, objectDeleted, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
+  return c.json({ success: true, removed: true, ...sanitizeUserRow(await getUserWithRole(c, targetId)) })
 })
 
 // -- User CRUD (admin control) --------------------------------------------
