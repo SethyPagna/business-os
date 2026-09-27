@@ -143,7 +143,12 @@ check('an existing count movement on a DIFFERENT date (not in this import) is le
   assert.deepStrictEqual(plan.movementsToCreate[0], {
     productId: 1, productName: 'Eye Shadow Palette', branchId: 1, branchName: 'Shop',
     date: '2026-08-02', quantity: 1, movementType: 'add', reason: DATED_STOCK_COUNT_REASON,
+    // H-stock 1: each movement carries its own lot effect for the atomic apply.
+    batchActions: [{ batchId: null, date: '2026-08-02', quantity: 1 }],
   })
+  // The out-of-file prior row is untouched, and neither reversed.
+  assert.deepStrictEqual(plan.supersededMovements, [])
+  assert.deepStrictEqual(plan.groupFingerprints, [{ productId: 1, branchId: 1, movementCount: 1, movementIdSum: 999 }])
 })
 
 check('multiple product+branch groups in one import are computed fully independently', () => {
@@ -340,6 +345,42 @@ check('batch actions for multiple product+branch groups stay independent, same a
   const byProduct = Object.fromEntries(plan.batchCreates.map((c) => [c.productId, c.quantity]))
   assert.strictEqual(byProduct[1], 10)
   assert.strictEqual(byProduct[2], 6)
+})
+
+check('H-stock 1: per-movement lot actions split a remove FIFO across lots and name a same-run new lot by date', () => {
+  const plan = computeDatedStockCountPlan(
+    [entry('2026-08-05', 12), entry('2026-08-06', 3)],
+    [],
+    [{ productId: 1, branchId: 1, quantity: 8 }],
+    [
+      { batchId: 1, productId: 1, branchId: 1, date: '2026-08-01', quantity: 5 },
+      { batchId: 2, productId: 1, branchId: 1, date: '2026-08-02', quantity: 3 },
+    ],
+  )
+  assert.deepStrictEqual(plan.movementsToCreate.map((m) => [m.movementType, m.quantity, m.batchActions]), [
+    ['add', 4, [{ batchId: null, date: '2026-08-05', quantity: 4 }]],
+    ['remove', 9, [
+      { batchId: 1, date: '2026-08-01', quantity: -5 },
+      { batchId: 2, date: '2026-08-02', quantity: -3 },
+      { batchId: null, date: '2026-08-05', quantity: -1 },
+    ]],
+  ])
+  // Sum of lot actions equals the aggregate movement when the lots cover it.
+  for (const m of plan.movementsToCreate) {
+    const sum = m.batchActions.reduce((t, a) => t + a.quantity, 0)
+    assert.strictEqual(Math.abs(sum), m.quantity)
+  }
+})
+
+check('H-stock 1: a rerun carries its superseded movements (with provenance) for the apply to reverse', () => {
+  const prior = { id: 40, productId: 1, branchId: 1, date: '2026-08-16', signedQuantity: 3, batchActions: [{ batchId: 9, quantity: 3 }] }
+  const plan = computeDatedStockCountPlan([entry('2026-08-16', 10)], [prior], [{ productId: 1, branchId: 1, quantity: 10 }],
+    [{ batchId: 9, productId: 1, branchId: 1, date: '2026-08-16', quantity: 10 }])
+  assert.deepStrictEqual(plan.movementsToDelete, [40])
+  assert.deepStrictEqual(plan.supersededMovements, [prior])
+  assert.deepStrictEqual(plan.movementsToCreate.map((m) => [m.movementType, m.quantity, m.batchActions]), [
+    ['add', 3, [{ batchId: 9, date: '2026-08-16', quantity: 3 }]],
+  ])
 })
 
 console.log(`\n${passed} PASS, 0 FAIL`)

@@ -36,7 +36,7 @@ import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
-import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
+import { applyDatedStockCountPlan, DatedStockCountConflictError } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
 import { applyDatedStockCountDecisions, type DatedCountDecision } from '../lib/datedStockCountDecisions'
 import { formatStockChangeTelegramLines, formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -2400,7 +2400,16 @@ app.post('/dated-stock-count/apply', async (c) => {
   const built = await buildDatedStockCountPlan(db, parsed.entries)
   if ('error' in built) return c.json({ success: false, error: built.error }, built.status)
 
-  const result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+  // One atomic batch (lib/datedStockCountApply.ts): a conflict means the
+  // prior-run history changed between plan and write -- e.g. a double
+  // submit -- and nothing was applied.
+  let result: Awaited<ReturnType<typeof applyDatedStockCountPlan>>
+  try {
+    result = await applyDatedStockCountPlan(db, built.plan, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+  } catch (error) {
+    if (error instanceof DatedStockCountConflictError) return c.json({ success: false, error: error.message, code: 'dated_stock_count_conflict' }, 409)
+    throw error
+  }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'dated_stock_count_import', 'inventory', null, {
     entryCount: parsed.entries.length,
@@ -2688,7 +2697,7 @@ app.post('/movements/:id/revert', async (c) => {
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
   const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
-  if (!result.ok) return c.json({ error: result.error }, result.status)
+  if (!result.ok) return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
