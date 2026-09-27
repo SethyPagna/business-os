@@ -4994,7 +4994,8 @@ type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
 function canonicalSaleChildrenGuard(saleId: number | string, version=1): StatementList[number] {
   if(version===0)return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=@canonicalSale) BETWEEN 1 AND 200
     AND NOT EXISTS(SELECT 1 FROM sale_items WHERE sale_id=@canonicalSale AND (quantity<=0 OR quantity IS NULL))`,{canonicalSale:saleId},3)
-  const identity = typeof saleId === 'string' ? '(SELECT id FROM sales WHERE client_request_id=@canonicalSale)' : '@canonicalSale'
+  // The only client_request_id index is partial (<> ''); without that predicate every checkout scans sales twice.
+  const identity = typeof saleId === 'string' ? "(SELECT id FROM sales WHERE client_request_id=@canonicalSale AND client_request_id<>'')" : '@canonicalSale'
   const amount = (key: string) => `(typeof(i.${key}) IN ('real','integer') AND i.${key} BETWEEN 0 AND 100000000000
     AND i.${key}=CAST(ROUND(i.${key}*10000) AS INTEGER)/10000.0)`
   const keys = ['applied_price_usd','applied_price_khr','total_usd','total_khr','product_discount_usd','product_discount_khr',
