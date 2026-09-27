@@ -1183,8 +1183,16 @@ async function updateLocalUserGoogleIdentity(env: Env, userId: number, googleUse
 // redirects the browser to (or opens in a popup). `mode: 'link'` requires
 // an existing session (linking Google to the already-logged-in account);
 // `mode: 'login'` (default) is the sign-in flow.
+//
+// S-auth4e: linking also re-checks the current password (the same guarded,
+// rate-limited re-check as unlink and change password). A linked Google
+// identity is a lasting way in that survives a password change, so a
+// borrowed, stolen or left-open session must not be enough to attach one.
+// An account that must first replace a publicly known password (S-auth4b)
+// cannot link at all -- this route is not behind requireAuth, so that gate
+// is repeated here and at the callback.
 app.post('/oauth/start', async (c) => {
-  const body = await c.req.json<{ provider?: string; mode?: string; organization?: string; redirectTo?: string; deviceId?: string; deviceName?: string }>().catch(() => ({} as Record<string, string>))
+  const body = await c.req.json<{ provider?: string; mode?: string; organization?: string; redirectTo?: string; deviceId?: string; deviceName?: string; currentPassword?: string }>().catch(() => ({} as Record<string, string>))
   if (trim(body.provider || 'google').toLowerCase() !== 'google') {
     return c.json({ error: 'Only Google login is supported.' }, 400)
   }
@@ -1196,6 +1204,22 @@ app.post('/oauth/start', async (c) => {
     const sessionUser = await getSessionUser(c)
     if (!sessionUser?.id) return c.json({ error: 'Please sign in before linking Google.' }, 401)
     currentUserId = Number(sessionUser.id || 0) || 0
+    if (Number(sessionUser.must_change_password || 0) === 1) {
+      return c.json({ error: 'Change your password before connecting Google.', code: 'password_change_required' }, 403)
+    }
+    const currentPassword = String(body.currentPassword || '')
+    if (!currentPassword) {
+      return c.json({ error: 'Current password is required to connect Google.', code: 'current_password_required' }, 403)
+    }
+    const account = await getDb(c.env).prepare('SELECT password FROM users WHERE id = ? AND deleted_at IS NULL').get<{ password: string }>([currentUserId])
+    if (!account) return c.json({ error: 'Please sign in before linking Google.' }, 401)
+    const verdict = await verifyCurrentPassword(c, { actorId: currentUserId, targetId: currentUserId }, currentPassword, account.password)
+    if (!verdict.ok && verdict.rateLimited) {
+      return c.json({ error: CURRENT_PASSWORD_RATE_LIMITED_ERROR, code: 'current_password_rate_limited', retryAfterSeconds: verdict.retryAfterSeconds }, 429)
+    }
+    if (!verdict.ok) {
+      return c.json({ error: 'Current password is required to connect Google.', code: 'current_password_required' }, 403)
+    }
   }
   const result = await buildGoogleOauthStartUrl(c.env, {
     mode: oauthMode,
@@ -1323,6 +1347,11 @@ app.get('/oauth/callback', async (c) => {
       if (!actorId) { callbackPayload = { success: false, error: 'A local user session is required to link Google.' } }
       else if (!finishingUser || Number(finishingUser.id) !== actorId) {
         callbackPayload = { success: false, error: 'Sign in to Business OS in this browser as the account you are linking, then connect Google again.' }
+      }
+      // S-auth4e: same gate as /oauth/start -- a session that must first
+      // replace a publicly known password cannot attach a lasting way in.
+      else if (Number(finishingUser.must_change_password || 0) === 1) {
+        callbackPayload = { success: false, error: 'Change your password before connecting Google.' }
       }
       else if (linkedToOtherUser) { callbackPayload = { success: false, error: 'This Google account is already linked to another user.' } }
       else {

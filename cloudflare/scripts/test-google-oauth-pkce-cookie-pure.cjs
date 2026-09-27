@@ -153,10 +153,14 @@ const s256 = (value) => crypto.createHash('sha256').update(value).digest('base64
 const setCookies = (res) => (typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [res.headers.get('set-cookie')].filter(Boolean))
 const pkceSetCookie = (res) => setCookies(res).find((line) => line.startsWith(`${COOKIE}=`)) || null
 
+// S-auth4e: starting a link re-checks the current password (the signed-in
+// test user is always the cashier); see test-google-link-profile-pure.cjs.
+const linkPassword = (mode) => (mode === 'link' ? { currentPassword: 'cashier-pass' } : {})
+
 async function start(mode, sessionToken) {
   const headers = { 'Content-Type': 'application/json' }
   if (sessionToken) headers.Cookie = `bos_session=${sessionToken}`
-  const res = await authRoute.request('/oauth/start', { method: 'POST', headers, body: JSON.stringify({ mode }) }, env(), ctx)
+  const res = await authRoute.request('/oauth/start', { method: 'POST', headers, body: JSON.stringify({ mode, ...linkPassword(mode) }) }, env(), ctx)
   const body = await res.json()
   const state = body.url ? new URL(body.url).searchParams.get('state') : null
   const line = pkceSetCookie(res)
@@ -295,7 +299,7 @@ async function check(name, fn) {
   async function startAt(origin, mode, redirectTo, sessionToken) {
     const headers = { 'Content-Type': 'application/json' }
     if (sessionToken) headers.Cookie = `bos_session=${sessionToken}`
-    const res = await authRoute.request(`${origin}/oauth/start`, { method: 'POST', headers, body: JSON.stringify({ mode, redirectTo }) }, env(), ctx)
+    const res = await authRoute.request(`${origin}/oauth/start`, { method: 'POST', headers, body: JSON.stringify({ mode, redirectTo, ...linkPassword(mode) }) }, env(), ctx)
     return { status: res.status, body: await res.json(), cookieLine: pkceSetCookie(res) }
   }
 
