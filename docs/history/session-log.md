@@ -20516,3 +20516,14 @@ conflict / Records / stock-in edit asks N1-N6.
 **Verified:** individual sweep at `c64eced5`, 1,107 files (2 load flakes green alone); CI gates green; live version and placement read after the deploy.
 
 **Not done:** CP-1c, CP-2, CP-3; R2 move, official-names Excel and cost audit (U-ops running); Shop → Store paused by the owner.
+
+## Part 634 (27 Sep 2026, coordinator) — CP-1c deployed; owner delegates ops runs and the cost repair; refuters split the next checkpoint
+
+- Owner (27 Sep): standing permission for ops runs, the R2 move, the 0200 cost repair and product rulings; dpdns left as is; no action on stray token copies. Permanent deletion and Shop→Store stay out.
+- CP-1c `c35af63b` (main 8a5e2720 + U-transfer2) certified by R-transfer2 and deployed via GitHub Actions run 36271249835; live `/api/runtime/version` revision `c35af63bb491` on both hosts. Closes the over-lotted transfer 500 and the draft + failed lot dead end.
+- R-transfer2 F1 (older bug): a definitively refused saved transfer run keeps the form disabled forever → U-transfer3 (Edit / Discard). F2 tolerance test gap → same lane.
+- CP-2 integration `claude/cp2-20260927`: S-uploads2a (8f241cbd), S-uploads2b (0d749358), U-cost (90cffc6f; 0195 in migrations, 0200 held).
+- R-uploads2: certified with exceptions — legacy videos under odd names 404 (breaks the serve-by-bytes ruling), pending imports reaped at 20 min (ruling 24 h), backup restore withholds HEIC/BMP/CAEP/mp21, event-handler markup passes the gate → S-uploads3; avatar fallback + Library CSP → U-profile3.
+- R-cost: 0195 and the typed-cost writers confirmed; the held 0200 repair is correct where it acts (dry run on local D1, rollback exact, idempotent) but misses sale-linked returns without sale_item_id, walk-in returns, lines whose lots were edited/merged, and the deploy window → U-cost2.
+- R-cp3: U-broadcast and U-confirm certified, U-sync certified with exceptions, U-print not certified on Q13 → U-print2 (owner rule: never print a placeholder; the ABA QR waits and is omitted only on a load error).
+- U-ops finished (ops.yml, encrypted exports, R2 copy Worker) → U-ops2 integrates it on main with a top-up mode (no upload freeze), secret status encrypted, ordinal confirm words.

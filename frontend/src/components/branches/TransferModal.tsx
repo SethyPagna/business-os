@@ -365,6 +365,15 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         } catch (error) {
           if (cancelled || lotBranchRef.current !== branch) return
           setRowLots((current) => ({ ...current, [id]: { branch, batches: [], error: getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data') } }))
+          // The row can then show only Automatic, with its selector locked, so
+          // a received date restored from a draft must not stay behind it: it
+          // blocked submit ("choose a received date") with nothing choosable.
+          setSelectedLots((current) => {
+            if (!current[id]) return current
+            const next = { ...current }
+            delete next[id]
+            return next
+          })
         }
       }
     }))

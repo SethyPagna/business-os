@@ -96,7 +96,7 @@ async function main() {
     await check('cost changes between planning and commit reject atomically',async()=>{
       seed(1); h.beforeBatch(()=>db().exec(mutation))
       const result=await h.request('branches','/transfer',h.intent(1,1,'raced_cost_snapshot',false))
-      assert.equal(result.status,500,JSON.stringify(result))
+      assert.equal(result.status,409,JSON.stringify(result)); assert.equal(result.body.code,'transfer_stock_changed')
       assert.equal(costs().length,0)
       assert.equal(db().prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n,0)
       assert.equal(db().prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity,10)

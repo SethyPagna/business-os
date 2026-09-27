@@ -3,7 +3,8 @@
 #
 # Runs ONLY when someone presses "Run workflow" (no push or pull request
 # trigger), waits for the `production` environment's required reviewer, and
-# refuses to start unless the confirm box says DEPLOY.
+# refuses to start unless the confirm box says DEPLOY, compared ordinally
+# (byte for byte: no soft hyphen, zero-width or look-alike letter passes).
 #
 # This repository is public, so its Actions logs are public too. The job
 # summary carries row COUNTS, restore-point bookmarks and commit ids only:
@@ -60,7 +61,7 @@ jobs:
         env:
           CONFIRM: ${{ inputs.confirm }}
         run: |
-          if ($env:CONFIRM -cne 'DEPLOY') {
+          if (-not [string]::Equals($env:CONFIRM, 'DEPLOY', [System.StringComparison]::Ordinal)) {
             Write-Output '::error::Type DEPLOY (in capitals) in the confirm box to release.'
             exit 1
           }

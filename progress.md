@@ -10,9 +10,9 @@ and their new status, and each item here names the Part that last changed it (e.
 |---|---|---|
 | CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [x] deployed 26 Sep 11:35 UTC as `c64eced5` (Deploy run 36237752796, approved under the owner's delegation): 0196 + 0197 applied, key-table counts unchanged, live revision `c64eced5c231` → Part 633 |
 | CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [x] deployed with CP-1 (`c64eced5`) → Part 633 |
-| CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock cannot be transferred at all (generic "Something went wrong"); a saved draft plus a failed lot load dead-ends | [~] fixing as a hotfix from `c64eced5` → Part 633 |
-| CP-2 | S-auth (+ shared-login fix, 2FA-disable 400 + limit), S-uploads (images+videos only, import files temporary, K3 serving), U-records2, U-cost + 0195 (past-sale repair held as 0200), U-profile bugs | [~] S-auth + U-records2 certified; S-uploads refuted (its purge would delete real photos — never run) → S-uploads2a/2b fixing; U-profile refuter + U-profile2 follow-ups running; U-cost running → Part 633 |
-| CP-3 | U-cost past-sale repair (held 0200: owner sees the audit, then go), U-print, U-confirm, U-sync, U-broadcast, U-drain + offline removal (K5), S-secrets, K1/K3 caching | [~] refuter for print/confirm/sync/broadcast running; S-secrets resumed |
+| CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock could not be transferred at all; a saved draft plus a failed lot load dead-ended | [x] deployed 27 Sep as `c35af63b` (Deploy run 36271249835; R-transfer2 certified: 540 cf + 570 fe files green individually). Follow-up U-transfer3: a refused saved transfer run locks the form (Edit/Discard) → Part 634 |
+| CP-2 | S-auth, U-profile + U-profile2 (+ U-profile3 fixes), U-records2, S-uploads2a/2b (+ S-uploads3 fixes), U-cost + 0195 | [~] integration `claude/cp2-20260927` @ `90cffc6f`; R-uploads2 certified with exceptions → S-uploads3; R-cost: code confirmed, 0200 incomplete → U-cost2; U-profile3 running → Part 634 |
+| CP-3 | U-cost past-sale repair 0200 (owner authorised 27 Sep once complete: audit, backup, repair, verify), U-print2 (Q13: never print a placeholder; ABA QR waits), U-confirm + U-broadcast (certified), U-sync (certified with exceptions), U-ops2 (ops tools, R2 top-up without an upload freeze), U-drain/K5, S-secrets, K1/K3 | [~] → Part 634 |
 | CP-4 | U-branch (Shop → Store) — **PAUSED by owner 26 Sep: branches stay Shop + Warehouse; prep kept ready (0198 inert, 0199 held), needs the owner's go**; R2 move to APAC; official-names Excel (needs the product list: VPN blocks the export) | [!] owner-gated |
 
 ### All workstreams — one line each; the details are in the session log and in local Records (`Records/Recovery/LANES.md`)
@@ -105,6 +105,23 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 
 ### Checkpoint 3 — A/B data architecture
 - [ ] From PD-1 evidence: precomputed search/catalog read model (organized once at write time, not parsed per request), indexes, query budget per hot route; A/B measured against current path before switching
+- [~] C3v2 plan (27 Sep, owner asked for a deep D1/R2/policy redesign; offline cancelled so the change feed is dropped). Full plan: `Records/Performance/2026-09-25/claude/C3v2-data-architecture-plan.md`. Rule: every change measured A/B (shadow → on, KV flag, rollback in ~60 s); no second money or stock definition.
+  - [~] A0 metrics: per-request D1 rows_read/rows_written/statements/ms + cache state in Server-Timing and sampled Analytics Engine; KV feature flags. Foundation for every gated item.
+  - [ ] A1 hygiene: awaited broadcasts → waitUntil; every cache-version bump awaited (read-your-writes); ETag/304 on cached JSON
+  - [ ] A2 retention: `job_runs` table replaces settings stamps; bounded cleanup of idempotency/undo/revisions/telegram/image-audit/quota tables (sales, returns, movements, money audit never pruned)
+  - [ ] A3 catalog: one scan per page (COUNT OVER), family expansion limited to the page, parallel branch/stock reads, cached filters panel — after CP-2
+  - [ ] A4 dashboard: 20 s startup cache keyed by permissions + versions, expiry index, parallel config; refund-join narrowing gated on returns count
+  - [ ] A5 search: Khmer tokenizer probe on a local snapshot, then (if confirmed) FTS rebuild keeping combining marks + prefix index
+  - [ ] A6 R2 images: wire the existing thumbnail sizes (w160/320/640, made once, stored), srcset in the grids, orphan audit (report only) — after the APAC move
+  - [ ] A7 R2 layout: lifecycle for imports/ (7 d), quarantine/ (30 d), aborted multipart (1 d); backups/ in their own bucket during the APAC move
+  - [ ] A8 gated read models: closed-day report cache (trigger-invalidated), stored product family key + keyset paging, index cleanup by EXPLAIN — only if 7 days of A0 numbers cross the thresholds in the plan
+  - [ ] Production counts Q1–Q9 (read-only, via the ops d1-export path, results only in Records)
+  - [x] C3v3 deep audit (27 Sep, read-only, 4 reviewers: D1 schema, Worker round trips, frontend data flow, storage/platform) → `Records/Performance/2026-09-27/C3v3-plan-revision.md`. Corrections: only `undo_snapshots` + operation/receipt tables are truly unbounded (revisions and receipts must never be pruned); version bumps are not awaited today.
+  - [ ] F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) — first after CP-3
+  - [ ] F2 Durable Object auto-pong + pause health/WS/pending polls while the tab is hidden; F3 stop pre-downloading every route on deploy
+  - [ ] A2 fix: `action_history` retention must skip referenced rows (error currently swallowed); `undo_snapshots` expiry; split the 6-hourly cron
+  - [ ] B1 backups: keyset paging instead of OFFSET, full backup at 03:00 local; separate backups bucket (owner decision)
+  - [ ] W1 sale create ~18–20 D1 trips → 3–4; W2 report reader one-batch snapshot instead of double read; W3 login batching + atomic lockout
 
 <!-- PD-1 plan start -->
 ## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE

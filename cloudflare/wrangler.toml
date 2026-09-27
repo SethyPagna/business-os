@@ -161,7 +161,7 @@ migrations_dir = "migrations-import"
 
 [[r2_buckets]]
 binding = "ASSETS"
-bucket_name = "business-os-assets"
+bucket_name = "business-os-assets-apac"
 
 # Analytics Engine. Free with Workers, and the only place in this stack where
 # writing an observation is genuinely cheap: it does not draw on D1's row

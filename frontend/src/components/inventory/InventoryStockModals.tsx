@@ -271,7 +271,14 @@ export default function InventoryStockModals({
         setTransferForm((current) => (current.batch_id && !batches.some((batch) => String(batch.id) === String(current.batch_id))
           ? { ...current, batch_id: '', batch_quantity: '' } : current))
       })
-      .catch((error: unknown) => { if (!cancelled) { console.error('[Inventory] transfer lot load failed:', error); setTransferBatchOptions([]) } })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        console.error('[Inventory] transfer lot load failed:', error)
+        setTransferBatchOptions([])
+        // Only Automatic can be shown without the lot list, so a lot restored
+        // from a draft must not ride the wire unseen: fall back to Automatic.
+        setTransferForm((current) => (current.batch_id ? { ...current, batch_id: '', batch_quantity: '' } : current))
+      })
       .finally(() => { if (!cancelled) setTransferBatchesLoading(false) })
     return () => { cancelled = true }
     // setTransferForm is the parent's stable setter; re-key on product/source only.

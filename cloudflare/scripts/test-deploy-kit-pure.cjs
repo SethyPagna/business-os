@@ -244,7 +244,12 @@ for (const [file, word] of [['deploy.yml', 'DEPLOY'], ['deploy-rollback.yml', 'R
     assert.ok(/^permissions:\n {2}contents: read\n/m.test(y), 'permissions: contents: read')
     assert.ok(/^concurrency:\n {2}group: production-deploy\n/m.test(y), 'concurrency group')
     assert.ok(/ confirm:\n[\s\S]*?type: string/.test(y), 'confirm input')
-    assert.ok(new RegExp(`\\$env:CONFIRM -cne '${word}'[\\s\\S]*?exit 1`).test(y), `the job must stop unless confirm is ${word}`)
+    // Ordinal, byte for byte: PowerShell's -cne compares by culture and admits look-alikes
+    // (test-ops-workflow-pure.cjs runs these checks under PowerShell with such words).
+    const gate = `if (-not [string]::Equals($env:CONFIRM, '${word}', [System.StringComparison]::Ordinal)) {`
+    assert.ok(y.includes(gate) && /\[System\.StringComparison\]::Ordinal\)\) \{[\s\S]*?exit 1/.test(y), `the job must stop unless confirm is exactly ${word}`)
+    const confirmLines = y.split('\n').filter((l) => /\$env:CONFIRM/.test(l)).join('\n')
+    assert.ok(!/\s-[ci]?(ne|eq|like|notlike|match|notmatch)\b/i.test(confirmLines), `no culture-aware comparison operator on the confirm word: ${confirmLines}`)
     for (const [i, line] of y.split('\n').entries()) {
       if (/secrets\./.test(line)) {
         assert.ok(/^\s+[A-Z_]+: \$\{\{ secrets\.(CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID) \}\}$/.test(line), `line ${i + 1}: secrets only via env: (${line.trim()})`)
