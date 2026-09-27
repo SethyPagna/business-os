@@ -1149,6 +1149,31 @@ async function main() {
     assert.strictEqual(move.quantity, -2)
   })
 
+  // Receipt-number race (lane U-receipt): sales.receipt_number has no UNIQUE
+  // index, so the replacement sale's number -- probed free before the batch --
+  // must be re-asserted inside it. A peer till committing that number at the
+  // batch boundary fails the whole return; nothing is written twice.
+  await check('a peer taking the replacement receipt number at the batch boundary fails the whole return', async () => {
+    seed()
+    seedReplacementStock()
+    beforeBatchHook = () => {
+      rawDb.prepare("INSERT INTO sales (receipt_number, client_request_id, branch_id) VALUES ('20260830-120000', 'peer-till-replacement-race', 1)").run()
+    }
+    const { status, json } = await req('POST', '/', {
+      items: [{ product_id: 1, quantity: 2, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
+      replacement_items: [{ product_id: 2, quantity: 2, branch_id: 1, applied_price_usd: 10 }],
+      reason: 'Receipt race',
+    })
+    assert.strictEqual(beforeBatchHook, null, 'the peer sale was committed at the batch boundary')
+    assert.strictEqual(status, 409, JSON.stringify(json))
+    assert.strictEqual(json.code, 'write_conflict')
+    assert.deepStrictEqual(
+      rawDb.prepare('SELECT receipt_number, COUNT(*) AS n FROM sales WHERE receipt_number IS NOT NULL GROUP BY receipt_number HAVING COUNT(*) > 1').all(),
+      [], 'two sales must never share one receipt number')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 0)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 2 AND branch_id = 1').get().quantity, 10)
+  })
+
   await check('replacement sales canonicalize marked customers and atomically guard marker and membership races', async () => {
     const createReplacement = (extra = {}) => req('POST', '/', {
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1, applied_price_usd: 10 }],
