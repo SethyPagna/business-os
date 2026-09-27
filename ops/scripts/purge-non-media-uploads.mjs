@@ -645,7 +645,7 @@ function quickTimeAtomsFit(bytes, totalSize) {
     sampleContent(content, bytes, offset + header, offset + size)
     offset += size
   }
-  return content.length > 0 && !sampleLooksLikeText(content, bytes.length >= totalSize)
+  return content.length > 0 && !sampleLooksLikeText(content, sampleIsWhole(bytes, totalSize))
 }
 
 // An ID3v2 header: version 2-4, only the flag bits that version defines,
@@ -663,7 +663,7 @@ function id3TagFits(bytes, totalSize) {
   return [[10, tagEnd], [tagEnd, totalSize]].every(([start, end]) => {
     const content = []
     sampleContent(content, bytes, start, end)
-    return !sampleLooksLikeText(content, end <= bytes.length)
+    return !sampleLooksLikeText(content, sampleIsWhole(bytes, end))
   })
 }
 
@@ -836,12 +836,21 @@ export function decodeText(bytes, complete = true) {
 }
 
 // S-uploads4 (2026-09-27): what a container holds, its own headers set
-// aside, judged as text (QuickTime atoms, an ID3 tag). `sample` collects the
-// start of it from each part in turn, up to one byte more than decodeText
-// examines, so decodeText can tell a sample from the whole; parts past the
-// bytes read are cut.
+// aside, judged as text (QuickTime atoms, an ID3 tag). `sample` collects it
+// from each part in turn. S-uploads5 (R-S-uploads4 F10): only what lies in
+// the file's first TEXT_SAMPLE_BYTES is collected -- the head every caller
+// reads -- so a whole file and its first 4 KB give the same sample. Before,
+// a whole-file read also sampled content past that head, and the same
+// object could be text in the head and a movie in the whole file. The sample
+// is complete when the file ends inside the head (see sampleIsWhole).
 function sampleContent(sample, bytes, start, end) {
-  for (let index = start; index < Math.min(end, bytes.length) && sample.length <= TEXT_SAMPLE_BYTES; index += 1) sample.push(bytes[index])
+  for (let index = start; index < Math.min(end, bytes.length, TEXT_SAMPLE_BYTES); index += 1) sample.push(bytes[index])
+}
+
+// True when the content sampled up to `end` is all there is: it ends
+// inside the head and inside the bytes read.
+function sampleIsWhole(bytes, end) {
+  return end <= Math.min(bytes.length, TEXT_SAMPLE_BYTES)
 }
 
 function sampleLooksLikeText(sample, complete) {
@@ -859,6 +868,35 @@ const TEXT_MEDIA_FORMATS = ['XPM', 'XBM', 'NetPBM', 'Radiance HDR', 'FITS']
 // it goes to review.
 export function otherMediaLooksLikeText(other, bytes, complete = true) {
   return !TEXT_MEDIA_FORMATS.includes(other.format) && decodeText(bytes, complete) !== null
+}
+
+// ------------------------------------------- stored media: one verdict
+// S-uploads5 (2026-09-28, refuter R-S-uploads4 F10). Three callers judge an
+// object already in storage: /uploads/* for a key whose name says nothing
+// (the Worker's lib/r2.ts), this script and the backup restore
+// (lib/backup.ts). Each put the detectors above together itself, on as many
+// bytes as it had read -- 64 for /uploads, HEAD_BYTES here, the whole file
+// for the restore -- so a classic QuickTime movie whose first free/skip atom
+// holds 56+ bytes of encoder text was text to /uploads (a 404) and a movie
+// here and in the restore. This is the one judgement all three use, and it
+// looks only at the object's first STORED_MEDIA_HEAD_BYTES, which each of
+// them reads (or the whole object when it is smaller): they cannot disagree
+// about the same object. The head is decodeText's and sampleContent's
+// window too. 'allowed' says only what an image is: whoever keeps or writes
+// one still scans all of it with containsEmbeddedMarkup.
+export const STORED_MEDIA_HEAD_BYTES = TEXT_SAMPLE_BYTES
+
+// `complete`: `bytes` is the whole object; `totalSize` is its size.
+// Returns { kind: 'allowed', format } (on the upload allowlist),
+// { kind: 'other', media } (other media, kept), { kind: 'text', media }
+// (starts like other media, reads as text: review) or null.
+export function judgeStoredMedia(bytes, totalSize, complete = bytes.length >= totalSize) {
+  const head = bytes.subarray(0, STORED_MEDIA_HEAD_BYTES)
+  const format = detectUploadFormat(head)
+  if (format) return { kind: 'allowed', format }
+  const media = detectOtherMedia(head, totalSize)
+  if (!media) return null
+  return otherMediaLooksLikeText(media, head, complete && head.length === bytes.length) ? { kind: 'text', media } : { kind: 'other', media }
 }
 
 // The start of the data as text (UTF-16 decoded when it has a BOM).
@@ -1027,16 +1065,18 @@ export function classifyObject({ key, size, bytes, complete = true, activeJobIds
     if ((group === 'images' || group === 'videos') && !MEDIA_EXTENSIONS.has(extension)) return verdict('unusual-name', format, extra)
     return verdict(group, format, extra)
   }
-  const allowed = detectUploadFormat(bytes)
-  if (allowed) {
+  // The same judgement /uploads/* and the backup restore make (see
+  // judgeStoredMedia); an image is still scanned whole for markup.
+  const stored = judgeStoredMedia(bytes, total, complete)
+  if (stored && stored.kind === 'allowed') {
+    const allowed = stored.format
     if (allowed.kind === 'video') return media('videos', allowed.mime)
     const checked = { checked: complete ? 'whole file' : `first ${bytes.length} bytes` }
     if (containsEmbeddedMarkup(bytes)) return verdict('image-with-code', allowed.mime, checked)
     return media('images', allowed.mime, checked)
   }
-  const other = detectOtherMedia(bytes, total)
-  if (other && otherMediaLooksLikeText(other, bytes, complete)) return verdict('unrecognised', `text that starts like ${other.format}`)
-  if (other) return media(other.kind === 'photo' ? 'other-images' : 'other-video-audio', other.format)
+  if (stored && stored.kind === 'text') return verdict('unrecognised', `text that starts like ${stored.media.format}`)
+  if (stored) return media(stored.media.kind === 'photo' ? 'other-images' : 'other-video-audio', stored.media.format)
   const nonMedia = detectNonMedia(bytes, complete)
   if (nonMedia) return verdict(nonMedia.group, nonMedia.format)
   return verdict('unrecognised')

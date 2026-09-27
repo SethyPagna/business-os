@@ -15,7 +15,9 @@
 //     attachment as the detected type, anything else stays a 404. The
 //     uploader's stored type is never consulted, in either direction;
 //   - the sniff is ONE small ranged read, paid only by those keys: a .jpg
-//     still costs exactly one unranged R2 get;
+//     still costs exactly one unranged R2 get (S-uploads5: the read is the
+//     4 KB stored-media head, uploadSecurity STORED_MEDIA_HEAD_BYTES, that the
+//     purge and the backup restore judge too; it was 64 bytes);
 //   - nosniff + the sandbox CSP on every response; .html / .svg stay 404.
 //
 // Discriminating: the pre-fix module 404s every alias, `.bin` JPEG and
@@ -246,7 +248,7 @@ check('a sniffed key costs one small ranged read, then the normal read', async (
   await serve('uploads/paste-1712345678.bin')
   const reads = readsOf('uploads/paste-1712345678.bin')
   assert.strictEqual(reads.length, 2, 'peek + read')
-  assert.deepStrictEqual(reads[0].range, { offset: 0, length: 64 }, 'the peek reads the first 64 bytes only')
+  assert.deepStrictEqual(reads[0].range, { offset: 0, length: 4096 }, 'the peek reads the first 4 KB (STORED_MEDIA_HEAD_BYTES) only')
   assert.strictEqual(reads[0].conditional, false, 'the peek is unconditional (the type is known before any 304)')
   assert.strictEqual(reads[1].range, null)
   assert.strictEqual(reads[1].conditional, true, 'the real read keeps the conditional request')

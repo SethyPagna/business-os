@@ -32,8 +32,9 @@ const F = require('./harness/upload_fixtures.cjs')
 const SECURITY_SOURCE = process.env.UPLOAD_SECURITY_TS || path.join(__dirname, '..', 'src', 'lib', 'uploadSecurity.ts')
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.join(__dirname, '..', '..', 'ops', 'scripts', 'purge-non-media-uploads.mjs')
 // S-uploads3: the stored-media detection the backup restore and /uploads/*
-// serving share with the purge is mirrored too.
-const ROOTS = ['detectUploadFormat', 'containsEmbeddedMarkup', 'detectOtherMedia', 'otherMediaLooksLikeText']
+// serving share with the purge is mirrored too. S-uploads5: and the one
+// stored-media judgement all three make with it.
+const ROOTS = ['detectUploadFormat', 'containsEmbeddedMarkup', 'detectOtherMedia', 'otherMediaLooksLikeText', 'judgeStoredMedia']
 
 const failures = []
 let checks = 0
@@ -122,6 +123,7 @@ const SHARED_CONSTANTS = [
   'MP4_VIDEO_BRANDS', 'QUICKTIME_BRAND', 'AVIF_BRANDS', 'HEIF_STRUCTURAL_BRANDS', 'HEVC_IMAGE_BRANDS', 'QUICKTIME_LEADING_ATOMS',
   'EMBEDDED_MARKUP_TOKENS', 'MARKUP_TAG_TERMINATORS', 'MARKUP_TOKEN_SEPARATORS', 'MARKUP_SNIFF_WINDOW_BYTES',
   'MARKUP_PAYLOAD_MIN_TOKEN_LENGTH', 'C2PA_MANIFEST_IGNORED_TOKENS', 'EVENT_HANDLER_PRECEDERS', 'C2PA_UUID',
+  'STORED_MEDIA_HEAD_BYTES',
 ]
 
 // ------------------------------------------------------ 3. behaviour
@@ -178,6 +180,11 @@ function same(worker, purge, bytes) {
     }
     const kind = other ? other.kind : 'none'
     otherSeen[kind] = (otherSeen[kind] || 0) + 1
+  }
+  if (typeof worker.judgeStoredMedia === 'function') {
+    // The whole object, and its first bytes as the head of a larger one.
+    assert.deepEqual(purge.judgeStoredMedia(bytes, bytes.length, true), worker.judgeStoredMedia(bytes, bytes.length, true), 'judgeStoredMedia differs')
+    assert.deepEqual(purge.judgeStoredMedia(bytes, bytes.length + 100000, false), worker.judgeStoredMedia(bytes, bytes.length + 100000, false), 'judgeStoredMedia (head) differs')
   }
   return want
 }
