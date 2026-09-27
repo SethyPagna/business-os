@@ -2690,6 +2690,16 @@ app.patch('/:id', async (c) => {
   if ((await saleMoneyPrecisionVersion(db, existing.sale_id)) === 1) {
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
+  // A cancelled return counts for nothing and its restock was already taken
+  // back out by the cancel. The reversal below assumes the return's stock is
+  // still IN, so editing it would pull those units out a second time and then
+  // restock the new lines, and a later restore would add them again. Restore
+  // first, then edit. The write-revision guard on the final batch covers a
+  // cancel that lands between this read and the write.
+  if (String(existing.status || 'completed') === 'cancelled') {
+    return c.json({ error: 'This return is cancelled. Restore it before editing.',
+      code: 'return_edit_cancelled', action: 'restore_required' }, 409)
+  }
 
   const existingItems = await db.prepare('SELECT * FROM return_items WHERE return_id = ? ORDER BY id').all<{
     id: number; product_id: number | null; product_name: string | null; quantity: number

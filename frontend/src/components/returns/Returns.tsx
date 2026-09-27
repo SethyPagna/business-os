@@ -1651,7 +1651,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             ret={detailRet}
             onClose={closeReturnDetail}
             onMinimize={() => minimizeReturnDetail(detailRet)}
-            onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
+            onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE && isCountedReturn(detailRet) ? () => handleOpenEdit(detailRet) : undefined}
             onOpenRecords={() => setRecordsRet(detailRet)}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
