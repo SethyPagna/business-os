@@ -84,6 +84,11 @@ const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
 // ceiling is 20), not six from anywhere. Successes never spend it.
 const LOGIN_ACCOUNT_WIDE_MAX = 40
 const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
+// SEC1-02: a sign-in that resolves no usable account still spends one bcrypt
+// compare at the staff cost (10), so the answer time does not tell a staff
+// identifier from a stranger's (lib/portalAccounts.ts does the same). This is
+// the hash of a random string nobody holds.
+const NO_ACCOUNT_PASSWORD_HASH = '$2b$10$kPCxhXVBKdQbkO41qCeEI./xzCQduQU0aV1E9hdVpUBlxosWlHUzO'
 
 type OtpTargetUser = {
   id: number
@@ -320,10 +325,16 @@ app.post('/login', async (c) => {
         failedAttempts: failure.failedCount,
       }, 429)
     }
-    return c.json({ error: 'Invalid username or password', failedAttempts: failure.failedCount }, 401)
+    // The typed identifier's own count only (SEC1-02): the account-wide count
+    // showed that two spellings of a phone, or an email and a username, are
+    // one account.
+    return c.json({ error: 'Invalid username or password', failedAttempts: typedFailure.failedCount }, 401)
   }
 
-  if (!user || !user.is_active) return invalidCredentials()
+  if (!user || !user.is_active) {
+    bcrypt.compareSync(body.password, NO_ACCOUNT_PASSWORD_HASH)
+    return invalidCredentials()
+  }
   const passwordMatches = bcrypt.compareSync(body.password, user.password)
   if (!passwordMatches) return invalidCredentials()
 
