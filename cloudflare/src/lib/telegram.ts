@@ -1806,8 +1806,9 @@ function unknownCommandReply(command: string): string {
  */
 export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
-  // Group chats deliver "/report@shop_bot"; strip the bot mention.
-  const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  // Group chats deliver "/report@shop_bot". Whose command it is was decided
+  // by handleTelegramWebhook (addressedToThisBot); here the @name is dropped.
+  const { command } = parseTelegramCommand(parts[0])
   const argument = parts.slice(1).join(' ')
 
   if (command === '/help' || command === '/start') return withLanguage(language, telegramCommandReference)
@@ -1969,7 +1970,7 @@ function telegramActor(message: TelegramMessage, chatId: string): { actor: strin
 
 async function topicCommandReply(env: Env, config: TelegramConfig, message: TelegramMessage, text: string, deps: TelegramWebhookDeps): Promise<string> {
   const parts = text.trim().split(/\s+/)
-  const command = String(parts[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
+  const { command } = parseTelegramCommand(parts[0])
   const argument = parts.slice(1).join(' ')
   const language = config.language
   const chatId = String(message.chat?.id ?? '')
@@ -2013,12 +2014,64 @@ export async function isTelegramWebhookRequest(env: Env, suppliedSecret: string 
   let different = 0; for (let index = 0; index < expected.length; index += 1) different |= expected.charCodeAt(index) ^ suppliedSecret.charCodeAt(index)
   return different === 0
 }
+/**
+ * `/Report@Shop_Bot` -> `{ command: '/report', addressee: 'shop_bot' }`. A
+ * group's command menu adds the bot's @name; a typed command may leave it off
+ * (addressee '').
+ */
+export function parseTelegramCommand(word: string): { command: string; addressee: string } {
+  const lower = String(word || '').toLowerCase()
+  const at = lower.indexOf('@')
+  return at < 0 ? { command: lower, addressee: '' } : { command: lower.slice(0, at), addressee: lower.slice(at + 1) }
+}
+
+// This bot's own @name, per token, once per isolate: it never changes while a
+// token is in use, and getMe is the only place Telegram states it.
+const ownBotNames = new Map<string, string>()
+async function ownBotUsername(token: string): Promise<string | null> {
+  const known = ownBotNames.get(token)
+  if (known) return known
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    })
+    if (!response.ok) return null
+    const result = await response.json<{ ok?: boolean; result?: { username?: string } }>().catch(() => null)
+    const name = String(result?.result?.username || '').toLowerCase()
+    if (!result?.ok || !name) return null
+    ownBotNames.set(token, name)
+    return name
+  } catch {
+    return null
+  }
+}
+
+/** The one command that WRITES. The rest only read. */
+const WRITE_COMMANDS = new Set(['/settopic'])
+
+/**
+ * Is a command that names a bot (`/settopic@name`) addressed to THIS one? With
+ * privacy mode off every bot in the group receives `/settopic@other_bot`, and
+ * the name is what says whose it is (R-telegram E4, 27 Sep 2026: it used to be
+ * stripped whatever bot it named, so this bot ran another bot's /settopic).
+ * When getMe cannot tell us our own name, a read runs as it always did -- the
+ * chat is still allow-listed -- but a write does not run on a guess.
+ */
+async function addressedToThisBot(token: string, command: string, addressee: string): Promise<boolean> {
+  if (!addressee) return true
+  const own = await ownBotUsername(token)
+  return own ? addressee === own : !WRITE_COMMANDS.has(command)
+}
+
 export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, deps: TelegramWebhookDeps = {}): Promise<void> {
   const message = update?.message; const text = String(message?.text || '').trim(); const chatId = String(message?.chat?.id || '')
   if (!text.startsWith('/') || !chatId) return
   const config = await getTelegramConfig(env)
   // No token means there is no way to reply at all, so say nothing.
   if (commandProblem(config)) return
+  const { command, addressee } = parseTelegramCommand(text.split(/\s+/)[0])
+  // Another bot's command is not ours to answer -- not even with a refusal.
+  if (!(await addressedToThisBot(config.token, command, addressee))) return
   // A typed command replies IN THE TOPIC IT WAS ASKED FROM -- the reader is
   // already looking at that thread -- rather than the configured push topic,
   // which is for alerts nobody asked for. General chat carries no thread id,
@@ -2032,7 +2085,6 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, de
     await postTelegram(config, withLanguage(config.language, () => telegramUnauthorizedReply(chatId)), chatId, threadId)
     return
   }
-  const command = String(text.split(/\s+/)[0] || '').toLowerCase().replace(/@[^\s]+$/, '')
   if (TOPIC_COMMANDS.has(command)) {
     await postTelegram(config, await topicCommandReply(env, config, message as TelegramMessage, text, deps), chatId, threadId)
     return

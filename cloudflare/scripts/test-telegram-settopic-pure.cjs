@@ -143,10 +143,18 @@ let sent = []
 let memberCalls = []
 let memberStatus = 'administrator'
 let memberOk = true
+// getMe answers this bot's own @name (E4); Telegram's case, compared without it.
+let meCalls = 0
+let meOk = true
 const realFetch = globalThis.fetch
 globalThis.fetch = async (url, init) => {
   assert.match(String(url), /^https:\/\/api\.telegram\.org\/bot/, 'only the Telegram API is ever called')
   const body = JSON.parse(init.body)
+  if (/\/getMe$/.test(url)) {
+    meCalls += 1
+    if (!meOk) return { ok: false, status: 502, text: async () => '', json: async () => ({ ok: false }) }
+    return { ok: true, status: 200, text: async () => '', json: async () => ({ ok: true, result: { id: 7001, is_bot: true, username: 'Shop_Bot' } }) }
+  }
   if (/\/getChatMember$/.test(url)) {
     memberCalls.push(body)
     if (!memberOk) return { ok: false, status: 500, text: async () => '', json: async () => ({ ok: false }) }
@@ -226,9 +234,9 @@ globalThis.fetch = async (url, init) => {
     // ---- 3. the gate, end to end through handleTelegramWebhook ------------------
     const saves = []
     const deps = { saveTopics: async (_env, save) => { saves.push(save) } }
-    const run = async (message, settings = BASE) => {
+    const run = async (message, settings = BASE, runEnv = env) => {
       dbHolder.db = makeDb(settings); sent = []; memberCalls = []; saves.length = 0
-      await telegram.handleTelegramWebhook(env, { message }, deps)
+      await telegram.handleTelegramWebhook(runEnv, { message }, deps)
       return sent
     }
     const inTopic = (text, extra = {}) => ({ text, chat: { id: Number(ALERTS_CHAT) }, from: { id: 42, username: 'owner' }, message_thread_id: 734, is_topic_message: true, ...extra })
@@ -242,7 +250,37 @@ globalThis.fetch = async (url, init) => {
     pass('/settopic sales in topic 734 by an admin: saves telegram_topic_sales=734, confirms bilingually in topic 734')
 
     out = await run(inTopic('/settopic@shop_bot returns'))
-    assert.deepEqual(saves.map((s) => [s.keys, s.threadId]), [[['telegram_topic_returns'], 734]], 'the @bot mention is stripped')
+    assert.deepEqual(saves.map((s) => [s.keys, s.threadId]), [[['telegram_topic_returns'], 734]], 'a command addressed to THIS bot runs')
+
+    // E4 (R-telegram, 27 Sep 2026): with privacy mode off every bot in the
+    // group receives "/settopic@other_bot"; the name says whose it is. Our own
+    // name is getMe's, compared without case.
+    out = await run(inTopic('/settopic@other_bot returns'))
+    assert.equal(saves.length, 0, '/settopic@other_bot must not save anything')
+    assert.equal(out.length, 0, `and must not answer: ${JSON.stringify(out)}`)
+    assert.equal(memberCalls.length, 0, 'nor ask Telegram about the sender')
+    out = await run(inTopic('/topics@other_bot'))
+    assert.equal(out.length, 0, 'a read command addressed to another bot is not answered either')
+    out = await run(inTopic('/settopic@SHOP_BOT returns'))
+    assert.equal(saves.length, 1, 'the name is compared without case')
+    assert.ok(meCalls >= 1, 'the bot learned its own name from getMe')
+    const callsOnceKnown = meCalls
+    await run(inTopic('/settopic@shop_bot returns'))
+    assert.equal(meCalls, callsOnceKnown, 'and asks once per isolate, not on every command')
+    // getMe fails (a fresh token, so nothing is cached): an addressed WRITE is
+    // refused silently -- it cannot be shown to be ours -- while a read and an
+    // unaddressed command behave as they always did.
+    meOk = false
+    const envFresh = { TELEGRAM_BOT_TOKEN: 'second-test-token-not-a-real-one' }
+    out = await run(inTopic('/settopic@shop_bot returns'), BASE, envFresh)
+    assert.equal(saves.length, 0, 'own name unknown: an addressed /settopic saves nothing')
+    assert.equal(out.length, 0, 'and answers nothing')
+    out = await run(inTopic('/topics@shop_bot'), BASE, envFresh)
+    assert.equal(out.length, 1, 'own name unknown: an addressed read still answers')
+    out = await run(inTopic('/settopic returns'), BASE, envFresh)
+    assert.equal(saves.length, 1, 'an unaddressed /settopic never needs the name')
+    meOk = true
+    pass('E4: /settopic@other_bot and /topics@other_bot are ignored; @SHOP_BOT matches; name unknown -> addressed write refused, reads unchanged')
 
     memberStatus = 'member'
     out = await run(inTopic('/settopic sales'))
