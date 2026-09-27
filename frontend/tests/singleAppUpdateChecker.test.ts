@@ -3,8 +3,11 @@ import fs from 'node:fs'
 import ts from 'typescript'
 
 // F1 (27 Sep 2026). Offline selling is cancelled (owner, 26 Sep): queued
-// sales drain once through the service worker, offline is a banner plus
-// blocked saving, and the PWA stays installable caching app code only.
+// sales drain once through the manual review path (retryPendingSyncNow ->
+// syncPendingSalesQueue({ manualRecovery: true }), pinned by
+// offlineSalesQueue.test.ts; the service worker's sync handlers replay
+// nothing), offline is a banner plus blocked saving, and the PWA stays
+// installable caching app code only.
 //
 // F1 -- web-api.ts ran a background "offline maintenance" loop: every five
 // minutes, and again on every online / focus / visibility / pageshow /
@@ -193,8 +196,10 @@ await runTest('web-api no longer references the snapshot transport, a maintenanc
   }
   visit(parsed)
   assert.deepEqual(found, [])
-  // The one-time drain forwarders stay: they carry the worker's
-  // BUSINESS_OS_OUTBOX_* results for already-queued sales to the page.
+  // F1 leaves the BUSINESS_OS_OUTBOX_* / app-event forwarders alone. They are
+  // not the drain: the worker's replay functions have no caller and its sync
+  // handlers answer manual_recovery_required (service-worker.ts
+  // syncOutboxOnce). The drain is the manual review path, see the header.
   assert.match(webApi, /navigator\.serviceWorker\?\.addEventListener\?\.\('message', forwardServiceWorkerOutboxEvent\)/)
   assert.match(webApi, /navigator\.serviceWorker\?\.addEventListener\?\.\('message', forwardServiceWorkerAppEvent\)/)
   assert.match(webApi, /startsWith\('BUSINESS_OS_OUTBOX_'\)/)

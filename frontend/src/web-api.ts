@@ -356,11 +356,15 @@ async function syncUnlockedOfflineFileChunks(_options: OfflineSyncOptions = {}):
 // made eleven serial GETs every five minutes and again on every online/focus/
 // visibility/pageshow/reconnect, and localMirrors.ts discards every one of
 // them on an http(s) origin, so it was pure Worker and D1 load. Its second job,
-// the service-worker update check, is index.tsx's watchForNewAppShell alone --
-// one checker, so a long-lived till tab still sees the "Restart now" bar. The
-// one-time drain of already-queued sales is not here: it is the worker's own
-// sync / BUSINESS_OS_SYNC_NOW path, forwarded by the BUSINESS_OS_OUTBOX_*
-// listener below.
+// the service-worker update check, is index.tsx's watchForNewAppShell alone
+// (interval, visibility, online and sync:reconnected) -- one checker, so a
+// long-lived till tab still sees the "Restart now" bar. The loop never drained
+// queued sales either. The one-time drain is the MANUAL review path:
+// retryPendingSyncNow -> syncPendingSalesQueue({ manualRecovery: true }) in
+// pendingSyncTransport.ts / saleWriteTransport.ts, started from the App banner
+// and the Server page. Keep it until every device has upgraded. The service
+// worker does not drain: its sync / BUSINESS_OS_SYNC_NOW handlers run
+// syncOutboxOnce, which answers manual_recovery_required and replays nothing.
 function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
