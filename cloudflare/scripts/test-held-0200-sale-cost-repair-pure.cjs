@@ -11,9 +11,14 @@
 // for double-apply and reversal:
 //   1. Text: LF-only; the plan is byte-identical in the migration and every
 //      audit statement; the audit is SELECT-only and writes nothing.
-//   2. Buckets: repair / already_correct / ledger_unverified, and the lines
-//      that did not come from the buggy average (hand-typed, pre-era) are not
-//      candidates at all.
+//   1b. Compile: every audit statement and the migration's plan prepare on
+//      the full chain, and the plan stays a pipeline (SQLite re-expands a
+//      CTE for every reference to it; the WIP plan took ~40 s to prepare and
+//      its statement 3 overflowed SQLite's 65,535-reference limit).
+//   2. Buckets: every in-scope line in exactly one bucket -- repair /
+//      already_correct / ledger_unverified; a hand-typed cost on a product
+//      with era receipts is listed for review, never rewritten; a typed
+//      return cost is informational; pre-era lines are not in scope.
 //   3. Apply: backup first; ONLY sale_items.cost_price_usd and copied
 //      return_items.cost_price_usd move; revenue, quantities, statuses,
 //      receipts, movements, products byte-identical; the cost delta equals the
@@ -135,9 +140,9 @@ function seed() {
     VALUES (?, ?, ?, 'x', 1, 20, 11.8333, 0, 20, 1, 'restock', 1, ?)`).run(retId, ids.s1.lineId, p1, a).lastInsertRowid)
   raw.prepare(`INSERT INTO inventory_movements(product_id, branch_id, movement_type, quantity, unit_cost_usd, reference_id, batch_id, created_at)
     VALUES (?, 1, 'return', 1, 11.8333, ?, ?, '2026-09-23 09:00:00')`).run(p1, retId, a)
-  // A return line whose cost was NOT copied from the line (typed): untouched.
+  // A return line of the same sale line whose cost was NOT copied from it (typed): untouched.
   ids.returnTyped = Number(raw.prepare(`INSERT INTO return_items(return_id, sale_item_id, product_id, product_name, quantity, applied_price_usd, cost_price_usd, cost_price_khr, total_usd, return_to_stock, stock_action, branch_id)
-    VALUES (?, ?, ?, 'x', 1, 20, 9.5, 0, 20, 0, 'none', 1)`).run(retId, ids.s2.lineId, p1).lastInsertRowid)
+    VALUES (?, ?, ?, 'x', 1, 20, 9.5, 0, 20, 0, 'none', 1)`).run(retId, ids.s1.lineId, p1).lastInsertRowid)
   setStock(c, 0); setStock(a, 2); setStock(b, 6)
 
   // P2, a multi-lot line (movement batch NULL, allocations 2 x D + 1 x E),
@@ -157,7 +162,9 @@ function seed() {
   ids.s5 = sale(p3, '2026-09-20 09:00:00', 1, 3.5, { lotId: f })
   setStock(f, 3); setStock(g, 0)
 
-  // P4, a hand-typed cost that is no formula's output: not a candidate.
+  // P4, a hand-typed cost that is no formula's output, on a product with
+  // receipts in the era: listed for review (it may be a stale figure), never
+  // rewritten.
   const p4 = ids.p4 = product(9.99)
   const h = lot(p4, 8, 17, 3); lot(p4, 10, 18, 3)
   ids.s6 = sale(p4, '2026-09-20 09:00:00', 1, 9.99, { lotId: h })
@@ -238,13 +245,47 @@ check('text: LF-only, one plan shared verbatim by the migration and every audit 
   const updates = [...body.matchAll(/\nUPDATE (\w+) SET (\w+) =/g)].map((m) => `${m[1]}.${m[2]}`)
   assert.deepEqual(updates, ['sale_items.cost_price_usd', 'return_items.cost_price_usd'], 'the only writes are the two cost columns')
   const writes = [...body.matchAll(/\n(INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM|REPLACE INTO|DROP \w+|ALTER TABLE) (\w+)/g)].map((m) => `${m[1]} ${m[2]}`)
-  assert.deepEqual([...new Set(writes)], ['INSERT OR IGNORE INTO sale_cost_repair_0200_plan', 'INSERT OR IGNORE INTO sale_cost_repair_0200',
-    'INSERT OR IGNORE INTO sale_cost_repair_0200_return_items', 'UPDATE sale_items', 'UPDATE return_items', 'INSERT INTO branches'], 'nothing else is written')
+  // The first statement is the 0195 / deploy-window guard (an abort, not a write).
+  assert.deepEqual([...new Set(writes)], ['INSERT INTO branches', 'INSERT OR IGNORE INTO sale_cost_repair_0200_plan', 'INSERT OR IGNORE INTO sale_cost_repair_0200',
+    'INSERT OR IGNORE INTO sale_cost_repair_0200_return_items', 'UPDATE sale_items', 'UPDATE return_items'], 'nothing else is written')
   const asserts = [...body.matchAll(/\nINSERT INTO branches\(name\) SELECT NULL WHERE /g)].map((m) => m.index)
-  assert.ok(asserts.length >= 4 && asserts.every((i) => i > body.lastIndexOf('\nUPDATE ')), 'post assertions use the NOT NULL abort idiom, after the writes')
+  assert.ok(asserts.filter((i) => i > body.lastIndexOf('\nUPDATE ')).length >= 4, 'post assertions use the NOT NULL abort idiom, after the writes')
+  // Pre-write aborts: the guard before the plan, and unbucketed / after_window between the plan and the first backup.
+  const firstBackup = at('\nINSERT OR IGNORE INTO sale_cost_repair_0200 (')
+  assert.equal(asserts.filter((i) => i < at('\nINSERT OR IGNORE INTO sale_cost_repair_0200_plan')).length, 1, 'the 0195 guard runs before the plan')
+  assert.equal(asserts.filter((i) => i > at('\nINSERT OR IGNORE INTO sale_cost_repair_0200_plan') && i < firstBackup).length, 2, 'unbucketed and after_window abort before any backup or UPDATE')
 })
 
-check('buckets: repair / already_correct / ledger_unverified; hand-typed and pre-era lines are not candidates; the audit writes nothing', () => {
+// SQLite copies a CTE's definition into the statement once for EVERY reference
+// to it, correlated subqueries included (MATERIALIZED changes how it runs, not
+// that), so a plan whose heavy steps are each read by several later steps grows
+// exponentially at prepare time. The WIP plan of 66da324e expanded to ~35,000
+// CTE bodies per reference to 'classified': ~40 s to prepare on an empty
+// database, and audit statement 3 (three references) failed outright with
+// 'too many references to "json_each": max 65535'. Each statement must
+// prepare, and each must expand to a bounded number of CTE bodies.
+check('compile: every audit statement and the migration plan prepare on the full chain, and the plan expands linearly', () => {
+  const raw = openDb(loadAll()).db
+  const plan = planOf(migrationText)[0]
+  const tailOf = (text) => text.slice(text.indexOf('\n-- plan:stop\n') + '\n-- plan:stop\n'.length)
+  const migrationSelect = tailOf(migrationText).slice(0, tailOf(migrationText).indexOf(';\n') + 1)
+  const statements = [...auditStatements(), `-- plan:begin\n${plan}\n-- plan:stop\n${migrationSelect}`]
+  statements.forEach((s, i) => assert.doesNotThrow(() => raw.prepare(s), `statement ${i + 1} prepares`))
+  // The CTE graph, read from the plan text: every top-level "name AS [MATERIALIZED] (".
+  const parts = plan.split(/^(\w+) AS (?:MATERIALIZED )?\($/m)
+  const defs = {}
+  for (let i = 1; i < parts.length; i += 2) defs[parts[i]] = parts[i + 1]
+  const names = Object.keys(defs)
+  assert.ok(names.length >= 20 && names.includes('classified'), `the plan's CTEs are found (${names.length})`)
+  const refs = (text) => names.map((m) => [m, (text.match(new RegExp(`\\b(?:FROM|JOIN)\\s+${m}\\b`, 'g')) || []).length]).filter(([, c]) => c)
+  const memo = {}
+  const bodies = (n) => memo[n] ??= 1 + refs(defs[n]).filter(([m]) => m !== n).reduce((s, [m, c]) => s + c * bodies(m), 0)
+  const expanded = statements.map((s) => refs(tailOf(s)).reduce((sum, [m, c]) => sum + c * bodies(m), 0))
+  // Today's plan: ~2,000 per statement. The bound leaves room to grow, not to fan out.
+  for (const [i, n] of expanded.entries()) assert.ok(n > 0 && n <= 5000, `statement ${i + 1} expands to ${n} CTE bodies (bound 5,000)`)
+})
+
+check('buckets: every in-scope line placed once; a hand-typed cost is listed, never rewritten; pre-era lines out of scope; the audit writes nothing', () => {
   const { raw, ids } = seed()
   const before = raw.prepare('SELECT total_changes() n').get().n
   for (const s of auditStatements()) raw.prepare(s).all()
@@ -260,21 +301,25 @@ check('buckets: repair / already_correct / ledger_unverified; hand-typed and pre
   assert.deepEqual(got[ids.s10.lineId], { bucket: 'ledger_unverified', correct: 8 }, 'a received lot with no ledger event: not proof even when it balances')
   assert.deepEqual(got[ids.s11.lineId], { bucket: 'ledger_unverified', correct: 5 }, 'a ledger that runs negative: not proof even when it balances')
   assert.deepEqual(got[ids.s8.lineId], { bucket: 'repair', correct: 8 }, 'override prices the 2 units it re-priced: (2 x 10 + 1 x 4) / 3')
-  assert.equal(got[ids.s6.lineId], undefined, 'hand-typed cost: not a candidate')
-  assert.equal(got[ids.s7.lineId], undefined, 'before a5a2169f: not a candidate')
+  assert.deepEqual(got[ids.s6.lineId], { bucket: 'needs_owner_review', correct: 9 }, 'hand-typed cost: listed with the on-hand estimate (3 x 8 + 3 x 10) / 6')
+  assert.equal(raw.prepare(planSelect(`SELECT reason FROM classified WHERE kind = 'sale' AND item_id = ${ids.s6.lineId}`)).get().reason, 'recorded_cost_unexplained')
+  assert.equal(got[ids.s7.lineId], undefined, 'before a5a2169f: not in scope')
   // Discriminating controls: the plausible wrong methods give other figures.
   const today = raw.prepare('SELECT cost_price_usd c FROM products WHERE id = ?').get(ids.p1).c
   assert.equal(today, 12.375, "today's corrected catalog cost, today's quantities: (2 x 12 + 6 x 12.5) / 8")
   assert.ok(today !== 12.4 && today !== 12.4444, "today's corrected average is NOT the shelf at either sale")
   const summaryRows = raw.prepare(auditStatements()[0]).all()
   assert.deepEqual(summaryRows.map((r) => r.bucket), ['repair', 'window', 'returns_sale_linked', 'returns_walk_in', 'ledger_unverified',
-    'needs_owner_review', 'after_window', 'already_correct'], 'every bucket listed, in order, even when empty')
+    'needs_owner_review', 'after_window', 'already_correct', 'unaffected', 'unbucketed'], 'every bucket listed, in order, even when empty')
   const summary = Object.fromEntries(summaryRows.map((r) => [r.bucket, r]))
   assert.equal(summary.repair.lines, 5)
   assert.equal(summary.ledger_unverified.lines, 7, 's5, s9, s10, s11, the two unnamed earlier sales of P3 and P9, and the earlier sale of P7 -- its estimate equals its recorded cost, but an unreconciled ledger proves neither')
   assert.equal(summary.returns_sale_linked.lines, 1, 'the copied return line')
-  assert.equal(summary.window.lines + summary.returns_walk_in.lines + summary.needs_owner_review.lines + summary.after_window.lines, 0)
-  assert.deepEqual(buckets(raw, 'return'), { [ids.returnCopied]: { bucket: 'returns_sale_linked', correct: 12.4 } }, 'the typed return line is not listed')
+  assert.equal(summary.needs_owner_review.lines, 1, 's6, the hand-typed cost')
+  assert.deepEqual([summary.already_correct.lines, summary.unaffected.lines], [1, 1], 's3; the typed return line')
+  assert.equal(summary.window.lines + summary.returns_walk_in.lines + summary.after_window.lines + summary.unbucketed.lines, 0)
+  assert.deepEqual(buckets(raw, 'return'), { [ids.returnCopied]: { bucket: 'returns_sale_linked', correct: 12.4 }, [ids.returnTyped]: { bucket: 'unaffected', correct: 12.4 } },
+    'the typed return line is informational (not copied from its sale line), never rewritten')
   assert.equal(summary.repair.cost_delta_usd, Math.round((3 * (12.0769 - 11.8333) + (12.4 - 11.8333) + 2 * (12.4444 - 11.8333) + (7 - 6) + (8 - 7)) * 10000) / 10000)
   const effect = raw.prepare(auditStatements()[2]).get()
   assert.equal(effect.return_lines, 1, 'one copied return line')
@@ -395,7 +440,7 @@ check('owner-run audit: every header command is --command (never --file); the cu
   assert.equal(summary.ledger_unverified.lines, Object.values(buckets(raw)).filter((b) => b.bucket === 'ledger_unverified').length, 'ledger_unverified count')
   assert.ok(summary.ledger_unverified.lines >= 4, 'the four seeded unverified lines at least')
   assert.equal(typeof summary.repair.cost_delta_usd, 'number', 'D')
-  assert.equal(raw.prepare(cut(2)).all().length, Object.values(summary).reduce((n, r) => n + r.lines, 0), 'C lists every line B counts')
+  assert.equal(raw.prepare(cut(2)).all().length, Object.values(summary).reduce((n, r) => n + r.lines, 0) - summary.unaffected.lines, "C lists every line B counts but 'unaffected'")
   assert.deepEqual(Object.keys(raw.prepare(cut(3)).get()), ['sold_cost_delta_usd', 'returned_cost_delta_usd', 'return_lines'])
   // Logs get counts and sums only: statements 1 and 3 print no id, number or name.
   for (const n of [1, 3]) for (const row of raw.prepare(cut(n)).all()) for (const [k, v] of Object.entries(row)) {

@@ -187,120 +187,35 @@ setter AS MATERIALIZED (
   WHERE o.p IN (SELECT prod_at FROM item_ctx) AND o.at IS NOT NULL
 ),
 anchor AS MATERIALIZED (
-  SELECT ik AS ak, prod_at AS p, t AS at FROM item_ctx
+  SELECT ic.ik AS ak, ic.prod_at AS p, ic.t AS at, ic.kind, ic.item_id, ic.sale_id, ic.return_id, ic.product_now, ic.quantity,
+    ic.recorded, ic.born, ic.t, ic.pos, ic.fix_at, ic.era_end, ic.moved, ic.orphan, ic.since
+  FROM item_ctx ic
   UNION ALL
-  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at FROM setter s
-),
-pce_at AS MATERIALIZED (
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a JOIN product_cost_entries pce ON pce.product_id = a.p
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a
-    JOIN row_move rm ON rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.at
-    JOIN product_cost_entries pce ON pce.id = rm.row_id
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_cost_entries' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-pce_top AS MATERIALIZED (
-  SELECT ak, cost_usd, baseline_batch_id FROM (
-    SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.ak ORDER BY x.id DESC) AS rn FROM pce_at x)
-  WHERE rn = 1
+  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  FROM setter s
 ),
 anchor_me AS MATERIALIZED (
-  SELECT a.ak, a.p, a.at,
-    pt.ak IS NOT NULL AS has_me, pt.cost_usd AS me_cost, COALESCE(pt.baseline_batch_id, 0) AS me_baseline
-  FROM anchor a LEFT JOIN pce_top pt ON pt.ak = a.ak
-),
-item_me AS MATERIALIZED (
-  SELECT ic.*, am.has_me, am.me_cost, am.me_baseline,
-    EXISTS (SELECT 1 FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t) AS now_has_me,
-    (SELECT pce.cost_usd FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1) AS now_me_cost,
-    COALESCE((SELECT pce.baseline_batch_id FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1), 0) AS now_me_baseline,
-    EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = ic.prod_at AND rm.at > ic.t) AS me_moved
-  FROM item_ctx ic JOIN anchor_me am ON am.ak = ic.ik
-),
-anchor_lot AS MATERIALIZED (
-  SELECT a.ak, pb.id AS lot_id
-    FROM anchor a JOIN product_batches pb ON pb.variant_product_id = a.p
-   WHERE NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, rm.row_id
-    FROM anchor a JOIN row_move rm ON rm.tbl = 'product_batches' AND rm.dup_id = a.p AND rm.at > a.at
-   WHERE NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_batches' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-lot_base AS MATERIALIZED (
-  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
-    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
-    COALESCE(pb.received_quantity, 0) AS received_quantity,
-    (SELECT im.unit_cost_usd FROM inventory_movements im
-      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
-    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at
-  FROM product_batches pb WHERE pb.id IN (SELECT lot_id FROM anchor_lot)
-),
-lot_at AS MATERIALIZED (
-  SELECT al.ak, al.lot_id, am.at, am.has_me, am.me_cost, am.me_baseline, lb.created, lb.received_at,
-    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
-    COALESCE(
-      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = al.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
-      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
-           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
-             THEN lb.receipt_cost END,
-      lb.cost_now) AS cost_t,
-    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
-      OR lb.last_edit_at > am.at
-      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
-      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = al.lot_id AND rm.at > am.at)
-    THEN 1 ELSE 0 END AS changed
-  FROM anchor_lot al JOIN anchor_me am ON am.ak = al.ak JOIN lot_base lb ON lb.lot_id = al.lot_id
-),
-bset AS MATERIALIZED (
-  SELECT la.ak, 'h' AS v, la.cost_t AS cost
-    FROM lot_at la
-   WHERE la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-  UNION
-  SELECT am.ak, 'h', am.me_cost FROM anchor_me am WHERE am.has_me = 1 AND am.me_cost > 0
-  UNION
-  SELECT m.ik, 'n', pb.unit_cost_usd
-    FROM item_me m JOIN product_batches pb ON pb.variant_product_id = m.product_now
-   WHERE pb.is_active = 1 AND pb.unit_cost_usd > 0
-     AND datetime(COALESCE(pb.created_at, pb.received_at)) <= m.t
-     AND (m.now_has_me = 0 OR pb.id > m.now_me_baseline)
-  UNION
-  SELECT m.ik, 'n', m.now_me_cost FROM item_me m WHERE m.now_has_me = 1 AND m.now_me_cost > 0
-),
-anchor_b AS MATERIALIZED (
-  SELECT ak, v,
-    ROUND(AVG(cost), 4) AS b1,
-    CAST(AVG(cost) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
-    CASE WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost) ELSE ROUND(AVG(cost), 4) END AS b2
-  FROM bset GROUP BY ak, v
-),
-item_match AS MATERIALIZED (
-  SELECT m.ik,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS h_match,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'n'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS n_match,
-    EXISTS (SELECT 1 FROM anchor a JOIN anchor_b b ON b.ak = a.ak AND b.v = 'h'
-      WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t
-        AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS s_match,
-    EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = m.prod_at AND mb.at >= m.since AND mb.at <= m.t
-      AND (ABS(m.recorded - mb.b1) < 0.00006 OR ABS(m.recorded - mb.b1h) < 0.00006 OR ABS(m.recorded - mb.b2) < 0.00006)) AS m_match,
-    EXISTS (SELECT 1 FROM anchor a WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t)
-      OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = m.prod_at AND me.at >= m.since AND me.at <= m.t) AS has_setter,
-    (SELECT b.b1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h') AS buggy_mean_usd
-  FROM item_me m
+  SELECT x.*, pce.id IS NOT NULL AS has_me, pce.cost_usd AS me_cost, COALESCE(pce.baseline_batch_id, 0) AS me_baseline,
+    nm.id IS NOT NULL AS now_has_me, nm.cost_usd AS now_me_cost, COALESCE(nm.baseline_batch_id, 0) AS now_me_baseline
+  FROM (SELECT a.*,
+      (SELECT pc.id FROM product_cost_entries pc
+        WHERE (pc.product_id = a.p OR pc.id IN (SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p))
+          AND datetime(pc.created_at) <= a.at
+          AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pc.id AND rm.at > a.at
+            ORDER BY rm.ord LIMIT 1), pc.product_id) = a.p
+        ORDER BY pc.id DESC LIMIT 1) AS me_id,
+      (SELECT pc.id FROM product_cost_entries pc WHERE pc.product_id = a.product_now AND datetime(pc.created_at) <= a.t
+        ORDER BY pc.id DESC LIMIT 1) AS now_me_id,
+      EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.t) AS me_moved
+    FROM anchor a) x
+  LEFT JOIN product_cost_entries pce ON pce.id = x.me_id
+  LEFT JOIN product_cost_entries nm ON nm.id = x.now_me_id
 ),
 cand_lots AS MATERIALIZED (
-  SELECT lot_id FROM lot_base
+  SELECT pb.id AS lot_id FROM product_batches pb WHERE pb.variant_product_id IN (SELECT prod_at FROM item_ctx)
+  UNION
+  SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.dup_id IN (SELECT prod_at FROM item_ctx)
 ),
 ev AS MATERIALIZED (
   SELECT im.batch_id AS lot_id, im.id AS pos, im.quantity AS qty
@@ -328,46 +243,115 @@ ev AS MATERIALIZED (
      WHERE ml.how = 'fold') x
   WHERE x.lot_id IN (SELECT lot_id FROM cand_lots)
 ),
-bad_lots AS MATERIALIZED (
-  SELECT lot_id FROM (
-    SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
-      SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
-    FROM ev e) w
-  WHERE w.running < 0
-     OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)
-  UNION
-  SELECT lb.lot_id FROM lot_base lb
-   WHERE NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = lb.lot_id)
-     AND (lb.received_quantity > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = lb.lot_id), 0) <> 0)
+lot_base AS MATERIALIZED (
+  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
+    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
+    (SELECT im.unit_cost_usd FROM inventory_movements im
+      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
+    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at,
+    CASE WHEN b.lot_id IS NOT NULL
+      OR (NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = pb.id)
+        AND (COALESCE(pb.received_quantity, 0) > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id), 0) <> 0))
+    THEN 1 ELSE 0 END AS bad
+  FROM product_batches pb
+  LEFT JOIN (
+    SELECT DISTINCT w.lot_id FROM (
+      SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
+        SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
+      FROM ev e) w
+    WHERE w.running < 0
+       OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)) b ON b.lot_id = pb.id
+  WHERE pb.id IN (SELECT lot_id FROM cand_lots)
 ),
-weighted AS MATERIALIZED (
-  SELECT ik,
-    CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
-    SUM(qty) AS on_hand_units
-  FROM (
-    SELECT o.ik, CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END AS cost, o.q AS qty
-    FROM (
-      SELECT ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline, SUM(e.qty) AS q
-        FROM item_ctx ic JOIN lot_at la ON la.ak = ic.ik JOIN ev e ON e.lot_id = la.lot_id AND e.pos < ic.pos
-       WHERE la.active_t = 1
-       GROUP BY ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline) o
-    WHERE o.q > 0 AND (CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END) > 0)
-  GROUP BY ik
+lot_x AS MATERIALIZED (
+  SELECT am.*, lb.lot_id, lb.created, lb.received_at, lb.bad,
+    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
+    COALESCE(
+      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = lb.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
+      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
+           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
+             THEN lb.receipt_cost END,
+      lb.cost_now) AS cost_t,
+    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
+      OR lb.last_edit_at > am.at
+      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
+      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lb.lot_id AND rm.at > am.at)
+    THEN 1 ELSE 0 END AS changed
+  FROM anchor_me am
+  LEFT JOIN (
+    SELECT pb.id AS lot_id, pb.variant_product_id AS key_p, pb.variant_product_id AS cur_p FROM product_batches pb
+    UNION
+    SELECT rm.row_id, rm.dup_id, pb.variant_product_id
+      FROM row_move rm JOIN product_batches pb ON pb.id = rm.row_id WHERE rm.tbl = 'product_batches') lk
+    ON lk.key_p = am.p
+   AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lk.lot_id AND rm.at > am.at
+         ORDER BY rm.ord LIMIT 1), lk.cur_p) = am.p
+  LEFT JOIN lot_base lb ON lb.lot_id = lk.lot_id
 ),
-lot_agg AS MATERIALIZED (
-  SELECT ak,
-    MAX(CASE WHEN active_t = 1 AND created <= at AND bad = 1 THEN 1 ELSE 0 END) AS unverified,
-    MAX(CASE WHEN changed = 1 AND created <= at THEN 1 ELSE 0 END) AS lot_changed,
-    MAX(CASE WHEN fb_rank = 1 AND eligible = 1 THEN cost_t END) AS fallback
+lot_q AS MATERIALIZED (
+  SELECT w.ak, w.lot_id, w.q FROM (
+    SELECT u.ak, u.lot_id, u.is_ev,
+      SUM(u.qty) OVER (PARTITION BY u.lot_id ORDER BY u.pos, u.is_ev ROWS UNBOUNDED PRECEDING) AS q
+    FROM (SELECT lx.ak, lx.lot_id, lx.pos, 0 AS is_ev, 0 AS qty FROM lot_x lx
+           WHERE lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.ak < 1000000000000
+          UNION ALL
+          SELECT NULL, e.lot_id, e.pos, 1, e.qty FROM ev e) u) w
+  WHERE w.is_ev = 0
+),
+lot_rows AS MATERIALIZED (
+  SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
   FROM (
-    SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
-    FROM (
-      SELECT la.*, bl.lot_id IS NOT NULL AS bad,
-        CASE WHEN la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-          THEN 1 ELSE 0 END AS eligible
-      FROM lot_at la LEFT JOIN bad_lots bl ON bl.lot_id = la.lot_id
-      WHERE la.ak < 1000000000000) y)
-  GROUP BY ak
+    SELECT lx.*,
+      CASE WHEN lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.cost_t > 0 AND lx.created <= lx.at AND (lx.has_me = 0 OR lx.lot_id > lx.me_baseline)
+        THEN 1 ELSE 0 END AS eligible,
+      lq.q
+    FROM lot_x lx LEFT JOIN lot_q lq ON lq.ak = lx.ak AND lq.lot_id = lx.lot_id) y
+),
+ak_agg AS MATERIALIZED (
+  SELECT r.ak, r.p, r.at, r.kind, r.item_id, r.sale_id, r.return_id, r.product_now, r.quantity, r.recorded, r.born, r.t, r.pos,
+    r.fix_at, r.era_end, r.moved, r.orphan, r.since, r.me_moved, r.now_has_me, r.now_me_cost, r.now_me_baseline,
+    ROUND(AVG(DISTINCT r.hc), 4) AS b1,
+    CAST(AVG(DISTINCT r.hc) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
+    CASE WHEN MAX(r.hc) > 2 * MIN(r.hc) THEN MAX(r.hc) ELSE ROUND(AVG(DISTINCT r.hc), 4) END AS b2,
+    CASE WHEN SUM(r.wq) > 0 THEN CAST(SUM(r.wq * r.wc) / SUM(r.wq) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
+    SUM(r.wq) AS on_hand_units,
+    MAX(CASE WHEN r.u = 0 AND r.active_t = 1 AND r.created <= r.at AND r.bad = 1 THEN 1 ELSE 0 END) AS unverified,
+    MAX(CASE WHEN r.u = 0 AND r.changed = 1 AND r.created <= r.at THEN 1 ELSE 0 END) AS lot_changed,
+    MAX(CASE WHEN r.u = 0 AND r.fb_rank = 1 AND r.eligible = 1 THEN r.cost_t END) AS fallback
+  FROM (
+    SELECT lr.*, u.k AS u,
+      CASE WHEN u.k = 0 THEN CASE WHEN lr.eligible = 1 THEN lr.cost_t END
+           ELSE CASE WHEN lr.has_me = 1 AND lr.me_cost > 0 THEN lr.me_cost END END AS hc,
+      CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END AS wc,
+      CASE WHEN u.k = 0 AND lr.q > 0 AND (CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END) > 0
+        THEN lr.q END AS wq
+    FROM lot_rows lr CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) u) r
+  GROUP BY r.ak
+),
+item_match AS MATERIALIZED (
+  SELECT g.*,
+    CASE WHEN ABS(g.recorded - g.b1) < 0.00006 OR ABS(g.recorded - g.b1h) < 0.00006 OR ABS(g.recorded - g.b2) < 0.00006 THEN 1 ELSE 0 END AS h_match,
+    CASE WHEN EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = g.p AND mb.at >= g.since AND mb.at <= g.t
+      AND (ABS(g.recorded - mb.b1) < 0.00006 OR ABS(g.recorded - mb.b1h) < 0.00006 OR ABS(g.recorded - mb.b2) < 0.00006)) THEN 1 ELSE 0 END AS m_match,
+    CASE WHEN g.s_any = 1 OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = g.p AND me.at >= g.since AND me.at <= g.t)
+      THEN 1 ELSE 0 END AS has_setter,
+    COALESCE((SELECT CASE WHEN ABS(g.recorded - ROUND(AVG(n.c), 4)) < 0.00006
+          OR ABS(g.recorded - CAST(AVG(n.c) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0) < 0.00006
+          OR ABS(g.recorded - CASE WHEN MAX(n.c) > 2 * MIN(n.c) THEN MAX(n.c) ELSE ROUND(AVG(n.c), 4) END) < 0.00006 THEN 1 ELSE 0 END
+        FROM (SELECT pb.unit_cost_usd AS c FROM product_batches pb
+               WHERE pb.variant_product_id = g.product_now AND pb.is_active = 1 AND pb.unit_cost_usd > 0
+                 AND datetime(COALESCE(pb.created_at, pb.received_at)) <= g.t
+                 AND (g.now_has_me = 0 OR pb.id > g.now_me_baseline)
+              UNION
+              SELECT g.now_me_cost WHERE g.now_has_me = 1 AND g.now_me_cost > 0) n), 0) AS n_match
+  FROM (
+    SELECT i.*,
+      MAX(CASE WHEN ABS(i.recorded - s.b1) < 0.00006 OR ABS(i.recorded - s.b1h) < 0.00006 OR ABS(i.recorded - s.b2) < 0.00006
+        THEN 1 ELSE 0 END) AS s_match,
+      MAX(CASE WHEN s.ak IS NOT NULL THEN 1 ELSE 0 END) AS s_any
+    FROM ak_agg i LEFT JOIN ak_agg s ON s.ak >= 1000000000000 AND s.p = i.p AND s.at >= i.since AND s.at <= i.t
+    WHERE i.ak < 1000000000000
+    GROUP BY i.ak) g
 ),
 classified_items AS MATERIALIZED (
   SELECT g.*,
@@ -406,34 +390,43 @@ classified_items AS MATERIALIZED (
       CASE WHEN f.h_match = 1 THEN 'buggy_average' WHEN f.s_match = 1 THEN 'stale_buggy_average' ELSE 'stale_merge_cost' END AS producer
     FROM (
       SELECT m.kind, m.item_id, m.sale_id, m.return_id, m.product_now AS product_id, m.quantity, m.recorded, m.t, m.born, m.pos,
-        m.fix_at, m.era_end, COALESCE(w.w, la.fallback) AS correct, COALESCE(w.on_hand_units, 0) AS on_hand_units,
-        COALESCE(mt.h_match, 0) AS h_match, COALESCE(mt.s_match, 0) AS s_match, COALESCE(mt.m_match, 0) AS m_match,
-        COALESCE(mt.n_match, 0) AS n_match, COALESCE(mt.has_setter, 0) AS has_setter, mt.buggy_mean_usd,
-        COALESCE(la.unverified, 0) AS unverified, m.orphan,
-        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(la.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
-      FROM item_me m LEFT JOIN weighted w ON w.ik = m.ik LEFT JOIN item_match mt ON mt.ik = m.ik
-      LEFT JOIN lot_agg la ON la.ak = m.ik) f) g
-),
-sale_scope AS MATERIALIZED (
-  SELECT DISTINCT sale_id FROM classified_items WHERE kind = 'sale' AND bucket IS NOT NULL
+        m.fix_at, m.era_end, COALESCE(m.w, m.fallback) AS correct, COALESCE(m.on_hand_units, 0) AS on_hand_units,
+        m.h_match, m.s_match, m.m_match, m.n_match, m.has_setter, m.b1 AS buggy_mean_usd,
+        COALESCE(m.unverified, 0) AS unverified, m.orphan,
+        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(m.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
+      FROM item_match m) f) g
 ),
 linked AS MATERIALIZED (
-  SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
-    datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product,
-    COUNT(sc.id) AS n_lines,
-    SUM(CASE WHEN c.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
-    SUM(CASE WHEN c.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
-    SUM(CASE WHEN ABS(sc.cost_price_usd - ri.cost_price_usd) < 0.00006 THEN 0 ELSE 1 END) AS n_unequal,
-    MIN(c.correct) AS min_correct, MAX(c.correct) AS max_correct, MIN(sc.id) AS first_line_id,
-    MAX(c.buggy_mean_usd) AS buggy_mean_usd
-  FROM sale_scope ss
-  JOIN returns r ON r.sale_id = ss.sale_id
-  JOIN return_items ri ON ri.return_id = r.id
-  LEFT JOIN sale_items sc ON sc.sale_id = r.sale_id AND (sc.id = ri.sale_item_id OR (ri.sale_item_id IS NULL AND sc.product_id = ri.product_id
-     AND (ri.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = ri.branch_id)))
-  LEFT JOIN classified_items c ON c.kind = 'sale' AND c.item_id = sc.id
-  WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-  GROUP BY ri.id, r.id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd, r.created_at, ri.sale_item_id
+  SELECT y.return_item_id, y.return_id, y.sale_id, y.product_id, y.quantity, y.recorded, y.t, y.by_product, y.n_lines, y.n_unequal,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
+    MIN(CASE WHEN y.hit = 1 THEN y.correct END) AS min_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.correct END) AS max_correct,
+    MAX(CASE WHEN y.item_id = y.first_line_id THEN y.correct END) AS first_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.buggy_mean_usd END) AS buggy_mean_usd
+  FROM (
+    SELECT rl.*, c.item_id, c.bucket, c.correct, c.buggy_mean_usd,
+      CASE WHEN c.item_id = rl.sale_item_id OR (rl.sale_item_id IS NULL AND sc.product_id = rl.product_id
+        AND (rl.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = rl.branch_id)) THEN 1 ELSE 0 END AS hit
+    FROM (
+      SELECT z.*,
+        (SELECT COUNT(*) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_lines,
+        (SELECT COALESCE(SUM(CASE WHEN ABS(sc.cost_price_usd - z.recorded) < 0.00006 THEN 0 ELSE 1 END), 0) FROM sale_items sc
+          WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_unequal,
+        (SELECT MIN(sc.id) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS first_line_id
+      FROM (
+        SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
+          datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product, ri.sale_item_id, ri.branch_id
+        FROM returns r JOIN return_items ri ON ri.return_id = r.id
+        WHERE r.sale_id IS NOT NULL AND COALESCE(r.return_scope, 'customer') = 'customer'
+          AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0) z) rl
+    JOIN classified_items c ON c.kind = 'sale' AND c.sale_id = rl.sale_id
+    JOIN sale_items sc ON sc.id = c.item_id) y
+  GROUP BY y.return_item_id
+  HAVING MAX(CASE WHEN y.bucket IS NOT NULL THEN 1 ELSE 0 END) = 1
 ),
 scope AS MATERIALIZED (
   SELECT 'sale' AS kind, si.id AS item_id, si.sale_id, NULL AS return_id, si.product_id, si.quantity, si.cost_price_usd AS recorded,
@@ -445,37 +438,41 @@ scope AS MATERIALIZED (
   SELECT 'return', ri.id, r.sale_id, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at)
   FROM returns r JOIN return_items ri ON ri.return_id = r.id JOIN params p
   WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-    AND ((r.sale_id IS NULL AND ri.sale_item_id IS NULL
-        AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end)
-      OR r.sale_id IN (SELECT sale_id FROM sale_scope))
+    AND r.sale_id IS NULL AND ri.sale_item_id IS NULL
+    AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end
 ),
 classified AS MATERIALIZED (
-  SELECT kind, item_id, sale_id, return_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units, t, bucket, reason
-    FROM classified_items WHERE bucket IS NOT NULL
-  UNION ALL
-  SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
-    COALESCE((SELECT c2.correct FROM classified_items c2 WHERE c2.kind = 'sale' AND c2.item_id = l.first_line_id), l.min_correct),
-    l.buggy_mean_usd, NULL, NULL, l.t,
-    CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
-         WHEN l.n_unequal > 0 THEN 'unaffected'
-         WHEN l.n_review > 0 THEN 'needs_owner_review'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
-         WHEN l.n_repaired > 0 THEN 'needs_owner_review'
-         ELSE 'unaffected' END,
-    CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
-         WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
-         WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
-           THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
-         WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
-         ELSE 'follows_sale_line' END
-  FROM linked l
-  UNION ALL
-  SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
-    'unbucketed', 'in_scope_line_not_classified'
-  FROM scope s
-  WHERE NOT EXISTS (SELECT 1 FROM classified_items c WHERE c.kind = s.kind AND c.item_id = s.item_id AND c.bucket IS NOT NULL)
-    AND NOT EXISTS (SELECT 1 FROM linked l WHERE s.kind = 'return' AND l.return_item_id = s.item_id)
+  SELECT v.kind, v.item_id, v.sale_id, v.return_id, v.product_id, v.quantity, v.recorded, v.correct, v.buggy_mean_usd, v.pos,
+    v.on_hand_units, v.t, v.bucket, v.reason
+  FROM (
+    SELECT u.*, MAX(u.src) OVER (PARTITION BY u.kind, u.item_id) AS covered
+    FROM (
+      SELECT c.kind, c.item_id, c.sale_id, c.return_id, c.product_id, c.quantity, c.recorded, c.correct, c.buggy_mean_usd, c.pos,
+        c.on_hand_units, c.t, c.bucket, c.reason, 1 AS src
+      FROM classified_items c WHERE c.bucket IS NOT NULL
+      UNION ALL
+      SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
+        COALESCE(l.first_correct, l.min_correct), l.buggy_mean_usd, NULL, NULL, l.t,
+        CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
+             WHEN l.n_unequal > 0 THEN 'unaffected'
+             WHEN l.n_review > 0 THEN 'needs_owner_review'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
+             WHEN l.n_repaired > 0 THEN 'needs_owner_review'
+             ELSE 'unaffected' END,
+        CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
+             WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
+             WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
+               THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
+             WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
+             ELSE 'follows_sale_line' END,
+        1
+      FROM linked l
+      UNION ALL
+      SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
+        'unbucketed', 'in_scope_line_not_classified', 0
+      FROM scope s) u) v
+  WHERE v.src = 1 OR v.covered = 0
 )
 -- plan:stop
 SELECT b.value AS bucket, COUNT(c.kind) AS lines, ROUND(COALESCE(SUM(c.quantity), 0), 4) AS units,
@@ -632,120 +629,35 @@ setter AS MATERIALIZED (
   WHERE o.p IN (SELECT prod_at FROM item_ctx) AND o.at IS NOT NULL
 ),
 anchor AS MATERIALIZED (
-  SELECT ik AS ak, prod_at AS p, t AS at FROM item_ctx
+  SELECT ic.ik AS ak, ic.prod_at AS p, ic.t AS at, ic.kind, ic.item_id, ic.sale_id, ic.return_id, ic.product_now, ic.quantity,
+    ic.recorded, ic.born, ic.t, ic.pos, ic.fix_at, ic.era_end, ic.moved, ic.orphan, ic.since
+  FROM item_ctx ic
   UNION ALL
-  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at FROM setter s
-),
-pce_at AS MATERIALIZED (
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a JOIN product_cost_entries pce ON pce.product_id = a.p
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a
-    JOIN row_move rm ON rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.at
-    JOIN product_cost_entries pce ON pce.id = rm.row_id
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_cost_entries' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-pce_top AS MATERIALIZED (
-  SELECT ak, cost_usd, baseline_batch_id FROM (
-    SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.ak ORDER BY x.id DESC) AS rn FROM pce_at x)
-  WHERE rn = 1
+  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  FROM setter s
 ),
 anchor_me AS MATERIALIZED (
-  SELECT a.ak, a.p, a.at,
-    pt.ak IS NOT NULL AS has_me, pt.cost_usd AS me_cost, COALESCE(pt.baseline_batch_id, 0) AS me_baseline
-  FROM anchor a LEFT JOIN pce_top pt ON pt.ak = a.ak
-),
-item_me AS MATERIALIZED (
-  SELECT ic.*, am.has_me, am.me_cost, am.me_baseline,
-    EXISTS (SELECT 1 FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t) AS now_has_me,
-    (SELECT pce.cost_usd FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1) AS now_me_cost,
-    COALESCE((SELECT pce.baseline_batch_id FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1), 0) AS now_me_baseline,
-    EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = ic.prod_at AND rm.at > ic.t) AS me_moved
-  FROM item_ctx ic JOIN anchor_me am ON am.ak = ic.ik
-),
-anchor_lot AS MATERIALIZED (
-  SELECT a.ak, pb.id AS lot_id
-    FROM anchor a JOIN product_batches pb ON pb.variant_product_id = a.p
-   WHERE NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, rm.row_id
-    FROM anchor a JOIN row_move rm ON rm.tbl = 'product_batches' AND rm.dup_id = a.p AND rm.at > a.at
-   WHERE NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_batches' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-lot_base AS MATERIALIZED (
-  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
-    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
-    COALESCE(pb.received_quantity, 0) AS received_quantity,
-    (SELECT im.unit_cost_usd FROM inventory_movements im
-      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
-    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at
-  FROM product_batches pb WHERE pb.id IN (SELECT lot_id FROM anchor_lot)
-),
-lot_at AS MATERIALIZED (
-  SELECT al.ak, al.lot_id, am.at, am.has_me, am.me_cost, am.me_baseline, lb.created, lb.received_at,
-    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
-    COALESCE(
-      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = al.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
-      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
-           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
-             THEN lb.receipt_cost END,
-      lb.cost_now) AS cost_t,
-    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
-      OR lb.last_edit_at > am.at
-      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
-      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = al.lot_id AND rm.at > am.at)
-    THEN 1 ELSE 0 END AS changed
-  FROM anchor_lot al JOIN anchor_me am ON am.ak = al.ak JOIN lot_base lb ON lb.lot_id = al.lot_id
-),
-bset AS MATERIALIZED (
-  SELECT la.ak, 'h' AS v, la.cost_t AS cost
-    FROM lot_at la
-   WHERE la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-  UNION
-  SELECT am.ak, 'h', am.me_cost FROM anchor_me am WHERE am.has_me = 1 AND am.me_cost > 0
-  UNION
-  SELECT m.ik, 'n', pb.unit_cost_usd
-    FROM item_me m JOIN product_batches pb ON pb.variant_product_id = m.product_now
-   WHERE pb.is_active = 1 AND pb.unit_cost_usd > 0
-     AND datetime(COALESCE(pb.created_at, pb.received_at)) <= m.t
-     AND (m.now_has_me = 0 OR pb.id > m.now_me_baseline)
-  UNION
-  SELECT m.ik, 'n', m.now_me_cost FROM item_me m WHERE m.now_has_me = 1 AND m.now_me_cost > 0
-),
-anchor_b AS MATERIALIZED (
-  SELECT ak, v,
-    ROUND(AVG(cost), 4) AS b1,
-    CAST(AVG(cost) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
-    CASE WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost) ELSE ROUND(AVG(cost), 4) END AS b2
-  FROM bset GROUP BY ak, v
-),
-item_match AS MATERIALIZED (
-  SELECT m.ik,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS h_match,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'n'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS n_match,
-    EXISTS (SELECT 1 FROM anchor a JOIN anchor_b b ON b.ak = a.ak AND b.v = 'h'
-      WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t
-        AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS s_match,
-    EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = m.prod_at AND mb.at >= m.since AND mb.at <= m.t
-      AND (ABS(m.recorded - mb.b1) < 0.00006 OR ABS(m.recorded - mb.b1h) < 0.00006 OR ABS(m.recorded - mb.b2) < 0.00006)) AS m_match,
-    EXISTS (SELECT 1 FROM anchor a WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t)
-      OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = m.prod_at AND me.at >= m.since AND me.at <= m.t) AS has_setter,
-    (SELECT b.b1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h') AS buggy_mean_usd
-  FROM item_me m
+  SELECT x.*, pce.id IS NOT NULL AS has_me, pce.cost_usd AS me_cost, COALESCE(pce.baseline_batch_id, 0) AS me_baseline,
+    nm.id IS NOT NULL AS now_has_me, nm.cost_usd AS now_me_cost, COALESCE(nm.baseline_batch_id, 0) AS now_me_baseline
+  FROM (SELECT a.*,
+      (SELECT pc.id FROM product_cost_entries pc
+        WHERE (pc.product_id = a.p OR pc.id IN (SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p))
+          AND datetime(pc.created_at) <= a.at
+          AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pc.id AND rm.at > a.at
+            ORDER BY rm.ord LIMIT 1), pc.product_id) = a.p
+        ORDER BY pc.id DESC LIMIT 1) AS me_id,
+      (SELECT pc.id FROM product_cost_entries pc WHERE pc.product_id = a.product_now AND datetime(pc.created_at) <= a.t
+        ORDER BY pc.id DESC LIMIT 1) AS now_me_id,
+      EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.t) AS me_moved
+    FROM anchor a) x
+  LEFT JOIN product_cost_entries pce ON pce.id = x.me_id
+  LEFT JOIN product_cost_entries nm ON nm.id = x.now_me_id
 ),
 cand_lots AS MATERIALIZED (
-  SELECT lot_id FROM lot_base
+  SELECT pb.id AS lot_id FROM product_batches pb WHERE pb.variant_product_id IN (SELECT prod_at FROM item_ctx)
+  UNION
+  SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.dup_id IN (SELECT prod_at FROM item_ctx)
 ),
 ev AS MATERIALIZED (
   SELECT im.batch_id AS lot_id, im.id AS pos, im.quantity AS qty
@@ -773,46 +685,115 @@ ev AS MATERIALIZED (
      WHERE ml.how = 'fold') x
   WHERE x.lot_id IN (SELECT lot_id FROM cand_lots)
 ),
-bad_lots AS MATERIALIZED (
-  SELECT lot_id FROM (
-    SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
-      SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
-    FROM ev e) w
-  WHERE w.running < 0
-     OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)
-  UNION
-  SELECT lb.lot_id FROM lot_base lb
-   WHERE NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = lb.lot_id)
-     AND (lb.received_quantity > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = lb.lot_id), 0) <> 0)
+lot_base AS MATERIALIZED (
+  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
+    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
+    (SELECT im.unit_cost_usd FROM inventory_movements im
+      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
+    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at,
+    CASE WHEN b.lot_id IS NOT NULL
+      OR (NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = pb.id)
+        AND (COALESCE(pb.received_quantity, 0) > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id), 0) <> 0))
+    THEN 1 ELSE 0 END AS bad
+  FROM product_batches pb
+  LEFT JOIN (
+    SELECT DISTINCT w.lot_id FROM (
+      SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
+        SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
+      FROM ev e) w
+    WHERE w.running < 0
+       OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)) b ON b.lot_id = pb.id
+  WHERE pb.id IN (SELECT lot_id FROM cand_lots)
 ),
-weighted AS MATERIALIZED (
-  SELECT ik,
-    CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
-    SUM(qty) AS on_hand_units
-  FROM (
-    SELECT o.ik, CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END AS cost, o.q AS qty
-    FROM (
-      SELECT ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline, SUM(e.qty) AS q
-        FROM item_ctx ic JOIN lot_at la ON la.ak = ic.ik JOIN ev e ON e.lot_id = la.lot_id AND e.pos < ic.pos
-       WHERE la.active_t = 1
-       GROUP BY ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline) o
-    WHERE o.q > 0 AND (CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END) > 0)
-  GROUP BY ik
+lot_x AS MATERIALIZED (
+  SELECT am.*, lb.lot_id, lb.created, lb.received_at, lb.bad,
+    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
+    COALESCE(
+      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = lb.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
+      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
+           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
+             THEN lb.receipt_cost END,
+      lb.cost_now) AS cost_t,
+    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
+      OR lb.last_edit_at > am.at
+      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
+      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lb.lot_id AND rm.at > am.at)
+    THEN 1 ELSE 0 END AS changed
+  FROM anchor_me am
+  LEFT JOIN (
+    SELECT pb.id AS lot_id, pb.variant_product_id AS key_p, pb.variant_product_id AS cur_p FROM product_batches pb
+    UNION
+    SELECT rm.row_id, rm.dup_id, pb.variant_product_id
+      FROM row_move rm JOIN product_batches pb ON pb.id = rm.row_id WHERE rm.tbl = 'product_batches') lk
+    ON lk.key_p = am.p
+   AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lk.lot_id AND rm.at > am.at
+         ORDER BY rm.ord LIMIT 1), lk.cur_p) = am.p
+  LEFT JOIN lot_base lb ON lb.lot_id = lk.lot_id
 ),
-lot_agg AS MATERIALIZED (
-  SELECT ak,
-    MAX(CASE WHEN active_t = 1 AND created <= at AND bad = 1 THEN 1 ELSE 0 END) AS unverified,
-    MAX(CASE WHEN changed = 1 AND created <= at THEN 1 ELSE 0 END) AS lot_changed,
-    MAX(CASE WHEN fb_rank = 1 AND eligible = 1 THEN cost_t END) AS fallback
+lot_q AS MATERIALIZED (
+  SELECT w.ak, w.lot_id, w.q FROM (
+    SELECT u.ak, u.lot_id, u.is_ev,
+      SUM(u.qty) OVER (PARTITION BY u.lot_id ORDER BY u.pos, u.is_ev ROWS UNBOUNDED PRECEDING) AS q
+    FROM (SELECT lx.ak, lx.lot_id, lx.pos, 0 AS is_ev, 0 AS qty FROM lot_x lx
+           WHERE lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.ak < 1000000000000
+          UNION ALL
+          SELECT NULL, e.lot_id, e.pos, 1, e.qty FROM ev e) u) w
+  WHERE w.is_ev = 0
+),
+lot_rows AS MATERIALIZED (
+  SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
   FROM (
-    SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
-    FROM (
-      SELECT la.*, bl.lot_id IS NOT NULL AS bad,
-        CASE WHEN la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-          THEN 1 ELSE 0 END AS eligible
-      FROM lot_at la LEFT JOIN bad_lots bl ON bl.lot_id = la.lot_id
-      WHERE la.ak < 1000000000000) y)
-  GROUP BY ak
+    SELECT lx.*,
+      CASE WHEN lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.cost_t > 0 AND lx.created <= lx.at AND (lx.has_me = 0 OR lx.lot_id > lx.me_baseline)
+        THEN 1 ELSE 0 END AS eligible,
+      lq.q
+    FROM lot_x lx LEFT JOIN lot_q lq ON lq.ak = lx.ak AND lq.lot_id = lx.lot_id) y
+),
+ak_agg AS MATERIALIZED (
+  SELECT r.ak, r.p, r.at, r.kind, r.item_id, r.sale_id, r.return_id, r.product_now, r.quantity, r.recorded, r.born, r.t, r.pos,
+    r.fix_at, r.era_end, r.moved, r.orphan, r.since, r.me_moved, r.now_has_me, r.now_me_cost, r.now_me_baseline,
+    ROUND(AVG(DISTINCT r.hc), 4) AS b1,
+    CAST(AVG(DISTINCT r.hc) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
+    CASE WHEN MAX(r.hc) > 2 * MIN(r.hc) THEN MAX(r.hc) ELSE ROUND(AVG(DISTINCT r.hc), 4) END AS b2,
+    CASE WHEN SUM(r.wq) > 0 THEN CAST(SUM(r.wq * r.wc) / SUM(r.wq) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
+    SUM(r.wq) AS on_hand_units,
+    MAX(CASE WHEN r.u = 0 AND r.active_t = 1 AND r.created <= r.at AND r.bad = 1 THEN 1 ELSE 0 END) AS unverified,
+    MAX(CASE WHEN r.u = 0 AND r.changed = 1 AND r.created <= r.at THEN 1 ELSE 0 END) AS lot_changed,
+    MAX(CASE WHEN r.u = 0 AND r.fb_rank = 1 AND r.eligible = 1 THEN r.cost_t END) AS fallback
+  FROM (
+    SELECT lr.*, u.k AS u,
+      CASE WHEN u.k = 0 THEN CASE WHEN lr.eligible = 1 THEN lr.cost_t END
+           ELSE CASE WHEN lr.has_me = 1 AND lr.me_cost > 0 THEN lr.me_cost END END AS hc,
+      CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END AS wc,
+      CASE WHEN u.k = 0 AND lr.q > 0 AND (CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END) > 0
+        THEN lr.q END AS wq
+    FROM lot_rows lr CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) u) r
+  GROUP BY r.ak
+),
+item_match AS MATERIALIZED (
+  SELECT g.*,
+    CASE WHEN ABS(g.recorded - g.b1) < 0.00006 OR ABS(g.recorded - g.b1h) < 0.00006 OR ABS(g.recorded - g.b2) < 0.00006 THEN 1 ELSE 0 END AS h_match,
+    CASE WHEN EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = g.p AND mb.at >= g.since AND mb.at <= g.t
+      AND (ABS(g.recorded - mb.b1) < 0.00006 OR ABS(g.recorded - mb.b1h) < 0.00006 OR ABS(g.recorded - mb.b2) < 0.00006)) THEN 1 ELSE 0 END AS m_match,
+    CASE WHEN g.s_any = 1 OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = g.p AND me.at >= g.since AND me.at <= g.t)
+      THEN 1 ELSE 0 END AS has_setter,
+    COALESCE((SELECT CASE WHEN ABS(g.recorded - ROUND(AVG(n.c), 4)) < 0.00006
+          OR ABS(g.recorded - CAST(AVG(n.c) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0) < 0.00006
+          OR ABS(g.recorded - CASE WHEN MAX(n.c) > 2 * MIN(n.c) THEN MAX(n.c) ELSE ROUND(AVG(n.c), 4) END) < 0.00006 THEN 1 ELSE 0 END
+        FROM (SELECT pb.unit_cost_usd AS c FROM product_batches pb
+               WHERE pb.variant_product_id = g.product_now AND pb.is_active = 1 AND pb.unit_cost_usd > 0
+                 AND datetime(COALESCE(pb.created_at, pb.received_at)) <= g.t
+                 AND (g.now_has_me = 0 OR pb.id > g.now_me_baseline)
+              UNION
+              SELECT g.now_me_cost WHERE g.now_has_me = 1 AND g.now_me_cost > 0) n), 0) AS n_match
+  FROM (
+    SELECT i.*,
+      MAX(CASE WHEN ABS(i.recorded - s.b1) < 0.00006 OR ABS(i.recorded - s.b1h) < 0.00006 OR ABS(i.recorded - s.b2) < 0.00006
+        THEN 1 ELSE 0 END) AS s_match,
+      MAX(CASE WHEN s.ak IS NOT NULL THEN 1 ELSE 0 END) AS s_any
+    FROM ak_agg i LEFT JOIN ak_agg s ON s.ak >= 1000000000000 AND s.p = i.p AND s.at >= i.since AND s.at <= i.t
+    WHERE i.ak < 1000000000000
+    GROUP BY i.ak) g
 ),
 classified_items AS MATERIALIZED (
   SELECT g.*,
@@ -851,34 +832,43 @@ classified_items AS MATERIALIZED (
       CASE WHEN f.h_match = 1 THEN 'buggy_average' WHEN f.s_match = 1 THEN 'stale_buggy_average' ELSE 'stale_merge_cost' END AS producer
     FROM (
       SELECT m.kind, m.item_id, m.sale_id, m.return_id, m.product_now AS product_id, m.quantity, m.recorded, m.t, m.born, m.pos,
-        m.fix_at, m.era_end, COALESCE(w.w, la.fallback) AS correct, COALESCE(w.on_hand_units, 0) AS on_hand_units,
-        COALESCE(mt.h_match, 0) AS h_match, COALESCE(mt.s_match, 0) AS s_match, COALESCE(mt.m_match, 0) AS m_match,
-        COALESCE(mt.n_match, 0) AS n_match, COALESCE(mt.has_setter, 0) AS has_setter, mt.buggy_mean_usd,
-        COALESCE(la.unverified, 0) AS unverified, m.orphan,
-        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(la.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
-      FROM item_me m LEFT JOIN weighted w ON w.ik = m.ik LEFT JOIN item_match mt ON mt.ik = m.ik
-      LEFT JOIN lot_agg la ON la.ak = m.ik) f) g
-),
-sale_scope AS MATERIALIZED (
-  SELECT DISTINCT sale_id FROM classified_items WHERE kind = 'sale' AND bucket IS NOT NULL
+        m.fix_at, m.era_end, COALESCE(m.w, m.fallback) AS correct, COALESCE(m.on_hand_units, 0) AS on_hand_units,
+        m.h_match, m.s_match, m.m_match, m.n_match, m.has_setter, m.b1 AS buggy_mean_usd,
+        COALESCE(m.unverified, 0) AS unverified, m.orphan,
+        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(m.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
+      FROM item_match m) f) g
 ),
 linked AS MATERIALIZED (
-  SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
-    datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product,
-    COUNT(sc.id) AS n_lines,
-    SUM(CASE WHEN c.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
-    SUM(CASE WHEN c.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
-    SUM(CASE WHEN ABS(sc.cost_price_usd - ri.cost_price_usd) < 0.00006 THEN 0 ELSE 1 END) AS n_unequal,
-    MIN(c.correct) AS min_correct, MAX(c.correct) AS max_correct, MIN(sc.id) AS first_line_id,
-    MAX(c.buggy_mean_usd) AS buggy_mean_usd
-  FROM sale_scope ss
-  JOIN returns r ON r.sale_id = ss.sale_id
-  JOIN return_items ri ON ri.return_id = r.id
-  LEFT JOIN sale_items sc ON sc.sale_id = r.sale_id AND (sc.id = ri.sale_item_id OR (ri.sale_item_id IS NULL AND sc.product_id = ri.product_id
-     AND (ri.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = ri.branch_id)))
-  LEFT JOIN classified_items c ON c.kind = 'sale' AND c.item_id = sc.id
-  WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-  GROUP BY ri.id, r.id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd, r.created_at, ri.sale_item_id
+  SELECT y.return_item_id, y.return_id, y.sale_id, y.product_id, y.quantity, y.recorded, y.t, y.by_product, y.n_lines, y.n_unequal,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
+    MIN(CASE WHEN y.hit = 1 THEN y.correct END) AS min_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.correct END) AS max_correct,
+    MAX(CASE WHEN y.item_id = y.first_line_id THEN y.correct END) AS first_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.buggy_mean_usd END) AS buggy_mean_usd
+  FROM (
+    SELECT rl.*, c.item_id, c.bucket, c.correct, c.buggy_mean_usd,
+      CASE WHEN c.item_id = rl.sale_item_id OR (rl.sale_item_id IS NULL AND sc.product_id = rl.product_id
+        AND (rl.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = rl.branch_id)) THEN 1 ELSE 0 END AS hit
+    FROM (
+      SELECT z.*,
+        (SELECT COUNT(*) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_lines,
+        (SELECT COALESCE(SUM(CASE WHEN ABS(sc.cost_price_usd - z.recorded) < 0.00006 THEN 0 ELSE 1 END), 0) FROM sale_items sc
+          WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_unequal,
+        (SELECT MIN(sc.id) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS first_line_id
+      FROM (
+        SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
+          datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product, ri.sale_item_id, ri.branch_id
+        FROM returns r JOIN return_items ri ON ri.return_id = r.id
+        WHERE r.sale_id IS NOT NULL AND COALESCE(r.return_scope, 'customer') = 'customer'
+          AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0) z) rl
+    JOIN classified_items c ON c.kind = 'sale' AND c.sale_id = rl.sale_id
+    JOIN sale_items sc ON sc.id = c.item_id) y
+  GROUP BY y.return_item_id
+  HAVING MAX(CASE WHEN y.bucket IS NOT NULL THEN 1 ELSE 0 END) = 1
 ),
 scope AS MATERIALIZED (
   SELECT 'sale' AS kind, si.id AS item_id, si.sale_id, NULL AS return_id, si.product_id, si.quantity, si.cost_price_usd AS recorded,
@@ -890,37 +880,41 @@ scope AS MATERIALIZED (
   SELECT 'return', ri.id, r.sale_id, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at)
   FROM returns r JOIN return_items ri ON ri.return_id = r.id JOIN params p
   WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-    AND ((r.sale_id IS NULL AND ri.sale_item_id IS NULL
-        AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end)
-      OR r.sale_id IN (SELECT sale_id FROM sale_scope))
+    AND r.sale_id IS NULL AND ri.sale_item_id IS NULL
+    AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end
 ),
 classified AS MATERIALIZED (
-  SELECT kind, item_id, sale_id, return_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units, t, bucket, reason
-    FROM classified_items WHERE bucket IS NOT NULL
-  UNION ALL
-  SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
-    COALESCE((SELECT c2.correct FROM classified_items c2 WHERE c2.kind = 'sale' AND c2.item_id = l.first_line_id), l.min_correct),
-    l.buggy_mean_usd, NULL, NULL, l.t,
-    CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
-         WHEN l.n_unequal > 0 THEN 'unaffected'
-         WHEN l.n_review > 0 THEN 'needs_owner_review'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
-         WHEN l.n_repaired > 0 THEN 'needs_owner_review'
-         ELSE 'unaffected' END,
-    CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
-         WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
-         WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
-           THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
-         WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
-         ELSE 'follows_sale_line' END
-  FROM linked l
-  UNION ALL
-  SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
-    'unbucketed', 'in_scope_line_not_classified'
-  FROM scope s
-  WHERE NOT EXISTS (SELECT 1 FROM classified_items c WHERE c.kind = s.kind AND c.item_id = s.item_id AND c.bucket IS NOT NULL)
-    AND NOT EXISTS (SELECT 1 FROM linked l WHERE s.kind = 'return' AND l.return_item_id = s.item_id)
+  SELECT v.kind, v.item_id, v.sale_id, v.return_id, v.product_id, v.quantity, v.recorded, v.correct, v.buggy_mean_usd, v.pos,
+    v.on_hand_units, v.t, v.bucket, v.reason
+  FROM (
+    SELECT u.*, MAX(u.src) OVER (PARTITION BY u.kind, u.item_id) AS covered
+    FROM (
+      SELECT c.kind, c.item_id, c.sale_id, c.return_id, c.product_id, c.quantity, c.recorded, c.correct, c.buggy_mean_usd, c.pos,
+        c.on_hand_units, c.t, c.bucket, c.reason, 1 AS src
+      FROM classified_items c WHERE c.bucket IS NOT NULL
+      UNION ALL
+      SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
+        COALESCE(l.first_correct, l.min_correct), l.buggy_mean_usd, NULL, NULL, l.t,
+        CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
+             WHEN l.n_unequal > 0 THEN 'unaffected'
+             WHEN l.n_review > 0 THEN 'needs_owner_review'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
+             WHEN l.n_repaired > 0 THEN 'needs_owner_review'
+             ELSE 'unaffected' END,
+        CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
+             WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
+             WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
+               THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
+             WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
+             ELSE 'follows_sale_line' END,
+        1
+      FROM linked l
+      UNION ALL
+      SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
+        'unbucketed', 'in_scope_line_not_classified', 0
+      FROM scope s) u) v
+  WHERE v.src = 1 OR v.covered = 0
 )
 -- plan:stop
 SELECT c.kind, c.bucket, c.reason, c.item_id, c.sale_id, s.receipt_number, c.return_id, r.return_number, c.t AS line_at,
@@ -1079,120 +1073,35 @@ setter AS MATERIALIZED (
   WHERE o.p IN (SELECT prod_at FROM item_ctx) AND o.at IS NOT NULL
 ),
 anchor AS MATERIALIZED (
-  SELECT ik AS ak, prod_at AS p, t AS at FROM item_ctx
+  SELECT ic.ik AS ak, ic.prod_at AS p, ic.t AS at, ic.kind, ic.item_id, ic.sale_id, ic.return_id, ic.product_now, ic.quantity,
+    ic.recorded, ic.born, ic.t, ic.pos, ic.fix_at, ic.era_end, ic.moved, ic.orphan, ic.since
+  FROM item_ctx ic
   UNION ALL
-  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at FROM setter s
-),
-pce_at AS MATERIALIZED (
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a JOIN product_cost_entries pce ON pce.product_id = a.p
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pce.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, pce.id, pce.cost_usd, pce.baseline_batch_id
-    FROM anchor a
-    JOIN row_move rm ON rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.at
-    JOIN product_cost_entries pce ON pce.id = rm.row_id
-   WHERE datetime(pce.created_at) <= a.at
-     AND NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_cost_entries' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-pce_top AS MATERIALIZED (
-  SELECT ak, cost_usd, baseline_batch_id FROM (
-    SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.ak ORDER BY x.id DESC) AS rn FROM pce_at x)
-  WHERE rn = 1
+  SELECT 1000000000000 + ROW_NUMBER() OVER (ORDER BY s.p, s.at), s.p, s.at, NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+  FROM setter s
 ),
 anchor_me AS MATERIALIZED (
-  SELECT a.ak, a.p, a.at,
-    pt.ak IS NOT NULL AS has_me, pt.cost_usd AS me_cost, COALESCE(pt.baseline_batch_id, 0) AS me_baseline
-  FROM anchor a LEFT JOIN pce_top pt ON pt.ak = a.ak
-),
-item_me AS MATERIALIZED (
-  SELECT ic.*, am.has_me, am.me_cost, am.me_baseline,
-    EXISTS (SELECT 1 FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t) AS now_has_me,
-    (SELECT pce.cost_usd FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1) AS now_me_cost,
-    COALESCE((SELECT pce.baseline_batch_id FROM product_cost_entries pce
-      WHERE pce.product_id = ic.product_now AND datetime(pce.created_at) <= ic.t ORDER BY pce.id DESC LIMIT 1), 0) AS now_me_baseline,
-    EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = ic.prod_at AND rm.at > ic.t) AS me_moved
-  FROM item_ctx ic JOIN anchor_me am ON am.ak = ic.ik
-),
-anchor_lot AS MATERIALIZED (
-  SELECT a.ak, pb.id AS lot_id
-    FROM anchor a JOIN product_batches pb ON pb.variant_product_id = a.p
-   WHERE NOT EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = pb.id AND rm.at > a.at)
-  UNION
-  SELECT a.ak, rm.row_id
-    FROM anchor a JOIN row_move rm ON rm.tbl = 'product_batches' AND rm.dup_id = a.p AND rm.at > a.at
-   WHERE NOT EXISTS (SELECT 1 FROM row_move r2 WHERE r2.tbl = 'product_batches' AND r2.row_id = rm.row_id
-       AND r2.at > a.at AND r2.ord < rm.ord)
-),
-lot_base AS MATERIALIZED (
-  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
-    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
-    COALESCE(pb.received_quantity, 0) AS received_quantity,
-    (SELECT im.unit_cost_usd FROM inventory_movements im
-      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
-    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at
-  FROM product_batches pb WHERE pb.id IN (SELECT lot_id FROM anchor_lot)
-),
-lot_at AS MATERIALIZED (
-  SELECT al.ak, al.lot_id, am.at, am.has_me, am.me_cost, am.me_baseline, lb.created, lb.received_at,
-    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
-    COALESCE(
-      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = al.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
-      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
-           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
-             THEN lb.receipt_cost END,
-      lb.cost_now) AS cost_t,
-    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
-      OR lb.last_edit_at > am.at
-      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
-      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = al.lot_id AND rm.at > am.at)
-    THEN 1 ELSE 0 END AS changed
-  FROM anchor_lot al JOIN anchor_me am ON am.ak = al.ak JOIN lot_base lb ON lb.lot_id = al.lot_id
-),
-bset AS MATERIALIZED (
-  SELECT la.ak, 'h' AS v, la.cost_t AS cost
-    FROM lot_at la
-   WHERE la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-  UNION
-  SELECT am.ak, 'h', am.me_cost FROM anchor_me am WHERE am.has_me = 1 AND am.me_cost > 0
-  UNION
-  SELECT m.ik, 'n', pb.unit_cost_usd
-    FROM item_me m JOIN product_batches pb ON pb.variant_product_id = m.product_now
-   WHERE pb.is_active = 1 AND pb.unit_cost_usd > 0
-     AND datetime(COALESCE(pb.created_at, pb.received_at)) <= m.t
-     AND (m.now_has_me = 0 OR pb.id > m.now_me_baseline)
-  UNION
-  SELECT m.ik, 'n', m.now_me_cost FROM item_me m WHERE m.now_has_me = 1 AND m.now_me_cost > 0
-),
-anchor_b AS MATERIALIZED (
-  SELECT ak, v,
-    ROUND(AVG(cost), 4) AS b1,
-    CAST(AVG(cost) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
-    CASE WHEN MAX(cost) > 2 * MIN(cost) THEN MAX(cost) ELSE ROUND(AVG(cost), 4) END AS b2
-  FROM bset GROUP BY ak, v
-),
-item_match AS MATERIALIZED (
-  SELECT m.ik,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS h_match,
-    EXISTS (SELECT 1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'n'
-      AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS n_match,
-    EXISTS (SELECT 1 FROM anchor a JOIN anchor_b b ON b.ak = a.ak AND b.v = 'h'
-      WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t
-        AND (ABS(m.recorded - b.b1) < 0.00006 OR ABS(m.recorded - b.b1h) < 0.00006 OR ABS(m.recorded - b.b2) < 0.00006)) AS s_match,
-    EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = m.prod_at AND mb.at >= m.since AND mb.at <= m.t
-      AND (ABS(m.recorded - mb.b1) < 0.00006 OR ABS(m.recorded - mb.b1h) < 0.00006 OR ABS(m.recorded - mb.b2) < 0.00006)) AS m_match,
-    EXISTS (SELECT 1 FROM anchor a WHERE a.ak >= 1000000000000 AND a.p = m.prod_at AND a.at >= m.since AND a.at <= m.t)
-      OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = m.prod_at AND me.at >= m.since AND me.at <= m.t) AS has_setter,
-    (SELECT b.b1 FROM anchor_b b WHERE b.ak = m.ik AND b.v = 'h') AS buggy_mean_usd
-  FROM item_me m
+  SELECT x.*, pce.id IS NOT NULL AS has_me, pce.cost_usd AS me_cost, COALESCE(pce.baseline_batch_id, 0) AS me_baseline,
+    nm.id IS NOT NULL AS now_has_me, nm.cost_usd AS now_me_cost, COALESCE(nm.baseline_batch_id, 0) AS now_me_baseline
+  FROM (SELECT a.*,
+      (SELECT pc.id FROM product_cost_entries pc
+        WHERE (pc.product_id = a.p OR pc.id IN (SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p))
+          AND datetime(pc.created_at) <= a.at
+          AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.row_id = pc.id AND rm.at > a.at
+            ORDER BY rm.ord LIMIT 1), pc.product_id) = a.p
+        ORDER BY pc.id DESC LIMIT 1) AS me_id,
+      (SELECT pc.id FROM product_cost_entries pc WHERE pc.product_id = a.product_now AND datetime(pc.created_at) <= a.t
+        ORDER BY pc.id DESC LIMIT 1) AS now_me_id,
+      EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_cost_entries' AND rm.dup_id = a.p AND rm.at > a.t) AS me_moved
+    FROM anchor a) x
+  LEFT JOIN product_cost_entries pce ON pce.id = x.me_id
+  LEFT JOIN product_cost_entries nm ON nm.id = x.now_me_id
 ),
 cand_lots AS MATERIALIZED (
-  SELECT lot_id FROM lot_base
+  SELECT pb.id AS lot_id FROM product_batches pb WHERE pb.variant_product_id IN (SELECT prod_at FROM item_ctx)
+  UNION
+  SELECT rm.row_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.dup_id IN (SELECT prod_at FROM item_ctx)
 ),
 ev AS MATERIALIZED (
   SELECT im.batch_id AS lot_id, im.id AS pos, im.quantity AS qty
@@ -1220,46 +1129,115 @@ ev AS MATERIALIZED (
      WHERE ml.how = 'fold') x
   WHERE x.lot_id IN (SELECT lot_id FROM cand_lots)
 ),
-bad_lots AS MATERIALIZED (
-  SELECT lot_id FROM (
-    SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
-      SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
-    FROM ev e) w
-  WHERE w.running < 0
-     OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)
-  UNION
-  SELECT lb.lot_id FROM lot_base lb
-   WHERE NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = lb.lot_id)
-     AND (lb.received_quantity > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = lb.lot_id), 0) <> 0)
+lot_base AS MATERIALIZED (
+  SELECT pb.id AS lot_id, pb.is_active, pb.unit_cost_usd AS cost_now, datetime(pb.updated_at) AS updated_at,
+    datetime(COALESCE(pb.created_at, pb.received_at)) AS created, COALESCE(pb.received_at, '') AS received_at,
+    (SELECT im.unit_cost_usd FROM inventory_movements im
+      WHERE im.batch_id = pb.id AND im.quantity > 0 AND im.unit_cost_usd > 0 ORDER BY im.id LIMIT 1) AS receipt_cost,
+    (SELECT MAX(le.at) FROM lot_edit le WHERE le.lot_id = pb.id) AS last_edit_at,
+    CASE WHEN b.lot_id IS NOT NULL
+      OR (NOT EXISTS (SELECT 1 FROM inventory_movements im WHERE im.batch_id = pb.id)
+        AND (COALESCE(pb.received_quantity, 0) > 0 OR COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id), 0) <> 0))
+    THEN 1 ELSE 0 END AS bad
+  FROM product_batches pb
+  LEFT JOIN (
+    SELECT DISTINCT w.lot_id FROM (
+      SELECT e.lot_id, SUM(e.qty) OVER (PARTITION BY e.lot_id ORDER BY e.pos, e.qty DESC ROWS UNBOUNDED PRECEDING) AS running,
+        SUM(e.qty) OVER (PARTITION BY e.lot_id) AS total
+      FROM ev e) w
+    WHERE w.running < 0
+       OR w.total <> COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = w.lot_id), 0)) b ON b.lot_id = pb.id
+  WHERE pb.id IN (SELECT lot_id FROM cand_lots)
 ),
-weighted AS MATERIALIZED (
-  SELECT ik,
-    CASE WHEN SUM(qty) > 0 THEN CAST(SUM(qty * cost) / SUM(qty) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
-    SUM(qty) AS on_hand_units
-  FROM (
-    SELECT o.ik, CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END AS cost, o.q AS qty
-    FROM (
-      SELECT ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline, SUM(e.qty) AS q
-        FROM item_ctx ic JOIN lot_at la ON la.ak = ic.ik JOIN ev e ON e.lot_id = la.lot_id AND e.pos < ic.pos
-       WHERE la.active_t = 1
-       GROUP BY ic.ik, la.lot_id, la.cost_t, la.has_me, la.me_cost, la.me_baseline) o
-    WHERE o.q > 0 AND (CASE WHEN o.has_me = 1 AND o.lot_id <= o.me_baseline THEN o.me_cost ELSE o.cost_t END) > 0)
-  GROUP BY ik
+lot_x AS MATERIALIZED (
+  SELECT am.*, lb.lot_id, lb.created, lb.received_at, lb.bad,
+    CASE WHEN lb.is_active = 1 OR lb.updated_at > am.at THEN 1 ELSE 0 END AS active_t,
+    COALESCE(
+      (SELECT le.cost FROM lot_edit le WHERE le.lot_id = lb.lot_id AND le.at <= am.at ORDER BY le.id DESC LIMIT 1),
+      CASE WHEN lb.last_edit_at > am.at THEN COALESCE(lb.receipt_cost, lb.cost_now)
+           WHEN lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005
+             THEN lb.receipt_cost END,
+      lb.cost_now) AS cost_t,
+    CASE WHEN (COALESCE(lb.is_active, 0) <> 1 AND lb.updated_at > am.at)
+      OR lb.last_edit_at > am.at
+      OR (lb.updated_at > am.at AND lb.receipt_cost IS NOT NULL AND ABS(lb.receipt_cost - COALESCE(lb.cost_now, 0)) >= 0.00005)
+      OR EXISTS (SELECT 1 FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lb.lot_id AND rm.at > am.at)
+    THEN 1 ELSE 0 END AS changed
+  FROM anchor_me am
+  LEFT JOIN (
+    SELECT pb.id AS lot_id, pb.variant_product_id AS key_p, pb.variant_product_id AS cur_p FROM product_batches pb
+    UNION
+    SELECT rm.row_id, rm.dup_id, pb.variant_product_id
+      FROM row_move rm JOIN product_batches pb ON pb.id = rm.row_id WHERE rm.tbl = 'product_batches') lk
+    ON lk.key_p = am.p
+   AND COALESCE((SELECT rm.dup_id FROM row_move rm WHERE rm.tbl = 'product_batches' AND rm.row_id = lk.lot_id AND rm.at > am.at
+         ORDER BY rm.ord LIMIT 1), lk.cur_p) = am.p
+  LEFT JOIN lot_base lb ON lb.lot_id = lk.lot_id
 ),
-lot_agg AS MATERIALIZED (
-  SELECT ak,
-    MAX(CASE WHEN active_t = 1 AND created <= at AND bad = 1 THEN 1 ELSE 0 END) AS unverified,
-    MAX(CASE WHEN changed = 1 AND created <= at THEN 1 ELSE 0 END) AS lot_changed,
-    MAX(CASE WHEN fb_rank = 1 AND eligible = 1 THEN cost_t END) AS fallback
+lot_q AS MATERIALIZED (
+  SELECT w.ak, w.lot_id, w.q FROM (
+    SELECT u.ak, u.lot_id, u.is_ev,
+      SUM(u.qty) OVER (PARTITION BY u.lot_id ORDER BY u.pos, u.is_ev ROWS UNBOUNDED PRECEDING) AS q
+    FROM (SELECT lx.ak, lx.lot_id, lx.pos, 0 AS is_ev, 0 AS qty FROM lot_x lx
+           WHERE lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.ak < 1000000000000
+          UNION ALL
+          SELECT NULL, e.lot_id, e.pos, 1, e.qty FROM ev e) u) w
+  WHERE w.is_ev = 0
+),
+lot_rows AS MATERIALIZED (
+  SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
   FROM (
-    SELECT y.*, ROW_NUMBER() OVER (PARTITION BY y.ak, y.eligible ORDER BY y.received_at DESC, y.lot_id DESC) AS fb_rank
-    FROM (
-      SELECT la.*, bl.lot_id IS NOT NULL AS bad,
-        CASE WHEN la.active_t = 1 AND la.cost_t > 0 AND la.created <= la.at AND (la.has_me = 0 OR la.lot_id > la.me_baseline)
-          THEN 1 ELSE 0 END AS eligible
-      FROM lot_at la LEFT JOIN bad_lots bl ON bl.lot_id = la.lot_id
-      WHERE la.ak < 1000000000000) y)
-  GROUP BY ak
+    SELECT lx.*,
+      CASE WHEN lx.lot_id IS NOT NULL AND lx.active_t = 1 AND lx.cost_t > 0 AND lx.created <= lx.at AND (lx.has_me = 0 OR lx.lot_id > lx.me_baseline)
+        THEN 1 ELSE 0 END AS eligible,
+      lq.q
+    FROM lot_x lx LEFT JOIN lot_q lq ON lq.ak = lx.ak AND lq.lot_id = lx.lot_id) y
+),
+ak_agg AS MATERIALIZED (
+  SELECT r.ak, r.p, r.at, r.kind, r.item_id, r.sale_id, r.return_id, r.product_now, r.quantity, r.recorded, r.born, r.t, r.pos,
+    r.fix_at, r.era_end, r.moved, r.orphan, r.since, r.me_moved, r.now_has_me, r.now_me_cost, r.now_me_baseline,
+    ROUND(AVG(DISTINCT r.hc), 4) AS b1,
+    CAST(AVG(DISTINCT r.hc) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 AS b1h,
+    CASE WHEN MAX(r.hc) > 2 * MIN(r.hc) THEN MAX(r.hc) ELSE ROUND(AVG(DISTINCT r.hc), 4) END AS b2,
+    CASE WHEN SUM(r.wq) > 0 THEN CAST(SUM(r.wq * r.wc) / SUM(r.wq) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0 END AS w,
+    SUM(r.wq) AS on_hand_units,
+    MAX(CASE WHEN r.u = 0 AND r.active_t = 1 AND r.created <= r.at AND r.bad = 1 THEN 1 ELSE 0 END) AS unverified,
+    MAX(CASE WHEN r.u = 0 AND r.changed = 1 AND r.created <= r.at THEN 1 ELSE 0 END) AS lot_changed,
+    MAX(CASE WHEN r.u = 0 AND r.fb_rank = 1 AND r.eligible = 1 THEN r.cost_t END) AS fallback
+  FROM (
+    SELECT lr.*, u.k AS u,
+      CASE WHEN u.k = 0 THEN CASE WHEN lr.eligible = 1 THEN lr.cost_t END
+           ELSE CASE WHEN lr.has_me = 1 AND lr.me_cost > 0 THEN lr.me_cost END END AS hc,
+      CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END AS wc,
+      CASE WHEN u.k = 0 AND lr.q > 0 AND (CASE WHEN lr.has_me = 1 AND lr.lot_id <= lr.me_baseline THEN lr.me_cost ELSE lr.cost_t END) > 0
+        THEN lr.q END AS wq
+    FROM lot_rows lr CROSS JOIN (SELECT 0 AS k UNION ALL SELECT 1) u) r
+  GROUP BY r.ak
+),
+item_match AS MATERIALIZED (
+  SELECT g.*,
+    CASE WHEN ABS(g.recorded - g.b1) < 0.00006 OR ABS(g.recorded - g.b1h) < 0.00006 OR ABS(g.recorded - g.b2) < 0.00006 THEN 1 ELSE 0 END AS h_match,
+    CASE WHEN EXISTS (SELECT 1 FROM merge_b mb WHERE mb.keeper_id = g.p AND mb.at >= g.since AND mb.at <= g.t
+      AND (ABS(g.recorded - mb.b1) < 0.00006 OR ABS(g.recorded - mb.b1h) < 0.00006 OR ABS(g.recorded - mb.b2) < 0.00006)) THEN 1 ELSE 0 END AS m_match,
+    CASE WHEN g.s_any = 1 OR EXISTS (SELECT 1 FROM merge_ev me WHERE me.keeper_id = g.p AND me.at >= g.since AND me.at <= g.t)
+      THEN 1 ELSE 0 END AS has_setter,
+    COALESCE((SELECT CASE WHEN ABS(g.recorded - ROUND(AVG(n.c), 4)) < 0.00006
+          OR ABS(g.recorded - CAST(AVG(n.c) * 10000.0 + 0.5 + 1e-8 AS INTEGER) / 10000.0) < 0.00006
+          OR ABS(g.recorded - CASE WHEN MAX(n.c) > 2 * MIN(n.c) THEN MAX(n.c) ELSE ROUND(AVG(n.c), 4) END) < 0.00006 THEN 1 ELSE 0 END
+        FROM (SELECT pb.unit_cost_usd AS c FROM product_batches pb
+               WHERE pb.variant_product_id = g.product_now AND pb.is_active = 1 AND pb.unit_cost_usd > 0
+                 AND datetime(COALESCE(pb.created_at, pb.received_at)) <= g.t
+                 AND (g.now_has_me = 0 OR pb.id > g.now_me_baseline)
+              UNION
+              SELECT g.now_me_cost WHERE g.now_has_me = 1 AND g.now_me_cost > 0) n), 0) AS n_match
+  FROM (
+    SELECT i.*,
+      MAX(CASE WHEN ABS(i.recorded - s.b1) < 0.00006 OR ABS(i.recorded - s.b1h) < 0.00006 OR ABS(i.recorded - s.b2) < 0.00006
+        THEN 1 ELSE 0 END) AS s_match,
+      MAX(CASE WHEN s.ak IS NOT NULL THEN 1 ELSE 0 END) AS s_any
+    FROM ak_agg i LEFT JOIN ak_agg s ON s.ak >= 1000000000000 AND s.p = i.p AND s.at >= i.since AND s.at <= i.t
+    WHERE i.ak < 1000000000000
+    GROUP BY i.ak) g
 ),
 classified_items AS MATERIALIZED (
   SELECT g.*,
@@ -1298,34 +1276,43 @@ classified_items AS MATERIALIZED (
       CASE WHEN f.h_match = 1 THEN 'buggy_average' WHEN f.s_match = 1 THEN 'stale_buggy_average' ELSE 'stale_merge_cost' END AS producer
     FROM (
       SELECT m.kind, m.item_id, m.sale_id, m.return_id, m.product_now AS product_id, m.quantity, m.recorded, m.t, m.born, m.pos,
-        m.fix_at, m.era_end, COALESCE(w.w, la.fallback) AS correct, COALESCE(w.on_hand_units, 0) AS on_hand_units,
-        COALESCE(mt.h_match, 0) AS h_match, COALESCE(mt.s_match, 0) AS s_match, COALESCE(mt.m_match, 0) AS m_match,
-        COALESCE(mt.n_match, 0) AS n_match, COALESCE(mt.has_setter, 0) AS has_setter, mt.buggy_mean_usd,
-        COALESCE(la.unverified, 0) AS unverified, m.orphan,
-        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(la.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
-      FROM item_me m LEFT JOIN weighted w ON w.ik = m.ik LEFT JOIN item_match mt ON mt.ik = m.ik
-      LEFT JOIN lot_agg la ON la.ak = m.ik) f) g
-),
-sale_scope AS MATERIALIZED (
-  SELECT DISTINCT sale_id FROM classified_items WHERE kind = 'sale' AND bucket IS NOT NULL
+        m.fix_at, m.era_end, COALESCE(m.w, m.fallback) AS correct, COALESCE(m.on_hand_units, 0) AS on_hand_units,
+        m.h_match, m.s_match, m.m_match, m.n_match, m.has_setter, m.b1 AS buggy_mean_usd,
+        COALESCE(m.unverified, 0) AS unverified, m.orphan,
+        CASE WHEN m.moved = 1 OR m.me_moved = 1 OR COALESCE(m.lot_changed, 0) = 1 THEN 1 ELSE 0 END AS uncertain
+      FROM item_match m) f) g
 ),
 linked AS MATERIALIZED (
-  SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
-    datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product,
-    COUNT(sc.id) AS n_lines,
-    SUM(CASE WHEN c.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
-    SUM(CASE WHEN c.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
-    SUM(CASE WHEN ABS(sc.cost_price_usd - ri.cost_price_usd) < 0.00006 THEN 0 ELSE 1 END) AS n_unequal,
-    MIN(c.correct) AS min_correct, MAX(c.correct) AS max_correct, MIN(sc.id) AS first_line_id,
-    MAX(c.buggy_mean_usd) AS buggy_mean_usd
-  FROM sale_scope ss
-  JOIN returns r ON r.sale_id = ss.sale_id
-  JOIN return_items ri ON ri.return_id = r.id
-  LEFT JOIN sale_items sc ON sc.sale_id = r.sale_id AND (sc.id = ri.sale_item_id OR (ri.sale_item_id IS NULL AND sc.product_id = ri.product_id
-     AND (ri.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = ri.branch_id)))
-  LEFT JOIN classified_items c ON c.kind = 'sale' AND c.item_id = sc.id
-  WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-  GROUP BY ri.id, r.id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd, r.created_at, ri.sale_item_id
+  SELECT y.return_item_id, y.return_id, y.sale_id, y.product_id, y.quantity, y.recorded, y.t, y.by_product, y.n_lines, y.n_unequal,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('repair', 'window') THEN 1 ELSE 0 END) AS n_repaired,
+    SUM(CASE WHEN y.hit = 1 AND y.bucket IN ('ledger_unverified', 'needs_owner_review', 'after_window') THEN 1 ELSE 0 END) AS n_review,
+    MIN(CASE WHEN y.hit = 1 THEN y.correct END) AS min_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.correct END) AS max_correct,
+    MAX(CASE WHEN y.item_id = y.first_line_id THEN y.correct END) AS first_correct,
+    MAX(CASE WHEN y.hit = 1 THEN y.buggy_mean_usd END) AS buggy_mean_usd
+  FROM (
+    SELECT rl.*, c.item_id, c.bucket, c.correct, c.buggy_mean_usd,
+      CASE WHEN c.item_id = rl.sale_item_id OR (rl.sale_item_id IS NULL AND sc.product_id = rl.product_id
+        AND (rl.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = rl.branch_id)) THEN 1 ELSE 0 END AS hit
+    FROM (
+      SELECT z.*,
+        (SELECT COUNT(*) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_lines,
+        (SELECT COALESCE(SUM(CASE WHEN ABS(sc.cost_price_usd - z.recorded) < 0.00006 THEN 0 ELSE 1 END), 0) FROM sale_items sc
+          WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS n_unequal,
+        (SELECT MIN(sc.id) FROM sale_items sc WHERE sc.sale_id = z.sale_id AND (sc.id = z.sale_item_id OR (z.sale_item_id IS NULL
+          AND sc.product_id = z.product_id AND (z.branch_id IS NULL OR sc.branch_id IS NULL OR sc.branch_id = z.branch_id)))) AS first_line_id
+      FROM (
+        SELECT ri.id AS return_item_id, r.id AS return_id, r.sale_id, ri.product_id, ri.quantity, ri.cost_price_usd AS recorded,
+          datetime(r.created_at) AS t, ri.sale_item_id IS NULL AS by_product, ri.sale_item_id, ri.branch_id
+        FROM returns r JOIN return_items ri ON ri.return_id = r.id
+        WHERE r.sale_id IS NOT NULL AND COALESCE(r.return_scope, 'customer') = 'customer'
+          AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0) z) rl
+    JOIN classified_items c ON c.kind = 'sale' AND c.sale_id = rl.sale_id
+    JOIN sale_items sc ON sc.id = c.item_id) y
+  GROUP BY y.return_item_id
+  HAVING MAX(CASE WHEN y.bucket IS NOT NULL THEN 1 ELSE 0 END) = 1
 ),
 scope AS MATERIALIZED (
   SELECT 'sale' AS kind, si.id AS item_id, si.sale_id, NULL AS return_id, si.product_id, si.quantity, si.cost_price_usd AS recorded,
@@ -1337,42 +1324,50 @@ scope AS MATERIALIZED (
   SELECT 'return', ri.id, r.sale_id, r.id, ri.product_id, ri.quantity, ri.cost_price_usd, datetime(r.created_at)
   FROM returns r JOIN return_items ri ON ri.return_id = r.id JOIN params p
   WHERE COALESCE(r.return_scope, 'customer') = 'customer' AND ri.product_id IS NOT NULL AND ri.cost_price_usd > 0
-    AND ((r.sale_id IS NULL AND ri.sale_item_id IS NULL
-        AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end)
-      OR r.sale_id IN (SELECT sale_id FROM sale_scope))
+    AND r.sale_id IS NULL AND ri.sale_item_id IS NULL
+    AND datetime(r.created_at) >= '2026-09-16 14:04:42' AND datetime(r.created_at) < p.era_end
 ),
 classified AS MATERIALIZED (
-  SELECT kind, item_id, sale_id, return_id, product_id, quantity, recorded, correct, buggy_mean_usd, pos, on_hand_units, t, bucket, reason
-    FROM classified_items WHERE bucket IS NOT NULL
-  UNION ALL
-  SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
-    COALESCE((SELECT c2.correct FROM classified_items c2 WHERE c2.kind = 'sale' AND c2.item_id = l.first_line_id), l.min_correct),
-    l.buggy_mean_usd, NULL, NULL, l.t,
-    CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
-         WHEN l.n_unequal > 0 THEN 'unaffected'
-         WHEN l.n_review > 0 THEN 'needs_owner_review'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
-         WHEN l.n_repaired > 0 THEN 'needs_owner_review'
-         ELSE 'unaffected' END,
-    CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
-         WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
-         WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
-         WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
-           THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
-         WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
-         ELSE 'follows_sale_line' END
-  FROM linked l
-  UNION ALL
-  SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
-    'unbucketed', 'in_scope_line_not_classified'
-  FROM scope s
-  WHERE NOT EXISTS (SELECT 1 FROM classified_items c WHERE c.kind = s.kind AND c.item_id = s.item_id AND c.bucket IS NOT NULL)
-    AND NOT EXISTS (SELECT 1 FROM linked l WHERE s.kind = 'return' AND l.return_item_id = s.item_id)
+  SELECT v.kind, v.item_id, v.sale_id, v.return_id, v.product_id, v.quantity, v.recorded, v.correct, v.buggy_mean_usd, v.pos,
+    v.on_hand_units, v.t, v.bucket, v.reason
+  FROM (
+    SELECT u.*, MAX(u.src) OVER (PARTITION BY u.kind, u.item_id) AS covered
+    FROM (
+      SELECT c.kind, c.item_id, c.sale_id, c.return_id, c.product_id, c.quantity, c.recorded, c.correct, c.buggy_mean_usd, c.pos,
+        c.on_hand_units, c.t, c.bucket, c.reason, 1 AS src
+      FROM classified_items c WHERE c.bucket IS NOT NULL
+      UNION ALL
+      SELECT 'return', l.return_item_id, l.sale_id, l.return_id, l.product_id, l.quantity, l.recorded,
+        COALESCE(l.first_correct, l.min_correct), l.buggy_mean_usd, NULL, NULL, l.t,
+        CASE WHEN l.n_lines = 0 THEN 'needs_owner_review'
+             WHEN l.n_unequal > 0 THEN 'unaffected'
+             WHEN l.n_review > 0 THEN 'needs_owner_review'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct THEN 'returns_sale_linked'
+             WHEN l.n_repaired > 0 THEN 'needs_owner_review'
+             ELSE 'unaffected' END,
+        CASE WHEN l.n_lines = 0 THEN 'no_matching_sale_line'
+             WHEN l.n_unequal > 0 THEN 'return_cost_not_copied_from_sale'
+             WHEN l.n_review > 0 THEN 'follows_unrepaired_sale_line'
+             WHEN l.n_repaired = l.n_lines AND l.min_correct = l.max_correct
+               THEN CASE WHEN l.by_product = 1 THEN 'copied_from_sale_line_by_product' ELSE 'copied_from_sale_line' END
+             WHEN l.n_repaired > 0 THEN 'sale_lines_of_product_now_differ'
+             ELSE 'follows_sale_line' END,
+        1
+      FROM linked l
+      UNION ALL
+      SELECT s.kind, s.item_id, s.sale_id, s.return_id, s.product_id, s.quantity, s.recorded, NULL, NULL, NULL, NULL, s.t,
+        'unbucketed', 'in_scope_line_not_classified', 0
+      FROM scope s) u) v
+  WHERE v.src = 1 OR v.covered = 0
 )
 -- plan:stop
+-- One reference to classified: each reference re-expands the whole plan at prepare time.
 SELECT
-  (SELECT ROUND(COALESCE(SUM(c.quantity * (c.correct - c.recorded)), 0), 4) FROM classified c JOIN sales s ON s.id = c.sale_id
-    WHERE c.kind = 'sale' AND c.bucket IN ('repair', 'window') AND lower(trim(COALESCE(s.sale_status, ''))) <> 'cancelled') AS sold_cost_delta_usd,
-  (SELECT ROUND(COALESCE(SUM(c.quantity * (c.correct - c.recorded)), 0), 4) FROM classified c JOIN return_items ri ON ri.id = c.item_id
-    WHERE c.kind = 'return' AND c.bucket IN ('returns_sale_linked', 'returns_walk_in') AND ri.return_to_stock = 1) AS returned_cost_delta_usd,
-  (SELECT COUNT(*) FROM classified c WHERE c.kind = 'return' AND c.bucket IN ('returns_sale_linked', 'returns_walk_in')) AS return_lines;
+  ROUND(COALESCE(SUM(CASE WHEN c.kind = 'sale' AND c.bucket IN ('repair', 'window') AND s.id IS NOT NULL
+      AND lower(trim(COALESCE(s.sale_status, ''))) <> 'cancelled' THEN c.quantity * (c.correct - c.recorded) END), 0), 4) AS sold_cost_delta_usd,
+  ROUND(COALESCE(SUM(CASE WHEN c.kind = 'return' AND c.bucket IN ('returns_sale_linked', 'returns_walk_in') AND ri.return_to_stock = 1
+      THEN c.quantity * (c.correct - c.recorded) END), 0), 4) AS returned_cost_delta_usd,
+  COUNT(CASE WHEN c.kind = 'return' AND c.bucket IN ('returns_sale_linked', 'returns_walk_in') THEN 1 END) AS return_lines
+FROM classified c
+LEFT JOIN sales s ON c.kind = 'sale' AND s.id = c.sale_id
+LEFT JOIN return_items ri ON c.kind = 'return' AND ri.id = c.item_id;
