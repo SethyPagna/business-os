@@ -73,7 +73,8 @@ const app = load('routes/users.ts', {
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'x', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  // Real module (pure, no imports): a hand-rolled stub lags every member the route starts importing.
+  '../lib/passwordPolicy': load('lib/passwordPolicy.ts'),
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
