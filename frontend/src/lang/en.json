@@ -5070,6 +5070,8 @@
   "revert_failed": "Revert failed",
   "confirm_revert": "Revert this change?",
   "movement_reverted": "Change reverted",
+  "movement_already_reverted": "This change was already reverted. Nothing was changed.",
+  "movement_revert_stock_changed": "The stock changed while this was being reverted. Nothing was changed; refresh and try again.",
   "edit_reason": "Edit reason",
   "reason_updated": "Reason updated",
   "reason_required": "A reason is required",

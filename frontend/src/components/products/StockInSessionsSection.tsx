@@ -5,6 +5,7 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
 import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
+import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 import {
   buildStockInLineEditBody, isStockInLineEditable, newStockInLineEditRequestId, stockInLineDraft, stockInLineEditErrorText,
   freezeStockInLineEditAttempt, isKnownStockInLineEditRefusal, isStockInLineEditAcknowledged, STOCK_IN_LINE_MAX_QUANTITY,
@@ -182,6 +183,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const [selectedLine, setSelectedLine] = useState<Row | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Synchronous latch for a line removal (a ledger revert): `busy` only
+  // blocks after a re-render, so a double tap could send two. The Worker
+  // refuses the second (H-stock 2); this stops sending it.
+  const removeInFlightRef = useRef(false)
   const [editDate, setEditDate] = useState('')
   const [editSupplier, setEditSupplier] = useState<SupplierChoice>({ supplierId: null, supplierName: '' })
   const [editPayment, setEditPayment] = useState<'paid' | 'credit'>('paid')
@@ -311,16 +316,17 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const removeRow = async (row: Row) => {
     if (pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     if (row.id == null) return
-    if (busy) return
+    if (busy || removeInFlightRef.current) return
     if (Number(row.edit_count) > 0 && selected) {
       try { await commitLineAttempt(lineRemovalAttempt(row), selected, () => removeLine(row)) }
       catch (error) { notify(stockInLineEditErrorText(error, tr), 'error') }
       return
     }
+    removeInFlightRef.current = true
     setBusy(true)
     try { await removeLine(row); notify(tr('movement_reverted', 'Stock line removed')); setSelected(null); await load(); onChanged() }
-    catch (error) { notify(Number(row.edit_count) > 0 ? stockInLineEditErrorText(error, tr) : error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
-    finally { setBusy(false) }
+    catch (error) { notify(Number(row.edit_count) > 0 ? stockInLineEditErrorText(error, tr) : stockRevertErrorText(error, tr), 'error') }
+    finally { removeInFlightRef.current = false; setBusy(false) }
   }
   const startLineEdit = (row: Row) => {
     if (!isStockInLineEditable(row) || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return

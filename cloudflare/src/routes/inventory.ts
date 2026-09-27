@@ -2697,7 +2697,7 @@ app.post('/movements/:id/revert', async (c) => {
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
   const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
-  if (!result.ok) return c.json({ error: result.error }, result.status)
+  if (!result.ok) return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,
