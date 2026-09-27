@@ -30,6 +30,92 @@ import {
 export const MAX_DATED_STOCK_COUNT_ENTRIES = 5000
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
+// received_at comes straight out of D1 as ISO.
+const lotDate = (receivedAt: string | null) =>
+  normalizeToIsoDate(receivedAt, 'month-first') || String(receivedAt || '').slice(0, 10)
+
+type LotAction = NonNullable<ExistingCountMovement['batchActions']>[number]
+type StrayLotAction = { movement: ExistingCountMovement; action: LotAction; date: string | null; recorded: boolean }
+
+// FX-stock4 E1. A product merge (routes/products.ts foldDuplicateProductInto,
+// which every merge entry point calls) reparents the merged-away product's
+// movements onto the keeper but leaves their provenance naming the lots they
+// were recorded on: a lot folded into the keeper's same-batch_key lot stays
+// behind on the merged-away product, deactivated and empty, and a written-off
+// lot stays there with its stock cleared. Reversing such a movement onto the
+// lot it names put units on a product that no longer sells and left the
+// keeper's lots short of its branch_stock (R-stock3: keeper branch 9, lots 7,
+// merged-away lot 2). So every superseded action whose lot is not the counted
+// product's is moved, before the plan sees it, onto the counted product's lot
+// with the same batch_key: exactly where the fold put that lot's units (a
+// repointed lot keeps its key, and a chain of merges keeps it too). The
+// receipt it reverses is still un-received from the lot that recorded it.
+// Actions with no such lot (a written-off lot the keeper has no key for, or a
+// lot that no longer exists) come back as strays for placeStrayLotActions.
+async function resolveLotsToCountedProduct(db: D1Compat, movements: ExistingCountMovement[]): Promise<StrayLotAction[]> {
+  const namedIds = [...new Set(movements.flatMap((m) => (m.batchActions || []).map((a) => Number(a.batchId))))]
+  if (!namedIds.length) return []
+  const lotRows = await selectInChunks(namedIds, 0, (chunk) => {
+    const { sql, params } = buildInClause('lot', chunk)
+    return db.prepare(
+      `SELECT id, variant_product_id AS productId, batch_key AS batchKey, received_at AS receivedAt FROM product_batches WHERE id IN (${sql})`,
+    ).all<{ id: number; productId: number; batchKey: string | null; receivedAt: string | null }>(params)
+  })
+  const lotById = new Map(lotRows.map((row) => [Number(row.id), row]))
+  // Rare (only history a merge reparented), so one indexed read per key.
+  const sameKeyLot = new Map<string, number | null>()
+  const strays: StrayLotAction[] = []
+  for (const movement of movements) {
+    if (!movement.batchActions?.length) continue
+    const resolved: LotAction[] = []
+    for (const action of movement.batchActions) {
+      const lot = lotById.get(Number(action.batchId))
+      if (lot && Number(lot.productId) === movement.productId) {
+        resolved.push(action)
+        continue
+      }
+      let target: number | null = null
+      if (lot && lot.batchKey != null) {
+        const key = `${movement.productId}:${lot.batchKey}`
+        if (!sameKeyLot.has(key)) {
+          const row = await db.prepare('SELECT id FROM product_batches WHERE variant_product_id = @productId AND batch_key = @batchKey')
+            .get<{ id: number }>({ productId: movement.productId, batchKey: lot.batchKey })
+          sameKeyLot.set(key, row ? Number(row.id) : null)
+        }
+        target = sameKeyLot.get(key) ?? null
+      }
+      if (target != null) {
+        resolved.push({ batchId: target, quantity: action.quantity, ...(action.quantity > 0 ? { receivedBatchId: Number(action.batchId) } : {}) })
+      } else {
+        strays.push({ movement, action, date: lot ? lotDate(lot.receivedAt) : null, recorded: Boolean(lot) })
+      }
+    }
+    movement.batchActions = resolved
+  }
+  return strays
+}
+
+// The strays still have to move the counted product's lots by exactly what
+// they move its branch_stock, or the ledgers fork (up for a reversed drain,
+// down for a reversed receipt). They go onto the group's lot with the same
+// received date, else its oldest lot (the FIFO head the plan walks first).
+// A group with no lot at all has no lot ledger to keep level: the units stay
+// on branch_stock only, the convention a movement with no provenance already
+// follows, and nothing is ever written to another product's lot.
+function placeStrayLotActions(strays: StrayLotAction[], existingBatches: ExistingBatchState[]): void {
+  for (const { movement, action, date, recorded } of strays) {
+    const lots = existingBatches
+      .filter((b) => b.productId === movement.productId && b.branchId === movement.branchId)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.batchId - b.batchId)
+    const target = lots.find((b) => date != null && b.date === date) || lots[0]
+    if (!target) continue
+    movement.batchActions = [
+      ...(movement.batchActions || []),
+      { batchId: target.batchId, quantity: action.quantity, ...(recorded && action.quantity > 0 ? { receivedBatchId: Number(action.batchId) } : {}) },
+    ]
+  }
+}
+
 export interface ParsedDatedCountEntry {
   date: string
   productId: number
@@ -181,6 +267,12 @@ export async function buildDatedStockCountPlan(
       signedQuantity: row.movementType === 'remove' ? -Number(row.quantity) : Number(row.quantity),
       batchActions: batchActionsByMovementId.get(Number(row.id)),
     }))
+  // The movements this request supersedes (same product+branch, a date it
+  // counts -- computeDatedStockCountPlan's own rule), their lot provenance
+  // resolved onto the counted product (FX-stock4 E1).
+  const countedDates = new Set(entries.map((e) => `${e.productId}:${e.branchId}:${e.date}`))
+  const supersededMovements = existingCountMovements.filter((m) => countedDates.has(`${m.productId}:${m.branchId}:${m.date}`))
+  const strayLotActions = await resolveLotsToCountedProduct(db, supersededMovements)
 
   const stockRows: Array<{ productId: number; branchId: number; quantity: number }> = []
   for (const chunk of productChunks) {
@@ -213,9 +305,7 @@ export async function buildDatedStockCountPlan(
   // re-apply puts those units back on exactly that lot
   // (datedStockCountApply.ts), so the plan must see it too, or its lot
   // simulation runs short by those units and the ledgers fork.
-  const countedDates = new Set(entries.map((e) => `${e.productId}:${e.branchId}:${e.date}`))
-  const supersededLots = existingCountMovements
-    .filter((m) => countedDates.has(`${m.productId}:${m.branchId}:${m.date}`))
+  const supersededLots = supersededMovements
     .flatMap((m) => (m.batchActions || []).map((a) => ({ batchId: a.batchId, productId: m.productId, branchId: m.branchId })))
   const loadedBatchIds = new Set(batchRows.map((b) => Number(b.id)))
   const provenanceBatchIds = [...new Set(supersededLots.map((lot) => lot.batchId))].filter((id) => !loadedBatchIds.has(id))
@@ -237,9 +327,7 @@ export async function buildDatedStockCountPlan(
       ).all<{ batchId: number; branchId: number; quantity: number }>(btParams)
     })
     const batchById = new Map(batchRows.map((b) => [Number(b.id), b]))
-    // received_at comes straight out of D1 as ISO.
-    const dateOf = (batch: { receivedAt: string | null }) =>
-      normalizeToIsoDate(batch.receivedAt, 'month-first') || String(batch.receivedAt || '').slice(0, 10)
+    const dateOf = (batch: { receivedAt: string | null }) => lotDate(batch.receivedAt)
     // A lot loaded only because provenance names it joins only the group
     // (its branch) that provenance names -- not every counted branch it has
     // a row at, where it is inactive and no concern of this count.
@@ -269,6 +357,7 @@ export async function buildDatedStockCountPlan(
       existingBatches.push({ batchId: lot.batchId, productId: lot.productId, branchId: lot.branchId, date: dateOf(batch), quantity: 0 })
     }
   }
+  placeStrayLotActions(strayLotActions, existingBatches)
 
   const plan = computeDatedStockCountPlan(datedEntries, existingCountMovements, currentStock, existingBatches)
   return { plan }
