@@ -1,6 +1,6 @@
 -- F-forensics S7 follow-up: was inactive product 10223 (stock_quantity 8, no
--- branch_stock rows, no movements, updated_at 2026-09-03 03:24:55) folded
--- into a keeper by a duplicate merge?
+-- branch_stock rows, updated_at 2026-09-03 03:24:55; its movement count is
+-- read by the 'dup' section, not assumed) folded into a keeper by a merge?
 -- Until b13b57b4 (2026-09-07) foldDuplicateProductInto (routes/products.ts at
 -- d558dcfb and 426b2344) deleted the duplicate's branch_stock, re-parented
 -- its movements and set is_active = 0. It never recomputed the duplicate's
