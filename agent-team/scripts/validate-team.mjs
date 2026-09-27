@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,10 +26,14 @@ for (const path of [".claude/settings.json", ".codex/hooks.json", ".mcp.json", "
 const taskSchema = JSON.parse(readFileSync(join(root, "agent-team/schemas/task-envelope.schema.json"), "utf8"));
 const schemaRoles = taskSchema.properties.role.enum || [];
 if (schemaRoles.length !== ids.size || schemaRoles.some((id) => !ids.has(id))) throw new Error("Task-envelope role enum is out of sync with agent-team/agents.json");
-for (const name of ["orchestrate-team", "repo-patterns"]) {
-  const skill = readFileSync(join(root, `agent-team/skills/${name}/SKILL.md`), "utf8");
-  const normalizedSkill = skill.replaceAll("\r\n", "\n");
-  if (!normalizedSkill.startsWith("---\n") || !normalizedSkill.includes(`\nname: ${name}\n`) || !normalizedSkill.includes("\ndescription: ")) throw new Error(`Invalid portable skill: ${name}`);
+const skillNames = readdirSync(join(root, "agent-team/skills"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+for (const name of skillNames) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) throw new Error(`Skill folder must be kebab-case: ${name}`);
+  const skill = readFileSync(join(root, `agent-team/skills/${name}/SKILL.md`), "utf8").replaceAll("\r\n", "\n");
+  const front = skill.match(/^---\n([\s\S]*?)\n---\n/)?.[1];
+  if (!front || !front.includes(`name: ${name}\n`) || !/^description:/m.test(front)) throw new Error(`Invalid portable skill frontmatter: ${name}`);
+  if (front.length > 1400) throw new Error(`Skill description too long (keep it under ~1024 chars): ${name}`);
+  if (skill.split("\n").length > 300) throw new Error(`Skill body over 300 lines; move detail to references/: ${name}`);
 }
 execFileSync(process.execPath, [join(root, "agent-team/scripts/sync-adapters.mjs"), "--check"], { cwd: root, stdio: "inherit" });
-process.stdout.write(`Agent team valid: ${manifest.agents.length} roles, 3 adapter targets, synchronized output.\n`);
+process.stdout.write(`Agent team valid: ${manifest.agents.length} roles, ${skillNames.length} skills, synchronized output.\n`);

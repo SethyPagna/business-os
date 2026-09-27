@@ -12,8 +12,6 @@ description: >-
   package.json test chain; and the deploy record that stops the next session repeating it.
 ---
 
-<!-- Generated from agent-team/skills/deploy-provenance/SKILL.md. -->
-
 # Deploy provenance — know what is live before you replace it
 
 A deploy does not add your changes to production. It **replaces production wholesale** with the

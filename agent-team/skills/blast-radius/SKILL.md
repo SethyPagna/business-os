@@ -11,8 +11,6 @@ description: >-
   page blank, one "isolated" error that is really one instance of a class.
 ---
 
-<!-- Generated from agent-team/skills/blast-radius/SKILL.md. -->
-
 # Blast radius — verify the affected surroundings of every change
 
 Business OS is one interconnected system: a product save touches the product route, the image
