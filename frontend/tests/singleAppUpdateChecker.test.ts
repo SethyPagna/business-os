@@ -17,9 +17,12 @@ import ts from 'typescript'
 // After F1 the recovery listeners still resume the socket, ping health and
 // refresh screens, but load no snapshot and never touch the worker; index.tsx
 // is the one update checker, and it must still fire on its interval, when a
-// long-lived till tab becomes visible again, and on the app's own reconnect
-// signal (R-F1F3 F-03/F-09: F1 first deleted that reaction instead of moving
-// it) -- that is the only way the "Restart now" bar reaches the till.
+// long-lived till tab becomes visible again, when its window regains focus or
+// comes back from the back/forward cache, and on the app's own reconnect
+// signal (R-F1F3 F-03/F-09: F1 first deleted the reconnect, focus and pageshow
+// reactions instead of moving them) -- that is the only way the "Restart now"
+// bar reaches the till. One check that never settles must not silence the
+// checker for the rest of the tab's life.
 //
 // The web-api case runs the real listeners extracted from the source, so it is
 // red against c5b28762, where a focus event loads the snapshot transport and
@@ -47,10 +50,15 @@ function topLevelFunctions(fileName: string, text: string, names: string[]): str
     .join('\n')
 }
 
-function topLevelConstValue(text: string, name: string): number {
+function optionalTopLevelConstValue(text: string, name: string): number | undefined {
   const match = text.match(new RegExp(`^const ${name} = ([0-9_* ]+)$`, 'm'))
-  assert.ok(match, `${name} must stay a named numeric constant`)
-  return Number(Function(`return (${match[1].replace(/_/g, '')})`)())
+  return match ? Number(Function(`return (${match[1].replace(/_/g, '')})`)()) : undefined
+}
+
+function topLevelConstValue(text: string, name: string): number {
+  const value = optionalTopLevelConstValue(text, name)
+  assert.ok(value !== undefined, `${name} must stay a named numeric constant`)
+  return value
 }
 
 function transpile(body: string): string {
@@ -58,17 +66,19 @@ function transpile(body: string): string {
 }
 
 // A tiny deterministic browser: timers, idle callbacks and intervals are
-// recorded, and drain() runs every queued timeout/idle task (including ones
-// queued while draining) without waiting for real time.
+// recorded. drain() runs every queued timeout/idle task (including ones
+// queued while draining) without waiting for real time; fireDue() runs only
+// the timeouts whose delay has elapsed on the fake clock.
 function fakeBrowser() {
   let clock = 1_000_000
   let nextId = 1
-  const timeouts = new Map<number, () => void>()
+  const timeouts = new Map<number, { fn: () => void, due: number }>()
   const intervals: Array<{ fn: () => void, ms: number }> = []
+  const queue = (fn: () => void, ms = 0) => { const id = nextId++; timeouts.set(id, { fn, due: clock + Number(ms || 0) }); return id }
   const windowTarget = Object.assign(new EventTarget(), {
-    setTimeout: (fn: () => void) => { const id = nextId++; timeouts.set(id, fn); return id },
+    setTimeout: (fn: () => void, ms?: number) => queue(fn, ms),
     clearTimeout: (id: number) => { timeouts.delete(id) },
-    requestIdleCallback: (fn: () => void) => { const id = nextId++; timeouts.set(id, fn); return id },
+    requestIdleCallback: (fn: () => void) => queue(fn),
     cancelIdleCallback: (id: number) => { timeouts.delete(id) },
     setInterval: (fn: () => void, ms: number) => { intervals.push({ fn, ms }); return nextId++ },
   })
@@ -80,11 +90,19 @@ function fakeBrowser() {
     Date: fakeDate,
     intervals,
     advance(ms: number) { clock += ms },
+    pendingTimeouts: () => timeouts.size,
+    fireDue() {
+      for (const [id, { fn, due }] of [...timeouts]) {
+        if (due > clock || !timeouts.has(id)) continue
+        timeouts.delete(id)
+        fn()
+      }
+    },
     async drain() {
       for (let round = 0; round < 50 && timeouts.size; round += 1) {
         const batch = [...timeouts.values()]
         timeouts.clear()
-        batch.forEach((fn) => fn())
+        batch.forEach(({ fn }) => fn())
         await new Promise((resolve) => setImmediate(resolve))
       }
       await new Promise((resolve) => setImmediate(resolve))
@@ -212,6 +230,9 @@ function loadAppShellWatcher(browser: ReturnType<typeof fakeBrowser>, navigatorS
   assert.match(functions, /function watchForNewAppShell/)
   const POLL = topLevelConstValue(index, 'SERVICE_WORKER_UPDATE_POLL_MS')
   const MIN_GAP = topLevelConstValue(index, 'SERVICE_WORKER_UPDATE_MIN_GAP_MS')
+  // Read when present so the behaviour below, not a missing name, is what
+  // fails on a checker that has no bound.
+  const TIMEOUT = optionalTopLevelConstValue(index, 'SERVICE_WORKER_UPDATE_TIMEOUT_MS')
   const dependencies: Record<string, unknown> = {
     window: browser.window,
     document: browser.document,
@@ -219,10 +240,24 @@ function loadAppShellWatcher(browser: ReturnType<typeof fakeBrowser>, navigatorS
     Date: browser.Date,
     SERVICE_WORKER_UPDATE_POLL_MS: POLL,
     SERVICE_WORKER_UPDATE_MIN_GAP_MS: MIN_GAP,
+    SERVICE_WORKER_UPDATE_TIMEOUT_MS: TIMEOUT,
   }
   const compiled = transpile(`${functions}\nreturn { watchForNewAppShell };`)
   const runtime = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
-  return { watchForNewAppShell: runtime.watchForNewAppShell as (registration: unknown) => void, POLL, MIN_GAP }
+  return { watchForNewAppShell: runtime.watchForNewAppShell as (registration: unknown) => void, POLL, MIN_GAP, TIMEOUT }
+}
+
+// Counts addEventListener calls per event type on the fake window + document.
+function countListenerRegistrations(browser: ReturnType<typeof fakeBrowser>) {
+  const registrations = new Map<string, number>()
+  for (const [label, target] of [['window', browser.window], ['document', browser.document]] as const) {
+    const add = target.addEventListener.bind(target)
+    target.addEventListener = (type: string, listener: EventListenerOrEventListenerObject | null, options?: AddEventListenerOptions | boolean) => {
+      registrations.set(`${label}:${type}`, (registrations.get(`${label}:${type}`) || 0) + 1)
+      add(type, listener, options)
+    }
+  }
+  return registrations
 }
 
 await runTest('index.tsx update checker fires on its interval and on visibility return in a long-lived tab', async () => {
@@ -293,14 +328,7 @@ await runTest('index.tsx update checker asks for the new build on every app reco
   const navigatorState = { onLine: true }
   const { watchForNewAppShell, POLL } = loadAppShellWatcher(browser, navigatorState)
 
-  const registrations = new Map<string, number>()
-  for (const target of [browser.window, browser.document]) {
-    const add = target.addEventListener.bind(target)
-    target.addEventListener = (type: string, listener: EventListenerOrEventListenerObject | null, options?: AddEventListenerOptions | boolean) => {
-      registrations.set(type, (registrations.get(type) || 0) + 1)
-      add(type, listener, options)
-    }
-  }
+  const registrations = countListenerRegistrations(browser)
   const registrationCount = () => [...registrations.values()].reduce((sum, count) => sum + count, 0)
 
   // update() stays pending until released, like a real sw.js fetch in flight.
@@ -313,7 +341,7 @@ await runTest('index.tsx update checker asks for the new build on every app reco
   }
 
   watchForNewAppShell(registration)
-  assert.equal(registrations.get('sync:reconnected'), 1, 'the update checker must listen for the app reconnect signal exactly once')
+  assert.equal(registrations.get('window:sync:reconnected'), 1, 'the update checker must listen for the app reconnect signal exactly once')
   const registeredAtStart = registrationCount()
 
   // The slow poll checks, and sees the build that is still live.
@@ -346,9 +374,188 @@ await runTest('index.tsx update checker asks for the new build on every app reco
   browser.advance(POLL)
   browser.intervals.forEach(({ fn }) => fn())
   await settle()
-  assert.equal(registrations.get('sync:reconnected'), 1, 'reconnect handling must not add a listener per event')
+  assert.equal(registrations.get('window:sync:reconnected'), 1, 'reconnect handling must not add a listener per event')
   assert.equal(registrationCount(), registeredAtStart, 'no check or handler may register another listener')
   assert.equal(browser.intervals.length, 1, 'no check or handler may arm another poll')
+})
+
+// F1 also dropped the focus and pageshow reactions the old second checker had.
+// A till window left visible beside another app never fires visibilitychange
+// when the cashier clicks back into it -- only focus -- and a page restored
+// from the back/forward cache (iOS in particular) may report only pageshow
+// with persisted set. Both go through the same check() and minimum gap as the
+// other event triggers, so the iOS burst of online + focus + visibilitychange
+// + pageshow is still one request.
+await runTest('index.tsx update checker asks again when the till window regains focus or returns from the back/forward cache', async () => {
+  const browser = fakeBrowser()
+  const navigatorState = { onLine: true }
+  const { watchForNewAppShell, POLL, MIN_GAP } = loadAppShellWatcher(browser, navigatorState)
+  const registrations = countListenerRegistrations(browser)
+
+  let updates = 0
+  const registration = { update: async () => { updates += 1 } }
+  const settle = async () => { for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setImmediate(resolve)) }
+  const pageshow = (persisted: boolean) => Object.assign(new Event('pageshow'), { persisted })
+
+  watchForNewAppShell(registration)
+  assert.equal(registrations.get('window:focus'), 1, 'the update checker must listen for window focus exactly once')
+  assert.equal(registrations.get('window:pageshow'), 1, 'the update checker must listen for pageshow exactly once')
+
+  // Hours at the till with the window visible but behind another app, then the
+  // cashier clicks back in: visibility never changed, focus did.
+  browser.advance(3 * 60 * 60_000)
+  browser.window.dispatchEvent(new Event('focus'))
+  await settle()
+  assert.equal(updates, 1, 'regaining window focus must check for a new build')
+
+  // Clicking between windows inside the gap does not hammer the network...
+  browser.advance(Math.max(1, MIN_GAP - 1_000))
+  browser.window.dispatchEvent(new Event('focus'))
+  await settle()
+  assert.equal(updates, 1, 'a second focus inside the minimum gap is skipped')
+  // ...and a focus after it checks again.
+  browser.advance(2_000)
+  browser.window.dispatchEvent(new Event('focus'))
+  await settle()
+  assert.equal(updates, 2, 'a focus after the minimum gap checks again')
+
+  // A page restored from the back/forward cache is a return; a pageshow that is
+  // not a restore is the page's own first load, which register() already checked.
+  browser.advance(MIN_GAP + 1_000)
+  browser.window.dispatchEvent(pageshow(false))
+  await settle()
+  assert.equal(updates, 2, 'a pageshow that is not a back/forward-cache restore is not a return')
+  browser.window.dispatchEvent(pageshow(true))
+  await settle()
+  assert.equal(updates, 3, 'a back/forward-cache restore must check for a new build')
+  browser.advance(Math.max(1, MIN_GAP - 1_000))
+  browser.window.dispatchEvent(pageshow(true))
+  await settle()
+  assert.equal(updates, 3, 'a second restore inside the minimum gap is skipped')
+
+  // An offline till burns nothing on focus or restore.
+  browser.advance(MIN_GAP + 1_000)
+  navigatorState.onLine = false
+  browser.window.dispatchEvent(new Event('focus'))
+  browser.window.dispatchEvent(pageshow(true))
+  await settle()
+  assert.equal(updates, 3, 'no check on focus or restore while offline')
+  navigatorState.onLine = true
+
+  // iOS reports one return as a burst of every signal: still one request.
+  browser.advance(MIN_GAP + 1_000)
+  browser.window.dispatchEvent(new Event('online'))
+  browser.window.dispatchEvent(new Event('focus'))
+  browser.document.dispatchEvent(new Event('visibilitychange'))
+  browser.window.dispatchEvent(pageshow(true))
+  await settle()
+  assert.equal(updates, 4, 'one return reported by every signal is one check')
+
+  // No trigger registered anything more.
+  browser.advance(POLL)
+  browser.intervals.forEach(({ fn }) => fn())
+  await settle()
+  assert.equal(registrations.get('window:focus'), 1, 'focus handling must not add a listener per event')
+  assert.equal(registrations.get('window:pageshow'), 1, 'pageshow handling must not add a listener per event')
+})
+
+// R-F1F3 F-03 (PLAUSIBLE). `checking` folds overlapping triggers into one
+// request, and only the update() promise settling cleared it. A sw.js fetch
+// that never settles (a stalled connection, a captive portal) therefore left
+// it set for the rest of the tab's life: every later interval tick, return and
+// reconnect was silently skipped, and that till never saw "Restart now" again.
+// A check is now released after a bounded wait; a timed-out check that settles
+// late must not release the one that replaced it; and update() throwing
+// instead of rejecting must neither wedge the checker nor escape into the page.
+await runTest('an update check that never settles does not block every later check in the tab', async () => {
+  const browser = fakeBrowser()
+  const navigatorState = { onLine: true }
+  const { watchForNewAppShell, POLL, TIMEOUT } = loadAppShellWatcher(browser, navigatorState)
+
+  let updates = 0
+  let mode: 'hang' | 'controlled' | 'throw' = 'hang'
+  const inFlight: Array<() => void> = []
+  const registration = {
+    update: () => {
+      updates += 1
+      if (mode === 'throw') throw new Error('InvalidStateError')
+      if (mode === 'hang') return new Promise<void>(() => {})
+      return new Promise<void>((resolve) => { inFlight.push(resolve) })
+    },
+  }
+  const settle = async () => { for (let round = 0; round < 3; round += 1) await new Promise((resolve) => setImmediate(resolve)) }
+  const reconnect = () => browser.window.dispatchEvent(new CustomEvent('sync:reconnected'))
+  const tick = async () => { browser.advance(POLL); browser.fireDue(); browser.intervals[0].fn(); await settle() }
+
+  watchForNewAppShell(registration)
+
+  // The slow poll's request stalls forever.
+  await tick()
+  assert.equal(updates, 1)
+  // Seconds later both reconnect emitters still fold into the stalled request.
+  browser.advance(5_000)
+  browser.fireDue()
+  reconnect()
+  await settle()
+  assert.equal(updates, 1, 'a reconnect seconds into a check still in flight is folded into it')
+
+  // The next tick must not be swallowed by the stalled request.
+  await tick()
+  assert.equal(updates, 2, 'a check that never settled must not block the next interval tick')
+
+  // The bound is a named constant, shorter than the poll.
+  assert.ok(TIMEOUT !== undefined, 'the release must be the named SERVICE_WORKER_UPDATE_TIMEOUT_MS')
+  assert.ok(TIMEOUT > 5_000 && TIMEOUT < POLL, `the release must wait out a slow fetch but come before the next poll (got ${TIMEOUT})`)
+  browser.advance(TIMEOUT - 1)
+  browser.fireDue()
+  reconnect()
+  await settle()
+  assert.equal(updates, 2, 'a stalled check is not released before the timeout')
+  browser.advance(1)
+  browser.fireDue()
+  reconnect()
+  await settle()
+  assert.equal(updates, 3, 'a reconnect after the timeout must check again')
+
+  // Release every stalled check, then: check A times out, check B replaces it,
+  // and A settles late while B is still in flight.
+  browser.advance(TIMEOUT)
+  browser.fireDue()
+  mode = 'controlled'
+  reconnect()
+  assert.equal(updates, 4)
+  const settleA = inFlight.shift() as () => void
+  browser.advance(TIMEOUT)
+  browser.fireDue()
+  reconnect()
+  assert.equal(updates, 5)
+  const settleB = inFlight.shift() as () => void
+  settleA()
+  await settle()
+  reconnect()
+  await settle()
+  assert.equal(updates, 5, 'a timed-out check settling late must not release the check that replaced it')
+  settleB()
+  await settle()
+  reconnect()
+  await settle()
+  assert.equal(updates, 6, 'once the replacement settles the next reconnect checks')
+  ;(inFlight.shift() as () => void)()
+  await settle()
+
+  // update() throwing instead of returning a rejected promise.
+  mode = 'throw'
+  browser.advance(POLL)
+  assert.doesNotThrow(() => browser.intervals[0].fn(), 'a throwing update() must not escape the checker')
+  assert.equal(updates, 7)
+  await settle()
+  mode = 'controlled'
+  reconnect()
+  assert.equal(updates, 8, 'a throwing update() must not leave the checker wedged')
+  ;(inFlight.shift() as () => void)()
+  await settle()
+  // A timer-based release must not outlive the checks it guarded.
+  assert.equal(browser.pendingTimeouts(), 0, 'no timeout may outlive its check')
 })
 
 if (failed > 0) {
