@@ -90,9 +90,11 @@ async function main() {
     // Non-false action values preserve the shared helper's established semantics.
     for (const value of ['false', 'review', 1, null]) await reachesData(url, staff({ [section]: true }, { [`${section}:view`]: value }))
   }
-  for (const admin of [{ ...staff({}, revoked), username: ' ADMIN ' }, { ...staff({}, revoked), role_code: ' AdMiN ' }, staff({ all: true }, revoked)]) {
+  for (const admin of [{ ...staff({}, revoked), role_code: ' AdMiN ' }, staff({ all: true }, revoked)]) {
     for (const url of [...catalog, ...detail, '/inventory/summary', ...branchReads]) await reachesData(url, admin)
   }
+  // A user merely NAMED admin is not an administrator (FX-sec, 27 Sep 2026).
+  await denied('/products', { ...staff({}, revoked), username: ' ADMIN ' })
   for (const url of catalog) {
     for (const surface of ['pos', 'inventory']) await denied(`${url}?surface=${surface}`, staff({ products: true }))
     for (const grant of [{ pos: true }, { sales: true }]) await reachesData(`${url}?surface=pos`, staff({ products: true, ...grant }, { 'products:view': false }))

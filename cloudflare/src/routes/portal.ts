@@ -810,11 +810,23 @@ async function portalCacheVersion(c: { env: Env }): Promise<string> {
   return `portal-query-v1:${productsVersion}:${settingsVersion}:${stockVersion}`
 }
 
+// The anonymous storefront's view of the config (FX-sec, 27 Sep 2026).
+// buildPortalConfig() also carries two INTERNAL AI settings the server needs
+// -- aiPrompt (the merchant's private system instructions, forwarded into the
+// model prompt by lib/portalAi.ts) and aiProviderId (which
+// ai_provider_configs row backs the chat). No visitor feature reads either,
+// and /config + /bootstrap used to publish both to anyone. The website
+// editor reads them from the staff settings map (GET /api/settings) instead.
+export function buildPublicPortalConfig(settings: SettingsMap, env: Env) {
+  const { aiPrompt: _aiPrompt, aiProviderId: _aiProviderId, ...publicConfig } = buildPortalConfig(settings, env)
+  return publicConfig
+}
+
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    return buildPortalConfig(settings, c.env)
+    return buildPublicPortalConfig(settings, c.env)
   }))
 })
 
@@ -822,7 +834,7 @@ app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    const config = buildPortalConfig(settings, c.env)
+    const config = buildPublicPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
     const [meta, catalog] = await Promise.all([
       buildPortalMeta(c.env, showOutOfStockProducts),

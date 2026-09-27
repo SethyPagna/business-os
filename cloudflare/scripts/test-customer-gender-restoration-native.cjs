@@ -22,7 +22,8 @@ function load(file, overrides = {}) {
 }
 const permissions = load('lib/permissions.ts')
 const actor = load('lib/actorSnapshot.ts')
-const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', permissions: '{}' }
+// Administrator control comes from the role, not the name (FX-sec).
+const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', role_code: 'admin', permissions: '{}' }
 const OTHER = { ...ADMIN, id: 8 }
 async function fixture() {
   const native = openDb(loadAll()); const raw = native.db

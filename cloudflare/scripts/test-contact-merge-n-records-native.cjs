@@ -48,7 +48,8 @@ const contactMerge = load('lib/contactMerge.ts', { './contactOptions': contactOp
 const planTier = load('lib/planTier.ts')
 
 // One Worker app for the whole run; each fixture swaps in a fresh database.
-const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', permissions: '{}' }
+// Administrator control comes from the role, not the name (FX-sec).
+const ADMIN = { id: 7, username: 'admin', name: 'Fixture Admin', role_code: 'admin', permissions: '{}' }
 const state = { db: null, batches: [], broadcasts: [], hook: null, lost: false, user: ADMIN }
 const contacts = load('routes/contacts.ts', {
   '../lib/db': { getDb: () => state.db },

@@ -6,6 +6,7 @@ import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit, changedFields, auditChangeColumns } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
+import { isAdminControlGuardAbort, lastAdminRequiredBody, planAdminControlWrite } from '../lib/adminControlGuard'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -172,6 +173,39 @@ function isPrimaryAdmin(row: { username?: string | null } | undefined): boolean 
   return normalizeLookup(row?.username) === 'admin'
 }
 
+// The name "admin" is reserved (FX-sec, 27 Sep 2026). It used to be an
+// administrator credential by itself (lib/permissions.ts); that is gone, but
+// the name still reads as the seeded root account everywhere (is_primary_admin,
+// the seed/reseed lookup in lib/coreDataInvariants.ts), so nobody may take it.
+// The row that already holds it keeps it. Every username writer -- create,
+// admin edit, self-service profile -- runs through here.
+function refuseReservedUsername(c: Ctx, username: string, currentUsername: string | null): Response | null {
+  if (normalizeLookup(username) !== 'admin') return null
+  if (currentUsername != null && normalizeLookup(currentUsername) === 'admin') return null
+  return c.json({ success: false, error: 'The username "admin" is reserved.', code: 'username_reserved' }, 400)
+}
+
+// users.avatar_path is rendered as <img src> on every avatar surface, so a
+// new value must name a stored IMAGE in the file library -- the same rule as
+// PUT /users/:id/avatar below. Applied to every form writer (create, admin
+// edit, profile save), which used to store any string they were sent.
+// `undefined` = the key was absent: keep the current value. The value the
+// account already has is accepted unchanged, so the forms (which always send
+// the current value back) never block an unrelated edit on an older path.
+type AvatarDecision = { ok: true; value: string | null } | { ok: false; response: Response }
+async function resolveAvatarWrite(c: Ctx, raw: unknown, currentPath: string | null): Promise<AvatarDecision> {
+  const current = String(currentPath || '').trim() || null
+  if (raw === undefined) return { ok: true, value: current }
+  const next = String(raw ?? '').trim()
+  if (!next) return { ok: true, value: null }
+  if (next === current) return { ok: true, value: current }
+  const asset = await getDb(c.env).prepare(
+    "SELECT id FROM file_assets WHERE public_path = @path AND media_type = 'image' LIMIT 1",
+  ).get<{ id: number }>({ path: next })
+  if (asset) return { ok: true, value: next }
+  return { ok: false, response: c.json({ success: false, error: 'That image is not in the file library.', code: 'avatar_not_in_library' }, 400) }
+}
+
 function canManageTarget(actor: SessionUser, target: SecurityContextRow | undefined): boolean {
   if (!actor || !target) return false
   if (Number(actor.id) === Number(target.id)) return true
@@ -209,7 +243,8 @@ function sanitizeUserRow(row: Record<string, unknown> | undefined) {
   const userPermissions = parseJsonSafe(row.permissions)
   const merged = { ...rolePermissions, ...userPermissions } as Record<string, boolean>
   const primaryAdmin = isPrimaryAdmin(row as { username?: string })
-  const hasAdmin = !!(merged.all || primaryAdmin || normalizeLookup(row.role_code) === 'admin')
+  // Same rule as lib/permissions.ts's isAdminControlUser: never the name.
+  const hasAdmin = !!(merged.all === true || normalizeLookup(row.role_code) === 'admin')
   const { role_permissions: _rp, role_code: _rc, ...rest } = row
   return {
     ...rest,
@@ -512,10 +547,14 @@ app.post('/users', async (c) => {
     return c.json({ success: false, error: 'A role is required when creating a user' }, 400)
   }
 
+  const reserved = refuseReservedUsername(c, username, null)
+  if (reserved) return reserved
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup })
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, null)
+  if (!avatar.ok) return avatar.response
 
   try {
     const { orgId, groupId } = await resolveDefaultOrg(c, actor)
@@ -530,7 +569,7 @@ app.post('/users', async (c) => {
       ) VALUES (@username, @name, @org, @group, @phone, @phone_lookup, 0, @email, 0, @avatar, @password, @permissions, @role_id, @is_active)
     `).run({
       username, name, org: orgId, group: groupId, phone, phone_lookup: phoneLookup,
-      email, avatar: String(body.avatar_path || '').trim() || null, password: hash,
+      email, avatar: avatar.value, password: hash,
       permissions: JSON.stringify(body.permissions || {}), role_id: roleId,
       is_active: body.is_active == null ? 1 : body.is_active,
     })
@@ -556,7 +595,7 @@ app.put('/users/:id', async (c) => {
 
   const db = getDb(c.env)
   const existing = await db.prepare(
-    'SELECT id, username, name, permissions, phone, email, role_id, deleted_at, is_active, updated_at FROM users WHERE id = @id',
+    'SELECT id, username, name, permissions, phone, email, avatar_path, role_id, deleted_at, is_active, updated_at FROM users WHERE id = @id',
   ).get<Record<string, unknown>>({ id })
   const existingSecurity = await getUserSecurityContext(c, id)
   if (!existing || !existingSecurity) return c.json({ success: false, error: 'User not found' }, 404)
@@ -569,16 +608,23 @@ app.put('/users/:id', async (c) => {
   }
   if (existing.deleted_at) return c.json({ success: false, error: 'User is deleted' }, 400)
   if (!canManageTarget(actor, existingSecurity)) return c.json({ success: false, error: 'Cannot modify another admin account' }, 403)
+  const reserved = refuseReservedUsername(c, username, String(existing.username ?? ''))
+  if (reserved) return reserved
 
   const name = String(body.name || username).trim()
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup }, id)
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, (existing.avatar_path as string | null) ?? null)
+  if (!avatar.ok) return avatar.response
 
   const markDeleted = !!body.delete_user
   const nextIsActive = markDeleted ? 0 : (body.is_active ?? Number(existing.is_active || 0))
   const nextPermissions = body.permissions === undefined ? parseJsonSafe(existing.permissions) : body.permissions
+  // Never leave zero active administrators (FX-sec2, lib/adminControlGuard.ts).
+  const adminGuard = await planAdminControlWrite(db, { user: { id, roleId: body.role_id || null, permissions: JSON.stringify(nextPermissions), active: Number(nextIsActive) === 1 } })
+  if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
 
   try {
     const updateUserStatement = {
@@ -591,7 +637,7 @@ app.put('/users/:id', async (c) => {
     `,
       params: {
       username, name, phone, phone_lookup: phoneLookup, email,
-      avatar: String(body.avatar_path || '').trim() || null,
+      avatar: avatar.value,
       permissions: JSON.stringify(nextPermissions), role_id: body.role_id || null,
       is_active: nextIsActive, deleted_at: markDeleted ? new Date().toISOString() : null, id,
       },
@@ -606,6 +652,7 @@ app.put('/users/:id', async (c) => {
     }
     await db.batch([
       updateUserStatement,
+      adminGuard.guard,
       ...(usernameChanged && renameScope === 'carry' ? buildUserRenameStatements(Number(id), username) : []),
     ])
     // Deactivation must kill the currently-issued sessions as well. Otherwise
@@ -649,6 +696,7 @@ app.put('/users/:id', async (c) => {
     c.executionCtx.waitUntil(broadcast(c.env, 'users', { action: 'update', id }))
     return c.json({ success: true, ...sanitizeUserRow(await getUserWithRole(c, id)) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: mapIdentityErrorMessage(message) || message || 'Failed to update user' }, 500)
   }
@@ -692,11 +740,16 @@ app.put('/users/:id/profile', async (c) => {
     if (refused) return refused
   }
 
+  const reserved = refuseReservedUsername(c, username, String(user.username ?? ''))
+  if (reserved) return reserved
+
   const name = String(body.name || username).trim()
   const phone = String(body.phone || '').trim() || null
   const phoneLookup = phone ? normalizePhoneLookup(phone) : null
   const conflict = await findUserIdentityConflict(c, { username, name, email, phoneLookup }, targetId)
   if (conflict) return c.json({ success: false, error: conflict.message }, 409)
+  const avatar = await resolveAvatarWrite(c, body.avatar_path, (user.avatar_path as string | null) ?? null)
+  if (!avatar.ok) return avatar.response
 
   try {
     const updateProfileStatement = {
@@ -706,7 +759,7 @@ app.put('/users/:id/profile', async (c) => {
         avatar_path = @avatar, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
     `,
-      params: { username, name, phone, phone_lookup: phoneLookup, email, avatar: String(body.avatar_path || '').trim() || null, id: targetId },
+      params: { username, name, phone, phone_lookup: phoneLookup, email, avatar: avatar.value, id: targetId },
     }
     // Propagate a username change to every denormalized snapshot (see the admin
     // PUT above) -- same id-is-source-of-truth rule on the self-service path.
@@ -864,6 +917,9 @@ app.put('/roles/:id', async (c) => {
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
     const permissions = JSON.stringify(body.permissions || {})
+    // A custom role with `all` makes its holders administrators (FX-sec2).
+    const adminGuard = await planAdminControlWrite(db, { role: { id, permissions } })
+    if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
     const updatedAt = new Date().toISOString()
     const details = JSON.stringify({ name })
     // A role IS its permission set, so the row has to carry the permissions
@@ -905,7 +961,7 @@ app.put('/roles/:id', async (c) => {
               (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
             WHERE changes() = 1`,
       params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChange },
-    }])
+    }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)
     if (updatedRows !== 1) {
@@ -921,6 +977,7 @@ app.put('/roles/:id', async (c) => {
       'SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id',
     ).get({ id })) })
   } catch (error) {
+    if (isAdminControlGuardAbort(error)) return c.json(lastAdminRequiredBody(), 409)
     const message = String((error as Error)?.message || '')
     return c.json({ success: false, error: message.includes('UNIQUE') ? 'Role already exists' : (message || 'Failed to update role') }, 500)
   }

@@ -391,12 +391,9 @@ app.post('/login', async (c) => {
   return c.json({
     success: true,
     user: {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      organizationId: user.organization_id,
-      roleId: user.role_id,
-      permissions: user.permissions,
+      // The one sign-in serializer, shared with the authenticator step and
+      // Google sign-in; it carries the role half too (see buildUserPayload).
+      ...buildUserPayload(user),
       // role_code / role_permissions were queried above but never returned
       // here, unlike GET /me and GET /bootstrap which both include them.
       //
@@ -1006,7 +1003,14 @@ function trim(value: unknown): string {
 
 function buildUserPayload(user: {
   id: number; username: string; name: string; organization_id: number | null; role_id: number | null; permissions: string | null
+  role_code: string | null; role_permissions: string | null
 }) {
+  // The user every sign-in answer carries: POST /login, POST /otp/verify and
+  // Google sign-in alike. The role half is not optional. Most accounts hold
+  // every grant on the role (the seeded admin is `{}` on the user and
+  // `{"all":true}` on the role), and administrator control is read from
+  // role_code or an effective `all` grant, so a user without it is signed in
+  // with no permissions whenever the app cannot re-fetch its bootstrap.
   return {
     id: user.id,
     username: user.username,
@@ -1014,6 +1018,8 @@ function buildUserPayload(user: {
     organizationId: user.organization_id,
     roleId: user.role_id,
     permissions: user.permissions,
+    role_code: user.role_code,
+    role_permissions: user.role_permissions,
   }
 }
 
@@ -1027,6 +1033,8 @@ type LocalUserRow = {
   permissions: string | null
   is_active: number
   google_subject: string | null
+  role_code: string | null
+  role_permissions: string | null
 }
 
 async function updateLocalUserGoogleIdentity(env: Env, userId: number, googleUser: { sub: string; email: string; emailVerified: boolean }): Promise<LocalUserRow> {
@@ -1051,8 +1059,9 @@ async function updateLocalUserGoogleIdentity(env: Env, userId: number, googleUse
     WHERE id = ?
   `).run([googleSubject, email, emailVerified, shouldReplaceEmail ? 1 : 0, shouldReplaceEmail ? email : null, shouldReplaceEmail ? 1 : 0, emailVerified, userId])
   const updated = await db.prepare(`
-    SELECT id, username, name, email, organization_id, role_id, permissions, is_active, google_subject
-    FROM users WHERE id = ?
+    SELECT u.id, u.username, u.name, u.email, u.organization_id, u.role_id, u.permissions, u.is_active, u.google_subject,
+           r.code AS role_code, r.permissions AS role_permissions
+    FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?
   `).get<LocalUserRow>([userId])
   if (!updated) throw new Error('User not found after Google identity update')
   return updated
@@ -1214,10 +1223,13 @@ app.get('/oauth/callback', async (c) => {
         }
       }
     } else {
+      // Read with its role, as POST /login reads: the device gate below
+      // decides administrator control from the role half.
       const localUser = await db.prepare(`
-        SELECT id, username, name, email, organization_id, role_id, permissions, is_active, google_subject,
-               otp_enabled, otp_secret
-        FROM users WHERE google_subject = ? AND is_active = 1 AND deleted_at IS NULL LIMIT 1
+        SELECT u.id, u.username, u.name, u.email, u.organization_id, u.role_id, u.permissions, u.is_active, u.google_subject,
+               u.otp_enabled, u.otp_secret, r.code AS role_code, r.permissions AS role_permissions
+        FROM users u LEFT JOIN roles r ON r.id = u.role_id
+        WHERE u.google_subject = ? AND u.is_active = 1 AND u.deleted_at IS NULL LIMIT 1
       `).get<LocalUserRow & { otp_enabled: number; otp_secret: string | null }>([googleSubject])
       // Device-approval gate -- the same non-admin check POST /login runs,
       // resolved before the OTP branch below so Google sign-in cannot bypass
@@ -1333,7 +1345,10 @@ app.post('/oauth/unlink', requireAuth, async (c) => {
     UPDATE users SET google_subject = NULL, google_email = NULL, google_email_verified = 0, google_linked_at = NULL WHERE id = ?
   `).run([actorId])
   await audit(c.env, actorId, user.username, 'identity_unlinked', 'user', actorId, { provider: 'google' })
-  const updated = await db.prepare('SELECT id, username, name, organization_id, role_id, permissions FROM users WHERE id = ?').get<LocalUserRow>([actorId])
+  const updated = await db.prepare(`
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, r.code AS role_code, r.permissions AS role_permissions
+    FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.id = ?
+  `).get<LocalUserRow>([actorId])
   return c.json({ user: updated ? buildUserPayload(updated) : null })
 })
 

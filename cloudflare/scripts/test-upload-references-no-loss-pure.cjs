@@ -97,6 +97,7 @@ const common = {
 const usersRoute = load('routes/users.ts', {
   ...common,
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
+  '../lib/adminControlGuard': load('lib/adminControlGuard.ts', { './permissions': permissions }),
   '../lib/conflictControl': { assertUpdatedAtMatch: () => {}, getExpectedUpdatedAt: () => null, writeConflictResponse: () => ({}), WriteConflictError: class {} },
   '../lib/passwordPolicy': load('lib/passwordPolicy.ts'),
   '../lib/googleOauth': { isGoogleLinkReady: () => false },

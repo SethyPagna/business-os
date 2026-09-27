@@ -2,6 +2,9 @@ import type { SettingsRefreshChannel, SettingsWriteOptions } from '../types/sett
 
 export function normalizeSettingsWriteOptions(options: SettingsWriteOptions = {}): Required<SettingsWriteOptions> {
   return {
+    clearKeys: Array.isArray(options.clearKeys)
+      ? options.clearKeys.filter((key): key is string => typeof key === 'string' && key !== '')
+      : [],
     silentToast: options.silentToast === true,
     refreshChannels: Array.isArray(options.refreshChannels)
       ? options.refreshChannels.filter(Boolean) as SettingsRefreshChannel[]

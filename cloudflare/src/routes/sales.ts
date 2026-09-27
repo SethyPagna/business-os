@@ -5512,13 +5512,10 @@ app.get('/', async (c) => {
     }
   }
   if (query.userId) {
-    // Matches the original's isAdminControlUser check -- simplified to
-    // username==='admin' or an explicit permissions.all flag, since role
-    // management (role_code lookups against the roles table) isn't ported
-    // yet. Disclosed simplification, not a silent behavior change: see
-    // MIGRATION.md.
-    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
-    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    // The shared administrator rule (lib/permissions.ts): admin role code or
+    // an effective all grant. This used to be an inline copy keyed on the
+    // literal username 'admin' (FX-sec: a name is not a credential).
+    const isAdmin = isAdminControlUser(user)
     if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
     const userIds = String(query.userId).split(',').map((v) => v.trim()).filter(Boolean)
     if (userIds.length === 1) {
@@ -5799,8 +5796,7 @@ app.get('/stats', async (c) => {
   appendLocalTimeRange(query, where, params, 's.created_at')
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
-    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
-    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    const isAdmin = isAdminControlUser(user)
     if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
     const userIds = String(query.userId).split(',').map((v) => v.trim()).filter(Boolean)
     if (userIds.length === 1) {

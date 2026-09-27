@@ -21,11 +21,11 @@ export function getEffectivePermissionMap(user: PermissionUser): Record<string, 
   return normalized
 }
 
-/** Reserved identities and the effective all grant match Worker authority. */
+/** The admin role code and the effective all grant match Worker authority.
+ * The username is not an input: a name is not a credential (FX-sec). */
 export function isAdminControlUser(user: PermissionUser): boolean {
   if (!user) return false
-  return String(user.username || '').trim().toLowerCase() === 'admin'
-    || String(user.role_code || '').trim().toLowerCase() === 'admin'
+  return String(user.role_code || '').trim().toLowerCase() === 'admin'
     || getEffectivePermissionMap(user).all === true
 }
 

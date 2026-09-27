@@ -66,7 +66,8 @@ for (const value of [false, 'review', true, 'true', 1, {}]) {
 }
 assert.equal(canCommit({ role_permissions: { all: true }, permissions: { all: false, products: 'review' } }), false)
 assert.equal(canCommit({ permissions: { products: true, 'products:add': false } }), false)
-assert.equal(canCommit({ username: ' ADMIN ', permissions: { all: false, products: 'review', 'products:add': false } }), true)
+// Effective admin bypass through the admin role code (not the name, FX-sec).
+assert.equal(canCommit({ role_code: ' ADMIN ', permissions: { all: false, products: 'review', 'products:add': false } }), true)
 assert.equal(canImages({ role_code: ' admin ', permissions: { 'products:image': false } }), true)
 assert.equal(canCommit(null), false)
 assert.match(modalSource, /if \(!canCommitProductAdd\)[\s\S]*?await onCreateProduct\(\{ \.\.\.payload, stock_quantity: quantity \}\)/)
