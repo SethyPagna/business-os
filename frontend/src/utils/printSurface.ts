@@ -78,6 +78,18 @@ function withTimeout(work: Promise<unknown>, timeoutMs: number): Promise<void> {
   })
 }
 
+// Memoized for the session (I8, Sep 26 2026): it walked every rule of every
+// stylesheet on every print. The walk is repeated only when what it reads can
+// have changed -- another document, a stylesheet added or removed (a lazy
+// route's CSS chunk), or a different number of registered font faces.
+let fontFaceCssCache: { doc: Document; key: string; css: string } | null = null
+
+function fontFaceCssKey(doc: Document): string {
+  const sheets = doc.styleSheets ? doc.styleSheets.length : 0
+  const faces = (doc as Document & { fonts?: { size?: number } }).fonts?.size
+  return `${sheets}:${typeof faces === 'number' ? faces : -1}`
+}
+
 /**
  * The app's own @font-face rules, for a document the app prints. A print
  * document (the preview window or the hidden frame) has only the fonts it
@@ -90,6 +102,14 @@ function withTimeout(work: Promise<unknown>, timeoutMs: number): Promise<void> {
  */
 export function appFontFaceCss(): string {
   if (typeof document === 'undefined' || typeof CSSFontFaceRule === 'undefined') return ''
+  const key = fontFaceCssKey(document)
+  if (fontFaceCssCache && fontFaceCssCache.doc === document && fontFaceCssCache.key === key) return fontFaceCssCache.css
+  const css = collectAppFontFaceCss()
+  fontFaceCssCache = { doc: document, key, css }
+  return css
+}
+
+function collectAppFontFaceCss(): string {
   const rules: string[] = []
   for (const sheet of Array.from(document.styleSheets || [])) {
     let sheetRules: CSSRuleList
