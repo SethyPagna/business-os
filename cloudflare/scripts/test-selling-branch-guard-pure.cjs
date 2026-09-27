@@ -220,9 +220,9 @@ runTest('ALL THREE transfer routes check the direction', () => {
   // left a shop -> warehouse move one button away from any operator.
   assert.equal((branchesSource.match(/transferDirectionError\(/g) || []).length, 2, 'the single and the bulk transfer route')
   assert.equal((inventorySource.match(/transferDirectionError\(/g) || []).length, 1, 'the inventory-surface transfer route')
-  assert.match(branchesSource, /if \(directionError\) return c\.json\(\{ error: directionError \}, 400\)/)
-  assert.match(branchesSource, /if \(bulkDirectionError\) return c\.json\(\{ error: bulkDirectionError \}, 400\)/)
-  assert.match(inventorySource, /if \(directionError\) return c\.json\(\{ error: directionError \}, 400\)/)
+  assert.match(branchesSource, /if \(directionError\) return c\.json\(\{ error: directionError, code: 'transfer_direction_invalid' \}, 400\)/)
+  assert.match(branchesSource, /if \(bulkDirectionError\) return c\.json\(\{ error: bulkDirectionError, code: 'transfer_direction_invalid' \}, 400\)/)
+  assert.match(inventorySource, /if \(directionError\) return c\.json\(\{ error: directionError, code: 'transfer_direction_invalid' \}, 400\)/)
   assert.match(inventorySource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.equal((branchesSource.match(/resolveCanonicalTransferPair\(/g) || []).length, 2, 'both branch transfer routes require an unambiguous active pair')
   assert.equal((inventorySource.match(/resolveCanonicalTransferPair\(/g) || []).length, 1, 'the inventory transfer requires an unambiguous active pair')
