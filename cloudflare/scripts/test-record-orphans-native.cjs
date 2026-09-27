@@ -81,6 +81,15 @@ const NOT_A_REFERENCE = new Set([
   // (lots are deactivated, not deleted), so there is no real dangling case
   // this column could ever expose.
   'baseline_batch',
+  // user_sessions.limit_family_id (migration 0201) is a RATE-LIMIT KEY, not a
+  // live reference: the id of the sign-in session a re-issued session descends
+  // from, read only as COALESCE(limit_family_id, id) to count one sign-in's
+  // current-password guesses (lib/auth.ts currentSessionLimitFamily). Nothing
+  // joins it back to user_sessions. POST /session-duration leaves the sign-in
+  // session valid with its own expiry, and lib/ephemeralRetention.ts deletes
+  // expired or revoked sessions, so the sign-in row can be gone while a session
+  // re-issued from it is still live -- a plain orphan join would report that.
+  'limit_family',
 ])
 /**
  * Columns that record an id a row ONCE had, deliberately outliving the row.
