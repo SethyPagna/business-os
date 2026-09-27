@@ -3,7 +3,7 @@
 // existing generic `settings` table -- no migration. This pins:
 //   1. parseTelegramTopicId: integer string -> number; empty/blank -> undefined;
 //      non-digit, negative, zero, decimal -> undefined (rejected, not coerced).
-//   2. getTelegramConfig reads all seven topic keys into config.topics.
+//   2. getTelegramConfig reads all eight topic keys into config.topics.
 //   3. postTelegram includes message_thread_id in the POST body only when a
 //      topic is configured; it is entirely ABSENT from the body otherwise
 //      (not just falsy -- Telegram rejects a null/0 thread id on non-forum
@@ -78,7 +78,7 @@ function makeDb(settingsRows) {
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE sales (id INTEGER PRIMARY KEY, created_at TEXT, sale_status TEXT, receipt_number TEXT,
       subtotal_usd REAL, discount_usd REAL, membership_discount_usd REAL, tax_usd REAL, total_usd REAL, total_khr REAL,
-      delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER, delivery_actual_cost_usd REAL,
+      delivery_fee_usd REAL, delivery_fee_paid_by TEXT, is_delivery INTEGER, delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL,
       delivery_contact_id INTEGER, delivery_contact_name TEXT, branch_id INTEGER, branch_name TEXT,
       customer_id INTEGER, customer_name TEXT, customer_phone TEXT, cashier_id INTEGER, cashier_name TEXT,
       payment_method TEXT, amount_paid_usd REAL, source_return_id INTEGER);
@@ -150,12 +150,13 @@ const baseSettings = [
   assert.equal(bare.parseTelegramTopicId('abc'), undefined, 'non-numeric is rejected')
   console.log('PASS parseTelegramTopicId: integer-or-empty, defensively')
 
-  // ---- 2. TELEGRAM_TOPIC_KEYS names all seven settings the UI/backend share -
+  // ---- 2. TELEGRAM_TOPIC_KEYS names all eight settings the UI/backend share -
+  // (returns joined 27 Sep 2026: customer returns got their own family)
   assert.deepEqual([...bare.TELEGRAM_TOPIC_KEYS].sort(), [
-    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_reports',
+    'telegram_topic_alerts', 'telegram_topic_expenses', 'telegram_topic_reports', 'telegram_topic_returns',
     'telegram_topic_sales', 'telegram_topic_shift', 'telegram_topic_stock', 'telegram_topic_status',
   ].sort())
-  console.log('PASS TELEGRAM_TOPIC_KEYS: the seven settings keys the UI, backend validation, and config reader all share')
+  console.log('PASS TELEGRAM_TOPIC_KEYS: the eight settings keys the UI, backend validation, and config reader all share')
 
   // ---- 3-5. every outbound send path carries the right topic, or none -----
   const realFetch = globalThis.fetch
@@ -307,16 +308,20 @@ const baseSettings = [
 
   // ---- backend validation: routes/settings.ts rejects a non-integer, non-
   // empty topic id with the invalid_telegram_topic_id code, for EVERY one of
-  // the seven keys (not just one hardcoded key that could silently drift from
+  // the eight keys (not just one hardcoded key that could silently drift from
   // TELEGRAM_TOPIC_KEYS if a new topic slot were ever added).
   const settingsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'settings.ts'), 'utf8')
-  assert.match(settingsSource, /import \{ TELEGRAM_TOPIC_KEYS \} from '\.\.\/lib\/telegram'/, 'routes/settings.ts must import the shared topic key list, not its own copy')
+  assert.match(settingsSource, /import \{[^}]*\bTELEGRAM_TOPIC_KEYS\b[^}]*\} from '\.\.\/lib\/telegram'/, 'routes/settings.ts must import the shared topic key list, not its own copy')
   assert.match(settingsSource, /for \(const key of TELEGRAM_TOPIC_KEYS\)/, 'validation must loop over every topic key, not one hardcoded key')
   assert.match(settingsSource, /code: 'invalid_telegram_topic_id'/)
   // The same integer-or-empty rule the parser above enforces, checked
   // byte-for-byte so the two cannot silently diverge (one loosened, the
   // other not): a non-empty non-digit string is rejected.
-  assert.match(settingsSource, /raw !== '' && !\/\^\\d\+\$\/\.test\(raw\)/, 'validation must reject non-digit non-empty values, matching parseTelegramTopicId')
+  // Since 27 Sep 2026 the rule is ONE exported function, shared with the
+  // Telegram /settopic save (lib/telegramTopicSetting.ts), pinned by value.
+  assert.match(settingsSource, /if \(!isTelegramTopicSettingValue\(raw\)\)/, 'validation must use the shared topic value rule')
+  for (const good of ['', '7', '733']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
+  for (const bad of ['-5', '3.5', 'abc', ' 7x']) assert.equal(bare.isTelegramTopicSettingValue(bad), false, `${JSON.stringify(bad)} must be rejected`)
   console.log('PASS routes/settings.ts: every TELEGRAM_TOPIC_KEYS entry is validated integer-or-empty, rejected with invalid_telegram_topic_id')
 
   // ---- same role gate and audit treatment as the existing telegram_chat_id -

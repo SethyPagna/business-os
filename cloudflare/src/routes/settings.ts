@@ -27,7 +27,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
-import { TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
+import { isTelegramTopicSettingValue, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1061,7 +1061,8 @@ app.post('/', async (c) => {
   for (const key of TELEGRAM_TOPIC_KEYS) {
     if (!attemptedKeys.includes(key)) continue
     const raw = String(body[key] ?? '').trim()
-    if (raw !== '' && !/^\d+$/.test(raw)) {
+    // The one write rule, shared with the Telegram /settopic save.
+    if (!isTelegramTopicSettingValue(raw)) {
       return c.json({
         error: 'Telegram topic ID must be a whole number, or left empty for General.',
         code: 'invalid_telegram_topic_id',
