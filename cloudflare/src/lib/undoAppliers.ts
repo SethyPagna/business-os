@@ -5,7 +5,18 @@ import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from 
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { branchUpdateStatements } from './branchWrites'
+import {
+  BRANCH_REPLAY_ROW_SQL,
+  OTHER_CANONICAL_BRANCH_SQL,
+  branchReplayDefaultStatements,
+  branchReplayDropsDefault,
+  branchReplayStateGuardStatement,
+  branchUpdateStatements,
+  completeBranchReplayFields,
+  staleBranchReplayFields,
+  type BranchReplayRow,
+  type BranchWriteFields,
+} from './branchWrites'
 import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
 import {
   buildAllocationStatements,
@@ -83,8 +94,27 @@ export interface UndoApplierOutcome {
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void | UndoApplierOutcome>
 
+// A replay refused to protect newer data answers 409 with one of these stable
+// machine codes, so the client can restate it in the operator's language
+// (frontend/src/api/actionHistoryTransport.ts). The English message stays for
+// action_history.last_error and API callers.
+export const UNDO_RECORD_CHANGED_CODE = 'undo_record_changed'
+export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
+
 export class UndoConflictError extends Error {
   readonly statusCode = 409
+  readonly code?: string
+
+  constructor(message: string, code?: string) {
+    super(message)
+    if (code) this.code = code
+  }
+}
+
+// The machine code of a coded replay refusal, or null for any other error, so
+// the route never forwards a code from an error that is not a refusal.
+export function undoConflictCode(error: unknown): string | null {
+  return error instanceof UndoConflictError && error.code ? error.code : null
 }
 
 // Every applier declares the permission section its replay writes under, and
@@ -657,8 +687,324 @@ async function assertMergeStateUnchanged(
   // fingerprintPending until a complete expected value is stored.
   if (transactionGuards && !expected) throw new UndoConflictError('This group merge is missing its safety fingerprint.')
   if (expected && await mergeStateFingerprint(db, reversals, transactionGuards) !== expected) {
-    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.')
+    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
   }
+}
+
+// FX-undo2 (R-undo C11): the LEGACY product.merge / product.merge.bulk undo,
+// for snapshots recorded before 357bc6de7 (2026-09-05) and so carrying no
+// mergedStateFingerprint (every later recorder stores one, or
+// fingerprintPending until it has one, and a redo always does). That undo
+// writes ABSOLUTE values -- the keeper's branch stock and folded-into lots from
+// their before-images, its prices and its cover -- so it first derives from the
+// snapshot what the fold (routes/products.ts foldDuplicateProductInto as it
+// stood then) left behind, and proves both products still hold exactly that:
+//   * their activity: the discarded row inactive, the keeper active;
+//   * every branch_stock row of both: the keeper's before-image plus the
+//     discarded row's stock (unless it was written off), none on the other;
+//   * every lot the fold touched: its product, its activity where the fold set
+//     it, and the per-branch stock of each lot whose stock the snapshot holds;
+//   * the keeper's selling and wholesale prices: the higher of the saved
+//     before-price and the discarded row's own (resolveMergedPricing);
+//   * the keeper's cover, when this actor's undo would restore it.
+// A whole-catalog run is undone newest fold first, so each fold's in-batch
+// check is derived from the state the folds after it restore. Cost is not
+// compared: 0175/0195 re-derive it from lots, as step 8 of the undo does. A
+// snapshot that cannot be read this way, or whose undo would also write what
+// this derivation does not cover (catalog, barcode, parent links, promotion
+// lists, lot allocations -- written only by fingerprinted recorders), is
+// refused, never guessed.
+type LegacyMergeStock = Map<number, number>
+
+interface LegacyMergeFold {
+  keeperId: number
+  dupId: number
+  moveStock: boolean
+  keeperStock: LegacyMergeStock
+  dupStock: LegacyMergeStock
+  repointed: number[]
+  folded: Array<{ dupLot: number; keeperLot: number; dupStock: LegacyMergeStock; keeperStock: LegacyMergeStock }>
+  writtenOff: Array<{ lot: number; stock: LegacyMergeStock }>
+  // Exactly what the undo writes back (buildMergeReversalStatements step 1).
+  prices: { su: number; sk: number; wu?: number; wk?: number } | null
+  cover: string | null
+}
+
+interface LegacyMergeModel {
+  active: Map<number, number>
+  stock: Map<number, LegacyMergeStock>
+  lots: Map<number, { product: number; active: number | null }>
+  lotStock: Map<number, LegacyMergeStock>
+  // dupId: the discarded row whose price or cover the fold may have adopted;
+  // null once an undo has written the saved value back.
+  prices: Map<number, { dupId: number | null; su: number; sk: number; wu?: number; wk?: number }>
+  covers: Map<number, { dupId: number | null; before: string | null }>
+}
+
+const LEGACY_MERGE_EPSILON = 0.00005
+
+const positiveId = (value: unknown): number | null => {
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function legacyMergeStock(rows: unknown): LegacyMergeStock | null {
+  if (!Array.isArray(rows)) return null
+  const stock: LegacyMergeStock = new Map()
+  for (const row of rows) {
+    const branchId = positiveId((row as { branch_id?: unknown } | null)?.branch_id)
+    const quantity = legacyFiniteNumber((row as { quantity?: unknown } | null)?.quantity)
+    if (branchId === null || quantity === null || stock.has(branchId)) return null
+    stock.set(branchId, quantity)
+  }
+  return stock
+}
+
+function legacyMergeFold(r: MergeReversal): LegacyMergeFold | null {
+  if (!r || typeof r !== 'object') return null
+  const keeperId = positiveId(r.keeperId)
+  const dupId = positiveId(r.dupId)
+  if (keeperId === null || dupId === null || keeperId === dupId) return null
+  // Present (or non-empty) only on fingerprinted snapshots; the undo would
+  // write them, and nothing below derives what they must match.
+  const listed = (value: unknown) => value != null && (!Array.isArray(value) || value.length > 0)
+  if (r.keeperCatalogBefore || r.keeperBarcodeBefore !== undefined || r.keeperParentIdBefore != null
+    || listed(r.promotionRulesBefore) || listed(r.reparentedChildProductIds)) return null
+  const keeperStock = legacyMergeStock(r.keeperStockBefore)
+  const dupStock = legacyMergeStock(r.dupStockBefore)
+  if (!keeperStock || !dupStock || !Array.isArray(r.repointedBatches) || !Array.isArray(r.foldedBatches)) return null
+  const repointed: number[] = []
+  for (const batch of r.repointedBatches) {
+    const id = positiveId(batch?.id)
+    if (id === null) return null
+    repointed.push(id)
+  }
+  const folded: LegacyMergeFold['folded'] = []
+  for (const batch of r.foldedBatches) {
+    const dupLot = positiveId(batch?.dupBatchId)
+    const keeperLot = positiveId(batch?.keeperBatchId)
+    const lotDupStock = legacyMergeStock(batch?.dupStockBefore)
+    const lotKeeperStock = legacyMergeStock(batch?.keeperStockBefore)
+    if (dupLot === null || keeperLot === null || dupLot === keeperLot || !lotDupStock || !lotKeeperStock
+      || listed(batch?.saleAllocationIds) || listed(batch?.returnAllocationIds)) return null
+    folded.push({ dupLot, keeperLot, dupStock: lotDupStock, keeperStock: lotKeeperStock })
+  }
+  const writtenOff: LegacyMergeFold['writtenOff'] = []
+  if (r.writtenOffBatches != null) {
+    if (!Array.isArray(r.writtenOffBatches)) return null
+    for (const batch of r.writtenOffBatches) {
+      const lot = positiveId(batch?.batchId)
+      const stock = legacyMergeStock(batch?.stockBefore)
+      if (lot === null || !stock) return null
+      writtenOff.push({ lot, stock })
+    }
+  }
+  let prices: LegacyMergeFold['prices'] = null
+  const pricing = r.keeperPricingBefore
+  if (pricing) {
+    if (typeof pricing !== 'object' || Array.isArray(pricing)) return null
+    const wholesaleUsd = pricing.wholesale_price_usd ?? pricing.special_price_usd
+    const wholesaleKhr = pricing.wholesale_price_khr ?? pricing.special_price_khr
+    prices = {
+      su: Number(pricing.selling_price_usd) || 0,
+      sk: Number(pricing.selling_price_khr) || 0,
+      ...(wholesaleUsd !== undefined || wholesaleKhr !== undefined
+        ? { wu: Number(wholesaleUsd) || 0, wk: Number(wholesaleKhr) || 0 }
+        : {}),
+    }
+  }
+  const cover = r.keeperImagePathBefore ?? null
+  if (cover !== null && typeof cover !== 'string') return null
+  return {
+    keeperId, dupId, moveStock: r.stockDisposition !== 'write_off', keeperStock, dupStock,
+    repointed, folded, writtenOff, prices, cover,
+  }
+}
+
+function legacyMergeFoldLots(fold: LegacyMergeFold): number[] {
+  return [...new Set([
+    ...fold.repointed,
+    ...fold.folded.flatMap((batch) => [batch.dupLot, batch.keeperLot]),
+    ...fold.writtenOff.map((batch) => batch.lot),
+  ])]
+}
+
+const addLegacyMergeStock = (base: LegacyMergeStock, added: LegacyMergeStock): LegacyMergeStock => {
+  const sum = new Map(base)
+  for (const [branchId, quantity] of added) sum.set(branchId, (sum.get(branchId) ?? 0) + quantity)
+  return sum
+}
+
+// What the folds left behind, applied in their recorded order (a later fold
+// of the same keeper recorded the earlier one's result as its before-image).
+function legacyMergeApplied(folds: LegacyMergeFold[]): LegacyMergeModel {
+  const model: LegacyMergeModel = {
+    active: new Map(), stock: new Map(), lots: new Map(), lotStock: new Map(), prices: new Map(), covers: new Map(),
+  }
+  for (const fold of folds) {
+    model.active.set(fold.dupId, 0)
+    model.active.set(fold.keeperId, 1)
+    model.stock.set(fold.keeperId, fold.moveStock ? addLegacyMergeStock(fold.keeperStock, fold.dupStock) : new Map(fold.keeperStock))
+    model.stock.set(fold.dupId, new Map())
+    for (const lot of fold.repointed) model.lots.set(lot, { product: fold.keeperId, active: null })
+    for (const batch of fold.folded) {
+      model.lots.set(batch.dupLot, { product: fold.dupId, active: 0 })
+      model.lotStock.set(batch.dupLot, new Map())
+      model.lots.set(batch.keeperLot, { product: fold.keeperId, active: null })
+      model.lotStock.set(batch.keeperLot, addLegacyMergeStock(batch.keeperStock, batch.dupStock))
+    }
+    for (const batch of fold.writtenOff) {
+      model.lots.set(batch.lot, { product: fold.dupId, active: 0 })
+      model.lotStock.set(batch.lot, new Map())
+    }
+    if (fold.prices) model.prices.set(fold.keeperId, { dupId: fold.dupId, ...fold.prices })
+    model.covers.set(fold.keeperId, { dupId: fold.dupId, before: fold.cover })
+  }
+  return model
+}
+
+// The same writes buildMergeReversalStatements makes for one fold.
+function legacyMergeUndone(model: LegacyMergeModel, fold: LegacyMergeFold, canChangeProductImages: boolean): void {
+  model.active.set(fold.dupId, 1)
+  if (fold.prices) model.prices.set(fold.keeperId, { dupId: null, ...fold.prices })
+  if (canChangeProductImages) model.covers.set(fold.keeperId, { dupId: null, before: fold.cover })
+  const restore = (current: LegacyMergeStock | undefined, dupBefore: LegacyMergeStock, keeperBefore: LegacyMergeStock) => {
+    const keeper = new Map(current ?? [])
+    for (const branchId of dupBefore.keys()) {
+      if (keeperBefore.has(branchId)) keeper.set(branchId, keeperBefore.get(branchId)!)
+      else keeper.delete(branchId)
+    }
+    return keeper
+  }
+  const putBack = (current: LegacyMergeStock | undefined, before: LegacyMergeStock) => {
+    const stock = new Map(current ?? [])
+    for (const [branchId, quantity] of before) stock.set(branchId, quantity)
+    return stock
+  }
+  model.stock.set(fold.keeperId, restore(model.stock.get(fold.keeperId), fold.dupStock, fold.keeperStock))
+  model.stock.set(fold.dupId, putBack(model.stock.get(fold.dupId), fold.dupStock))
+  for (const lot of fold.repointed) model.lots.set(lot, { product: fold.dupId, active: model.lots.get(lot)?.active ?? null })
+  for (const batch of fold.folded) {
+    model.lots.set(batch.dupLot, { product: fold.dupId, active: 1 })
+    model.lotStock.set(batch.keeperLot, restore(model.lotStock.get(batch.keeperLot), batch.dupStock, batch.keeperStock))
+    model.lotStock.set(batch.dupLot, putBack(model.lotStock.get(batch.dupLot), batch.dupStock))
+  }
+  for (const batch of fold.writtenOff) {
+    model.lots.set(batch.lot, { product: fold.dupId, active: 1 })
+    model.lotStock.set(batch.lot, putBack(model.lotStock.get(batch.lot), batch.stock))
+  }
+}
+
+// The model, for these products and lots, as one boolean SQL expression over
+// JSON lists (a fixed number of bound values, whatever the size of the run).
+// Stock is compared as non-zero quantities, so a zero row and no row agree.
+function legacyMergeExpectation(
+  model: LegacyMergeModel, productIds: number[], lotIds: number[], canChangeProductImages: boolean,
+): { sql: string; params: Record<string, unknown> } {
+  const nonZero = (quantity: number) => Math.abs(quantity) >= LEGACY_MERGE_EPSILON
+  const products = productIds.filter((id) => model.active.has(id)).map((id) => ({ id, a: model.active.get(id) }))
+  const stock = products.flatMap(({ id }) => [...(model.stock.get(id) ?? [])]
+    .filter(([, quantity]) => nonZero(quantity)).map(([branchId, quantity]) => ({ p: id, b: branchId, q: quantity })))
+  const lots = lotIds.filter((id) => model.lots.has(id))
+    .map((id) => ({ id, p: model.lots.get(id)!.product, a: model.lots.get(id)!.active }))
+  const stockLots = lotIds.filter((id) => model.lotStock.has(id))
+  const lotStock = stockLots.flatMap((id) => [...model.lotStock.get(id)!]
+    .filter(([, quantity]) => nonZero(quantity)).map(([branchId, quantity]) => ({ l: id, b: branchId, q: quantity })))
+  const prices = productIds.filter((id) => model.prices.has(id)).map((id) => {
+    const { dupId, ...values } = model.prices.get(id)!
+    return { k: id, d: dupId, ...values }
+  })
+  const covers = canChangeProductImages
+    ? productIds.filter((id) => model.covers.has(id)).map((id) => ({ k: id, d: model.covers.get(id)!.dupId, before: model.covers.get(id)!.before }))
+    : []
+  // resolveMergedPricing: the higher of the two rows, a blank row skipped.
+  const merged = (column: string, key: string) => `(CASE WHEN d.id IS NULL OR d.${column} IS NULL OR d.${column} = ''
+      THEN json_extract(e.value, '$.${key}') ELSE MAX(json_extract(e.value, '$.${key}'), CAST(d.${column} AS REAL)) END)`
+  const priceDiffers = (column: string, key: string) => `ABS(COALESCE(k.${column}, 0) - ${merged(column, key)}) >= @epsilon`
+  return {
+    sql: `(NOT EXISTS (SELECT 1 FROM json_each(@products) e LEFT JOIN products p ON p.id = json_extract(e.value, '$.id')
+        WHERE p.id IS NULL OR COALESCE(p.is_active, 0) <> json_extract(e.value, '$.a'))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@stock) e
+        WHERE ABS(COALESCE((SELECT SUM(bs.quantity) FROM branch_stock bs WHERE bs.product_id = json_extract(e.value, '$.p')
+          AND bs.branch_id = json_extract(e.value, '$.b')), 0) - json_extract(e.value, '$.q')) >= @epsilon)
+      AND NOT EXISTS (SELECT 1 FROM branch_stock bs
+        WHERE bs.product_id IN (SELECT json_extract(value, '$.id') FROM json_each(@products))
+          AND ABS(COALESCE(bs.quantity, 0)) >= @epsilon
+          AND NOT EXISTS (SELECT 1 FROM json_each(@stock) e
+            WHERE json_extract(e.value, '$.p') = bs.product_id AND json_extract(e.value, '$.b') = bs.branch_id))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@lots) e LEFT JOIN product_batches pb ON pb.id = json_extract(e.value, '$.id')
+        WHERE pb.id IS NULL OR pb.variant_product_id IS NOT json_extract(e.value, '$.p')
+          OR (json_extract(e.value, '$.a') IS NOT NULL AND COALESCE(pb.is_active, 0) <> json_extract(e.value, '$.a')))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@lotStock) e
+        WHERE ABS(COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = json_extract(e.value, '$.l')
+          AND bbs.branch_id = json_extract(e.value, '$.b')), 0) - json_extract(e.value, '$.q')) >= @epsilon)
+      AND NOT EXISTS (SELECT 1 FROM branch_batch_stock bbs
+        WHERE bbs.batch_id IN (SELECT value FROM json_each(@stockLots))
+          AND ABS(COALESCE(bbs.quantity, 0)) >= @epsilon
+          AND NOT EXISTS (SELECT 1 FROM json_each(@lotStock) e
+            WHERE json_extract(e.value, '$.l') = bbs.batch_id AND json_extract(e.value, '$.b') = bbs.branch_id))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@prices) e JOIN products k ON k.id = json_extract(e.value, '$.k')
+        LEFT JOIN products d ON d.id = json_extract(e.value, '$.d')
+        WHERE ${priceDiffers('selling_price_usd', 'su')} OR ${priceDiffers('selling_price_khr', 'sk')}
+          OR (json_extract(e.value, '$.wu') IS NOT NULL AND ${priceDiffers('wholesale_price_usd', 'wu')})
+          OR (json_extract(e.value, '$.wk') IS NOT NULL AND ${priceDiffers('wholesale_price_khr', 'wk')}))
+      AND NOT EXISTS (SELECT 1 FROM json_each(@covers) e JOIN products k ON k.id = json_extract(e.value, '$.k')
+        LEFT JOIN products d ON d.id = json_extract(e.value, '$.d')
+        WHERE COALESCE(k.image_path, '') IS NOT COALESCE(CASE
+            WHEN COALESCE(json_extract(e.value, '$.before'), '') <> '' THEN json_extract(e.value, '$.before')
+            WHEN COALESCE(d.image_path, '') <> '' THEN d.image_path
+            ELSE json_extract(e.value, '$.before') END, '')))`,
+    params: {
+      products: JSON.stringify(products),
+      stock: JSON.stringify(stock),
+      lots: JSON.stringify(lots),
+      lotStock: JSON.stringify(lotStock),
+      stockLots: JSON.stringify(stockLots),
+      prices: JSON.stringify(prices),
+      covers: JSON.stringify(covers),
+      epsilon: LEGACY_MERGE_EPSILON,
+    },
+  }
+}
+
+// Checks the derived state of the whole run now, and returns one in-batch
+// twin per fold (index = the fold's position) that aborts that fold's undo
+// batch through a malformed JSON path if its products change in between. Null
+// for a fingerprinted snapshot, which assertMergeStateUnchanged has checked.
+async function assertLegacyMergeUnchanged(
+  db: ReturnType<typeof getDb>, reversals: MergeReversal[], expected: string | undefined, canChangeProductImages: boolean,
+): Promise<AtomicMergeStatement[] | null> {
+  if (expected) return null
+  const folds: LegacyMergeFold[] = []
+  for (const reversal of reversals) {
+    const fold = legacyMergeFold(reversal)
+    if (!fold) {
+      throw new UndoConflictError('This merge was saved without the details needed to check the two products are unchanged, so it cannot be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+    }
+    folds.push(fold)
+  }
+  const model = legacyMergeApplied(folds)
+  const whole = legacyMergeExpectation(
+    model,
+    [...new Set(folds.flatMap((fold) => [fold.keeperId, fold.dupId]))],
+    [...new Set(folds.flatMap(legacyMergeFoldLots))],
+    canChangeProductImages,
+  )
+  const row = await db.prepare(`SELECT CASE WHEN ${whole.sql} THEN 1 ELSE 0 END AS ok`).get<{ ok: number }>(whole.params)
+  if (Number(row?.ok) !== 1) {
+    throw new UndoConflictError('These products changed after the merge (stock, lots, prices or cover image), so it can no longer be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+  }
+  const guards: AtomicMergeStatement[] = new Array(folds.length)
+  for (let i = folds.length - 1; i >= 0; i--) {
+    const fold = folds[i]
+    const scoped = legacyMergeExpectation(model, [fold.keeperId, fold.dupId], legacyMergeFoldLots(fold), canChangeProductImages)
+    guards[i] = {
+      sql: `SELECT CASE WHEN ${scoped.sql} THEN 1 ELSE json_extract('[1]', '$[product_merge_changed]') END AS product_merge_guard`,
+      params: scoped.params,
+    }
+    legacyMergeUndone(model, fold, canChangeProductImages)
+  }
+  return guards
 }
 
 async function saleStateFingerprint(db: ReturnType<typeof getDb>, saleId: number): Promise<string> {
@@ -683,6 +1029,113 @@ export function sameSaleStateFingerprint(currentJson: string, expectedJson: stri
     })
     return JSON.stringify({ ...current, sale: expected.sale, lines }) === expectedJson
   } catch { return false }
+}
+
+// FX-undo2 (R-undo C10): the LEGACY sale.add_items replay, for snapshots the
+// old POST /sales/:id/items recorded on 2026-09-04..05 before the atomic path
+// (no operation id, no sale revision; the oldest without saleStateFingerprint
+// either). Both directions write ABSOLUTE values -- an undo restores
+// moneyBefore, a redo restores moneyAfter -- so each first proves the sale is
+// still exactly as the other direction left it, derived from the snapshot:
+//   undo: the money columns equal moneyAfter, every recorded line is still on
+//         the sale as recorded, and the lines sum to moneyAfter's subtotal
+//         (that route summed the subtotal from the sale's own lines);
+//   redo: the money columns equal moneyBefore, no recorded line is on the
+//         sale, and its lines sum to moneyAfter's subtotal less the recorded
+//         lines this redo adds back.
+// A snapshot too incomplete to derive that from is refused, never guessed.
+const LEGACY_ADD_ITEMS_REQUIRED_MONEY = ['subtotal_usd', 'subtotal_khr', 'total_usd', 'total_khr', 'change_usd', 'change_khr']
+// Optional keys saleMoneyUpdateStatement also writes when a snapshot has them.
+const LEGACY_ADD_ITEMS_OPTIONAL_MONEY = ['exchange_rate', 'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd',
+  'change_is_actual', 'change_exchange_rate', 'discount_khr', 'tax_khr', 'delivery_fee_khr', 'membership_discount_khr']
+const LEGACY_ADD_ITEMS_EPSILON = 0.00005
+// The legacy subtotal was round2(existing lines + round2(added lines)).
+const LEGACY_ADD_ITEMS_SUM_TOLERANCE = 0.0101
+
+function legacyFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function legacySaleAddItemsExpectation(
+  reversal: SaleAddItemsReversal, direction: 'undo' | 'redo',
+): { sql: string; params: Record<string, unknown> } | null {
+  const saleId = Number(reversal?.saleId)
+  const money = (direction === 'undo' ? reversal?.moneyAfter : reversal?.moneyBefore) as unknown as Record<string, unknown> | undefined
+  const subtotalAfter = legacyFiniteNumber(reversal?.moneyAfter?.subtotal_usd)
+  const lines = Array.isArray(reversal?.lines) ? reversal.lines : []
+  if (!Number.isInteger(saleId) || saleId <= 0 || !money || typeof money !== 'object' || subtotalAfter === null || !lines.length) return null
+  const params: Record<string, unknown> = { saleId, epsilon: LEGACY_ADD_ITEMS_EPSILON, sumTolerance: LEGACY_ADD_ITEMS_SUM_TOLERANCE }
+  const moneyTerms: string[] = []
+  for (const column of [...LEGACY_ADD_ITEMS_REQUIRED_MONEY, ...LEGACY_ADD_ITEMS_OPTIONAL_MONEY]) {
+    const present = Object.prototype.hasOwnProperty.call(money, column)
+    const value = present ? legacyFiniteNumber(money[column]) : null
+    if (LEGACY_ADD_ITEMS_REQUIRED_MONEY.includes(column) ? value === null : present && value === null && money[column] !== null) return null
+    if (!present) continue
+    params[`m_${column}`] = value
+    moneyTerms.push(`ABS(COALESCE(s.${column}, 0) - COALESCE(@m_${column}, 0)) < @epsilon`)
+  }
+  const recorded: Array<{ id: number; productId: number; quantity: number; total: number }> = []
+  let recordedTotal = 0
+  for (const line of lines) {
+    const id = Number(line?.saleItemId)
+    const productId = Number(line?.productId)
+    const quantity = legacyFiniteNumber(line?.quantity)
+    const total = legacyFiniteNumber(line?.lineTotalUsd)
+    if (!Number.isInteger(id) || id <= 0 || recorded.some((r) => r.id === id)
+      || !Number.isInteger(productId) || productId <= 0 || quantity === null || total === null) return null
+    recorded.push({ id, productId, quantity, total })
+    recordedTotal += total
+  }
+  params.lines = JSON.stringify(recorded)
+  params.lineSum = direction === 'undo' ? subtotalAfter : subtotalAfter - recordedTotal
+  let lineTerm: string
+  if (direction === 'undo') {
+    params.lineCount = recorded.length
+    lineTerm = `(SELECT COUNT(*) FROM json_each(@lines) j JOIN sale_items si ON si.id = json_extract(j.value, '$.id')
+        WHERE si.sale_id = @saleId AND si.product_id = json_extract(j.value, '$.productId')
+          AND ABS(COALESCE(si.quantity, 0) - json_extract(j.value, '$.quantity')) < @epsilon
+          AND ABS(COALESCE(si.total_usd, 0) - json_extract(j.value, '$.total')) < @epsilon) = @lineCount`
+  } else {
+    lineTerm = `NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = @saleId
+        AND si.id IN (SELECT json_extract(value, '$.id') FROM json_each(@lines)))`
+  }
+  return {
+    sql: `(EXISTS (SELECT 1 FROM sales s WHERE s.id = @saleId AND ${moneyTerms.join(' AND ')})
+      AND ${lineTerm}
+      AND ABS((SELECT COALESCE(SUM(total_usd), 0) FROM sale_items WHERE sale_id = @saleId) - @lineSum) <= @sumTolerance)`,
+    params,
+  }
+}
+
+// Checks the derived state now and returns its in-batch twin, which aborts the
+// replay's whole batch through a malformed JSON path (the supplier.backfill
+// guard mechanism) if the sale changes between this check and the write.
+async function assertLegacySaleAddItemsUnchanged(
+  db: ReturnType<typeof getDb>, reversal: SaleAddItemsReversal, direction: 'undo' | 'redo',
+): Promise<{ sql: string; params: Record<string, unknown> }> {
+  const verb = direction === 'undo' ? 'undone' : 'redone'
+  const expectation = legacySaleAddItemsExpectation(reversal, direction)
+  if (!expectation) {
+    throw new UndoConflictError(`These added items were saved without the totals needed to check the sale is unchanged, so they cannot be ${verb} safely. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+  }
+  const row = await db.prepare(`SELECT CASE WHEN ${expectation.sql} THEN 1 ELSE 0 END AS ok`).get<{ ok: number }>(expectation.params)
+  if (Number(row?.ok) !== 1) {
+    throw new UndoConflictError(direction === 'undo'
+      ? 'This sale was edited after the items were added, so this can no longer be undone safely.'
+      : 'This sale was edited after these items were removed, so they can no longer be added back safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+  }
+  return {
+    sql: `SELECT CASE WHEN ${expectation.sql} THEN 1 ELSE json_extract('[1]', '$[sale_add_items_changed]') END AS sale_add_items_guard`,
+    params: expectation.params,
+  }
+}
+
+function legacySaleAddItemsRaceError(error: unknown, direction: 'undo' | 'redo'): unknown {
+  return /JSON path error|sale_add_items_changed/i.test(String((error as Error)?.message ?? error))
+    ? new UndoConflictError(`This sale changed while the added items were being ${direction === 'undo' ? 'removed' : 'added back'}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+    : error
 }
 
 type AtomicSaleAddItemsReversal = SaleAddItemsReversal & {
@@ -752,7 +1205,7 @@ async function replayAtomicSaleAddItems(
   const revision = await db.prepare('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS revision')
     .get<{ revision: number }>([saleId])
   if (Number(revision?.revision) !== expectedRevision) {
-    throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.')
+    throw new UndoConflictError('This sale was edited after the items were added. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
   }
 
   const currentSale=await db.prepare('SELECT * FROM sales WHERE id=?').get<Record<string,unknown>>([saleId])
@@ -940,7 +1393,7 @@ async function replayAtomicSaleAddItems(
     await db.batch(statements)
   } catch (error) {
     if (/constraint|guard_value/i.test(String(error))) {
-      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.')
+      throw new UndoConflictError('This sale or added-items receipt changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
     }
     throw error
   }
@@ -1442,9 +1895,24 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   return stmts
 }
 
-async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<void> {
+async function applyMergeReversal(
+  env: Env, r: MergeReversal, canChangeProductImages = true, legacyGuard?: AtomicMergeStatement,
+): Promise<void> {
   const db = getDb(env)
-  await db.batch(await buildMergeReversalStatements(env, r, canChangeProductImages))
+  const statements = await buildMergeReversalStatements(env, r, canChangeProductImages)
+  if (!legacyGuard) {
+    await db.batch(statements)
+    return
+  }
+  // assertLegacyMergeUnchanged's in-batch twin runs first, inside the batch.
+  try {
+    await db.batch([legacyGuard, ...statements])
+  } catch (error) {
+    if (/JSON path error|product_merge_changed/i.test(String((error as Error)?.message ?? error))) {
+      throw new UndoConflictError('These products changed while the merge was being undone, so the undo stopped before overwriting that change.', UNDO_RECORD_CHANGED_CODE)
+    }
+    throw error
+  }
 }
 
 // Undo a whole bulk merge: replay each fold's reversal in REVERSE application
@@ -1453,9 +1921,11 @@ async function applyMergeReversal(env: Env, r: MergeReversal, canChangeProductIm
 // first restores the keeper to the exact state the next-oldest reversal was
 // captured against. Each reversal runs in its own batch (validating the two
 // products still exist); a cleanup undo is a rare admin op, not a hot path.
-async function applyBulkMergeReversal(env: Env, reversals: MergeReversal[], canChangeProductImages = true): Promise<void> {
+async function applyBulkMergeReversal(
+  env: Env, reversals: MergeReversal[], canChangeProductImages = true, legacyGuards?: AtomicMergeStatement[] | null,
+): Promise<void> {
   for (let i = reversals.length - 1; i >= 0; i--) {
-    await applyMergeReversal(env, reversals[i], canChangeProductImages)
+    await applyMergeReversal(env, reversals[i], canChangeProductImages, legacyGuards?.[i])
   }
 }
 
@@ -1564,16 +2034,91 @@ export async function recordSupplierBackfillSnapshot(
   return { snapshotId, actionHistoryId: Number(hist.lastInsertRowid ?? 0) }
 }
 
+// Staleness (FX-undo): a replay may only rewrite a lot that still carries the
+// attribution the recorded action left on it. An undo expects every lot to
+// still be attributed to the backfilled supplier under the name the action
+// stamped (the snapshot's supplierName, which a redo keeps current) or the
+// supplier's current name (a rename that carried to its lots re-stamps them --
+// that is the same attribution); a redo expects every lot to still hold the
+// prior attribution the undo restored. Anything else is a later edit (a batch
+// edit, including one that changed only the lot's supplier name -- FX-undo2,
+// R-undo C8 -- a supplier merge, another backfill) that the replay must refuse
+// rather than overwrite. A lot that no longer exists counts as changed.
+function supplierBackfillLotsJson(r: SupplierBackfillReversal): string {
+  return JSON.stringify((r.lots || []).filter((l) => Number(l.id) > 0).map((l) => ({
+    id: Number(l.id),
+    prevSupplierId: l.prevSupplierId == null ? null : Number(l.prevSupplierId),
+    prevSupplierName: l.prevSupplierName ?? null,
+  })))
+}
+
+function supplierBackfillLotMatchesSql(direction: 'undo' | 'redo'): string {
+  return direction === 'undo'
+    ? `b.supplier_id IS @supplierId
+       AND lower(trim(COALESCE(b.supplier_name, ''))) IN (lower(trim(COALESCE(@supplierName, ''))),
+         (SELECT lower(trim(COALESCE(s.name, ''))) FROM suppliers s WHERE s.id = @supplierId))`
+    : `b.supplier_id IS json_extract(l.value, '$.prevSupplierId')
+       AND lower(trim(COALESCE(b.supplier_name, ''))) = lower(trim(COALESCE(json_extract(l.value, '$.prevSupplierName'), '')))`
+}
+
+function supplierBackfillStaleLotsParams(r: SupplierBackfillReversal): Record<string, unknown> {
+  return { lots: supplierBackfillLotsJson(r), supplierId: Number(r.supplierId), supplierName: r.supplierName ?? null }
+}
+
+function supplierBackfillStaleLotsSql(direction: 'undo' | 'redo'): string {
+  return `SELECT json_extract(l.value, '$.id') AS id FROM json_each(@lots) l
+    WHERE NOT EXISTS (SELECT 1 FROM product_batches b
+      WHERE b.id = json_extract(l.value, '$.id') AND ${supplierBackfillLotMatchesSql(direction)})`
+}
+
+async function assertSupplierBackfillLotsUnchanged(
+  db: ReturnType<typeof getDb>, r: SupplierBackfillReversal, direction: 'undo' | 'redo',
+): Promise<void> {
+  const stale = await db.prepare(supplierBackfillStaleLotsSql(direction))
+    .all<{ id: number }>(supplierBackfillStaleLotsParams(r))
+  if (stale.length) {
+    const noun = stale.length === 1 ? 'lot was' : 'lots were'
+    throw new UndoConflictError(`${stale.length} ${noun} re-attributed after this change, so it can no longer be ${direction === 'undo' ? 'undone' : 'redone'} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+  }
+}
+
+// In-batch twin of the check above: aborts the whole batch through a malformed
+// JSON path (the ordinaryBusinessMaintenanceGuard mechanism) when any lot
+// changed between the check and the write.
+function supplierBackfillGuardStatement(r: SupplierBackfillReversal, direction: 'undo' | 'redo') {
+  return {
+    sql: `SELECT CASE WHEN NOT EXISTS (${supplierBackfillStaleLotsSql(direction)})
+      THEN 1 ELSE json_extract('[1]', '$[supplier_backfill_lot_changed]') END AS supplier_backfill_guard`,
+    params: supplierBackfillStaleLotsParams(r),
+  }
+}
+
+async function runSupplierBackfillBatch(
+  db: ReturnType<typeof getDb>, r: SupplierBackfillReversal, direction: 'undo' | 'redo',
+  stmts: Array<{ sql: string; params: Record<string, unknown> }>,
+): Promise<void> {
+  if (!stmts.length) return
+  try {
+    await db.batch([supplierBackfillGuardStatement(r, direction), ...stmts])
+  } catch (error) {
+    if (/JSON path error|supplier_backfill_lot_changed/i.test(String((error as Error)?.message ?? error))) {
+      throw new UndoConflictError(`A lot was re-attributed while this change was being ${direction === 'undo' ? 'undone' : 'redone'}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+    }
+    throw error
+  }
+}
+
 // UNDO: restore each lot's exact prior attribution.
 async function applySupplierBackfillUndo(env: Env, r: SupplierBackfillReversal): Promise<void> {
   const db = getDb(env)
+  await assertSupplierBackfillLotsUnchanged(db, r, 'undo')
   const stmts = (r.lots || [])
     .filter((l) => Number(l.id) > 0)
     .map((l) => ({
       sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
       params: { id: Number(l.id), sid: l.prevSupplierId == null ? null : Number(l.prevSupplierId), sname: l.prevSupplierName ?? null },
     }))
-  if (stmts.length) await db.batch(stmts)
+  await runSupplierBackfillBatch(db, r, 'undo', stmts)
 }
 
 // REDO: re-apply the supplier to the same lots, using the supplier's CURRENT
@@ -1584,6 +2129,7 @@ async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal):
   const supplierId = Number(r.supplierId)
   const supplier = await db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get<{ id: number; name: string }>([supplierId])
   if (!supplier) throw new Error('That supplier no longer exists, so this attribution cannot be redone.')
+  await assertSupplierBackfillLotsUnchanged(db, r, 'redo')
   const name = supplier.name
   const stmts = (r.lots || [])
     .filter((l) => Number(l.id) > 0)
@@ -1591,7 +2137,7 @@ async function applySupplierBackfillRedo(env: Env, r: SupplierBackfillReversal):
       sql: 'UPDATE product_batches SET supplier_id = @sid, supplier_name = @sname, updated_at = CURRENT_TIMESTAMP WHERE id = @id',
       params: { id: Number(l.id), sid: supplierId, sname: name },
     }))
-  if (stmts.length) await db.batch(stmts)
+  await runSupplierBackfillBatch(db, r, 'redo', stmts)
   return name
 }
 
@@ -2201,6 +2747,28 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
   return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: expectedGeneration + 1 }
 }
 
+// branch.update records the PRE-edit fields as its undo payload and the
+// POST-edit fields as its redo payload. The payload a replay is NOT running is
+// therefore the state the row must still be in: an undo expects the redo
+// payload's fields, a redo the undo payload's. Read from the history row
+// itself, never from the request, and refused when it is missing.
+async function branchReplayExpectedFields(
+  db: ReturnType<typeof getDb>, id: number, ctx: UndoApplierContext,
+): Promise<BranchWriteFields> {
+  const refuse = () => new UndoConflictError('This branch edit has no recorded result to check against, so it cannot be replayed safely. Edit the branch directly instead.', UNDO_RECORD_CHANGED_CODE)
+  if (!ctx.historyId) throw refuse()
+  const row = await db.prepare('SELECT undo_payload, redo_payload FROM action_history WHERE id = ?')
+    .get<{ undo_payload: string | null; redo_payload: string | null }>([ctx.historyId])
+  const raw = row ? (ctx.direction === 'undo' ? row.redo_payload : row.undo_payload) : null
+  let other: Record<string, unknown> | null = null
+  try { other = raw ? JSON.parse(raw) as Record<string, unknown> : null } catch (_) { other = null }
+  if (!other || other.applier !== 'branch.update' || Number(other.id) !== id
+    || !other.fields || typeof other.fields !== 'object' || Array.isArray(other.fields)) {
+    throw refuse()
+  }
+  return other.fields as BranchWriteFields
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // Scoped Set (lib/stockLotAdjustment.ts): the server replays the exact lot
@@ -2343,8 +2911,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
         if (savedFingerprint && !sameSaleStateFingerprint(await saleStateFingerprint(db, saleId),savedFingerprint)) {
-          throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.')
+          throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
         }
+        // With or without a fingerprint, the state the undo overwrites is
+        // derived from the snapshot and re-checked inside the batch.
+        const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'undo')
         const removal = planSaleLineRemoval({
           saleId,
           lines: reversal.lines || [],
@@ -2362,6 +2933,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // the afternoon.
         const undoGroupId = crypto.randomUUID()
         await db.batch([
+          saleGuard,
           ...removal.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
           ...(reversal.lineMoneyBefore
@@ -2386,10 +2958,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userId: ctx.user?.id ?? null,
             userName: actorSnapshot(ctx.user),
           })),
-        ])
+        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('These items are already on the sale; there is nothing to redo.')
+        // A redo writes moneyAfter over the sale, so it too must find the sale
+        // exactly as the undo left it (R-undo C10: it was never checked).
+        const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'redo')
         // Re-add through the SAME production planner, drawing the exact lots
         // the original addition drew from (plannedLineFromRecord) rather than
         // re-running FIFO -- undo put those units back into those lots, so
@@ -2410,9 +2985,13 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         // never explains.
         const redoGroupId = crypto.randomUUID()
         const residualGuards = planUnlottedSaleLineGuards(plan.lines)
-        const results = await db.batch([
+        const leading = [
+          saleGuard,
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
           ...residualGuards,
+        ]
+        const results = await db.batch([
+          ...leading,
           ...plan.statements,
           saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
           ...(reversal.lineMoneyAfter
@@ -2437,9 +3016,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
             userName: actorSnapshot(ctx.user),
           })),
           { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        ]) as Array<{ meta?: { last_row_id?: number } }>
+        ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'redo') }) as Array<{ meta?: { last_row_id?: number } }>
         const saleItemIdByLine = plan.lines.map((_line, lineIndex) => {
-          const statementIndex = 1 + residualGuards.length + plan.saleItemStatementIndexByLine[lineIndex]
+          const statementIndex = leading.length + plan.saleItemStatementIndexByLine[lineIndex]
           return Number(results[statementIndex]?.meta?.last_row_id || 0) || null
         })
         const allocationStatements = buildAllocationStatements(plan.lines, saleItemIdByLine)
@@ -2450,13 +3029,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         }
         // The re-inserted rows have NEW ids -- persist them so a later undo
         // deletes the rows that actually exist, not the ones this redo
-        // replaced.
-        const nextReversal: SaleAddItemsReversal = {
+        // replaced. A saved fingerprint names those ids and the amendment
+        // head, which this redo just moved, so it is re-taken too; kept as it
+        // was, it could never match again and the next undo would be refused.
+        const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
+        const nextReversal: SaleAddItemsReversal & { saleStateFingerprint?: string } = {
           ...reversal,
           lines: (reversal.lines || []).map((line, lineIndex) => ({
             ...line,
             saleItemId: Number(saleItemIdByLine[lineIndex] || 0) || line.saleItemId,
           })),
+          ...(savedFingerprint ? { saleStateFingerprint: await saleStateFingerprint(db, saleId) } : {}),
         }
         await db.prepare("UPDATE undo_snapshots SET payload_json = @payload, status = 'applied', updated_at = CURRENT_TIMESTAMP WHERE id = @id")
           .run({ payload: JSON.stringify(nextReversal), id: snapshotId })
@@ -2490,15 +3073,41 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (!Number.isInteger(id) || id <= 0) {
         throw new Error('This action cannot be replayed: its saved details are missing a branch id.')
       }
-      const existing = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
-        .get<{ id: number; name: string; is_active: number }>([id])
+      const existing = await db.prepare(BRANCH_REPLAY_ROW_SQL).get<BranchReplayRow>([id])
       if (!existing) {
         throw new Error('The branch this action changed no longer exists, so it cannot be reversed.')
       }
       const fields = payload.fields && typeof payload.fields === 'object'
         ? (payload.fields as Record<string, unknown>)
         : {}
-      await db.batch(branchUpdateStatements(id, fields, existing))
+      // Staleness: the row must still hold what the recorded action left
+      // behind -- the OTHER payload of this history row -- for every field
+      // this replay restores, or a later edit would be silently overwritten.
+      const expected = await branchReplayExpectedFields(db, id, ctx)
+      const verb = ctx.direction === 'undo' ? 'undone' : 'redone'
+      const stale = staleBranchReplayFields(existing, expected)
+      if (stale.length) {
+        throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+      }
+      const replayFields = completeBranchReplayFields(fields, existing)
+      if (branchReplayDropsDefault(replayFields, existing)
+        && !(await db.prepare(OTHER_CANONICAL_BRANCH_SQL).get<{ id: number }>([id]))) {
+        throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`, UNDO_NO_DEFAULT_BRANCH_CODE)
+      }
+      try {
+        await db.batch([
+          branchReplayStateGuardStatement(id, expected),
+          ...branchUpdateStatements(id, replayFields, existing),
+          ...branchReplayDefaultStatements(id, replayFields, existing),
+        ])
+      } catch (error) {
+        // Every guard in this batch (identity, staleness, one default) aborts
+        // through the same NOT NULL on branches.name.
+        if (/NOT NULL constraint failed: branches\.name/i.test(String((error as Error)?.message ?? error))) {
+          throw new UndoConflictError(`This branch changed while the change was being ${verb}. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
+        }
+        throw error
+      }
       await audit(
         ctx.env,
         ctx.user?.id ?? null,
@@ -2539,7 +3148,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
-        await applyMergeReversal(ctx.env, reversal, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
+        const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
+        const legacyGuards = await assertLegacyMergeUnchanged(db, [reversal], reversal.mergedStateFingerprint, canChangeImages)
+        await applyMergeReversal(ctx.env, reversal, canChangeImages, legacyGuards?.[0])
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
@@ -2615,7 +3226,9 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
         await assertMergeStateUnchanged(db, reversals, mergedStateFingerprint)
-        await applyBulkMergeReversal(ctx.env, reversals, !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full')
+        const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
+        const legacyGuards = await assertLegacyMergeUnchanged(db, reversals, mergedStateFingerprint, canChangeImages)
+        await applyBulkMergeReversal(ctx.env, reversals, canChangeImages, legacyGuards)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
         if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
