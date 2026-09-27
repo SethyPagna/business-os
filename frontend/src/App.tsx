@@ -34,6 +34,8 @@ import { SIGNOUT_RETRY_EVENT, isSignoutBlocked } from './api/unresolvedSignout.t
 import { captureOfflineSaleOwner, offlineSaleOwnersMatch, type OfflineSaleOwner } from './api/offlineQueueOwnership.ts'
 import { hasLocalSyncProblemPresentation, subscribeSyncProblemPresentation, shouldClearResolvedSyncError, SYNC_ERROR_RESOLVED_EVENT, type SyncProblemReference } from './utils/syncProblemLifecycle.ts'
 import { presentWriteError } from './utils/writeErrorPresentation.ts'
+import { runWhenVisible } from './utils/visibilityPolling.ts'
+import { createPendingSyncPoll } from './app/pendingSyncPolling.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -612,9 +614,13 @@ function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
   let cancelled = false
   let idleId: number | null = null
   let timerId: number | null = null
+  let cancelWaitForVisible: (() => void) | null = null
   const run = () => {
-    if (cancelled || document.visibilityState === 'hidden') return
-    refresh()
+    if (cancelled) return
+    // A tab hidden at this point reads once it is shown. It used to drop the
+    // read and rely on the session-long 20 s interval, which F2 removed; the
+    // poll now starts from a completed read (createPendingSyncPoll).
+    cancelWaitForVisible = runWhenVisible(refresh)
   }
 
   timerId = window.setTimeout(() => {
@@ -631,20 +637,7 @@ function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
     if (idleId != null && typeof window.cancelIdleCallback === 'function') {
       window.cancelIdleCallback(idleId)
     }
-  }
-}
-
-function scheduleDeferredPendingSyncPolling(refresh: () => void): CancelWarmup {
-  if (typeof window === 'undefined') return () => {}
-
-  let intervalId: number | null = null
-  const timerId = window.setTimeout(() => {
-    intervalId = window.setInterval(refresh, PENDING_SYNC_POLL_INTERVAL_MS)
-  }, PENDING_SYNC_INITIAL_REFRESH_DELAY_MS)
-
-  return () => {
-    window.clearTimeout(timerId)
-    if (intervalId != null) window.clearInterval(intervalId)
+    cancelWaitForVisible?.()
   }
 }
 
@@ -793,6 +786,9 @@ function useSyncErrorBanner(user: AppUser | null) {
     const isCurrent = () => !disposed && isActorReadScopeCurrent(scope, false)
       && offlineSaleOwnersMatch(owner, pendingSaleOwnerForUser(user))
 
+    // Polls only while a read shows something to watch drain (or could not
+    // confirm the owner), and never in a hidden tab -- see pendingSyncPolling.ts.
+    const pendingSyncPoll = createPendingSyncPoll(() => refreshPendingSync(), PENDING_SYNC_POLL_INTERVAL_MS)
     const refreshPendingSync = () => {
       if (!isCurrent()) return
       const requestId = ++request
@@ -800,6 +796,7 @@ function useSyncErrorBanner(user: AppUser | null) {
         .then((state) => {
           if (!isCurrent() || requestId !== request) return
           setPendingSync(state && offlineSaleOwnersMatch(state.owner, owner) ? { state, scope } : null)
+          pendingSyncPoll.observe(state)
         })
         .catch(() => {})
     }
@@ -852,11 +849,10 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('offline:vault-locked', onVaultLocked)
     window.addEventListener('sync:write-conflict', onConflictReview)
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
-    const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
     return () => {
       disposed = true
       cancelInitialPendingSyncRefresh()
-      cancelPendingSyncPolling()
+      pendingSyncPoll.cancel()
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
       window.removeEventListener('sync:transient-outage', onTransientOutage)
