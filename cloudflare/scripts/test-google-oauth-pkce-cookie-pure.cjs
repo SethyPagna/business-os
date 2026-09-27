@@ -92,7 +92,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: noop, getClientIp: () => '127.0.0.1' },
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': { recordFailedLogin: noop, getLoginLockoutState: async () => ({ locked: false }), clearLoginLockout: noop },
@@ -154,10 +154,14 @@ const s256 = (value) => crypto.createHash('sha256').update(value).digest('base64
 const setCookies = (res) => (typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [res.headers.get('set-cookie')].filter(Boolean))
 const pkceSetCookie = (res) => setCookies(res).find((line) => line.startsWith(`${COOKIE}=`)) || null
 
+// S-auth4e: starting a link re-checks the current password (the signed-in
+// test user is always the cashier); see test-google-link-profile-pure.cjs.
+const linkPassword = (mode) => (mode === 'link' ? { currentPassword: 'cashier-pass' } : {})
+
 async function start(mode, sessionToken) {
   const headers = { 'Content-Type': 'application/json' }
   if (sessionToken) headers.Cookie = `bos_session=${sessionToken}`
-  const res = await authRoute.request('/oauth/start', { method: 'POST', headers, body: JSON.stringify({ mode }) }, env(), ctx)
+  const res = await authRoute.request('/oauth/start', { method: 'POST', headers, body: JSON.stringify({ mode, ...linkPassword(mode) }) }, env(), ctx)
   const body = await res.json()
   const state = body.url ? new URL(body.url).searchParams.get('state') : null
   const line = pkceSetCookie(res)
@@ -230,6 +234,30 @@ async function check(name, fn) {
     assertCleared(done.cleared)
   })
 
+  // S-auth4b (council K21): the app shows its forced password change screen
+  // from the sign-in payload's flag. The Google sign-in payload must carry the
+  // account's flag like POST /login and /otp/verify do, or a Google sign-in of
+  // an account that must change its password mounts the app behind 403s.
+  const googlePayload = (html) => JSON.parse(/const payload = (\{.*\});/.exec(html)[1])
+  await check('S-auth4b: a Google sign-in of an account that must change its password carries the flag', async () => {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
+    db.prepare('UPDATE users SET must_change_password = 1 WHERE id = 3').run({})
+    const started = await start('login')
+    const done = await callback(started.state, { pkce: started.cookieValue })
+    assert.equal(done.status, 200, done.html)
+    const payload = googlePayload(done.html)
+    assert.equal(payload.user.id, 3)
+    assert.equal(payload.user.must_change_password, 1)
+  })
+
+  await check('S-auth4b control: a Google sign-in of an account that need not change reads 0', async () => {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0')
+    const started = await start('login')
+    const done = await callback(started.state, { pkce: started.cookieValue })
+    assert.equal(done.status, 200, done.html)
+    assert.equal(googlePayload(done.html).user.must_change_password, 0)
+  })
+
   await check('a callback WITHOUT the cookie is refused and the code is never redeemed', async () => {
     const started = await start('login')
     const done = await callback(started.state, {})
@@ -296,7 +324,7 @@ async function check(name, fn) {
   async function startAt(origin, mode, redirectTo, sessionToken) {
     const headers = { 'Content-Type': 'application/json' }
     if (sessionToken) headers.Cookie = `bos_session=${sessionToken}`
-    const res = await authRoute.request(`${origin}/oauth/start`, { method: 'POST', headers, body: JSON.stringify({ mode, redirectTo }) }, env(), ctx)
+    const res = await authRoute.request(`${origin}/oauth/start`, { method: 'POST', headers, body: JSON.stringify({ mode, redirectTo, ...linkPassword(mode) }) }, env(), ctx)
     return { status: res.status, body: await res.json(), cookieLine: pkceSetCookie(res) }
   }
 

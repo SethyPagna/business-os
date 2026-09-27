@@ -84,7 +84,7 @@ const app = load('routes/users.ts', {
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'Too many wrong current-password attempts. Please try again later.', verifyCurrentPassword: async (_c, _who, plain, hash) => (hash === `hash:${plain}` ? { ok: true } : { ok: false, rateLimited: false }) },
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },

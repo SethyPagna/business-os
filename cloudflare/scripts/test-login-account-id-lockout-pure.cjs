@@ -23,8 +23,12 @@ async function check(name, fn) {
 }
 
 const ALIASES = ['dara', 'dara@shop.test', 'Dara Sok']
-let ipCounter = 0
-const freshIp = () => `198.51.100.${++ipCounter}`
+// S-auth4d: the lockout and the per-account limiter are scoped to the
+// network (account + IP), so these alias checks run from ONE network; that
+// failures from one network do not lock another is
+// test-login-lockout-per-network-pure.cjs.
+const NETWORK = '198.51.100.1'
+const freshIp = () => NETWORK
 
 async function main() {
   await check('failures spread across aliases share ONE escalating lockout', async () => {
@@ -77,7 +81,7 @@ async function main() {
     }
     const ok = await h.request('/login', 'POST', { username: 'dara', password: 'right-password' }, { ip: freshIp() })
     assert.equal(ok.status, 200)
-    const row = h.raw.prepare("SELECT failed_count FROM login_lockouts WHERE username = '#uid:603'").get()
+    const row = h.raw.prepare("SELECT failed_count FROM login_lockouts WHERE username = ?").get(['#uid:603@198.51.100.1'])
     assert.equal(row, undefined, 'the id-keyed counter is cleared on success')
     // Five fresh free attempts again (2 + 1 + 5 stays inside the limiter;
     // without the clear, the 4th of these would be the 6th failure and lock).
@@ -110,7 +114,7 @@ async function main() {
     for (let i = 0; i < 6; i++) {
       await h.request('/otp/verify', 'POST', { userId: 604, token: '000000', otpChallenge: first.body.otpChallenge }, { ip: freshIp() })
     }
-    const idRow = h.raw.prepare("SELECT failed_count FROM login_lockouts WHERE username = '#uid:604'").get()
+    const idRow = h.raw.prepare("SELECT failed_count FROM login_lockouts WHERE username = ?").get(['#uid:604@198.51.100.1'])
     assert.ok(idRow && idRow.failed_count >= 6, 'wrong second-factor codes feed the id-keyed lockout')
     const viaEmail = await h.request('/login', 'POST', { username: 'dara@shop.test', password: 'right-password' }, { ip: freshIp() })
     assert.equal(viaEmail.status, 429, 'a lockout earned at the OTP step holds at the password step of every alias')

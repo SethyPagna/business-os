@@ -538,6 +538,7 @@ const SettingsHubPage = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const Login = lazyWithRetry(asPageModule(() => import('./components/auth/Login')), 'auth-login')
+const ForcedPasswordChange = lazyWithRetry(asPageModule(() => import('./components/auth/ForcedPasswordChange.tsx')), 'auth-forced-password-change')
 const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components/shared/NotificationCenter')), 'notification-center')
 const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
 const NotesWidget = lazyWithRetry(asPageModule(() => import('./components/shared/NotesWidget')), 'notes-widget')
@@ -2207,6 +2208,19 @@ export default function App() {
         <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
         <Suspense fallback={<PageLoader />}>
           <Login />
+        </Suspense>
+      </>
+    )
+  }
+
+  // S-auth4b: signed in with a publicly known password. The Worker refuses
+  // everything else until it is changed, so the app is not mounted at all.
+  if (Number((user as { must_change_password?: unknown }).must_change_password || 0) === 1) {
+    return (
+      <>
+        <AppUpdateBanner update={appUpdate} onDismiss={clearAppUpdate} />
+        <Suspense fallback={<PageLoader />}>
+          <ForcedPasswordChange />
         </Suspense>
       </>
     )

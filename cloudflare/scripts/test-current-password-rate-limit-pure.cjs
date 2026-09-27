@@ -76,8 +76,13 @@ const rateLimitDb = (raw) => ({
 const rateLimit = load('lib/rateLimit.ts', { './db': { getDb: (env) => rateLimitDb(env.DB) }, '../index': {} })
 const bcryptStub = { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` }
 const guardPath = path.join(__dirname, '..', 'src', 'lib', 'currentPasswordGuard.ts')
+// The cookies here are bare strings with no user_sessions row, so the sign-in
+// family lookup finds nothing and the guard keys per cookie -- each cookie
+// stands for one sign-in. Families across minted sessions are pinned by
+// test-migration-0201-session-limit-family-pure.cjs against the real lib/auth.ts.
+const authLibStub = { currentSessionLimitFamily: async () => null }
 const guard = fs.existsSync(guardPath)
-  ? load('lib/currentPasswordGuard.ts', { './rateLimit': rateLimit, bcryptjs: bcryptStub, 'hono/cookie': require('hono/cookie'), '../index': {} })
+  ? load('lib/currentPasswordGuard.ts', { './rateLimit': rateLimit, './auth': authLibStub, bcryptjs: bcryptStub, 'hono/cookie': require('hono/cookie'), '../index': {} })
   : {}
 
 let db
@@ -100,7 +105,7 @@ const usersRoute = load('routes/users.ts', {
   '../lib/uploadSecurity': { validateUploadedBuffer: () => {} },
   '../lib/rateLimit': rateLimit,
   '../lib/currentPasswordGuard': guard,
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
@@ -128,7 +133,7 @@ const authRoute = load('routes/auth.ts', {
   '../lib/planTier': { resolvePlanTier: () => 'pro' },
   '../lib/rateLimit': rateLimit,
   '../lib/currentPasswordGuard': guard,
-  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '' },
+  '../lib/passwordPolicy': { passwordTooShort: () => false, passwordMinLengthError: () => '', passwordKnownLeaked: () => false, setPasswordMustChange: async () => {} },
   '../lib/settingsSensitive': { stripSensitiveSettings: (v) => v },
   '../lib/otpChallenge': { issueOtpChallenge: async () => 'ch', isLiveOtpChallenge: async () => false, consumeOtpChallenge: noop },
   '../lib/loginLockout': { recordFailedLogin: noop, getLoginLockoutState: async () => ({ locked: false }), clearLoginLockout: noop },
