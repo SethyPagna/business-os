@@ -105,7 +105,7 @@ Never reconcile in the shared tree: peers are working in it, and a merge conflic
 everyone.
 
 ```bash
-git worktree add -b reconcile/<date> C:/Users/mrkl6/Downloads/bos-rec main
+git worktree add -b reconcile/<date> ../bos-rec main
 ```
 
 Use a **short path** — deep `node_modules/.pnpm/…` paths hit the Windows MAX_PATH limit.
