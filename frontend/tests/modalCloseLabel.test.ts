@@ -71,10 +71,11 @@ assert.match(
   `${posLightboxFiles[0]}'s lightbox labels must pass a translated close label, not rely on the component default`,
 )
 // Positive control on the same discovered file: its prev sibling, right
-// next to the new close field, is untouched.
+// next to the new close field, is untouched. (FX-ui part 1 moved it from the
+// English-only posCopy('Prev') to the pack key prevImage, present in both packs.)
 assert.match(
   posLightboxSource,
-  /prev:\s*posCopy\('Prev'\)/,
+  /prev:\s*t\('prevImage'\)/,
   `positive control: ${posLightboxFiles[0]}'s lightbox prev label (existing convention) is untouched`,
 )
 
