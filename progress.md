@@ -116,6 +116,12 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
   - [ ] A7 R2 layout: lifecycle for imports/ (7 d), quarantine/ (30 d), aborted multipart (1 d); backups/ in their own bucket during the APAC move
   - [ ] A8 gated read models: closed-day report cache (trigger-invalidated), stored product family key + keyset paging, index cleanup by EXPLAIN — only if 7 days of A0 numbers cross the thresholds in the plan
   - [ ] Production counts Q1–Q9 (read-only, via the ops d1-export path, results only in Records)
+  - [x] C3v3 deep audit (27 Sep, read-only, 4 reviewers: D1 schema, Worker round trips, frontend data flow, storage/platform) → `Records/Performance/2026-09-27/C3v3-plan-revision.md`. Corrections: only `undo_snapshots` + operation/receipt tables are truly unbounded (revisions and receipts must never be pruned); version bumps are not awaited today.
+  - [ ] F1 remove the leftover offline snapshot loop (11 serial requests per device every 5 min, results discarded) — first after CP-3
+  - [ ] F2 Durable Object auto-pong + pause health/WS/pending polls while the tab is hidden; F3 stop pre-downloading every route on deploy
+  - [ ] A2 fix: `action_history` retention must skip referenced rows (error currently swallowed); `undo_snapshots` expiry; split the 6-hourly cron
+  - [ ] B1 backups: keyset paging instead of OFFSET, full backup at 03:00 local; separate backups bucket (owner decision)
+  - [ ] W1 sale create ~18–20 D1 trips → 3–4; W2 report reader one-batch snapshot instead of double read; W3 login batching + atomic lockout
 
 <!-- PD-1 plan start -->
 ## PD-1 — Performance & debloat deep pass (started 25 Sep 2026) — ACTIVE
