@@ -27,9 +27,15 @@ import { getDb } from './db'
 import { getPlanLimits } from './planTier'
 import { sqliteUtcTimestamp } from './rateLimit'
 import { deleteObjectsBulk } from './r2'
+import { recordAnalytics } from './analytics'
 import type { Env } from '../index'
 
 const LAST_RUN_KEY = 'ephemeral_retention_last_run'
+// Durable outcome of the last completed sweep: { at, failed, deleted,
+// retained }. There is no job_runs table in this schema; the settings row
+// sits beside LAST_RUN_KEY so a failing step leaves evidence in D1, not only
+// in a console line nobody tails.
+export const LAST_RESULT_KEY = 'ephemeral_retention_last_result'
 // 5h (not 6h) so ordinary jitter between 6h ticks can never make every second
 // tick skip -- same reasoning as importRetention's interval.
 const MIN_INTERVAL_MS = 5 * 60 * 60 * 1000
@@ -126,6 +132,93 @@ export interface EphemeralRetentionResult {
   skipped: boolean
   reason?: string
   deleted?: Record<string, number>
+  // Steps that threw, with the error message. A failing step no longer
+  // disappears into one console line: it is returned, logged with a count,
+  // and recorded to Analytics Engine, while every other step still runs.
+  failed?: Record<string, string>
+  // action_history rows past the window that were deliberately KEPT because
+  // another table still references them (see pruneActionHistory).
+  retained?: Record<string, number>
+}
+
+// ---------------------------------------------------------------------------
+// action_history is a PARENT table. Operation receipts point at it through
+// plain `REFERENCES action_history(id)` columns (sale_bulk_operations,
+// stock_session_operations, return_bulk_operations, sale_mutation_receipts,
+// sale_incident_recovery_members, sale_not_paid_stock_recovery_members,
+// stock_lot_adjustment_operations -- NO ACTION) and the product-conflict /
+// product-remove tables (ON DELETE SET NULL). D1 enforces foreign keys, and
+// a NO ACTION violation aborts the WHOLE bounded DELETE statement: a single
+// referenced id inside a slice meant the slice deleted nothing, the error was
+// swallowed, and the next sweep picked the same slice again -- so one old
+// receipt stalled action_history retention forever.
+//
+// Every referenced id is excluded, not only the NO ACTION ones: receipts are
+// idempotency/concurrency evidence that is never pruned, and a SET NULL
+// cascade would silently cut a merge-run / conflict-group / remove
+// operation's undo link to its history row. Rows named by a top-level
+// `history_id` inside an undo_snapshots payload (customer gender
+// restoration joins through it) are excluded too.
+//
+// The referencing columns are DISCOVERED from the live schema each run (one
+// sqlite_master x pragma_foreign_key_list read), so a future migration that
+// adds another reference cannot reintroduce the stall. Internal D1
+// (_cf_*) and sqlite_* tables are filtered before the pragma is evaluated
+// (MATERIALIZED), since D1 does not authorize reading them.
+// ---------------------------------------------------------------------------
+export type ForeignReference = { table_name: string; column_name: string }
+
+function quoteIdent(name: string): string {
+  return `"${String(name).replace(/"/g, '""')}"`
+}
+
+export async function discoverActionHistoryReferences(db: Db): Promise<ForeignReference[]> {
+  const rows = await db.prepare(`
+    WITH candidate AS MATERIALIZED (
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+        AND name NOT LIKE '!_cf!_%' ESCAPE '!'
+        AND name NOT LIKE 'sqlite!_%' ESCAPE '!'
+    )
+    SELECT candidate.name AS table_name, f."from" AS column_name
+    FROM candidate JOIN pragma_foreign_key_list(candidate.name) AS f
+    WHERE lower(f."table") = 'action_history'
+    ORDER BY candidate.name, f."from"
+  `).all<ForeignReference>({})
+  return (Array.isArray(rows) ? rows : []).filter((row) => row?.table_name && row?.column_name)
+}
+
+// The exclusion is a non-correlated NOT IN per referencing column: SQLite
+// builds each set once per statement, so an unindexed history_id column costs
+// one scan of that (small) table rather than one per candidate row.
+// `IS NOT NULL` is load-bearing -- a single NULL in the set would make
+// NOT IN unknown for every row and silently stop all pruning.
+export function actionHistoryReferenceExclusion(references: ForeignReference[]): string {
+  return references.map(({ table_name, column_name }) => {
+    const column = quoteIdent(column_name)
+    return ` AND id NOT IN (SELECT ${column} FROM ${quoteIdent(table_name)} WHERE ${column} IS NOT NULL)`
+  }).join('') + SNAPSHOT_HISTORY_EXCLUSION
+}
+
+// Snapshot payloads are large; instr() skips the JSON parse for every payload
+// that cannot name a history row, and json_valid() keeps one malformed legacy
+// payload (0135 indexes exist for exactly those) from erroring the statement
+// -- which would recreate the very stall this sweep is fixing.
+// CASE (not AND) because SQLite does not promise to evaluate AND left-to-right.
+const SNAPSHOT_HISTORY_ID = `CASE WHEN instr(payload_json, '"history_id"') > 0 AND json_valid(payload_json)
+      THEN CAST(json_extract(payload_json, '$.history_id') AS INTEGER) END`
+const SNAPSHOT_HISTORY_EXCLUSION = ` AND id NOT IN (SELECT ${SNAPSHOT_HISTORY_ID} FROM undo_snapshots
+    WHERE (${SNAPSHOT_HISTORY_ID}) IS NOT NULL)`
+
+async function pruneActionHistory(env: Env, db: Db, retained: Record<string, number>): Promise<number> {
+  const cutoff = daysAgo(ACTION_HISTORY_TTL_DAYS)
+  const references = await discoverActionHistoryReferences(db)
+  const removed = await batchDeleteById(env, db, 'action_history', `created_at < @cutoff${actionHistoryReferenceExclusion(references)}`, { cutoff })
+  // Everything still older than the window is, by construction, referenced.
+  // Reported so a growing pinned set is visible rather than inferred.
+  const left = await db.prepare('SELECT COUNT(*) AS n FROM action_history WHERE created_at < @cutoff').get<{ n: number }>({ cutoff })
+  retained.action_history = Number(left?.n || 0)
+  return removed
 }
 
 // Collect the R2 keys a set of submission rows points at. Only keys under
@@ -211,10 +304,16 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
 
   const db = getDb(env)
   const deleted: Record<string, number> = {}
+  const failed: Record<string, string> = {}
+  const retained: Record<string, number> = {}
   // Each table guarded independently: a table missing on a not-yet-migrated
   // local DB, or a transient error on one, must not stop the others.
   const step = async (label: string, fn: () => Promise<number>) => {
-    try { deleted[label] = await fn() } catch (error) { console.error(`[ephemeral-retention] ${label} failed`, (error as Error)?.message || error) }
+    try { deleted[label] = await fn() } catch (error) {
+      const message = String((error as Error)?.message || error).slice(0, 300)
+      failed[label] = message
+      console.error(`[ephemeral-retention] ${label} failed`, message)
+    }
   }
 
   await step('rate_limit_events', () => batchDeleteById(env, db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
@@ -230,12 +329,29 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
   }))
   await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
   await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
-  await step('action_history', () => batchDeleteById(env, db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
+  await step('action_history', () => pruneActionHistory(env, db, retained))
   await step('share_submission_images', () => pruneSubmissionImages(env, db))
   await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
   await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
   await step('portal_auth_lockouts', () => directDelete(db, 'portal_auth_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
 
+  const failedLabels = Object.keys(failed)
+  if (failedLabels.length) {
+    console.error(`[ephemeral-retention] ${failedLabels.length} step(s) failed: ${failedLabels.join(', ')}`)
+  }
+  try {
+    await setSettingValue(env, LAST_RESULT_KEY, JSON.stringify({ at: new Date().toISOString(), failed, deleted, retained }))
+  } catch (error) {
+    console.error('[ephemeral-retention] could not record the sweep result', (error as Error)?.message || error)
+  }
+  // Table labels and counts only -- nothing identifying (see analytics.ts).
+  // -1 means the action_history step did not complete.
+  recordAnalytics(env, {
+    kind: 'ephemeral_retention',
+    labels: [failedLabels.join(',') || 'ok'],
+    values: [failedLabels.length, deleted.action_history ?? -1, retained.action_history ?? -1],
+  })
+
   await setSettingValue(env, LAST_RUN_KEY, new Date().toISOString())
-  return { skipped: false, deleted }
+  return { skipped: false, deleted, failed, retained }
 }

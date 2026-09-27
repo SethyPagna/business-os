@@ -529,6 +529,10 @@ export const FACTORY_RESET_TABLES = [
   'promotions',
   'verification_codes',
   'user_sessions',
+  // Parent of the history_id column on every operation receipt (0120-0193).
+  // Reset clears those children above first; scheduled retention
+  // (ephemeralRetention.ts) instead keeps any row still referenced by a
+  // foreign key or an undo snapshot payload.
   'action_history',
   'audit_logs',
   'settings',
