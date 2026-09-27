@@ -258,7 +258,17 @@ function freshDb() {
            CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);
            CREATE TABLE returns (branch_id INTEGER, branch_name TEXT);
            CREATE TABLE stock_row_moves (branch_id INTEGER, branch_name TEXT);`)
+  // FX-undo: branch.update compares the row against the OTHER payload of its
+  // own history row before replaying, so a replay needs its history row.
+  db.exec(`CREATE TABLE action_history (id INTEGER PRIMARY KEY AUTOINCREMENT, undo_payload TEXT DEFAULT '{}', redo_payload TEXT DEFAULT '{}')`)
   return db
+}
+
+function recordBranchHistory(db, id, undoFields, redoFields) {
+  return Number(db.prepare('INSERT INTO action_history (undo_payload, redo_payload) VALUES (?, ?)').run(
+    JSON.stringify({ applier: 'branch.update', id, fields: undoFields }),
+    JSON.stringify({ applier: 'branch.update', id, fields: redoFields }),
+  ).lastInsertRowid)
 }
 
 const atomicUser = { id: 7, name: 'Atomic verifier' }
@@ -448,7 +458,8 @@ await check('the real branch.update applier updates canonical metadata through t
   const payload = { applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'Old Loc', is_default: 0, is_active: 1 } }
   const applier = resolveUndoApplier(payload)
   assert.ok(applier && applier.name === 'branch.update')
-  await applier.run(payload, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo' })
+  const historyId = recordBranchHistory(db, 2, payload.fields, { name: 'Shop', location: 'x', is_default: 0, is_active: 1 })
+  await applier.run(payload, { env: {}, user: { id: 9, name: 'Admin' }, direction: 'undo', historyId })
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: null, manager: null, notes: null, is_default: 0, is_active: 1 })
 })
 
@@ -457,16 +468,18 @@ await check('the branch.update applier rejects historical identity changes and a
   db.prepare(`INSERT INTO branches (id, name, location, is_default, is_active) VALUES (2, 'Shop', 'before', 0, 1)`).run()
   sharedDb = db
   const applier = resolveUndoApplier({ applier: 'branch.update', id: 2 })
+  const renameHistory = recordBranchHistory(db, 2, { name: 'Depot', location: 'forbidden' }, { name: 'Shop', location: 'before' })
   await assert.rejects(
-    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Depot', location: 'forbidden' } }, { env: {}, user: null, direction: 'undo' }),
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Depot', location: 'forbidden' } }, { env: {}, user: null, direction: 'undo', historyId: renameHistory }),
     /fixed to Shop and Warehouse/,
   )
   assert.equal(readBranch(db, 2).location, 'before')
 
+  const raceHistory = recordBranchHistory(db, 2, { name: 'Shop', location: 'before' }, { name: 'Shop', location: 'raced' })
   beforeAtomicBatch = (sqlite) => sqlite.prepare("UPDATE branches SET name='Changed elsewhere' WHERE id=2").run()
   await assert.rejects(
-    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'raced' } }, { env: {}, user: null, direction: 'redo' }),
-    /NOT NULL/,
+    () => applier.run({ applier: 'branch.update', id: 2, fields: { name: 'Shop', location: 'raced' } }, { env: {}, user: null, direction: 'redo', historyId: raceHistory }),
+    (error) => error.statusCode === 409 && /changed while the change was being redone/.test(error.message),
   )
   assert.equal(readBranch(db, 2).location, 'before')
   assert.equal(readBranch(db, 2).name, 'Changed elsewhere')

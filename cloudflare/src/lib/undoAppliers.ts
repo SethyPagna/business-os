@@ -5,7 +5,18 @@ import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from 
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { branchUpdateStatements } from './branchWrites'
+import {
+  BRANCH_REPLAY_ROW_SQL,
+  OTHER_CANONICAL_BRANCH_SQL,
+  branchReplayDefaultStatements,
+  branchReplayDropsDefault,
+  branchReplayStateGuardStatement,
+  branchUpdateStatements,
+  completeBranchReplayFields,
+  staleBranchReplayFields,
+  type BranchReplayRow,
+  type BranchWriteFields,
+} from './branchWrites'
 import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
 import {
   buildAllocationStatements,
@@ -2201,6 +2212,28 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
   return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: expectedGeneration + 1 }
 }
 
+// branch.update records the PRE-edit fields as its undo payload and the
+// POST-edit fields as its redo payload. The payload a replay is NOT running is
+// therefore the state the row must still be in: an undo expects the redo
+// payload's fields, a redo the undo payload's. Read from the history row
+// itself, never from the request, and refused when it is missing.
+async function branchReplayExpectedFields(
+  db: ReturnType<typeof getDb>, id: number, ctx: UndoApplierContext,
+): Promise<BranchWriteFields> {
+  const refuse = () => new UndoConflictError('This branch edit has no recorded result to check against, so it cannot be replayed safely. Edit the branch directly instead.')
+  if (!ctx.historyId) throw refuse()
+  const row = await db.prepare('SELECT undo_payload, redo_payload FROM action_history WHERE id = ?')
+    .get<{ undo_payload: string | null; redo_payload: string | null }>([ctx.historyId])
+  const raw = row ? (ctx.direction === 'undo' ? row.redo_payload : row.undo_payload) : null
+  let other: Record<string, unknown> | null = null
+  try { other = raw ? JSON.parse(raw) as Record<string, unknown> : null } catch (_) { other = null }
+  if (!other || other.applier !== 'branch.update' || Number(other.id) !== id
+    || !other.fields || typeof other.fields !== 'object' || Array.isArray(other.fields)) {
+    throw refuse()
+  }
+  return other.fields as BranchWriteFields
+}
+
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // Scoped Set (lib/stockLotAdjustment.ts): the server replays the exact lot
@@ -2490,15 +2523,41 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (!Number.isInteger(id) || id <= 0) {
         throw new Error('This action cannot be replayed: its saved details are missing a branch id.')
       }
-      const existing = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
-        .get<{ id: number; name: string; is_active: number }>([id])
+      const existing = await db.prepare(BRANCH_REPLAY_ROW_SQL).get<BranchReplayRow>([id])
       if (!existing) {
         throw new Error('The branch this action changed no longer exists, so it cannot be reversed.')
       }
       const fields = payload.fields && typeof payload.fields === 'object'
         ? (payload.fields as Record<string, unknown>)
         : {}
-      await db.batch(branchUpdateStatements(id, fields, existing))
+      // Staleness: the row must still hold what the recorded action left
+      // behind -- the OTHER payload of this history row -- for every field
+      // this replay restores, or a later edit would be silently overwritten.
+      const expected = await branchReplayExpectedFields(db, id, ctx)
+      const verb = ctx.direction === 'undo' ? 'undone' : 'redone'
+      const stale = staleBranchReplayFields(existing, expected)
+      if (stale.length) {
+        throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`)
+      }
+      const replayFields = completeBranchReplayFields(fields, existing)
+      if (branchReplayDropsDefault(replayFields, existing)
+        && !(await db.prepare(OTHER_CANONICAL_BRANCH_SQL).get<{ id: number }>([id]))) {
+        throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`)
+      }
+      try {
+        await db.batch([
+          branchReplayStateGuardStatement(id, expected),
+          ...branchUpdateStatements(id, replayFields, existing),
+          ...branchReplayDefaultStatements(id, replayFields, existing),
+        ])
+      } catch (error) {
+        // Every guard in this batch (identity, staleness, one default) aborts
+        // through the same NOT NULL on branches.name.
+        if (/NOT NULL constraint failed: branches\.name/i.test(String((error as Error)?.message ?? error))) {
+          throw new UndoConflictError(`This branch changed while the change was being ${verb}. Nothing was changed.`)
+        }
+        throw error
+      }
       await audit(
         ctx.env,
         ctx.user?.id ?? null,
