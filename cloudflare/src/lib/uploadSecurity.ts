@@ -326,9 +326,15 @@ function eventHandlerAt(bytes: Uint8Array, start: number, step: 1 | 2): boolean 
   return charAt(position) === 0x3d
 }
 
+// The candidate search runs on a view that ends at the region's end: the
+// native indexOf on the whole file does not stop there, so a region with no
+// candidate byte scanned on to the end of the file, and an image of many tiny
+// parts took quadratic time (S-uploads5, refuter R-S-uploads4 F11). The match
+// itself still reads the whole file, as before.
 function eventHandlerInRange(bytes: Uint8Array, start: number, end: number): boolean {
+  const region = bytes.subarray(0, end)
   for (const first of [0x6f, 0x4f]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       if (eventHandlerAt(bytes, index, 1) || eventHandlerAt(bytes, index, 2)) return true
     }
   }
@@ -368,9 +374,11 @@ function markupTokenAt(bytes: Uint8Array, start: number, token: string, step: 1 
   return MARKUP_TAG_TERMINATORS.includes(bytes[position])
 }
 
+// Bounded by the region's end like eventHandlerInRange.
 function markupInRange(bytes: Uint8Array, start: number, end: number, mode: MarkupScanMode): boolean {
+  const region = bytes.subarray(0, end)
   for (const [first, tokens] of MARKUP_TOKEN_GROUPS[mode]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       for (const token of tokens) {
         if (markupTokenAt(bytes, index, token, 1) || markupTokenAt(bytes, index, token, 2)) return true
       }

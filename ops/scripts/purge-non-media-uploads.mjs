@@ -315,9 +315,12 @@ function eventHandlerAt(bytes, start, step) {
   return charAt(position) === 0x3d
 }
 
+// S-uploads5 F11: the candidate search stops at the region's end (see
+// uploadSecurity.ts); the match still reads the whole file.
 function eventHandlerInRange(bytes, start, end) {
+  const region = bytes.subarray(0, end)
   for (const first of [0x6f, 0x4f]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       if (eventHandlerAt(bytes, index, 1) || eventHandlerAt(bytes, index, 2)) return true
     }
   }
@@ -356,8 +359,9 @@ function markupTokenAt(bytes, start, token, step) {
 }
 
 function markupInRange(bytes, start, end, mode) {
+  const region = bytes.subarray(0, end)
   for (const [first, tokens] of MARKUP_TOKEN_GROUPS[mode]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       for (const token of tokens) {
         if (markupTokenAt(bytes, index, token, 1) || markupTokenAt(bytes, index, token, 2)) return true
       }
