@@ -2,6 +2,12 @@
 
 Read `progress.md` before planning or editing. It is the live coordination and deployment ledger. Load the relevant project skill from the current tool's skill directory. Tool-specific adapters may add mechanics but must not override this provider-neutral guide.
 
+## Workflow
+
+- Start rigorous work with the `work-mode` skill: it picks a playbook (bug, feature, lane, refute, checkpoint, recover, forensics, perf, cleanup, council, loop) and routes to the other skills. Index: `agent-team/skills/INDEX.md`.
+- One command decides "done": `node agent-team/scripts/verify.mjs` (full gate, both packages, every test file alone) or `--fast` for the inner loop. Report only what it actually printed.
+- Skills are authored once in `agent-team/skills/` and generated into `.agents/skills` (Cursor, Codex, Gemini), `.claude/skills` and `.github/skills` by `node agent-team/scripts/sync-adapters.mjs`. Every human correction becomes a test, check or skill (`skill-wiki`).
+
 ## Specialized delegation
 
 For owner-submitted ideas/decisions and maintainability reviews, follow
