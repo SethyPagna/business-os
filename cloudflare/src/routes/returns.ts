@@ -22,7 +22,7 @@ import {
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
-import { applyReturnBulkAction, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
+import { applyReturnBulkActionOutcome, notifyReturnBulkAction, ReturnBulkError } from '../lib/returnBulkAction'
 import { bulkAssertion, saleRevisionGuard } from '../lib/saleBulkStatus'
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert, SaleRecordEventError, sha256Hex } from '../lib/saleRecordEvents'
 import { loadReturnRecords } from '../lib/returnRecords'
@@ -1201,23 +1201,23 @@ app.post('/reasons/replace', async (c) => {
 
 // Conditional grouped action: every selected row is revision checked, while
 // only rows whose chosen field still equals `source` move to `target`.
-// applyReturnBulkAction owns the atomic stock/snapshot/idempotency contract;
+// applyReturnBulkActionOutcome owns the atomic stock/snapshot/idempotency contract;
 // this route only translates typed business failures to HTTP responses.
 app.post('/bulk', async (c) => {
   const body: Record<string, unknown> = await c.req.json<Record<string, unknown>>().catch(() => ({}))
   const user = c.get('user')
   try {
-    // A retried request id replays its stored receipt without writing again,
-    // so it must not announce the same cancel/restore to Telegram twice.
-    const replayed = typeof body.client_request_id === 'string' && Boolean(await getDb(c.env)
-      .prepare('SELECT 1 AS hit FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request')
-      .get<{ hit: number }>({ actor: user.id, request: body.client_request_id }))
-    const result = await applyReturnBulkAction(c.env, user, body)
+    // `wrote` is true only for the call whose OWN batch committed the change.
+    // A replayed request id -- a sequential retry, a retry that overtook a
+    // slow original, or that original itself -- gets the stored receipt with
+    // wrote=false, so one write is announced once (R-telegram E1). A read made
+    // here before the write could not tell; see applyReturnBulkActionOutcome.
+    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body)
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
     const changedIds = Array.isArray(result.changedIds) ? result.changedIds.map(Number) : []
-    if (!replayed && body.field === 'status' && changedIds.length) {
+    if (wrote && body.field === 'status' && changedIds.length) {
       c.executionCtx.waitUntil(sendReturnStatusTelegramEvents(c.env, changedIds, actorSnapshot(user))
         .catch((error) => console.error('[telegram] return status notification failed', error)))
     }

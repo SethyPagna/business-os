@@ -369,7 +369,10 @@ globalThis.fetch = async (url, init) => {
     // ---- 6. wiring ------------------------------------------------------------------
     const read = (rel) => fs.readFileSync(path.join(root, 'src', rel), 'utf8')
     const returnsRoute = read('routes/returns.ts')
-    assert.match(returnsRoute, /!replayed && body\.field === 'status' && changedIds\.length\) \{\s*c\.executionCtx\.waitUntil\(sendReturnStatusTelegramEvents\(c\.env, changedIds, actorSnapshot\(user\)\)/, 'bulk status change announces only the changed ids, never a replayed request')
+    // Source pin only. The BEHAVIOUR -- one write is one message, even when the
+    // app's retry overtakes a slow original -- is pinned by
+    // test-returns-bulk-telegram-once-native.cjs (R-telegram E1).
+    assert.match(returnsRoute, /wrote && body\.field === 'status' && changedIds\.length\) \{\s*c\.executionCtx\.waitUntil\(sendReturnStatusTelegramEvents\(c\.env, changedIds, actorSnapshot\(user\)\)/, 'bulk status change announces only the changed ids, and only from the call whose batch wrote them')
     const historyRoute = read('routes/actionHistory.ts')
     assert.match(historyRoute, /applier\.name === RETURN_BULK_ACTION_KIND && payload\.field === 'status'[\s\S]{0,400}sendReturnStatusTelegramEvents/, 'undo/redo of a return status change is announced')
     assert.match(read('routes/telegram.ts'), /handleTelegramWebhook\(c\.env, update, \{ saveTopics: saveTelegramTopicSetting \}\)/)

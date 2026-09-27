@@ -612,6 +612,22 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
 }
 
 export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row): Promise<Row> {
+  return (await applyReturnBulkActionOutcome(env, user, raw)).receipt
+}
+
+/**
+ * The receipt, and whether THIS call's own batch wrote it. `wrote` is false
+ * for every replay of a request id: a sequential retry (early replay below),
+ * a retry that overtook a slow original, and the original overtaken by its
+ * retry (either replay path). routes/returns.ts announces a status change to
+ * Telegram only when `wrote` is true, so one write is announced once even
+ * when the app's own retry (Returns.tsx, same client_request_id after its
+ * client timeout) races the first request (R-telegram E1, 27 Sep 2026). A
+ * check made BEFORE the write cannot say this; only the batch outcome can.
+ */
+export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
+
+export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -619,7 +635,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   const previous = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
   if (previous) {
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
-    return JSON.parse(String(previous.receipt_json)) as Row
+    return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
   const { members, guards } = await buildMembers(db, request)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
@@ -678,10 +694,16 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
   assertBounded(statements, snapshot, recordEvents?.eventsBytes || 0)
   try {
     const results = await db.batch(statements)
-    return { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }
+    return { receipt: { ...receipt, actionHistoryId: Number(results[historyIndex].meta.last_row_id) }, wrote: true }
   } catch (error) {
     const retry = await db.prepare('SELECT request_json,receipt_json FROM return_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id })
-    if (retry?.request_json === canonical) return JSON.parse(String(retry.receipt_json)) as Row
+    if (retry?.request_json === canonical) {
+      const stored = JSON.parse(String(retry.receipt_json)) as Row
+      // operationId is this call's own random UUID: the stored receipt carries
+      // it only when THIS batch committed and the error came after the commit.
+      // Any other receipt was written by a concurrent call with the same id.
+      return { receipt: stored, wrote: stored.operationId === operationId }
+    }
     if (/constraint/i.test(String(error))) fail('A return or its stock changed. Nothing in the group was applied.')
     throw error
   }
