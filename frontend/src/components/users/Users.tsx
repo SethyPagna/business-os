@@ -35,6 +35,7 @@ import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { buildUserWritePayload, userEditReplayScope, type UserWritePayload } from './userWritePayload.ts'
 import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
+import { lastAdminRequiredError, lastAdminRequiredMessage } from './lastAdminErrors.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -798,7 +799,7 @@ export default function Users() {
         : await runUserMutation(() => getUsersApi().createUser({ ...payload, password: userForm.password }), 'Create user')
 
       if (result?.success === false) {
-        notify(result.error || 'Failed to save user', 'error')
+        notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')
         return
       }
 
@@ -812,12 +813,14 @@ export default function Users() {
           label: `Edit user ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const undoResult = await runUserMutation(() => getUsersApi().updateUser(previousSnapshot.id, buildUserWritePayload(previousSnapshot, actor, replayScope)), 'Undo user update')
-            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore user')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (undoResult?.success === false) throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore user')
             await load({ silent: true })
           },
           redo: async () => {
             const redoResult = await runUserMutation(() => getUsersApi().updateUser(nextSnapshot.id, buildUserWritePayload(nextSnapshot, actor, replayScope)), 'Redo user update')
-            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply user changes')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (redoResult?.success === false) throw new Error(lastAdminRequiredMessage(redoResult, tr) || redoResult.error || 'Failed to reapply user changes')
             await load({ silent: true })
           },
         })
@@ -829,7 +832,7 @@ export default function Users() {
       setUserForm(INITIAL_USER_FORM)
       await load()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save user'), 'error')
+      notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')
     } finally {
       finishSingleAction(saveUserInFlightRef)
       setSaving(false)
@@ -954,7 +957,7 @@ export default function Users() {
         : await runRoleMutation(() => getUsersApi().createRole(payload), 'Create role')
 
       if (result?.success === false) {
-        notify(result.error || 'Failed to save role', 'error')
+        notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save role', 'error')
         return
       }
 
@@ -965,12 +968,14 @@ export default function Users() {
           label: `Edit role ${previousSnapshot.name || nextSnapshot.name || ''}`.trim(),
           undo: async () => {
             const undoResult = await runRoleMutation(() => getUsersApi().updateRole(previousSnapshot.id, buildRoleWritePayload(previousSnapshot)), 'Undo role update')
-            if (undoResult?.success === false) throw new Error(undoResult.error || 'Failed to restore role')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (undoResult?.success === false) throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore role')
             await load({ silent: true })
           },
           redo: async () => {
             const redoResult = await runRoleMutation(() => getUsersApi().updateRole(nextSnapshot.id, buildRoleWritePayload(nextSnapshot)), 'Redo role update')
-            if (redoResult?.success === false) throw new Error(redoResult.error || 'Failed to reapply role changes')
+              .catch((error: unknown) => { throw lastAdminRequiredError(error, tr) })
+            if (redoResult?.success === false) throw new Error(lastAdminRequiredMessage(redoResult, tr) || redoResult.error || 'Failed to reapply role changes')
             await load({ silent: true })
           },
         })
@@ -1001,7 +1006,7 @@ export default function Users() {
       setRoleForm(INITIAL_ROLE_FORM)
       await load()
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save role'), 'error')
+      notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save role'), 'error')
     } finally {
       finishSingleAction(saveRoleInFlightRef)
       setSaving(false)

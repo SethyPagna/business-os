@@ -2548,6 +2548,7 @@
   "label_total_value": "Total Value",
   "label_unit": "Unit",
   "language": "Language",
+  "last_admin_required": "This change would leave no active administrator. Give another active user the admin role first. No changes were saved.",
   "last_delivery": "Last",
   "last_30_days": "Last 30 days",
   "last_7_days": "Last 7 days",
