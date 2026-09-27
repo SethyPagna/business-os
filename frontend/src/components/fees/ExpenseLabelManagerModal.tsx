@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Modal from '../shared/Modal.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import {
   classifyFeeLabel,
@@ -30,6 +31,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
     const value = t(key)
     return value && value !== key ? value : fallback
   }, [t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -54,10 +56,17 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       const impact = await getFeeLabelImpact(entry.label, to) as { linked_records?: number; target_exists?: boolean }
       if (!canEdit()) return
       const linked = Number(impact.linked_records || 0)
-      const mergeNote = impact.target_exists ? ` "${to}" already exists, so these labels will merge.` : ''
-      if (!window.confirm(
-        `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}".${mergeNote}\n\nReplace only those exact matches with "${to}"? Audit history remains unchanged.`,
-      )) return
+      if (!(await askToConfirm({
+        title: impact.target_exists ? tr('expense_label_merge_title', 'Merge expense labels?') : tr('expense_label_rename_title', 'Rename expense label?'),
+        message: impact.target_exists ? tr('expense_label_merge_note', '"{name}" already exists, so these labels will merge.').replace('{name}', to) : undefined,
+        items: [
+          { label: tr('before', 'Before'), value: entry.label },
+          { label: tr('after', 'After'), value: to },
+          { label: tr('expense_label_linked_records', 'Live expense records changed'), value: linked },
+        ],
+        note: tr('expense_label_rename_note', 'Only exact matches are replaced. Audit history remains unchanged.'),
+        confirmLabel: impact.target_exists ? tr('merge', 'Merge') : tr('rename', 'Rename'),
+      }))) return
       if (!canEdit()) return
       await replaceFeeLabel(entry.label, to)
       if (!canEdit()) return
@@ -83,9 +92,16 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       const current = (impact.type_counts || [])
         .map((row) => `${row.uses} ${t(FEE_TYPE_OPTIONS.find((option) => option.value === row.fee_type)?.labelKey || '') || row.fee_type}`)
         .join(', ')
-      if (!window.confirm(
-        `${linked} live expense record${linked === 1 ? '' : 's'} use "${entry.label}"${current ? ` (${current})` : ''}.\n\nClassify every exact label match as ${nextLabel}? The source label and audit history remain unchanged.`,
-      )) return
+      if (!(await askToConfirm({
+        title: tr('expense_label_classify_title', 'Change expense category?'),
+        message: entry.label,
+        items: [
+          { label: tr('before', 'Before'), value: current || '—' },
+          { label: tr('after', 'After'), value: `${linked} ${nextLabel}` },
+          { label: tr('expense_label_linked_records', 'Live expense records changed'), value: linked },
+        ],
+        note: tr('expense_label_classify_note', 'Every exact label match is classified. The source label and audit history remain unchanged.'),
+      }))) return
       if (!canEdit()) return
       const result = await classifyFeeLabel(entry.label, feeType)
       if (!canEdit()) return
@@ -124,6 +140,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
           )) : <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400 dark:border-slate-700">{tr('no_expense_labels', 'No expense labels yet.')}</div>}
         </div>
       </div>
+      {confirmDialog}
     </Modal>
   )
 }

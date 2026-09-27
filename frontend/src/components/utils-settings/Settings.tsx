@@ -33,6 +33,7 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -509,6 +510,7 @@ function SettingsSection({
 
 export default function Settings() {
   const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone, getPermissionTier } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Part 557: 'settings' is a view-tier section. A View-only grant can open
   // this page (reading settings is open to any signed-in user) but cannot
   // save -- the Save button is disabled and the backend refuses the POST
@@ -858,9 +860,19 @@ export default function Settings() {
       const linked = Number(impact.linked_records || 0)
       const isCaseOnlyRename = to.toLocaleLowerCase() === from.toLocaleLowerCase()
       const scope: PaymentMethodRenameScope = isCaseOnlyRename || linked > 0 ? 'linked' : 'settings_only'
-      if (scope === 'linked' && !window.confirm(
-        `${linked} current sale/payment record${linked === 1 ? '' : 's'} use "${from}".${impact.target_exists && !isCaseOnlyRename ? ` "${to}" already exists, so the configured choices will merge.` : ''}\n\nContinue to update current labels to "${to}"? Historical audit records stay unchanged.`,
-      )) return
+      if (scope === 'linked' && !(await askToConfirm({
+        title: t('rename_payment_method') || 'Rename payment method',
+        message: impact.target_exists && !isCaseOnlyRename
+          ? (t('payment_method_merge_note') || '"{to}" already exists, so the configured choices will merge.').replace('{to}', to)
+          : undefined,
+        items: [
+          { label: t('before') || 'Before', value: from },
+          { label: t('after') || 'After', value: to },
+          { label: t('payment_method_linked_records') || 'Current sale/payment records updated', value: linked },
+        ],
+        note: t('payment_method_audit_unchanged') || 'Historical audit records stay unchanged.',
+        confirmLabel: t('rename') || 'Rename',
+      }))) return
       const expectedUpdatedAt = typeof impact.settings_updated_at === 'string' && impact.settings_updated_at.trim()
         ? impact.settings_updated_at
         : undefined
@@ -1952,8 +1964,14 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!window.confirm(`Remove "${paymentMethod}" from checkout choices? Existing sales keep their recorded payment method.`)) return
-                    void savePaymentMethods(pmList.filter((_, methodIndex) => methodIndex !== index))
+                    void askToConfirm({
+                      title: t('payment_method_remove_title') || 'Remove payment method?',
+                      message: (t('payment_method_remove_confirm') || 'Remove "{name}" from checkout choices? Existing sales keep their recorded payment method.').replace('{name}', paymentMethod),
+                      confirmLabel: t('remove') || 'Remove',
+                      danger: true,
+                    }).then((confirmed) => {
+                      if (confirmed) void savePaymentMethods(pmList.filter((_, methodIndex) => methodIndex !== index))
+                    })
                   }}
                   className="text-red-400 hover:text-red-600 text-xs px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
                 >
@@ -2291,6 +2309,7 @@ export default function Settings() {
           {savingSettings ? (t('saving') || 'Saving...') : t('save')}
         </button>
       </div>
+      {confirmDialog}
     </div>
   )
 }

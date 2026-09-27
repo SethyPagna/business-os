@@ -34,6 +34,7 @@ import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 // Transfers can allocate and materialize many lot rows in one D1 batch. Keep
@@ -254,6 +255,7 @@ function normalizeTransferStockRows(stock: unknown): TransferProduct[] {
  */
 export default function TransferModal({ branches, onClose, onDone, user, notify }: TransferModalProps) {
   const { t, settings, can } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const canTransferStock = can('branches', 'transfer')
   const transferAuthorityRef = useRef({ allowed: canTransferStock, actorId: String(user?.id) })
   transferAuthorityRef.current = { allowed: canTransferStock, actorId: String(user?.id) }
@@ -1041,14 +1043,28 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     const fromName = branches.find((branch) => String(branch.id) === String(fromBranch))?.name || t('source_branch') || 'source branch'
     const toName = branches.find((branch) => String(branch.id) === String(toBranch))?.name || t('destination_branch') || 'destination branch'
     const lot = selectedBatch
-      ? ` ${t('transfer_selected_lot') || 'Selected received date'}: ${batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Received date')}.`
-      : ` ${t('transfer_fifo_lot_notice') || 'Available received dates will be allocated FIFO.'}`
-    if (!window.confirm((t('confirm_transfer_details') || 'Transfer {n} {unit} of "{name}" from {from} to {to}?')
-      .replace('{n}', String(qty))
-      .replace('{unit}', selectedProduct.unit || '')
-      .replace('{name}', selectedProduct.name || '')
-      .replace('{from}', fromName)
-      .replace('{to}', toName) + lot)) return
+      ? batchDisplayLabel({ id: selectedBatch.id, lot_code: (selectedBatch.lot_code as string) ?? null, received_at: (selectedBatch.received_at as string) ?? null, batch_number: (selectedBatch.batch_number as number) ?? null }, t('batch') || 'Received date')
+      : (t('transfer_fifo_lot_notice') || 'Available received dates will be allocated FIFO.')
+    const unitSuffix = selectedProduct.unit ? ` ${selectedProduct.unit}` : ''
+    // Review with the source branch's stock before and after the move (FX-ui:
+    // the shared dialog, never window.confirm).
+    if (!(await askToConfirm({
+      title: t('confirm_transfer') || 'Confirm Transfer',
+      message: (t('confirm_transfer_details') || 'Transfer {n} {unit} of "{name}" from {from} to {to}?')
+        .replace('{n}', String(qty))
+        .replace('{unit}', selectedProduct.unit || '')
+        .replace('{name}', selectedProduct.name || '')
+        .replace('{from}', fromName)
+        .replace('{to}', toName),
+      items: [
+        { label: t('product') || 'Product', value: selectedProduct.name || '' },
+        { label: t('quantity') || 'Quantity', value: `${qty}${unitSuffix}` },
+        { label: `${t('source_branch') || 'Source Branch'} · ${fromName}`, value: `${sourceBranchAvailable}${unitSuffix} → ${Math.max(0, sourceBranchAvailable - qty)}${unitSuffix}` },
+        { label: t('destination_branch') || 'Destination branch', value: toName },
+        { label: selectedBatch ? (t('transfer_selected_lot') || 'Selected received date') : (t('batch') || 'Received date'), value: lot },
+      ],
+      confirmLabel: t('transfer') || 'Transfer',
+    }))) return
 
     if (!beginSingleAction(transferInFlightRef, { blocked: saving })) return
     setSaving(true)
@@ -1825,6 +1841,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           t={t}
         />
       ) : null}
+      {confirmDialog}
     </>,
     document.body,
   )

@@ -60,14 +60,7 @@ function sourceFiles(dir: string): string[] {
 // Native confirm() calls that remain, by file (relative to frontend/src).
 // Lower a number -- or delete the line -- when you replace one.
 const REMAINING: Record<string, number> = {
-  'components/branches/TransferModal.tsx': 1,
   'components/catalog/CatalogAccountSection.tsx': 1,
-  'components/fees/ExpenseLabelManagerModal.tsx': 2,
-  'components/fees/FeeForm.tsx': 1,
-  'components/fees/FeesPage.tsx': 1,
-  'components/inventory/Inventory.tsx': 3,
-  'components/inventory/InventoryMovementsSurface.tsx': 1,
-  'components/inventory/ManageBatchesModal.tsx': 2,
   'components/products/DeleteConfirmModal.tsx': 1,
   'components/products/Products.tsx': 5,
   'components/products/forms/BulkAddStockModal.tsx': 1,
@@ -78,7 +71,6 @@ const REMAINING: Record<string, number> = {
   'components/products/lookups/ManageUnitsModal.tsx': 2,
   'components/shared/BackgroundImportTracker.tsx': 1,
   'components/utils-settings/Backup.tsx': 4,
-  'components/utils-settings/Settings.tsx': 2,
 }
 
 runTest('positive control: every native form is counted, comments and a local confirm are not', () => {

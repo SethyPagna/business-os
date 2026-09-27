@@ -15,6 +15,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
@@ -115,7 +116,7 @@ type FeeTypeFilter = FeeType | 'all'
 
 type ExpenseDeleteOperation = {
   canDelete: () => boolean
-  confirmDelete: () => boolean
+  confirmDelete: () => boolean | Promise<boolean>
   begin: () => boolean
   remove: () => Promise<unknown>
   onStart: () => void
@@ -132,7 +133,7 @@ export function expenseSaleLabel(receipt: string | null | undefined, saleId: num
 
 export async function performExpenseDelete(operation: ExpenseDeleteOperation): Promise<boolean> {
   if (!operation.canDelete()) return false
-  if (!operation.confirmDelete()) return false
+  if (!(await operation.confirmDelete())) return false
   if (!operation.canDelete()) return false
   if (!operation.begin()) return false
   operation.onStart()
@@ -203,6 +204,7 @@ export function buildFeeExportRows(rows: FeeRecord[], feeTypeLabel: (type: strin
 
 export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const { can, getPermissionTier, t, notify, fmtUSD, fmtKHR, khrToUsd, usdToKhr, displayCurrency, user } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Display-currency-aware money formatter (see utils/reportMoney.ts) —
   // honors the display_currency setting without touching stored data.
   const fmtMoney = useMemo(
@@ -595,7 +597,17 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const handleDelete = async (fee: FeeRecord): Promise<boolean> => {
     return performExpenseDelete({
       canDelete: () => canDeleteFeeRef.current,
-      confirmDelete: () => window.confirm(tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.')),
+      confirmDelete: () => askToConfirm({
+        title: tr('delete_fee_title', 'Delete expense?'),
+        message: tr('delete_fee_confirm', 'Delete this expense record? This cannot be undone.'),
+        items: [
+          { label: tr('fee_label', 'Label'), value: fee.label || `#${fee.id}` },
+          { label: tr('fee_date', 'Date'), value: fee.fee_date },
+          { label: tr('amount', 'Amount'), value: fmtUSD(fee.amount_usd) },
+        ],
+        confirmLabel: tr('delete', 'Delete'),
+        danger: true,
+      }),
       begin: () => beginKeyedAction(deleteActionRef, fee.id),
       onStart: () => setDeletingId(fee.id),
       remove: () => withLoaderTimeout(
@@ -1007,6 +1019,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           />
         </Suspense>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

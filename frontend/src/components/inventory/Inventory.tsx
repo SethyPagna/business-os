@@ -28,6 +28,7 @@ import { columnsFromRows } from '../../utils/exportOptions.ts'
 // P10-19: the adjust confirm dialog (Part 563's shared review pattern,
 // already used by StockAdjustModal.tsx's Products-page twin of this flow).
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { buildStockAdjustQuantityReview, buildStockReceiptPaymentReview } from '../../utils/stockAdjustReview.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
@@ -395,6 +396,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
   const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate, navigateTo } = useApp() as InventoryAppContext
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
   // Every stock-moving action here mutates live batch/stock state that could
@@ -1163,20 +1165,38 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     const to = nextLabel.trim()
     const impact = await getInventoryApi().getInventoryReasonImpact(entry.type, entry.label, to) as { linked_records?: number }
     const linked = Number(impact.linked_records || 0)
-    const scope = linked > 0 && window.confirm(
-      `${linked} exact stock-movement record${linked === 1 ? '' : 's'} use this reason. Update those linked records too? Audit logs stay unchanged.`,
-    ) ? 'linked' : 'saved_only'
+    // Both answers save the rename, as on the native prompt this replaced:
+    // Confirm also rewrites the exact linked movements, Cancel renames only
+    // the saved choice. The buttons now say which is which.
+    const scope = linked > 0 && await askToConfirm({
+      title: tr('rename_reason_prompt', 'Rename saved reason'),
+      message: tr('inventory_reason_linked_notice', '{count} exact stock-movement record(s) use this reason.').replace('{count}', String(linked)),
+      items: [
+        { label: tr('before', 'Before'), value: entry.label },
+        { label: tr('after', 'After'), value: to },
+      ],
+      note: tr('audit_logs_unchanged', 'Audit logs stay unchanged.'),
+      confirmLabel: tr('reason_update_linked_too', 'Update linked records too'),
+      cancelLabel: tr('reason_rename_saved_only', 'Rename saved reason only'),
+    }) ? 'linked' : 'saved_only'
     const result = await getInventoryApi().replaceInventoryReason({ type: entry.type, from: entry.label, to, scope })
     const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: to } : item)
     setInventoryReasons(items)
     notify(scope === 'linked' ? 'Reason and exact linked movements updated.' : 'Saved reason updated; existing movements were preserved.')
-  }, [inventoryReasons, notify, tr])
+  }, [askToConfirm, inventoryReasons, notify, tr])
 
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(tr('delete_saved_reason_confirm'))) return
+    if (!(await askToConfirm({
+      title: tr('delete', 'Delete'),
+      message: tr('delete_saved_reason_confirm', 'Delete this saved reason?'),
+      items: [{ label: tr('reason', 'Reason'), value: entry.label }],
+      confirmLabel: tr('delete', 'Delete'),
+      cancelLabel: tr('cancel', 'Cancel'),
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog, tr])
+  }, [askToConfirm, inventoryReasons, saveReasonCatalog, tr])
   useEffect(() => {
     const showingMovements = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
     if (!isActive || !isAdmin || !showingMovements) return
@@ -1947,7 +1967,21 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       .replace('{product}', transferModal.name || '')
       .replace('{from}', fromBranch.name || '')
       .replace('{to}', toBranch.name || '')
-    if (!window.confirm(confirmation)) {
+    const unitSuffix = transferModal.unit ? ` ${transferModal.unit}` : ''
+    if (!(await askToConfirm({
+      title: tr('confirm_transfer', 'Confirm Transfer'),
+      message: confirmation,
+      items: [
+        { label: tr('product', 'Product'), value: transferModal.name || '' },
+        { label: tr('quantity', 'Quantity'), value: `${quantity}${unitSuffix}` },
+        ...(Number.isFinite(sourceAvailable)
+          ? [{ label: `${tr('source_branch', 'Source Branch')} · ${fromBranch.name || ''}`, value: `${sourceAvailable}${unitSuffix} → ${Math.max(0, sourceAvailable - quantity)}${unitSuffix}` }]
+          : []),
+        { label: tr('destination_branch', 'Destination branch'), value: toBranch.name || '' },
+      ],
+      confirmLabel: tr('transfer', 'Transfer'),
+      cancelLabel: tr('cancel', 'Cancel'),
+    }))) {
       return
     }
 
@@ -3219,6 +3253,7 @@ ${inventoryFeesFormulaText}`,
           />
         </Suspense>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

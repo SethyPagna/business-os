@@ -21,7 +21,10 @@ assert.match(settingsSource, /if \(!to \|\| to === from\) return/)
 assert.doesNotMatch(settingsSource, /if \(!to \|\| to\.toLocaleLowerCase\(\) === from\.toLocaleLowerCase\(\)\) return/)
 assert.match(settingsSource, /const isCaseOnlyRename = to\.toLocaleLowerCase\(\) === from\.toLocaleLowerCase\(\)/)
 assert.match(settingsSource, /const scope: PaymentMethodRenameScope = isCaseOnlyRename \|\| linked > 0 \? 'linked' : 'settings_only'/)
-assert.match(settingsSource, /if \(scope === 'linked' && !window\.confirm\([\s\S]*?\)\) return/)
+// FX-ui: the linked-rename question is the shared ConfirmDialog (before/after),
+// never window.confirm; declining still returns before replacePaymentMethod.
+assert.match(settingsSource, /if \(scope === 'linked' && !\(await askToConfirm\(\{[\s\S]*?\}\)\)\) return[\s\S]*?await replacePaymentMethod\(/)
+assert.doesNotMatch(settingsSource, /window\.confirm\(/)
 
 // Configured choices keep one case-insensitive identity. A cashier cannot add
 // FCB beside Fcb; the explicit rename path above is the only way to change the

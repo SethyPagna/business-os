@@ -1,5 +1,6 @@
 import ProductNameRail from '../shared/ProductNameRail'
 import TruncatedText from '../shared/TruncatedText.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { Fragment } from 'react'
 import type { ComponentType, Dispatch, RefObject, SetStateAction } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -229,6 +230,7 @@ export default function InventoryMovementsSurface({
   collapsedMovementSections,
   visibleMovementGroups,
 }: InventoryMovementsSurfaceProps) {
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   // Every data column of the desktop table, for the day/action header rows
   // to span; +1 while the Select-mode checkbox column exists.
   const desktopColumnCount = movementSelectMode ? 8 : 7
@@ -358,8 +360,16 @@ export default function InventoryMovementsSurface({
                       type="button"
                       className="btn-secondary px-2 py-1 text-[11px]"
                       onClick={() => {
-                        if (!window.confirm(tr('confirm_export_selected_movements'))) return
-                        exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected')
+                        const groups = selectedMovementGroups
+                        void askToConfirm({
+                          title: tr('export_selected', 'Export selected'),
+                          message: tr('confirm_export_selected_movements', 'Export the selected movements?'),
+                          items: [{ label: tr('selected', 'selected'), value: groups.length }],
+                          confirmLabel: tr('export', 'Export'),
+                          cancelLabel: tr('cancel', 'Cancel'),
+                        }).then((confirmed) => {
+                          if (confirmed) exportMovementGroups(groups, 'inventory-movements-selected')
+                        })
                       }}
                     >
                       {tr('export_selected', 'Export selected')}
@@ -685,6 +695,7 @@ export default function InventoryMovementsSurface({
               </table>
             </div>
           </div>
+          {confirmDialog}
         </>
   )
 }
