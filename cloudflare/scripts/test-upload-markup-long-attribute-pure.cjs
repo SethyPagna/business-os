@@ -23,6 +23,14 @@
 // keeps its false-positive budget there), real-shaped JPEG/PNG/GIF/WebP/AVIF.
 // The refuter's 1000-byte case is refused before and after.
 //
+// S-uploads5 (refuter R-S-uploads4 F9): no case had its first tag start past
+// 64 KB, so a tag-start search cut off there (a plausible "performance"
+// bound) passed every check. Section 6 puts 64 KB+ of zero-filled metadata
+// (an ICC profile, a colour table, a thumbnail placeholder) in front of the
+// only tag in the file, in every carrier, bytes and UTF-16, through both
+// mirrors. With firstTagStart cut at 64 KB in either mirror, sections 1-5
+// still pass and section 6 fails 10 checks.
+//
 // Fails on 63a1a770 (every long and split case is accepted). Against older
 // sources: UPLOAD_SECURITY_TS=... PURGE_SCRIPT=... node test-upload-markup-long-attribute-pure.cjs
 const assert = require('node:assert/strict')
@@ -85,6 +93,18 @@ const CARRIERS = [
   ['GIF comment', (payload) => F.gif({ extensions: [F.bytes([0x21, 0xfe], F.gifSubBlocks(F.bytes(PAD))), F.bytes([0x21, 0xfe], F.gifSubBlocks(payload))] }), Infinity],
   ['WebP XMP chunk', (payload) => F.webp(F.webpChunk('VP8X', new Uint8Array(10)), F.webpChunk('EXIF', F.bytes(PAD)), F.webpChunk('XMP ', payload)), Infinity],
   ['AVIF meta box', (payload) => F.avif(F.bytes(PAD, payload), F.randomBytes(F.mulberry32(5), 800)), Infinity],
+]
+
+// 64 KB+ of zero-filled metadata in front of the payload (section 6). A
+// JPEG segment holds at most 65533 bytes, so it takes two there.
+const DEEP_PADDING = 70000
+const zeros = (length) => new Uint8Array(length)
+const DEEP_CARRIERS = [
+  ['JPEG: two zero-filled APP2 segments, then a comment', (payload) => F.jpeg({ segments: [F.jpegSegment(0xe2, zeros(DEEP_PADDING / 2)), F.jpegSegment(0xe2, zeros(DEEP_PADDING / 2)), F.comSegment(payload)] })],
+  ['PNG: a zero-filled iCCP chunk, then tEXt', (payload) => F.png(F.pngChunk('iCCP', zeros(DEEP_PADDING)), F.pngChunk('tEXt', F.bytes('Comment\0', payload)))],
+  ['GIF: a zero-filled application extension, then a comment', (payload) => F.gif({ extensions: [F.bytes([0x21, 0xff], F.gifSubBlocks(zeros(DEEP_PADDING))), F.bytes([0x21, 0xfe], F.gifSubBlocks(payload))] })],
+  ['WebP: a zero-filled ICCP chunk, then XMP', (payload) => F.webp(F.webpChunk('VP8X', new Uint8Array(10)), F.webpChunk('ICCP', zeros(DEEP_PADDING)), F.webpChunk('XMP ', payload))],
+  ['AVIF: zero-filled metadata, then the payload, in the meta box', (payload) => F.avif(F.bytes(zeros(DEEP_PADDING), payload), F.randomBytes(F.mulberry32(7), 800))],
 ]
 
 // '%' is where the long attribute value goes.
@@ -272,6 +292,23 @@ async function main() {
     const ms = Number(process.hrtime.bigint() - started) / 1e6
     assert.ok(ms < 1000, `${ms.toFixed(0)} ms`)
   })
+
+  // 6. The first tag start past 64 KB of zero-filled metadata.
+  for (const [carrier, build] of DEEP_CARRIERS) {
+    for (const [encoding, encode] of [['bytes', latin1], ['UTF-16', utf16]]) {
+      check(`${carrier}, ${encoding}: <x title="A x1100" onclick=alert(1)> after ${DEEP_PADDING} zero bytes is refused`, () => {
+        const { file } = place(build, '<x title="%" onclick=alert(1)>', 1100, encode)
+        const tagAt = firstTagStart(file)
+        assert.ok(tagAt > 65536, `fixture: the first tag start is at ${tagAt}`)
+        assertRefused(file)
+      })
+      check(`control: ${carrier}, ${encoding}: <x title="A x1100"> after ${DEEP_PADDING} zero bytes is still an image`, () => {
+        const file = build(encode(`<x title="${'A'.repeat(1100)}">`))
+        assert.ok(firstTagStart(file) > 65536, 'fixture: the first tag start is past 64 KB')
+        assertImage(file)
+      })
+    }
+  }
 
   if (failures.length) {
     for (const failure of failures.slice(0, 40)) console.error(`FAIL ${failure}`)
