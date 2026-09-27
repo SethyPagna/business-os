@@ -2049,6 +2049,12 @@ app.get('/auto-merges/:productId', async (c) => {
   })
 })
 
+// Keyed by the engine's RenameKind so tsc fails when the engine gains a kind
+// this gate does not list (DC-12: 'unit' was missing, so every Manage Units
+// rename failed). This gate is the only guard: computeRenameImpact answers
+// any kind it has no branch for as a product-name rename.
+const RENAME_IMPACT_KINDS: Record<RenameKind, true> = { category: true, brand: true, unit: true, supplier: true, product_name: true }
+
 app.get('/rename-impact', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'edit') === 'none') {
@@ -2057,7 +2063,7 @@ app.get('/rename-impact', async (c) => {
   const kind = String(c.req.query('kind') || '') as RenameKind
   const from = String(c.req.query('from') || '').trim()
   const to = String(c.req.query('to') || '').trim()
-  if (!['category', 'brand', 'supplier', 'product_name'].includes(kind)) return c.json({ error: 'Unknown rename kind' }, 400)
+  if (!Object.prototype.hasOwnProperty.call(RENAME_IMPACT_KINDS, kind)) return c.json({ error: 'Unknown rename kind' }, 400)
   if (!from || !to) return c.json({ error: 'from and to are required' }, 400)
   return c.json(await computeRenameImpact(getDb(c.env), kind, from, to))
 })
