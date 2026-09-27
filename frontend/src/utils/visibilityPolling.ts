@@ -4,7 +4,10 @@
 // or on a locked phone. Every interval that reads the server from such a tab
 // costs Worker requests (and D1 reads) that nobody sees. The rule is: no poll
 // runs while document.visibilityState is 'hidden'; when the tab is shown
-// again it catches up with ONE immediate read and then resumes its cadence.
+// again it catches up with ONE immediate read -- if a tick came due while it
+// was hidden -- and then resumes its cadence. A tab hidden for less than one
+// interval just finishes the interval it was in, so flicking between tabs
+// never costs more requests than leaving the tab open would have.
 //
 // Pausing clears the timer outright rather than skipping ticks, so a hidden
 // tab does not even wake up to decide to do nothing.
@@ -22,6 +25,7 @@ export interface VisibilityHost {
   clearInterval: (id: number) => void
   setTimeout: (callback: () => void, ms: number) => number
   clearTimeout: (id: number) => void
+  now?: () => number
 }
 
 export function isDocumentHidden(): boolean {
@@ -44,13 +48,16 @@ function browserHost(): VisibilityHost | null {
 }
 
 export interface VisibleIntervalOptions {
-  // Run `tick` once as soon as a hidden tab is shown again (default true).
-  // Turn off only where another owner already refreshes on resume.
+  // Run `tick` once as soon as a hidden tab is shown again, when at least one
+  // tick came due while it was hidden (default true). Turn off only where
+  // another owner already refreshes on resume.
   refreshOnVisible?: boolean
   host?: VisibilityHost | null
 }
 
 // setInterval that is paused while the tab is hidden. Returns stop().
+// The first tick is one interval after the start: callers read once
+// themselves when they mount, exactly as with setInterval.
 export function startVisibleInterval(
   tick: () => void,
   intervalMs: number,
@@ -58,21 +65,43 @@ export function startVisibleInterval(
 ): () => void {
   const host = options.host === undefined ? browserHost() : options.host
   if (!host) return () => {}
+  const now = host.now || Date.now
   const refreshOnVisible = options.refreshOnVisible !== false
   let intervalId: number | null = null
+  let timeoutId: number | null = null
   let stopped = false
+  let lastTickAt = now()
 
-  const start = () => {
-    if (stopped || intervalId != null) return
+  const runTick = () => {
+    lastTickAt = now()
+    tick()
+  }
+  const startInterval = () => {
     intervalId = host.setInterval(() => {
       // Belt and braces: a tick queued just before 'hidden' was announced.
-      if (!host.isHidden()) tick()
+      if (!host.isHidden()) runTick()
     }, intervalMs)
   }
+  const running = () => intervalId != null || timeoutId != null
+  // Arms the cadence with the next tick `firstDelayMs` from now.
+  const arm = (firstDelayMs: number) => {
+    if (stopped || running()) return
+    if (firstDelayMs >= intervalMs) {
+      startInterval()
+      return
+    }
+    timeoutId = host.setTimeout(() => {
+      timeoutId = null
+      if (stopped || host.isHidden()) return
+      runTick()
+      startInterval()
+    }, Math.max(0, firstDelayMs))
+  }
   const pause = () => {
-    if (intervalId == null) return
-    host.clearInterval(intervalId)
+    if (intervalId != null) host.clearInterval(intervalId)
+    if (timeoutId != null) host.clearTimeout(timeoutId)
     intervalId = null
+    timeoutId = null
   }
   const unsubscribe = host.onVisibilityChange(() => {
     if (stopped) return
@@ -81,12 +110,18 @@ export function startVisibleInterval(
       return
     }
     // A repeated 'visible' while already running is not a resume.
-    if (intervalId != null) return
-    if (refreshOnVisible) tick()
-    start()
+    if (running()) return
+    const elapsed = now() - lastTickAt
+    if (elapsed < intervalMs) {
+      arm(intervalMs - elapsed)
+      return
+    }
+    if (refreshOnVisible) runTick()
+    else lastTickAt = now()
+    arm(intervalMs)
   })
 
-  if (!host.isHidden()) start()
+  if (!host.isHidden()) arm(intervalMs)
 
   return () => {
     if (stopped) return

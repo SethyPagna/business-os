@@ -23,7 +23,9 @@ await runTest('pending-sale queue polling stops once a confirmed read reports no
   let visibilityListener: (() => void) | null = null
   let reads = 0
   let hidden = false
+  let clock = 1_000_000
   const poll = createPendingSyncPoll(() => { reads += 1 }, 20_000, {
+    now: () => clock,
     isHidden: () => hidden,
     onVisibilityChange: (listener) => { visibilityListener = listener; return () => { visibilityListener = null } },
     setInterval: (cb) => { active = cb; return 1 },
@@ -38,6 +40,7 @@ await runTest('pending-sale queue polling stops once a confirmed read reports no
   assert.equal(reads, 1)
   hidden = true; visibilityListener!()
   assert.equal(active, null, 'a hidden tab has no interval at all')
+  clock += 60_000
   hidden = false; visibilityListener!()
   assert.equal(reads, 2, 'showing the tab reads once at once')
   assert.notEqual(active, null, 'and resumes the interval')
