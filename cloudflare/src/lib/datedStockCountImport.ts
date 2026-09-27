@@ -68,6 +68,33 @@ export interface StockCountPlanMovement {
   quantity: number // always positive -- the magnitude; movementType carries direction
   movementType: 'add' | 'remove'
   reason: string
+  // This movement's own lot effects, from the same FIFO simulation that
+  // produced batchTopUps/batchCreates/batchDrains (signed: + received into
+  // the lot, - drained from it). `batchId` null means the lot this same run
+  // creates for `date` (it has no id until the apply batch runs). A remove
+  // whose quantity exceeds the actions' total left the shortfall on the
+  // plain aggregate. The apply layer writes exactly these, inside its one
+  // atomic batch, and records them as the movement's provenance.
+  batchActions: PlannedBatchAction[]
+}
+
+export interface PlannedBatchAction {
+  batchId: number | null
+  date: string
+  quantity: number
+}
+
+// Every prior, un-reverted movement this importer recorded for one
+// product+branch as the plan saw it. The apply batch re-counts the same
+// set first and refuses (nothing written) when it no longer matches: a
+// concurrent apply of the same file, a ledger revert of one of these rows,
+// or a deletion between preview and apply would otherwise let the relative
+// deltas below land twice.
+export interface StockCountGroupFingerprint {
+  productId: number
+  branchId: number
+  movementCount: number
+  movementIdSum: number
 }
 
 // A batch that already exists (in `product_batches`/`branch_batch_stock`)
@@ -109,6 +136,13 @@ export interface StockCountPlan {
   // Existing movement ids to delete first (superseded by this run's
   // fresh computation for the same product+branch+date).
   movementsToDelete: number[]
+  // The same superseded movements with their recorded effect (aggregate
+  // signed quantity + lot provenance). The apply layer REVERSES exactly
+  // these in the same atomic batch that deletes them -- the deltas in
+  // movementsToCreate are relative to the baseline with these undone, so
+  // deleting a row without reversing it would apply its effect twice.
+  supersededMovements: ExistingCountMovement[]
+  groupFingerprints: StockCountGroupFingerprint[]
   // New movements to insert, in the order they should be applied
   // (earliest date first within each product+branch group).
   movementsToCreate: StockCountPlanMovement[]
@@ -165,7 +199,7 @@ function computeBatchPlanForGroup(
   branchId: number,
   deltas: { date: string; delta: number }[],
   existingBatches: ExistingBatchState[],
-): { topUps: BatchTopUp[]; creates: BatchCreate[]; drains: BatchDrain[]; deactivations: { productId: number; branchId: number; batchId: number }[] } {
+): { topUps: BatchTopUp[]; creates: BatchCreate[]; drains: BatchDrain[]; deactivations: { productId: number; branchId: number; batchId: number }[]; actionsByDelta: PlannedBatchAction[][] } {
   type Lot = { kind: 'existing'; batchId: number; date: string; remaining: number } | { kind: 'new'; date: string; remaining: number }
 
   const queue: Lot[] = existingBatches
@@ -184,13 +218,17 @@ function computeBatchPlanForGroup(
     return created
   }
 
+  const actionsByDelta: PlannedBatchAction[][] = []
   for (const { date, delta } of deltas) {
+    const actions: PlannedBatchAction[] = []
+    actionsByDelta.push(actions)
     if (delta > 0) {
       const lot = findOrCreateLotForDate(date)
       lot.remaining += delta
       if (lot.kind === 'existing') {
         topUpTotals.set(lot.batchId, (topUpTotals.get(lot.batchId) || 0) + delta)
       }
+      actions.push({ batchId: lot.kind === 'existing' ? lot.batchId : null, date: lot.date, quantity: delta })
     } else if (delta < 0) {
       let remaining = -delta
       for (const lot of queue) {
@@ -202,6 +240,7 @@ function computeBatchPlanForGroup(
         if (lot.kind === 'existing') {
           drainTotals.set(lot.batchId, (drainTotals.get(lot.batchId) || 0) + take)
         }
+        actions.push({ batchId: lot.kind === 'existing' ? lot.batchId : null, date: lot.date, quantity: -take })
       }
       // Any shortfall (this group's tracked batches can't cover the full
       // decrease) is left untracked at the batch level, same as
@@ -228,7 +267,7 @@ function computeBatchPlanForGroup(
     .filter((lot): lot is Lot & { kind: 'new' } => lot.kind === 'new' && lot.remaining > 0)
     .map((lot) => ({ productId, branchId, date: lot.date, quantity: lot.remaining }))
 
-  return { topUps, creates, drains, deactivations }
+  return { topUps, creates, drains, deactivations, actionsByDelta }
 }
 
 // Un-does THIS group's own prior batch actions from its current batch
@@ -306,6 +345,8 @@ export function computeDatedStockCountPlan(
   }
 
   const movementsToDelete: number[] = []
+  const supersededMovements: ExistingCountMovement[] = []
+  const groupFingerprints: StockCountGroupFingerprint[] = []
   const movementsToCreate: StockCountPlanMovement[] = []
   const finalBranchStock: CurrentStock[] = []
   const batchTopUps: BatchTopUp[] = []
@@ -336,9 +377,17 @@ export function computeDatedStockCountPlan(
     // problem (would need to know WHEN relative to the count series they
     // happened), out of scope for this pass.
     const deletedMovements: ExistingCountMovement[] = []
-    for (const existing of existingByKey.get(key) || []) {
+    const priorForGroup = existingByKey.get(key) || []
+    groupFingerprints.push({
+      productId,
+      branchId,
+      movementCount: priorForGroup.length,
+      movementIdSum: priorForGroup.reduce((sum, row) => sum + row.id, 0),
+    })
+    for (const existing of priorForGroup) {
       if (dateSet.has(existing.date)) {
         movementsToDelete.push(existing.id)
+        supersededMovements.push(existing)
         deletedMovements.push(existing)
         baseline -= existing.signedQuantity
       }
@@ -346,10 +395,11 @@ export function computeDatedStockCountPlan(
 
     let running = baseline
     const deltas: { date: string; delta: number }[] = []
+    const groupMovements: { deltaIndex: number; movement: StockCountPlanMovement }[] = []
     for (const entry of sorted) {
       const delta = entry.count - running
       if (delta !== 0) {
-        movementsToCreate.push({
+        const movement: StockCountPlanMovement = {
           productId,
           productName: entry.productName,
           branchId,
@@ -358,7 +408,10 @@ export function computeDatedStockCountPlan(
           quantity: Math.abs(delta),
           movementType: delta > 0 ? 'add' : 'remove',
           reason: DATED_STOCK_COUNT_REASON,
-        })
+          batchActions: [],
+        }
+        movementsToCreate.push(movement)
+        groupMovements.push({ deltaIndex: deltas.length, movement })
       }
       deltas.push({ date: entry.date, delta })
       running = entry.count
@@ -378,7 +431,8 @@ export function computeDatedStockCountPlan(
     batchCreates.push(...batchPlan.creates)
     batchDrains.push(...batchPlan.drains)
     batchDeactivations.push(...batchPlan.deactivations)
+    for (const { deltaIndex, movement } of groupMovements) movement.batchActions = batchPlan.actionsByDelta[deltaIndex] || []
   }
 
-  return { movementsToDelete, movementsToCreate, finalBranchStock, batchTopUps, batchCreates, batchDrains, batchDeactivations }
+  return { movementsToDelete, supersededMovements, groupFingerprints, movementsToCreate, finalBranchStock, batchTopUps, batchCreates, batchDrains, batchDeactivations }
 }

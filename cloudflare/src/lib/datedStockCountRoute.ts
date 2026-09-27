@@ -127,6 +127,26 @@ export async function buildDatedStockCountPlan(
     })
     priorMovementRows.push(...rows)
   }
+  // A prior movement someone reverted from the stock ledger
+  // (lib/stockRevert.ts, reference_id 'revert:<id>') no longer holds its
+  // effect in live stock -- its counter-movement took it back. It is left
+  // alone: not deleted (that would orphan the counter-movement), not
+  // reversed again, and not part of the baseline reconstruction. The apply
+  // batch's per-group fingerprint uses the same rule (datedStockCountApply.ts).
+  if (priorMovementRows.length) {
+    const revertRefs = priorMovementRows.map((row) => `revert:${Number(row.id)}`)
+    const reverted = await selectInChunks(revertRefs, 0, (chunk) => {
+      const { sql: rIn, params: rParams } = buildInClause('r', chunk)
+      return db.prepare(`SELECT reference_id AS ref FROM inventory_movements WHERE reference_id IN (${rIn})`)
+        .all<{ ref: string }>(rParams)
+    })
+    const revertedIds = new Set(reverted.map((row) => Number(String(row.ref).slice('revert:'.length))))
+    if (revertedIds.size) {
+      const kept = priorMovementRows.filter((row) => !revertedIds.has(Number(row.id)))
+      priorMovementRows.length = 0
+      priorMovementRows.push(...kept)
+    }
+  }
   // This same importer's own batch-level provenance for those prior
   // movements (migration 0035) -- needed so reconstructBatchBaseline can
   // reverse only ITS OWN prior batch effects on a rerun, not just its

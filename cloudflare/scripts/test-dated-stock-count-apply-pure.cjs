@@ -106,8 +106,8 @@ const relMap = {
   './moneyPrecision.ts': () => loadReal('lib/moneyPrecision.ts'),
   './db': () => ({}),
   './db.ts': () => ({}),
-  './datedStockCountImport': () => ({}),
-  './datedStockCountImport.ts': () => ({}),
+  './datedStockCountImport': () => loadReal('lib/datedStockCountImport.ts'),
+  './datedStockCountImport.ts': () => loadReal('lib/datedStockCountImport.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
@@ -156,7 +156,7 @@ function seedProduct(rawDb, { id, name, stockQuantity }) {
 }
 
 async function main() {
-  await testAsync('plain (non-batch-tracked) group: deletes superseded movements, applies new ones, updates branch_stock/products.stock_quantity', async () => {
+  await testAsync('plain (non-batch-tracked) group: reverses AND deletes superseded movements, applies new ones, updates branch_stock/products.stock_quantity', async () => {
     const { rawDb, db } = freshDb()
     seedProduct(rawDb, { id: 1, name: 'Widget', stockQuantity: 10 })
     const oldMovementId = rawDb.prepare(
@@ -166,11 +166,13 @@ async function main() {
 
     const plan = {
       movementsToDelete: [oldMovementId],
+      supersededMovements: [{ id: oldMovementId, productId: 1, branchId: 1, date: '2026-08-16', signedQuantity: 5 }],
+      groupFingerprints: [{ productId: 1, branchId: 1, movementCount: 1, movementIdSum: oldMovementId }],
       movementsToCreate: [
-        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-16', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-18', quantity: 2, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-16', quantity: 3, movementType: 'add', reason: 'Dated stock count import', batchActions: [] },
+        { productId: 1, productName: 'Widget', branchId: 1, branchName: 'Shop', date: '2026-08-18', quantity: 2, movementType: 'remove', reason: 'Dated stock count import', batchActions: [] },
       ],
-      finalBranchStock: [{ productId: 1, branchId: 1, quantity: 11 }],
+      finalBranchStock: [{ productId: 1, branchId: 1, quantity: 6 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
     }
 
@@ -189,11 +191,13 @@ async function main() {
     assert.strictEqual(remaining[0].created_at, '2026-08-16 00:00:00')
     assert.strictEqual(remaining[1].movement_type, 'remove')
 
-    // 10 (start) + 3 - 2 = 11
+    // H-stock 1: this used to assert 10 + 3 - 2 = 11, i.e. the superseded
+    // +5 deleted but left in stock. The live 10 INCLUDES that +5; the plan's
+    // deltas are relative to 10 - 5 = 5, so the right answer is 5 + 3 - 2 = 6.
     const stock = rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get()
-    assert.strictEqual(stock.quantity, 11)
+    assert.strictEqual(stock.quantity, 6)
     const product = rawDb.prepare('SELECT stock_quantity FROM products WHERE id = 1').get()
-    assert.strictEqual(product.stock_quantity, 11)
+    assert.strictEqual(product.stock_quantity, 6)
   })
 
   await testAsync('batch-tracked group (fresh import): add creates a real batch via receiveBatchStock, later remove FIFO-drains it via removeStockAcrossBatches', async () => {
@@ -202,9 +206,11 @@ async function main() {
 
     const plan = {
       movementsToDelete: [],
+      supersededMovements: [],
+      groupFingerprints: [],
       movementsToCreate: [
-        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 5, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 5, movementType: 'add', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: 5 }] },
+        { productId: 2, productName: 'Gadget', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: -5 }] },
       ],
       finalBranchStock: [{ productId: 2, branchId: 1, quantity: 0 }],
       // batchCreates present for this group -> marks it batch-tracked,
@@ -237,9 +243,11 @@ async function main() {
 
     const plan = {
       movementsToDelete: [],
+      supersededMovements: [],
+      groupFingerprints: [],
       movementsToCreate: [
-        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: 3 }] },
+        { productId: 3, productName: 'Thingamajig', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: -3 }] },
       ],
       finalBranchStock: [{ productId: 3, branchId: 1, quantity: 0 }],
       batchTopUps: [], batchCreates: [{ productId: 3, branchId: 1, date: '2026-08-10', quantity: 3 }], batchDrains: [], batchDeactivations: [],
@@ -263,8 +271,10 @@ async function main() {
     seedProduct(rawDb, { id: 4, name: 'Doohickey', stockQuantity: 0 })
     const plan = {
       movementsToDelete: [],
+      supersededMovements: [],
+      groupFingerprints: [],
       movementsToCreate: [
-        { productId: 4, productName: 'Doohickey', branchId: 1, branchName: 'Shop', date: '2026-01-05', quantity: 1, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 4, productName: 'Doohickey', branchId: 1, branchName: 'Shop', date: '2026-01-05', quantity: 1, movementType: 'add', reason: 'Dated stock count import', batchActions: [] },
       ],
       finalBranchStock: [{ productId: 4, branchId: 1, quantity: 1 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
@@ -280,8 +290,10 @@ async function main() {
 
     const plan = {
       movementsToDelete: [],
+      supersededMovements: [],
+      groupFingerprints: [],
       movementsToCreate: [
-        { productId: 5, productName: 'Gizmo', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 7, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 5, productName: 'Gizmo', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 7, movementType: 'add', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: 7 }] },
       ],
       finalBranchStock: [{ productId: 5, branchId: 1, quantity: 7 }],
       batchTopUps: [], batchCreates: [{ productId: 5, branchId: 1, date: '2026-08-10', quantity: 7 }], batchDrains: [], batchDeactivations: [],
@@ -302,9 +314,11 @@ async function main() {
 
     const plan = {
       movementsToDelete: [],
+      supersededMovements: [],
+      groupFingerprints: [],
       movementsToCreate: [
-        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import' },
-        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import' },
+        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-10', quantity: 3, movementType: 'add', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: 3 }] },
+        { productId: 6, productName: 'Sprocket', branchId: 1, branchName: 'Shop', date: '2026-08-12', quantity: 5, movementType: 'remove', reason: 'Dated stock count import', batchActions: [{ batchId: null, date: '2026-08-10', quantity: -3 }] },
       ],
       finalBranchStock: [{ productId: 6, branchId: 1, quantity: 0 }],
       batchTopUps: [], batchCreates: [{ productId: 6, branchId: 1, date: '2026-08-10', quantity: 3 }], batchDrains: [], batchDeactivations: [],
@@ -335,8 +349,10 @@ async function main() {
 
     const plan = {
       movementsToDelete: [oldMovementId],
+      supersededMovements: [{ id: oldMovementId, productId: 7, branchId: 1, date: '2026-08-01', signedQuantity: 10, batchActions: [{ batchId: 999, quantity: 10 }] }],
+      groupFingerprints: [{ productId: 7, branchId: 1, movementCount: 1, movementIdSum: oldMovementId }],
       movementsToCreate: [
-        { productId: 7, productName: 'Widget Pro', branchId: 1, branchName: 'Shop', date: '2026-08-01', quantity: 4, movementType: 'add', reason: 'Dated stock count import' },
+        { productId: 7, productName: 'Widget Pro', branchId: 1, branchName: 'Shop', date: '2026-08-01', quantity: 4, movementType: 'add', reason: 'Dated stock count import', batchActions: [] },
       ],
       finalBranchStock: [{ productId: 7, branchId: 1, quantity: 4 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
@@ -357,7 +373,9 @@ async function main() {
     ).run().meta.last_row_id
     const plan = {
       movementsToDelete: [oldMovementId],
-      movementsToCreate: [{ productId: 8, productName: 'Guarded Widget', branchId: 1, branchName: 'Main', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import' }],
+      supersededMovements: [{ id: oldMovementId, productId: 8, branchId: 1, date: '2026-08-01', signedQuantity: 4 }],
+      groupFingerprints: [{ productId: 8, branchId: 1, movementCount: 1, movementIdSum: oldMovementId }],
+      movementsToCreate: [{ productId: 8, productName: 'Guarded Widget', branchId: 1, branchName: 'Main', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import', batchActions: [] }],
       finalBranchStock: [{ productId: 8, branchId: 1, quantity: 7 }],
       batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
     }
@@ -381,7 +399,9 @@ async function main() {
       seedProduct(rawDb, { id: 9, name: 'Raced Widget', stockQuantity: 2 })
       const plan = {
         movementsToDelete: [],
-        movementsToCreate: [{ productId: 9, productName: 'Raced Widget', branchId: 1, branchName: 'Shop', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import' }],
+        supersededMovements: [],
+        groupFingerprints: [],
+        movementsToCreate: [{ productId: 9, productName: 'Raced Widget', branchId: 1, branchName: 'Shop', date: '2026-08-02', quantity: 3, movementType: 'add', reason: 'Dated stock count import', batchActions: [] }],
         finalBranchStock: [{ productId: 9, branchId: 1, quantity: 5 }],
         batchTopUps: [], batchCreates: [], batchDrains: [], batchDeactivations: [],
       }
