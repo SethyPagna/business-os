@@ -1644,7 +1644,7 @@ export default function POS() {
         setMembershipLoading(false)
       }
     }
-  }, [posCopy])
+  }, [t])
 
 // Initial data load. NOTE: this effect's dependency array is `[isActive,
 // loadCatalogData]`, and `loadCatalogData` is a useCallback that's recreated
