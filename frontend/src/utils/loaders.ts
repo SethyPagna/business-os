@@ -2,6 +2,8 @@
  * Resilient async loader helpers for page bootstrap.
  */
 
+import { presentWriteError, type WriteErrorTranslator } from './writeErrorPresentation.ts'
+
 type LoaderMap = Record<string, (() => unknown | Promise<unknown>) | unknown>
 
 type LoaderResult = {
@@ -81,6 +83,53 @@ export async function withLoaderTimeout<T>(
       Promise.resolve(promise),
       new Promise<never>((_, reject) => {
         timer = globalThis.setTimeout(() => reject(createLoaderTimeoutError(label, timeoutMs)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer != null) {
+      globalThis.clearTimeout(timer)
+    }
+  }
+}
+
+// SCAN1 F2/F5: the timer above only stops WAITING; nothing aborts the fetch,
+// and a write keeps going for up to 45 s (api/http.ts WRITE_REQUEST_TIMEOUT_MS)
+// after a 12-15 s UI timer gave up. "Please try again" was therefore wrong for
+// a write -- it may already have committed. A write's timeout says the outcome
+// is unknown and to check before retrying, in the active language (the shared
+// write_outcome_unknown_timeout pack sentence), and keeps code 'loader_timeout'
+// plus outcome 'unknown' for presentWriteError / directMutationOutcomeIsUnknown.
+// Pair it with one request id per intent (api/requestIds.ts identityForIntent)
+// so the operator's retry replays instead of applying twice.
+export function createWriteTimeoutError(
+  label: unknown,
+  timeoutMs: number,
+  t: WriteErrorTranslator = () => undefined,
+): Error & { code: string; outcome: 'unknown'; timeoutMs: number; label: string } {
+  const detail = presentWriteError({ outcome: 'unknown', timeoutMs }, t).detail
+  const error = new Error(detail) as Error & { code: string; outcome: 'unknown'; timeoutMs: number; label: string }
+  error.name = 'LoaderTimeoutError'
+  error.code = 'loader_timeout'
+  error.outcome = 'unknown'
+  error.timeoutMs = timeoutMs
+  error.label = String(label || 'Request')
+  return error
+}
+
+// Only THIS timer's expiry is reworded: a refusal, or any error the loader
+// itself throws, is a known outcome and passes through untouched.
+export async function withWriteTimeout<T>(
+  loader: () => T | Promise<T>,
+  label = 'Request',
+  timeoutMs = DEFAULT_LOADER_TIMEOUT_MS,
+  t?: WriteErrorTranslator,
+): Promise<T> {
+  let timer: ReturnType<typeof globalThis.setTimeout> | null = null
+  try {
+    return await Promise.race([
+      Promise.resolve(loader()),
+      new Promise<never>((_, reject) => {
+        timer = globalThis.setTimeout(() => reject(createWriteTimeoutError(label, timeoutMs, t)), timeoutMs)
       }),
     ])
   } finally {
