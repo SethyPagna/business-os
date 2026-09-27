@@ -261,9 +261,6 @@ export const EMBEDDED_MARKUP_TOKENS = [
   '<details', '<input', '<video', '<audio', '<marquee', '<textarea', '<select', '<noscript', '<template', '<button', '<dialog',
   '<keygen', '<isindex', '<source', '<bgsound',
 ]
-// S-uploads3: an event handler after ANY tag start in a 'full' region (see
-// uploadSecurity.ts).
-export const TAG_EVENT_HANDLER_WINDOW_BYTES = 1024
 export const MARKUP_TAG_TERMINATORS = [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f, 0x3d, 0x3e]
 export const MARKUP_TOKEN_SEPARATORS = [0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f]
 export const MARKUP_SNIFF_WINDOW_BYTES = 1445
@@ -326,17 +323,13 @@ function tagStartAt(bytes, index) {
   return isAsciiLetter(bytes[index + 1]) || (bytes[index + 1] === 0x00 && isAsciiLetter(bytes[index + 2]) && bytes[index + 3] === 0x00)
 }
 
-function tagEventHandlerInRange(bytes, start, end) {
-  let scannedTo = start
-  for (let index = bytes.indexOf(0x3c, start); index !== -1 && index < end; index = bytes.indexOf(0x3c, index + 1)) {
-    if (!tagStartAt(bytes, index)) continue
-    const to = Math.min(end, index + TAG_EVENT_HANDLER_WINDOW_BYTES)
-    for (let position = Math.max(index + 2, scannedTo); position < to; position += 1) {
-      if ((bytes[position] | 0x20) === 0x6f && (eventHandlerAt(bytes, position, 1) || eventHandlerAt(bytes, position, 2))) return true
-    }
-    scannedTo = Math.max(scannedTo, to)
+// S-uploads3/4: an event handler in a 'full' region after a tag start
+// anywhere before it, at any distance (see uploadSecurity.ts).
+function firstTagStart(bytes) {
+  for (let index = bytes.indexOf(0x3c); index !== -1; index = bytes.indexOf(0x3c, index + 1)) {
+    if (tagStartAt(bytes, index)) return index
   }
-  return false
+  return -1
 }
 
 function markupTokenAt(bytes, start, token, step) {
@@ -365,8 +358,7 @@ function markupInRange(bytes, start, end, mode) {
       }
     }
   }
-  if (mode === 'manifest') return eventHandlerInRange(bytes, start, end)
-  return mode === 'full' && tagEventHandlerInRange(bytes, start, end)
+  return mode === 'manifest' && eventHandlerInRange(bytes, start, end)
 }
 
 function walkMarkupTrailer(bytes, offset, add, depth) {
@@ -539,10 +531,13 @@ function planMarkupScan(bytes) {
 
 export function containsEmbeddedMarkup(bytes) {
   if (!bytes || bytes.length === 0) return false
-  for (const region of planMarkupScan(bytes)) {
+  const regions = planMarkupScan(bytes)
+  for (const region of regions) {
     if (markupInRange(bytes, region.start, region.end, region.mode)) return true
   }
-  return false
+  const tagStart = firstTagStart(bytes)
+  if (tagStart === -1) return false
+  return regions.some((region) => region.mode === 'full' && eventHandlerInRange(bytes, Math.max(region.start, tagStart + 2), region.end))
 }
 
 export function detectUploadFormat(bytes) {

@@ -239,24 +239,24 @@ function detectQuickTimeAtoms(bytes: Uint8Array): DetectedUploadFormat | null {
 // S-uploads3 (2026-09-27) closed refuter R-uploads2's bypasses: an event
 // handler on a tag that was not a token (`<details open ontoggle=...>`,
 // `<input autofocus onfocus=...>`, `<video><source onerror=...>`,
-// `<marquee onstart=...>`, `<x onclick=...>`) passed as image/jpeg. In every
-// 'full' region (the sniffing window and all metadata/text parts) a tag start
-// -- '<' and a letter, as bytes or UTF-16 -- followed within
-// TAG_EVENT_HANDLER_WINDOW_BYTES by an event handler attribute is refused,
-// whatever the tag, and the script-capable tags below are tokens too.
-// Compressed pixel data ('payload') keeps its long-token rule. False
-// positives: '<' + letter is about 8e-4 per random byte and a handler about
-// 6e-11 per position, so random 128 KB metadata would flag about 1 photo in
-// 100,000 (the owner's 12,321-file corpus: no new refusal).
+// `<marquee onstart=...>`, `<x onclick=...>`) passed as image/jpeg. An event
+// handler attribute in a 'full' region (the sniffing window and all
+// metadata/text parts) is refused when a tag starts -- '<' and a letter, as
+// bytes or UTF-16 -- anywhere before it, whatever the tag, and the
+// script-capable tags below are tokens too. S-uploads4 (refuter R-uploads3):
+// the handler was looked for only 1024 bytes past a tag start in the same
+// part, so one long quoted attribute value, or a tag continued in the next
+// segment or chunk, hid it. A quoted value is part of the tag however long it
+// runs, so there is no distance limit. Compressed pixel data ('payload')
+// keeps its long-token rule. False positives: '<' + letter is about 8e-4 per
+// random byte and a handler about 6e-11 per position, so random 128 KB
+// metadata would flag about 1 photo in 100,000.
 export const EMBEDDED_MARKUP_TOKENS: readonly string[] = [
   '<script', '<html', '<svg', '<iframe', '<body', '<object', '<embed', '<!doctype html', '<meta', '<img', '<a href', 'javascript:',
   '<style', '<form', '<link', '<base', '<frame', '<frameset', '<applet', '<math',
   '<details', '<input', '<video', '<audio', '<marquee', '<textarea', '<select', '<noscript', '<template', '<button', '<dialog',
   '<keygen', '<isindex', '<source', '<bgsound',
 ]
-// How far after a tag start an event handler attribute is looked for. Not
-// cut at '>': a browser's tag may run on past a '>' inside a quoted value.
-export const TAG_EVENT_HANDLER_WINDOW_BYTES = 1024
 // Bytes that end a '<' token (see above). A token needs none at the end of
 // the data; 'javascript:' needs none at all.
 export const MARKUP_TAG_TERMINATORS: readonly number[] = [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f, 0x3d, 0x3e]
@@ -333,19 +333,13 @@ function tagStartAt(bytes: Uint8Array, index: number): boolean {
   return isAsciiLetter(bytes[index + 1]) || (bytes[index + 1] === 0x00 && isAsciiLetter(bytes[index + 2]) && bytes[index + 3] === 0x00)
 }
 
-// An event handler attribute within TAG_EVENT_HANDLER_WINDOW_BYTES after a
-// tag start. Every byte is looked at once at most, however many tags overlap.
-function tagEventHandlerInRange(bytes: Uint8Array, start: number, end: number): boolean {
-  let scannedTo = start
-  for (let index = bytes.indexOf(0x3c, start); index !== -1 && index < end; index = bytes.indexOf(0x3c, index + 1)) {
-    if (!tagStartAt(bytes, index)) continue
-    const to = Math.min(end, index + TAG_EVENT_HANDLER_WINDOW_BYTES)
-    for (let position = Math.max(index + 2, scannedTo); position < to; position += 1) {
-      if ((bytes[position] | 0x20) === 0x6f && (eventHandlerAt(bytes, position, 1) || eventHandlerAt(bytes, position, 2))) return true
-    }
-    scannedTo = Math.max(scannedTo, to)
+// Where the first tag starts, or -1. Every part counts, pixel data included:
+// a tag started there runs on into the parts after it.
+function firstTagStart(bytes: Uint8Array): number {
+  for (let index = bytes.indexOf(0x3c); index !== -1; index = bytes.indexOf(0x3c, index + 1)) {
+    if (tagStartAt(bytes, index)) return index
   }
-  return false
+  return -1
 }
 
 // `step` 1 matches bytes; 2 matches UTF-16 (a zero byte after each character).
@@ -375,8 +369,7 @@ function markupInRange(bytes: Uint8Array, start: number, end: number, mode: Mark
       }
     }
   }
-  if (mode === 'manifest') return eventHandlerInRange(bytes, start, end)
-  return mode === 'full' && tagEventHandlerInRange(bytes, start, end)
+  return mode === 'manifest' && eventHandlerInRange(bytes, start, end)
 }
 
 type AddMarkupRegion = (start: number, end: number, mode: MarkupScanMode) => void
@@ -562,10 +555,15 @@ function planMarkupScan(bytes: Uint8Array): Array<{ start: number; end: number; 
 
 export function containsEmbeddedMarkup(bytes: Uint8Array): boolean {
   if (!bytes || bytes.length === 0) return false
-  for (const region of planMarkupScan(bytes)) {
+  const regions = planMarkupScan(bytes)
+  for (const region of regions) {
     if (markupInRange(bytes, region.start, region.end, region.mode)) return true
   }
-  return false
+  // An event handler attribute in a 'full' region after a tag start, however
+  // far after it.
+  const tagStart = firstTagStart(bytes)
+  if (tagStart === -1) return false
+  return regions.some((region) => region.mode === 'full' && eventHandlerInRange(bytes, Math.max(region.start, tagStart + 2), region.end))
 }
 
 // The single allowlist: images and videos only. Returns null for anything
