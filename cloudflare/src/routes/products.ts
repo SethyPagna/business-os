@@ -2880,6 +2880,59 @@ app.post('/wire-images/preview', async (c) => {
   })
 })
 
+// What each product showed before a bulk image write. The preview's
+// currentImagePath/currentGallery live only in the client's response, so this
+// read is the one server-side record of a photo the write replaces.
+async function loadWireImagePreviousState(db: ReturnType<typeof getDb>, productIds: number[]) {
+  const covers = new Map<number, string | null>()
+  const galleries = new Map<number, string[]>()
+  for (const chunk of chunkForBinding([...new Set(productIds)])) {
+    const { sql, params } = buildInClause('id', chunk)
+    const products = await db.prepare(`SELECT id, image_path FROM products WHERE id IN (${sql})`)
+      .all<{ id: number; image_path: string | null }>(params)
+    for (const row of products) covers.set(Number(row.id), row.image_path ?? null)
+    const images = await db.prepare(`SELECT product_id, image_path FROM product_images WHERE product_id IN (${sql}) ORDER BY product_id ASC, sort_order ASC, id ASC`)
+      .all<{ product_id: number; image_path: string }>(params)
+    for (const row of images) {
+      const list = galleries.get(Number(row.product_id))
+      if (list) list.push(row.image_path)
+      else galleries.set(Number(row.product_id), [row.image_path])
+    }
+  }
+  return { covers, galleries }
+}
+
+// One row per WIRE_IMAGES_AUDIT_CHUNK products, sharing an operation id: a
+// whole-catalog wire in one row can pass D1's row-size limit, and audit()
+// swallows that failure, so an unbounded row would leave no trail at all.
+const WIRE_IMAGES_AUDIT_CHUNK = 100
+
+async function auditWireImages(
+  env: Env,
+  user: SessionUser | null,
+  applied: Array<{ productId: number; imagePaths: string[] }>,
+  previous: Awaited<ReturnType<typeof loadWireImagePreviousState>>,
+) {
+  const operation = crypto.randomUUID()
+  const parts = Math.ceil(applied.length / WIRE_IMAGES_AUDIT_CHUNK)
+  for (let part = 0; part < parts; part += 1) {
+    const slice = applied.slice(part * WIRE_IMAGES_AUDIT_CHUNK, (part + 1) * WIRE_IMAGES_AUDIT_CHUNK)
+    await audit(env, user?.id ?? null, actorSnapshot(user), 'wire_images', 'product', null, {
+      scope: 'selection',
+      productCount: applied.length,
+      operation,
+      part: part + 1,
+      parts,
+      products: slice.map((entry) => ({
+        id: entry.productId,
+        previousImagePath: previous.covers.get(entry.productId) ?? null,
+        previousGallery: previous.galleries.get(entry.productId) ?? [],
+        imagePaths: entry.imagePaths,
+      })),
+    })
+  }
+}
+
 app.post('/wire-images', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'image') !== 'full') {
@@ -2912,6 +2965,8 @@ app.post('/wire-images', async (c) => {
 
   if (!applied.length) return c.json({ success: true, updated: 0 })
 
+  const previous = await loadWireImagePreviousState(db, applied.map((entry) => entry.productId))
+
   // Cover column and gallery table both, through the same
   // syncProductImageGallery every other product write uses -- the gallery is
   // what the Products page, the edit form and the public portal all read, so
@@ -2924,6 +2979,7 @@ app.post('/wire-images', async (c) => {
     }])
     await syncProductImageGallery(c.env, entry.productId, entry.imagePaths)
   }
+  await auditWireImages(c.env, user, applied, previous)
   await bumpVersion(c.env, 'products')
   return c.json({ success: true, updated: applied.length, imagesAttached: applied.reduce((sum, entry) => sum + entry.imagePaths.length, 0) })
 })
