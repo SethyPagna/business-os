@@ -152,6 +152,10 @@ import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAno
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+// POST / re-mints a receipt number this many times after losing an in-batch
+// receipt race before answering receipt_number_conflict. Each retry re-runs
+// the whole atomic batch, so the bound caps the write cost of a burst.
+const RECEIPT_NUMBER_RETRY_LIMIT = 3
 
 async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId: number): Promise<boolean> {
   const latest = await db.prepare(`
@@ -1113,10 +1117,16 @@ app.post('/', async (c) => {
   // is dropped and replaced by the server-minted id. Normalise rather than
   // 400: see normalizeClientReceiptNumber for why rejecting an offline
   // replay would strand a sale that really happened in the outbox forever.
-  const receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber(
-    '',
-    async (candidate) => !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate])),
-  )
+  //
+  // The probe below only picks a CANDIDATE. receipt_number has no UNIQUE
+  // index (migration 0107 / lib/receiptNumber.ts), so a second till can
+  // commit the same number between this probe and the write batch. The batch
+  // therefore re-asserts uniqueness in-transaction (receiptNumberGuard in
+  // step 5) and a lost race re-mints and retries, bounded -- see
+  // RECEIPT_NUMBER_RETRY_LIMIT. `let` because a retry replaces it.
+  const receiptNumberTaken = async (candidate: string) =>
+    !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
+  let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
   // An offline replay carries the sale's own queue-time moment (stamped in
   // saleWriteTransport); honored with bounded trust so day-ranged reports
   // put the sale on the day it happened, not the day it synced. Online
@@ -1135,14 +1145,15 @@ app.post('/', async (c) => {
   // ---- 4. Insert the sale header (single statement -- see lib/db.ts's
   // batch() docs for why this can't be the same atomic unit as step 5) ----
   const branchRow = body.branch_id ? await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]) : null
-  let creationSnapshotJson: string
-  try {
-    creationSnapshotJson = buildSaleCreationSnapshot({
+  // The snapshot embeds the receipt number, so a receipt-race retry rebuilds
+  // it from the same inputs (and the same recordedAt) with the new number.
+  const snapshotRecordedAt = new Date().toISOString()
+  const buildCreationSnapshotFor = (snapshotReceiptNumber: string) => buildSaleCreationSnapshot({
       moneyPrecisionVersion: 1, calculatedTotalUsd, roundingAdjustmentUsd,
       origin: clientCreatedAt ? 'offline_replay' : 'pos',
-      recordedAt: new Date().toISOString(),
+      recordedAt: snapshotRecordedAt,
       saleAt: clientCreatedAt,
-      receiptNumber,
+      receiptNumber: snapshotReceiptNumber,
       actor: user,
       cashierId: actorId(user) ?? (body.cashier_id || null),
       cashierName: actorSnapshot(user),
@@ -1177,10 +1188,20 @@ app.post('/', async (c) => {
         pointsRedeemed: membershipPointsRedeemed,
       } : null,
     })
+  let creationSnapshotJson: string
+  try {
+    creationSnapshotJson = buildCreationSnapshotFor(receiptNumber)
   } catch (error) {
     if (error instanceof SaleCreationSnapshotError) return c.json({ error: error.message }, 400)
     throw error
   }
+  // Same fold as the search_normalized param below; a function so a
+  // receipt-race retry can refold it around the new number.
+  const saleSearchNormalizedFor = (searchReceiptNumber: string) => normalizeSearchText(
+    [searchReceiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
+      .filter(Boolean)
+      .join(' '),
+  )
   const saleInsertStatement = {
     sql: `
       INSERT INTO sales (
@@ -1248,11 +1269,7 @@ app.post('/', async (c) => {
       // run through, so folded queries match folded storage. Read additively
       // by buildSalesSearchWhere; membership_number is joined from customers
       // at read time, so it stays out of this per-row blob.
-      search_normalized: normalizeSearchText(
-        [receiptNumber, actorSnapshot(user), saleCustomerName, saleCustomerPhone, branchRow?.name, paymentMethod]
-          .filter(Boolean)
-          .join(' '),
-      ),
+      search_normalized: saleSearchNormalizedFor(receiptNumber),
       creation_snapshot_json: creationSnapshotJson,
       // Keep the legacy compatibility projection in sync with the canonical
       // sale_items rows.  The Sales list joins sale_items directly, but the
@@ -1327,9 +1344,55 @@ app.post('/', async (c) => {
   let saleId = 0
   let recoveredCommittedCreate = false
   let resolvedReceiptNumber = receiptNumber
+  // Set only when every bounded retry lost the receipt race; the catch below
+  // then answers receipt_number_conflict instead of guessing from the message.
+  let receiptNumberRaceLost = false
+  // In-batch uniqueness: the probe that minted receiptNumber ran outside this
+  // transaction, so re-assert it here, in the same transaction ahead of the
+  // header INSERT (before the loyalty redemptionGuard, which keeps its slot
+  // directly above the INSERT).
+  // Aborts via the same json_extract idiom as the other guards; because that
+  // error text ("malformed JSON") is shared, the route attributes the failure
+  // afterwards by re-probing the number (see the retry loop), never by message.
+  const receiptNumberGuard = {
+    sql: `SELECT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM sales WHERE receipt_number = @receipt_number
+          ) THEN 1 ELSE json_extract('receipt_number_conflict', '$') END`,
+    params: { receipt_number: receiptNumber } as Record<string, unknown>,
+  }
+  const saleCreationAuditDetails = (auditReceiptNumber: string) => JSON.stringify({
+    kind: 'sale.creation',
+    receiptNumber: auditReceiptNumber,
+    itemCount: priced.length,
+    totalUsd,
+    saleStatus,
+    origin: clientCreatedAt ? 'offline_replay' : 'pos',
+  })
+  const saleCreationAuditStatement = {
+    sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
+          SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
+          FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
+    params: {
+      user_id: actorId(user),
+      user_name: actorSnapshot(user),
+      details: saleCreationAuditDetails(receiptNumber),
+      sale_write_key: saleWriteKey,
+    } as Record<string, unknown>,
+  }
+  // Every statement that carries the receipt number, moved together.
+  const adoptReceiptNumber = (next: string) => {
+    receiptNumber = next
+    resolvedReceiptNumber = next
+    receiptNumberGuard.params.receipt_number = next
+    saleInsertStatement.params.receipt_number = next
+    saleInsertStatement.params.search_normalized = saleSearchNormalizedFor(next)
+    saleInsertStatement.params.creation_snapshot_json = buildCreationSnapshotFor(next)
+    saleCreationAuditStatement.params.details = saleCreationAuditDetails(next)
+  }
   try {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
+      receiptNumberGuard,
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1631,26 +1694,30 @@ app.post('/', async (c) => {
             ), 0) = @item_count
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
-    }, {
-      sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
-            SELECT @user_id,@user_name,'create','sale_creation',CAST(id AS TEXT),@details,'sales',CAST(id AS TEXT),@details
-            FROM sales WHERE client_request_id = @sale_write_key AND client_request_id <> ''`,
-      params: {
-        user_id: actorId(user),
-        user_name: actorSnapshot(user),
-        details: JSON.stringify({
-          kind: 'sale.creation',
-          receiptNumber,
-          itemCount: priced.length,
-          totalUsd,
-          saleStatus,
-          origin: clientCreatedAt ? 'offline_replay' : 'pos',
-        }),
-        sale_write_key: saleWriteKey,
-      },
-    })
+    }, saleCreationAuditStatement)
     statements.push(ordinaryBusinessMaintenanceGuard)
-    await db.batch(statements)
+    // Receipt-race retry. A failed batch rolled back completely, so re-running
+    // it with a fresh number re-evaluates every guard (stock, pricing,
+    // customer) from scratch. Retry ONLY when the failure is attributable to
+    // the receipt number: this request's own sale is absent (a committed own
+    // sale is a lost response, reconciled below as a replay) and another sale
+    // now holds the number. Anything else falls through unchanged.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await db.batch(statements)
+        break
+      } catch (batchError) {
+        const ownSale = await db.prepare(`SELECT 1 AS hit FROM sales
+          WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
+          .get({ sale_write_key: saleWriteKey })
+        if (ownSale || !(await receiptNumberTaken(receiptNumber))) throw batchError
+        if (attempt >= RECEIPT_NUMBER_RETRY_LIMIT) {
+          receiptNumberRaceLost = true
+          throw batchError
+        }
+        adoptReceiptNumber(await uniqueBusinessDateTimeNumber('', receiptNumberTaken))
+      }
+    }
     const createdSale = await db.prepare(`SELECT id,receipt_number FROM sales
       WHERE client_request_id=@sale_write_key AND client_request_id<>'' LIMIT 1`)
       .get<{ id: number; receipt_number: string }>({ sale_write_key: saleWriteKey })
@@ -1675,6 +1742,17 @@ app.post('/', async (c) => {
         return c.json({
           error: 'This sale was not completely recorded. Keep the original sale details and ask an administrator to recover it.',
           code: 'sale_incomplete',
+        }, 409)
+      }
+      // Checked BEFORE the generic guesses below: the receipt guard fails
+      // with the same "malformed JSON" text as the pricing/loyalty guards, and
+      // a UNIQUE failure on the column (should an index ever exist) matches
+      // the catch-all /constraint failed/ that answers stock_conflict. Neither
+      // is a stock shortage, and a retry with the same body mints afresh.
+      if (receiptNumberRaceLost || /UNIQUE constraint failed:\s*sales\.receipt_number/i.test(message)) {
+        return c.json({
+          error: 'Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.',
+          code: 'receipt_number_conflict',
         }, 409)
       }
       if (/malformed JSON/i.test(message)) {
