@@ -5,7 +5,10 @@ Read `progress.md` before planning or editing. It is the live coordination and d
 ## Workflow
 
 - Start rigorous work with the `work-mode` skill: it picks a playbook (bug, feature, lane, refute, checkpoint, recover, forensics, perf, cleanup, council, loop) and routes to the other skills. Index: `agent-team/skills/INDEX.md`.
-- One command decides "done": `node agent-team/scripts/verify.mjs` (full gate, both packages, every test file alone) or `--fast` for the inner loop. Report only what it actually printed.
+- Three gates, one job each; report only what the gate you ran printed:
+  - `node agent-team/scripts/verify.mjs` is a lane's local done-check: both typechecks, i18n, the frontend build and each `frontend/tests` and `cloudflare/scripts` test file run alone (`--fast` for the inner loop); its summary says `partial` whenever a filter narrowed the run.
+  - `.github/workflows/gate.yml` on GitHub is the full both-package sweep for a release candidate.
+  - `run/verify-local.bat` is the heavier legacy local wrapper; it installs and builds, so use it intentionally.
 - Skills are authored once in `agent-team/skills/` and generated into `.agents/skills` (Cursor, Codex, Gemini), `.claude/skills` and `.github/skills` by `node agent-team/scripts/sync-adapters.mjs`. Every human correction becomes a test, check or skill (`skill-wiki`).
 
 ## Specialized delegation
@@ -69,4 +72,4 @@ npm run typecheck
 Pop-Location
 ```
 
-`frontend npm run test:utils` and the full `cloudflare/scripts/test-*.cjs` sweep are broad certification gates. `run/verify-local.bat` is the canonical local wrapper but installs/builds and cleans known strays, so use it intentionally. Never run `run/full-automation.bat` as verification.
+`frontend npm run test:utils` and the full `cloudflare/scripts/test-*.cjs` sweep are broad certification gates. `run/verify-local.bat` is the heavier legacy local wrapper: it installs, builds and cleans known strays, so use it intentionally. Never run `run/full-automation.bat` as verification.

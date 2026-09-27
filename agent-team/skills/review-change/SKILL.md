@@ -23,7 +23,7 @@ You did not write this code. Judge what is written, not what was meant.
 9. Security: auth/permission on every new route, no secret in responses/logs, input validated server-side.
 10. Merge: `git merge-tree <release-base> <head>`; list conflicts.
 
-Run the gates yourself: `node agent-team/scripts/verify.mjs <terms>` for the touched area, full when certifying a release.
+Run the gates yourself: `node agent-team/scripts/verify.mjs <terms>` for the touched area (its summary says `partial` and what ran). A release candidate is certified by the `.github/workflows/gate.yml` run on GitHub for that exact commit, the full both-package sweep.
 
 ## Output
 Verdict: **CERTIFIED** / **CERTIFIED WITH EXCEPTIONS** / **NOT CERTIFIED**. Each finding is one of:

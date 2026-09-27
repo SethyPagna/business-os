@@ -27,7 +27,7 @@ tool, use your harness's equivalent (table at the end).
 1. **Evidence over belief.** Reproduce before fixing; observe success after. Reasoning proposes, reality votes.
 2. **Red first.** A bug fix starts with a test that fails on the base for the reported reason.
 3. **Discriminating tests.** A test must fail for the plausible wrong implementation, not only for no implementation.
-4. **One command for done.** `node agent-team/scripts/verify.mjs` (full) / `--fast` (inner loop). Never claim a gate you did not run.
+4. **Three gates, one job each.** `node agent-team/scripts/verify.mjs` is a lane's local done-check (`--fast` for the inner loop); `.github/workflows/gate.yml` on GitHub is the full both-package sweep for a release candidate; `run/verify-local.bat` is the heavier legacy local wrapper, which installs and builds, so use it intentionally. Never claim a gate you did not run.
 5. **Committed HEAD is the product.** Green on a dirty tree proves nothing about what ships.
 6. **Fresh eyes certify.** The writer never certifies its own work; a read-only refuter does (`review-change`).
 7. **One writer per path.** Parallelize independent work in separate worktrees; never parallelize the same files.
@@ -78,7 +78,7 @@ tool, use your harness's equivalent (table at the end).
 ### checkpoint — assemble and ship a release
 1. `deploy-provenance`: prove what production runs.
 2. Fresh integration branch from main; merge only refuter-certified lanes, in the council's order.
-3. Resolve conflicts by union, never by choosing a side blindly; after merging run every test file alone.
+3. Resolve conflicts by union, never by choosing a side blindly; after merging run every test file alone (the full sweep: `gate.yml` on GitHub).
 4. Integrated refuter on the candidate.
 5. With explicit user authorization, deploy from the committed candidate after trading close; smoke test live; record provenance in progress.md.
 
