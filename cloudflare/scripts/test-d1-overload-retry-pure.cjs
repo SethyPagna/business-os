@@ -1,7 +1,8 @@
 // Focused regression coverage for the shared D1 retry adapter. Queue overload
 // must fail once so a saturated D1 is not given another identical operation;
 // ordinary transient infrastructure errors still receive the established one
-// retry. The real TypeScript module is transpiled and executed.
+// retry, except through batchOnce, which never retries. The real TypeScript
+// module is transpiled and executed.
 
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -92,6 +93,20 @@ async function main() {
   )
   assert.equal(overloadedBatch.attempts, 1, 'the shared batch path must also skip an overload retry')
   console.log('PASS queue-overload batches fail after one D1 attempt')
+
+  // batchOnce is the explicit single-attempt write: a rejected batch may have
+  // committed with its acknowledgement lost, so even the transient error that
+  // batch() retries must reach the caller after one attempt.
+  const retriedBatch = batchDb([new Error('D1_ERROR: internal error')])
+  await new D1Compat(retriedBatch).batch([{ sql: 'UPDATE t SET value = 1' }])
+  assert.equal(retriedBatch.attempts, 2, 'batch() keeps the one retry on a transient error')
+  const onceBatch = batchDb([new Error('D1_ERROR: internal error')])
+  await assert.rejects(
+    () => new D1Compat(onceBatch).batchOnce([{ sql: 'UPDATE t SET value = 1' }]),
+    /internal error/,
+  )
+  assert.equal(onceBatch.attempts, 1, 'batchOnce must not retry, not even a transient error')
+  console.log('PASS batchOnce makes one attempt on an error batch() retries')
 }
 
 main().catch((error) => {
