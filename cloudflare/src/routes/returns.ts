@@ -1988,7 +1988,7 @@ app.post('/', async (c) => {
     const recordedBatchSql = fallbackReceive && !plan.splits.length ? fallbackBatchSql : '@batch_id'
     if (stockAction === 'restock' && productId && itemBranchId) {
       for (const split of plan.splits) {
-        const receive = planReceiveBatchStock({ productId, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
+        const receive = planReceiveBatchStock({ productId, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId, restockOnly: true })
         statements.push(...receive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
       }
       if (fallbackReceive) statements.push(...fallbackReceive.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
@@ -3029,7 +3029,7 @@ app.patch('/:id', async (c) => {
       for (const split of plan.splits) {
         statements.push(bulkAssertion('EXISTS(SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId)',
           { batchId: split.batchId, productId: item.product_id }))
-        const received = planReceiveBatchStock({ productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId })
+        const received = planReceiveBatchStock({ productId: item.product_id, branchId: itemBranchId, quantity: split.quantity, batchId: split.batchId, restockOnly: true })
         statements.push(...received.statements.map((statement) => ({ sql: statement.sql, params: statement.params as Record<string, unknown> })))
         if (plan.splits.length === 1 && split.quantity === quantity) resolvedBatchId = split.batchId
         itemSplits.push({ batchId: split.batchId, branchId: itemBranchId, quantity: split.quantity, saleItemId: item.sale_item_id ?? null })

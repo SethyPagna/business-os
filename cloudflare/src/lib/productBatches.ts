@@ -223,6 +223,13 @@ export type ReceiveBatchPlanInput = {
   reservedBatchId?: number
   /** Internal provenance key, e.g. a return event; never an operator lot code. */
   provenanceKey?: string
+  /**
+   * Internal only: put units back into an EXISTING lot they came out of (a
+   * customer return). Moves on-hand stock and reactivates the lot, but is not
+   * a supplier receipt: received_quantity, received cost and supplier/payment
+   * attribution stay exactly as the supplier delivered them.
+   */
+  restockOnly?: boolean
 }
 
 export type ReceiveBatchStatementPlan = {
@@ -280,6 +287,16 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
+  const restockOnly = input.restockOnly === true
+  if (restockOnly) {
+    if (!(Number.isSafeInteger(Number(input.batchId)) && Number(input.batchId) > 0) || input.provenanceKey
+      || input.receiptLotTarget || reservedBatchId !== undefined) {
+      throw new Error('A return restock must name the existing lot it goes back into')
+    }
+    if (input.unitCostUsd != null || input.receiptCostPreimage || input.paymentStatus || input.supplierId != null || input.supplierName) {
+      throw new Error('A return restock records no receipt cost or supplier')
+    }
+  }
   const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
@@ -325,7 +342,19 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
     ? `(SELECT id FROM products WHERE client_request_id = @productClientRequestId AND client_request_id <> '')`
     : '@productId'
   const explicitBatch = params.batchId != null
-  const metadata: StockWriteStatement = explicitBatch
+  // A return restock only makes the lot selectable again. Running the receipt
+  // UPDATE below would add the returned units to what the supplier delivered
+  // (inflating purchases totals and never taken back on cancel or edit) and,
+  // on a fully reverted lot, hand its attribution to a supplier-less receipt.
+  const metadata: StockWriteStatement = restockOnly
+    ? {
+        sql: `UPDATE product_batches SET
+          is_active = 1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = @batchId AND variant_product_id = ${productIdSql}`,
+        params,
+      }
+    : explicitBatch
     ? {
         sql: `UPDATE product_batches SET
           is_active = 1,
