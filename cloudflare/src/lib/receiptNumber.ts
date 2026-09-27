@@ -26,10 +26,13 @@ export function businessDateTimeId(now: Date = new Date()): string {
 // Same-second writes are real on a busy POS: the first sale keeps the bare
 // timestamp id, later ones probe and take -2, -3, ... The probe cap guards
 // against a pathological burst; past it a short random suffix keeps the id
-// unique rather than looping. Two concurrent Workers can still in
-// principle race between probe and INSERT (receipt_number carries no
-// UNIQUE constraint) -- accepted: client_request_id dedupe already guards
-// the harmful double-insert case, this only disambiguates the label.
+// unique rather than looping. The probe only picks a CANDIDATE: two
+// concurrent Workers can race between probe and INSERT (receipt_number
+// carries no UNIQUE constraint), so every sales writer re-asserts the number
+// inside its write batch: POST /api/sales and lib/salesImportCommit.ts
+// re-mint on a lost race (bounded); lib/stockActionCommit.ts (job-scoped
+// IMP- ids) and the return replacement sale's precondition in
+// routes/returns.ts fail the write whole instead.
 //
 // `moment` defaults to now (a live checkout or return). A historical sales
 // import passes the sale's OWN moment instead, so an imported receipt gets

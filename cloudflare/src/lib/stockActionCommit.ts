@@ -660,7 +660,12 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     row: line.rowNumber, product_id: line.productId, product_name: line.productName,
     branch_id: line.branchId, quantity: line.quantity, price_usd: line.sellingPriceUsd,
   })))
-  const receiptNumber = `IMP-${soldAt.replace(/-/g, '')}-${groupHash.slice(0, 8).toUpperCase()}`
+  // Job-scoped: the sale group key is only date + ordinal ("sale", "sale2"),
+  // so hashing it alone gave every import job's same-date group the SAME
+  // number for a different sale (client_request_id is job-scoped, so nothing
+  // deduped it). Still deterministic per job, so a same-job retry is stable.
+  const receiptHash = await sha256Hex(`${jobId}:${saleGroupKey}`)
+  const receiptNumber = `IMP-${soldAt.replace(/-/g, '')}-${receiptHash.slice(0, 8).toUpperCase()}`
   const branchId = uniqueBranches.length === 1 ? uniqueBranches[0] : null
   const branchName = uniqueBranches.length === 1 ? lines[0].branchName : 'Multiple branches'
   const creationSnapshotJson = buildSaleCreationSnapshot({
@@ -689,6 +694,16 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     deliveryFeeUsd: 0,
     customerSnapshot: null,
     membershipSnapshot: null,
+  })
+  // In-transaction receipt uniqueness (receipt_number has no UNIQUE index):
+  // another sale holding this number fails the guard CHECK and rolls the
+  // whole group back; reported below as a receipt collision.
+  statements.push({
+    sql: `INSERT INTO import_stock_action_guards (job_id, action_key, guard_key, guard_value)
+          SELECT @jobId, @actionKey, 'receipt',
+            CASE WHEN NOT EXISTS (SELECT 1 FROM sales WHERE receipt_number = @receiptNumber) THEN 1 ELSE 0 END
+          WHERE ${guard}`,
+    params: { ...common, receiptNumber },
   })
   statements.push({
     sql: `INSERT INTO sales (
@@ -807,7 +822,16 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
     },
   )
 
-  await db.batch(statements)
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const holder = await db.prepare(`SELECT client_request_id FROM sales WHERE receipt_number = @receiptNumber LIMIT 1`)
+      .get<{ client_request_id: string | null }>({ receiptNumber })
+    if (holder && holder.client_request_id !== clientRequestId) {
+      throw new Error(`Sale group ${saleGroupKey} could not be recorded: receipt number ${receiptNumber} is already held by another sale. Nothing was written for this group.`)
+    }
+    throw error
+  }
   const committed = await db.prepare(`
     SELECT status FROM import_stock_action_commits WHERE job_id = @jobId AND action_key = @actionKey
   `).get<{ status: string }>({ jobId, actionKey })
