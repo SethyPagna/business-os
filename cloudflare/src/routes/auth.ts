@@ -85,9 +85,10 @@ const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_ACCOUNT_WIDE_MAX = 40
 const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
 // SEC1-02: a sign-in that resolves no usable account still spends one bcrypt
-// compare at the staff cost (10), so the answer time does not tell a staff
-// identifier from a stranger's (lib/portalAccounts.ts does the same). This is
-// the hash of a random string nobody holds.
+// compare at the staff cost (10), as lib/portalAccounts.ts does. That narrows
+// the timing gap to a staff identifier but does not close it: a resolved
+// account also spends the per-account limiter and lockout D1 calls. The hash
+// is of a random string nobody holds.
 const NO_ACCOUNT_PASSWORD_HASH = '$2b$10$kPCxhXVBKdQbkO41qCeEI./xzCQduQU0aV1E9hdVpUBlxosWlHUzO'
 
 type OtpTargetUser = {
