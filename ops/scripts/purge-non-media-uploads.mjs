@@ -1600,9 +1600,9 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
   }
 }
 
-// Why this run must stop before its first R2 or D1 request (empty when every
-// version of the production Worker carrying traffic binds ASSETS to BUCKET).
-// An unreadable answer stops it too: the check never passes by default.
+// Why this run must stop (empty when every version of the production Worker
+// carrying traffic binds ASSETS to BUCKET). An unreadable answer stops it
+// too: the check never passes by default.
 export const WORKERS_READ_HINT = 'Add the permission row  Account | Workers Scripts | Read  to the token (step 1 at the top of this script) and run it again.'
 export async function liveBucketProblem(api, accountId) {
   const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
@@ -1680,7 +1680,9 @@ else out of the website's storage into quarantine/, where it can be put back.
 
 Before anything else it checks that the live website stores its files in
 ${BUCKET}, the bucket this script works on, and stops if not (the token
-needs Account | Workers Scripts | Read for that check).
+needs Account | Workers Scripts | Read for that check). --move and
+--restore check it again after you type MOVE or RESTORE, before changing
+anything.
 
 There is no --delete: the quarantine copies stay until you delete them
 yourself, which this script never does (see "Deleting the quarantine for
@@ -1747,13 +1749,15 @@ export async function run({
   if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the BusinessOS checkout after a fresh git pull of main.')
   token = String(env.CLOUDFLARE_API_TOKEN || await prompts.hidden('Cloudflare API token: ') || '').trim()
   if (!token) return fail('no token given.')
+  const cf = makeClient({ token, accountId, databaseId, fetchImpl })
   const context = {
-    cf: makeClient({ token, accountId, databaseId, fetchImpl }), log, fail, prompts, homeDir, now, token,
+    cf, log, fail, prompts, homeDir, now, token,
     concurrency: Math.max(1, Math.floor(concurrency) || 1), moveMaxBytes, largeFileBytes,
+    readLiveBucketProblem: () => liveBucketProblem(cf.api, accountId),
   }
   try {
     log(`Checking that the live website stores its files in ${BUCKET}...`)
-    const problem = await liveBucketProblem(context.cf.api, accountId)
+    const problem = await context.readLiveBucketProblem()
     if (problem) return fail(`${problem} No stored file or database row was read or changed.`)
     if (options.mode === 'restore') return await restoreRun({ ...context, manifest, manifestPath })
     return await purgeRun({ ...context, move: options.mode === 'move' })
@@ -1762,7 +1766,15 @@ export async function run({
   }
 }
 
-async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, moveMaxBytes, largeFileBytes, move }) {
+// After MOVE or RESTORE is typed, before the first change: the website may
+// have been rolled back to another bucket while the run listed or waited.
+async function liveBucketChangedProblem({ log, readLiveBucketProblem }) {
+  log(`Checking again that the live website stores its files in ${BUCKET}...`)
+  const problem = await readLiveBucketProblem()
+  return problem ? `${problem} Nothing was changed.` : ''
+}
+
+async function purgeRun({ cf, log, fail, prompts, homeDir, now, token, concurrency, moveMaxBytes, largeFileBytes, move, readLiveBucketProblem }) {
   log(move ? 'Mode: MOVE to quarantine (asks before changing anything)' : 'Mode: DRY RUN (changes nothing)')
   log('Reading the database (read-only)...')
   const activeJobIds = await readActiveJobIds(cf)
@@ -1823,6 +1835,8 @@ async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, mo
   const totalBytes = candidates.reduce((sum, entry) => sum + entry.size, 0)
   const answer = String(await prompts.visible(`\nType MOVE to move ${candidates.length} files (${megabytes(totalBytes)} MB) to ${quarantineKeyFor(stamp, '')} -- --restore can put them back: `) || '').trim()
   if (answer !== 'MOVE') { log('Not confirmed. Nothing was changed.'); return 0 }
+  const changed = await liveBucketChangedProblem({ log, readLiveBucketProblem })
+  if (changed) return fail(changed)
   return moveToQuarantine({ cf, log, now, token, concurrency, moveMaxBytes, largeFileBytes, entries, candidates, stamp, outDir })
 }
 
@@ -2074,13 +2088,15 @@ async function restoreRows(cf, manifest) {
   return result
 }
 
-async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFileBytes, manifest, manifestPath }) {
+async function restoreRun({ cf, log, fail, prompts, now, token, concurrency, largeFileBytes, manifest, manifestPath, readLiveBucketProblem }) {
   const moves = manifest.moves
   const rows = manifest.rows || {}
   log(`Restore from ${manifestPath}`)
   log(`  files recorded: ${moves.length}; Library rows: ${(rows.file_assets || []).length}; import rows: ${(rows.import_job_files || []).length}`)
   const answer = String(await prompts.visible('Type RESTORE to put them back: ') || '').trim()
   if (answer !== 'RESTORE') { log('Not confirmed. Nothing was changed.'); return 0 }
+  const changed = await liveBucketChangedProblem({ log, readLiveBucketProblem })
+  if (changed) return fail(changed)
 
   // Files first, so a restored row never points at a missing file.
   const objects = new Array(moves.length)

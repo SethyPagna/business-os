@@ -15,6 +15,8 @@
 //     wrong bucket (an old copy of the script, or a rollback past the move);
 //   - an unreadable answer (a token without Workers Scripts Read) refuses
 //     with the permission to add -- never a silent pass;
+//   - --move and --restore read the binding again after MOVE or RESTORE is
+//     typed and refuse, with no R2 or D1 request, if it changed meanwhile;
 //   - the owner steps name the live bucket, never the stale business-os-v1
 //     folder, and the only mention of the old bucket is the warning never to
 //     put a lifecycle rule on it.
@@ -26,6 +28,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const F = require('./harness/upload_fixtures.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const PURGE_SOURCE = process.env.PURGE_SCRIPT || path.join(ROOT, 'ops', 'scripts', 'purge-non-media-uploads.mjs')
@@ -37,6 +40,7 @@ const DATABASE = 'fedcba98-7654-3210-fedc-ba9876543210'
 const ENV = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, BUSINESS_OS_D1_DATABASE_ID: DATABASE, CLOUDFLARE_API_TOKEN: TOKEN }
 const WORKER = `/client/v4/accounts/${ACCOUNT}/workers/scripts/business-os`
 const R2_PREFIX = `/client/v4/accounts/${ACCOUNT}/r2/`
+const OBJECTS_PATH = `${R2_PREFIX}buckets/${LIVE_BUCKET}/objects/`
 const D1_PATH = `/client/v4/accounts/${ACCOUNT}/d1/database/${DATABASE}/query`
 const STAMP = '2026-09-29T01-00-00-000Z'
 
@@ -95,7 +99,20 @@ function fakeApi(live) {
       if (found.status) return found.status === 403 ? denied() : reply(found.status, { success: false, errors: [] })
       return reply(200, { success: true, result: { id: found.id, resources: { bindings: found.bindings } } })
     }
-    if (kind === 'r2' && method === 'GET' && searchParams.has('prefix')) return reply(200, { success: true, result: [], result_info: { cursor: '', is_truncated: false } })
+    const objects = live.objects || new Map()
+    if (kind === 'r2' && method === 'GET' && searchParams.has('prefix')) {
+      const listed = [...objects.keys()].filter((key) => key.startsWith(searchParams.get('prefix'))).map((key) => ({ key, size: objects.get(key).length }))
+      return reply(200, { success: true, result: listed, result_info: { cursor: '', is_truncated: false } })
+    }
+    if (kind === 'r2' && pathname.startsWith(OBJECTS_PATH)) {
+      const key = pathname.slice(OBJECTS_PATH.length).split('/').map(decodeURIComponent).join('/')
+      if (method === 'PUT') { objects.set(key, Uint8Array.from(init.body)); return reply(200, { success: true, result: {} }) }
+      if (!objects.has(key)) return reply(404, { success: false, errors: [{ code: 10007, message: 'no such key' }] })
+      if (method === 'DELETE') { objects.delete(key); return reply(200, { success: true, result: {} }) }
+      const range = /^bytes=(\d+)-(\d+)$/.exec(headers.get('range') || '')
+      const bytes = objects.get(key)
+      return new Response(range ? bytes.subarray(Number(range[1]), Number(range[2]) + 1) : bytes, { status: range ? 206 : 200 })
+    }
     if (kind === 'd1') return reply(200, { success: true, errors: [], messages: [], result: [{ results: [], success: true, meta: {} }] })
     return reply(404, { success: false, errors: [{ code: 7003, message: 'no such route' }] })
   }
@@ -122,7 +139,12 @@ async function invoke(live, argv) {
   const questions = []
   const prompts = {
     hidden: async () => TOKEN,
-    visible: async (question) => { questions.push(question); return argv[0] === '--restore' ? 'RESTORE' : 'MOVE' },
+    visible: async (question) => {
+      questions.push(question)
+      world.promptAt = world.requests.length
+      if (live.onPrompt) live.onPrompt(live)
+      return argv[0] === '--restore' ? 'RESTORE' : 'MOVE'
+    },
   }
   let code
   try {
@@ -210,6 +232,32 @@ async function main() {
     }
   }
 
+  const withDocument = (live) => ({ ...live, objects: new Map([['uploads/invoice.pdf', F.pdf()]]) })
+  const unchanged = await invoke(withDocument(LIVE_ON_BUCKET()), ['--move'])
+  check('binding unchanged at MOVE: the document is moved', () => {
+    assert.equal(unchanged.code, 0, unchanged.text)
+    assert.ok(unchanged.world.requests.some((request) => request.kind === 'r2' && request.method === 'PUT'), 'no quarantine copy was written')
+  })
+  const CHANGES_AT_PROMPT = [
+    ['rolled back to the old bucket', (live) => { live.versions = [version(V2, 100, [r2Binding(SPARE_BUCKET)])] }, /stores its files in business-os-assets[^-]/],
+    ['a new deployment sends 10% to the old bucket', (live) => { live.versions = [version(V1, 90, [r2Binding(script.BUCKET)]), version(V2, 10, [r2Binding(SPARE_BUCKET)])] }, /stores its files in business-os-assets[^-]/],
+    ['the binding became unreadable', (live) => { live.deploymentsStatus = 403 }, /Account \| Workers Scripts \| Read/],
+  ]
+  for (const [name, change, message] of CHANGES_AT_PROMPT) {
+    for (const [mode, argv] of MODES.filter(([, args]) => args.length)) {
+      const result = await invoke({ ...withDocument(LIVE_ON_BUCKET()), onPrompt: change }, argv)
+      const afterPrompt = result.world.requests.slice(result.world.promptAt ?? result.world.requests.length)
+      const label = `${name} while ${mode} waited`
+      check(`${label}: the prompt was reached`, () => assert.equal(result.questions.length, 1, result.text))
+      check(`${label}: exits 1 with FAILED and says why`, () => { assert.equal(result.code, 1, result.text); assert.match(result.text, /FAILED/); assert.match(result.text, message) })
+      check(`${label}: read the binding again after the prompt`, () => assert.ok(afterPrompt.some((request) => request.kind === 'worker')))
+      check(`${label}: no R2 or D1 request after the prompt`, () => assert.deepEqual(afterPrompt.filter((request) => request.kind === 'r2' || request.kind === 'd1'), []))
+      check(`${label}: nothing written or deleted`, () => assert.deepEqual(result.world.requests.filter((request) => request.method === 'PUT' || request.method === 'DELETE'), []))
+      check(`${label}: no manifest.json`, () => assert.ok(!result.files.some((file) => path.basename(file) === 'manifest.json'), result.files.join(', ')))
+      check(`${label}: the token is not printed`, () => assert.ok(!result.text.includes(TOKEN)))
+    }
+  }
+
   // ------------------------------------------ 4. the owner instructions
   let source = ''
   try { source = fs.readFileSync(PURGE_SOURCE, 'utf8').replace(/\r\n/g, '\n') } catch (error) { failures.push(`read the purge script: ${firstLine(error)}`) }
@@ -238,7 +286,7 @@ async function main() {
     process.exitCode = 1
     return
   }
-  console.log(`PASS ${checks} checks: BUCKET is the ASSETS bucket of both wrangler files; the live binding is read before any R2 or D1 request in dry run, --move and --restore, and anything but every live version on BUCKET is refused with zero R2 and D1 requests; the owner steps name the live bucket and never the old one or business-os-v1`)
+  console.log(`PASS ${checks} checks: BUCKET is the ASSETS bucket of both wrangler files; the live binding is read before any R2 or D1 request in dry run, --move and --restore, and anything but every live version on BUCKET is refused with zero R2 and D1 requests; a change while MOVE or RESTORE waits is refused before any change; the owner steps name the live bucket and never the old one or business-os-v1`)
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
