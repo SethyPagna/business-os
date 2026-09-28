@@ -1,5 +1,5 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
-import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 import Modal from './Modal'
 
 // Shared compact "review before you commit" confirmation dialog (Part 563).
@@ -51,9 +51,10 @@ type ConfirmDialogProps = {
   layer?: ConfirmDialogLayer
   /**
    * Native confirm() keyboard parity, opt-in: Confirm takes focus on open so
-   * Enter answers yes, and Escape answers no. Opt-in because a dialog that
-   * carries its own input (a required reason) must keep focus and Enter in
-   * that field. useConfirmDialog turns it on.
+   * Enter answers yes. Opt-in because a dialog that carries its own input (a
+   * required reason) must keep focus and Enter in that field.
+   * useConfirmDialog turns it on and answers Escape itself: this file sits in
+   * app-shared, which the public catalog loads.
    */
   keyboard?: boolean
   onConfirm: () => void
@@ -79,19 +80,6 @@ export default function ConfirmDialog({
   onClose,
   t,
 }: ConfirmDialogProps) {
-  // The ref keeps the listener current without re-subscribing every render.
-  const escapeCloseRef = useRef<() => void>(onClose)
-  escapeCloseRef.current = working ? () => {} : onClose
-  useEffect(() => {
-    if (!keyboard) return undefined
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      event.preventDefault()
-      escapeCloseRef.current()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [keyboard])
   const inheritedLayer = useContext(ConfirmDialogLayerContext)
   const resolvedLayer = layer || inheritedLayer
   const T = (key: string, fallback: string): string => {

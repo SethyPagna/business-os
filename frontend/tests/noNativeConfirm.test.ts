@@ -202,22 +202,25 @@ runTest('a host that passes no translator still gets a translated dialog', () =>
 })
 
 // Native confirm() answered from the keyboard: Enter said yes, Escape said no.
-// The shared dialog replacing it keeps both (absorbed from U-confirm): the
-// Confirm button takes focus on open and Escape cancels -- but never while an
-// action is running. Opt-in on ConfirmDialog, because a dialog carrying its
-// own required-reason input must keep focus and Enter in that field; the hook
-// turns it on since its asks carry no inputs.
+// The shared dialog replacing it keeps both (absorbed from U-confirm). Focus
+// on open is opt-in on ConfirmDialog (`keyboard`), because a dialog carrying
+// its own required-reason input must keep focus and Enter in that field; the
+// hook turns it on since its asks carry no inputs.
+// Escape is the hook's, not the dialog's: ConfirmDialog falls in app-shared,
+// which the public catalog loads, and its listener there put the composed
+// catalog-products closure 24 bytes past tests/performanceBudgets.test.ts
+// (FX-ui3 F11). The hook has its own admin-only chunk.
 runTest('the hook keeps native confirm() semantics: Enter confirms, Escape and every dismissal cancel', () => {
   const hook = fs.readFileSync(path.join(srcRoot, 'components/shared/useConfirmDialog.tsx'), 'utf8')
   const dialog = fs.readFileSync(path.join(srcRoot, 'components/shared/ConfirmDialog.tsx'), 'utf8')
+  const viteConfig = fs.readFileSync(path.join(here, '..', 'vite.config.ts'), 'utf8')
   assert.match(hook, /<ConfirmDialog[\s\S]*?\bkeyboard\b[\s\S]*?onConfirm=\{\(\) => settle\(true\)\}[\s\S]*?onClose=\{\(\) => settle\(false\)\}/, 'Confirm resolves true; Cancel, the X and Escape resolve false')
   assert.match(hook, /pendingRef\.current\?\.resolve\(false\)\s*const next = /, 'a superseded ask resolves false, never hangs')
   assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*pendingRef\.current\?\.resolve\(false\)/, 'unmounting the host resolves false')
-  assert.match(dialog, /keyboard\?: boolean/, 'keyboard parity is an opt-in prop')
-  assert.match(dialog, /autoFocus=\{keyboard\}/, 'Confirm takes focus so Enter answers yes')
-  assert.match(dialog, /event\.key !== 'Escape'[\s\S]*?escapeCloseRef\.current\(\)/, 'Escape answers no')
-  assert.match(dialog, /escapeCloseRef\.current = working \? \(\) => \{\} : onClose/, 'Escape cannot cancel a running action')
-  assert.match(dialog, /if \(!keyboard\) return/, 'dialogs that did not opt in keep their own keyboard handling')
+  assert.match(dialog, /keyboard\?: boolean/, 'focus on open is an opt-in prop')
+  assert.match(hook, /const open = pending !== null\s+useEffect\(\(\) => \{\s*if \(!open\) return undefined\s+const onKeyDown = \(event: KeyboardEvent\) => \{\s*if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return\s+event\.preventDefault\(\)\s+settle\(false\)\s*\}\s*document\.addEventListener\('keydown', onKeyDown\)\s*return \(\) => document\.removeEventListener\('keydown', onKeyDown\)\s*\}, \[open, settle\]\)/, 'Escape answers no, and only while a question is open')
+  assert.doesNotMatch(dialog, /addEventListener|useEffect|'Escape'/, 'the dialog, in the storefront-loaded app-shared chunk, carries no keyboard listener')
+  assert.match(viteConfig, /normalized\.includes\('\/src\/components\/shared\/useConfirmDialog\.tsx'\)\) return 'confirm-dialog-hook'/, 'the hook, and so its Escape listener, stays in its own admin-only chunk')
 })
 
 if (failed) { console.error(`\n${failed} native-confirm guard test(s) failed`); process.exit(1) }

@@ -67,6 +67,20 @@ export function useConfirmDialog(t?: Translate) {
     pendingRef.current = null
   }, [])
 
+  // Escape answers no. Here, not in ConfirmDialog: the dialog sits in
+  // app-shared, which the public catalog loads; this hook is admin-only.
+  const open = pending !== null
+  useEffect(() => {
+    if (!open) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      settle(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open, settle])
+
   const confirmDialog = pending ? (
     <ConfirmDialog
       title={pending.title}
