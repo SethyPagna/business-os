@@ -14,7 +14,7 @@ export interface HandlerOptions {
   include?: readonly string[]
 }
 
-type FunctionNode = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression
+export type FunctionNode = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression
 type ImportBinding = { specifier: string; importedName: string | null }
 
 export function readComponent(relativeToSrc: string): ComponentSource {
@@ -23,7 +23,7 @@ export function readComponent(relativeToSrc: string): ComponentSource {
   return { url, text, file: ts.createSourceFile(url.pathname, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX) }
 }
 
-function isFunctionNode(node: ts.Node | undefined): node is FunctionNode {
+export function isFunctionNode(node: ts.Node | undefined): node is FunctionNode {
   return !!node && (ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node))
 }
 
@@ -118,19 +118,22 @@ async function loadImport(component: ComponentSource, binding: ImportBinding, na
 }
 
 function functionSource(component: ComponentSource, name: string, fn: FunctionNode): string {
-  const text = fn.getText(component.file)
-  return ts.isFunctionDeclaration(fn) ? text : `const ${name} = ${text}`
+  return `const ${name} = ${fn.getText(component.file)}`
 }
 
 function withoutExportKeyword(text: string): string {
   return text.replace(/^export\s+(?:default\s+)?/, '')
 }
 
-export async function compileHandler<F>(component: ComponentSource, name: string, options: HandlerOptions): Promise<(scope: Scope) => F> {
+export function compileHandler<F>(component: ComponentSource, name: string, options: HandlerOptions): Promise<(scope: Scope) => F> {
+  return compileFunction<F>(component, name, findFunction(component, name), options)
+}
+
+export async function compileFunction<F>(component: ComponentSource, name: string, fn: FunctionNode, options: HandlerOptions): Promise<(scope: Scope) => F> {
   const locals = new Set(options.locals)
   const topLevel = topLevelDeclarations(component)
   const imports = importBindings(component)
-  const included = [name, ...(options.include ?? [])].map((entry) => ({ name: entry, fn: findFunction(component, entry) }))
+  const included = [{ name, fn }, ...(options.include ?? []).map((entry) => ({ name: entry, fn: findFunction(component, entry) }))]
   const pending = included.flatMap((entry) => freeIdentifiers(entry.fn))
   const seen = new Set<string>()
   const statements = new Set<ts.Statement>()

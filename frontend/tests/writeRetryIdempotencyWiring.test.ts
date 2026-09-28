@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { compileHandler, findFunction, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
+import { compileFunction, compileHandler, findFunction, isFunctionNode, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
 import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
@@ -389,11 +389,19 @@ await runTest('inventory adjust: Save and Confirm keep one id per intent across 
       assert.equal(retry.client_request_id, undoTimedOut.client_request_id, 'a retried undo replays its own request instead of reversing the stock twice')
     }
     assert.match(String(undoTimedOut.client_request_id), /^stockadjust-undo_/)
+    assert.deepEqual(
+      { type: undoTimedOut.type, quantity: undoTimedOut.quantity, batchId: undoTimedOut.batchId, attribution: undoTimedOut.attribution },
+      { type: 'add', quantity: 2, batchId: 31, attribution: 'correction' },
+      'the undo of a removal puts the units back into the resolved lot as a correction, not a receipt',
+    )
+    assert.match(String(undoTimedOut.reason), /^Undo: Damaged$/)
     assert.notEqual(undoTimedOut.client_request_id, intentId, 'the undo carries its own id, not the forward adjust id')
     const redoLost = await run(history.redo, LOST, 'the redo whose answer was lost', true)
     const redoDone = await run(history.redo, answer({ success: true }), 'the redo that fully succeeded', false)
     assert.equal(redoDone.client_request_id, redoLost.client_request_id, 'a retried redo replays its own request')
     assert.match(String(redoLost.client_request_id), /^stockadjust-redo_/)
+    assert.deepEqual({ type: redoLost.type, quantity: redoLost.quantity, batchId: redoLost.batchId }, { type: 'remove', quantity: 2, batchId: 31 })
+    assert.match(String(redoLost.reason), /^Redo: Damaged$/)
     assert.notEqual(redoLost.client_request_id, undoTimedOut.client_request_id)
     const nextUndo = await run(history.undo, answer({ success: true }), 'the undo after the redo', false)
     assert.notEqual(nextUndo.client_request_id, undoDone.client_request_id, 'once an undo fully succeeded, the next undo is a new request')
@@ -402,7 +410,7 @@ await runTest('inventory adjust: Save and Confirm keep one id per intent across 
   }
 })
 
-await runTest('stock-action import: a retry resumes the job it created; only a started job or a different sheet releases it', async () => {
+await runTest('stock-action import: a retry resumes the job it created; only a started job, a different sheet or closing the sheet releases it', async () => {
   const created: string[] = []
   const uploads: unknown[] = []
   const starts: unknown[] = []
@@ -432,7 +440,13 @@ await runTest('stock-action import: a retry resumes the job it created; only a s
     csvText: sheet.csvText,
     fileName: sheet.fileName,
   }
-  const render = await compileHandler<() => Promise<void>>(readComponent('components/products/import/StockActionImportModal.tsx'), 'handleImport', { locals: Object.keys(scope) })
+  const importModal = readComponent('components/products/import/StockActionImportModal.tsx')
+  const render = await compileHandler<() => Promise<void>>(importModal, 'handleImport', { locals: Object.keys(scope) })
+  const [closeEffect] = callsNamed(importModal.file, 'useEffect')
+    .map((call) => call.arguments[0])
+    .filter((fn) => isFunctionNode(fn) && descendants(fn, (node) => ts.isIdentifier(node) && node.text === 'pendingJobRef').length > 0)
+  assert.ok(isFunctionNode(closeEffect), 'the modal owns an effect whose cleanup handles the pending job')
+  const mountEffect = await compileFunction<() => () => void>(importModal, 'closeEffect', closeEffect, { locals: Object.keys(scope) })
   const clock = installSteppedClock()
   try {
     const importSheet = async (upload: Outcome, start: Outcome) => {
@@ -460,6 +474,13 @@ await runTest('stock-action import: a retry resumes the job it created; only a s
     assert.deepEqual(cancels, ['job-3'], 'a different sheet cancels the orphaned job first')
     assert.deepEqual(created, ['job-1', 'job-2', 'job-3', 'job-4'])
     assert.deepEqual(reviewed.at(-1), { id: 'job-4', rowCount: 1 })
+
+    await importSheet(answer({ ok: true }), LOST)
+    const closeSheet = mountEffect({ ...scope, ...sheet })()
+    closeSheet()
+    assert.deepEqual(cancels, ['job-3', 'job-5'], 'closing the sheet cancels the job it created but never started')
+    mountEffect({ ...scope, ...sheet })()()
+    assert.deepEqual(cancels, ['job-3', 'job-5'], 'nothing is pending after a close, so a second close cancels nothing')
   } finally {
     clock.restore()
   }
