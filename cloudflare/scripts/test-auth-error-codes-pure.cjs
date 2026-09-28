@@ -1,6 +1,6 @@
 // I18N-4: every refusal POST /api/auth/login and POST /api/auth/otp/verify
 // give carries a stable `code`, so the sign-in screen can say it in the
-// operator's language (frontend/src/components/auth/authErrorText.ts) instead
+// operator's language (frontend/src/utils/authErrorText.ts) instead
 // of showing the Worker's English sentence. The English `error` stays for
 // older clients.
 //
