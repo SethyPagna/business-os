@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 type Listener = (event: { type: string; detail?: unknown }) => void
 const listeners = new Map<string, Set<Listener>>()
 const statuses: boolean[] = []
+let reconnects = 0
 let now = 10_000_000
 const timers: Array<{ id: number; callback: () => void }> = []
 let nextId = 1
@@ -37,6 +38,7 @@ Object.defineProperty(globalThis, 'window', {
     },
     dispatchEvent(event: { type: string; detail?: { connected?: boolean } }) {
       if (event.type === 'sync:status') statuses.push(event.detail?.connected === true)
+      if (event.type === 'sync:reconnected') reconnects += 1
       for (const listener of listeners.get(event.type) || []) listener(event)
       return true
     },
@@ -120,6 +122,19 @@ try {
   third.deliverClose(1006)
   assert.equal(statuses.at(-1), false, 'the live socket dropping is announced')
   assert.ok(timers.length > timersBefore, 'the live socket dropping must schedule a reconnect')
+
+  // A deploy restarts the hub, so an open till sees exactly this drop. The
+  // reopen must announce sync:reconnected: index.tsx's one update checker
+  // listens for it, which is how a tab open all day finds the new build.
+  const reconnect = timers.at(-1)
+  assert.ok(reconnect, 'a reconnect timer is pending')
+  timers.splice(timers.indexOf(reconnect), 1)
+  const reconnectsBefore = reconnects
+  reconnect.callback()
+  assert.equal(AsyncCloseWebSocket.instances.length, 4, 'the scheduled reconnect opens a new socket')
+  AsyncCloseWebSocket.instances[3].open()
+  assert.equal(isWSConnected(), true)
+  assert.equal(reconnects - reconnectsBefore, 1, 'reopening after a drop must announce sync:reconnected once')
 
   disconnectWS()
   console.log('websocket stale socket tests passed')
