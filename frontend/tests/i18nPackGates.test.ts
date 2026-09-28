@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { duplicateTopLevelKeys, fallbackSlotRegressions, orphanPackKeys } from '../../ops/scripts/frontend/i18nPackChecks.ts'
+import { REPLACE_COLUMN_GROUPS } from '../src/components/products/import/productReplaceColumnGroups.ts'
 
 // Two whole classes of pack defect that every gate on this repo was blind to,
 // both found live in en.json/km.json on 2026-09-06.
@@ -138,6 +139,27 @@ runTest('orphanPackKeys clears a key inside a known dynamic-prefix family with n
 runTest('orphanPackKeys flags a key with no literal site and no matching family', () => {
   const sources = [{ file: 'x.tsx', text: "translateOr('other_key', 'Fallback')" }]
   assert.deepEqual(orphanPackKeys(['truly_dead_key'], sources), ['truly_dead_key'])
+})
+
+// BulkImportModal names each replace-columns group with
+// T(`replace_group_${group.key}`) and its hint with the _hint sibling, so no
+// key in the family has a literal call site. Unregistered, all 15 read as
+// orphan candidates and a later cleanup would delete the Khmer group names.
+runTest('the replace_group_ keys BulkImportModal builds from REPLACE_COLUMN_GROUPS are live, in both packs', () => {
+  const source = read('../src/components/products/import/BulkImportModal.tsx')
+  assert.match(source, /T\(`replace_group_\$\{group\.key\}`/)
+  assert.match(source, /T\(`replace_group_\$\{group\.key\}_hint`/)
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
+  const keys = REPLACE_COLUMN_GROUPS.flatMap((group) => [
+    [`replace_group_${group.key}`, group.label],
+    ...(group.hint ? [[`replace_group_${group.key}_hint`, group.hint]] : []),
+  ])
+  for (const [key, english] of keys) {
+    assert.equal(en[key], english, `en.json ${key}`)
+    assert.ok(km[key] && /[ក-៿]/.test(km[key]), `km.json ${key} is not Khmer: ${km[key]}`)
+  }
+  assert.deepEqual(orphanPackKeys(keys.map(([key]) => key), [{ file: 'BulkImportModal.tsx', text: source }]), [])
 })
 
 if (failed > 0) {

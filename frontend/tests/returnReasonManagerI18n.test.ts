@@ -100,6 +100,33 @@ runTest('every prompt/confirm/notify string in the rename and remove flows is tr
   assert.match(modalSource, /tr\('return_reason_save_failed'/)
 })
 
+// FX-ui3 F7: the "update linked returns too?" question names its two answers
+// on the buttons, with the keys Inventory's saved-reason rename uses. Before,
+// the buttons read Confirm / Cancel while two review rows explained
+// "OK: ..." -- a button that no longer exists -- and "Cancel: ...".
+runTest('the linked-rename question labels its buttons like Inventory\'s saved-reason rename, with no "OK" row', () => {
+  const start = modalSource.indexOf('const replaceLinked = ')
+  const end = modalSource.indexOf('const response = await replaceReturnReason(')
+  assert.ok(start >= 0 && end > start, 'the linked-rename ask is where the rename flow asks it')
+  const ask = modalSource.slice(start, end)
+  const inventorySource = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+  for (const [prop, key, fallback] of [
+    ['confirmLabel', 'reason_update_linked_too', 'Update linked records too'],
+    ['cancelLabel', 'reason_rename_saved_only', 'Rename saved reason only'],
+  ]) {
+    const call = `${prop}: tr('${key}', '${fallback}')`
+    assert.ok(ask.includes(call), `ReturnReasonManagerModal's ask sets ${call}`)
+    assert.ok(inventorySource.includes(call), `Inventory's rename sets the same ${call}`)
+    assert.equal(typeof enPack[key], 'string', `en.json has ${key}`)
+    assert.match(String(kmPack[key] ?? ''), /[ក-៿]/, `km.json ${key} is Khmer`)
+  }
+  assert.doesNotMatch(ask, /return_reason_replace_confirm_(ok|cancel)|label: tr\('(confirm|cancel)'/, 'no review row explains a button by name')
+  for (const key of ['return_reason_replace_confirm_ok', 'return_reason_replace_confirm_cancel']) {
+    assert.equal(enPack[key], undefined, `en.json retires ${key}`)
+    assert.equal(kmPack[key], undefined, `km.json retires ${key}`)
+  }
+})
+
 runTest('ManageBrandsModal no longer hardcodes the "e.g. L\'Oreal" placeholder (i18n-14)', () => {
   assert.doesNotMatch(brandsSource, /placeholder="e\.g\. L'Oreal"/, 'the add-brand placeholder should not be a bare English literal')
   assert.match(brandsSource, /t\('brand_name_example_placeholder'\)/, 'the placeholder should resolve through a translated key')
@@ -115,10 +142,8 @@ const NEW_KEYS = [
   'return_reason_remove_confirm',
   'return_reason_removed',
   'return_reason_rename_failed',
-  'return_reason_replace_confirm_cancel',
   'return_reason_replace_confirm_intro',
   'return_reason_replace_confirm_note',
-  'return_reason_replace_confirm_ok',
   'return_reason_save_failed',
   'return_reason_updated_linked',
   'return_reason_updated_only',

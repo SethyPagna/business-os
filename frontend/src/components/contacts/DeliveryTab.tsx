@@ -21,6 +21,7 @@ import Modal from '../shared/Modal'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../shared/RenameCascadeModal.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputKeyDown } from '../../utils/phoneInput.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
@@ -394,9 +395,9 @@ function DeliveryForm({ contact, onSave, onUseExisting, onClose, t }: DeliveryFo
       <div className="space-y-3">
         <div>
           <label htmlFor="delivery-form-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('name')} <span className="text-xs font-normal text-gray-400">(driver / rider)</span>
+            {t('name')} <span className="text-xs font-normal text-gray-400">({t('delivery_driver_or_rider')})</span>
           </label>
-          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} autoFocus placeholder="Driver name" />
+          <input id="delivery-form-name" name="delivery_name" autoComplete="name" className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} autoFocus placeholder={t('driver_name')} />
         </div>
         <div>
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -519,6 +520,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }, [isKhmer, t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Rename prompt, same flow as CustomersTab/SuppliersTab: the save awaits
   // the user's carry / only-this-one choice before the PUT goes out.
   const [renameRequest, setRenameRequest] = useState<RenameCascadeRequest | null>(null)
@@ -978,7 +980,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleDelete = async (c: DeliveryContact) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete "${c.name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_delivery', 'Delete delivery contact?'),
+      message: c.name,
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -1015,7 +1022,12 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} delivery contact(s)?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_delivery_count', 'Delete selected delivery contacts?'),
+      items: [{ label: tr('selected', 'Selected'), value: selectedIds.size }],
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1238,7 +1250,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                         if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
+                      aria-label={`${t('select')} ${section.label}`}
                     />
                     ) : null}
                     <span>{section.label}</span>
@@ -1284,7 +1296,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <td className={selectionModeActive ? 'px-3 py-2 w-10' : 'px-0 py-2 w-0'} onClick={e => e.stopPropagation()}>
               {selectionModeActive ? (
               <>
-              <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <label htmlFor={`delivery-select-${contact.id}`} className="sr-only">{`${t('select')} ${contact.name}`}</label>
               <input id={`delivery-select-${contact.id}`} name={`delivery_select_${contact.id}`} type="checkbox" className="w-4 h-4 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
               </>
               ) : null}
@@ -1316,7 +1328,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
                       if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                     }}
                     onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                    aria-label={`Select ${section.label}`}
+                    aria-label={`${t('select')} ${section.label}`}
                   />
                   ) : null}
                   <span>{section.label}</span>
@@ -1365,7 +1377,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           >
             {selectionModeActive ? (
             <div className="flex-shrink-0" onClick={e => { e.stopPropagation(); toggleOne(contact.id) }}>
-              <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`Select ${contact.name}`}</label>
+              <label htmlFor={`delivery-card-select-${contact.id}`} className="sr-only">{`${t('select')} ${contact.name}`}</label>
               <input id={`delivery-card-select-${contact.id}`} name={`delivery_card_select_${contact.id}`} type="checkbox" className="w-5 h-5 cursor-pointer rounded" checked={selectedIds.has(Number(contact.id))} onChange={() => toggleOne(contact.id)} />
             </div>
             ) : null}
@@ -1465,6 +1477,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         </Suspense>
       ) : null}
       <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(key, fallback || key)} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </div>
   )
 }

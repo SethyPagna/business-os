@@ -726,7 +726,7 @@ export default function SaleDetailModal({
         .catch((error: unknown) => {
           if (!cancelled) {
             setDeliveryOptions([])
-            setDeliveryContactsError((error as Error)?.message || translateOr('load_error', 'Could not load delivery drivers.'))
+            setDeliveryContactsError((error as Error)?.message || translateOr('delivery_drivers_load_error', 'Could not load delivery drivers.'))
           }
         })
         .finally(() => { if (!cancelled) setDeliveryContactsLoading(false) })
@@ -2869,7 +2869,7 @@ export default function SaleDetailModal({
               ) : needsPaymentEntry ? (
                 <>
                 {!paymentConfigReady ? <div role="status" className="mb-2 text-sm text-amber-700 dark:text-amber-300">
-                  <span>{paymentConfig.status === 'failed' ? translateOr('load_error', 'Could not load payment methods.') : (t('loading') || 'Loading')}</span>
+                  <span>{paymentConfig.status === 'failed' ? translateOr('payment_methods_load_error', 'Could not load payment methods.') : (t('loading') || 'Loading')}</span>
                   {paymentConfig.status === 'failed' ? <button type="button" className="btn-secondary ml-2 text-xs" onClick={() => setPaymentConfigReload((value) => value + 1)}>{t('retry') || 'Retry'}</button> : null}
                 </div> : null}
                 {paymentConfigReady || (paymentConfig.scope === detailScope && paymentConfig.value && settlementSession.configuredMethods.length > 0) ? (

@@ -4,7 +4,6 @@ import { formatPhoneInputElement, handlePhoneInputBeforeInput, handlePhoneInputK
 import type { ContactDuplicateCheck, ContactDuplicateMatch } from '../contacts/contactDuplicates.ts'
 
 type Translator = (key: string) => string
-type PosCopy = (en: string, km?: string) => string
 
 type CustomerFormState = {
   address: string
@@ -35,7 +34,6 @@ type POSQuickAddModalsProps = {
   onOpenCustomerAddressPresets: () => void
   newCustomerForm: CustomerFormState
   newDeliveryForm: DeliveryFormState
-  posCopy: PosCopy
   savingCustomer: boolean
   savingDelivery: boolean
   setNewCustomerForm: Dispatch<SetStateAction<CustomerFormState>>
@@ -99,7 +97,6 @@ export default function POSQuickAddModals({
   onOpenCustomerAddressPresets,
   newCustomerForm,
   newDeliveryForm,
-  posCopy,
   savingCustomer,
   savingDelivery,
   setNewCustomerForm,
@@ -136,9 +133,9 @@ export default function POSQuickAddModals({
           </div>
           <div>
             <label htmlFor="pos-quick-customer-membership" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-              {posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span>
+              {t('customer_membership_id')} <span className="font-normal text-gray-400">({t('optional')})</span>
             </label>
-            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" />
+            <input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={(event) => setNewCustomerForm((form) => ({ ...form, membership_number: event.target.value }))} placeholder={t('membership_auto_generated_if_blank')} autoComplete="off" />
           </div>
         </QuickAddModal>
       ) : null}
@@ -147,23 +144,25 @@ export default function POSQuickAddModals({
         <QuickAddModal title={t('add_delivery_contact') || 'Add Delivery Contact'} saving={savingDelivery} saveDisabled={!!deliveryDuplicateCheck} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
           <DuplicateDecisionPanel check={deliveryDuplicateCheck} entityLabel="delivery contact" saving={savingDelivery} onUseExisting={handleUseExistingDelivery} onCreateSeparate={handleCreateSeparateDelivery} onBack={clearDeliveryDuplicateCheck} t={t} />
           <div>
-            <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Driver / Rider Name</label>
+            <label htmlFor="pos-quick-delivery-name" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              {t('name')} <span className="font-normal text-gray-400">({t('delivery_driver_or_rider')})</span>
+            </label>
             <input id="pos-quick-delivery-name" name="pos_quick_delivery_name" className="input" value={newDeliveryForm.name} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, name: event.target.value }))} autoComplete="name" autoFocus />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label htmlFor="pos-quick-delivery-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Phone</label>
+              <label htmlFor="pos-quick-delivery-phone" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('phone')}</label>
               <input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={(event) => {
                 const phone = formatPhoneInputElement(event.currentTarget)
                 setNewDeliveryForm((form) => ({ ...form, phone }))
               }} onKeyDown={(event) => handlePhoneInputKeyDown(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} onBeforeInput={(event) => handlePhoneInputBeforeInput(event, (phone) => setNewDeliveryForm((form) => ({ ...form, phone })))} placeholder="012 345 678" autoComplete="tel" inputMode="tel" />
             </div>
             <div>
-              <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">Area / Zone</label>
-              <input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, area: event.target.value }))} placeholder="Central, North" autoComplete="address-level2" />
+              <label htmlFor="pos-quick-delivery-area" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('area_zone')}</label>
+              <input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={(event) => setNewDeliveryForm((form) => ({ ...form, area: event.target.value }))} placeholder={t('delivery_area_placeholder')} autoComplete="address-level2" />
             </div>
           </div>
-          <p className="text-xs text-gray-400">Enter at least a driver name or phone number.</p>
+          <p className="text-xs text-gray-400">{t('delivery_option_hint')}</p>
         </QuickAddModal>
       ) : null}
     </>

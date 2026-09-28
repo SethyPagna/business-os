@@ -15,6 +15,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Modal from '../../shared/Modal'
 import AppSelect from '../../shared/AppSelect'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import FilePickerModalBase from '../../files/FilePickerModal'
 import {
   analyzeProductImportText,
@@ -1246,6 +1247,22 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
   }
+  // The cancel / delete / replace questions are the shared compact review
+  // dialog (FX-ui) -- never the browser's confirm(). Each names the file and
+  // its rows, so the operator sees WHICH import the answer applies to.
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  const replaceGroupLabel = (group: { key: string; label: string }): string => T(`replace_group_${group.key}`, group.label)
+  const importFileReviewItems = (rows: number): { label: string; value: string }[] => [
+    { label: T('job_current_file', 'File'), value: csvData?.name || T('selected_file', 'Selected file') },
+    ...(rows > 0 ? [{ label: T('job_rows', 'Rows'), value: rows.toLocaleString() }] : []),
+  ]
+  const importJobReviewItems = (job: ImportJob | null | undefined): { label: string; value: string }[] => {
+    const total = Number(job?.total_rows || 0)
+    return [
+      { label: T('job_current_file', 'File'), value: csvData?.name || T('selected_file', 'Selected file') },
+      ...(total > 0 ? [{ label: T('job_rows', 'Rows'), value: `${Number(job?.processed_rows || 0).toLocaleString()} / ${total.toLocaleString()}` }] : []),
+    ]
+  }
   const signalDone = async (payload: ImportResult): Promise<void> => {
     if (typeof onDone === 'function') {
       await Promise.resolve(onDone(payload))
@@ -1579,8 +1596,15 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   const handleCancelCurrentJob = async () => {
     if (!canEditCosts) { notify(T('product_cost_import_required', 'Cost edit permission is required for this import format.'), 'error'); return }
     if (!currentJob?.id) return
-    if (loading && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      const confirmed = window.confirm(T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'))
+    if (loading) {
+      const confirmed = await askToConfirm({
+        title: T('cancel_import', 'Cancel import'),
+        message: T('confirm_cancel_import', 'Cancel this import? The upload/start sequence will stop immediately.'),
+        items: importJobReviewItems(currentJob),
+        confirmLabel: T('cancel_import', 'Cancel import'),
+        cancelLabel: T('back', 'Back'),
+        danger: true,
+      })
       if (!confirmed) return
     }
     cancelRequestedRef.current = true
@@ -1655,9 +1679,14 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       finishImportAction('delete')
       return
     }
-    const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-      ? true
-      : window.confirm(T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'))
+    const confirmed = await askToConfirm({
+      title: T('delete_import', 'Delete import'),
+      message: T('confirm_delete_import', 'Delete this import job? This keeps product data unchanged.'),
+      items: importJobReviewItems(targetJob),
+      confirmLabel: T('delete_import', 'Delete import'),
+      cancelLabel: T('cancel', 'Cancel'),
+      danger: true,
+    })
     if (!confirmed) {
       finishImportAction('delete')
       return
@@ -1825,7 +1854,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       if (!picked) return
       await analyzePickedCsv(picked)
     } catch (error) {
-      alert(`Failed to analyze CSV: ${getErrorMessage(error, 'Unknown error')}`)
+      notify(`${T('csv_analyze_failed', 'Failed to analyze CSV')}: ${getErrorMessage(error, T('unknown_error', 'Unknown error'))}`, 'error')
     } finally {
       finishImportAction('pick-csv')
       setAnalysisProgress(null)
@@ -1880,16 +1909,32 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     // existing cancel/delete-job confirms above, just red instead of the
     // neutral copy those use since this one can deactivate products.
     if (mode === 'products' && importMode === 'replace_all') {
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'))
+      const confirmed = await askToConfirm({
+        title: T('csv_mode_replace_title', 'Replace entire catalog'),
+        message: T('confirm_replace_all_import', 'Replace mode: every active product not in this file will be deactivated once this import finishes. Continue?'),
+        items: importFileReviewItems(totalCount),
+        confirmLabel: T('continue', 'Continue'),
+        cancelLabel: T('cancel', 'Cancel'),
+        danger: true,
+      })
       if (!confirmed) return
     }
     if (mode === 'products' && importMode === 'replace_columns') {
       if (!selectedReplaceColumns.length) return
-      const confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
-        ? true
-        : window.confirm(T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?'))
+      const confirmed = await askToConfirm({
+        title: T('csv_mode_replace_columns_title', 'Replace selected columns'),
+        message: T('confirm_replace_columns_import', 'Replace mode: for every product this file matches, the selected columns will be overwritten with this file\'s values -- including blanks. Continue?'),
+        items: [
+          ...importFileReviewItems(totalCount),
+          {
+            label: T('columns', 'Columns'),
+            value: REPLACE_COLUMN_GROUPS.filter((group) => replaceColumnGroupKeys.has(group.key)).map(replaceGroupLabel).join(', '),
+          },
+        ],
+        confirmLabel: T('continue', 'Continue'),
+        cancelLabel: T('cancel', 'Cancel'),
+        danger: true,
+      })
       if (!confirmed) return
     }
     if (!beginImportAction('import')) return
@@ -2290,7 +2335,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     return (
       <div key={index} className={`rounded-xl border p-2 text-sm ${liveBarcodeBlocking ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : decisionValue === 'ask' ? 'border-yellow-400 bg-yellow-50 dark:bg-yellow-900/10' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'}`}>
         <div className="flex flex-wrap items-start gap-2">
-          <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`Select conflict row ${index + 1}`} className="mt-1" />
+          <input type="checkbox" checked={selectedConflictIds.has(index)} onChange={() => toggleConflictSelection(index)} aria-label={`${T('select', 'Select')} ${T('row_label', 'Row {n}').replace('{n}', String(index + 1))}`} className="mt-1" />
           <div className="min-w-[14rem] flex-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="detail-scroll-text font-medium text-gray-900 dark:text-white">{editedRow.name || 'Needs a product name'}</span>
@@ -2843,8 +2888,8 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                           onChange={() => toggleReplaceColumnGroup(group.key)}
                         />
                         <span>
-                          <span className="block font-medium text-gray-700 dark:text-gray-300">{group.label}</span>
-                          {group.hint ? <span className="block text-gray-400 dark:text-gray-500">{group.hint}</span> : null}
+                          <span className="block font-medium text-gray-700 dark:text-gray-300">{replaceGroupLabel(group)}</span>
+                          {group.hint ? <span className="block text-gray-400 dark:text-gray-500">{T(`replace_group_${group.key}_hint`, group.hint)}</span> : null}
                         </span>
                       </label>
                     )
@@ -3094,6 +3139,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         multiple
         onSelectMany={addLibraryImages}
       />
+      {confirmDialog}
     </Modal>
   )
 }

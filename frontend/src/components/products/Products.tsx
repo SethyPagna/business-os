@@ -17,6 +17,7 @@ import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
 import InfoHint from '../shared/InfoHint'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import PortalMenu from '../shared/PortalMenu'
 import AppSelect from '../shared/AppSelect'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
@@ -1727,6 +1728,28 @@ function ProductsFullEditor() {
   // The ONE keep-this / merge-that flow, shared with the Conflicts review: a
   // discarded twin that still holds stock asks what happens to it first.
   const { mergeWithChoice, mergeStockChoiceDialog } = useMergeStockChoice(t)
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  // The label the bulk-edit form itself shows for a field, so a bulk review
+  // (FX-ui) names each change the way the operator just entered it. Every
+  // field buildProductBulkInfoUpdates / buildProductBulkPricingUpdates and the
+  // two price adjusters can write is named here, so a Khmer screen never falls
+  // back to an English column name.
+  const bulkFieldLabel = useCallback((field: string): string => {
+    switch (field.replace(/^cost_price_/, 'purchase_price_')) {
+      case 'selling_price_usd': return tr('selling_price_usd', 'Selling price (USD)')
+      case 'selling_price_khr': return tr('selling_price_khr', 'Selling price (KHR)')
+      case 'wholesale_price_usd': return tr('wholesale_price_usd_full', 'Wholesale price (USD)', 'តម្លៃបោះដុំ (USD)')
+      case 'wholesale_price_khr': return tr('wholesale_price_khr_full', 'Wholesale price (KHR)', 'តម្លៃបោះដុំ (KHR)')
+      case 'purchase_price_usd': return tr('purchase_price_usd', 'Cost price (USD)')
+      case 'purchase_price_khr': return tr('purchase_price_khr', 'Cost price (KHR)')
+      case 'category': return tr('category', 'Category')
+      case 'unit': return tr('unit', 'Unit')
+      case 'supplier': return tr('supplier', 'Supplier')
+      case 'brand': return tr('brand', 'Brand')
+      case 'low_stock_threshold': return tr('low_stock_threshold', 'Low Stock Alert At')
+      default: return tr(field, field)
+    }
+  }, [tr])
   const [zeroQuantityCleanupOpen, setZeroQuantityCleanupOpen] = useState(false)
   const [zeroQuantityCleanupBusy, setZeroQuantityCleanupBusy] = useState(false)
   const [wireImagesOpen, setWireImagesOpen] = useState(false)
@@ -2665,7 +2688,19 @@ function ProductsFullEditor() {
 
   const handleBulkOutOfStock = async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
-    if (!confirm(`Set ${selectedVisibleCount} product(s) to out-of-stock (quantity = 0)?`)) return
+    // Every branch's stock of every selected product goes to 0 (the pin below
+    // zeroes stock_quantity and each branch_stock row), so the before is the
+    // selection's total on hand.
+    const stockBefore = selectedVisibleIds.reduce((sum, id) => sum + (Number(productsById.get(Number(id))?.stock_quantity) || 0), 0)
+    if (!(await askToConfirm({
+      title: tr('bulk_out_of_stock', 'Set Out of Stock'),
+      items: [
+        { label: tr('products', 'Products'), value: selectedVisibleCount },
+        { label: tr('quantity', 'Quantity'), value: `${stockBefore.toLocaleString()} → 0` },
+      ],
+      confirmLabel: tr('bulk_out_of_stock', 'Set Out of Stock'),
+      danger: true,
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     const failedIds: number[] = []
@@ -2727,7 +2762,23 @@ function ProductsFullEditor() {
     if (!selectedVisibleIds.length || !branchId || bulkActionBusy) return
     const branch = branchesById.get(String(branchId))
     if (!branch) return
-    if (!confirm(`Move stock of ${selectedVisibleCount} product(s) to "${branch.name}"?`)) return
+    // Where the stock sits now, from the same plan moveProductsToBranch
+    // follows, so the review shows from -> to and not only the destination.
+    const { buildProductBranchMovePlan } = await loadProductWriteHelpers()
+    const sourceBranchNames = new Set<string>()
+    for (const id of selectedVisibleIds) {
+      const plan = buildProductBranchMovePlan(productsById.get(Number(id)) || {}, branchId)
+      if (plan?.action === 'transfer') sourceBranchNames.add(String(branchesById.get(String(plan.fromBranchId))?.name || `#${plan.fromBranchId}`))
+    }
+    if (!(await askToConfirm({
+      title: tr('bulk_change_branch', 'Change Branch'),
+      items: [
+        { label: tr('products', 'Products'), value: selectedVisibleCount },
+        { label: tr('source_branch', 'Source Branch'), value: [...sourceBranchNames].join(', ') || '—' },
+        { label: tr('destination_branch', 'Destination branch'), value: branch.name },
+      ],
+      confirmLabel: tr('bulk_change_branch', 'Change Branch'),
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     try {
@@ -3557,6 +3608,20 @@ function ProductsFullEditor() {
   }, [filtered, notify, t])
 
   const productsById = useMemo(() => buildProductIdMap(products), [products])
+  // What a bulk write replaces, for its review's before -> after (FX-ui): the
+  // one current value when every selected product shares it, "Mixed" when
+  // they differ. null for a cost the operator may edit but not view -- editing
+  // (product_cost_edit) does not imply viewing, so the review must not show it.
+  const bulkCurrentValue = useCallback((ids: EntityId[], field: string): string | null => {
+    if (/^(purchase|cost)_price_/.test(field) && !canViewCosts) return null
+    const seen = new Set<string>()
+    for (const id of ids) {
+      const raw = productsById.get(Number(id))?.[field as keyof ProductRecord]
+      seen.add(raw === null || raw === undefined || raw === '' ? '—' : String(raw))
+      if (seen.size > 1) return tr('bulk_value_mixed', 'Mixed')
+    }
+    return seen.size ? [...seen][0] : '—'
+  }, [canViewCosts, productsById, tr])
 
   // Category-first sectioning (decided ask: category header first, A-Z
   // across categories, A-Z within each category, rail jumps by category
@@ -4180,7 +4245,18 @@ function ProductsFullEditor() {
       notify('No changes specified', 'warning')
       return
     }
-    if (!window.confirm(`Do you want to update ${selectedVisibleCount} product${selectedVisibleCount === 1 ? '' : 's'}?`)) return
+    if (!(await askToConfirm({
+      title: tr('bulk_edit', 'Bulk Edit'),
+      items: [
+        { label: tr('products', 'Products'), value: selectedVisibleCount },
+        ...Object.entries(nextUpdates).map(([field, value]) => {
+          const before = bulkCurrentValue(selectedVisibleIds, field)
+          const after = value === null || value === '' ? '—' : String(value)
+          return { label: bulkFieldLabel(field), value: before === null ? `→ ${after}` : `${before} → ${after}` }
+        }),
+      ],
+      confirmLabel: tr('save', 'Save'),
+    }))) return
     const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     let done = 0
@@ -4249,7 +4325,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user?.id, user?.name])
+  }, [actionHistory, askToConfirm, bulkActionBusy, bulkCurrentValue, bulkFieldLabel, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
 
   // Relative price change ("add $1 to all of these"), as opposed to
   // runBulkProductUpdates above which writes the SAME value to every
@@ -4296,7 +4372,17 @@ function ProductsFullEditor() {
       }
       const verb = direction === 'decrease' ? tr('bulk_price_decrease', 'Decrease') : tr('bulk_price_increase', 'Increase')
       const warning = tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
-      if (!window.confirm(`${verb} prices on ${count} products — ${warning}`)) return
+      if (!(await askToConfirm({
+        title: tr('bulk_price_confirm_title', 'Adjust prices?'),
+        message: warning,
+        items: [
+          { label: tr('products', 'Products'), value: count },
+          { label: tr('bulk_price_change', 'Change'), value: `${verb} ${currency === 'khr' ? `${amount.toLocaleString('en-US')}${khrSymbol}` : `${usdSymbol}${amount.toLocaleString('en-US')}`}` },
+          { label: tr('bulk_price_fields', 'Prices'), value: fields.map(bulkFieldLabel).join(', ') },
+        ],
+        confirmLabel: verb,
+        danger: true,
+      }))) return
       const result = await bulkPriceAdjustAllProducts(payload)
       if (result?.success === false || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
       notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed) || count}`)
@@ -4306,7 +4392,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [bulkActionBusy, bulkEditForm, notify, tr, load])
+  }, [askToConfirm, bulkActionBusy, bulkEditForm, bulkFieldLabel, khrSymbol, notify, tr, load, usdSymbol])
 
   const runBulkProductPriceAdjustment = useCallback(async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
@@ -4346,7 +4432,23 @@ function ProductsFullEditor() {
     const verb = bulkEditForm.adjust_direction === 'decrease'
       ? tr('bulk_price_decrease', 'Decrease')
       : tr('bulk_price_increase', 'Increase')
-    if (!window.confirm(`${verb} prices on ${adjustments.length} product${adjustments.length === 1 ? '' : 's'}?`)) return
+    // Before -> after for the first few products, so the review shows the
+    // real resulting prices, not only a count.
+    const samples = adjustments.slice(0, 3).flatMap((entry) => {
+      const product = productsById.get(Number(entry.id))
+      return Object.entries(entry.updates).map(([field, next]) => ({
+        label: `${product?.name || `#${entry.id}`} · ${bulkFieldLabel(field)}`,
+        value: `${Number(product?.[field as keyof ProductRecord] ?? 0)} → ${Number(next)}`,
+      }))
+    })
+    if (!(await askToConfirm({
+      title: tr('bulk_price_confirm_title', 'Adjust prices?'),
+      items: [
+        { label: tr('products', 'Products'), value: adjustments.length },
+        ...samples,
+      ],
+      confirmLabel: verb,
+    }))) return
 
     const adjustedIds = adjustments.map((entry) => entry.id)
     const snapshots = snapshotProductsByIds(adjustedIds)
@@ -4419,7 +4521,7 @@ function ProductsFullEditor() {
     } finally {
       setBulkActionBusy(false)
     }
-  }, [actionHistory, bulkActionBusy, bulkEditForm, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
+  }, [actionHistory, askToConfirm, bulkActionBusy, bulkEditForm, bulkFieldLabel, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
 
   const productFilterSections = useMemo(() => buildProductFilterSections({
     availabilitySection: buildAvailabilityFilterSection({
@@ -5770,6 +5872,7 @@ function ProductsFullEditor() {
 
       {/* The merge/remove stock decision behind an exact-duplicate "Keep this". */}
       {mergeStockChoiceDialog}
+      {confirmDialog}
     </div>
   )
 }

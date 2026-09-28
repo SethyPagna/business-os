@@ -20,6 +20,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { shouldPromptConflictReviewBeforeApprove } from './importJobApproveGate.ts'
+import { useConfirmDialog } from './useConfirmDialog.tsx'
 
 // This widget is the ONE place import jobs surface across every page
 // (mounted globally in NotificationCenter.tsx -- Products/Inventory/Sales/
@@ -760,6 +761,9 @@ function buildJobsSignature(jobs: ImportJob[] = []): string {
 
 export default function BackgroundImportTracker() {
   const { notify, t, settings } = useApp()
+  // Compact review dialog on the nested layer (z-[1070]), above this
+  // tracker panel (z-[1000]) -- never the browser's confirm() (FX-ui).
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const pagesNavigation = useMobileSectionNavMode(settings?.ui_mobile_section_nav) === 'pages'
   const [jobs, setJobs] = useState<ImportJob[]>([])
   const [expanded, setExpanded] = useState(false)
@@ -1063,7 +1067,10 @@ export default function BackgroundImportTracker() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs])
 
-  if (!primaryJob) return null
+  // A remove question can still be open when the last job disappears (a poll
+  // or another tab removed it). Keep it on screen and answerable rather than
+  // hiding it while handleRemove still holds the tracker's action lock.
+  if (!primaryJob) return confirmDialog
 
   const status = normalizeJobStatus(primaryJob)
   const isActive = ACTIVE_STATUSES.has(status) && !jobNeedsAttention(primaryJob)
@@ -1253,7 +1260,16 @@ export default function BackgroundImportTracker() {
   const handleRemove = async (job: ImportJob) => {
     const action = beginTrackerAction(job, 'remove')
     if (!action) return
-    const okToRemove = window.confirm?.(t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?') ?? true
+    const okToRemove = await askToConfirm({
+      title: removeLabel,
+      message: t('remove_import_confirm') || 'Remove this import from the tracker and delete its uploaded import files?',
+      items: [
+        { label: t('import') || 'Import', value: getJobLabel(job) },
+        { label: t('summary') || 'Summary', value: getJobCountsSummary(job, { rows: rowsLabel, images: imagesLabel, issues: issuesLabel, analyzed: progressLabels.analyzed, queued: progressLabels.queued }) },
+      ],
+      confirmLabel: t('remove') || 'Remove',
+      danger: true,
+    })
     if (!okToRemove) {
       finishTrackerAction(action)
       return
@@ -1654,6 +1670,7 @@ export default function BackgroundImportTracker() {
           />
         </Suspense>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

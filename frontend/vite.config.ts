@@ -987,6 +987,11 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'records-float'
     }
+    // useConfirmDialog is admin-only (every host is a back-office surface), but
+    // the '/src/components/shared/' catch-all put it in 'app-shared', which the
+    // public catalog loads: the catalog-products closure passed the budget in
+    // tests/performanceBudgets.test.ts. Its own chunk keeps it off the storefront.
+    if (normalized.includes('/src/components/shared/useConfirmDialog.tsx')) return 'confirm-dialog-hook'
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'

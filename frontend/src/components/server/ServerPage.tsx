@@ -10,6 +10,7 @@ import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
 import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -375,6 +376,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
 function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
   const { user, notify } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   const actorKey = `${user?.id || ''}:${user?.organization_id ?? ''}:${syncUrl || ''}`
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
@@ -508,7 +510,15 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
   async function handleDiscardQueue() {
     const reviewToken = pendingSync.review_token
-    if (!reviewToken || !window.confirm('Clear only the pending sales reviewed in this account? This removes their local recovery copies. Other accounts and unidentified records will be retained.')) return
+    if (!reviewToken) return
+    if (!(await askToConfirm({
+      title: copy('server_clear_reviewed_title', 'Clear reviewed pending sales?', 'សម្អាតការលក់កំពុងរង់ចាំដែលបានពិនិត្យ?'),
+      message: copy('server_clear_reviewed_message', 'Only the pending sales reviewed in this account are cleared, and their local recovery copies are removed. Other accounts and unidentified records are kept.', 'មានតែការលក់កំពុងរង់ចាំដែលបានពិនិត្យក្នុងគណនីនេះប៉ុណ្ណោះដែលត្រូវសម្អាត ហើយច្បាប់ចម្លងសង្គ្រោះក្នុងឧបករណ៍ត្រូវលុប។ គណនីផ្សេង និងកំណត់ត្រាមិនស្គាល់ម្ចាស់ នៅដដែល។'),
+      items: [{ label: copy('server_reviewed_sales_count', 'Reviewed sales in this account', 'ការលក់ដែលបានពិនិត្យក្នុងគណនីនេះ'), value: `${pendingSync.total} → 0` }],
+      confirmLabel: copy('server_clear_reviewed_sales', 'Clear reviewed sales', 'សម្អាតការលក់ដែលបានពិនិត្យ'),
+      cancelLabel: copy('cancel', 'Cancel', 'បោះបង់'),
+      danger: true,
+    }))) return
     if (!getServerApi().discardPendingSyncQueue) return
     if (!beginSingleAction(queueActionInFlightRef, { blocked: retryingQueue })) return
     setRetryingQueue(true)
@@ -646,7 +656,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
                   disabled={retryingQueue || !pendingSync.review_token || pendingSync.total === 0 || !syncConnected}
                   className="text-red-500 hover:underline disabled:opacity-40"
                 >
-                  Clear reviewed sales
+                  {copy('server_clear_reviewed_sales', 'Clear reviewed sales', 'សម្អាតការលក់ដែលបានពិនិត្យ')}
                 </button>
               </div>
             </div>
@@ -698,6 +708,7 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
 
         {tab === 'info' ? <InfoTab syncUrl={syncUrl} syncConnected={syncConnected} active={active} /> : null}
       </div>
+      {confirmDialog}
     </div>
   )
 }

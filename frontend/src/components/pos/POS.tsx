@@ -961,7 +961,7 @@ export default function POS() {
 
   const addNewOrder = () => {
     if (orders.length >= LAYOUT.MAX_CONCURRENT_ORDERS) {
-      notify(`Maximum ${LAYOUT.MAX_CONCURRENT_ORDERS} open orders at once`, 'info')
+      notify(t('pos_max_open_orders').replace('{count}', String(LAYOUT.MAX_CONCURRENT_ORDERS)), 'info')
       return
     }
     const nextNum = orders.length + 1
@@ -1633,19 +1633,19 @@ export default function POS() {
       )
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
       setMembershipInfo(data || null)
-      if (!data) setMembershipError(posCopy('Membership not found'))
+      if (!data) setMembershipError(t('pos_membership_not_found'))
       return data || null
     } catch (error) {
       if (!isTrackedRequestCurrent(membershipRequestRef, requestId)) return null
       setMembershipInfo(null)
-      setMembershipError(getErrorMessage(error, posCopy('Membership lookup failed')))
+      setMembershipError(getErrorMessage(error, t('pos_membership_lookup_failed')))
       return null
     } finally {
       if (isTrackedRequestCurrent(membershipRequestRef, requestId)) {
         setMembershipLoading(false)
       }
     }
-  }, [posCopy])
+  }, [t])
 
 // Initial data load. NOTE: this effect's dependency array is `[isActive,
 // loadCatalogData]`, and `loadCatalogData` is a useCallback that's recreated
@@ -1989,7 +1989,7 @@ export default function POS() {
   })
 
   const submitNewCustomer = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
-    if (!newCustomerForm.name.trim()) return notify('Name required', 'error')
+    if (!newCustomerForm.name.trim()) return notify(t('name_required'), 'error')
     if (savingCustomerRef.current) return
     savingCustomerRef.current = true
     setSavingCustomer(true)
@@ -2087,7 +2087,7 @@ export default function POS() {
 
   const submitNewDelivery = async (duplicateDecision: ContactDuplicateDecision | null = null) => {
     if (!newDeliveryForm.name.trim() && !newDeliveryForm.phone.trim()) {
-      return notify('Driver name or phone is required', 'error')
+      return notify(t('delivery_option_hint'), 'error')
     }
     if (savingDeliveryRef.current) return
     savingDeliveryRef.current = true
@@ -2112,7 +2112,7 @@ export default function POS() {
         'Create POS delivery contact',
         POS_DELIVERY_CREATE_TIMEOUT_MS,
       )
-      notify('Delivery contact added')
+      notify(t('delivery_contact_added'))
       const created = { ...payload, id: res.id }
       setDeliveryContacts(prev => [...prev, created])
       selectDelivery(created)
@@ -3252,10 +3252,10 @@ export default function POS() {
     const cartBlocker = findCheckoutBlocker(active.cart, { totalUsd })
     if (cartBlocker) {
       const blockerMessage = cartBlocker.code === 'invalid_quantity'
-        ? `${posCopy('Invalid quantity - review the cart')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
+        ? `${t('pos_cart_invalid_quantity')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
         : cartBlocker.code === 'invalid_price'
-          ? `${posCopy('Invalid price - review the cart')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
-          : posCopy('This sale total is invalid. Review the cart before completing.')
+          ? `${t('pos_cart_invalid_price')}${cartBlocker.itemName ? `: ${cartBlocker.itemName}` : ''}`
+          : t('pos_cart_invalid_total')
       return notify(blockerMessage, 'error')
     }
     // Y10: an awaiting-payment sale is exactly the "decide the payment
@@ -3276,14 +3276,14 @@ export default function POS() {
 
     const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchesById.has(Number(item.branch_id)))
     if (invalidBranchItem) {
-      return notify(posCopy('One or more cart items use an inactive branch. Please re-select the branch before checkout.'), 'error')
+      return notify(t('pos_cart_inactive_branch'), 'error')
     }
 
     if (branches.length > 1) {
       const missingBranchItem = active.cart.find((item) => !item.branch_id)
       if (missingBranchItem) {
         return notify(
-          `${posCopy('Select a branch for')} ${missingBranchItem.name}`,
+          t('pos_cart_select_branch_for').replace('{name}', String(missingBranchItem.name || '')),
           'error',
         )
       }
@@ -3801,12 +3801,16 @@ export default function POS() {
               non-scrolling cell pinned beside it. */}
           <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
           <div className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 overflow-x-auto scroll-x">
-            {orders.map(order => (
+            {orders.map((order, orderIndex) => (
               <div key={order.id} className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors cursor-pointer
                 ${resolvedActiveId === order.id ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:border-blue-400'}`}
                 onClick={() => setActiveId(order.id)}
               >
-                <span>{order.label}</span>
+                {/* The tab name is positional (createEmptyOrder numbers it by
+                    position and closing a tab renumbers the rest), so it is
+                    rendered from the position in the operator's language
+                    rather than from the English label stored on the order. */}
+                <span>{t('pos_order_n').replace('{n}', String(orderIndex + 1))}</span>
                 {order.cart.length > 0 && (
                   <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${resolvedActiveId === order.id ? 'bg-white/30 text-white' : 'bg-blue-600 text-white'}`}>{order.cart.length}</span>
                 )}
@@ -3823,7 +3827,7 @@ export default function POS() {
               </div>
             ))}
             {orders.length < LAYOUT.MAX_CONCURRENT_ORDERS && (
-              <button onClick={addNewOrder} className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 text-gray-400 hover:text-blue-600 text-sm font-bold transition-colors" title="New order">+</button>
+              <button onClick={addNewOrder} className="w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-lg bg-white dark:bg-gray-800 border border-dashed border-gray-300 dark:border-gray-600 hover:border-blue-400 text-gray-400 hover:text-blue-600 text-sm font-bold transition-colors" title={t('pos_new_order_tab')} aria-label={t('pos_new_order_tab')}>+</button>
             )}
           </div>
           {/* Shift history remains visible before opening, while open, after
@@ -3994,9 +3998,9 @@ export default function POS() {
                               className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-t border-gray-100 dark:border-gray-700 first:border-t-0 text-xs transition-colors">
                               <div className="font-semibold text-gray-800 dark:text-gray-200">{opt.label || (t('option_n')||'Option {n}').replace('{n}', String(i + 1))}</div>
                               <div className="text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-2 mt-0.5">
-                                {opt.name    && <span>Name: {opt.name}</span>}
-                                {opt.phone   && <span>Phone: {opt.phone}</span>}
-                                {opt.address && <span>Address: {opt.address}</span>}
+                                {opt.name    && <span>{t('name')}: {opt.name}</span>}
+                                {opt.phone   && <span>{t('phone')}: {opt.phone}</span>}
+                                {opt.address && <span>{t('address')}: {opt.address}</span>}
                               </div>
                             </button>
                           ))}
@@ -4026,7 +4030,7 @@ export default function POS() {
                       />
                     </div>
                   ) : membershipLoading ? (
-                    <p className="text-xs text-emerald-700">{posCopy('Checking membership points...')}</p>
+                    <p className="text-xs text-emerald-700">{t('pos_membership_checking_points')}</p>
                   ) : membershipError ? (
                     <p className="text-xs text-red-600">{membershipError}</p>
                   ) : (
@@ -4034,17 +4038,17 @@ export default function POS() {
                       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <span className="font-semibold text-emerald-800">{active.customer.membership_number}</span>
                         <span className="text-emerald-700">
-                          {posCopy('Balance')}: {(membershipInfo?.points?.balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts
+                          {t('balance')}: {(membershipInfo?.points?.balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts
                         </span>
                       </div>
                       <div className="grid grid-cols-[110px,1fr] gap-2">
                         <div>
-                          <label htmlFor="pos-membership-redeem-units" className="mb-1 block text-[11px] font-medium text-emerald-700">{posCopy('Units')}</label>
+                          <label htmlFor="pos-membership-redeem-units" className="mb-1 block text-[11px] font-medium text-emerald-700">{t('pos_membership_redeem_units')}</label>
                           <input id="pos-membership-redeem-units" name="pos_membership_redeem_units" className="input text-xs py-1" type="number" min="0" step="1" value={active.membershipRedeemUnits || ''} onChange={e => handleMembershipUnits(e.target.value)} />
                         </div>
                         <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
-                          <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
-                          <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
+                          <div>{t('pos_membership_one_unit')} = {redeemPointsStep} {t('points')} = {fmtUSD(redeemValueUsdStep)}</div>
+                          <div className="mt-1">{t('pos_membership_available_units')}: {maxMembershipUnits}</div>
                           {maxMembershipUnits === 0 && (membershipInfo?.points?.balance || 0) >= redeemPointsStep ? (
                             <div className="mt-1 text-[11px] text-gray-500">
                               {posCopy('Membership points are turned off in Settings.', 'ពិន្ទុសមាជិកត្រូវបានបិទក្នុងការកំណត់។')}
@@ -4054,9 +4058,9 @@ export default function POS() {
                         </div>
                       </div>
                       <div className="flex gap-2 text-xs">
-                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits('0')}>{posCopy('Clear')}</button>
+                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits('0')}>{t('clear')}</button>
                         <span className="text-emerald-300">|</span>
-                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits(String(maxMembershipUnits))}>{posCopy('Use max')}</button>
+                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits(String(maxMembershipUnits))}>{t('pos_membership_use_max')}</button>
                       </div>
                     </div>
                   )}
@@ -4284,9 +4288,9 @@ export default function POS() {
                   ))}
                 </div>
                 <div className="flex gap-2 mt-1">
-                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('usd', totalUsd)}>Exact {usdSymbol}</button>
+                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('usd', totalUsd)}>{t('pos_exact_amount')} {usdSymbol}</button>
                   <span className="text-gray-300">|</span>
-                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('khr', totalKhr)}>Exact {khrSymbol}</button>
+                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('khr', totalKhr)}>{t('pos_exact_amount')} {khrSymbol}</button>
                 </div>
                 {(paidUsdNum > 0 || paidKhrNum > 0) && (
                   <div className={`mt-1.5 p-2 rounded-lg text-xs ${posTenderCovers ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
@@ -4455,7 +4459,6 @@ export default function POS() {
             clearDeliveryDuplicateCheck={() => setDeliveryDuplicateCheck(null)}
             newCustomerForm={newCustomerForm}
             newDeliveryForm={newDeliveryForm}
-            posCopy={posCopy}
             savingCustomer={savingCustomer}
             savingDelivery={savingDelivery}
             setNewCustomerForm={setNewCustomerForm}
@@ -4539,10 +4542,10 @@ export default function POS() {
               onClose={() => setImageLightbox(null)}
               onIndexChange={(index) => setImageLightbox((current) => (current ? { ...current, index } : current))}
               labels={{
-                prev: posCopy('Prev'),
-                next: posCopy('Next'),
-                imageCount: '{current}/{total}',
-                dotsLabel: 'Image {current} of {total}',
+                prev: t('prevImage'),
+                next: t('nextImage'),
+                imageCount: t('imageCount'),
+                dotsLabel: t('dotsLabel'),
                 close: t('close') || 'Close',
               }}
             />
@@ -4551,7 +4554,7 @@ export default function POS() {
             <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
               <div className="relative w-full max-w-md max-h-modal-90 flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-2xl">
                 {receiptQueue.length > 1 && (
-                  <div className="flex-shrink-0 bg-blue-600 text-white text-xs text-center py-1 px-3">{receiptQueue.length} receipts waiting - close this one to see the next</div>
+                  <div className="flex-shrink-0 bg-blue-600 text-white text-xs text-center py-1 px-3">{t('pos_receipts_waiting').replace('{count}', String(receiptQueue.length))}</div>
                 )}
                 <Receipt
                   sale={receiptQueue[0]}

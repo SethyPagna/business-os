@@ -215,7 +215,7 @@ export default function ReturnsListSurface({
                       className="h-4 w-4 rounded"
                       checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
                       onChange={(event) => toggleSelectAll(event.target.checked)}
-                      aria-label="Select all returns"
+                      aria-label={t('select_all')}
                     />
                   ) : null}
                 </th>
@@ -257,7 +257,7 @@ export default function ReturnsListSurface({
                                 if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                               }}
                               onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                              aria-label={`Select ${section.label}`}
+                              aria-label={`${t('select')} ${section.label}`}
                             />
                             ) : null}
                             <span>{section.label}</span>
@@ -288,7 +288,7 @@ export default function ReturnsListSurface({
                                       if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                                     }}
                                     onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                    aria-label={`Select ${group.label}`}
+                                    aria-label={`${t('select')} ${group.label}`}
                                   />
                                   ) : null}
                                   <span>{group.label}</span>
@@ -341,7 +341,7 @@ export default function ReturnsListSurface({
                                   className="h-4 w-4 rounded"
                                   checked={rowSelected}
                                   onChange={() => toggleSelected(ret.id)}
-                                  aria-label={`Select ${ret.return_number}`}
+                                  aria-label={`${t('select')} ${ret.return_number}`}
                                 />
                                 ) : null}
                               </td>
@@ -429,7 +429,7 @@ export default function ReturnsListSurface({
                         if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
                       }}
                       onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
+                      aria-label={`${t('select')} ${section.label}`}
                     />
                     ) : null}
                     <span>{section.label}</span>
@@ -456,7 +456,7 @@ export default function ReturnsListSurface({
                             if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
                           }}
                           onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                          aria-label={`Select ${group.label}`}
+                          aria-label={`${t('select')} ${group.label}`}
                         />
                         ) : null}
                         <span>{group.label}</span>
@@ -495,7 +495,7 @@ export default function ReturnsListSurface({
                             className="h-4 w-4 rounded"
                             checked={cardSelected}
                             onChange={() => toggleSelected(ret.id)}
-                            aria-label={`Select ${ret.return_number}`}
+                            aria-label={`${t('select')} ${ret.return_number}`}
                           />
                         </div>
                         ) : null}

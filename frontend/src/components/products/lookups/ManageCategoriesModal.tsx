@@ -3,6 +3,7 @@ import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest
 import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 import type { ComponentProps } from 'react'
 import Modal from '../../shared/Modal'
+import { useConfirmDialog } from '../../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../../shared/ActionHistoryBar'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../../AppContext.tsx'
 import { useActionHistory } from '../../../utils/actionHistory.ts'
@@ -197,6 +198,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   }
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const { notify, user } = useApp()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
@@ -393,7 +395,12 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const handleDelete = async (id: EntityId): Promise<void> => {
     if (saving || deletingId) return
     if (!beginSingleAction(deleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(t('confirm_delete'))) {
+    if (!(await askToConfirm({
+      title: t('confirm_delete') || 'Are you sure you want to delete this?',
+      message: categoriesById.get(Number(id))?.name,
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -464,7 +471,12 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
   const handleDeleteSelected = async (): Promise<void> => {
     if (saving || deletingId || selectedIds.size === 0) return
     if (!beginSingleAction(bulkDeleteInFlightRef, { blocked: deletingId != null })) return
-    if (!confirm(`Delete ${selectedIds.size} selected categor${selectedIds.size === 1 ? 'y' : 'ies'}?`)) {
+    if (!(await askToConfirm({
+      title: t('delete_selected') || 'Delete selected',
+      items: [{ label: t('categories') || 'Categories', value: selectedIds.size }],
+      confirmLabel: t('delete') || 'Delete',
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -604,7 +616,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
                     checked={selectedIds.has(Number(category.id))}
                     onChange={() => toggleSelected(category.id)}
                     disabled={saving || deletingId != null}
-                    aria-label={`Select ${category.name}`}
+                    aria-label={`${t('select')} ${category.name}`}
                   />
                   <div className="h-4 w-4 flex-shrink-0 rounded-full" style={{ background: category.color || DEFAULT_CATEGORY_COLOR }} />
                   <div className="min-w-0 flex-1">
@@ -645,6 +657,7 @@ export default function ManageCategoriesModal({ onClose, onReviewSelection, t }:
         </div>
       </div>
       <RenameCascadeModal request={renameRequest} busy={saving} t={(key, fallback) => t(key) || fallback || key} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </Modal>
   )
 }

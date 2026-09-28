@@ -16,6 +16,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import type { QueryParams } from '../../api/query.ts'
 import { isWriteConflictError } from '../../api/http.ts'
 import { fmtDateTime24 } from '../../utils/formatters'
@@ -299,6 +300,7 @@ type CustomerSection = 'directory' | 'invoices'
 
 function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { can, user, getPermissionTier, fmtUSD, fmtKHR, language } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
   // the Review Required tier rather than queueing them, so those controls
   // are withheld instead of rendered and then failing on click. Add stays
@@ -897,7 +899,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   const handleDelete = async (customer: CustomerRow) => {
     if (!beginSingleAction(deleteInFlightRef)) return
-    if (!confirm(`Delete customer "${customer.name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr(t, 'confirm_delete_customer', 'Delete customer?'),
+      message: customer.name,
+      confirmLabel: tr(t, 'delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteInFlightRef)
       return
     }
@@ -936,7 +943,12 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
 
   const handleBulkDelete = async () => {
     if (!canBulkContactsRef.current || !selectedIds.size || !beginSingleAction(bulkDeleteInFlightRef, { blocked: bulkActionBusy })) return
-    if (!confirm(`Delete ${selectedIds.size} customer(s)?`)) {
+    if (!(await askToConfirm({
+      title: tr(t, 'confirm_delete_customers', 'Delete selected customers?'),
+      items: [{ label: tr(t, 'selected', 'Selected'), value: selectedIds.size }],
+      confirmLabel: tr(t, 'delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(bulkDeleteInFlightRef)
       return
     }
@@ -1214,7 +1226,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                           if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                         }}
                         onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                        aria-label={`Select ${section.label}`}
+                        aria-label={`${t('select')} ${section.label}`}
                       />
                       ) : null}
                       <span>{section.label}</span>
@@ -1266,7 +1278,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
               <td className={selectionModeActive ? 'w-10 px-3 py-2' : 'w-0 px-0 py-2'} onClick={(event) => event.stopPropagation()}>
                 {selectionModeActive ? (
                 <>
-                <label htmlFor={`customer-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <label htmlFor={`customer-select-${customerRow.id}`} className="sr-only">{`${t('select')} ${customerRow.name}`}</label>
                 <input id={`customer-select-${customerRow.id}`} name={`customer_select_${customerRow.id}`} type="checkbox" className="h-4 w-4 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
                 </>
                 ) : null}
@@ -1323,7 +1335,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                         if (node) node.indeterminate = isSectionPartiallySelected(section.ids)
                       }}
                       onChange={(event) => toggleSectionSelection(section.ids, event.target.checked)}
-                      aria-label={`Select ${section.label}`}
+                      aria-label={`${t('select')} ${section.label}`}
                     />
                     ) : null}
                     <span>{section.label}</span>
@@ -1377,7 +1389,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
             >
               {selectionModeActive ? (
               <div className="flex-shrink-0" onClick={(event) => { event.stopPropagation(); toggleOne(customerRow.id) }}>
-                <label htmlFor={`customer-card-select-${customerRow.id}`} className="sr-only">{`Select ${customerRow.name}`}</label>
+                <label htmlFor={`customer-card-select-${customerRow.id}`} className="sr-only">{`${t('select')} ${customerRow.name}`}</label>
                 <input id={`customer-card-select-${customerRow.id}`} name={`customer_card_select_${customerRow.id}`} type="checkbox" className="h-5 w-5 cursor-pointer rounded" checked={selectedIds.has(Number(customerRow.id))} onChange={() => toggleOne(customerRow.id)} />
               </div>
               ) : null}
@@ -1516,6 +1528,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         </Suspense>
       ) : null}
       <RenameCascadeModal request={renameRequest} busy={false} t={(key, fallback) => tr(t, key, fallback || key)} onChoose={handleRenameChoice} />
+      {confirmDialog}
     </div>
   )
 }

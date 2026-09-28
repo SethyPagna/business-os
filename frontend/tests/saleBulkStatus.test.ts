@@ -130,5 +130,8 @@ for(const language of ['en','km']) {
   for(const key of ['sale_bulk_limit','sale_bulk_pending','sale_bulk_retry','sale_bulk_discard','sale_bulk_discard_warning']) assert.ok(labels[key])
 }
 assert.match(source,/handleBulkStatusUpdate\(pendingBulkRequest.target_status, null, true, true\)/)
-assert.match(source,/window.confirm\(translateOr\('sale_bulk_discard_warning'/)
+// FX-ui: the discard question is the shared ConfirmDialog, not window.confirm.
+assert.match(source,/const confirmDiscardRetry = useCallback\(\(\) => askToConfirm\(\{[\s\S]*?message: translateOr\('sale_bulk_discard_warning'/)
+assert.match(source,/void confirmDiscardRetry\(\)\.then\(\(confirmed\) => \{ if \(confirmed\) savePendingBulkRequest\(null\) \}\)/)
+assert.doesNotMatch(source,/window\.confirm\(/)
 console.log('PASS real persistence hooks restore full request after remount, isolate actor, discard and tolerate storage failures; EN/KM retry UX')

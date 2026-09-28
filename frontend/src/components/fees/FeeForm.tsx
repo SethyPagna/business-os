@@ -11,6 +11,7 @@ import {
 } from '../../utils/workDrafts.ts'
 import { useModalClose } from '../shared/modalCloseContext.ts'
 import AppSelect from '../shared/AppSelect.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import { nativeChangeAmounts, roundMoney2 } from '../../utils/moneyPrecision.ts'
@@ -229,6 +230,7 @@ export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCre
 
 export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange }: FeeFormProps) {
   const { t } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
   const initialPendingRef = useRef<PendingFeeCreate | null>(fee ? null : getPendingFeeCreate(actorId))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<FeeFormState>>> | undefined>(undefined)
@@ -439,10 +441,19 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
 
   const discardPending = () => {
     if (!pendingCreate || savingRef.current || !actorId) return
-    const warning = `${t('write_outcome_unknown') || 'The previous save may already have succeeded.'} ${t('discard_changes') || 'Discard changes'}?`
-    if (!window.confirm(warning)) return
-    discardPendingFeeCreate(actorId, pendingCreate.client_request_id)
-    setPendingCreate(null)
+    const pending = pendingCreate
+    // The shared dialog (FX-ui), never window.confirm. The discard removes
+    // only this exact request id, so a late answer cannot drop a newer one.
+    void askToConfirm({
+      title: t('discard_retry') || 'Discard retry',
+      message: t('write_outcome_unknown') || 'The previous save may already have succeeded.',
+      confirmLabel: t('discard_retry') || 'Discard retry',
+      danger: true,
+    }).then((confirmed) => {
+      if (!confirmed || savingRef.current) return
+      discardPendingFeeCreate(actorId, pending.client_request_id)
+      setPendingCreate((current) => (current?.client_request_id === pending.client_request_id ? null : current))
+    })
   }
 
   return (
@@ -685,6 +696,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
           </button>
         )}
       </div>
+      {confirmDialog}
     </form>
   )
 }

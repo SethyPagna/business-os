@@ -65,6 +65,7 @@ import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelM
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 import {
   directMutationOutcomeIsUnknown,
@@ -633,6 +634,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  // One question for every "Discard retry" on this page (direct status, bulk
+  // status, bulk field, customer and customer-name retries).
+  const confirmDiscardRetry = useCallback(() => askToConfirm({
+    title: translateOr('sale_bulk_discard', 'Discard retry'),
+    message: translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'),
+    confirmLabel: translateOr('sale_bulk_discard', 'Discard retry'),
+    danger: true,
+  }), [askToConfirm, translateOr])
   // The Worker answers 409 money_precision_invalid_rate when a sale has no
   // usable exchange rate of its own (owner rule, 24 Sep 2026: a sale keeps its
   // own rate and is never handed today's). Settle, add items and amend all say
@@ -1308,7 +1318,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   ): Promise<void> => {
     const result = await handleStatusChange(saleId, saleStatus, notes, false, extra, false, null, history)
     if (result === true || (result && typeof result === 'object' && 'statusUpdatedAt' in result)) return
-    throw new Error(translateOr('action_failed', 'The sale status change did not complete. Retry the original action.'))
+    throw new Error(translateOr('sale_status_change_incomplete', 'The sale status change did not complete. Retry the original action.'))
   }
 
   const retryPendingDirectStatusRequest = async (): Promise<void> => {
@@ -1349,12 +1359,15 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     }
   }
 
-  const discardPendingDirectStatus = (): void => {
+  const discardPendingDirectStatus = async (): Promise<void> => {
     const pending = currentPendingDirectStatus()
     if (!pending || statusActionRef.current.size > 0) return
-    if (!window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) return
+    if (!(await confirmDiscardRetry())) return
+    // The question was open for a while: act only if the same retry is still
+    // the pending one and no status write started meanwhile.
+    if (currentPendingDirectStatus()?.entityId !== pending.entityId || statusActionRef.current.size > 0) return
     try { savePendingDirectStatus(pending.entityId, null) }
-    catch (error) { notify(getErrorMessage(error, 'Unable to discard the pending retry.'), 'error') }
+    catch (error) { notify(getErrorMessage(error, translateOr('pending_status_retry_discard_failed', 'Unable to discard the pending retry.', 'មិនអាចបោះបង់ការព្យាយាមឡើងវិញដែលកំពុងរង់ចាំបានទេ។')), 'error') }
   }
 
   // S4-24b: add product lines to a sale that already exists. The server does
@@ -2005,7 +2018,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     : field === 'payment_method'
       ? valueChoice(sale.payment_method, translateOr('none', 'None'))
       : field === 'delivery_contact'
-        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_delivery_contact', 'No driver'))
+        ? linkedChoice(sale.delivery_contact_id, sale.delivery_contact_name, translateOr('no_driver', 'No driver'))
         : linkedChoice(sale.customer_id, sale.customer_name, translateOr('no_customer', 'No customer'))
   const choicesForSale = (sale: SaleRecord, field: BulkSaleField): BulkSaleChoice[] => {
     if (field !== 'payment_method') return [choiceForSale(sale, field)]
@@ -2047,7 +2060,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         const record = (result || {}) as Record<string, unknown>
         const rows = Array.isArray(result) ? result : Array.isArray(record.data) ? record.data : Array.isArray(record.items) ? record.items : []
         targetChoices = uniqueChoices([
-          linkedChoice(null, null, field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')),
+          linkedChoice(null, null, field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_driver', 'No driver')),
           ...sourceChoices,
           ...(rows as Array<Record<string, unknown>>).map((row) => linkedChoice(row.id, row.name, translateOr('none', 'None'))),
         ])
@@ -2101,7 +2114,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       if (searchVersion !== bulkTargetSearchVersionRef.current) return
       setBulkChangePrompt((current) => {
         if (!current || current.field !== prompt.field) return current
-        const emptyLabel = current.field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_delivery_contact', 'No driver')
+        const emptyLabel = current.field === 'customer' ? translateOr('no_customer', 'No customer') : translateOr('no_driver', 'No driver')
         return {
           ...current,
           targetChoices: uniqueChoices([
@@ -2229,7 +2242,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       }
       notify(unpaid
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
-        : getErrorMessage(error, 'Unable to update the selected sales.'), 'error')
+        : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
       setBulkStatusSaving('')
@@ -2699,7 +2712,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           <span>{translateOr('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}</span>
           <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving || !canChangeSaleStatus} onClick={() => handleBulkStatusUpdate(pendingBulkRequest.target_status, null, true, true)}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
           <button type="button" className="btn-secondary" disabled={!!bulkStatusSaving} onClick={() => {
-            if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkRequest(null)
+            void confirmDiscardRetry().then((confirmed) => { if (confirmed) savePendingBulkRequest(null) })
           }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}
@@ -2855,7 +2868,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               void submitSaleCustomerChange(saleCustomerPrompt.sale, target, saleCustomerPendingRequest)
             } : undefined}
             onDiscardPending={saleCustomerPendingRequest ? () => {
-              if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null)
+              void confirmDiscardRetry().then((confirmed) => { if (confirmed) savePendingBulkFieldRequest(null) })
             } : undefined}
           />
         </Suspense>
@@ -2873,7 +2886,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             onSave={({ name }) => submitSaleCustomerChange(saleCustomerNameForm.sale, null, undefined, name)}
             onRetryPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => { void submitSaleCustomerChange(saleCustomerNameForm.sale, null, pendingBulkFieldRequest) } : undefined}
             onDiscardPending={pendingBulkFieldRequest?.action.kind === 'customer_name' ? () => {
-              if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null)
+              void confirmDiscardRetry().then((confirmed) => { if (confirmed) savePendingBulkFieldRequest(null) })
             } : undefined}
             onClose={() => {
               if (saleCustomerSaving || bulkFieldSaving) return
@@ -2983,7 +2996,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
               else notify(translateOr('sale_customer_retry_find', 'Find and open the original sale to review this pending customer-name change.'), 'error')
             } else void submitBulkFieldChange(kind, { key: '', label: '' }, { key: '', label: '' }, [], [], pendingBulkFieldRequest)
           }}>{translateOr('sale_bulk_retry', 'Retry original request')}</button>
-          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { if (window.confirm(translateOr('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.'))) savePendingBulkFieldRequest(null) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
+          <button type="button" className="btn-secondary" disabled={bulkFieldSaving} onClick={() => { void confirmDiscardRetry().then((confirmed) => { if (confirmed) savePendingBulkFieldRequest(null) }) }}>{translateOr('sale_bulk_discard', 'Discard retry')}</button>
         </div>
       ) : null}
 
@@ -3060,6 +3073,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           />
         </Suspense>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

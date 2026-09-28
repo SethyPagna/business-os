@@ -175,6 +175,7 @@ async function main() {
   const handlerSource = `${inventory.slice(handlerStart, handlerEnd + '\n  }'.length)}; return handleTransferStock`
   async function submitInventory(form) {
     let body
+    let asked = 0
     const notices = []
     const context = {
       transferSaving: false, pendingTransfer: null, transferRetryReady: true, canTransferStock: true,
@@ -183,10 +184,12 @@ async function main() {
       branchesById: new Map([['1', { id: 1, name: 'Warehouse' }], ['2', { id: 2, name: 'Shop' }]]),
       branches: [{ id: 1, name: 'Warehouse' }, { id: 2, name: 'Shop' }],
       branchCanTransferBetween: () => true, branchCanBeTransferSource: () => true,
-      window: { confirm: () => true }, user: { id: 5, name: 'Dara' },
+      // FX-ui: the review is the shared dialog (askToConfirm), not window.confirm.
+      askToConfirm: async () => { asked += 1; return true }, user: { id: 5, name: 'Dara' },
       runInventoryTransferIntent: async (kind, original) => { body = original },
     }
     await new Function(...Object.keys(context), compile(handlerSource))(...Object.values(context))()
+    if (body) assert.equal(asked, 1, 'the transfer is reviewed once before it posts')
     return { body, notices }
   }
   const afterFailure = await submitInventory(inventoryFailed.form)

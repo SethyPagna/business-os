@@ -18,6 +18,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls from '../shared/PaginationControls'
@@ -659,6 +660,7 @@ const LazyWireImagesReviewModal = lazyRetry(async () => {
 
 export default function FilesPage() {
   const { notify, user, t, can, hasPermission, getPermissionTier } = useApp()
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   // Library view/manage split (see cloudflare/src/routes/files.ts's own
   // top-of-file comment for the full backend-side rule this mirrors):
   // browsing/searching/previewing an asset is available to every
@@ -1458,7 +1460,12 @@ export default function FilesPage() {
   async function removeProvider(provider: AiProvider) {
     if (!provider?.id) return
     if (!beginSingleAction(deleteProviderInFlightRef, { blocked: deletingProviderId != null })) return
-    if (!window.confirm(`Delete AI provider "${provider.name}"?`)) {
+    if (!(await askToConfirm({
+      title: tr('confirm_delete_ai_provider', 'Delete AI provider?'),
+      message: provider.name,
+      confirmLabel: tr('delete', 'Delete'),
+      danger: true,
+    }))) {
       finishSingleAction(deleteProviderInFlightRef)
       return
     }
@@ -1971,6 +1978,7 @@ export default function FilesPage() {
           </div>
         </Modal>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }

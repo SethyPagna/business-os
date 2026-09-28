@@ -194,8 +194,15 @@ assert.doesNotMatch(
 )
 assert.match(
   posQuickAddModals,
-  /membership_number[\s\S]*Auto-generated if blank/,
+  // FX-ui part 1: the placeholder is the pack key, translated in both packs.
+  /membership_number[\s\S]*membership_auto_generated_if_blank/,
   'POS quick-add customer form should expose optional membership id and allow generated memberships',
 )
+{
+  const enPack = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const kmPack = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.match(enPack.membership_auto_generated_if_blank || '', /Auto-generated if blank/, 'the English placeholder still says a blank id is generated')
+  assert.ok(kmPack.membership_auto_generated_if_blank && kmPack.membership_auto_generated_if_blank !== enPack.membership_auto_generated_if_blank, 'the Khmer placeholder is translated')
+}
 
 console.log('productSearchPagination tests passed')

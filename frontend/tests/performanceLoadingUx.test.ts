@@ -3433,8 +3433,10 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => createPosSale\(frozen, checkoutScope\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
-const membershipLoadHandler = pos.match(/const loadMembershipInfo = useCallback\(async \([\s\S]*?\}, \[posCopy\]\)/)?.[0] || ''
-assert.match(membershipLoadHandler, /catch \(error\) \{\s*if \(!isTrackedRequestCurrent\(membershipRequestRef, requestId\)\) return null\s*setMembershipInfo\(null\)\s*setMembershipError\(getErrorMessage\(error, posCopy\('Membership lookup failed'\)\)\)\s*return null/, 'failed authenticated membership lookup must clear the stale balance, show the error, and return no member while ignoring superseded requests')
+// FX-ui part 1: the lookup-failure copy is the pack key (both languages), not
+// the English-only posCopy('Membership lookup failed'); the handler depends on t.
+const membershipLoadHandler = pos.match(/const loadMembershipInfo = useCallback\(async \([\s\S]*?\}, \[t\]\)/)?.[0] || ''
+assert.match(membershipLoadHandler, /catch \(error\) \{\s*if \(!isTrackedRequestCurrent\(membershipRequestRef, requestId\)\) return null\s*setMembershipInfo\(null\)\s*setMembershipError\(getErrorMessage\(error, t\('pos_membership_lookup_failed'\)\)\)\s*return null/, 'failed authenticated membership lookup must clear the stale balance, show the error, and return no member while ignoring superseded requests')
 assert.doesNotMatch(membershipLoadHandler, /membershipInfoRef|return membershipInfo\b|setMembershipError\(''\)[\s\S]*catch[\s\S]*setMembershipError\(''\)/, 'authorization and network failures must not reuse an earlier membership balance or report success')
 assert.match(
   pos,

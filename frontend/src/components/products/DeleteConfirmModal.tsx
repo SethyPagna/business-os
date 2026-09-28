@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../shared/Modal'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
 // Same saved-reason catalog + "Manage reasons" component Inventory's own
 // Adjust-stock modal already uses -- per the
@@ -59,6 +60,7 @@ export default function DeleteConfirmModal({
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
+  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
 
   // Delete now requires a reason, drawn from the same saved-reason catalog
   // Inventory's Adjust-stock modal uses (inventory_saved_reasons), just
@@ -117,10 +119,17 @@ export default function DeleteConfirmModal({
     await saveReasonCatalog(next)
   }, [inventoryReasons, saveReasonCatalog])
   const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!window.confirm(T('delete_saved_reason_confirm', 'Delete this saved reason?'))) return
+    // Same review as Inventory's saved-reason delete (FX-ui), never window.confirm.
+    if (!(await askToConfirm({
+      title: T('delete', 'Delete'),
+      message: T('delete_saved_reason_confirm', 'Delete this saved reason?'),
+      items: [{ label: T('reason', 'Reason'), value: entry.label }],
+      confirmLabel: T('delete', 'Delete'),
+      danger: true,
+    }))) return
     const next = inventoryReasons.filter((item) => item.id !== entry.id)
     await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
+  }, [askToConfirm, inventoryReasons, saveReasonCatalog])
 
   const isBulk = summary.productCount > 1
   const title = isBulk
@@ -246,6 +255,7 @@ export default function DeleteConfirmModal({
           tr={(key, fallbackEn) => T(key, fallbackEn ?? key)}
         />
       </div>
+      {confirmDialog}
     </Modal>
   )
 }

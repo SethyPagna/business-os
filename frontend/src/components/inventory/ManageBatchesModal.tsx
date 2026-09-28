@@ -5,6 +5,7 @@ import { fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import SectionCard from '../shared/SectionCard'
@@ -89,6 +90,7 @@ export default function ManageBatchesModal({
   t,
   tr,
 }: ManageBatchesModalProps) {
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   const [branchId, setBranchId] = useState(defaultBranchId || String(branchSelectOptions[0]?.value ?? ''))
   const [batches, setBatches] = useState<ProductBatch[]>([])
   const [loading, setLoading] = useState(false)
@@ -182,13 +184,21 @@ export default function ManageBatchesModal({
           .replace('{from}', String(batch.quantity))
           .replace('{to}', String(nextQuantity))}`
       : ''
-    if (!window.confirm(tr(
-      'confirm_update_batch_details',
-      'Update {batch} for {product}?{note}',
-    )
-      .replace('{batch}', batchLabel)
-      .replace('{product}', product.name || 'this product')
-      .replace('{note}', quantityNote))) return
+    if (!(await askToConfirm({
+      title: tr('save_changes', 'Save Changes'),
+      message: tr(
+        'confirm_update_batch_details',
+        'Update {batch} for {product}?{note}',
+      )
+        .replace('{batch}', batchLabel)
+        .replace('{product}', product.name || 'this product')
+        .replace('{note}', quantityNote),
+      items: quantityChange
+        ? [{ label: tr('quantity', 'Quantity'), value: `${batch.quantity} → ${nextQuantity}` }]
+        : undefined,
+      confirmLabel: tr('save', 'Save'),
+      cancelLabel: tr('cancel', 'Cancel'),
+    }))) return
     if (!beginSingleAction(saveBatchInFlightRef, { blocked: savingId != null })) return
     setSavingId(batch.id)
     try {
@@ -237,12 +247,18 @@ export default function ManageBatchesModal({
 
   const deactivate = async (batch: ProductBatch) => {
     const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
-    if (!window.confirm(tr(
-      'confirm_deactivate_batch_details',
-      'Deactivate {batch} for {product}? It will no longer be available for new stock operations.',
-    )
-      .replace('{batch}', batchLabel)
-      .replace('{product}', product?.name || 'this product'))) return
+    if (!(await askToConfirm({
+      title: tr('deactivate', 'Deactivate'),
+      message: tr(
+        'confirm_deactivate_batch_details',
+        'Deactivate {batch} for {product}? It will no longer be available for new stock operations.',
+      )
+        .replace('{batch}', batchLabel)
+        .replace('{product}', product?.name || 'this product'),
+      confirmLabel: tr('deactivate', 'Deactivate'),
+      cancelLabel: tr('cancel', 'Cancel'),
+      danger: true,
+    }))) return
     setSavingId(batch.id)
     try {
       const res = await deactivateBatch(batch.id)
@@ -262,6 +278,7 @@ export default function ManageBatchesModal({
   }
 
   return createPortal(
+    <>
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeIfIdle}>
       <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
@@ -505,7 +522,12 @@ export default function ManageBatchesModal({
             row, so there was no other footer action to keep. */}
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
-    </div>,
+    </div>
+    {/* Beside the backdrop, not inside it: React bubbles the dialog's clicks
+        through the component tree, so inside it Confirm and Cancel also closed
+        Manage Received Dates. */}
+    {confirmDialog}
+    </>,
     document.body,
   )
 }

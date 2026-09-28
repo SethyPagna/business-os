@@ -27,6 +27,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import PageHeader from '../shared/PageHeader'
+import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -273,6 +274,7 @@ function getBackupApi(): BackupApi {
 function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: NotifyFn }) {
   const [state, setState] = useState<RestoreMaintenanceState>(null)
   const [clearing, setClearing] = useState(false)
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   // Same page id the GoogleDriveSyncSection below uses -- Backup renders
   // under the Settings hub.
   const pageActive = useIsPageActive('settings')
@@ -299,10 +301,16 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
   ].filter(Boolean).join(' · ')
   const handleClear = async () => {
     if (clearing) return
-    if (!window.confirm(copy(
-      'restore_maintenance_clear_confirm',
-      'Force-clear restore maintenance? Writes re-open on a database whose restore did NOT finish. Restart the restore instead if you can.',
-    ))) return
+    if (!(await askToConfirm({
+      title: copy('restore_maintenance_clear', 'Force clear (accept half-state)'),
+      message: copy(
+        'restore_maintenance_clear_confirm',
+        'Force-clear restore maintenance? Writes re-open on a database whose restore did NOT finish. Restart the restore instead if you can.',
+      ),
+      confirmLabel: copy('restore_maintenance_clear', 'Force clear (accept half-state)'),
+      cancelLabel: copy('cancel', 'Cancel'),
+      danger: true,
+    }))) return
     setClearing(true)
     try {
       await clearBackupMaintenance()
@@ -331,6 +339,7 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
           {clearing ? copy('working', 'Working...') : copy('restore_maintenance_clear', 'Force clear (accept half-state)')}
         </button>
       ) : null}
+      {confirmDialog}
     </div>
   )
 }
@@ -904,6 +913,7 @@ function minutesToSyncSeconds(minutes: unknown): number {
 
 function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null, canRestore = false, onRestoreStaged }: GoogleDriveSyncSectionProps) {
   const copy = useCopy(t)
+  const { askToConfirm: askDriveConfirm, confirmDialog: driveConfirmDialog } = useConfirmDialog()
   const [busy, setBusy] = useState<BackupAction>('')
   const [status, setStatus] = useState<DriveSyncStatus | null>(null)
   const [form, setForm] = useState<DriveSyncForm>({
@@ -1345,7 +1355,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const disconnect = async () => {
     if (actionLockRef.current) return
-    if (!confirm(copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'))) return
+    if (!(await askDriveConfirm({
+      title: copy('disconnect', 'Disconnect'),
+      message: copy('drive_sync_disconnect_confirm', 'Disconnect Google Drive sync from this app?'),
+      confirmLabel: copy('disconnect', 'Disconnect'),
+      cancelLabel: copy('cancel', 'Cancel'),
+      danger: true,
+    }))) return
     if (!beginAction('disconnect')) return
     try {
       await yieldToBrowser()
@@ -1370,7 +1386,13 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
 
   const forgetCredentials = async () => {
     if (actionLockRef.current) return
-    if (!confirm(copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'))) return
+    if (!(await askDriveConfirm({
+      title: copy('drive_sync_forget_credentials', 'Forget app credentials'),
+      message: copy('drive_sync_forget_credentials_confirm', 'Forget the saved Google Drive app credentials too? This clears the client ID, client secret, and redirect URI defaults until you enter them again.'),
+      confirmLabel: copy('drive_sync_forget_credentials', 'Forget app credentials'),
+      cancelLabel: copy('cancel', 'Cancel'),
+      danger: true,
+    }))) return
     if (!beginAction('forget')) return
     try {
       await yieldToBrowser()
@@ -1598,6 +1620,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
           {busy === 'forget' ? copy('forgetting', 'Forgetting...') : copy('drive_sync_forget_credentials', 'Forget app credentials')}
         </PathActionButton>
       </div>
+      {driveConfirmDialog}
     </div>
   )
 }
@@ -1677,6 +1700,7 @@ const MemoBackupOverview = memo(BackupOverview)
 export default function Backup() {
   const { t, notify, hasPermission, user } = useApp()
   const copy = useCopy(t)
+  const { askToConfirm, confirmDialog } = useConfirmDialog()
   // E4: renders inside the Settings hub now.
   const isActive = useIsPageActive('settings')
   const [historyReady, setHistoryReady] = useState(false)
@@ -1814,7 +1838,13 @@ export default function Backup() {
     // database restore power; fixed both sides together this session.
     if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
-    if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
+    if (!(await askToConfirm({
+      title: copy('import_backup', 'Import Backup'),
+      message: copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.'),
+      items: [{ label: copy('backup_folder', 'Folder'), value: folderImportPath }],
+      confirmLabel: copy('continue', 'Continue'),
+      cancelLabel: copy('cancel', 'Cancel'),
+    }))) return
 
     if (!beginBackupAction('folder-import')) return
     try {
@@ -2115,6 +2145,7 @@ export default function Backup() {
         </details>
         ) : null}
       </div>
+      {confirmDialog}
     </div>
   )
 }
