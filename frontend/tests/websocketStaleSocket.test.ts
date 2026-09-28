@@ -22,8 +22,9 @@ const originalClearInterval = globalThis.clearInterval
 Date.now = () => now
 globalThis.setTimeout = ((callback: () => void) => { const id = nextId++; timers.push({ id, callback }); return id }) as unknown as typeof setTimeout
 globalThis.clearTimeout = ((id: number) => { const i = timers.findIndex((t) => t.id === id); if (i >= 0) timers.splice(i, 1) }) as typeof clearTimeout
-globalThis.setInterval = (() => nextId++) as unknown as typeof setInterval
-globalThis.clearInterval = (() => {}) as typeof clearInterval
+const liveIntervals = new Set<number>()
+globalThis.setInterval = (() => { const id = nextId++; liveIntervals.add(id); return id }) as unknown as typeof setInterval
+globalThis.clearInterval = ((id: number) => { liveIntervals.delete(id) }) as typeof clearInterval
 
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
@@ -135,6 +136,43 @@ try {
   AsyncCloseWebSocket.instances[3].open()
   assert.equal(isWSConnected(), true)
   assert.equal(reconnects - reconnectsBefore, 1, 'reopening after a drop must announce sync:reconnected once')
+
+  disconnectWS()
+
+  // A till phone resumes offline with a socket that went quiet while it was
+  // suspended. resumeWS() drops that socket but cannot open a replacement, and
+  // the socket's late close is ignored like any replaced socket's, so the drop
+  // must be announced where it happens. Otherwise the Sidebar dot, the Server
+  // page retry buttons and http.ts's health cadence all keep "connected".
+  const browser = navigator as { onLine: boolean }
+  connectWS()
+  const quiet = AsyncCloseWebSocket.instances.at(-1)!
+  quiet.open()
+  const liveStatusCount = statuses.length
+  resumeWS()
+  assert.equal(AsyncCloseWebSocket.instances.at(-1), quiet, 'resume keeps a socket that is still answering')
+  assert.equal(statuses.length, liveStatusCount, 'resume with a live socket announces nothing')
+
+  now += 60_000
+  browser.onLine = false
+  resumeWS()
+  assert.equal(AsyncCloseWebSocket.instances.at(-1), quiet, 'offline: no replacement socket is opened')
+  assert.equal(isWSConnected(), false)
+  assert.equal(statuses.at(-1), false, 'dropping a stale socket with no replacement announces "disconnected"')
+  assert.equal(liveIntervals.size, 0, 'the dropped socket stops its ping timer')
+  quiet.deliverClose()
+  assert.equal(statuses.at(-1), false, 'the late close of the dropped socket leaves "disconnected" in place')
+  const offlineStatusCount = statuses.length
+  resumeWS()
+  assert.equal(statuses.length, offlineStatusCount, 'further offline resumes (focus, visibility) announce the drop only once')
+
+  browser.onLine = true
+  resumeWS()
+  const back = AsyncCloseWebSocket.instances.at(-1)!
+  assert.notEqual(back, quiet, 'back online: resume opens a socket')
+  back.open()
+  assert.equal(statuses.at(-1), true)
+  assert.equal(liveIntervals.size, 1, 'exactly one ping timer, the live socket\'s')
 
   disconnectWS()
   console.log('websocket stale socket tests passed')

@@ -248,8 +248,12 @@ export function resumeWS(): void {
   reconnectAttempts = 0
   if (ws && ws.readyState === WebSocket.OPEN && wsLastPongAt > 0 && Date.now() - wsLastPongAt > WS_PONG_TIMEOUT_MS) {
     try { ws.close(4000, 'resume-stale-socket') } catch (_) {}
+    // Its late close is ignored as a replaced socket's (onclose above), so the
+    // drop is announced here; offline, no replacement opens to announce it.
+    clearPingTimer()
     ws = null
     wsLastPongAt = 0
+    window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
   }
   reconnectWS()
 }
