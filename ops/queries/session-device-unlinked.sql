@@ -5,9 +5,17 @@
 -- device_id NULL (or, for a crafted body, another device's id).
 --   class a_family_null        re-issued since migration 0201 (limit_family_id
 --                              set) with no device id while its sign-in has one.
---                              The FX-auth revoke reaches it once deployed.
+--                              The FX-auth revoke reaches it through that sign-in
+--                              row once deployed, while the row lasts.
 --   class a_family_other       re-issued since 0201 with a device id different
 --                              from its sign-in's. Also reached by that revoke.
+--   class a_family_orphan      re-issued since 0201 with no device id, and its
+--                              sign-in row is gone: ephemeral retention deletes a
+--                              sign-in once it expires or is revoked. Device
+--                              revoke cannot reach it, even after FX-auth:
+--                              revokeSessionsForDevice (lib/auth.ts) reaches a
+--                              re-issue only through that row. Repair: revoke by
+--                              session id or by user, never by device.
 --   class b_prefamily_reissue  no family link (minted before 0201), no device id,
 --                              and a session_duration_updated audit row by the
 --                              same user within 10 s of created_at. Device revoke
@@ -17,6 +25,8 @@
 --                              one. Not this bug.
 --   user_device_rows           trusted_devices rows of the account (0 = device
 --                              approval never applied, e.g. administrators).
+-- A re-issue that carries a device id is not listed once its sign-in is gone:
+-- nothing is left to compare that id with.
 -- Selects no token hash, IP, user agent, device id or device name.
 -- ops:min-rows 0
 -- ops:max-rows 5000
@@ -34,6 +44,7 @@ WITH live AS (
       WHEN l.limit_family_id IS NOT NULL AND COALESCE(r.device_id, '') <> '' AND COALESCE(l.device_id, '') = '' THEN 'a_family_null'
       WHEN l.limit_family_id IS NOT NULL AND COALESCE(r.device_id, '') <> '' AND l.device_id <> r.device_id THEN 'a_family_other'
       WHEN COALESCE(l.device_id, '') <> '' THEN NULL
+      WHEN l.limit_family_id IS NOT NULL AND r.id IS NULL THEN 'a_family_orphan'
       WHEN l.limit_family_id IS NULL AND EXISTS (
         SELECT 1 FROM reissue_audit ra
         WHERE ra.user_id = l.user_id AND abs(ra.at - julianday(l.created_at)) <= 10.0 / 86400

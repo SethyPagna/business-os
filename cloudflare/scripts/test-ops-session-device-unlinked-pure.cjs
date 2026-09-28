@@ -6,9 +6,11 @@
 'use strict'
 
 const assert = require('assert')
+const fs = require('fs')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const { DatabaseSync } = require('node:sqlite')
+const ts = require('typescript')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
@@ -16,6 +18,19 @@ const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href)
 
 const FUTURE = '2036-01-01T00:00:00.000Z'
 const PAST = '2020-01-01T00:00:00.000Z'
+const PURGED_SIGN_IN_ID = 99
+
+function realRevokeSessionsForDevice(db) {
+  const sourcePath = path.join(ROOT, 'cloudflare', 'src', 'lib', 'auth.ts')
+  const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: sourcePath,
+  }).outputText
+  const overrides = { './db': { getDb: () => db }, 'hono/cookie': {} }
+  const mod = { exports: {} }
+  new Function('require', 'module', 'exports', output)((request) => overrides[request] ?? require(request), mod, mod.exports)
+  return mod.exports.revokeSessionsForDevice
+}
 
 ;(async () => {
   const guard = await load('ops/scripts/ops-sql-guard.mjs')
@@ -50,11 +65,14 @@ const PAST = '2020-01-01T00:00:00.000Z'
   audit(2, '2026-09-12 11:00:00')
   add(10, 3, null, null, { created: '2026-09-10 09:00:00' })   // c: the audit row at that second is another user's
   add(11, 2, null, 9)                                          // c: re-issue of a sign-in that had no device
+  add(12, 2, null, PURGED_SIGN_IN_ID)
+  add(13, 2, 'phone-D', PURGED_SIGN_IN_ID)
 
   const rows = db.prepare(q.sql).all()
   const byId = Object.fromEntries(rows.map((r) => [r.session_id, r]))
   assert.deepStrictEqual(rows.map((r) => [r.session_id, r.class]), [
     [2, 'a_family_null'],
+    [12, 'a_family_orphan'],
     [3, 'a_family_other'],
     [8, 'b_prefamily_reissue'],
     [9, 'c_signin_no_device'],
@@ -62,12 +80,25 @@ const PAST = '2020-01-01T00:00:00.000Z'
     [10, 'c_signin_no_device'],
   ])
   for (const id of [1, 4, 5, 6, 7]) assert.ok(!byId[id], `session ${id} is not listed`)
+  assert.ok(!byId[13], 'a re-issue that carries its own device id is not listed once its sign-in is gone')
+  assert.strictEqual(byId[12].limit_family_id, PURGED_SIGN_IN_ID)
   assert.strictEqual(byId[2].user_device_rows, 1)
   assert.strictEqual(byId[10].user_device_rows, 0)
   assert.strictEqual(byId[2].username, 'cashier')
   for (const row of rows) assert.ok(!('device_id' in row) && !('token_hash' in row), 'no device id or token in the output')
 
-  console.log(`ok - session-device-unlinked: ${rows.length} rows, classes a/a/b/c/c/c, 5 negatives excluded`)
+  const revokeSessionsForDevice = realRevokeSessionsForDevice(db)
+  await revokeSessionsForDevice({}, 2, 'phone-D')
+  const liveAfterDeviceRevoke = db.prepare(q.sql).all().map((r) => [r.session_id, r.class])
+  assert.deepStrictEqual(liveAfterDeviceRevoke, [
+    [12, 'a_family_orphan'],
+    [8, 'b_prefamily_reissue'],
+    [9, 'c_signin_no_device'],
+    [11, 'c_signin_no_device'],
+    [10, 'c_signin_no_device'],
+  ], 'Devices -> Revoke reaches every a_family_null/other row through its sign-in and no a_family_orphan row')
+
+  console.log(`ok - session-device-unlinked: ${rows.length} rows, classes a/a/a/b/c/c/c, 6 negatives excluded; the device revoke leaves only the orphan of class a`)
 })().catch((error) => {
   console.error(error)
   process.exit(1)
