@@ -17,7 +17,9 @@ const DB = {
     let values = []
     const statement = {
       bind(...args) { values = args; return statement },
-      async all() { return { results: raw.prepare(sql).all(...values) } },
+      // D1Compat.get() reads row 0 of all() since A0 (first() returns no meta),
+      // so the injected-race hook fires on all() the same way it did on first().
+      async all() { const results = raw.prepare(sql).all(...values); if (afterRead) afterRead(sql, results[0] ?? null); return { results } },
       async first() { const value = raw.prepare(sql).get(...values) ?? null; if (afterRead) afterRead(sql, value); return value },
       async run() {
         if (/^UPDATE "products" SET/.test(sql) && beforeProductUpdate) { const hook = beforeProductUpdate; beforeProductUpdate = null; hook() }
