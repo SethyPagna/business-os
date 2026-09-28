@@ -1,11 +1,13 @@
 -- d1-table-rows: exact row count of every base table (FTS virtual tables and
 -- their shadow tables are left out; their bytes are in d1-dbstat-probe).
--- A pure test applies every migration to an in-memory node:sqlite database and
--- asserts this list equals the live table set, so a new table fails the gate
--- until it is added here. json_object groups of at most 60 tables keep each
--- call under SQLite's 127-argument limit; one row of scalar sub-queries, no
--- UNION (D1 compound limit). COUNT(*) scans every row once: rows_read in the
--- encrypted meta equals the total, so run it once, not on a schedule.
+-- cloudflare/scripts/test-storage-queries-native.cjs applies every migration
+-- to an in-memory node:sqlite database and asserts this list equals the base
+-- tables the migrations create, so a new table fails the gate until it is
+-- added here (production's d1_migrations and _cf_* tables are not listed).
+-- json_object groups of at most 16 tables keep each call within D1's limit of
+-- 32 arguments per SQL function; one row of scalar sub-queries, no UNION (D1
+-- compound limit). COUNT(*) scans every row once: rows_read in the encrypted
+-- meta equals the total, so run it once, not on a schedule.
 -- ops:min-rows 1
 -- ops:max-rows 1
 SELECT
@@ -25,7 +27,9 @@ SELECT
     'categories', (SELECT COUNT(*) FROM categories),
     'contact_duplicate_dismissals', (SELECT COUNT(*) FROM contact_duplicate_dismissals),
     'custom_fields', (SELECT COUNT(*) FROM custom_fields),
-    'custom_tables', (SELECT COUNT(*) FROM custom_tables),
+    'custom_tables', (SELECT COUNT(*) FROM custom_tables)
+  ) AS rows_1,
+  json_object(
     'customer_membership_number_repair', (SELECT COUNT(*) FROM customer_membership_number_repair),
     'customer_merge_map_0166', (SELECT COUNT(*) FROM customer_merge_map_0166),
     'customer_receivables', (SELECT COUNT(*) FROM customer_receivables),
@@ -41,7 +45,9 @@ SELECT
     'google_drive_sync_entries', (SELECT COUNT(*) FROM google_drive_sync_entries),
     'image_audit', (SELECT COUNT(*) FROM image_audit),
     'image_audit_state', (SELECT COUNT(*) FROM image_audit_state),
-    'import_auto_merges', (SELECT COUNT(*) FROM import_auto_merges),
+    'import_auto_merges', (SELECT COUNT(*) FROM import_auto_merges)
+  ) AS rows_2,
+  json_object(
     'import_job_batches', (SELECT COUNT(*) FROM import_job_batches),
     'import_job_errors', (SELECT COUNT(*) FROM import_job_errors),
     'import_job_files', (SELECT COUNT(*) FROM import_job_files),
@@ -57,7 +63,9 @@ SELECT
     'import_stock_action_guards', (SELECT COUNT(*) FROM import_stock_action_guards),
     'inventory_movements', (SELECT COUNT(*) FROM inventory_movements),
     'legacy_deleted_sale_items', (SELECT COUNT(*) FROM legacy_deleted_sale_items),
-    'legacy_inventory_effects', (SELECT COUNT(*) FROM legacy_inventory_effects),
+    'legacy_inventory_effects', (SELECT COUNT(*) FROM legacy_inventory_effects)
+  ) AS rows_3,
+  json_object(
     'legacy_sale_date_corrections', (SELECT COUNT(*) FROM legacy_sale_date_corrections),
     'legacy_sale_item_corrections', (SELECT COUNT(*) FROM legacy_sale_item_corrections),
     'login_lockouts', (SELECT COUNT(*) FROM login_lockouts),
@@ -69,13 +77,13 @@ SELECT
     'pending_actions', (SELECT COUNT(*) FROM pending_actions),
     'portal_accounts', (SELECT COUNT(*) FROM portal_accounts),
     'portal_auth_lockouts', (SELECT COUNT(*) FROM portal_auth_lockouts),
-    'portal_password_resets', (SELECT COUNT(*) FROM portal_password_resets)
-  ) AS rows_1,
-  json_object(
+    'portal_password_resets', (SELECT COUNT(*) FROM portal_password_resets),
     'portal_sessions', (SELECT COUNT(*) FROM portal_sessions),
     'product_batches', (SELECT COUNT(*) FROM product_batches),
     'product_conflict_action_group_members', (SELECT COUNT(*) FROM product_conflict_action_group_members),
-    'product_conflict_action_groups', (SELECT COUNT(*) FROM product_conflict_action_groups),
+    'product_conflict_action_groups', (SELECT COUNT(*) FROM product_conflict_action_groups)
+  ) AS rows_4,
+  json_object(
     'product_conflict_action_reviews', (SELECT COUNT(*) FROM product_conflict_action_reviews),
     'product_conflict_merge_run_cases', (SELECT COUNT(*) FROM product_conflict_merge_run_cases),
     'product_conflict_merge_runs', (SELECT COUNT(*) FROM product_conflict_merge_runs),
@@ -91,7 +99,9 @@ SELECT
     'products', (SELECT COUNT(*) FROM products),
     'promotion_rules', (SELECT COUNT(*) FROM promotion_rules),
     'promotions', (SELECT COUNT(*) FROM promotions),
-    'quota_usage', (SELECT COUNT(*) FROM quota_usage),
+    'quota_usage', (SELECT COUNT(*) FROM quota_usage)
+  ) AS rows_5,
+  json_object(
     'rate_limit_events', (SELECT COUNT(*) FROM rate_limit_events),
     'return_bulk_guards', (SELECT COUNT(*) FROM return_bulk_guards),
     'return_bulk_members', (SELECT COUNT(*) FROM return_bulk_members),
@@ -107,7 +117,9 @@ SELECT
     'rfid_events', (SELECT COUNT(*) FROM rfid_events),
     'rfid_scan_sessions', (SELECT COUNT(*) FROM rfid_scan_sessions),
     'rfid_session_items', (SELECT COUNT(*) FROM rfid_session_items),
-    'rfid_tags', (SELECT COUNT(*) FROM rfid_tags),
+    'rfid_tags', (SELECT COUNT(*) FROM rfid_tags)
+  ) AS rows_6,
+  json_object(
     'roles', (SELECT COUNT(*) FROM roles),
     'sale_amendments', (SELECT COUNT(*) FROM sale_amendments),
     'sale_bulk_guards', (SELECT COUNT(*) FROM sale_bulk_guards),
@@ -123,7 +135,9 @@ SELECT
     'sale_mutation_receipts', (SELECT COUNT(*) FROM sale_mutation_receipts),
     'sale_not_paid_repair_0173', (SELECT COUNT(*) FROM sale_not_paid_repair_0173),
     'sale_not_paid_stock_recovery_guards', (SELECT COUNT(*) FROM sale_not_paid_stock_recovery_guards),
-    'sale_not_paid_stock_recovery_members', (SELECT COUNT(*) FROM sale_not_paid_stock_recovery_members),
+    'sale_not_paid_stock_recovery_members', (SELECT COUNT(*) FROM sale_not_paid_stock_recovery_members)
+  ) AS rows_7,
+  json_object(
     'sale_not_paid_stock_recovery_receipts', (SELECT COUNT(*) FROM sale_not_paid_stock_recovery_receipts),
     'sale_record_events', (SELECT COUNT(*) FROM sale_record_events),
     'sale_write_revisions', (SELECT COUNT(*) FROM sale_write_revisions),
@@ -131,9 +145,7 @@ SELECT
     'settings', (SELECT COUNT(*) FROM settings),
     'shift_session_amendments', (SELECT COUNT(*) FROM shift_session_amendments),
     'shift_sessions', (SELECT COUNT(*) FROM shift_sessions),
-    'stock_lot_adjustment_operations', (SELECT COUNT(*) FROM stock_lot_adjustment_operations)
-  ) AS rows_2,
-  json_object(
+    'stock_lot_adjustment_operations', (SELECT COUNT(*) FROM stock_lot_adjustment_operations),
     'stock_mutation_receipts', (SELECT COUNT(*) FROM stock_mutation_receipts),
     'stock_row_moves', (SELECT COUNT(*) FROM stock_row_moves),
     'stock_session_guards', (SELECT COUNT(*) FROM stock_session_guards),
@@ -141,7 +153,9 @@ SELECT
     'stock_session_operations', (SELECT COUNT(*) FROM stock_session_operations),
     'stock_session_revisions', (SELECT COUNT(*) FROM stock_session_revisions),
     'stock_transfers', (SELECT COUNT(*) FROM stock_transfers),
-    'supplier_invoices', (SELECT COUNT(*) FROM supplier_invoices),
+    'supplier_invoices', (SELECT COUNT(*) FROM supplier_invoices)
+  ) AS rows_8,
+  json_object(
     'suppliers', (SELECT COUNT(*) FROM suppliers),
     'system_flags', (SELECT COUNT(*) FROM system_flags),
     'telegram_scheduled_sends', (SELECT COUNT(*) FROM telegram_scheduled_sends),
@@ -155,4 +169,4 @@ SELECT
     'user_sessions', (SELECT COUNT(*) FROM user_sessions),
     'users', (SELECT COUNT(*) FROM users),
     'verification_codes', (SELECT COUNT(*) FROM verification_codes)
-  ) AS rows_3;
+  ) AS rows_9;
