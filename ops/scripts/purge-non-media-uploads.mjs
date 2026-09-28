@@ -15,16 +15,25 @@
 //     - Open https://dash.cloudflare.com/profile/api-tokens
 //     - Click "Create Token", then "Create Custom Token".
 //     - Name it: purge-uploads
-//     - Permissions, add two rows:
+//     - Permissions, add three rows:
 //         Account | Workers R2 Storage | Edit
 //         Account | D1                 | Edit
+//         Account | Workers Scripts    | Read
+//       (the last row lets it check which bucket the live website uses;
+//       without it the script refuses to start)
 //     - Account Resources: Include | (your account)
 //     - Click "Continue to summary", then "Create Token".
 //     - Copy the token. Keep the page open until step 3 is done.
 //
-//  2. Open a terminal in the business-os-v1 folder (the folder that holds
+//  2. Open a terminal in the BusinessOS checkout (the folder that holds
 //     the "ops" and "cloudflare" folders). In Windows Explorer: open that
 //     folder, click the address bar, type  powershell  and press Enter.
+//     Then take a fresh git pull of main, so this script is current:
+//         git checkout main
+//         git pull
+//     An old copy cannot do harm: before reading anything the script checks
+//     that the live website stores its files in the bucket it names, and
+//     stops if not.
 //
 //  3. Do a DRY RUN (lists and counts, changes nothing):
 //         node ops/scripts/purge-non-media-uploads.mjs
@@ -59,17 +68,25 @@
 //  Deleting the quarantine for good (only when you are sure, for example a
 //  month later -- after this, --restore cannot bring those files back):
 //  this script never does it. In the Cloudflare dashboard open R2 >
-//  business-os-assets > Settings > Object lifecycle rules > Add rule; set
-//  the prefix to the quarantine folder it printed (quarantine/<time>/),
-//  choose to delete objects 1 day after upload, and save. Remove the rule
-//  once the folder is empty.
+//  business-os-assets-apac > Settings > Object lifecycle rules > Add rule;
+//  set the prefix to the quarantine folder it printed (quarantine/<time>/)
+//  -- never leave the prefix empty, that would delete every file -- choose
+//  to delete objects 1 day after upload, and save. Remove the rule once the
+//  folder is empty. Never add a rule on business-os-assets (the spare photo copy).
 // =====================================================================
 //
 // What it does
-//   (a) Lists every object in R2 bucket business-os-assets under uploads/,
-//       private/ and imports/ through the Cloudflare API, with the token you
-//       paste (read from a hidden prompt, or from CLOUDFLARE_API_TOKEN if
-//       that is already set). The token is never printed or written.
+//   (0) Before any other request, reads the production Worker's live
+//       ASSETS binding (every version carrying traffic) and stops unless
+//       each one is BUCKET, the bucket this script works on. So an old copy
+//       of the script, or a website rolled back to the old bucket, never
+//       reads or changes the wrong bucket or the database. A token without
+//       Workers Scripts Read is refused the same way.
+//   (a) Lists every object in R2 bucket business-os-assets-apac (BUCKET)
+//       under uploads/, private/ and imports/ through the Cloudflare API,
+//       with the token you paste (read from a hidden prompt, or from
+//       CLOUDFLARE_API_TOKEN if that is already set). The token is never
+//       printed or written.
 //   (b) Classifies each object from its BYTES, never from its name
 //       (S-uploads2a, 2026-09-26: the first version went by the name and
 //       would have deleted real photos saved as .jfif, .jpe, .bin or with
@@ -133,8 +150,12 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
 
-export const BUCKET = 'business-os-assets'
+// The ASSETS bucket of cloudflare/wrangler.toml and wrangler.free.toml
+// (cloudflare/scripts/test-purge-bucket-binding-pure.cjs pins it to both).
+export const BUCKET = 'business-os-assets-apac'
+export const ASSETS_BINDING = 'ASSETS'
 export const PREFIXES = ['uploads/', 'private/', 'imports/']
 const API = 'https://api.cloudflare.com/client/v4'
 // Every object's first bytes are read; that is enough to identify it.
@@ -1481,6 +1502,17 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
     return out
   }
   return {
+    // Any other API read, in the shape ops-common's liveVersionBindings
+    // takes: never throws, a network failure is status 0.
+    async api(method, pathname) {
+      try {
+        const response = await call(`${API}${pathname}`, { method })
+        const body = await response.json().catch(() => null)
+        return { ok: response.ok && body?.success !== false, status: response.status, json: body }
+      } catch {
+        return { ok: false, status: 0, json: null }
+      }
+    },
     async listObjects(prefix) {
       const objects = []
       let cursor = ''
@@ -1547,6 +1579,30 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
   }
 }
 
+// Why this run must stop before its first R2 or D1 request (empty when every
+// version of the production Worker carrying traffic binds ASSETS to BUCKET).
+// An unreadable answer stops it too: the check never passes by default.
+export const WORKERS_READ_HINT = 'Add the permission row  Account | Workers Scripts | Read  to the token (step 1 at the top of this script) and run it again.'
+export async function liveBucketProblem(api, accountId) {
+  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  if (!live.ok) {
+    const status = live.detail?.status ? `, HTTP ${live.detail.status}` : ''
+    const unreadable = live.reason === 'deployments-unreadable' || live.reason === 'bindings-unreadable'
+    return `could not read which bucket the live website uses (${live.reason}${status}).${unreadable ? ` ${WORKERS_READ_HINT}` : ''}`
+  }
+  for (const version of live.versions) {
+    const where = `the live website (version ${printable(version.versionId)}, ${version.percentage}% of traffic)`
+    const assets = version.bindings.filter((binding) => binding && binding.name === ASSETS_BINDING)
+    if (assets.length !== 1 || assets[0].type !== 'r2_bucket') return `${where} has no single R2 ${ASSETS_BINDING} binding.`
+    const bucket = printable(String(assets[0].bucket_name ?? ''))
+    const jurisdiction = assets[0].jurisdiction ? ` (jurisdiction ${printable(String(assets[0].jurisdiction))})` : ''
+    if (bucket !== BUCKET || jurisdiction) {
+      return `${where} stores its files in ${bucket}${jurisdiction}, not ${BUCKET}. Take a fresh git pull of main and run it again; if it still says this, send the printout.`
+    }
+  }
+  return ''
+}
+
 const rowsOf = (result) => (Array.isArray(result) ? result.flatMap((statement) => statement?.results || []) : [])
 
 async function readActiveJobIds(cf) {
@@ -1600,6 +1656,10 @@ else out of the website's storage into quarantine/, where it can be put back.
       file. Safe to run again.
 
   --help   shows this.
+
+Before anything else it checks that the live website stores its files in
+${BUCKET}, the bucket this script works on, and stops if not (the token
+needs Account | Workers Scripts | Read for that check).
 
 There is no --delete: the quarantine copies stay until you delete them
 yourself, which this script never does (see "Deleting the quarantine for
@@ -1663,7 +1723,7 @@ export async function run({
     accountId = accountId || fromToml.accountId
     databaseId = databaseId || fromToml.databaseId
   }
-  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the business-os-v1 folder.')
+  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the BusinessOS checkout after a fresh git pull of main.')
   token = String(env.CLOUDFLARE_API_TOKEN || await prompts.hidden('Cloudflare API token: ') || '').trim()
   if (!token) return fail('no token given.')
   const context = {
@@ -1671,6 +1731,9 @@ export async function run({
     concurrency: Math.max(1, Math.floor(concurrency) || 1), moveMaxBytes, largeFileBytes,
   }
   try {
+    log(`Checking that the live website stores its files in ${BUCKET}...`)
+    const problem = await liveBucketProblem(context.cf.api, accountId)
+    if (problem) return fail(`${problem} No stored file or database row was read or changed.`)
     if (options.mode === 'restore') return await restoreRun({ ...context, manifest, manifestPath })
     return await purgeRun({ ...context, move: options.mode === 'move' })
   } catch (error) {
