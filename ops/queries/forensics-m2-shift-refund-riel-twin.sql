@@ -19,16 +19,17 @@
 --   affected_with_riel_count   ... of those, a riel count was entered, so the
 --                              difference line printed a phantom riel figure
 --   affected_returns           distinct returns inside an affected window
---   riel_only_returns          PRECONDITION for the dollars-only fix: customer
+--   riel_only_returns          PRECONDITION for the dollars-only fixes: customer
 --                              returns with no dollar refund but a riel figure.
 --                              Must be 0; any such row is a refund the fixed
---                              drawer no longer subtracts.
+--                              drawer no longer subtracts and the Reports hub
+--                              (M3, refund_usd only) shows as $0.00.
 --   first_affected_date, last_affected_date   business_date range
 -- Proposed repair (NOT run): none to stored data -- the fixed loader recomputes
 -- every affected shift correctly once deployed. Tell the owner how many closed
 -- shifts' Telegram reports carried a wrong riel expected/difference, and over
 -- which dates. If riel_only_returns is ever non-zero, stop: those returns need
--- an owner decision before the dollars-only drawer ships.
+-- an owner decision before the dollars-only drawer and report ship.
 -- Proof: cloudflare/scripts/test-forensics-m2-shift-refund-twin-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
