@@ -3,7 +3,7 @@ import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
 import { streamBackupEvents } from './backupRestoreStream'
 import { assertCustomTableName } from './customTableName'
-import { containsEmbeddedMarkup, detectOtherMedia, detectUploadFormat, otherMediaContentType, otherMediaLooksLikeText } from './uploadSecurity'
+import { containsEmbeddedMarkup, judgeStoredMedia, otherMediaContentType } from './uploadSecurity'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -1327,17 +1327,21 @@ async function readAssetBytes(body: ReadableStream<Uint8Array>, size: number): P
 }
 
 // `whole` false: `bytes` are only the start of a copy too large to check;
-// `size` is the copy's full size.
+// `size` is the copy's full size. S-uploads5 (R-S-uploads4 F10): what the
+// copy is comes from judgeStoredMedia -- the purge's and /uploads/*'s own
+// judgement, made on the same first bytes -- so a restore writes back
+// exactly what the purge keeps and /uploads/* serves. An image is still
+// scanned whole for markup.
 export function judgeRestoredAsset(bytes: Uint8Array, whole: boolean, size: number = bytes.length): { contentType: string } | { reason: WithheldAssetReason } {
   if (whole && bytes.length === 0) return { reason: 'empty' }
-  const format = detectUploadFormat(bytes)
-  if (format) {
+  const stored = judgeStoredMedia(bytes, size, whole)
+  if (stored && stored.kind === 'allowed') {
+    const format = stored.format
     if (format.kind === 'video') return { contentType: format.mime }
     if (!whole) return { reason: 'too-large-to-check' }
     return containsEmbeddedMarkup(bytes) ? { reason: 'image-with-code' } : { contentType: format.mime }
   }
-  const other = detectOtherMedia(bytes, size)
-  if (other && !otherMediaLooksLikeText(other, bytes, whole)) return { contentType: otherMediaContentType(other) }
+  if (stored && stored.kind === 'other') return { contentType: otherMediaContentType(stored.media) }
   return { reason: 'not-media' }
 }
 

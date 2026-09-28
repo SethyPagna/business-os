@@ -262,10 +262,14 @@ async function main() {
   // 4. The atom walk has no atom limit, so it must stay linear: 32 MB (the
   // backup restore's whole-file limit) of an empty mdat and empty free atoms
   // (they hold nothing: refused), of the same atoms holding one letter each
-  // (text: refused), and of empty atoms that end in a size-0 mdat of video
-  // (the walk reaches the video: accepted). About 0.2-0.7 s here; the bound
-  // is loose so a slow CI runner does not flake, and still fails a walk that
-  // goes quadratic (4 million atoms).
+  // (text: refused), of empty atoms that end in a size-0 mdat of video, and
+  // of an mdat of video followed by empty atoms (the walk reaches the end:
+  // accepted). About 0.2-0.7 s here; the bound is loose so a slow CI runner
+  // does not flake, and still fails a walk that goes quadratic (4 million
+  // atoms). S-uploads5 (R-S-uploads4 F10): what the atoms hold is judged
+  // only in the first 4 KB of the file (the head /uploads/*, the purge and
+  // the restore all read), so the video behind 4 million empty atoms is not
+  // seen and the file is refused, as the purge already refused it.
   const ATOMS_BYTES = 32 * 1024 * 1024
   const atomChain = (atomSize, count) => {
     const bytes = new Uint8Array(count * atomSize)
@@ -276,7 +280,8 @@ async function main() {
   const chains = [
     ['empty atoms', atomChain(8, Math.floor(ATOMS_BYTES / 8)), null],
     ['atoms holding one letter each', atomChain(9, Math.floor(ATOMS_BYTES / 9)), null],
-    ['empty atoms ending in a size-0 mdat of video', F.bytes(atomChain(8, Math.floor((ATOMS_BYTES - 8 - VIDEO.length) / 8)), size0('mdat', VIDEO)), 'video/quicktime'],
+    ['empty atoms ending in a size-0 mdat of video', F.bytes(atomChain(8, Math.floor((ATOMS_BYTES - 8 - VIDEO.length) / 8)), size0('mdat', VIDEO)), null],
+    ['an mdat of video followed by empty atoms', F.bytes(F.isoBox('mdat', VIDEO), atomChain(8, Math.floor((ATOMS_BYTES - 8 - VIDEO.length) / 8)).subarray(8)), 'video/quicktime'],
   ]
   for (const [label, bytes, expected] of chains) {
     await check(`32 MB of ${label} is walked in under 3 s`, () => {

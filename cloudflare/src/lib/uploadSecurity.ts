@@ -326,9 +326,15 @@ function eventHandlerAt(bytes: Uint8Array, start: number, step: 1 | 2): boolean 
   return charAt(position) === 0x3d
 }
 
+// The candidate search runs on a view that ends at the region's end: the
+// native indexOf on the whole file does not stop there, so a region with no
+// candidate byte scanned on to the end of the file, and an image of many tiny
+// parts took quadratic time (S-uploads5, refuter R-S-uploads4 F11). The match
+// itself still reads the whole file, as before.
 function eventHandlerInRange(bytes: Uint8Array, start: number, end: number): boolean {
+  const region = bytes.subarray(0, end)
   for (const first of [0x6f, 0x4f]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       if (eventHandlerAt(bytes, index, 1) || eventHandlerAt(bytes, index, 2)) return true
     }
   }
@@ -368,9 +374,11 @@ function markupTokenAt(bytes: Uint8Array, start: number, token: string, step: 1 
   return MARKUP_TAG_TERMINATORS.includes(bytes[position])
 }
 
+// Bounded by the region's end like eventHandlerInRange.
 function markupInRange(bytes: Uint8Array, start: number, end: number, mode: MarkupScanMode): boolean {
+  const region = bytes.subarray(0, end)
   for (const [first, tokens] of MARKUP_TOKEN_GROUPS[mode]) {
-    for (let index = bytes.indexOf(first, start); index !== -1 && index < end; index = bytes.indexOf(first, index + 1)) {
+    for (let index = region.indexOf(first, start); index !== -1; index = region.indexOf(first, index + 1)) {
       for (const token of tokens) {
         if (markupTokenAt(bytes, index, token, 1) || markupTokenAt(bytes, index, token, 2)) return true
       }
@@ -695,7 +703,7 @@ function quickTimeAtomsFit(bytes: Uint8Array, totalSize: number): boolean {
     sampleContent(content, bytes, offset + header, offset + size)
     offset += size
   }
-  return content.length > 0 && !sampleLooksLikeText(content, bytes.length >= totalSize)
+  return content.length > 0 && !sampleLooksLikeText(content, sampleIsWhole(bytes, totalSize))
 }
 
 // An ID3v2 header: version 2-4, only the flag bits that version defines,
@@ -713,7 +721,7 @@ function id3TagFits(bytes: Uint8Array, totalSize: number): boolean {
   return [[10, tagEnd], [tagEnd, totalSize]].every(([start, end]) => {
     const content: number[] = []
     sampleContent(content, bytes, start, end)
-    return !sampleLooksLikeText(content, end <= bytes.length)
+    return !sampleLooksLikeText(content, sampleIsWhole(bytes, end))
   })
 }
 
@@ -884,12 +892,21 @@ export function decodeText(bytes: Uint8Array, complete = true): string | null {
 }
 
 // S-uploads4 (2026-09-27): what a container holds, its own headers set
-// aside, judged as text (QuickTime atoms, an ID3 tag). `sample` collects the
-// start of it from each part in turn, up to one byte more than decodeText
-// examines, so decodeText can tell a sample from the whole; parts past the
-// bytes read are cut.
+// aside, judged as text (QuickTime atoms, an ID3 tag). `sample` collects it
+// from each part in turn. S-uploads5 (R-S-uploads4 F10): only what lies in
+// the file's first TEXT_SAMPLE_BYTES is collected -- the head every caller
+// reads -- so a whole file and its first 4 KB give the same sample. Before,
+// a whole-file read also sampled content past that head, and the same
+// object could be text in the head and a movie in the whole file. The sample
+// is complete when the file ends inside the head (see sampleIsWhole).
 function sampleContent(sample: number[], bytes: Uint8Array, start: number, end: number): void {
-  for (let index = start; index < Math.min(end, bytes.length) && sample.length <= TEXT_SAMPLE_BYTES; index += 1) sample.push(bytes[index])
+  for (let index = start; index < Math.min(end, bytes.length, TEXT_SAMPLE_BYTES); index += 1) sample.push(bytes[index])
+}
+
+// True when the content sampled up to `end` is all there is: it ends
+// inside the head and inside the bytes read.
+function sampleIsWhole(bytes: Uint8Array, end: number): boolean {
+  return end <= Math.min(bytes.length, TEXT_SAMPLE_BYTES)
 }
 
 function sampleLooksLikeText(sample: number[], complete: boolean): boolean {
@@ -907,6 +924,37 @@ const TEXT_MEDIA_FORMATS: readonly string[] = ['XPM', 'XBM', 'NetPBM', 'Radiance
 // it goes to review.
 export function otherMediaLooksLikeText(other: OtherMedia, bytes: Uint8Array, complete = true): boolean {
   return !TEXT_MEDIA_FORMATS.includes(other.format) && decodeText(bytes, complete) !== null
+}
+
+// ------------------------------------------- stored media: one verdict
+// S-uploads5 (2026-09-28, refuter R-S-uploads4 F10). Three callers judge an
+// object already in storage: /uploads/* for a key whose name says nothing
+// (lib/r2.ts), the owner-run purge and the backup restore (lib/backup.ts).
+// Each put the detectors above together itself, on as many bytes as it had
+// read -- 64 for /uploads, 4 KB for the purge, the whole file for the
+// restore -- so a classic QuickTime movie whose first free/skip atom holds
+// 56+ bytes of encoder text was text to /uploads (a 404) and a movie to the
+// purge and the restore. This is the one judgement all three use, and it
+// looks only at the object's first STORED_MEDIA_HEAD_BYTES, which each of
+// them reads (or the whole object when it is smaller): they cannot disagree
+// about the same object. The head is decodeText's and sampleContent's
+// window too. 'allowed' says only what an image is: whoever keeps or writes
+// one still scans all of it with containsEmbeddedMarkup.
+export const STORED_MEDIA_HEAD_BYTES = TEXT_SAMPLE_BYTES
+
+export type StoredMedia =
+  | { kind: 'allowed'; format: DetectedUploadFormat } // on the upload allowlist
+  | { kind: 'other'; media: OtherMedia } // other media the purge keeps
+  | { kind: 'text'; media: OtherMedia } // starts like other media, reads as text: review
+
+// `complete`: `bytes` is the whole object; `totalSize` is its size.
+export function judgeStoredMedia(bytes: Uint8Array, totalSize: number, complete: boolean = bytes.length >= totalSize): StoredMedia | null {
+  const head = bytes.subarray(0, STORED_MEDIA_HEAD_BYTES)
+  const format = detectUploadFormat(head)
+  if (format) return { kind: 'allowed', format }
+  const media = detectOtherMedia(head, totalSize)
+  if (!media) return null
+  return otherMediaLooksLikeText(media, head, complete && head.length === bytes.length) ? { kind: 'text', media } : { kind: 'other', media }
 }
 
 // Worker only (not mirrored): the content type a stored file of another
