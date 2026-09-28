@@ -16,12 +16,16 @@
 // browser's.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const srcRoot = path.join(here, '..', 'src')
+const require = createRequire(import.meta.url)
+const React = require('react') as typeof import('react')
+const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server')
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -221,6 +225,43 @@ runTest('the hook keeps native confirm() semantics: Enter confirms, Escape and e
   assert.match(hook, /const open = pending !== null\s+useEffect\(\(\) => \{\s*if \(!open\) return undefined\s+const onKeyDown = \(event: KeyboardEvent\) => \{\s*if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return\s+event\.preventDefault\(\)\s+settle\(false\)\s*\}\s*document\.addEventListener\('keydown', onKeyDown\)\s*return \(\) => document\.removeEventListener\('keydown', onKeyDown\)\s*\}, \[open, settle\]\)/, 'Escape answers no, and only while a question is open')
   assert.doesNotMatch(dialog, /addEventListener|useEffect|'Escape'/, 'the dialog, in the storefront-loaded app-shared chunk, carries no keyboard listener')
   assert.match(viteConfig, /normalized\.includes\('\/src\/components\/shared\/useConfirmDialog\.tsx'\)\) return 'confirm-dialog-hook'/, 'the hook, and so its Escape listener, stays in its own admin-only chunk')
+})
+
+// FX-ui3 F2: a destructive question opens with Cancel focused. With Confirm
+// focused, the Enter that opened a Delete row action (a held key's repeat, or
+// a barcode scanner's trailing Enter) went on to confirm the delete before
+// the operator read the review. Other questions keep native confirm()'s
+// Enter-says-yes; a dialog that did not opt in (it carries its own input)
+// takes no focus. Rendered from the real component, Modal's portal stubbed.
+function loadConfirmDialog(): React.ComponentType<Record<string, unknown>> {
+  const source = fs.readFileSync(path.join(srcRoot, 'components/shared/ConfirmDialog.tsx'), 'utf8')
+  const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } })
+  const loaded = { exports: {} as Record<string, unknown> }
+  const stubbedRequire = (id: string): unknown => {
+    if (id === './Modal') return { __esModule: true, default: ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children) }
+    if (id.startsWith('lucide-react/')) return { __esModule: true, default: () => null }
+    return require(id)
+  }
+  new Function('require', 'module', 'exports', outputText)(stubbedRequire, loaded, loaded.exports)
+  return loaded.exports.default as React.ComponentType<Record<string, unknown>>
+}
+
+runTest('a destructive question focuses Cancel, so Enter cannot confirm it; others keep Enter = yes', () => {
+  const ConfirmDialog = loadConfirmDialog()
+  const buttons = (props: Record<string, unknown>) => [...renderToStaticMarkup(React.createElement(ConfirmDialog, {
+    title: 'Delete customer', confirmLabel: 'CONFIRM', cancelLabel: 'CANCEL', onConfirm() {}, onClose() {}, ...props,
+  })).matchAll(/<button\b([^>]*)>([^<]*)<\/button>/g)].map(([, attributes, label]) => ({ label, focused: /\bautofocus=""/.test(attributes) }))
+  const focusedLabels = (props: Record<string, unknown>): string[] => {
+    const rendered = buttons(props)
+    assert.deepEqual(rendered.map((button) => button.label), ['CONFIRM', 'CANCEL'], 'both footer buttons render')
+    return rendered.filter((button) => button.focused).map((button) => button.label)
+  }
+  assert.deepEqual(focusedLabels({ keyboard: true, danger: true }), ['CANCEL'], 'a danger dialog must never autofocus Confirm')
+  assert.deepEqual(focusedLabels({ keyboard: true }), ['CONFIRM'], 'a non-destructive question keeps Enter = yes')
+  assert.deepEqual(focusedLabels({ danger: true }), [], 'a dialog that did not opt in takes no focus')
+  assert.deepEqual(focusedLabels({}), [])
+  const hook = fs.readFileSync(path.join(srcRoot, 'components/shared/useConfirmDialog.tsx'), 'utf8')
+  assert.match(hook, /<ConfirmDialog[\s\S]*?danger=\{pending\.danger\}[\s\S]*?\bkeyboard\b/, 'every ask reaches the dialog with its danger flag and keyboard parity')
 })
 
 if (failed) { console.error(`\n${failed} native-confirm guard test(s) failed`); process.exit(1) }

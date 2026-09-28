@@ -16,7 +16,8 @@ import ConfirmDialog, { type ConfirmDialogLayer, type ConfirmReviewItem } from '
 // askToConfirm() resolves true on Confirm (or Enter: Confirm takes focus on
 // open) and false on Cancel, the X, Escape or an unmount -- the same two
 // outcomes native confirm() had, so a call site keeps its behaviour: the
-// action on true, nothing on false. Asking again while a
+// action on true, nothing on false. A `danger` ask focuses Cancel instead,
+// so Enter cannot confirm a delete. Asking again while a
 // question is open answers the earlier one false first, so no caller is ever
 // left awaiting a promise that can no longer settle.
 //

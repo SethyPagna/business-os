@@ -51,8 +51,10 @@ type ConfirmDialogProps = {
   layer?: ConfirmDialogLayer
   /**
    * Native confirm() keyboard parity, opt-in: Confirm takes focus on open so
-   * Enter answers yes. Opt-in because a dialog that carries its own input (a
-   * required reason) must keep focus and Enter in that field.
+   * Enter answers yes -- except a `danger` dialog focuses Cancel, so a held
+   * Enter or a scanner's trailing Enter cannot confirm a delete. Opt-in
+   * because a dialog that carries its own input (a required reason) must keep
+   * focus and Enter in that field.
    * useConfirmDialog turns it on and answers Escape itself: this file sits in
    * app-shared, which the public catalog loads.
    */
@@ -129,7 +131,7 @@ export default function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            autoFocus={keyboard}
+            autoFocus={keyboard && !danger}
             disabled={working || confirmDisabled}
             className={`${primaryActionClass} min-w-0 flex-1 break-words`}
           >
@@ -138,6 +140,7 @@ export default function ConfirmDialog({
           <button
             type="button"
             onClick={onClose}
+            autoFocus={keyboard && danger}
             disabled={working}
             className="min-w-0 break-words rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300"
           >
