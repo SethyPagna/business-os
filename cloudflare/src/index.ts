@@ -57,6 +57,7 @@ import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocumen
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
+import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 
 export type Env = {
   DB: D1Database
@@ -170,6 +171,10 @@ export type Env = {
 }
 
 const app = new Hono<{ Bindings: Env }>()
+
+// C3v2 A0: per-request D1/cache metrics (lib/requestMetrics.ts). First, so it
+// wraps every /api/* middleware and handler below; adds no I/O to the request.
+app.use('/api/*', requestMetricsMiddleware)
 
 // Global safety net: most routes in this Worker (compat.ts, auth.ts, etc.)
 // have no per-route try/catch. Without this, Hono's default behavior for
@@ -462,7 +467,7 @@ app.use('/api/*', async (c, next) => {
   // Everything inside the async body, so no failure of the drain -- not even
   // a synchronous one -- can reach the response that has already been built.
   const drain = (async () => {
-    try { await drainDueTelegramShiftOverviews(c.env, now) } catch (error) { console.error('[telegram] overview drain failed', error) }
+    try { await runBackground(c.env, 'telegram-drain', () => drainDueTelegramShiftOverviews(c.env, now)) } catch (error) { console.error('[telegram] overview drain failed', error) }
   })()
   try { c.executionCtx.waitUntil(drain) } catch { void drain }
 })
@@ -615,7 +620,7 @@ export default {
       // independence changes only what a failure does to the steps after it.
       const runStep = async (label: string, step: () => Promise<unknown>) => {
         try {
-          await step()
+          await runBackground(env, `cron:${label}`, step)
         } catch (error) {
           console.error(`[scheduled] ${label} failed`, (error as Error)?.message || error)
         }

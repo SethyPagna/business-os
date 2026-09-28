@@ -69,6 +69,9 @@ Module._load = function(request, parent, isMain) {
   // The F4 origin guard is /api middleware: a harmless proxy returns
   // undefined without calling next(), so every request would die unfinalized.
   if (request === './lib/originGuard') return originalLoad.call(this, path.join(root, 'src', 'lib', 'originGuard.ts'), parent, isMain)
+  // A0's per-request metrics middleware is mounted first on /api/*: same
+  // reason as the origin guard, the real module (it calls next()).
+  if (request === './lib/requestMetrics') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestMetrics.ts'), parent, isMain)
   if (request === './lib/coreDataInvariants') return { ensureCoreDataInvariantsOnce: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }
