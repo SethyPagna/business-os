@@ -19,18 +19,40 @@
 //   the same branch, does NOT clear a drain (a product-only or branch-only
 //   match fails);
 //   a partly drained lot (a mixed removal always drained every lot to 0);
-//   a completed 200 receipt, an unwritten refusal, a request still in flight.
+//   a completed 200 receipt, an unwritten refusal, a request still in flight;
+//   the REAL products-import absolute snapshot (planReconcileBranchSnapshot),
+//   which zeroes or restamps a lot with no movement while a sibling written in
+//   the same statement keeps stock. Drains the exclusion must not swallow:
+//   two lots drained together, a drained lot beside stock received later, and
+//   one beside the same product's lot at the other branch stamped at that instant.
 // No network, no wrangler.
 'use strict'
 
 const assert = require('assert')
+const fs = require('fs')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const { DatabaseSync } = require('node:sqlite')
+const ts = require('typescript')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const load = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href)
+
+function loadRealLib(fileName, loaded = new Map()) {
+  const file = path.join(ROOT, 'cloudflare', 'src', 'lib', fileName)
+  if (loaded.has(file)) return loaded.get(file).exports
+  const mod = { exports: {} }
+  loaded.set(file, mod)
+  const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: file,
+  }).outputText
+  const requireLib = (request) => request.startsWith('./') ? loadRealLib(`${request.slice(2).replace(/\.ts$/, '')}.ts`, loaded) : require(request)
+  new Function('require', 'module', 'exports', output)(requireLib, mod, mod.exports)
+  return mod.exports
+}
+const { planReconcileBranchSnapshot } = loadRealLib('productBatches.ts')
 
 let passed = 0
 let failed = 0
@@ -93,6 +115,15 @@ function zeroLotAt(productId, branchId, updatedAt) {
   db.prepare('UPDATE branch_batch_stock SET quantity = 0, updated_at = ? WHERE batch_id = ?').run(updatedAt, id)
   return id
 }
+function productsImportSnapshot(productId, branchId, quantity) {
+  db.exec('BEGIN')
+  for (const statement of planReconcileBranchSnapshot({ productId, branchId, quantity, receivedDate: '2026-09-28' })) {
+    const prepared = db.prepare(statement.sql)
+    prepared.setAllowUnknownNamedParameters(true)
+    prepared.run(statement.params)
+  }
+  db.exec('COMMIT')
+}
 let nextReceipt = 0
 function receipt({ written, status, response, createdAtSql = 'CURRENT_TIMESTAMP', completed = true, productId = 1, branchId = 1, quantity = 4 }) {
   nextReceipt += 1
@@ -116,6 +147,17 @@ movement(pOtherBranch, 2, "'2026-09-20 11:00:00'")
 const pOtherProduct = product('another product moved at that moment')
 const lotOtherProduct = zeroLotAt(pOtherProduct, 1, '2026-09-20 12:00:00')
 movement(pMixed, 1, "'2026-09-20 12:00:00'")
+const pTwoLots = product('mixed removal that drained two lots in one write')
+const lotTwoFirst = zeroLotAt(pTwoLots, 1, '2026-09-23 09:00:00')
+const lotTwoSecond = zeroLotAt(pTwoLots, 1, '2026-09-23 09:00:00')
+const pRestocked = product('drained, then new stock received')
+const lotRestockedDrain = zeroLotAt(pRestocked, 1, '2026-09-22 10:00:00')
+lot(pRestocked, 1, 4)
+movement(pRestocked, 1, 'CURRENT_TIMESTAMP', 'purchase', 4)
+const pOtherBranchKept = product('drained while the other branch kept stock at that instant')
+const lotOtherBranchKeptDrain = zeroLotAt(pOtherBranchKept, 1, '2026-09-24 10:00:00')
+const lotOtherBranchKept = lot(pOtherBranchKept, 2, 4)
+db.prepare("UPDATE branch_batch_stock SET updated_at = '2026-09-24 10:00:00' WHERE batch_id = ?").run(lotOtherBranchKept)
 const rCheck = receipt({ written: 1, status: 400, response: { error: 'CHECK constraint failed: quantity >= 0' }, productId: pMixed, quantity: 4 })
 const rStale = receipt({ written: 1, status: null, completed: false, createdAtSql: "datetime('now', '-10 minutes')", productId: pLate })
 
@@ -136,6 +178,15 @@ oldDrain(pPartial, 1, lotPartial, 2)
 const rOk = receipt({ written: 1, status: 200, response: { success: true }, productId: pClean })
 const rRefused = receipt({ written: 0, status: 400, response: { error: 'Only 3 available' }, productId: pClean })
 const rInFlight = receipt({ written: 1, status: null, completed: false, productId: pClean })
+const pImportTrim = product('import says 3 of 5: the newer lot is trimmed to 0')
+const lotImportKept = lot(pImportTrim, 1, 3)
+const lotImportTrimmed = lot(pImportTrim, 1, 2)
+productsImportSnapshot(pImportTrim, 1, 3)
+const pImportRestamp = product('import restamps a lot sold to 0 months ago')
+const lotImportRestampKept = lot(pImportRestamp, 1, 3)
+const lotImportRestamped = zeroLotAt(pImportRestamp, 1, '2026-06-01 10:00:00')
+movement(pImportRestamp, 1, "'2026-06-01 10:00:00'", 'sale', -5)
+productsImportSnapshot(pImportRestamp, 1, 3)
 
 // ---- run -----------------------------------------------------------------------
 ;(async () => {
@@ -177,6 +228,24 @@ const rInFlight = receipt({ written: 1, status: null, completed: false, productI
     assert.ok(!drains.has(lotPartial), 'lot still above 0')
   })
 
+  await check('KNOWN NEGATIVE: lots the products-import snapshot zeroed or restamped are not flagged', () => {
+    const lotRow = db.prepare('SELECT quantity, updated_at FROM branch_batch_stock WHERE batch_id = ?')
+    const kept = lotRow.get(lotImportKept)
+    assert.deepStrictEqual([kept.quantity, lotRow.get(lotImportTrimmed).quantity], [3, 0], 'the fixture is the real trim')
+    assert.strictEqual(lotRow.get(lotImportTrimmed).updated_at, kept.updated_at, 'one statement stamped both lots')
+    assert.strictEqual(lotRow.get(lotImportRestamped).quantity, 0)
+    assert.strictEqual(lotRow.get(lotImportRestamped).updated_at, lotRow.get(lotImportRestampKept).updated_at, 'the import restamped the sold-out lot with its sibling')
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM inventory_movements WHERE product_id IN (?, ?) AND created_at > ?').get(pImportTrim, pImportRestamp, '2026-06-01 10:00:00').n, 0, 'the import wrote no movement')
+    assert.ok(!drains.has(lotImportTrimmed), 'a lot the import trimmed to 0')
+    assert.ok(!drains.has(lotImportRestamped), 'a lot sold to 0 that the import restamped')
+  })
+
+  await check('positives the import exclusion must keep: two lots drained together, a drain beside later or other-branch stock', () => {
+    assert.ok(drains.has(lotTwoFirst) && drains.has(lotTwoSecond), 'two lots drained in one removal share a stamp, both at 0')
+    assert.ok(drains.has(lotRestockedDrain), 'a lot received later holds stock under another stamp')
+    assert.ok(drains.has(lotOtherBranchKeptDrain), 'a lot of the same product kept stock at the OTHER branch at that instant')
+  })
+
   await check('receipt signal: written-then-failed and stale-unfinished only', () => {
     assert.ok(receipts.has(rCheck), 'written=1 + 400')
     assert.ok(receipts.has(rStale), 'written=1, unfinished for 10 minutes')
@@ -193,7 +262,8 @@ const rInFlight = receipt({ written: 1, status: null, completed: false, productI
   })
 
   await check('exactly the known positives, nothing else', () => {
-    assert.deepStrictEqual([...drains].sort((a, b) => a - b), [lotMixed, lotLate, lotOtherBranch, lotOtherProduct].sort((a, b) => a - b))
+    assert.deepStrictEqual([...drains].sort((a, b) => a - b),
+      [lotMixed, lotLate, lotOtherBranch, lotOtherProduct, lotTwoFirst, lotTwoSecond, lotRestockedDrain, lotOtherBranchKeptDrain].sort((a, b) => a - b))
     assert.deepStrictEqual([...receipts].sort((a, b) => a - b), [rCheck, rStale])
   })
 

@@ -17,19 +17,32 @@
 --   receipt       a stock_mutation_receipts row (migration 0192) that wrote
 --                 stock and then failed: written = 1 and a stored status of
 --                 400 or more, or still unfinished more than 120 s after it
---                 was claimed. This is exactly what the old /adjust kernel
---                 left for a client that sent a client_request_id; the
---                 request's productId / branchId / type / quantity come from
---                 the stored request fingerprint.
+--                 was claimed. The old /adjust kernel left this for a client
+--                 that sent a client_request_id, but it also marked refusals
+--                 that moved nothing as written ("Only N available ...", "A
+--                 received date must be selected ..."): an STK-C row's detail
+--                 reads "CHECK constraint failed". productId / branchId /
+--                 type / quantity come from the stored request fingerprint;
+--                 quantity is what was asked, not what was drained.
 --   orphan_drain  a lot at 0 whose last write (updated_at) has no movement
 --                 row for its product and branch within 120 s. A mixed
 --                 removal always drained EVERY available lot to 0 before it
---                 failed, so a lot still above 0 is never this bug. Limits: a
---                 lot touched again later has lost the timestamp (the receipt
---                 signal still has it); an unrelated movement of the same
---                 product and branch inside the window hides a real one; a
---                 migration or merge that zeroed lots can show up here --
---                 check the timestamp against the migration dates.
+--                 failed, so a lot still above 0 is never this bug, and
+--                 neither is a lot at 0 beside a lot of the same product and
+--                 branch written at the same instant that kept stock. That is
+--                 the products import's absolute branch snapshot
+--                 (planReconcileBranchSnapshot, lib/productBatches.ts): one
+--                 statement rewrites every lot of the product at that branch,
+--                 keeps the oldest up to the imported count, and writes no
+--                 movement. Those lots are left out. Limits: a lot touched
+--                 again later has lost the timestamp (the receipt signal still
+--                 has it); an unrelated movement of the same product and
+--                 branch inside the window hides a real one. Still listed and
+--                 not separable from a drain in stored data: an import
+--                 snapshot that set the branch to 0 or whose kept lot was
+--                 written since, and a migration or merge that zeroed lots --
+--                 check the timestamp against import_jobs (kept 7 days by
+--                 default) and the migration dates.
 --
 -- Columns: signal, product_id, branch_id, batch_id, batch_key, observed_at,
 -- request_type, quantity (the request's quantity for a receipt, the lot's
@@ -38,16 +51,21 @@
 -- lot_stock_now. Ids, timestamps and quantities only. Read-only.
 --
 -- Compensation is NOT done here, and never by SQL. Proposed (not run): per
--- flagged product + branch, count the shelf first. Units still there that the
--- ledgers dropped go back through the app's one lot-level Set writer:
--- POST /inventory/adjust {type:'set', setScope:'lot', batchId:<batch_id>,
--- branchId, quantity:<counted units of that received date>, reason:
--- 'STK-C compensation <batch_key> <observed_at>', client_request_id}. Upward
--- it raises the lot and branch_stock together and writes one 'adjustment'
--- movement at the lot's own cost (not a purchase), with undo. A receipt row
--- with no orphan_drain row names no lot: set the product's received date the
--- counted units belong to. Units no longer on the shelf need nothing -- the
--- ledgers already dropped them; only their movement row is missing.
+-- flagged product + branch, not per lot, count the product's units on the
+-- shelf at that branch first. Only a shortfall goes back: counted units minus
+-- branch_stock_now; 0 or less means nothing is missing (an import snapshot or
+-- a later count already set the branch). Put it back with ONE branch-scope Set
+-- naming a flagged lot: POST /inventory/adjust {type:'set', setScope:'branch',
+-- batchId:<batch_id>, branchId, quantity:<counted units>, reason:'STK-C
+-- compensation <batch_key> <observed_at>', client_request_id}. It sets
+-- branch_stock to the count, puts the difference into that lot, and writes one
+-- 'adjustment' movement at the lot's own cost (not a purchase), with undo.
+-- Never setScope:'lot' here: it ADDS the lot's change to branch_stock, so on a
+-- lot the import snapshot zeroed, or on a drain a later count already healed,
+-- it creates phantom units. A receipt row with no orphan_drain row names no
+-- lot: name a lot of the received date the counted units belong to. Units no
+-- longer on the shelf need nothing -- the ledgers already dropped them; only
+-- their movement row is missing.
 -- ops:min-rows 0
 -- ops:max-rows 2000
 WITH receipt_fields AS (
@@ -85,6 +103,14 @@ orphan AS (
   JOIN product_batches pb ON pb.id = bbs.batch_id
   WHERE bbs.quantity = 0
     AND julianday(bbs.updated_at) IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM branch_batch_stock kept
+      JOIN product_batches kept_pb ON kept_pb.id = kept.batch_id
+      WHERE kept_pb.variant_product_id = pb.variant_product_id
+        AND kept.branch_id = bbs.branch_id
+        AND kept.quantity > 0
+        AND kept.updated_at = bbs.updated_at
+    )
     AND NOT EXISTS (
       SELECT 1 FROM inventory_movements m
       WHERE m.product_id = pb.variant_product_id
