@@ -967,6 +967,48 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 6)
   })
 
+  // SCAN1 F2 (L8): NewSupplierReturnModal resends ONE client_request_id and
+  // return number per intent when its 15 s timer gave up while the POST
+  // committed. The Worker keys a supplier return on that id alone; this pins
+  // the replay the modal relies on, and that a new id is still a new return.
+  await check('supplier return: the same client_request_id sent twice records one return and moves stock once', async () => {
+    seed()
+    const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    const lotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @b AND branch_id = 1').get({ b: batch.batchId }).quantity
+    const aggQty = () => rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
+    const counts = () => ({
+      returns: rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n,
+      movements: rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,
+    })
+    const body = {
+      client_request_id: 'supplier_return_l8-timeout-retry-1',
+      return_number: 'SRET-20260928-101500',
+      items: [{ product_id: 1, quantity: 4, branch_id: 1, cost_price_usd: 2 }],
+      branch_id: 1, reason: 'Timed-out retry', settlement: 'refund', supplier_name: 'Acme',
+    }
+    const before = counts()
+    const first = await req('POST', '/supplier', body)
+    assert.strictEqual(first.status, 200, JSON.stringify(first.json))
+    const afterFirst = counts()
+    assert.strictEqual(afterFirst.returns, before.returns + 1)
+    assert.ok(afterFirst.movements > before.movements, 'the first write moved stock')
+    assert.strictEqual(aggQty(), 6)
+
+    const retry = await req('POST', '/supplier', body)
+    assert.strictEqual(retry.status, 200, JSON.stringify(retry.json))
+    assert.strictEqual(retry.json.duplicate, true, 'the retry is answered as a replay')
+    assert.strictEqual(retry.json.id, first.json.id, 'with the FIRST return')
+    assert.deepStrictEqual(counts(), afterFirst, 'no second return, no second movement')
+    assert.strictEqual(aggQty(), 6, 'branch stock moved once')
+    assert.strictEqual(lotQty(), 6, 'the lot moved once')
+
+    const other = await req('POST', '/supplier', { ...body, client_request_id: 'supplier_return_l8-timeout-retry-2', return_number: 'SRET-20260928-101501' })
+    assert.strictEqual(other.status, 200, JSON.stringify(other.json))
+    assert.notStrictEqual(other.json.duplicate, true, 'a new id is a new return (control)')
+    assert.strictEqual(counts().returns, afterFirst.returns + 1)
+    assert.strictEqual(aggQty(), 2)
+  })
+
   for (const mode of ['reset', 'restore', 'corrupt']) await check(`return reason presets ${mode} marker after admission refuses one-statement write`, async () => {
     seed()
     const beforeAudit = auditCalls.length

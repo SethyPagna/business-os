@@ -158,7 +158,9 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(newReturn, /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)/)
   assert.match(newReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
   assert.match(newReturn, /async function createReturnRequest\(payload: ReturnCreatePayload\): Promise<unknown>[\s\S]*createReturn\(payload\)/)
-  assert.match(newReturn, /withLoaderTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  // SCAN1 F2: the create is a write, so its timer is withWriteTimeout (the
+  // outcome is unknown, not "try again"); same label and budget as before.
+  assert.match(newReturn, /withWriteTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\(key: string\) => T\(key, ''\),\s*\)/)
   assert.doesNotMatch(newReturn, /getReturnApi|window\.api|api\.createReturn/)
   assert.match(editReturn, /const RETURN_UPDATE_TIMEOUT_MS = 15000/)
   assert.match(editReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
@@ -169,7 +171,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)
   assert.match(supplierReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
   assert.match(supplierReturn, /async function createSupplierReturnRequest\(payload: SupplierReturnPayload\): Promise<unknown>[\s\S]*createSupplierReturn\(payload\)/)
-  assert.match(supplierReturn, /withLoaderTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(supplierReturn, /withWriteTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\(key: string\) => tr\(key, ''\),\s*\)/)
   assert.doesNotMatch(supplierReturn, /getSupplierReturnApi|window\.api|api\.createSupplierReturn/)
 
   assert.match(newReturn, /const searchInFlightRef = useRef\(false\)/)
@@ -610,7 +612,8 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   assert.match(source, /const transferStockInFlightRef = useRef\(false\)/)
   assert.doesNotMatch(source, /moveStockInFlightRef|moveSaving|moveModal|moveForm|openMove\(|handleMoveStock/, 'standalone Move Stock modal should stay removed')
   assert.doesNotMatch(source, /batchInventoryInFlightRef|batchApplying/, 'the dormant in-page batch-session apply path should stay excised (Part 562)')
-  assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withLoaderTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS\)/)
+  // SCAN1 F5: stock mutations are writes; a timeout reports an unknown outcome.
+  assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withWriteTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS, \(key: string\) => tr\(key, ''\)\)/)
   assert.match(source, /if \(!beginSingleAction\(adjustStockInFlightRef, \{ blocked: adjustSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)

@@ -82,6 +82,7 @@ import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
+import { identityForIntent, retryableRequestId, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
@@ -621,6 +622,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const inventoryUsersLoadedRef = useRef(false)
   const inventoryUsersPromiseRef = useRef<Promise<InventoryUserOption[]> | null>(null)
   const adjustStockInFlightRef = useRef(false)
+  // SCAN1 F5: the adjust's request id, one per intent (see handleAdjust).
+  const adjustIdentityRef = useRef<IntentIdentityRef<string>['current']>(null)
   const transferStockInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
   const transferAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canTransferStock })
@@ -724,9 +727,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     })
     return () => { current = false }
   }, [user?.id])
+  // SCAN1 F5: a write outlives this timer (the POST lives on for up to 45 s),
+  // so its expiry reports an unknown outcome -- check before retrying -- not
+  // "Please try again"; the per-intent ids below make that retry a replay.
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
-    withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
-  ), [])
+    withWriteTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS, (key: string) => tr(key, ''))
+  ), [tr])
   // DAY sections always (user, Aug 31: "the date can be moved as group
   // wrap... show only time for rows") -- the date lives once on each day's
   // divider header, so rows need only their clock time.
@@ -1404,7 +1410,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
       return
     }
-    const adjustmentRequest = {
+    const adjustmentIntent = {
       productId: selectedAdjustProduct.id,
       productName: selectedAdjustProduct.name,
       type: adjustForm.type,
@@ -1419,9 +1425,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         setScope,
         expectedLotQuantity: Number(adjustForm.batch_quantity),
         expectedBranchQuantity: previousQuantity,
-        // 0192/0193 per-request identity: a retry after a lost response is
-        // answered from the stored result instead of setting stock again.
-        client_request_id: createClientRequestId('stock-set'),
       } : {}),
       // D4 (11.28): sent only when the date input was actually on screen
       // (InventoryStockModals.tsx's own visibility condition, recomputed
@@ -1470,6 +1473,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         barcode: adjustForm.barcode || null,
       } : undefined,
     }
+    const adjustmentRequest = {
+      ...adjustmentIntent,
+      // SCAN1 F5 / migrations 0192-0193: every adjust carries a per-request
+      // identity (a plain add/remove used to carry none and took the
+      // unprotected path). Minted once per INTENT: a re-confirm, or a
+      // re-submit of the same values after the UI stopped waiting, resends it
+      // and the Worker answers from the stored result instead of adjusting
+      // stock twice; changed values are a new request.
+      client_request_id: identityForIntent(adjustIdentityRef, adjustmentIntent, () => createClientRequestId(scopedSet ? 'stock-set' : 'stockadjust')),
+    }
     if (adjustForm.type === 'remove') {
       if (numericBranchId) {
         const available = selectedBranchStock?.quantity || 0
@@ -1513,6 +1526,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       // future response-shape change can't silently reintroduce the
       // "succeeded but shows an error toast" bug).
       if (res?.success !== false) {
+        // Committed: the next adjust, even an identical one, is a new request.
+        adjustIdentityRef.current = null
         // The inverse of a batch-scoped adjustment must target the *same*
         // batch the original one actually resolved to -- for a plain
         // pick this is just adjustmentRequest.batchId, but an 'add' with
@@ -1523,6 +1538,13 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         // (possibly 'new') batchId.
         const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
         const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
+        // SCAN1 F5: the inverse writes carry their OWN ids. Inheriting the
+        // forward id would be answered 409 (same id, different body) or
+        // replay the forward adjust; a fresh id per call would re-apply an
+        // undo whose answer was lost. Each rotates only once its closure fully
+        // succeeded (actionHistory re-runs a failed closure).
+        const undoRequestId = retryableRequestId('stockadjust-undo')
+        const redoRequestId = retryableRequestId('stockadjust-redo')
         // A scoped Set is recorded by the Worker with an exact, generation-
         // guarded undo/redo (stock.quantity_set). A client closure here would
         // be a second, unguarded reversal of the same change.
@@ -1554,7 +1576,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             // no supplier and no cost of its own, and the inverse of a set can
             // raise stock too -- so it declares itself a correction rather than
             // being handed invented receipt facts.
-            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const }
+            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const, client_request_id: undoRequestId.current() }
             const inverseRequest = adjustmentRequest.type === 'set'
               ? { ...undoBase, type: 'set', quantity: pending.beforeQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
@@ -1563,11 +1585,13 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
             if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
             await load(true)
+            undoRequestId.settle()
           },
           redo: async () => {
-            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, batchId: inverseBatchId, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
+            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, batchId: inverseBatchId, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}`, client_request_id: redoRequestId.current() }), 'Redo inventory adjustment')
             if (redoResult?.success === false) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
             await load(true)
+            redoRequestId.settle()
           },
         })
         notify('Stock adjusted')
@@ -1664,6 +1688,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     receiptSessionIdRef.current = Date.now()
+    adjustIdentityRef.current = null
     setPendingAdjust(null)
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''

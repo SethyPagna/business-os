@@ -15,6 +15,9 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
+import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
@@ -330,6 +333,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const searchRequestRef = useRef(0)
   const searchInFlightRef = useRef(false)
   const submitInFlightRef = useRef(false)
+  // SCAN1 F2: the legacy create's identity, one per intent. The UI stops
+  // waiting at RETURN_CREATE_TIMEOUT_MS while the POST lives on for up to
+  // 45 s, so a retry must resend the SAME id and return number (both are in
+  // the Worker's digest) to be replayed instead of refunding twice.
+  const legacyReturnIdentityRef = useRef<IntentIdentityRef<{ client_request_id: string; return_number: string }>['current']>(null)
   const [replacements, setReplacements] = useState<ReplacementLine[]>([])
   // The replacement is an ordinary sale, so it takes an ordinary tender.
   const [replacementPaymentMethod, setReplacementPaymentMethod] = useState<string>(PAYMENT_METHODS[0])
@@ -804,8 +812,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      const result = await withLoaderTimeout(
-        () => createReturnRequest({
+      const legacyReturnIntent = {
           sale_id:          foundSale?.id   || null,
           receipt_number:   foundSale?.receipt_number || null,
           cashier_id:       user?.id,
@@ -855,10 +862,19 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             })),
             replacement_payment_method: replacementPaymentMethod,
           } : {}),
-        }),
+      }
+      const legacyReturnIdentity = identityForIntent(legacyReturnIdentityRef, legacyReturnIntent, () => ({
+        client_request_id: createClientRequestId('return'),
+        return_number: `RET-${businessDateTimeId()}`,
+      }))
+      const result = await withWriteTimeout(
+        () => createReturnRequest({ ...legacyReturnIntent, ...legacyReturnIdentity }),
         'Create return',
         RETURN_CREATE_TIMEOUT_MS,
+        (key: string) => T(key, ''),
       )
+      // Committed: the next return, even an identical one, is a new request.
+      legacyReturnIdentityRef.current = null
       const response = (result || {}) as { replacementReceiptNumber?: string | null }
       notify(response.replacementReceiptNumber
         ? `${T('return_processed_with_receipt', 'Return processed. Replacement sale receipt')}: ${response.replacementReceiptNumber}`

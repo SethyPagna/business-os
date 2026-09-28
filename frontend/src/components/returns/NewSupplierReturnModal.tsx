@@ -9,6 +9,9 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
+import { businessDateTimeId } from '../../utils/timestampId.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
@@ -188,6 +191,11 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const productsBranchRef = useRef('')
   const aliveRef = useRef(true)
   const submitInFlightRef = useRef(false)
+  // SCAN1 F2: one identity per intent. The Worker dedupes a supplier return by
+  // client_request_id alone, so a retry after the UI stopped waiting (the POST
+  // lives on for up to 45 s) must resend the SAME id -- and changed values
+  // must get a NEW one, or the Worker would silently replay the old return.
+  const supplierReturnIdentityRef = useRef<IntentIdentityRef<{ client_request_id: string; return_number: string }>['current']>(null)
 
   useEffect(() => {
     aliveRef.current = true
@@ -373,28 +381,38 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      const result = await withLoaderTimeout(
-        () => createSupplierReturnRequest({
-          cashier_id: user?.id || null,
-          cashier_name: user?.name || user?.username || null,
-          branch_id: Number(branchId),
-          supplier_id: Number(supplierId),
-          supplier_name: supplier?.name || null,
-          reason: reason.trim(),
-          notes: notes.trim() || null,
-          settlement,
-          supplier_compensation_usd: effectiveCompensationUsd,
-          supplier_compensation_khr: effectiveCompensationKhr,
-          items: selectedItems,
-        }),
+      const supplierReturnIntent = {
+        cashier_id: user?.id || null,
+        cashier_name: user?.name || user?.username || null,
+        branch_id: Number(branchId),
+        supplier_id: Number(supplierId),
+        supplier_name: supplier?.name || null,
+        reason: reason.trim(),
+        notes: notes.trim() || null,
+        settlement,
+        supplier_compensation_usd: effectiveCompensationUsd,
+        supplier_compensation_khr: effectiveCompensationKhr,
+        items: selectedItems,
+      }
+      const supplierReturnIdentity = identityForIntent(supplierReturnIdentityRef, supplierReturnIntent, () => ({
+        client_request_id: createClientRequestId('supplier_return'),
+        return_number: `SRET-${businessDateTimeId()}`,
+      }))
+      const result = await withWriteTimeout(
+        () => createSupplierReturnRequest({ ...supplierReturnIntent, ...supplierReturnIdentity }),
         'Create supplier return',
         SUPPLIER_RETURN_CREATE_TIMEOUT_MS,
+        (key: string) => tr(key, ''),
       )
       notify(tr('supplier_return_success', 'Supplier return processed successfully'), 'success')
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'products' } }))
       await Promise.resolve(onSuccess?.(result))
+      // Committed and handed over: the next return, even an identical one, is
+      // a new request. (Kept until here so a retry after onSuccess threw
+      // replays rather than creating a second return.)
+      supplierReturnIdentityRef.current = null
       onClose?.()
     } catch (error) {
       notify(getLoaderErrorMessage(error, tr('error', 'Error')), 'error')

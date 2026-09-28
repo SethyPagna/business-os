@@ -1935,7 +1935,8 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /async function createReturnRequest\(payload: ReturnCreatePayload\): Promise<unknown>[\s\S]*createReturn\(payload\)[\s\S]*withLoaderTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  // SCAN1 F2: a write's timer reports an unknown outcome (withWriteTimeout).
+  /async function createReturnRequest\(payload: ReturnCreatePayload\): Promise<unknown>[\s\S]*createReturn\(payload\)[\s\S]*withWriteTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\(key: string\) => T\(key, ''\),\s*\)/,
   'customer return create should timeout slow return writes through the focused returns transport',
 )
 assert.doesNotMatch(
@@ -3045,7 +3046,7 @@ assert.match(
 )
 assert.match(
   newSupplierReturnModal,
-  /withLoaderTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  /withWriteTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\(key: string\) => tr\(key, ''\),\s*\)/,
   'supplier return create should timeout slow supplier-return writes',
 )
 assert.match(

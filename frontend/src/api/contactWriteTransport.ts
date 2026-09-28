@@ -120,7 +120,9 @@ export function getCustomerGenderRestorationStatus(campaignId: string): Promise<
   return apiFetch('GET', `/api/customers/gender-restoration/status?${query.toString()}`)
 }
 
-export function awardCustomerPoints(id: number | string, payload: { points: number; note?: string }): Promise<unknown> {
+// A supplied client_request_id is kept (buildContactWritePayload only mints
+// when none is given), so the page's per-intent id reaches the Worker's dedupe.
+export function awardCustomerPoints(id: number | string, payload: { points: number; note?: string; client_request_id?: string }): Promise<unknown> {
   return route(
     'customers:awardPoints',
     () => apiFetch('POST', `/api/customers/${encodeURIComponent(String(id))}/points`, buildContactWritePayload(payload, 'loyalty_points')),
