@@ -14,8 +14,10 @@
 --                              sign-in once it expires or is revoked. Device
 --                              revoke cannot reach it, even after FX-auth:
 --                              revokeSessionsForDevice (lib/auth.ts) reaches a
---                              re-issue only through that row. Repair: revoke by
---                              session id or by user, never by device.
+--                              re-issue only through that row. Repair by session
+--                              or by user, never by device (both audited): POST
+--                              /api/auth/devices/sessions/<session_id>/revoke or
+--                              /api/auth/devices/sessions/revoke-user {userId}.
 --   class b_prefamily_reissue  no family link (minted before 0201), no device id,
 --                              and a session_duration_updated audit row by the
 --                              same user within 10 s of created_at. Device revoke
