@@ -142,7 +142,7 @@ import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError }
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
@@ -2500,9 +2500,10 @@ app.patch('/:id/status', async (c) => {
     }
     statements.push({
       sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-            VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
       params: {
         label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+        fee_date: businessToday(Date.parse(mutationStamp)),
         amount_usd: cancelFeeUsd,
         amount_khr: cancelFeeKhr,
         sale_id: Number(id),
