@@ -194,7 +194,7 @@ export async function applyDatedStockCountPlan(
       const quantity = Number(action.quantity)
       if (!(Math.abs(quantity) > 0)) continue
       lotNet({ kind: 'id', batchId: action.batchId }, prior.branchId).stock -= quantity
-      if (quantity > 0) unreceive.push(...planUnreceiveBatchStock({ batchId: action.batchId, quantity, totalCostUsd: null }))
+      if (quantity > 0) unreceive.push(...planUnreceiveBatchStock({ batchId: action.receivedBatchId ?? action.batchId, quantity, totalCostUsd: null }))
     }
   }
   if (plan.movementsToDelete.length) {
