@@ -7,6 +7,7 @@ import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
 import { capDriverFormMargins, downloadReceiptPdf, getDriverFormWidthMm, getPaperWidthMm, getPrintSettings, openReceiptPdf, printReceipt, printsOnPrinterPaper, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
+import { isReceiptQrError } from '../../utils/receiptQrReadiness.ts'
 import { isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSettings, type ReceiptRendition } from '../../utils/receiptAppliedConfig'
 import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
@@ -33,7 +34,13 @@ interface PrintSettingsProps {
   previewTargetRef?: RefObject<HTMLElement | null> | null
   settings?: AppSettings
   saveSettings?: SaveSettings | null
+  notify?: ((message: string, type?: string) => void) | null
 }
+
+// The three test exports below print the live preview, QR codes included, so
+// they wait for its QR codes exactly as a sale's receipt does (Q13).
+type TestExport = 'print' | 'open-pdf' | 'download-pdf'
+type TestExportHooks = { signal: AbortSignal; onWaitingForQr: (waiting: boolean) => void; onPaymentQrOmitted: () => void }
 
 type ReceiptMarginKey = 'marginTop' | 'marginRight' | 'marginBottom' | 'marginLeft'
 
@@ -99,8 +106,50 @@ function buildSafePreviewSource(previewNode: unknown, rendition: ReceiptRenditio
   }
 }
 
-export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null }: PrintSettingsProps) {
+export default function PrintSettings({ t: tProp, previewTargetRef = null, settings = {}, saveSettings: saveAppSettings = null, notify = null }: PrintSettingsProps) {
   const T = (key: string, fallback: string): string => tProp?.(key, fallback) || fallback
+  const [testBusy, setTestBusy] = useState<TestExport | ''>('')
+  const [waitingForQr, setWaitingForQr] = useState(false)
+  const testAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => testAbortRef.current?.abort(), [])
+
+  // One path for the three test buttons: busy state, the QR wait and its
+  // Cancel, the refusal message, and the payment-QR warning after success.
+  const runTestExport = async (kind: TestExport, failurePrefix: string, run: (hooks: TestExportHooks) => Promise<unknown>) => {
+    testAbortRef.current?.abort()
+    const controller = new AbortController()
+    testAbortRef.current = controller
+    let paymentQrOmitted = false
+    setTestBusy(kind)
+    try {
+      await run({
+        signal: controller.signal,
+        onWaitingForQr: (waiting) => { if (!controller.signal.aborted) setWaitingForQr(waiting) },
+        onPaymentQrOmitted: () => { paymentQrOmitted = true },
+      })
+      if (paymentQrOmitted) notify?.(T('receipt_payment_qr_omitted', 'Payment QR image could not be loaded — printed without it'), 'warning')
+    } catch (error) {
+      if (isReceiptQrError(error)) {
+        if (error.code === 'cancelled') return
+        alert(error.code === 'generation-timeout'
+          ? T('receipt_qr_still_generating', 'The QR codes are still being generated. Try printing again.')
+          : T('receipt_qr_generation_failed', 'A QR code could not be generated, so nothing was printed. Tap Retry on the QR code, then print again.'))
+        return
+      }
+      console.error(`[PrintSettings] ${kind} failed:`, error)
+      alert(`${failurePrefix}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
+    } finally {
+      if (testAbortRef.current === controller) testAbortRef.current = null
+      setWaitingForQr(false)
+      setTestBusy('')
+    }
+  }
+  const testLabel = (kind: TestExport, idle: string): string => (testBusy === kind && waitingForQr ? T('receipt_qr_waiting', 'Waiting for QR codes...') : idle)
+  const qrWaitCancel = waitingForQr ? (
+    <button type="button" className="btn-secondary mt-3 text-sm leading-normal" onClick={() => testAbortRef.current?.abort()}>
+      {T('cancel', 'Cancel')}
+    </button>
+  ) : null
   const [ps, setPs] = useState(() => {
     try {
       return getPrintSettings(settings)
@@ -359,24 +408,23 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
             </div>
           ) : null}
 
+          <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className="btn-secondary mt-3 flex items-center gap-2 text-sm"
-            onClick={async () => {
-              try {
-                await printReceipt(getPreviewSource(), {
-                  title: T('receipt_test_pdf', 'Receipt Test'),
-                  printSettings: testPrintSettings,
-                })
-              } catch (error) {
-                console.error('[PrintSettings] Test print failed:', error)
-                alert(`${T('print_test_failed', 'Test print failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
-              }
-            }}
+            disabled={testBusy !== ''}
+            onClick={() => runTestExport('print', T('print_test_failed', 'Test print failed'), (hooks) => printReceipt(getPreviewSource(), {
+              ...hooks,
+              previewTranslate: tProp ? (key: string) => tProp(key) : undefined,
+              title: T('receipt_test_pdf', 'Receipt Test'),
+              printSettings: testPrintSettings,
+            }))}
           >
             <Printer className="h-4 w-4" />
-            {T('print_test_this_mode', 'Test print this mode')}
+            {testLabel('print', T('print_test_this_mode', 'Test print this mode'))}
           </button>
+          {testBusy === 'print' ? qrWaitCancel : null}
+          </div>
         </Section>
       ) : null}
 
@@ -462,45 +510,36 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
           <button
             type="button"
             className="btn-primary flex items-center gap-2 text-sm"
-            onClick={async () => {
-              try {
-                await openReceiptPdf(getPreviewSource(), {
-                  title: T('receipt_test_pdf', 'Receipt Test'),
-                  fileName: 'receipt-test',
-                  printSettings: testPrintSettings,
-                  previewFallback: true,
-                  previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
-                })
-              } catch (error) {
-                console.error('[PrintSettings] PDF preview failed:', error)
-                alert(`${T('pdf_preview_failed', 'PDF preview failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
-              }
-            }}
+            disabled={testBusy !== ''}
+            onClick={() => runTestExport('open-pdf', T('pdf_preview_failed', 'PDF preview failed'), (hooks) => openReceiptPdf(getPreviewSource(), {
+              ...hooks,
+              title: T('receipt_test_pdf', 'Receipt Test'),
+              fileName: 'receipt-test',
+              printSettings: testPrintSettings,
+              previewFallback: true,
+              previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
+            }))}
           >
             <Printer className="h-4 w-4" />
-            {T('open_test_pdf', 'Open Test PDF')}
+            {testLabel('open-pdf', T('open_test_pdf', 'Open Test PDF'))}
           </button>
           <button
             type="button"
             className="btn-secondary flex items-center gap-2 text-sm"
-            onClick={async () => {
-              try {
-                await downloadReceiptPdf(getPreviewSource(), {
-                  title: T('receipt_test_pdf', 'Receipt Test'),
-                  fileName: 'receipt-test',
-                  printSettings: testPrintSettings,
-                  previewFallback: true,
-                  previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
-                })
-              } catch (error) {
-                console.error('[PrintSettings] PDF download failed:', error)
-                alert(`${T('pdf_download_failed', 'PDF download failed')}: ${error instanceof Error ? error.message : T('unknown_error', 'unknown error')}`)
-              }
-            }}
+            disabled={testBusy !== ''}
+            onClick={() => runTestExport('download-pdf', T('pdf_download_failed', 'PDF download failed'), (hooks) => downloadReceiptPdf(getPreviewSource(), {
+              ...hooks,
+              title: T('receipt_test_pdf', 'Receipt Test'),
+              fileName: 'receipt-test',
+              printSettings: testPrintSettings,
+              previewFallback: true,
+              previewFallbackNote: T('receipt_pdf_preview_fallback', 'PDF export was unavailable, so a printable receipt preview was opened instead.'),
+            }))}
           >
             <Download className="h-4 w-4" />
-            {T('download_pdf', 'Download PDF')}
+            {testLabel('download-pdf', T('download_pdf', 'Download PDF'))}
           </button>
+          {testBusy === 'open-pdf' || testBusy === 'download-pdf' ? qrWaitCancel : null}
         </div>
       </Section>
     </div>

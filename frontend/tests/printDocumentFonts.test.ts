@@ -146,6 +146,36 @@ await check('without a DOM there is nothing to copy, and nothing throws', () => 
   }
 })
 
+// I8 (Sep 26 2026): the walk over every stylesheet ran on every print. It is
+// memoized, and re-walked only when the sheets or the registered faces change.
+await check('the font-face walk runs once per unchanged document, again when sheets or faces change', () => {
+  const saved = globals.document
+  let walks = 0
+  const counted = (cssText: string) => ({ href: 'https://pos.example/assets/a.css', get cssRules() { walks += 1; return [new FakeFontFaceRule(cssText)] } })
+  const fonts = { size: 1 }
+  const doc = { baseURI: 'https://pos.example/', styleSheets: [counted('@font-face { font-family: A; src: url(/a.woff2); }')], fonts }
+  globals.document = doc
+  try {
+    const first = appFontFaceCss()
+    assert.equal(appFontFaceCss(), first)
+    assert.equal(appFontFaceCss(), first)
+    assert.equal(walks, 1, 'three prints, one walk')
+    doc.styleSheets.push(counted('@font-face { font-family: B; src: url(/b.woff2); }'))
+    assert.match(appFontFaceCss(), /font-family: B/, 'a lazily loaded stylesheet is picked up')
+    assert.equal(walks, 3, 'both sheets re-read once')
+    fonts.size = 2
+    appFontFaceCss()
+    assert.equal(walks, 5, 'a newly registered face invalidates the memo')
+    appFontFaceCss()
+    assert.equal(walks, 5)
+    globals.document = { ...doc, styleSheets: [...doc.styleSheets] }
+    appFontFaceCss()
+    assert.equal(walks, 7, 'another document is never served the previous one\'s rules')
+  } finally {
+    globals.document = saved
+  }
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

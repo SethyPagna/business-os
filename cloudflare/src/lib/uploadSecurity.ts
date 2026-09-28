@@ -156,9 +156,14 @@ function detectIsoBmff(bytes: Uint8Array): DetectedUploadFormat | 'rejected' | n
 
 // Classic QuickTime movies (older cameras and editors) have no `ftyp` box:
 // the file starts straight with one of these atoms. They count as
-// video/quicktime only when the atoms chain consistently and a movie atom
-// (`moov` or `mdat`) is among them.
+// video/quicktime only when the atoms chain consistently, a movie atom
+// (`moov` or `mdat`) is among them and what the atoms hold is binary data
+// (S-uploads4: `00 00 00 00 mdat` -- size 0, "runs to the end of the file"
+// -- followed by notes or a web page passed as a movie; so did an empty
+// mdat followed by more than 64 atoms, or by nothing).
 export const QUICKTIME_LEADING_ATOMS: readonly string[] = ['wide', 'mdat', 'moov', 'free', 'skip', 'pnot']
+// 'moov' and 'mdat' as a big-endian number.
+const QUICKTIME_MOVIE_ATOMS: readonly number[] = [0x6d6f6f76, 0x6d646174]
 
 function detectQuickTimeAtoms(bytes: Uint8Array): DetectedUploadFormat | null {
   if (bytes.length < 8 || !QUICKTIME_LEADING_ATOMS.includes(asciiAt(bytes, 4, 8))) return null
@@ -167,22 +172,24 @@ function detectQuickTimeAtoms(bytes: Uint8Array): DetectedUploadFormat | null {
   if (readU32BE(bytes, 0) > bytes.length && [0, 1, 2, 3].every((index) => bytes[index] >= 0x20 && bytes[index] <= 0x7e)) return null
   let offset = 0
   let sawMovie = false
-  for (let atoms = 0; atoms < 64 && offset + 8 <= bytes.length; atoms += 1) {
+  const content: number[] = []
+  while (offset + 8 <= bytes.length) {
     if (!isFourCcAt(bytes, offset + 4)) return null
-    const type = asciiAt(bytes, offset + 4, offset + 8)
-    if (type === 'moov' || type === 'mdat') sawMovie = true
+    if (QUICKTIME_MOVIE_ATOMS.includes(readU32BE(bytes, offset + 4))) sawMovie = true
     let size = readU32BE(bytes, offset)
-    if (size === 0) break // runs to the end of the file
+    let header = 8
     if (size === 1) {
       if (offset + 16 > bytes.length) break
       size = readU32BE(bytes, offset + 8) * 0x100000000 + readU32BE(bytes, offset + 12)
-      if (size < 16) return null
-    } else if (size < 8) {
-      return null
+      header = 16
+    } else if (size === 0) {
+      size = bytes.length - offset // runs to the end of the file
     }
+    if (size < header) return null
+    sampleContent(content, bytes, offset + header, offset + size)
     offset += size
   }
-  return sawMovie ? { kind: 'video', mime: 'video/quicktime', extension: '.mov' } : null
+  return sawMovie && content.length > 0 && !sampleLooksLikeText(content, false) ? { kind: 'video', mime: 'video/quicktime', extension: '.mov' } : null
 }
 
 // ------------------------------------------------------- embedded markup
@@ -239,24 +246,24 @@ function detectQuickTimeAtoms(bytes: Uint8Array): DetectedUploadFormat | null {
 // S-uploads3 (2026-09-27) closed refuter R-uploads2's bypasses: an event
 // handler on a tag that was not a token (`<details open ontoggle=...>`,
 // `<input autofocus onfocus=...>`, `<video><source onerror=...>`,
-// `<marquee onstart=...>`, `<x onclick=...>`) passed as image/jpeg. In every
-// 'full' region (the sniffing window and all metadata/text parts) a tag start
-// -- '<' and a letter, as bytes or UTF-16 -- followed within
-// TAG_EVENT_HANDLER_WINDOW_BYTES by an event handler attribute is refused,
-// whatever the tag, and the script-capable tags below are tokens too.
-// Compressed pixel data ('payload') keeps its long-token rule. False
-// positives: '<' + letter is about 8e-4 per random byte and a handler about
-// 6e-11 per position, so random 128 KB metadata would flag about 1 photo in
-// 100,000 (the owner's 12,321-file corpus: no new refusal).
+// `<marquee onstart=...>`, `<x onclick=...>`) passed as image/jpeg. An event
+// handler attribute in a 'full' region (the sniffing window and all
+// metadata/text parts) is refused when a tag starts -- '<' and a letter, as
+// bytes or UTF-16 -- anywhere before it, whatever the tag, and the
+// script-capable tags below are tokens too. S-uploads4 (refuter R-uploads3):
+// the handler was looked for only 1024 bytes past a tag start in the same
+// part, so one long quoted attribute value, or a tag continued in the next
+// segment or chunk, hid it. A quoted value is part of the tag however long it
+// runs, so there is no distance limit. Compressed pixel data ('payload')
+// keeps its long-token rule. False positives: '<' + letter is about 8e-4 per
+// random byte and a handler about 6e-11 per position, so random 128 KB
+// metadata would flag about 1 photo in 100,000.
 export const EMBEDDED_MARKUP_TOKENS: readonly string[] = [
   '<script', '<html', '<svg', '<iframe', '<body', '<object', '<embed', '<!doctype html', '<meta', '<img', '<a href', 'javascript:',
   '<style', '<form', '<link', '<base', '<frame', '<frameset', '<applet', '<math',
   '<details', '<input', '<video', '<audio', '<marquee', '<textarea', '<select', '<noscript', '<template', '<button', '<dialog',
   '<keygen', '<isindex', '<source', '<bgsound',
 ]
-// How far after a tag start an event handler attribute is looked for. Not
-// cut at '>': a browser's tag may run on past a '>' inside a quoted value.
-export const TAG_EVENT_HANDLER_WINDOW_BYTES = 1024
 // Bytes that end a '<' token (see above). A token needs none at the end of
 // the data; 'javascript:' needs none at all.
 export const MARKUP_TAG_TERMINATORS: readonly number[] = [0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0x2f, 0x3d, 0x3e]
@@ -333,19 +340,13 @@ function tagStartAt(bytes: Uint8Array, index: number): boolean {
   return isAsciiLetter(bytes[index + 1]) || (bytes[index + 1] === 0x00 && isAsciiLetter(bytes[index + 2]) && bytes[index + 3] === 0x00)
 }
 
-// An event handler attribute within TAG_EVENT_HANDLER_WINDOW_BYTES after a
-// tag start. Every byte is looked at once at most, however many tags overlap.
-function tagEventHandlerInRange(bytes: Uint8Array, start: number, end: number): boolean {
-  let scannedTo = start
-  for (let index = bytes.indexOf(0x3c, start); index !== -1 && index < end; index = bytes.indexOf(0x3c, index + 1)) {
-    if (!tagStartAt(bytes, index)) continue
-    const to = Math.min(end, index + TAG_EVENT_HANDLER_WINDOW_BYTES)
-    for (let position = Math.max(index + 2, scannedTo); position < to; position += 1) {
-      if ((bytes[position] | 0x20) === 0x6f && (eventHandlerAt(bytes, position, 1) || eventHandlerAt(bytes, position, 2))) return true
-    }
-    scannedTo = Math.max(scannedTo, to)
+// Where the first tag starts, or -1. Every part counts, pixel data included:
+// a tag started there runs on into the parts after it.
+function firstTagStart(bytes: Uint8Array): number {
+  for (let index = bytes.indexOf(0x3c); index !== -1; index = bytes.indexOf(0x3c, index + 1)) {
+    if (tagStartAt(bytes, index)) return index
   }
-  return false
+  return -1
 }
 
 // `step` 1 matches bytes; 2 matches UTF-16 (a zero byte after each character).
@@ -375,8 +376,7 @@ function markupInRange(bytes: Uint8Array, start: number, end: number, mode: Mark
       }
     }
   }
-  if (mode === 'manifest') return eventHandlerInRange(bytes, start, end)
-  return mode === 'full' && tagEventHandlerInRange(bytes, start, end)
+  return mode === 'manifest' && eventHandlerInRange(bytes, start, end)
 }
 
 type AddMarkupRegion = (start: number, end: number, mode: MarkupScanMode) => void
@@ -562,10 +562,15 @@ function planMarkupScan(bytes: Uint8Array): Array<{ start: number; end: number; 
 
 export function containsEmbeddedMarkup(bytes: Uint8Array): boolean {
   if (!bytes || bytes.length === 0) return false
-  for (const region of planMarkupScan(bytes)) {
+  const regions = planMarkupScan(bytes)
+  for (const region of regions) {
     if (markupInRange(bytes, region.start, region.end, region.mode)) return true
   }
-  return false
+  // An event handler attribute in a 'full' region after a tag start, however
+  // far after it.
+  const tagStart = firstTagStart(bytes)
+  if (tagStart === -1) return false
+  return regions.some((region) => region.mode === 'full' && eventHandlerInRange(bytes, Math.max(region.start, tagStart + 2), region.end))
 }
 
 // The single allowlist: images and videos only. Returns null for anything
@@ -666,34 +671,50 @@ function isNetpbm(bytes: Uint8Array): boolean {
 // notes, `ID3\x03\x00` followed by notes). Every atom header within the
 // bytes read must be a four-character type with a size that stays inside
 // the file; the last one may run past the bytes read.
+// S-uploads4 (R-uploads3): text still passed behind a size-0 atom (it runs
+// to the end of the file), an atom sized to the whole file or more than 64
+// empty atoms -- the zero bytes of the headers kept otherMediaLooksLikeText
+// from seeing it. Every atom is walked, and what the atoms hold, their
+// headers set aside, must be binary data, as in a real movie: not text, and
+// not nothing (empty atoms up to the end of the bytes read hide the rest).
 function quickTimeAtomsFit(bytes: Uint8Array, totalSize: number): boolean {
   let offset = 0
-  for (let atoms = 0; atoms < 64 && offset + 8 <= bytes.length; atoms += 1) {
+  const content: number[] = []
+  while (offset + 8 <= bytes.length) {
     if (!isFourCcAt(bytes, offset + 4)) return false
     let size = readU32BE(bytes, offset)
-    if (size === 0) return true
+    let header = 8
     if (size === 1) {
-      if (offset + 16 > bytes.length) return true
+      if (offset + 16 > bytes.length) break
       size = readU32BE(bytes, offset + 8) * 0x100000000 + readU32BE(bytes, offset + 12)
-      if (size < 16) return false
-    } else if (size < 8) {
-      return false
+      header = 16
+    } else if (size === 0) {
+      size = totalSize - offset // runs to the end of the file
     }
-    if (offset + size > totalSize) return false
+    if (size < header || offset + size > totalSize) return false
+    sampleContent(content, bytes, offset + header, offset + size)
     offset += size
   }
-  return true
+  return content.length > 0 && !sampleLooksLikeText(content, bytes.length >= totalSize)
 }
 
 // An ID3v2 header: version 2-4, only the flag bits that version defines,
 // a sync-safe size (every byte under 0x80) and a tag that fits in the file.
+// S-uploads4 (R-uploads3): neither the tag (frames and zero padding in a
+// real file) nor what follows it (the audio) may be text -- an empty or
+// padded tag in front of notes kept them as an MP3.
 const ID3_UNDEFINED_FLAG_BITS: readonly number[] = [0x3f, 0x1f, 0x0f]
 function id3TagFits(bytes: Uint8Array, totalSize: number): boolean {
   if (bytes.length < 10 || bytes[3] < 2 || bytes[3] > 4 || bytes[4] === 0xff) return false
   if (bytes[5] & ID3_UNDEFINED_FLAG_BITS[bytes[3] - 2]) return false
   if ([6, 7, 8, 9].some((index) => bytes[index] >= 0x80)) return false
-  const size = bytes[6] * 0x200000 + bytes[7] * 0x4000 + bytes[8] * 0x80 + bytes[9]
-  return 10 + size <= totalSize
+  const tagEnd = 10 + bytes[6] * 0x200000 + bytes[7] * 0x4000 + bytes[8] * 0x80 + bytes[9]
+  if (tagEnd > totalSize) return false
+  return [[10, tagEnd], [tagEnd, totalSize]].every(([start, end]) => {
+    const content: number[] = []
+    sampleContent(content, bytes, start, end)
+    return !sampleLooksLikeText(content, end <= bytes.length)
+  })
 }
 
 // { kind: 'photo' | 'video-audio', format } or null. `totalSize` is the
@@ -860,6 +881,19 @@ export function decodeText(bytes: Uint8Array, complete = true): string | null {
     if (byte < 0x80) asciiBytes += 1
   }
   return asciiBytes >= sample.length * 0.75 ? String.fromCharCode(...sample) : null
+}
+
+// S-uploads4 (2026-09-27): what a container holds, its own headers set
+// aside, judged as text (QuickTime atoms, an ID3 tag). `sample` collects the
+// start of it from each part in turn, up to one byte more than decodeText
+// examines, so decodeText can tell a sample from the whole; parts past the
+// bytes read are cut.
+function sampleContent(sample: number[], bytes: Uint8Array, start: number, end: number): void {
+  for (let index = start; index < Math.min(end, bytes.length) && sample.length <= TEXT_SAMPLE_BYTES; index += 1) sample.push(bytes[index])
+}
+
+function sampleLooksLikeText(sample: number[], complete: boolean): boolean {
+  return sample.length > 0 && decodeText(Uint8Array.from(sample), complete) !== null
 }
 
 // Media formats that are plain text by design.

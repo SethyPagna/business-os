@@ -25,7 +25,7 @@ export function wranglerArgs(sql) {
   return ['d1', 'execute', DATABASE, '--remote', '--json', '--command', sql]
 }
 
-function parseJsonOutput(stdout) {
+export function parseJsonOutput(stdout) {
   const text = String(stdout || '').trim()
   if (!text) return undefined
   try {

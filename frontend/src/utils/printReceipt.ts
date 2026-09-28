@@ -9,9 +9,15 @@ import { computeFixedSheetFit, computeImagePageSegments, computeImagePdfLayout, 
 import { RECEIPT_ITEM_COLUMN_GAP_EM, RECEIPT_ROW_GRID_TEMPLATE, receiptItemGridTemplate } from './receiptItemColumns.ts'
 import { receiptLengthDiagnosticLine, receiptPreviewDiagnosticLines, receiptPreviewSettings, type ReceiptPreviewSettings, type ReceiptPreviewTranslate } from './receiptPreviewDiagnostics.ts'
 import { appFontFaceCss, openPrintPreviewWindow, printHtmlInHiddenFrame, waitForFrameAssets } from './printSurface.ts'
+// Bounded: every asset shares one deadline, and a missing one is left out
+// rather than holding or failing the print (see receiptAssetLoader.ts).
+import { inlineReceiptAssets } from './receiptAssetLoader.ts'
+import { RECEIPT_ASSET_BUDGET_MS, RECEIPT_PAYMENT_QR_BUDGET_MS } from './receiptAssetLoader.ts'
+// Print waits for QR codes (Q13): nothing below clones a receipt until every
+// QR on it has settled, and a generated QR that failed refuses the print.
+import { ReceiptQrError, isReceiptQrError, stripUnreadyReceiptQrCodes, waitForReceiptQrCodes } from './receiptQrReadiness.ts'
 
 export const PRINT_DEFAULTS = { ...DEFAULT_RECEIPT_PRINT_SETTINGS }
-const RECEIPT_ASSET_INLINE_CONCURRENCY = 3
 
 type ReceiptContent = string | HTMLElement
 type ReceiptSourceSettings = {
@@ -42,6 +48,14 @@ type ReceiptPrintOptions = {
   // receipt's Text contrast setting is 'maximum' so even that rare fallback
   // stays pure black instead of the softer default.
   textColor?: string
+  // Q13 (receiptQrReadiness.ts). `signal` is the cashier's Cancel while the
+  // print waits for a QR; a cancelled print rejects with ReceiptQrError
+  // ('cancelled') and produces nothing. `onWaitingForQr` drives the busy
+  // label; `onPaymentQrOmitted` fires at most once per call, when the payment
+  // QR could not be loaded and the receipt was printed without it.
+  signal?: AbortSignal
+  onWaitingForQr?: (waiting: boolean) => void
+  onPaymentQrOmitted?: () => void
 }
 type ByteChunk = Uint8Array<ArrayBufferLike>
 type ImagePdfInput = {
@@ -342,92 +356,6 @@ function escapeHtml(value: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('Failed to read receipt asset'))
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.readAsDataURL(blob)
-  })
-}
-
-async function mapReceiptAssets<T>(items: Iterable<T> | ArrayLike<T> | null | undefined, worker: (item: T, index: number) => Promise<void> | void): Promise<void> {
-  const list = Array.from(items || [])
-  if (!list.length) return
-  let nextIndex = 0
-  const workers = Array.from({ length: Math.min(RECEIPT_ASSET_INLINE_CONCURRENCY, list.length) }, async () => {
-    while (nextIndex < list.length) {
-      const index = nextIndex
-      nextIndex += 1
-      await worker(list[index], index)
-    }
-  })
-  await Promise.all(workers)
-}
-
-async function inlineImageNodeSources(root: unknown): Promise<void> {
-  if (!root || !(root instanceof HTMLElement)) return
-  const images = Array.from(root.querySelectorAll('img'))
-  await mapReceiptAssets(images, async (image) => {
-    const src = String(image.getAttribute('src') || '').trim()
-    if (!src || /^data:/i.test(src)) return
-    try {
-      const absoluteSrc = new URL(src, window.location.href).toString()
-      const response = await fetch(absoluteSrc, {
-        mode: 'cors',
-        credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
-      })
-      if (!response.ok) throw new Error(`Image fetch failed with ${response.status}`)
-      const blob = await response.blob()
-      const dataUrl = await blobToDataUrl(blob)
-      image.setAttribute('src', dataUrl)
-    } catch (_) {
-      image.removeAttribute('src')
-      image.style.visibility = 'hidden'
-    }
-  })
-}
-
-function extractUrlsFromCssValue(value: unknown): string[] {
-  return Array.from(String(value || '').matchAll(/url\((['"]?)(.*?)\1\)/gi))
-    .map((match) => String(match[2] || '').trim())
-    .filter(Boolean)
-}
-
-async function inlineStyleAssetUrls(root: unknown): Promise<void> {
-  if (!root || !(root instanceof HTMLElement)) return
-  const nodes = [root, ...Array.from(root.querySelectorAll('*'))]
-  await mapReceiptAssets(nodes, async (node) => {
-    if (!(node instanceof HTMLElement)) return
-    const style = node.getAttribute('style') || ''
-    const urls = extractUrlsFromCssValue(style)
-    if (!urls.length) return
-
-    let nextStyle = style
-    for (const src of urls) {
-      if (/^data:/i.test(src)) continue
-      try {
-        const absoluteSrc = new URL(src, window.location.href).toString()
-        const response = await fetch(absoluteSrc, {
-          mode: 'cors',
-          credentials: absoluteSrc.startsWith(window.location.origin) ? 'same-origin' : 'omit',
-        })
-        if (!response.ok) throw new Error(`Asset fetch failed with ${response.status}`)
-        const blob = await response.blob()
-        const dataUrl = await blobToDataUrl(blob)
-        nextStyle = nextStyle.split(src).join(dataUrl)
-      } catch (_) {
-        const escaped = String(src).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        nextStyle = nextStyle
-          .replace(new RegExp(`background-image\\s*:\\s*url\\((['"]?)${escaped}\\1\\)\\s*;?`, 'gi'), 'background-image:none;')
-          .replace(new RegExp(`background\\s*:[^;]*url\\((['"]?)${escaped}\\1\\)[^;]*;?`, 'gi'), 'background:none;')
-      }
-    }
-
-    node.setAttribute('style', nextStyle)
-  })
 }
 
 function normalizePrintableRoot(root: unknown, widthMm: number): HTMLElement | null {
@@ -910,7 +838,7 @@ async function waitForElementAssets(element: HTMLElement): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
 }
 
-async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canvas: HTMLCanvasElement; breakOffsetsPx: number[] }> {
+async function renderElementToCanvasResult(element: HTMLElement, qr: QrPrintSession): Promise<{ canvas: HTMLCanvasElement; breakOffsetsPx: number[] }> {
   await waitForElementAssets(element)
 
   const rect = element.getBoundingClientRect()
@@ -936,8 +864,8 @@ async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canv
   cloned.style.maxWidth = `${width}px`
   cloned.style.minHeight = '0'
   cloned.style.margin = '0'
-  await inlineImageNodeSources(cloned)
-  await inlineStyleAssetUrls(cloned)
+  await inlineReceiptAssets(cloned, qr.assetOptions())
+  qr.throwIfCancelled()
   // Rasterizing an SVG <foreignObject> and then calling canvas.toDataURL()
   // taints the canvas in Safari and in current Chromium builds. That made the
   // visible receipt look correct but caused Open PDF / Image to fail and fall
@@ -991,8 +919,8 @@ async function renderElementToCanvasResult(element: HTMLElement): Promise<{ canv
   }
 }
 
-async function renderElementToCanvas(element: HTMLElement): Promise<HTMLCanvasElement> {
-  return (await renderElementToCanvasResult(element)).canvas
+async function renderElementToCanvas(element: HTMLElement, qr: QrPrintSession): Promise<HTMLCanvasElement> {
+  return (await renderElementToCanvasResult(element, qr)).canvas
 }
 
 function collectReceiptPageBreakOffsets(element: HTMLElement, canvasHeightPx: number): number[] {
@@ -1036,6 +964,49 @@ function collectReceiptPageBreakOffsets(element: HTMLElement, canvasHeightPx: nu
   return Array.from(offsets).sort((a, b) => a - b)
 }
 
+// The QR half of one print/export call (Q13). Created once per public call so
+// the payment-QR warning fires at most once, however many clones the call
+// makes (a PDF render retry, the two stages that can each drop the image).
+type QrPrintSession = {
+  /** Resolves once every QR on the live receipt has settled; see receiptQrReadiness.ts. */
+  settle: (content: ReceiptContent) => Promise<void>
+  /** Options for inlineReceiptAssets: the Cancel signal, the payment-QR hooks and what is left of the ceiling. */
+  assetOptions: () => { signal?: AbortSignal; paymentQrBudgetMs?: number; onPaymentQrOmitted: () => void; onPaymentQrWaiting?: (waiting: boolean) => void }
+  throwIfCancelled: () => void
+}
+
+function createQrPrintSession(options: ReceiptPrintOptions): QrPrintSession {
+  let warned = false
+  const warnPaymentQrOmitted = () => {
+    if (warned) return
+    warned = true
+    options.onPaymentQrOmitted?.()
+  }
+  let waitStartedAt = 0
+  return {
+    async settle(content) {
+      waitStartedAt = Date.now()
+      const { paymentOmitted } = await waitForReceiptQrCodes(content, { signal: options.signal, onWaiting: options.onWaitingForQr })
+      if (paymentOmitted) warnPaymentQrOmitted()
+    },
+    assetOptions() {
+      // One 30 s ceiling for the payment QR, not one per stage: what the
+      // on-screen load used is taken off the inline budget, never below the
+      // 5 s every other receipt image gets.
+      const used = waitStartedAt ? Date.now() - waitStartedAt : 0
+      return {
+        signal: options.signal,
+        paymentQrBudgetMs: Math.max(RECEIPT_ASSET_BUDGET_MS, RECEIPT_PAYMENT_QR_BUDGET_MS - used),
+        onPaymentQrOmitted: warnPaymentQrOmitted,
+        onPaymentQrWaiting: options.onWaitingForQr,
+      }
+    },
+    throwIfCancelled() {
+      if (options.signal?.aborted) throw new ReceiptQrError('cancelled')
+    },
+  }
+}
+
 async function withReceiptElement<T>(
   content: ReceiptContent,
   widthMm: number,
@@ -1075,6 +1046,10 @@ async function withReceiptElement<T>(
   const fitToOneSheet = isSingleSheetPaperSize(printSettings.paperSize)
   if (isElementContent) {
     const cloned = normalizeReceiptContentWidth(cloneElementWithInlineStyles(content, SCREEN_LAYOUT_PROPS))
+    // The public entry points waited for the QR codes before calling here;
+    // this drops a payment QR that will not print and refuses a generated QR
+    // that is not ready, so no later clone can carry a placeholder (Q13).
+    if (cloned) stripUnreadyReceiptQrCodes(cloned)
     if (cloned) {
       // On continuous rolls the receipt shell's padding is the physical print
       // margin. Replace its screen-preview padding with the operator setting,
@@ -1207,7 +1182,7 @@ export function resolveReceiptPageGeometry({
   return { pageHeightMm: Math.max(1, measuredHeightMm + 1), continuousRoll: true, pageSizeMode: 'measured' }
 }
 
-async function createPrintableReceiptMarkup(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
+async function createPrintableReceiptMarkup(content: ReceiptContent, qr: QrPrintSession, options: ReceiptPrintOptions = {}): Promise<PrintableReceiptLayout> {
   const printSettings = options.printSettings || getPrintSettings()
   const singleSheet = isSingleSheetPaperSize(printSettings.paperSize)
   const printsOnDriverForms = printsOnPrinterPaper(printSettings)
@@ -1249,8 +1224,8 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     clone.style.maxWidth = `${widthMm}mm`
     clone.style.minWidth = `${widthMm}mm`
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
-    await inlineImageNodeSources(clone)
-    await inlineStyleAssetUrls(clone)
+    await inlineReceiptAssets(clone, qr.assetOptions())
+    qr.throwIfCancelled()
     return {
       markup: clone.outerHTML,
       widthMm,
@@ -1656,6 +1631,17 @@ function attachPrintablePreviewActions(
   else previewWindow.addEventListener?.('load', schedulePrint, { once: true })
 }
 
+function writeQrWaitingNotice(previewWindow: Window | null, translate?: ReceiptPreviewTranslate): void {
+  if (!previewWindow || previewWindow.closed) return
+  const text = translate?.('receipt_qr_waiting') || 'Waiting for QR codes...'
+  try {
+    previewWindow.document.open()
+    // line-height 1.8: Khmer stacks glyphs above and below the Latin line box.
+    previewWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(text)}</title></head><body style="font-family:system-ui,sans-serif;line-height:1.8;padding:24px;color:#374151">${escapeHtml(text)}</body></html>`)
+    previewWindow.document.close()
+  } catch { /* the notice is a courtesy; the print itself does not depend on it */ }
+}
+
 export async function openPrintableReceiptPreview(content: ReceiptContent, options: ReceiptPrintOptions = {}) {
   // The window is opened BEFORE the first await, not after it. Building the
   // markup awaits fonts, images and a requestAnimationFrame, and by then the
@@ -1664,7 +1650,18 @@ export async function openPrintableReceiptPreview(content: ReceiptContent, optio
   // anyway -- which is why the receipt never reached the printer on iPhone.
   const previewWindow = options.previewWindow !== undefined ? options.previewWindow : openPrintPreviewWindow()
   try {
-    const layout = await createPrintableReceiptMarkup(content, options)
+    // The preview tab was opened in the tap and is in front of the app; while
+    // the print waits for a QR it says so, instead of sitting blank. The app
+    // keeps the busy label and the Cancel.
+    const qr = createQrPrintSession({
+      ...options,
+      onWaitingForQr: (waiting) => {
+        options.onWaitingForQr?.(waiting)
+        if (waiting) writeQrWaitingNotice(previewWindow, options.previewTranslate)
+      },
+    })
+    await qr.settle(content)
+    const layout = await createPrintableReceiptMarkup(content, qr, options)
     const html = buildPrintablePreviewDocument(layout, options)
     if (!previewWindow) {
       // No second window on this device. Print the SAME document -- identical
@@ -1790,12 +1787,18 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })
   }
 
+  // Before preferTextOnly and before any fallback below: a text-only PDF is
+  // no way round a QR that is not ready (Q13), so a refusal from here is
+  // never caught and replaced by one.
+  const qr = createQrPrintSession(options)
+  await qr.settle(content)
+
   if (options.preferTextOnly) {
     return buildTextOnlyReceiptBlob()
   }
 
   const renderPdfBlob = async () => {
-    const rendered = await withReceiptElement(content, widthMm, renderElementToCanvasResult, printSettings)
+    const rendered = await withReceiptElement(content, widthMm, (host) => renderElementToCanvasResult(host, qr), printSettings)
     const { canvas, breakOffsetsPx } = rendered
     const jpegUrl = canvas.toDataURL('image/jpeg', 0.98)
     const jpegBytes = dataUrlToBytes(jpegUrl)
@@ -1815,10 +1818,12 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
   try {
     return await renderPdfBlob()
   } catch (firstError) {
+    if (isReceiptQrError(firstError)) throw firstError
     try {
       await new Promise<void>((resolve) => window.setTimeout(resolve, 180))
       return await renderPdfBlob()
     } catch (secondError) {
+      if (isReceiptQrError(secondError)) throw secondError
       if (allowTextFallback) {
         try {
           return buildTextOnlyReceiptBlob()
@@ -1836,8 +1841,10 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
 export async function createReceiptImageBlob(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<Blob> {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  const qr = createQrPrintSession(options)
+  await qr.settle(content)
   try {
-    const canvas = await withReceiptElement(content, widthMm, renderElementToCanvas, printSettings)
+    const canvas = await withReceiptElement(content, widthMm, (host) => renderElementToCanvas(host, qr), printSettings)
     try {
       return await canvasToPngBlob(canvas)
     } catch (_) {
@@ -1845,6 +1852,9 @@ export async function createReceiptImageBlob(content: ReceiptContent, options: R
       return await canvasToPngBlob(fallbackCanvas)
     }
   } catch (error) {
+    // A refused or cancelled QR wait (stripUnreadyReceiptQrCodes, Cancel) is
+    // not a render failure: no text-only image stands in for it.
+    if (isReceiptQrError(error)) throw error
     const fallbackCanvas = createTextOnlyReceiptCanvas(content, options)
     try {
       return await canvasToPngBlob(fallbackCanvas)
@@ -1961,6 +1971,9 @@ export async function downloadReceiptPdf(content: ReceiptContent, options: Recei
     const url = downloadBlob(blob, fileName)
     return { blob, fileName, url, mode: 'pdf' }
   } catch (error) {
+    // A QR that is not ready is not a PDF failure: a preview fallback would
+    // only reach the same refusal (Q13).
+    if (isReceiptQrError(error)) throw error
     if (options.previewFallback !== false) {
       await openPrintableReceiptPreview(content, {
         ...options,
@@ -1993,6 +2006,9 @@ export async function openReceiptPdf(content: ReceiptContent, options: ReceiptPr
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     return { blob, fileName, url, opened: true, mode: 'pdf' }
   } catch (error) {
+    // A QR that is not ready is not a PDF failure: a preview fallback would
+    // only reach the same refusal (Q13).
+    if (isReceiptQrError(error)) throw error
     if (options.previewFallback !== false) {
       return openPrintableReceiptPreview(content, {
         ...options,
