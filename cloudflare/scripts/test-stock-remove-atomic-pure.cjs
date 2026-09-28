@@ -104,9 +104,8 @@ function loadReal(relPath, requireOverrides = {}) {
   return moduleObj.exports
 }
 
-// The REAL date->code module: the route's own validation (normalizeToIsoDate)
-// and the assertions below (dateToBatchCode) must be the same code the
-// kernel derives lot codes with -- a stub would test the stub.
+// The REAL date module the route validates with and the kernel derives lot
+// codes with; a stub would test the stub.
 const batchCode = loadReal('lib/batchCode.ts')
 // N14-D: routes/inventory.ts now enforces the shared receipt gate, so the
 // real module has to be in the stub map like every other real dependency.
@@ -138,11 +137,6 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision,
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
-// P3-losses-writeoff: salesAnalytics.ts pulls in removalLosses.ts (p3/losses)
-// -- a merge-time wiring gap left this override out, which died at load time
-// for EVERY check in this file, not just the ones this lane touches.
-// removalLosses.ts is deliberately import-free (see its own header), so it
-// loads with no overrides of its own.
 const removalLosses = loadReal('lib/removalLosses.ts')
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
@@ -156,21 +150,13 @@ const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': sche
 // routes/inventory.ts's per-product revenue/COGS SQL moved into this shared
 // ledger (audit sibling:F14); the REAL module, so the route builds real SQL.
 const productSalesLedger = loadReal('lib/productSalesLedger.ts', { './salesAnalytics': salesAnalytics })
-// routes/batches.ts imports the shared optimistic-locking helpers; without
-// this override the transpiled module's './conflictControl' require resolves
-// against scripts/ and the whole test file dies at load time.
-const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 
-// Only the /adjust path is driven here -- the list/search/dated-count
-// endpoints' dependencies are stubbed inert (never called by these checks).
-// Sep 6 2026: the owner's low-stock alert setting reaches this module through
-// lib/lowStockSettings.ts. The SQL builder is the REAL one -- the clauses
-// asserted below are the ones it composes -- while the settings READ answers
-// the shipped default, there being no settings row in this harness. The rule
-// itself is proven in scripts/test-low-stock-settings-pure.cjs.
+// The list, search and dated-count endpoints' dependencies are stubbed inert:
+// no check here calls them. With no settings row in this harness, the
+// low-stock settings read answers the shipped default.
 const lowStockRule = loadReal('lib/lowStockSettings.ts', { './db': { getDb: () => { throw new Error('no DB in this test') } } })
 const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStockRule.DEFAULT_LOW_STOCK_CONFIG }
 
@@ -181,19 +167,10 @@ const movementBranchNameKernel = loadReal('lib/movementBranchName.ts')
 // N13: and the actor / receipt kernels the movement readers now import.
 const movementActorNameKernel = loadReal('lib/movementActorName.ts')
 const movementReferenceKernel = loadReal('lib/movementReference.ts')
-// N13 (round 2): the /movements search haystack is built from those same two
-// expressions, so the route imports the haystack kernel too.
-// P3-L6: deleting a product has to take its HELD units with it and give them
-// back on undo. productDelete.ts only builds statements, so it is driven here
-// exactly as routes/products.ts and lib/undoAppliers.ts drive it.
-const productDelete = loadReal('lib/productDelete.ts', { './actorSnapshot': actorSnapshotKernel })
 const movementSearchKernel = loadReal('lib/movementSearch.ts', {
   './movementActorName': movementActorNameKernel,
   './movementBranchName': movementBranchNameKernel,
 })
-// P3-L6: routes/inventory.ts imports the tagged-stock kernel, so this
-// loader has to resolve it too (the paths under test never tag anything;
-// they just have to import).
 const stockCondition = loadReal('lib/stockCondition.ts')
 const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './productBatches': productBatches,
@@ -206,8 +183,6 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const audits = []
-// The REAL ledger revert. Its refusal of a damaged_lot: movement is one of
-// the contracts under test, and a stub would agree with itself.
 const stockInSessionsQuery = loadReal('lib/stockInSessionsQuery.ts', {
   './movementActorName': movementActorNameKernel,
   './movementBranchName': movementBranchNameKernel,
@@ -238,11 +213,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   // inventory.ts imports this TypeScript-only helper; load it through the
   // harness rather than asking Node to resolve a non-existent .js sibling.
   '../lib/transferOperationReceipt': loadReal('lib/transferOperationReceipt.ts'),
-  // This contract exercises receive/adjust; fail loudly on accidental transfer.
+  // No check here transfers; fail loudly if one does.
   '../lib/transferOperation': { planTransferOperation: async () => { throw new Error('unrelated transfer path invoked') } },
-  // REAL, not stubbed: POST /inventory/transfer now refuses a shop -> warehouse
-  // move through this guard, so the fixtures here run through the rejection
-  // instead of opting out of it.
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': loadReal('lib/branchRoles.ts') }),
   '../lib/canonicalBranchIdentity': canonicalBranchIdentity,
   '../lib/actorSnapshot': actorSnapshotKernel,
@@ -262,10 +234,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
-  // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
-  // the per-line receipt guard. REAL, not a stub: a body without a
-  // client_request_id must hand straight through to the kernel, and that is
-  // the property every fixture here depends on.
+  // REAL, not a stub: the replay, conflict and release checks below run
+  // through the per-line receipt guard.
   '../lib/stockMutationReceipt': stockMutationReceipt,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/sqlBinding': sqlBinding,
@@ -280,9 +250,6 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
-  // identityBarcodeKey is the REAL fold, not a stub: the add-stock 'same
-  // barcode means the SOURCE row' rule is exactly what this file exercises,
-  // and stubbing the comparison would make the test agree with itself.
   '../lib/productIdentity': {
     findIdentityMatch: async () => null,
     identityBarcodeKey: productDetailRule.identityBarcodeKey,
@@ -294,10 +261,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     './moneyPrecision': moneyPrecision,
     './productDetailRule': productDetailRule,
   }),
-  // routes/products.ts + inventory.ts now build their search tail from the
-  // one shared implementation (lib/productSearchQuery.ts). These tests
-  // exercise write paths, not search, so an inert builder keeps the WHERE
-  // unfiltered exactly as the searchMatch stubs above already did.
+  // Write-path tests: an inert search builder keeps the WHERE unfiltered.
   '../lib/productSearchQuery': {
     buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
     buildFamilyRelevanceOrderSql: (tail) => tail,
@@ -321,9 +285,6 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/datedStockCountApply': { applyDatedStockCountPlan: async () => ({}) },
   '../lib/datedStockCountResolve': { parseRawDatedCountRows: () => [], resolveDatedStockCountRows: async () => [] },
   '../lib/datedStockCountDecisions': { applyDatedStockCountDecisions: async () => ({}) },
-  // Part 553 added the movement-revert path to inventory.ts; these tests
-  // exercise receive/adjust, not revert, so an empty stub is honest (the type
-  // import is compile-erased, only applyMovementRevert needs a runtime stub).
   '../lib/stockRevert': stockRevert,
   '../lib/movementCostSnapshot': movementCostSnapshot,
   '../lib/moneyPrecision': moneyPrecision,
@@ -398,7 +359,7 @@ const lotQty = (productId) => Number(rawDb.prepare(
      JOIN product_batches pb ON pb.id = bbs.batch_id WHERE pb.variant_product_id = @productId`,
 ).get({ productId }).q)
 // Both ledgers at once: the aggregate (branch_stock + products.stock_quantity)
-// and the lot ledger. Every assertion below compares all three together.
+// and the lot ledger.
 const stateOf = (productId) => ({ branch: branchQty(productId), product: productQty(productId), lots: lotQty(productId) })
 const moves = (productId, type) => rawDb.prepare(
   `SELECT * FROM inventory_movements WHERE product_id = @productId ${type ? 'AND movement_type = @type' : ''} ORDER BY id`,
