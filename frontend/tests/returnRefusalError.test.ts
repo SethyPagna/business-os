@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { RETURN_REFUSAL_ERRORS, returnRefusalText } from '../src/components/returns/helpers/returnRefusalError.ts'
+import { RETURN_REFUSAL_DETAILS, RETURN_REFUSAL_ERRORS, returnRefusalText } from '../src/components/returns/helpers/returnRefusalError.ts'
 
 // FX-returns2 F4 (2026-09-28): the FX-returns fixes refuse four return writes
 // with a machine code next to an English sentence -- editing a cancelled
@@ -45,6 +45,43 @@ runTest('each coded refusal shows the pack text -- Khmer on a Khmer till', () =>
   }
 })
 
+// FX-exc1 item 4 (28 Sep 2026): the restore refusal came back as a sentence
+// with no product and no counts. The Worker now sends them as params, and
+// the restated sentence names them in the operator's language.
+runTest('a restore refusal with its params names the product and both counts, in both languages', () => {
+  const params = { product: 'Serum', returned: 4, sold: 2 }
+  const thrown = Object.assign(new Error('English server sentence'), { status: 409, code: 'return_restore_over_capacity', params })
+  const detail = RETURN_REFUSAL_DETAILS.return_restore_over_capacity
+  assert.equal(detail.key, 'return_restore_over_capacity_detail')
+  assert.equal(packs.en[detail.key], detail.english, 'en is the helper\'s English fallback, one statement')
+  assert.equal(returnRefusalText(thrown, trFrom(packs.en)), 'Cannot restore: 4 of Serum would count as returned, but the sale sold only 2. Nothing was changed.')
+  const km = String(returnRefusalText(thrown, trFrom(packs.km)) || '')
+  assert.match(km, /[ក-៿]/, 'km is Khmer')
+  assert.notEqual(packs.km[detail.key], packs.en[detail.key])
+  for (const value of ['Serum', '4', '2']) assert.ok(km.includes(value), `km names ${value}`)
+  assert.ok(!/[{}]/.test(km), 'every km placeholder is filled')
+  for (const name of detail.params) {
+    assert.ok(String(packs.en[detail.key]).includes(`{${name}}`), `en names {${name}}`)
+    assert.ok(String(packs.km[detail.key]).includes(`{${name}}`), `km names {${name}}`)
+  }
+  // A pack without the detail key still gives the English detail.
+  assert.equal(returnRefusalText(thrown, (_key, fallback) => fallback), 'Cannot restore: 4 of Serum would count as returned, but the sale sold only 2. Nothing was changed.')
+})
+
+runTest('a restore refusal missing any param keeps the plain sentence; a name is printed as it is', () => {
+  const refusal = (params: unknown) => Object.assign(new Error('English'), { status: 409, code: 'return_restore_over_capacity', params })
+  for (const params of [null, undefined, [], {}, { product: 'Serum', returned: 4 }, { product: '  ', returned: 4, sold: 2 },
+    { product: 'Serum', returned: Number.NaN, sold: 2 }, { product: 'Serum', returned: '4', sold: null }]) {
+    assert.equal(returnRefusalText(refusal(params), trFrom(packs.km)), packs.km.return_restore_over_capacity, JSON.stringify(params))
+  }
+  assert.equal(returnRefusalText(refusal({ product: 'Gift {sold}', returned: 1.5, sold: '1' }), trFrom(packs.en)),
+    'Cannot restore: 1.5 of Gift {sold} would count as returned, but the sale sold only 1. Nothing was changed.',
+    'the product name is not substituted a second time')
+  // Only this code has a detail sentence; another code's params change nothing.
+  assert.equal(returnRefusalText(Object.assign(new Error('x'), { code: 'return_edit_cancelled', params: { product: 'Serum', returned: 4, sold: 2 } }), trFrom(packs.km)),
+    packs.km.return_edit_cancelled)
+})
+
 runTest('an uncoded or foreign-coded failure returns null, so the caller keeps the server message', () => {
   assert.equal(returnRefusalText(new Error('Return not found'), trFrom(packs.km)), null)
   assert.equal(returnRefusalText(Object.assign(new Error('Return changed'), { code: 'write_conflict' }), trFrom(packs.km)), null)
@@ -58,8 +95,12 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   const bulk = readWorker('lib/returnBulkAction.ts')
   const kernel = readWorker('lib/returnsStock.ts')
   assert.ok(route.includes("code: 'return_edit_cancelled', action: 'restore_required' }, 409)"), 'PATCH /:id refuses a cancelled return with 409 return_edit_cancelled')
-  assert.ok(bulk.includes("409, 'return_restore_over_capacity')"), 'the legacy restore guard fails with return_restore_over_capacity')
+  assert.match(bulk, /409, 'return_restore_over_capacity',\s+error instanceof ReturnCapacityError \? error\.params \?\? undefined : undefined\)/,
+    'the legacy restore guard fails with return_restore_over_capacity and the capacity refusal\'s params')
   assert.ok(route.includes('if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || '), 'POST /bulk forwards a coded bulk refusal before the generic write_conflict')
+  assert.ok(route.includes("'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)"), 'POST /bulk forwards the refusal\'s params with its code')
+  assert.ok(read('src/api/http.ts').includes("error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null"),
+    'the API error carries the refusal\'s params to the helper')
   assert.ok(kernel.includes("throw new RefundSaleLineError('return_refund_price_ambiguous',"), 'the kernel refuses an ambiguous product price')
   assert.ok(route.includes("throw new RefundSaleLineError('return_refund_sale_line_required',"), 'PATCH /:id refuses a line naming neither sale item nor product')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,

@@ -9,7 +9,7 @@ import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './sale
 import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestorationMemberV1,
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
-import { assertReturnCreateCapacity } from './returnCreateAction'
+import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -97,15 +97,17 @@ type Snapshot = { version: 1; operationId: string; field: ReturnField; members: 
 
 // `code` names a business refusal the client restates in the operator's
 // language; without one the route answers the generic write_conflict /
-// invalid_bulk_action it always has.
+// invalid_bulk_action it always has. `params` are the values that sentence
+// names (the product and counts of return_restore_over_capacity), forwarded
+// so the restated sentence keeps them.
 export class ReturnBulkError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string) {
+  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string, readonly params?: ReturnCapacityParams) {
     super(message)
   }
 }
 
-function fail(message: string, status: 400 | 403 | 409 = 409, code?: string): never {
-  throw new ReturnBulkError(message, status, code)
+function fail(message: string, status: 400 | 403 | 409 = 409, code?: string, params?: ReturnCapacityParams): never {
+  throw new ReturnBulkError(message, status, code, params)
 }
 
 function normalize(value: unknown, fallback = ''): string {
@@ -420,7 +422,8 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
         try {
           assertReturnCreateCapacity(soldLines, [], activeLines)
         } catch (error) {
-          fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409, 'return_restore_over_capacity')
+          fail(`Restoring this return would count more units as returned than the sale sold. ${(error as Error).message}`, 409, 'return_restore_over_capacity',
+            error instanceof ReturnCapacityError ? error.params ?? undefined : undefined)
         }
       }
       continue

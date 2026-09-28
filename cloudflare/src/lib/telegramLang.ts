@@ -270,6 +270,10 @@ const LABELS = {
   expensesOther: { en: 'Other expenses', km: 'ចំណាយផ្សេងទៀត' },
   deliveryFee: { en: 'Delivery fee', km: 'ថ្លៃដឹក' },
   deliveryCost: { en: 'Actual delivery cost', km: 'ថ្លៃដឹកដើម' },
+  // A branch's Overview: the day's fees recorded with NO branch, shown beside
+  // the branch's expenses and never added to them (R-telegram X1). The pack's
+  // no_branch word, then "not counted in the total".
+  noBranchFees: { en: 'No branch (not in total)', km: 'គ្មានសាខា (មិនរាប់ក្នុងសរុប)' },
   // Copied from km.json's shift_opening_cash / shift_counted_cash -- the same
   // words the shift screen itself uses for these two figures, so a cashier
   // reading the phone message and the shift screen sees the same terms.

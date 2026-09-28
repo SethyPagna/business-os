@@ -51,9 +51,9 @@ export function updateActionHistory(id: string | number, payload: ActionHistoryP
   )
 }
 
-// A replay the Worker refused to protect newer data answers 409 with a code
-// from cloudflare/src/lib/undoAppliers.ts (UNDO_RECORD_CHANGED_CODE,
-// UNDO_NO_DEFAULT_BRANCH_CODE). It is restated in the UI language AppContext
+// A replay the Worker refused answers 409 with a code from
+// cloudflare/src/lib/undoAppliers.ts (UNDO_*_CODE; UNDO_REFUSED_CODE for a
+// refusal with no stable code of its own). It is restated in the UI language AppContext
 // applies to <html lang>, from the same language pack the screens use, the way
 // fileTransport.ts restates an avatar type refusal; callers
 // (utils/actionHistory.ts runEntry and runServerEntry) show error.message as
@@ -63,6 +63,11 @@ export function updateActionHistory(id: string | number, payload: ActionHistoryP
 const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string }>> = {
   undo_record_changed: { undo: 'undo_refused_record_changed', redo: 'redo_refused_record_changed' },
   undo_no_default_branch: { undo: 'undo_refused_no_default_branch', redo: 'redo_refused_no_default_branch' },
+  undo_history_stale: { undo: 'undo_refused_history_stale', redo: 'redo_refused_history_stale' },
+  undo_already_done: { undo: 'undo_refused_already_done', redo: 'redo_refused_already_done' },
+  undo_history_unusable: { undo: 'undo_refused_history_unusable', redo: 'redo_refused_history_unusable' },
+  undo_needs_original_tab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
+  undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }
 
 async function localizeReplayRefusal(error: unknown, direction: 'undo' | 'redo'): Promise<never> {

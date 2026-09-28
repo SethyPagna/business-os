@@ -76,6 +76,10 @@ const app = load('routes/settings.ts').default
 const PORTAL_EDITOR = { id: 21, username: 'web', permissions: JSON.stringify({ customer_portal: true }), role_code: null, role_permissions: null }
 // Posts only: may not touch the assistant settings at all.
 const POSTS_ONLY = { id: 22, username: 'posts', permissions: JSON.stringify({ portal_posts: true }), role_code: null, role_permissions: null }
+// A signed-in account with no grant at all.
+const NO_GRANTS = { id: 23, username: 'cashier', permissions: JSON.stringify({}), role_code: null, role_permissions: null }
+// The broad Settings grant covers every settings bucket.
+const SETTINGS_HOLDER = { id: 24, username: 'manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }
 
 async function save(user, body) {
   sessionUser = user
@@ -168,6 +172,29 @@ async function main() {
     seedAssistant()
     const res = await save(POSTS_ONLY, { [PROMPT_KEY]: '', clearKeys: [PROMPT_KEY] })
     assert.equal(res.status, 403, JSON.stringify(res.body))
+    assert.equal(stored(PROMPT_KEY), PROMPT)
+  })
+
+  // R-sec2 E-S1 (28 Sep 2026): the blanks-only no-op answered 200 with the
+  // settings updatedAt before any permission check, so every signed-in
+  // account could read it. It now needs the grant the real save needs.
+  await check('a blanks-only save without the portal-config grant is refused and reveals no updatedAt', async () => {
+    seedAssistant()
+    for (const user of [POSTS_ONLY, NO_GRANTS]) {
+      const res = await save(user, { [PROMPT_KEY]: '', [PROVIDER_KEY]: null })
+      assert.equal(res.status, 403, `${user.username}: ${JSON.stringify(res.body)}`)
+      assert.equal('updatedAt' in res.body, false, `${user.username} must not read updatedAt: ${JSON.stringify(res.body)}`)
+      assert.equal(stored(PROMPT_KEY), PROMPT)
+      assert.equal(stored(PROVIDER_KEY), '3')
+    }
+  })
+
+  await check('control: a blanks-only save by a full Settings holder is still a 200 no-op', async () => {
+    seedAssistant()
+    const res = await save(SETTINGS_HOLDER, { [PROMPT_KEY]: '' })
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.deepEqual(res.body.keys, [])
+    assert.equal(typeof res.body.updatedAt === 'string' || res.body.updatedAt === null, true, JSON.stringify(res.body))
     assert.equal(stored(PROMPT_KEY), PROMPT)
   })
 

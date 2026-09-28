@@ -43,7 +43,9 @@ function unexpected(name) {
   return () => { throw new Error(`Unexpected ${name} replay in the undo staleness harness`) }
 }
 
-function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false } = {}) {
+// `stubs` replaces a stubbed dependency, e.g. a replay that throws the refusal
+// a test drives through the route.
+function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false, stubs: extraStubs = {} } = {}) {
   const dbAdapter = {
     prepare(sql) {
       const st = d1.prepare(sql)
@@ -98,6 +100,7 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false 
       productRemovePlanDigest: async () => '',
       productRemoveReplayStatements: () => [],
     },
+    ...extraStubs,
   }
   const loaded = new Map()
   function loadDependency(filename) {

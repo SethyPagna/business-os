@@ -6,6 +6,14 @@
 // { success: false, error: <English sentence> }, so a Khmer screen showed the
 // server's English.
 //
+// FX-exc1 item 1 (R-undo RC14/RC17, R-returns2 U4, 28 Sep 2026): every other
+// refusal carries a code as well -- the route's own "not undoable right now"
+// and "only from the tab that performed it", the uncoded UndoConflictErrors
+// (stale generation, unusable details, changed concurrently), the plain-Error
+// "already undone / already in place" answers that were 500s, and any other
+// applier's 409 (a grouped Return replay's), which keeps its own stable code
+// or falls back to the generic undo_refused.
+//
 // Real SQLite over the real migrated schema, the REAL transpiled
 // lib/undoAppliers.ts + lib/branchWrites.ts (harness/load_undo_appliers.cjs)
 // and the REAL routes/actionHistory.ts mounted on Hono. Only auth, audit,
@@ -26,6 +34,12 @@ const ROUTE = path.join(__dirname, '..', 'src', 'routes', 'actionHistory.ts')
 const USER = { id: 42, name: 'Admin', username: 'admin' }
 const RECORD_CHANGED = 'undo_record_changed'
 const NO_DEFAULT_BRANCH = 'undo_no_default_branch'
+// FX-exc1 item 1: every other replay refusal carries a code too.
+const HISTORY_STALE = 'undo_history_stale'
+const ALREADY_DONE = 'undo_already_done'
+const HISTORY_UNUSABLE = 'undo_history_unusable'
+const NEEDS_ORIGINAL_TAB = 'undo_needs_original_tab'
+const GENERIC_REFUSAL = 'undo_refused'
 const notify = async () => {}
 
 function loadHistoryRoute(db, undoAppliers) {
@@ -70,16 +84,16 @@ function loadHistoryRoute(db, undoAppliers) {
   return app
 }
 
-function freshWorld() {
+function freshWorld(options = {}) {
   const d1 = openDb(loadAll())
-  const { undoAppliers, branchWrites, db } = loadUndoAppliers(d1)
+  const { undoAppliers, branchWrites, db } = loadUndoAppliers(d1, options)
   const run = (sql, params) => d1.db.prepare(sql).run(params == null ? {} : params)
   return { d1, undoAppliers, branchWrites, db, run, app: loadHistoryRoute(db, undoAppliers) }
 }
 
-async function replay(world, historyId, direction) {
+async function replay(world, historyId, direction, request = {}) {
   const res = await world.app.request(`/api/action-history/${historyId}/${direction}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request),
   }, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
   const text = await res.text()
   let body
@@ -90,6 +104,26 @@ async function replay(world, historyId, direction) {
 function historyRow(world, id) {
   return world.d1.db.prepare('SELECT status, last_error FROM action_history WHERE id = ?').get(id)
 }
+
+// A history row whose payloads name `undoPayload`'s applier, recorded by USER.
+function recordedHistory(world, undoPayload, { status = 'undoable', redoPayload = undoPayload } = {}) {
+  const info = world.run(`INSERT INTO action_history (scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
+    VALUES ('products', 'product', '1', 'Recorded action', 1, @status, @undo, @redo, @by, @byName)`, {
+    status, undo: JSON.stringify(undoPayload), redo: JSON.stringify(redoPayload), by: USER.id, byName: USER.name,
+  })
+  return Number(info.lastInsertRowid)
+}
+
+// A world whose grouped Return replay (lib/returnBulkAction.ts
+// replayReturnBulkAction) throws `refusal` -- the shape of ReturnBulkError
+// (statusCode, optional code) without its SQL world.
+function returnBulkWorld(refusal) {
+  return freshWorld({ stubs: { './returnBulkAction': {
+    RETURN_BULK_ACTION_KIND: 'return.fields.bulk',
+    replayReturnBulkAction: async () => { throw refusal },
+  } } })
+}
+const RETURN_BULK_PAYLOAD = { applier: 'return.fields.bulk', operation_id: 'op-returns-1', snapshot_id: 1, generation: 0 }
 
 function assertCoded(result, code, pattern) {
   assert.equal(result.status, 409, `expected a 409 conflict, got ${result.status}: ${JSON.stringify(result.body)}`)
@@ -272,6 +306,72 @@ async function main() {
       return batch(statements)
     }
     assertCoded(await replay(world, h, 'undo'), RECORD_CHANGED, /re-attributed while this change was being undone/)
+  })
+
+  // --- FX-exc1 item 1: the refusals that still answered in English only.
+
+  await check('a row that is not undoable right now: 409 with the history-stale code', async () => {
+    const world = branchWorld()
+    const h = await branchEdit(world, 1, { phone: '099 999' })
+    assert.equal((await replay(world, h, 'undo')).status, 200)
+    assertCoded(await replay(world, h, 'undo'), HISTORY_STALE, /not undoable right now/)
+    assert.equal(branch(world, 1).phone, '012 111', 'the refused second undo wrote nothing')
+    assert.equal(historyRow(world, h).status, 'redoable')
+  })
+
+  await check('a row no server applier can replay, asked with require_applied: 409 with the needs-original-tab code', async () => {
+    const world = branchWorld()
+    const h = recordedHistory(world, { kind: 'client-only' })
+    assertCoded(await replay(world, h, 'undo', { require_applied: true }), NEEDS_ORIGINAL_TAB, /only be reversed from the tab that performed it/)
+    assert.equal(historyRow(world, h).status, 'undoable', 'nothing flipped')
+  })
+
+  await check('product.remove replay without the exact generation: 409 with the history-stale code', async () => {
+    const world = freshWorld()
+    const h = recordedHistory(world, { applier: 'product.remove', operation_id: 'op-remove-1', generation: 0 })
+    assertCoded(await replay(world, h, 'undo'), HISTORY_STALE, /exact product removal generation is required/)
+  })
+
+  await check('product.remove whose saved removal is gone: 409 with the history-unusable code', async () => {
+    const world = freshWorld()
+    const h = recordedHistory(world, { applier: 'product.remove', operation_id: 'op-remove-2', generation: 0 })
+    assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), HISTORY_UNUSABLE, /saved product removal is unavailable/)
+  })
+
+  await check('supplier.backfill undo already done elsewhere: 409 with the already-done code, not a 500', async () => {
+    const world = supplierWorld()
+    const h = await supplierBackfill(world)
+    world.run("UPDATE undo_snapshots SET status = 'reversed' WHERE kind = 'supplier.backfill'")
+    assertCoded(await replay(world, h, 'undo'), ALREADY_DONE, /already been undone/)
+    assert.equal(world.d1.db.prepare('SELECT supplier_id FROM product_batches WHERE id = 5000').get().supplier_id, 7, 'nothing reverted')
+    assert.equal(historyRow(world, h).status, 'undoable')
+  })
+
+  await check('supplier.backfill redo already in place: 409 with the already-done code', async () => {
+    const world = supplierWorld()
+    const h = await supplierBackfill(world)
+    assert.equal((await replay(world, h, 'undo')).status, 200)
+    world.run("UPDATE undo_snapshots SET status = 'applied' WHERE kind = 'supplier.backfill'")
+    assertCoded(await replay(world, h, 'redo'), ALREADY_DONE, /already in place/)
+  })
+
+  await check('a grouped Return undo refused without a code of its own (409): the generic refusal code', async () => {
+    const world = returnBulkWorld(Object.assign(new Error('Refresh history before replaying this group.'), { statusCode: 409 }))
+    const h = recordedHistory(world, RETURN_BULK_PAYLOAD)
+    assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), GENERIC_REFUSAL, /Refresh history before replaying this group/)
+    assert.equal(historyRow(world, h).status, 'undoable')
+  })
+
+  await check('a replay refusal with its own stable code keeps that code', async () => {
+    const world = returnBulkWorld(Object.assign(new Error('The products or stock changed.'), { statusCode: 409, code: 'transfer_stock_changed' }))
+    const h = recordedHistory(world, RETURN_BULK_PAYLOAD)
+    assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), 'transfer_stock_changed', /stock changed/)
+  })
+
+  await check('a 409 whose own code is not a stable machine code falls back to the generic refusal code', async () => {
+    const world = returnBulkWorld(Object.assign(new Error('D1_ERROR: constraint failed'), { statusCode: 409, code: 'SQLITE_CONSTRAINT' }))
+    const h = recordedHistory(world, RETURN_BULK_PAYLOAD)
+    assertCoded(await replay(world, h, 'undo', { expected_generation: 0 }), GENERIC_REFUSAL, /constraint failed/)
   })
 
   await check('control: a failure that is not a refusal to protect newer data keeps its old shape (no code)', async () => {

@@ -1564,6 +1564,11 @@ export type ShiftOverviewFigures = {
    *  typed 'delivery', and the courier money paid on the sales
    *  (courierPayoutsWhere) -- the same three the shift report splits. */
   expenses: { fees: ShiftMoney; deliveryFees: ShiftMoney; courier: ShiftMoney }
+  /** On a branch's overview, the day's fees recorded with NO branch -- kept
+   *  out of `expenses` (they are not the branch's) and printed beside them so
+   *  they are not dropped without a trace (R-telegram X1). Null on the
+   *  all-branches overview, whose `expenses` already count them. */
+  unbranchedFees: ShiftMoney | null
   returns: { count: number; refundUsd: number; refundKhr: number }
 }
 
@@ -1614,7 +1619,12 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
     deliveryFees: showExpenses ? figures.expenses.deliveryFees : null,
     courier: showSales ? figures.expenses.courier : null,
   })
-  section('expenses', expenseSectionRows(expenses), showExpenses)
+  const expenseRows = expenseSectionRows(expenses)
+  // A branch's overview: the day's no-branch fees, beside the total and never
+  // in it. Which of them are delivery cost is left alone (owner question X3).
+  const unbranched = figures.unbranchedFees
+  if (unbranched && hasMoney(unbranched)) expenseRows.push(labeled('noBranchFees', money(unbranched.usd, unbranched.khr)))
+  section('expenses', expenseRows, showExpenses)
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
@@ -1638,7 +1648,7 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
   const db = getDb(env)
   // The courier half over the kernel's own sale set for these filters.
   const courierWhere = whereActiveSales('sales', filters)
-  const [totals, payments, fees, returned, courier] = await Promise.all([
+  const [totals, payments, fees, returned, courier, unbranched] = await Promise.all([
     getSalesTotals(env, filters),
     getSalesGroupedTotals(env, filters, 'payment_method'),
     db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
@@ -1648,6 +1658,13 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
       WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
         AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
+    // A branch's overview only: the same days' fees with no branch at all,
+    // which the branch clause above cannot see (R-telegram X1).
+    filters.branchId == null
+      ? Promise.resolve(null)
+      : db.prepare(`SELECT COALESCE(SUM(amount_usd), 0) AS usd, COALESCE(SUM(amount_khr), 0) AS khr FROM fees
+      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate AND fees.branch_id IS NULL`)
+        .get<{ usd: number; khr: number }>(params),
   ])
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
@@ -1668,6 +1685,7 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
       deliveryFees: { usd: Number(fees?.delivery_usd) || 0, khr: Number(fees?.delivery_khr) || 0 },
       courier,
     },
+    unbranchedFees: filters.branchId == null ? null : { usd: Number(unbranched?.usd) || 0, khr: Number(unbranched?.khr) || 0 },
     returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
   }
 }

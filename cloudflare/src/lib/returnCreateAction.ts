@@ -299,6 +299,32 @@ export function projectedSaleStatusForReturnCreateV1(
   return fullyReturned ? 'returned' : allLines.length ? 'partial_return' : (statusBeforeReturn || 'completed')
 }
 
+/** What an over-capacity refusal names: the product, the units that would
+ *  count as returned against it, and the units the sale sold of it. */
+export type ReturnCapacityParams = { product: string; returned: number; sold: number }
+
+/**
+ * assertReturnCreateCapacity's refusal. The English sentence is unchanged;
+ * `params` carries the product and counts that sentence names as data, so a
+ * route can hand them to the till to restate in the operator's language
+ * (POST /api/returns/bulk's return_restore_over_capacity). Null when the line
+ * has neither a name nor a product to name.
+ */
+export class ReturnCapacityError extends Error {
+  constructor(message: string, readonly params: ReturnCapacityParams | null) {
+    super(message)
+  }
+}
+
+// Quantities are summed as binary floats; the counts a person reads carry
+// none of that noise.
+const capacityCount = (value: number): number => Math.round(value * 1e6) / 1e6
+
+function capacityParams(product: string | null | undefined, productId: number, returned: number, sold: number): ReturnCapacityParams | null {
+  const name = String(product ?? '').trim() || (productId ? `#${productId}` : '')
+  return name ? { product: name, returned: capacityCount(returned), sold: capacityCount(Math.max(0, sold)) } : null
+}
+
 export function assertReturnCreateCapacity(
   saleItems: Array<{ id: number; product_id: number | null; quantity: number; product_name?: string | null }>,
   committedReturnLines: Array<{ sale_item_id?: number | null; product_id?: number | null; quantity: number }>,
@@ -324,7 +350,8 @@ export function assertReturnCreateCapacity(
   for (const item of saleItems) {
     const used = usedByItem.get(item.id) || 0
     if (used > Number(item.quantity)) {
-      throw new Error(`Cannot return ${used} of ${item.product_name || 'this item'} — only ${Math.max(0, Number(item.quantity))} sold`)
+      throw new ReturnCapacityError(`Cannot return ${used} of ${item.product_name || 'this item'} — only ${Math.max(0, Number(item.quantity))} sold`,
+        capacityParams(item.product_name, Number(item.product_id) || 0, used, Number(item.quantity)))
     }
     const productId = Number(item.product_id) || 0
     let fallback = fallbackByProduct.get(productId) || 0
@@ -335,7 +362,16 @@ export function assertReturnCreateCapacity(
     fallbackByProduct.set(productId, fallback - allocated)
   }
   const overflow = [...fallbackByProduct.entries()].find(([, quantity]) => quantity > 0)
-  if (overflow) throw new Error(`Cannot return ${overflow[1]} additional unit(s) of product #${overflow[0]} — only the unreturned sold quantity is eligible`)
+  if (overflow) {
+    // Every sale line of this product is full by now (the allocation above
+    // fills each before any quantity is left over), so what would count as
+    // returned is everything the sale sold of it plus the overflow.
+    const [productId, extra] = overflow
+    const lines = saleItems.filter((item) => (Number(item.product_id) || 0) === productId)
+    const sold = lines.reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0)
+    throw new ReturnCapacityError(`Cannot return ${extra} additional unit(s) of product #${productId} — only the unreturned sold quantity is eligible`,
+      capacityParams(lines.find((item) => String(item.product_name ?? '').trim())?.product_name, productId, sold + extra, sold))
+  }
 }
 
 export function returnCreateGuardStatement(

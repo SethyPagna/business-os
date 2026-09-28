@@ -422,6 +422,10 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
+  // The values a coded refusal's sentence names (POST /api/returns/bulk's
+  // return_restore_over_capacity: product, returned, sold), so the restated
+  // sentence keeps them -- see returns/helpers/returnRefusalError.ts.
+  error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null
   error.current = parsed?.current || null
   // Older Workers only returned the generic `current` record for a settings
   // conflict. Prefer the newer, intentionally field-scoped payload, but

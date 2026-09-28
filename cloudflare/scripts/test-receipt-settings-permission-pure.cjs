@@ -29,7 +29,7 @@ function bucketFor(key) {
   return null
 }
 // bucket grant OR settings (admin folds into a caller's grant set upstream,
-// same contract as settings.ts's real missingBucket check).
+// same contract as settings.ts's real settingsPermissionRefusal).
 const canWrite = (key, grants) => {
   const b = bucketFor(key)
   if (!b) return grants.has('settings')
