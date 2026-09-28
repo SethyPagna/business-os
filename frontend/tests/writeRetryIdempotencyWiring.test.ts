@@ -639,7 +639,7 @@ await runTest('the stock-action import releases its pending job only after it st
   const component = readComponent('components/products/import/StockActionImportModal.tsx')
   const writes = descendants(component.file, (node) => isRefCurrentAssignment(node, 'pendingJobRef')) as ts.BinaryExpression[]
   const releases = writes.filter((node) => node.right.getText() !== 'pending')
-  assert.ok(releases.length >= 3)
+  assert.equal(releases.length, 3, 'the pending job is released after a start, after a cancel, and on close')
   for (const release of releases) {
     assert.ok(!onFailurePath(release), `a catch or finally must not drop the pending job: ${lineOf(component, release)}`)
     const owner = functionLabel(enclosingFunction(release))

@@ -5,7 +5,6 @@ export type Scope = Record<string, unknown>
 
 export interface ComponentSource {
   url: URL
-  text: string
   file: ts.SourceFile
 }
 
@@ -20,7 +19,7 @@ type ImportBinding = { specifier: string; importedName: string | null }
 export function readComponent(relativeToSrc: string): ComponentSource {
   const url = new URL(`../src/${relativeToSrc}`, import.meta.url)
   const text = readFileSync(url, 'utf8').replace(/\r\n/g, '\n')
-  return { url, text, file: ts.createSourceFile(url.pathname, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX) }
+  return { url, file: ts.createSourceFile(url.pathname, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX) }
 }
 
 export function isFunctionNode(node: ts.Node | undefined): node is FunctionNode {
@@ -57,7 +56,7 @@ function isDeclarationName(node: ts.Identifier): boolean {
   return ts.isJsxAttribute(parent) || ts.isLabeledStatement(parent) || ts.isBreakOrContinueStatement(parent)
 }
 
-export function freeIdentifiers(root: ts.Node): string[] {
+function freeIdentifiers(root: ts.Node): string[] {
   const declared = new Set<string>()
   const referenced = new Set<string>()
   const declare = (name: ts.BindingName): void => {
