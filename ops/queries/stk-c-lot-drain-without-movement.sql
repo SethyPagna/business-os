@@ -37,11 +37,17 @@
 -- (first 200 characters of the stored response), branch_stock_now,
 -- lot_stock_now. Ids, timestamps and quantities only. Read-only.
 --
--- Compensation is NOT done here: see the FX-stock-adjust lane result. After a
--- physical count confirms the units are still on the shelf, the operator
--- re-records them through the app (Stock Adjust, Add, reason
--- "STK-C compensation"), which writes the movement the failed request never
--- did.
+-- Compensation is NOT done here, and never by SQL. Proposed (not run): per
+-- flagged product + branch, count the shelf first. Units still there that the
+-- ledgers dropped go back through the app's one lot-level Set writer:
+-- POST /inventory/adjust {type:'set', setScope:'lot', batchId:<batch_id>,
+-- branchId, quantity:<counted units of that received date>, reason:
+-- 'STK-C compensation <batch_key> <observed_at>', client_request_id}. Upward
+-- it raises the lot and branch_stock together and writes one 'adjustment'
+-- movement at the lot's own cost (not a purchase), with undo. A receipt row
+-- with no orphan_drain row names no lot: set the product's received date the
+-- counted units belong to. Units no longer on the shelf need nothing -- the
+-- ledgers already dropped them; only their movement row is missing.
 -- ops:min-rows 0
 -- ops:max-rows 2000
 WITH receipt_fields AS (
