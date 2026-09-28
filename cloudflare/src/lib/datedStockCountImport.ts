@@ -44,13 +44,19 @@ export interface DatedCountEntry {
 // only ever touched the plain aggregate (never a tracked batch). Lets a
 // rerun reverse only ITS OWN prior batch effects before recomputing,
 // instead of being forced to skip batch actions on every rerun.
+//
+// `receivedBatchId` (FX-stock4 E1): set only when `batchId` is not the lot
+// the action was recorded on -- a merge moved that lot's units onto another
+// lot (datedStockCountRoute.ts resolves it). A reversed receipt comes off
+// `batchId`, where the units are now, and is un-received from
+// `receivedBatchId`, the lot whose received figures recorded it.
 export interface ExistingCountMovement {
   id: number
   productId: number
   branchId: number
   date: string
   signedQuantity: number
-  batchActions?: { batchId: number; quantity: number }[]
+  batchActions?: { batchId: number; quantity: number; receivedBatchId?: number }[]
 }
 
 export interface CurrentStock {
@@ -356,7 +362,9 @@ function computeBatchPlanForGroup(
 // A lot the provenance names that the caller did not load is still
 // reversed (it holds nothing here, so it starts below zero or, for a
 // reversed drain, gets its units back) with no date of its own; the route
-// loads those lots, inactive ones included, so this is only a fallback.
+// loads those lots, inactive ones included, and first resolves every action
+// to a lot of the counted product (FX-stock4 E1), so this is only a fallback
+// for a direct caller.
 function reconstructBatchBaseline(
   groupBatches: ExistingBatchState[],
   deletedMovements: ExistingCountMovement[],
