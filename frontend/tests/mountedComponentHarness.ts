@@ -23,11 +23,12 @@ const TRANSPORT_MODULE = /^api\/[^/]+Transport\.ts$/
 const DISPATCH = Symbol.for('mountedComponentHarness.dispatch')
 const LONG_TIMER_MS = 1_000
 const FLUSH_MS = 4
-const QUIET_MS = 80
+const QUIET_MS = 120
 const SETTLE_DEADLINE_MS = 10_000
 
 let domVersion = 0
 let bundlerActivity = 0
+let transformsInFlight = 0
 
 class MemoryStyle {
   [property: string]: unknown
@@ -430,6 +431,19 @@ function harnessPlugin(): Plugin {
     },
     transform() {
       bundlerActivity += 1
+      transformsInFlight += 1
+      return null
+    },
+  }
+}
+
+function transformDonePlugin(): Plugin {
+  return {
+    name: 'mounted-component-harness-transform-done',
+    enforce: 'post',
+    transform() {
+      bundlerActivity += 1
+      transformsInFlight -= 1
       return null
     },
   }
@@ -452,6 +466,8 @@ export interface MountOptions {
 }
 
 export interface SettleOptions {
+  until?: () => boolean
+  waitingFor?: string
   expireWaitsWhen?: () => boolean
 }
 
@@ -466,6 +482,7 @@ export interface MountedSurface {
   type(node: MemoryNode, value: string): Promise<void>
   call(node: MemoryNode, handler: string, args: unknown[], options?: SettleOptions): Promise<void>
   settle(options?: SettleOptions): Promise<void>
+  waitFor(condition: () => boolean, what: string): Promise<void>
   render(props: Record<string, unknown>): Promise<void>
   unmount(): Promise<void>
 }
@@ -493,7 +510,7 @@ export async function createHarness(): Promise<Harness> {
       logLevel: 'error',
       server: { middlewareMode: true, hmr: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },
-      plugins: [harnessPlugin(), react()],
+      plugins: [harnessPlugin(), react(), transformDonePlugin()],
     })
   } catch (error) {
     restoreGlobals()
@@ -511,14 +528,15 @@ export async function createHarness(): Promise<Harness> {
       await act(async () => { await new Promise((done) => realSetTimeout(done, FLUSH_MS)) })
       if (options.expireWaitsWhen?.()) expireWaitsSince(pressMark)
       const next = activityMark()
-      if (next !== mark || pendingShortTimers() > 0) {
+      const busy = pendingShortTimers() > 0 || transformsInFlight > 0 || (options.until ? !options.until() : false)
+      if (next !== mark || busy) {
         mark = next
         quietSince = performance.now()
       } else if (performance.now() - quietSince >= QUIET_MS) {
         if (handlerFailures.length) throw new Error(`a handler rejected instead of handling its failure: ${String(handlerFailures.splice(0)[0])}`)
         return
       }
-      if (performance.now() > deadline) throw new Error(`the mounted surface never went quiet within ${SETTLE_DEADLINE_MS} ms`)
+      if (performance.now() > deadline) throw new Error(`the mounted surface ${options.waitingFor ? `never showed ${options.waitingFor}` : 'never went quiet'} within ${SETTLE_DEADLINE_MS} ms; it reads: ${memoryDocument.body.textContent.replace(/\s+/g, ' ').slice(0, 400)}`)
     }
   }
 
@@ -575,6 +593,7 @@ export async function createHarness(): Promise<Harness> {
       },
       call: (node, handler, args, settleOptions) => invoke(node, handler, args, settleOptions),
       settle: (settleOptions) => settle(settleOptions),
+      waitFor: (condition, what) => settle({ until: condition, waitingFor: what }),
       render,
       unmount: async () => {
         await act(async () => root.unmount())

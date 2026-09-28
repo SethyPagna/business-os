@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { compileFunction, compileHandler, findFunction, isFunctionNode, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
-import { createHarness, installSteppedClock as installOperatorClock, type Harness } from './mountedComponentHarness.ts'
+import { createHarness, installSteppedClock as installOperatorClock, type Harness, type SettleOptions } from './mountedComponentHarness.ts'
 import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
@@ -242,7 +242,10 @@ function adminApp(overrides: Record<string, unknown>): Record<string, unknown> {
 }
 
 const harness: Harness = await createHarness()
-const pressing = (write: ScriptedWrite) => ({ expireWaitsWhen: () => write.hanging })
+function pressing(write: ScriptedWrite): SettleOptions {
+  const before = write.calls.length
+  return { until: () => write.calls.length > before, waitingFor: 'the write this press sends', expireWaitsWhen: () => write.hanging }
+}
 
 await runTest('loyalty add: a timed-out or lost award keeps its id; only a committed award or a changed intent mints a new one', async () => {
   const write = scriptedWrite()
@@ -261,6 +264,7 @@ await runTest('loyalty add: a timed-out or lost award keeps its id; only a commi
   try {
     await page.type(page.field('membership_lookup'), member.customer.membership_number)
     await page.click(page.button(shown('lookup', 'Check points')))
+    await page.waitFor(() => page.findAll((node) => node.getAttribute('name') === 'loyalty_manual_points').length > 0, 'the award form')
     await proveOneIdentityPerMountedIntent({
       press: async () => {
         await page.type(page.field('loyalty_manual_points'), form.points)
@@ -338,47 +342,58 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
   const notices: Notice[] = []
   const form = { reason: 'Expired' }
   let parentFailures = 0
-  const scope: Scope = {
-    branchId: '1',
-    supplierId: '4',
-    selectedItems: [{ product_id: 5, product_name: 'Serum', quantity: 2, cost_price_usd: 4, cost_price_khr: 16400 }],
-    notify: recordNotices(notices),
-    tr: translate,
-    submitInFlightRef: { current: false },
-    setSubmitting: () => {},
-    user: { id: 3, name: 'Dara' },
-    supplier: { id: 4, name: 'Glow Co' },
-    notes: '',
-    settlement: 'refund',
-    effectiveCompensationUsd: 8,
-    effectiveCompensationKhr: 32800,
-    supplierReturnIdentityRef: { current: null },
-    createSupplierReturnRequest: write.fn,
-    SUPPLIER_RETURN_CREATE_TIMEOUT_MS: UI_TIMEOUT_MS,
-    window: { dispatchEvent: () => true },
-    onSuccess: () => {
-      if (parentFailures > 0) {
-        parentFailures -= 1
-        throw new Error('The returns list could not refresh.')
-      }
+  const serum = { id: 5, name: 'Serum', sku: 'SER-5', category: 'Skincare', display_quantity: 6, cost_price_usd: 4, cost_price_khr: 16400 }
+  const page = await harness.mount({
+    component: 'components/returns/NewSupplierReturnModal.tsx',
+    props: {
+      notify: recordNotices(notices),
+      fmtUSD: (value: unknown) => `$${Number(value || 0).toFixed(2)}`,
+      fmtKHR: (value: unknown) => `${Number(value || 0)}៛`,
+      onClose: () => {},
+      onSuccess: () => {
+        if (parentFailures > 0) {
+          parentFailures -= 1
+          throw new Error('The returns list could not refresh.')
+        }
+      },
     },
-    onClose: () => {},
-    reason: form.reason,
-  }
-  const render = await compileHandler<() => Promise<void>>(readComponent('components/returns/NewSupplierReturnModal.tsx'), 'submit', { locals: Object.keys(scope) })
-  await proveOneIdentityPerIntent({
-    press: () => render({ ...scope, reason: form.reason })(),
-    write,
-    notices,
-    identityOf: (call) => [String((call[0] as WireRequest).client_request_id), String((call[0] as WireRequest).return_number)],
-    requestOf: (call) => withoutIdentity(call[0]),
-    editIntent: () => { form.reason = 'Damaged in transit' },
-    committed: answer({ success: true, id: 91 }),
-    failParentOnce: () => { parentFailures = 1 },
+    app: adminApp({ page: 'returns' }),
+    doubles: {
+      'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Store', is_active: true, is_default: true }] },
+      'api/contactReadTransport.ts': { getSuppliers: async () => [{ id: 4, name: 'Glow Co' }] },
+      'api/inventoryTransport.ts': { getInventorySummary: async () => [serum] },
+      'api/returnsReadTransport.ts': { getReturnReasonPresets: async () => ({}) },
+      'api/returnsTransport.ts': { createSupplierReturn: write.fn },
+    },
   })
-  const first = write.calls[0][0] as WireRequest
-  assert.match(String(first.client_request_id), /^supplier_return_/)
-  assert.match(String(first.return_number), /^SRET-/)
+  try {
+    await page.waitFor(() => page.findAll((node) => node.tagName === 'TR' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
+    await page.type(page.field('supplier-return-supplier'), 'Glow')
+    await page.click(page.find((node) => node.getAttribute('role') === 'option' && node.textContent.includes('Glow Co'), 'supplier option Glow Co'))
+    await proveOneIdentityPerMountedIntent({
+      press: async () => {
+        await page.type(page.field('supplier-return-reason'), form.reason)
+        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('tr')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
+        await page.click(page.button(shown('save', 'Save')), pressing(write))
+      },
+      write,
+      notices,
+      identityOf: (call) => [String((call[0] as WireRequest).client_request_id), String((call[0] as WireRequest).return_number)],
+      requestOf: (call) => withoutIdentity(call[0]),
+      editIntent: () => { form.reason = 'Damaged in transit' },
+      committed: answer({ success: true, id: 91 }),
+      failParentOnce: () => { parentFailures = 1 },
+    })
+    const first = write.calls[0][0] as WireRequest
+    assert.deepEqual(
+      { branch: first.branch_id, supplier: first.supplier_id, reason: first.reason, items: first.items },
+      { branch: 1, supplier: 4, reason: 'Expired', items: [{ product_id: 5, product_name: 'Serum', quantity: 2, cost_price_usd: 4, cost_price_khr: 16400 }] },
+    )
+    assert.match(String(first.client_request_id), /^supplier_return_/)
+    assert.match(String(first.return_number), /^SRET-/)
+  } finally {
+    await page.unmount()
+  }
 })
 
 await runTest('inventory adjust: Save and Confirm keep one id per intent across failures; undo and redo keep their own until they fully succeed', async () => {
