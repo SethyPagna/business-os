@@ -14,6 +14,7 @@ const RETENTION_SOURCES = ['audit.ts', 'importRetention.ts', 'ephemeralRetention
 
 const SINGLE_ROW_QUERIES = ['r2-image-audit-summary', 'retention-health', 'd1-growth-candidates', 'd1-table-rows']
 const TABLE_ROWS_QUERY = 'd1-table-rows'
+const GROWTH_QUERY = 'd1-growth-candidates'
 const DBSTAT_PROBE = 'd1-dbstat-probe'
 const SINGLE_ROW_RULES = { minRows: 1, maxRows: 1, expectZero: null }
 const AT_LEAST_ONE_ROW_RULES = { minRows: 1, maxRows: null, expectZero: null }
@@ -180,6 +181,17 @@ async function main() {
       .filter(([, args]) => args > D1_MAX_FUNCTION_ARGS)
       .map(([fn, args]) => `ops/queries/${name}.sql: ${fn}() takes ${args} arguments`))
     assert.deepEqual(over, [], 'split the call (json_object: groups of at most 16 key/value pairs)')
+  })
+
+  await check(`${GROWTH_QUERY}'s header names every table it measures that a retention sweep prunes`, () => {
+    const query = load(GROWTH_QUERY)
+    const header = fs.readFileSync(query.file, 'utf8').split(/\r?\n/).filter((line) => line.startsWith('--') && !/^-- ops:/.test(line)).join(' ')
+    const measured = [...new Set([...query.sql.matchAll(/\bFROM ([a-z0-9_]+)/g)].map((m) => m[1]))]
+    const source = RETENTION_SOURCES.map((file) => fs.readFileSync(file, 'utf8')).join('\n')
+    const pruned = measured.filter((table) => new RegExp(`DELETE FROM ${table}\\b|'${table}'`).test(source))
+    assert.ok(pruned.length >= 3 && pruned.length < measured.length, `pruned ${pruned.join(', ')} of ${measured.length} measured tables`)
+    assert.deepEqual(pruned.filter((table) => !new RegExp(`\\b${table}\\b`).test(header)), [], 'name these pruned tables in the header')
+    assert.doesNotMatch(header, /only ever grow/)
   })
 
   await check('retention-health reads the settings keys the retention sweeps write', () => {

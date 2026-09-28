@@ -1,12 +1,18 @@
--- d1-growth-candidates: the tables that only ever grow (no retention in
--- lib/audit.ts, lib/importRetention.ts or lib/ephemeralRetention.ts), plus the
--- two retained tables with the largest payloads. For each: rows, oldest row,
--- and the bytes of its JSON/text payload columns (length of the value cast to
--- BLOB, i.e. UTF-8 bytes). Decide retention from these numbers, not guesses.
+-- d1-growth-candidates: tables that none of lib/audit.ts,
+-- lib/importRetention.ts or lib/ephemeralRetention.ts prunes; the windowed
+-- tables action_history, audit_logs and ai_response_logs; and the import
+-- tables importRetention prunes: import_job_errors, plus import_job_source_rows
+-- and import_job_rows, which production prunes only in business-os-import, so
+-- rows here are main-database leftovers. Rows per table and, where measured,
+-- the oldest row and the bytes of JSON/text payload columns (length of the
+-- value cast to BLOB, i.e. UTF-8 bytes). Decide retention from these numbers,
+-- not guesses.
 -- Provenance tables (mutation receipts, undo_snapshots, sale_record_events,
--- the migration receipt tables) are measured here but are NOT prune
--- candidates: undoAppliers.ts and KNOWN-90 depend on them.
--- Scans each listed table once. One row of scalar sub-queries.
+-- the migration receipt tables) are NOT prune candidates: undoAppliers.ts and
+-- KNOWN-90 depend on them. All but the migration receipt tables are measured
+-- here.
+-- One row of scalar sub-queries; each sub-query is its own scan, so a table
+-- in several of them is read several times.
 -- ops:min-rows 1
 -- ops:max-rows 1
 SELECT
