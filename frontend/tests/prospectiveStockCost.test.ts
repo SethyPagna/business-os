@@ -30,7 +30,7 @@ for (const canViewCosts of [false, true]) {
       let form: any
       const callback = evaluate(extract(path, path.includes('/forms/') ? 'selectProduct' : 'openAdjust'), {
         useCallback: (fn: unknown) => fn, costViewRef: { current: canViewCosts }, canViewCosts,
-        restoredDraftRef: { current: null }, resumeRef: { current: null }, receiptSessionIdRef: { current: null },
+        restoredDraftRef: { current: null }, resumeRef: { current: null }, receiptSessionIdRef: { current: null }, adjustIdentityRef: { current: null },
         defaultBranch: { id: 2 }, openingType: 'add', DEFAULT_ADD_QUANTITY: 1,
         setSelectedProduct: () => {}, setAdjustModal: () => {}, setPendingAdjust: () => {},
         ensureInventoryReasonsLoaded: () => {}, todayIsoDate: () => '2026-09-20',

@@ -26,7 +26,7 @@ import CsvImportPreview from '../../shared/CsvImportPreview.tsx'
 import ServerImportReviewScreen from '../../imports/ServerImportReviewScreen'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
-import { createImportJob, uploadImportJobCsv, startImportJob } from '../../../api/importJobsTransport.ts'
+import { createImportJob, uploadImportJobCsv, startImportJob, cancelImportJob } from '../../../api/importJobsTransport.ts'
 import {
   parseUnifiedStockRows,
   buildUnifiedStockTemplateCsv,
@@ -101,8 +101,20 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
   const [reviewJob, setReviewJob] = useState<{ id: string | number; rowCount: number } | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
+  // SCAN1 O13: the job this sheet already created but has not started. A
+  // retry after a failed upload or a lost start answer RESUMES it; creating a
+  // second job left the first "awaiting review" in the tracker, where
+  // approving it later applied the same stock rows twice.
+  const pendingJobRef = useRef<{ intent: string; id: string | number; uploaded: boolean } | null>(null)
 
-  useEffect(() => () => { aliveRef.current = false }, [])
+  useEffect(() => () => {
+    aliveRef.current = false
+    // Closing abandons the sheet: cancel a job that never started (approve
+    // refuses a cancelled job), best effort.
+    const orphan = pendingJobRef.current
+    pendingJobRef.current = null
+    if (orphan) void cancelImportJob(orphan.id).catch(() => {})
+  }, [])
 
   // The sheet is re-read whenever the file OR the mode changes: the receipt
   // gate is a DIRECT-mode question (a reconcile number is a counted total, not
@@ -168,15 +180,29 @@ export default function StockActionImportModal({ onClose, onDone, t, notify, top
     setBusy(true)
     setError('')
     try {
-      const created = unwrapImportJob(await createImportJob({
-        type: 'stock_actions',
-        policy: { source: 'stock_action_modal', stock_action_mode: mode, auto_approve: true },
-      }))
-      if (!created?.id) throw new Error(tr('stock_import_no_job', 'The import job could not be created.', 'មិនអាចបង្កើតការងារនាំចូលបានទេ។'))
-      await uploadImportJobCsv({ jobId: created.id, text: csvText, fileName: fileName || 'stock-actions.csv' })
-      await startImportJob(created.id)
+      const intent = JSON.stringify([mode, fileName, csvText])
+      let pending = pendingJobRef.current
+      if (pending && pending.intent !== intent) {
+        await cancelImportJob(pending.id)
+        pendingJobRef.current = pending = null
+      }
+      if (!pending) {
+        const created = unwrapImportJob(await createImportJob({
+          type: 'stock_actions',
+          policy: { source: 'stock_action_modal', stock_action_mode: mode, auto_approve: true },
+        }))
+        if (!created?.id) throw new Error(tr('stock_import_no_job', 'The import job could not be created.', 'មិនអាចបង្កើតការងារនាំចូលបានទេ។'))
+        pending = { intent, id: created.id, uploaded: false }
+        pendingJobRef.current = pending
+      }
+      if (!pending.uploaded) {
+        await uploadImportJobCsv({ jobId: pending.id, text: csvText, fileName: fileName || 'stock-actions.csv' })
+        pending.uploaded = true
+      }
+      await startImportJob(pending.id)
+      pendingJobRef.current = null
       if (!aliveRef.current) return
-      setReviewJob({ id: created.id, rowCount })
+      setReviewJob({ id: pending.id, rowCount })
     } catch (err) {
       setError(err instanceof Error ? err.message : tr('stock_import_start_failed', 'Could not start the import.', 'មិនអាចចាប់ផ្តើមការនាំចូលបានទេ។'))
     } finally {

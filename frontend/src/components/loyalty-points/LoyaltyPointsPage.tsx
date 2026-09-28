@@ -16,7 +16,9 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
+  withWriteTimeout,
 } from '../../utils/loaders.ts'
+import { createClientRequestId, identityForIntent, type IntentIdentityRef } from '../../api/requestIds.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'
@@ -349,6 +351,10 @@ export default function LoyaltyPointsPage() {
   const reviewRequestRef = useRef(0)
   const saveInFlightRef = useRef(false)
   const reviewSavingRef = useRef(false)
+  // SCAN1 F2: one request id per award intent. The UI stops waiting after
+  // LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS while the POST lives on, so the retry
+  // resends the SAME id and the Worker replays instead of adding the points twice.
+  const awardIdentityRef = useRef<IntentIdentityRef<string>['current']>(null)
   const sectionStorageKey = 'business-os:loyalty:section'
   const showLoyaltySection = (sectionId: Exclude<LoyaltySection, 'all'>): boolean => loyaltySection === 'all' || loyaltySection === sectionId
   const globalCopy = useCallback((key: string, fallback: string): string => {
@@ -564,11 +570,16 @@ export default function LoyaltyPointsPage() {
     }
     try {
       setManualPointSaving(true)
-      await withLoaderTimeout(
-        () => awardCustomerPoints(customerId, { points, note: manualPointNote.trim() }),
+      const note = manualPointNote.trim()
+      const awardRequestId = identityForIntent(awardIdentityRef, { customerId, points, note }, () => createClientRequestId('loyalty_points'))
+      await withWriteTimeout(
+        () => awardCustomerPoints(customerId, { points, note, client_request_id: awardRequestId }),
         'Award customer loyalty points',
         LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
+        (key: string) => t?.(key),
       )
+      // Committed: the next award, even an identical one, is a new request.
+      awardIdentityRef.current = null
       setManualPoints('')
       setManualPointNote('')
       notify(copy('addPointsSuccess', 'Points added to the customer.'))
