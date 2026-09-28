@@ -5,9 +5,12 @@
 // doesn't show different because conversion is different ... just one source
 // of truth but shown differently based on the settings").
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { formatReportMoney, makeReportMoneyFormatter, type ReportMoneyDeps } from '../src/utils/reportMoney.ts'
 import { actualUsdValue } from '../src/utils/financialPrecision.ts'
 import { normalizePriceValue } from '../src/utils/pricing.ts'
+import { num, pct, round2 } from '../src/components/sales/reports/reportModel.ts'
 
 let failed = 0
 const test = (name: string, fn: () => void): void => {
@@ -133,6 +136,74 @@ test('makeReportMoneyFormatter currries deps and defaults khr to 0', () => {
   const f = makeReportMoneyFormatter(deps('khr'))
   assert.equal(f(10), '40,000៛', 'a USD-only figure (khr omitted) still converts under KHR mode')
   assert.equal(f(0, 40000), '40,000៛')
+})
+
+// ---- SCAN1 M3: a refund is ONE amount -------------------------------------
+// A customer return stores its refund in dollars AND the riel equivalent at
+// the return's own rate (cloudflare/src/lib/customerReturnEntitlement.ts:
+// total_refund_khr = multiplyMoney4(usd, rate); the legacy path sums the sale
+// lines' riel twins). The Reports hub handed that pair to the fold above as if
+// it were a fee's two native amounts, so one $10.00 refund read $20.25 in USD
+// mode and "$10.00 · 41,000៛" (two refunds) in BOTH mode. These cases run the
+// REAL column definitions and the REAL cell/CSV formatters on a paired row.
+const reportsDir = new URL('../src/components/sales/reports/', import.meta.url)
+const readReport = (name: string) => fs.readFileSync(new URL(name, reportsDir), 'utf8')
+const between = (source: string, start: string, end: string) => {
+  const from = source.indexOf(start)
+  const to = source.indexOf(end, from)
+  assert.ok(from >= 0 && to > from, `slice ${start} .. ${end}`)
+  return stripTypeScriptTypes(source.slice(from, to).replaceAll('export function', 'function'))
+}
+type Column = { key: string; kind?: string; value: (row: unknown) => unknown; khr?: (row: unknown) => number }
+type Fmt = (usd: number, khr?: number) => string
+const tableSource = readReport('ReportTable.tsx')
+const table = new Function('num', 'fmtInt', 'fmtQty', 'fmtPct', 'fmtDateOnly', 'fmtDateTime24',
+  `${between(tableSource, 'export function formatCell', 'function isNumericKind')}
+   ${between(tableSource, 'export function csvColumnsFor', 'export default function ReportTable')}
+   return { formatCell, csvColumnsFor }`)(num, String, String, String, String, String) as {
+  formatCell: (column: Column, row: unknown, fmtMoney: Fmt) => unknown
+  csvColumnsFor: (columns: Column[], fmtMoney: Fmt) => Array<{ header: string; value: (row: unknown) => unknown }>
+}
+const returnsSource = readReport('ReturnsReport.tsx')
+const overviewSource = readReport('OverviewReport.tsx')
+const returnsHelpers = new Function('num', 'round2', 'pct',
+  `${between(returnsSource, 'function money(raw', 'export default function ReturnsReport')}
+   return { moneyColumns, mapReturnRow }`)(num, round2, pct) as {
+  moneyColumns: (tr: (key: string, fallback: string) => string, totalUsd: number) => Column[]
+  mapReturnRow: (raw: unknown, index: number) => Record<string, unknown>
+}
+// $10.00 refunded at 4,100 -- the pair as GET /api/returns/report sends it.
+// The display rate (RATE, 4,000) differs from the return's own rate on purpose.
+const pairedRefund = { count: 1, refund_usd: 10, refund_khr: 41_000 }
+const refundColumn = returnsHelpers.moneyColumns((_key, fallback) => fallback, 10).find((column) => column.key === 'refund')!
+const cell = (currency: string) => String(table.formatCell(refundColumn, pairedRefund, makeReportMoneyFormatter(deps(currency))))
+
+test('M3: a paired refund cell shows ONE amount in every display currency', () => {
+  assert.equal(cell('usd'), '$10.00', 'USD mode: the refund, not the refund plus its own riel twin ($20.25)')
+  assert.equal(cell('khr'), '40,000៛', 'KHR mode converts the dollar refund at the main rate, like revenue -- never 41,000 + 40,000')
+  assert.equal(cell('both'), '$10.00', 'BOTH mode shows the refund once, not "$10.00 · 41,000៛" (which reads as two refunds)')
+})
+
+test('M3: the CSV export carries the refund once, as a plain number', () => {
+  const [csvRefund] = table.csvColumnsFor([refundColumn], makeReportMoneyFormatter(deps('usd')))
+  assert.equal(csvRefund.value(pairedRefund), 10)
+})
+
+test('M3: fees keep additive folding -- their two amounts are independent native payments', () => {
+  assert.equal(formatReportMoney(5, 40000, deps('usd')), '$15.00')
+  assert.equal(formatReportMoney(5, 40000, deps('both')), '$5.00 · 40,000៛')
+})
+
+test('M3: the riel twin never enters a Reports hub refund figure', () => {
+  // Root cause, not symptom: every refund cell, the summary line, the totals
+  // row and the row detail read one figure. A report that still maps or passes
+  // refund_khr can fold it again (the per-return list, the summary line and the
+  // Overview's by-reason fold each did).
+  assert.equal('refund_khr' in returnsHelpers.mapReturnRow({ refund_usd: 10, refund_khr: 41_000 }, 0), false)
+  const carriesTwin = (source: string) => /refund_khr/.test(source)
+  assert.equal(carriesTwin('{ key: \'refund\', value: (r) => r.refund_usd, khr: (r) => r.refund_khr }'), true, 'negative control: the predicate sees the defect')
+  assert.equal(carriesTwin(returnsSource), false, 'ReturnsReport.tsx reads refund_usd only')
+  assert.equal(carriesTwin(overviewSource), false, 'OverviewReport.tsx reads refund_usd only')
 })
 
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }

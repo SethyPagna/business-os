@@ -31,7 +31,8 @@
  *   * REFUNDS are subtracted. There is no refund-tender column anywhere in the
  *     schema -- `returns` carries total_refund_usd/khr and nothing about how
  *     the money went back -- so a refund issued in the window is treated as
- *     cash out of this drawer.
+ *     cash out of this drawer, once, in dollars: total_refund_khr is the same
+ *     refund's riel equivalent, not a second payout (see shiftRefunds).
  *   * COURIER payouts are subtracted, for the same reason: what a courier was
  *     actually paid (sales.delivery_actual_cost_usd/khr, migration 0068) is a
  *     payout with no tender column. The double-count guard is NOT re-invented
@@ -388,16 +389,21 @@ export async function shiftCashSales(
  * is money that left THIS drawer, which is the opposite of how the same refund
  * is attributed for revenue (there it belongs to the sale's window). Both are
  * right for their own question; this one is about the cash box.
+ *
+ * Dollars only. total_refund_khr is the riel equivalent of the same refund
+ * (customerReturnEntitlement: multiplyMoney4(usd, rate); the legacy path sums
+ * the sale lines' riel twins), not a second payout, so subtracting it as well
+ * took every refund out of the drawer twice (SCAN1 M2).
  */
 export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
   const { clauses, params } = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('returns.branch_id = @branchId'); params.branchId = shift.branch_id }
   clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'")
   clauses.push("COALESCE(returns.return_scope, 'customer') = 'customer'")
-  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_usd), 0) AS usd,
-      COALESCE(SUM(total_refund_khr), 0) AS khr FROM returns WHERE ${clauses.join(' AND ')}`)
-    .get<{ usd: number; khr: number }>(params)
-  return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
+  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_usd), 0) AS usd
+      FROM returns WHERE ${clauses.join(' AND ')}`)
+    .get<{ usd: number }>(params)
+  return { usd: round2(Number(row?.usd || 0)), khr: 0 }
 }
 
 /**

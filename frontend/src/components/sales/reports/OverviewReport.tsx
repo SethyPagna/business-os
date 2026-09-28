@@ -25,6 +25,7 @@ import { Chip, DenseTable, Fold, OverflowMenu, Skeleton } from '../../shared/kit
 import ReceiptSheet, { type ReceiptBlock } from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { type ReportColumn } from './ReportTable.tsx'
+import { refundColumn } from './ReturnsReport.tsx'
 import {
   buildIncomeStatement,
   delta,
@@ -45,7 +46,7 @@ import {
 } from './reportModel.ts'
 import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } from './reportTypes.ts'
 
-interface ReturnsTotals { count: number; refund_usd: number; refund_khr: number }
+interface ReturnsTotals { count: number; refund_usd: number }
 interface ExpenseTotals { count: number; amount_usd: number; amount_khr: number }
 interface PaymentRow { key: string; payment_method: string; tx_count: number; revenue_usd: number; pending_revenue_usd: number; collected_usd: number }
 interface CourierRow {
@@ -59,7 +60,7 @@ interface CourierRow {
   margin_usd: number
   last_delivery_at: string | null
 }
-interface ReasonRow { reason: string; count: number; refund_usd: number; refund_khr: number }
+interface ReasonRow { reason: string; count: number; refund_usd: number }
 interface TypeRow { fee_type: string; count: number; amount_usd: number; amount_khr: number }
 interface OverviewResponse {
   is_admin?: boolean
@@ -168,7 +169,7 @@ export default function OverviewReport(p: ReportViewProps) {
   const reasonColumns: Array<ReportColumn<ReasonRow>> = [
     { key: 'reason', label: tr('reason', 'Reason'), primary: true, value: (r) => r.reason || '—' },
     { key: 'count', label: tr('rpt_count', 'Count'), kind: 'int', value: (r) => r.count },
-    { key: 'refund', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd, khr: (r) => r.refund_khr, emphasis: true },
+    refundColumn<ReasonRow>(tr),
   ]
   const typeColumns: Array<ReportColumn<TypeRow>> = [
     { key: 'fee_type', label: tr('type', 'Type'), primary: true, value: (r) => feeTypeLabel(r.fee_type) },

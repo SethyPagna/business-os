@@ -1,10 +1,13 @@
 // Real-SQLite regression lock for the Reports-hub money aggregation
-// (Part 553). Fees and returns are recorded in EITHER USD or KHR (never
-// both on one row); the /report endpoints used to SUM(amount_usd) only, so
-// a whole month of KHR-denominated fees/refunds reported as "$0.00" (user:
-// "the fees showing no rows even though there are many fees"). The fix sums
-// BOTH currencies. This test runs the EXACT money-sum SQL those two routes
-// use against a real better-sqlite3 fixture and asserts both totals.
+// (Part 553). A fee is recorded in EITHER USD or KHR (never both on one
+// row); the /report endpoints used to SUM(amount_usd) only, so a whole month
+// of KHR-denominated fees reported as "$0.00" (user: "the fees showing no
+// rows even though there are many fees"). The fix sums BOTH currencies. A
+// customer return is NOT single-currency: every writer stores the refund in
+// USD plus its riel equivalent at the return's rate, so refund_khr is the
+// twin of refund_usd and the Reports hub shows refund_usd alone (SCAN1 M3,
+// frontend/tests/reportMoney.test.ts). This test runs the EXACT money-sum SQL
+// those two routes use against a real better-sqlite3 fixture.
 //
 // Run (from cloudflare/): node scripts/test-report-currency-pure.cjs
 const assert = require('node:assert/strict')
@@ -29,9 +32,10 @@ insFee.run('delivery', 'grab ', 0, 18000, '2026-08-06')
 insFee.run('expense', 'Supplies', 0, 73500, '2026-08-06')
 insFee.run('expense', 'Supplies', 12.5, 0, '2026-08-07')
 insFee.run('expense', 'Supplies', 5, 0, '2026-07-31') // OUT of range -- must be excluded
-// 1 KHR-only customer return in range.
+// 1 customer return in range, stored as production stores it: $12.50 and its
+// riel twin at 4,100 (customerReturnEntitlement: multiplyMoney4(usd, rate)).
 db.prepare(`INSERT INTO returns (total_refund_usd, total_refund_khr, supplier_compensation_usd, supplier_compensation_khr, supplier_loss_usd, supplier_loss_khr, return_scope, status, branch_id, created_at)
-  VALUES (0, 51250, 0, 0, 0, 0, 'customer', 'completed', 1, '2026-08-10 03:00:00')`).run()
+  VALUES (12.5, 51250, 0, 0, 0, 0, 'customer', 'completed', 1, '2026-08-10 03:00:00')`).run()
 
 // --- fees /report money expression (verbatim from routes/fees.ts) --------
 const feeMoney = 'ROUND(COALESCE(SUM(amount_usd), 0), 2) AS amount_usd, ROUND(COALESCE(SUM(amount_khr), 0), 0) AS amount_khr'
@@ -65,12 +69,12 @@ check('fees by_category groups label variants without changing source rows', () 
 // --- returns /report money expression (verbatim from routes/returns.ts) --
 const retMoney = `ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS refund_usd,
   ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS refund_khr`
-check('returns report sums refund KHR, scoped + customer + not-cancelled', () => {
+check('returns report sums the refund and its riel twin, scoped + customer + not-cancelled', () => {
   const where = `date(created_at) BETWEEN date('2026-08-01') AND date('2026-08-31') AND COALESCE(return_scope,'customer')='customer' AND COALESCE(status,'completed')<>'cancelled'`
   const totals = db.prepare(`SELECT COUNT(*) AS count, ${retMoney} FROM returns WHERE ${where}`).get()
   assert.equal(totals.count, 1)
-  assert.equal(totals.refund_usd, 0)
-  assert.equal(totals.refund_khr, 51250, 'KHR refund is summed')
+  assert.equal(totals.refund_usd, 12.5, 'the refund')
+  assert.equal(totals.refund_khr, 51250, 'the same refund in riel, not a second amount')
 })
 
 // --- source guard: the routes must keep summing KHR --------------------

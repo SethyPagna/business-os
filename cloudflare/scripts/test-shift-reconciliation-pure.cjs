@@ -27,6 +27,12 @@
 //      stops the mirror drifting.
 //   5. A NULL-BRANCH EXPENSE COUNTS (owner ruling), a wrong-branch one does
 //      not, and the window stays half-open at both ends.
+//   6. A REFUND LEAVES THE DRAWER ONCE (SCAN1 M2). Returns are seeded the way
+//      every live writer stores them: the dollar refund AND its riel
+//      equivalent at the return's own rate (total_refund_khr =
+//      multiplyMoney4(usd, rate)). The riel figure is the same money, so a
+//      reconciliation that subtracts it as well reports a riel surplus on
+//      every shift with a return.
 //
 // Run (from cloudflare/): node scripts/test-shift-reconciliation-pure.cjs
 const assert = require('node:assert/strict')
@@ -58,7 +64,7 @@ CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, sa
  label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
- total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
+ total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, exchange_rate REAL);
 
 INSERT INTO settings VALUES('pos_payment_methods','["Cash","ABA"]');
 
@@ -83,14 +89,6 @@ INSERT INTO fees(id,created_at,branch_id,sale_id,fee_type,label,amount_usd,amoun
  (5,'2026-09-06 03:00:00',2,NULL,'expense','Other employee',77,0,8),
  (6,'2026-09-06 06:00:00',2,NULL,'expense','At the closing second',66,0,7),
  (7,'2026-09-06 01:59:59',2,NULL,'expense','Before opening',55,0,7);
-
-INSERT INTO returns(id,created_at,branch_id,cashier_id,status,return_scope,total_refund_usd,total_refund_khr) VALUES
- (1,'2026-09-06 03:15:00',2,7,'completed','customer',6,0),
- (2,'2026-09-06 03:20:00',2,7,'cancelled','customer',44,0),
- (3,'2026-09-06 03:25:00',2,7,'completed','supplier',33,0),
- (4,'2026-09-06 05:00:00',2,7,'completed','customer',0,10000),
- (5,'2026-09-06 05:10:00',2,8,'completed','customer',22,0),
- (6,'2026-09-06 06:00:00',2,7,'completed','customer',11,0);
 `)
 
 const db = {
@@ -110,6 +108,24 @@ const db = {
 
 const businessDateWindow = load('lib/businessDateWindow.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
+
+// Customer returns, stored the way routes/returns.ts stores them: the dollar
+// refund plus its riel equivalent at the return's own rate, through the
+// writer's own multiplyMoney4. Return 4 is at 4,000 so the twin is not a
+// multiple of the 4,100 used elsewhere.
+const insertReturn = sql.prepare(`INSERT INTO returns(id,created_at,branch_id,cashier_id,status,return_scope,
+  total_refund_usd,total_refund_khr,exchange_rate) VALUES (?,?,?,?,?,?,?,?,?)`)
+function pairedReturn(id, createdAt, branchId, cashierId, status, scope, usd, rate = 4100) {
+  insertReturn.run(id, createdAt, branchId, cashierId, status, scope, usd, moneyPrecision.multiplyMoney4(usd, rate), rate)
+}
+pairedReturn(1, '2026-09-06 03:15:00', 2, 7, 'completed', 'customer', 6)
+pairedReturn(2, '2026-09-06 03:20:00', 2, 7, 'cancelled', 'customer', 44)
+pairedReturn(3, '2026-09-06 03:25:00', 2, 7, 'completed', 'supplier', 33)
+pairedReturn(4, '2026-09-06 05:00:00', 2, 7, 'completed', 'customer', 2.5, 4000)
+pairedReturn(5, '2026-09-06 05:10:00', 2, 8, 'completed', 'customer', 22)
+pairedReturn(6, '2026-09-06 06:00:00', 2, 7, 'completed', 'customer', 11)
+assert.deepEqual(sql.prepare('SELECT total_refund_khr AS khr FROM returns WHERE id IN (1,4) ORDER BY id').all().map((r) => r.khr), [24_600, 10_000],
+  'the fixture carries the riel twin every live writer stores')
 const reportMoneyPrecision = load('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const promotionRules = load('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = load('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
@@ -139,8 +155,8 @@ const SHIFT = {
   opening_float_khr: 100_000,
   additional_cash_usd: 10,
   additional_cash_khr: 5_000,
-  closing_counted_usd: 100,
-  closing_counted_khr: 150_000,
+  closing_counted_usd: 97.5,
+  closing_counted_khr: 160_000,
 }
 const NOW = Date.parse('2026-09-06T08:00:00.000Z')
 
@@ -166,8 +182,8 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.ok(expenses.details.some((row) => row.label === 'Moto'), 'the NULL-branch fee is itemised, not silently folded away')
 
   const refunds = await recon.shiftRefunds({}, SHIFT, NOW)
-  assert.deepEqual(refunds, { usd: 6, khr: 10_000 },
-    'refunds are the completed CUSTOMER returns issued in the window; cancelled, supplier-scope, another cashier and the closing second are out')
+  assert.deepEqual(refunds, { usd: 8.5, khr: 0 },
+    'refunds are the completed CUSTOMER returns issued in the window ($6 + $2.50), each taken out ONCE in dollars -- their riel twins (24,600 + 10,000) are the same money; cancelled, supplier-scope, another cashier and the closing second are out')
 
   const courier = await recon.shiftCourierPayouts({}, SHIFT, NOW)
   assert.deepEqual(courier, { usd: 3, khr: 4_000 },
@@ -179,19 +195,22 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   assert.deepEqual(result.opening, { usd: 50, khr: 100_000 })
   assert.deepEqual(result.additional_cash, { usd: 10, khr: 5_000 })
   assert.deepEqual(result.cash_sales, { usd: 58, khr: 82_000 })
-  assert.deepEqual(result.refunds, { usd: 6, khr: 10_000 })
+  assert.deepEqual(result.refunds, { usd: 8.5, khr: 0 })
   assert.deepEqual(result.expenses, { usd: 9, khr: 20_000 })
   assert.deepEqual(result.courier, { usd: 3, khr: 4_000 })
-  assert.deepEqual(result.expected, { usd: 100, khr: 153_000 })
-  assert.deepEqual(result.counted, { usd: 100, khr: 150_000 })
+  assert.deepEqual(result.expected, { usd: 97.5, khr: 163_000 })
+  assert.deepEqual(result.counted, { usd: 97.5, khr: 160_000 })
+  // The drawer really is 3,000 riel short. Subtracting the refunds' riel
+  // twins as well (34,600) turned that into a +31,600 riel SURPLUS: the
+  // double subtraction does not just add noise, it hides a real shortage.
   assert.deepEqual(result.difference, { usd: 0, khr: -3_000 })
   assert.equal(result.needs_review, false)
   assert.deepEqual(result.review_codes, [])
 
   // THE DISCRIMINATOR. `opening + cash - expenses` is what lib/telegram.ts
   // computed before this module existed. On this drawer it answers $99 and
-  // 162,000 riel -- $9 and 14,000 riel of money that was handed back to
-  // customers and couriers and is not in the till.
+  // 162,000 riel -- ignoring the $8.50 of refunds and the courier payouts
+  // that are not in the till, and the change added after opening.
   const legacyUsd = 50 + 58 - 9
   const legacyKhr = 100_000 + 82_000 - 20_000
   assert.equal(legacyUsd, 99)
@@ -202,12 +221,12 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   console.log('PASS arithmetic: expected = opening + cash - refunds - expenses - courier, per currency, and it is NOT the old opening+cash-expenses answer')
 
   // --- 3. the two currencies stay apart ------------------------------------
-  // The dollar side moved by 58 - 6 - 9 - 3 = +40 and the riel side by
-  // 82,000 - 10,000 - 20,000 - 4,000 = +48,000. Neither number is derivable
-  // from the other at any exchange rate the fixture uses (4,100), so an
-  // implementation that folded them would have to miss one.
-  assert.equal(result.expected.usd - result.opening.usd, 50)
-  assert.equal(result.expected.khr - result.opening.khr, 53_000)
+  // The dollar side moved by 10 + 58 - 8.5 - 9 - 3 = +47.5 and the riel side
+  // by 5,000 + 82,000 - 20,000 - 4,000 = +63,000. Neither number is
+  // derivable from the other at any exchange rate the fixture uses (4,100),
+  // so an implementation that folded them would have to miss one.
+  assert.equal(result.expected.usd - result.opening.usd, 47.5)
+  assert.equal(result.expected.khr - result.opening.khr, 63_000)
   assert.notEqual(Math.round((result.expected.khr - result.opening.khr) / 4100), result.expected.usd - result.opening.usd)
   console.log('PASS native currencies: dollars and riel move independently; no exchange rate is applied anywhere')
 
@@ -223,7 +242,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   renameTo('Cash USD', ['Cash USD', 'ABA'])
   const renamed = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(renamed.cash_sales, { usd: 58, khr: 82_000 }, 'a renamed cash method is still cash')
-  assert.deepEqual(renamed.expected, { usd: 100, khr: 153_000 })
+  assert.deepEqual(renamed.expected, { usd: 97.5, khr: 163_000 })
   assert.equal(renamed.needs_review, false)
   assert.equal(registry.resolvePaymentMethodKind('Cash USD'), 'cash')
   assert.equal(registry.resolvePaymentMethodKind('សាច់ប្រាក់ដុល្លារ'), 'cash')
@@ -241,7 +260,7 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   sql.prepare("INSERT INTO settings(key,value) VALUES('pos_payment_method_kinds',?)").run(JSON.stringify({ Drawer: 'cash' }))
   const pinned = await recon.loadShiftReconciliation({}, SHIFT, NOW)
   assert.deepEqual(pinned.cash_sales, { usd: 58, khr: 82_000 })
-  assert.deepEqual(pinned.expected, { usd: 100, khr: 153_000 })
+  assert.deepEqual(pinned.expected, { usd: 97.5, khr: 163_000 })
   assert.equal(pinned.needs_review, false)
   sql.prepare("DELETE FROM settings WHERE key='pos_payment_method_kinds'").run()
   renameTo('Cash', ['Cash', 'ABA'])
@@ -275,14 +294,30 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   const laterAfterSettlement = await recon.loadShiftReconciliation({}, laterShift, NOW)
   assert.equal(originalAfterSettlement.cash_sales.usd - originalBeforeSettlement.cash_sales.usd, 17)
   assert.deepEqual(laterAfterSettlement.cash_sales, laterBeforeSettlement.cash_sales)
-  sql.prepare(`INSERT INTO returns(id,created_at,branch_id,cashier_id,status,return_scope,total_refund_usd)
-    VALUES (50,'2026-09-06 07:00:00',2,7,'completed','customer',2)`).run()
+  pairedReturn(50, '2026-09-06 07:00:00', 2, 7, 'completed', 'customer', 2)
   sql.prepare(`INSERT INTO fees(id,created_at,branch_id,created_by,fee_type,amount_usd)
     VALUES (50,'2026-09-06 07:00:00',2,7,'expense',3)`).run()
   const laterWithOutflows = await recon.loadShiftReconciliation({}, laterShift, NOW)
   assert.equal(laterWithOutflows.refunds.usd - laterAfterSettlement.refunds.usd, 2)
+  assert.equal(laterWithOutflows.refunds.khr, 0, 'the later refund\'s riel twin is not a second payout')
   assert.equal(laterWithOutflows.expenses.usd - laterAfterSettlement.expenses.usd, 3)
   console.log('PASS attribution: later settlement stays with sale creation; returns and fees use their own recorded windows')
+
+  // --- 5b. a refund leaves the drawer ONCE (SCAN1 M2) -----------------------
+  // The finding's own scenario: open $50 / 0 riel, one $10 customer return at
+  // 4,100 (stored 10 / 41,000), paid out in dollars, $40 / 0 riel counted.
+  // The honest answer is "balanced". Subtracting the riel twin as well said
+  // expected -41,000 riel and a +41,000 riel surplus on a drawer that holds no
+  // riel at all.
+  const refundShift = { ...SHIFT, user_id: 9, branch_id: 4, opened_at: '2026-09-07T02:00:00.000Z', closed_at: '2026-09-07T03:00:00.000Z',
+    opening_float_usd: 50, opening_float_khr: 0, additional_cash_usd: 0, additional_cash_khr: 0,
+    closing_counted_usd: 40, closing_counted_khr: 0 }
+  pairedReturn(60, '2026-09-07 02:30:00', 4, 9, 'completed', 'customer', 10)
+  const once = await recon.loadShiftReconciliation({}, refundShift, NOW)
+  assert.deepEqual(once.refunds, { usd: 10, khr: 0 }, 'one $10 refund is $10 out of the drawer, not $10 and 41,000 riel')
+  assert.deepEqual(once.expected, { usd: 40, khr: 0 })
+  assert.deepEqual(once.difference, { usd: 0, khr: 0 }, 'a balanced drawer reads balanced -- no phantom riel surplus')
+  console.log('PASS refund once: a return stored as USD + its riel twin is subtracted once, in dollars')
 
   // --- 6. the pure arithmetic on its own -----------------------------------
 

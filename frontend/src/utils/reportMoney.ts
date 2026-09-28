@@ -6,8 +6,8 @@
 // rates for sale and change").
 //
 // The invariant that makes this safe: the row's RAW stored amounts
-// (`amount_usd` + `amount_khr` for fees, `refund_usd` + `refund_khr` for
-// returns, `revenue_usd` for sales) are the ONE source of truth. This
+// (`amount_usd` + `amount_khr` for fees, `refund_usd` for returns,
+// `revenue_usd` for sales) are the ONE source of truth. This
 // function NEVER mutates or persists anything and NEVER chains a previously
 // converted value — every render recomputes straight from the raw pair. So
 // toggling the setting USD -> KHR -> BOTH -> USD is lossless: you always get
@@ -29,9 +29,12 @@ export interface ReportMoneyDeps {
 
 /**
  * Render a row's raw (usd, khr) amounts per the display_currency setting.
- * Fees/returns rows are single-currency (one of usd/khr is 0); sales pass
- * (revenue_usd, 0). In BOTH mode nothing is converted — each non-zero raw
- * amount is shown as-is ("$X · Y៛"), so BOTH is always rate-independent.
+ * `khr` is ADDED to `usd`, so pass it only when the two are independent
+ * native amounts, as a fee's are. A return's refund_khr is NOT: it is the
+ * same refund's riel equivalent (total_refund_khr = usd x the return's rate),
+ * and folding it doubled every refund (SCAN1 M3). Returns and sales pass
+ * their USD figure alone. In BOTH mode nothing is converted — each non-zero
+ * raw amount is shown as-is ("$X · Y៛"), so BOTH is always rate-independent.
  */
 export function formatReportMoney(usd: number, khr: number | undefined, deps: ReportMoneyDeps): string {
   const u = Number(usd) || 0
