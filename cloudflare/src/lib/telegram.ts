@@ -1564,7 +1564,7 @@ export type ShiftOverviewFigures = {
    *  typed 'delivery', and the courier money paid on the sales
    *  (courierPayoutsWhere) -- the same three the shift report splits. */
   expenses: { fees: ShiftMoney; deliveryFees: ShiftMoney; courier: ShiftMoney }
-  returns: { count: number; refundUsd: number; refundKhr: number }
+  returns: { count: number; refundUsd: number }
 }
 
 /**
@@ -1618,9 +1618,12 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
-  // day), which is why it is its own section and never subtracted.
+  // day), which is why it is its own section and never subtracted. A refund
+  // is ONE amount, in dollars like every total here: total_refund_khr is the
+  // same refund at the return's rate, so printing it beside the dollars read
+  // as a second refund (SCAN1 M3, the Reports hub rule).
   const returned = figures.returns
-  section('returns', returned.count ? [labeled('total', `${returned.count} · ${money(returned.refundUsd, returned.refundKhr)}`)] : [])
+  section('returns', returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : [])
   return lines.join('\n')
 }
 
@@ -1644,9 +1647,9 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
     db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
       WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`)
       .get<{ usd: number; khr: number; delivery_usd: number; delivery_khr: number }>(params),
-    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS khr FROM returns
+    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd FROM returns
       WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
-        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
+        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number }>(params),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
   ])
   return {
@@ -1668,7 +1671,7 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
       deliveryFees: { usd: Number(fees?.delivery_usd) || 0, khr: Number(fees?.delivery_khr) || 0 },
       courier,
     },
-    returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
+    returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0 },
   }
 }
 

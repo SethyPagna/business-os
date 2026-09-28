@@ -78,11 +78,13 @@ sqlite.exec(`
   INSERT INTO sales VALUES (4, 1, '2026-09-22T04:00:00Z', 'completed', 70, NULL);
   INSERT INTO sales VALUES (5, 1, '2026-09-23T05:00:00Z', 'cancelled', 80, NULL);
   -- Two customer returns taken on the day (local UTC+7; 17:30Z on the 22nd is
-  -- 00:30 on the 23rd), one cancelled return, one on another branch.
-  INSERT INTO returns VALUES (1, 1, '2026-09-22T17:30:00Z', 'completed', 'customer', 'Damaged', 7.5, 0);
-  INSERT INTO returns VALUES (2, 1, '2026-09-23T09:00:00Z', 'completed', NULL, '', 2.5, 0);
-  INSERT INTO returns VALUES (3, 1, '2026-09-23T09:10:00Z', 'cancelled', 'customer', '', 40, 0);
-  INSERT INTO returns VALUES (4, 2, '2026-09-23T09:20:00Z', 'completed', 'customer', '', 60, 0);
+  -- 00:30 on the 23rd), one cancelled return, one on another branch. Each is
+  -- stored the way every writer stores a refund: the dollars and their riel
+  -- twin at the return's own rate (4,100), one refund, not two payments.
+  INSERT INTO returns VALUES (1, 1, '2026-09-22T17:30:00Z', 'completed', 'customer', 'Damaged', 7.5, 30750);
+  INSERT INTO returns VALUES (2, 1, '2026-09-23T09:00:00Z', 'completed', NULL, '', 2.5, 10250);
+  INSERT INTO returns VALUES (3, 1, '2026-09-23T09:10:00Z', 'cancelled', 'customer', '', 40, 164000);
+  INSERT INTO returns VALUES (4, 2, '2026-09-23T09:20:00Z', 'completed', 'customer', '', 60, 246000);
 `)
 const preparedSql = []
 function d1() {
@@ -314,8 +316,10 @@ async function main() {
   const returnsRange = reports.exports.reportRecordRange('returns', 'returns', routeFilters).sql
   check('the expenses clause is reportRecordRange(\'expenses\')', feesSql.includes(`WHERE ${expensesRange}`), `${feesSql}\n${expensesRange}`)
   check('the returns clause is reportRecordRange(\'returns\')', returnsSql.includes(`AND ${returnsRange}`), `${returnsSql}\n${returnsRange}`)
-  check('the returns and expenses figures leave the other branch, day and cancelled rows out',
-    figures.returns.count === 2 && figures.returns.refundUsd === 10
+  // One refund is one amount, as on the Reports hub: the riel twin is not a
+  // figure of its own, so the message cannot print "$10.00 · 41,000៛".
+  check('the returns and expenses figures leave the other branch, day and cancelled rows out; a refund carries no riel twin',
+    JSON.stringify(figures.returns) === JSON.stringify({ count: 2, refundUsd: 10 })
       && JSON.stringify(figures.expenses) === JSON.stringify({ fees: { usd: 5, khr: 4000 }, deliveryFees: { usd: 0, khr: 0 }, courier: { usd: 4.5, khr: 0 } }),
     JSON.stringify(figures))
 
