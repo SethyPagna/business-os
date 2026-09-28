@@ -8,7 +8,7 @@ and their new status, and each item here names the Part that last changed it (e.
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
 |---|---|---|
-| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), P-public, U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [x] deployed 26 Sep 11:35 UTC as `c64eced5` (Deploy run 36237752796, approved under the owner's delegation): 0196 + 0197 applied, key-table counts unchanged, live revision `c64eced5c231` → Part 633 |
+| CP-1 | urgent @ `1e925d8b`: U-telegram, U-products-ui, U-records part 1, U-load, U-db (0196/0197), U-worker perf, admin P0 fix, dpdns retired, deploy kit (menu + GitHub button), POS held-order fix | [x] deployed 26 Sep 11:35 UTC as `c64eced5` (Deploy run 36237752796, approved under the owner's delegation): 0196 + 0197 applied, key-table counts unchanged, live revision `c64eced5c231` → Part 633. Correction 29 Sep: P-public was listed here but its branch was never merged, so it did not ship (see Checkpoint 2) |
 | CP-1b | transfer fix: multi-product quantity no longer locked behind a received date (Automatic FIFO) — `ab156302` | [x] deployed with CP-1 (`c64eced5`) → Part 633 |
 | CP-1c | transfer follow-ups (U-transfer2): a product whose lots add up to more than its branch stock could not be transferred at all; a saved draft plus a failed lot load dead-ended | [x] deployed 27 Sep as `c35af63b` (Deploy run 36271249835; R-transfer2 certified: 540 cf + 570 fe files green individually). Follow-up U-transfer3: a refused saved transfer run locks the form (Edit/Discard) → Part 634 |
 | CP-2 | S-auth, U-profile + U-profile2 (+ U-profile3 fixes), U-records2, S-uploads2a/2b (+ S-uploads3 fixes), U-cost + 0195 | [x] deployed 27 Sep as `c5b28762` (Deploy run 36292174516, both hosts); smoke: /uploads CSP sandbox + nosniff + Range 206 live; R-cp2 exception (session-duration mints a session → bypasses the current-password allowance) → S-auth4 → Part 636 |
@@ -77,7 +77,7 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 - [ ] Integrate → both package gates at committed HEAD → browser check → deploy → live check
 
 ### Checkpoint 2 — public site
-- [x] P-public (refuter certified; translate DOM guard, viewer focus/scroll lock, CSP frame-src added; on-screen check pending): Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
+- [ ] P-public: NOT LIVE. The 29 Sep branch census found `claude/p-public-20260925` (`97587c5b`, 19 commits) was never merged; the earlier [x] was wrong. A reconcile lane is queued ahead of the storefront lanes (PWA-1, AB-F, P2, K1). Content (refuter certified; translate DOM guard, viewer focus/scroll lock, CSP frame-src added; on-screen check pending): Khmer default + Google Translate with no-translate guards; owner default Caution / Need-more-details texts; official name never falls back to shop name, empty rows hidden; FAQ columns expand independently; contact button minimized; small scrollable image album + new viewer; policies shown as tabs; clipping + full-width search; About overhaul + footer with socials; compact products filter; phone-first pass
 - [~] Official product names: step 1 product list from the public catalog (local Records only) → brand batches researched in parallel → Excel for owner review; no import without owner review
 - [ ] Integrate → gates → browser check (360/390/desktop, KM/EN) → deploy → live check
 
@@ -104,9 +104,9 @@ PD-1 wave 1 (I1–I10, A1–A3, D-docs) stopped on a usage limit before writing 
 | CERT | council-build (detached 19013909) | read-only: every test file individually + hygiene | running |
 | Investigations | read-only (ro-urgent) | I1, I5, I8 saved locally; I3, I7, I9, A1–A3, R2 plan running | — |
 | Official names | claude/p-names-20260926 | local Records only | [!] blocked: the public API challenges this laptop's VPN exit |
-| P-public | claude/p-public-20260925 | storefront | certified; on-screen check before integration |
+| P-public | claude/p-public-20260925 | storefront | certified 25 Sep; never merged (census 29 Sep); reconcile lane queued before PWA-1/AB-F/P2/K1 |
 | U-sync | claude/u-sync-20260926 | sync coalescing, useSyncReload, PageSlot memo, NotificationContext, hidden-tab timers | phase 1 done; refuter running |
-| U-drain | claude/u-drain-20260926 | automatic one-time upload of queued sales/outbox rows (existing server duplicate checks), nothing auto-deleted; then snapshot/mirror removal, POS checkout gate and copy (after U-sync, U-confirm, U-branch) | building; the offline map is in local Records |
+| U-drain | claude/u-drain-20260926 | automatic one-time upload of queued sales/outbox rows (existing server duplicate checks), nothing auto-deleted; then snapshot/mirror removal, POS checkout gate and copy (after U-sync, U-confirm, U-branch) | not shipped: census 29 Sep found 7 uncommitted files and no commits; the owner-ruled one-time drain of queued sales still needs a lane (offline mode cancelled 26 Sep) |
 | U-deploykit | claude/u-deploykit-20260926 | run/release.bat menu, GitHub Actions deploy (manual start + owner approval), beginner setup guide, VPN split-tunnel guide | building; not pushed |
 
 ### Verification (every lane, before integration)
