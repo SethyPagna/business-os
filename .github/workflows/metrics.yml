@@ -1,0 +1,107 @@
+# Read-only: whole trading days of the Worker's request metrics from Analytics Engine. The repository is
+# public, so the log shows counts and PASS/FAIL; the numbers are encrypted (the token needs Account Analytics Read).
+name: Metrics
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: First business date to read, YYYY-MM-DD (trading hours 08:00-20:00 Cambodia)
+        required: true
+        type: string
+      days:
+        description: Whole trading days to pool, from that date on
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+          - '7'
+      revision:
+        description: Optional - only the datapoints of this build revision (as /api/runtime/version shows it)
+        required: false
+        default: ''
+        type: string
+      confirm:
+        description: Type metrics to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metrics
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check the confirm word
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'metrics', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type metrics in the confirm box to run this job.'
+            exit 1
+          }
+
+  metrics:
+    name: metrics
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check the confirm word
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if (-not [string]::Equals($env:CONFIRM, 'metrics', [System.StringComparison]::Ordinal)) {
+            Write-Output '::error::Type metrics in the confirm box to run this job.'
+            exit 1
+          }
+
+      - name: Check out
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Read the metrics (Analytics Engine SQL, encrypted on the runner)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPS_METRICS_FROM: ${{ inputs.from }}
+          OPS_METRICS_DAYS: ${{ inputs.days }}
+          OPS_METRICS_REVISION: ${{ inputs.revision }}
+          OPS_OUT_DIR: ${{ runner.temp }}/ops-out
+        run: node ops/scripts/ops-metrics.mjs
+
+      - name: Upload the encrypted file
+        if: always() && steps.checkout.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ops-metrics
+          path: ${{ runner.temp }}/ops-out/*.enc.json
+          retention-days: 3
+          if-no-files-found: ignore
