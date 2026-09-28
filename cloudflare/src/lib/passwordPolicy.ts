@@ -25,6 +25,34 @@ export function passwordMinLengthError(): string {
   return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
 }
 
+// bcrypt hashes only the first 72 bytes; a longer password would silently
+// match any password sharing those bytes.
+export const MAX_PASSWORD_BYTES = 72
+
+export type NewPasswordProblem = 'password_too_short' | 'password_edge_whitespace' | 'password_too_long'
+
+// Every NEW password (create, change, reset). Edge whitespace is refused, not
+// trimmed: a password manager saves exactly what was typed. Sign-in keeps
+// comparing the raw value, so existing passwords are unaffected.
+// Mirrored by frontend/src/utils/passwordRules.ts.
+export function newPasswordProblem(password: unknown): NewPasswordProblem | null {
+  const value = String(password ?? '')
+  if (value.length < MIN_PASSWORD_LENGTH) return 'password_too_short'
+  if (value !== value.trim()) return 'password_edge_whitespace'
+  if (new TextEncoder().encode(value).length > MAX_PASSWORD_BYTES) return 'password_too_long'
+  return null
+}
+
+const NEW_PASSWORD_PROBLEM_ERRORS: Record<NewPasswordProblem, string> = {
+  password_too_short: passwordMinLengthError(),
+  password_edge_whitespace: 'Password cannot start or end with a space',
+  password_too_long: `Password is too long: at most ${MAX_PASSWORD_BYTES} bytes (a Khmer letter counts as 3)`,
+}
+
+export function newPasswordProblemError(problem: NewPasswordProblem): string {
+  return NEW_PASSWORD_PROBLEM_ERRORS[problem]
+}
+
 // Passwords that are public because they sit in this repository's git
 // history (S-auth4b, 27 Sep 2026): the Worker's old seed fallback, and the
 // local-dev demo seed (lib/coreDataInvariants.ts LOCAL_DEV_ADMIN_PASSWORD),
@@ -35,8 +63,8 @@ export function passwordMinLengthError(): string {
 // Held as SHA-256 hex digests, not literals: the old seed literal must appear
 // nowhere in cloudflare/src (test-admin-reseed-never-default-password-pure.cjs),
 // so it can never be pasted back in as a default. Exact match on the value as
-// typed and as trimmed (the user routes trim before hashing). The plaintext is
-// only ever hashed here; never log it.
+// typed and as trimmed (passwords set before newPasswordProblem may carry edge
+// spaces). The plaintext is only ever hashed here; never log it.
 const KNOWN_LEAKED_PASSWORD_SHA256: readonly string[] = [
   'db735458867474ed3163fd668a7324d4c03853bec77d1ab3dc2f070ad92d80dc', // old seed fallback (12 chars)
   '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', // local-dev demo seed

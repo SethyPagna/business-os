@@ -14,7 +14,7 @@ import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '.
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
-import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
+import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { isGoogleLinkReady } from '../lib/googleOauth'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -536,11 +536,12 @@ app.post('/users', async (c) => {
   if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const username = String(body.username || '').trim()
-  const password = String(body.password || '').trim()
+  const password = String(body.password || '')
   const name = String(body.name || username).trim()
   const email = String(body.email || '').trim().toLowerCase() || null
   if (!username || !password) return c.json({ success: false, error: 'Username and password required' }, 400)
-  if (passwordTooShort(password)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  const passwordProblem = newPasswordProblem(password)
+  if (passwordProblem) return c.json({ success: false, error: newPasswordProblemError(passwordProblem), code: passwordProblem }, 400)
   if (await passwordKnownLeaked(password, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
   if (!isValidEmail(email)) return c.json({ success: false, error: 'Valid email required' }, 400)
   const roleId = Number(body.role_id)
@@ -813,9 +814,10 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
   const actor = c.get('user')
   const targetId = c.req.param('id') || ''
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-  const newPassword = String(body.newPassword || body.new_password || '').trim()
+  const newPassword = String(body.newPassword || body.new_password || '')
   if (!newPassword) return c.json({ success: false, error: 'New password required' }, 400)
-  if (passwordTooShort(newPassword)) return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  const passwordProblem = newPasswordProblem(newPassword)
+  if (passwordProblem) return c.json({ success: false, error: newPasswordProblemError(passwordProblem), code: passwordProblem }, 400)
   if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   if (options.requireAdminControl && !isAdminControlUser(actor)) {
