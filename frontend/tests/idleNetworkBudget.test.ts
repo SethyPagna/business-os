@@ -151,7 +151,9 @@ try {
     assert.equal(fetchCalls.length, 1, 'a dropped socket must trigger an immediate probe, not wait for the tick')
     const health = dispatched.slice(before).find((e) => e.type === 'server:health')
     assert.deepEqual(health?.detail, { online: false }, 'the failed probe must announce the server offline')
-    assert.equal(http.isServerOnline(), false)
+    // The stored offline state is proved by the next case: recovery is only
+    // announced on a change. F1 deleted the dead isServerOnline getter.
+    assert.equal('isServerOnline' in http, false, 'server health is read from server:health events, not a getter')
   })
 
   await runTest('while offline every visible tick probes, and recovery is announced', async () => {
