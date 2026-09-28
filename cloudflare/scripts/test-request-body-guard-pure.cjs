@@ -141,6 +141,7 @@ async function main() {
     '../lib/requestBodyGuard': guard, '../lib/auth': auth,
     '../lib/portalAbuseKey': { portalAbuseKey: async () => 'unit-portal-abuse-key' },
     '../lib/portalImagePrivacy': portalImagePrivacy,
+    '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
     '../lib/portalSession': {
       createPortalSession: async () => ({ token: '', expiresAt: '' }),
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},

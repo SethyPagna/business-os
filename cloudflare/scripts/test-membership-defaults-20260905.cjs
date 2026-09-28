@@ -31,6 +31,7 @@ const portal = load('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/anonymousCustomer': anonymousCustomer,
+  '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
 })
 const contactDependencies = {
   '../lib/db': { getDb: () => db },
