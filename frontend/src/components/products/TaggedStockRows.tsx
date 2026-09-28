@@ -2,6 +2,8 @@ import { memo, useState } from 'react'
 import Modal from '../shared/Modal'
 import { stockConditionLabel } from '../../utils/stockCondition.ts'
 import { disposeTaggedLot, restoreTaggedLot, type TaggedLotGroup } from '../../api/damagedLotsTransport.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
 
 // P3-L6. The TAGGED child row: units the owner chose to keep inside the
 // product group instead of destroying ("Make it option chooseable to keep in
@@ -155,6 +157,12 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
   const [quantity, setQuantity] = useState(String(held))
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
+  // SCAN1 STK-D: ONE id for this dialog, minted when it opens -- every retry
+  // click below reuses it, so a Restore / Dispose whose reply was lost
+  // replays on the Worker instead of applying twice. A refused attempt
+  // releases the id server-side, so correcting the quantity and retrying is
+  // fine; the next dialog gets a new one.
+  const [requestId] = useState(() => createClientRequestId('tagged'))
   const tag = stockConditionLabel(row.condition_tag)
   const title = kind === 'dispose'
     ? tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')
@@ -176,6 +184,7 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
         conditionTag: tag,
         quantity: qty,
         reason: reason.trim(),
+        client_request_id: requestId,
       }
       await (kind === 'dispose' ? disposeTaggedLot(payload) : restoreTaggedLot(payload))
       notify(kind === 'dispose'
@@ -185,8 +194,15 @@ export function TaggedStockActionModal({ action, tr, notify, onClose, onDone }: 
       onClose()
     } catch (error) {
       // The dialog STAYS open with everything typed intact -- the standing
-      // rule for a failed stock action.
-      notify(error instanceof Error ? error.message : tr('error', 'Error'), 'error')
+      // rule for a failed stock action. A guard code (the held stock changed
+      // under the action, a replay refusal) is shown in the operator's
+      // language; anything else keeps the Worker's own sentence.
+      notify(stockFailureText(error, tr, tr('error', 'Error')), 'error')
+      // The held stock changed under the action, or it was already recorded /
+      // recorded but did not finish: either way the list on screen is stale,
+      // so refresh it behind the dialog.
+      const code = (error as { code?: unknown } | null)?.code
+      if (code === 'tagged_lot_conflict' || stockLineNeedsRemoval(error)) onDone()
     } finally {
       setSaving(false)
     }

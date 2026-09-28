@@ -24,14 +24,14 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
+import { withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { planReceiveBatchStock, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, planBranchStockRemoval, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
@@ -63,8 +63,8 @@ import { findTransferReceipt, normalizeTransferRequestId, transferReceiptRespons
 import { resolveMovementCostSnapshot, type MovementCostComponent } from '../lib/movementCostSnapshot'
 import { parseStockConditionTag, type StockConditionTag } from '../lib/stockCondition'
 import {
-  allocateTaggedLots, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
-  readOpenTaggedLots, readTaggedLotGroups,
+  allocateTaggedLots, isTaggedLotConflict, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
+  readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
 import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
@@ -1420,8 +1420,26 @@ async function branchStockQty(env: Env, productId: number, branchId: number): Pr
   return row ? num(row.quantity) : 0
 }
 
+// The answer every stock removal gives when the stock it read is gone by the
+// time it writes (an in-batch guard or a strict CHECK refused the batch, so
+// NOTHING was written). The frontend translates the code
+// (utils/stockAdjustOutcome.ts); the English is the direct-API fallback.
+const STOCK_REMOVAL_CONFLICT = {
+  error: 'The stock changed while this was being saved. Nothing was changed; refresh and try again.',
+  code: 'stock_removal_conflict',
+} as const
+
 async function applyStockDelta(env: Env, productId: number, branchId: number, delta: number) {
   const db = getDb(env)
+  if (delta < 0) {
+    // SCAN1 STK-C: a decrement must never go through the accumulating UPSERT
+    // below. Its VALUES row carries the negative delta, SQLite checks
+    // CHECK(quantity >= 0) (migration 0058) on that candidate row before ON
+    // CONFLICT is considered, and so the write failed every time. The strict,
+    // guarded UPDATE is the one removal idiom (planBranchStockRemoval).
+    await db.batch(planBranchStockRemoval({ productId, branchId, quantity: -delta }))
+    return
+  }
   await db.batch([
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
@@ -1455,7 +1473,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     'adjust',
     body,
     (value, status) => c.json(value as never, status as never),
-    (markWritten) => runAdjustActionKernel(c, body, markWritten),
+    (markWritten, atomicMark) => runAdjustActionKernel(c, body, markWritten, atomicMark),
   )
 }
 
@@ -1464,7 +1482,11 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
 // can move stock, and it is what tells a retry apart from a re-apply: every
 // refusal above that line released the claim and may be retried with the same
 // id, every failure below it is reported as partially applied instead.
-async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>): Promise<Response> {
+// `atomicMark` is the same barrier as a statement, for the one path whose whole
+// stock write is a single db.batch (the auto-routed removal): the mark commits
+// with the stock or not at all. Optional so a caller that stubs the wrapper
+// with a one-argument run() still drives the kernel.
+async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>, atomicMark?: StockMutationAtomicMark): Promise<Response> {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -1916,7 +1938,99 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // Everything above this line is reads, validation and (for an unlocked add)
   // at most a sibling product row that a retry resolves to again by identity.
   // Everything below it can move stock.
-  await markWritten()
+  //
+  // SCAN1 STK-C / OV-6: an auto-routed removal (no lot named) is ONE db.batch
+  // -- the captured lot drain, the strict aggregate decrement for the full
+  // quantity, and its movement or held row -- so its write mark rides INSIDE
+  // that batch (atomicMark) instead of being set ahead of it. A guard that
+  // refuses the write rolls the mark back with it and the claim is released.
+  const atomicRemoval = !correctionLot && useBatchLedger && type === 'remove'
+    && batchIdRequested == null && (rawBatchId == null || rawBatchId === '')
+  if (!atomicRemoval) await markWritten()
+
+  // The two ledger records a removal can leave -- the plain movement row, or
+  // the held-lot row + damage_out movement of a tagged removal -- built in one
+  // place for both the atomic removal batch below and the older sequential
+  // paths after it. Closures, so they read resolvedBatchId and
+  // removedBatchQuantities as the write path has left them.
+  const holdRemovedStatements = (tag: StockConditionTag): StockWriteStatement[] => {
+    const holdCost = removeMovementCost || resolveMovementCostSnapshot({
+      quantity: Math.abs(delta),
+      components: removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      })),
+      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+    })
+    return planHoldAsTagged({
+      productId: targetProductId,
+      productName: targetProductName,
+      branchId,
+      branchName: branch?.name || null,
+      batchId: useBatchLedger ? resolvedBatchId : null,
+      quantity: Math.abs(delta),
+      tag,
+      source: 'remove',
+      reason,
+      cost: holdCost,
+      referenceId: sessionId,
+      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
+    })
+  }
+  const movementRowStatement = (): { sql: string; params: Record<string, unknown> } => {
+    let costComponents: MovementCostComponent[] = []
+    if (type === 'add') {
+      // An entered receipt cost, including an explicit free-goods zero, is
+      // the strongest action-time fact. KHR has no request/lot field; zero
+      // is defensible for explicitly free goods, otherwise use the catalog
+      // KHR snapshot without inventing an exchange conversion.
+      costComponents = [{
+        quantity: Math.abs(delta),
+        unitCostUsd: receiptUnitCostUsd,
+        unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
+      }]
+    } else if (removedBatchQuantities.length) {
+      costComponents = removedBatchQuantities.map((entry) => ({
+        quantity: entry.quantity,
+        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
+      }))
+    }
+    const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
+        quantity: Math.abs(delta),
+        components: costComponents,
+        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
+        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
+      })
+    return {
+      sql: `
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
+        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
+      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
+        @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
+        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+    `,
+      params: {
+        productId: targetProductId,
+        productName: targetProductName,
+        branchId,
+        branchName: branch?.name || null,
+        movementType,
+        quantity: Math.abs(delta),
+        ...movementCost,
+        reason: appendReceiptNotes(createdSibling
+          ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
+          : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
+        referenceId: sessionId,
+        userId: user?.id ?? null,
+        userName: actorSnapshot(user),
+        // 0084: the lot this adjust touched -- the received/topped lot on
+        // add, the explicit pick or fully-covering single auto-drained lot
+        // on remove; NULL when no single lot owns the whole movement.
+        batchId: useBatchLedger ? resolvedBatchId : null,
+      },
+    }
+  }
 
   if (correctionLot && addMovementCost) {
     // A physical count correction is not a new purchase. Preserve lot price,
@@ -2064,21 +2178,38 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       // across whatever active batches this branch has rather than
       // require one named lot, since there's no picker in play here to
       // have named one. Any shortfall the batches can't cover (mixed-
-      // provenance stock, see removeStockAcrossBatches) falls through to
-      // the same plain decrement a batch-less product already used.
+      // provenance stock: units that predate batch tracking and ride
+      // branch_stock alone) comes off the aggregate in the SAME batch.
+      //
+      // SCAN1 STK-C / OV-6: ONE db.batch -- the write mark, the captured
+      // lot drain (guarded, strict), the strict guarded aggregate decrement
+      // for the FULL quantity, and the movement row (or the held-lot row +
+      // damage_out of a tagged removal). The remainder used to go through
+      // applyStockDelta's UPSERT after the lots had already committed in a
+      // batch of their own, and the CHECK refused it every time: lots
+      // drained, no movement, a 400.
       try {
-        const drained = await removeStockAcrossBatches(db, {
-          productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations,
+        const plan = planRemoveStockAcrossBatches({
+          productId: targetProductId, branchId, quantity, allocations: capturedRemovalAllocations ?? [],
         })
-        autoBatchDrainIds = drained.batchIds
-        removedBatchQuantities = drained.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
+        autoBatchDrainIds = plan.batchIds
+        removedBatchQuantities = plan.batchQuantities.map((entry) => ({ batchId: entry.batchId, quantity: Math.abs(entry.quantity) }))
         // 0084: an auto-drain that ONE lot fully covered is attributable to
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
-        resolvedBatchId = drained.batchIds.length === 1 && drained.remainder === 0 ? drained.batchIds[0] : null
-        if (drained.remainder > 0) await applyStockDelta(c.env, targetProductId, branchId, -drained.remainder)
+        resolvedBatchId = plan.batchIds.length === 1 && plan.remainder === 0 ? plan.batchIds[0] : null
+        const mark = atomicMark?.statement() ?? null
+        await db.batch([
+          ...(mark ? [mark] : []),
+          ...plan.statements,
+          ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
+        ])
       } catch (err) {
+        if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+        if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
+      atomicMark?.committed()
+      movementWrittenAtomically = true
     }
   } else if (delta !== 0) {
     await applyStockDelta(c.env, targetProductId, branchId, delta)
@@ -2093,81 +2224,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // at what they cost -- but as damage_out, which a loss report must not
   // count; the loss is booked once, when the held row is disposed of.
   if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
-    const holdCost = removeMovementCost || resolveMovementCostSnapshot({
-      quantity: Math.abs(delta),
-      components: removedBatchQuantities.map((entry) => ({
-        quantity: entry.quantity,
-        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
-      })),
-      fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-      fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
-    })
-    await db.batch(planHoldAsTagged({
-      productId: targetProductId,
-      productName: targetProductName,
-      branchId,
-      branchName: branch?.name || null,
-      batchId: useBatchLedger ? resolvedBatchId : null,
-      quantity: Math.abs(delta),
-      tag: conditionTag,
-      source: 'remove',
-      reason,
-      cost: holdCost,
-      referenceId: sessionId,
-      actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    }))
+    await db.batch(holdRemovedStatements(conditionTag))
     movementWrittenAtomically = true
   }
 
   if (delta !== 0 && !movementWrittenAtomically) {
-    let costComponents: MovementCostComponent[] = []
-    if (type === 'add') {
-      // An entered receipt cost, including an explicit free-goods zero, is
-      // the strongest action-time fact. KHR has no request/lot field; zero
-      // is defensible for explicitly free goods, otherwise use the catalog
-      // KHR snapshot without inventing an exchange conversion.
-      costComponents = [{
-        quantity: Math.abs(delta),
-        unitCostUsd: receiptUnitCostUsd,
-        unitCostKhr: unitCostUsd === 0 && freeGoods ? 0 : null,
-      }]
-    } else if (removedBatchQuantities.length) {
-      costComponents = removedBatchQuantities.map((entry) => ({
-        quantity: entry.quantity,
-        unitCostUsd: removalCostByBatch.get(entry.batchId) ?? null,
-      }))
-    }
-    const movementCost = addMovementCost || removeMovementCost || resolveMovementCostSnapshot({
-        quantity: Math.abs(delta),
-        components: costComponents,
-        fallbackUnitCostUsd: productCostSnapshot?.cost_price_usd ?? null,
-        fallbackUnitCostKhr: productCostSnapshot?.cost_price_khr ?? null,
-      })
-    await db.prepare(`
-      INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
-      VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
-        @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
-        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
-    `).run({
-      productId: targetProductId,
-      productName: targetProductName,
-      branchId,
-      branchName: branch?.name || null,
-      movementType,
-      quantity: Math.abs(delta),
-      ...movementCost,
-      reason: appendReceiptNotes(createdSibling
-        ? `${reason ? `${reason} - ` : ''}Auto-created row (barcode/cost differs from ${product.name})`
-        : setToNote ? `${reason} (${setToNote})` : reason, reasonNotes),
-      referenceId: sessionId,
-      userId: user?.id ?? null,
-      userName: actorSnapshot(user),
-      // 0084: the lot this adjust touched -- the received/topped lot on
-      // add, the explicit pick or fully-covering single auto-drained lot
-      // on remove; NULL when no single lot owns the whole movement.
-      batchId: useBatchLedger ? resolvedBatchId : null,
-    })
+    const movement = movementRowStatement()
+    await db.prepare(movement.sql).run(movement.params)
   }
 
   // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
@@ -2199,6 +2262,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       }
     } catch (err) {
       if (err instanceof InsufficientBatchStockError) return c.json({ error: err.message }, 400)
+      if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
       return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
     }
     await db.batch(planHoldAsTagged({
@@ -2575,7 +2639,9 @@ app.post('/transfer', async (c) => {
   return c.json(transferReceiptResponse((await findTransferReceipt(db, user.id, clientRequestId))!))
 })
 
-// DEPRECATED as a UI entry point: InventoryStockModals.tsx no longer has a
+// DEPRECATED as a UI entry point (no screen calls it -- api/methods.ts still
+// exports moveStockRow, and it stays listed in the permission matrix as
+// inventory > move_row): InventoryStockModals.tsx no longer has a
 // "Move stock" action -- receiving stock at different pricing now goes
 // through POST /adjust's `unlockPricing` path (resolveAddStockTarget
 // above), which finds-or-creates the right row automatically instead of
@@ -2640,32 +2706,62 @@ app.post('/move-row', async (c) => {
   const available = await branchStockQty(c.env, sourceProductId, branchId)
   if (quantity > available) return c.json({ error: `Cannot move ${quantity} - only ${available} available in ${branch?.name || 'this branch'}` }, 400)
 
-  // Lot-ledger parity on BOTH legs (was plain applyStockDelta on each, which
-  // moved branch_stock while every branch_batch_stock row stayed frozen -- the
-  // same lot drift POST /adjust already avoids). Source: FIFO-drain its active
-  // lots for the moved units (removeStockAcrossBatches does the aggregate write
-  // too; any legacy-unlotted remainder rides applyStockDelta as before).
-  // Destination: a batch can't cross products, so the units arrive as a fresh
-  // lot via receiveBatchStock -- which keeps the destination's own
-  // branch_stock/branch_batch_stock/products in lockstep.
-  const moveDrained = await removeStockAcrossBatches(db, { productId: sourceProductId, branchId, quantity })
-  if (moveDrained.remainder > 0) await applyStockDelta(c.env, sourceProductId, branchId, -moveDrained.remainder)
-  const moveReceived = await receiveBatchStock(db, { productId: destinationProductId, branchId, quantity })
-  await db.batch([
-    {
-      // 0084 batch attribution: out is stampable only when ONE source lot
-      // covered the whole move; in always lands on exactly the lot
-      // receiveBatchStock resolved.
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveDrained.batchIds.length === 1 && moveDrained.remainder === 0 ? moveDrained.batchIds[0] : null },
-    },
-    {
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
-      params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: moveReceived.batchId },
-    },
-  ])
+  // Lot-ledger parity on BOTH legs, in ONE db.batch (SCAN1, the /move-row
+  // variant of OV-3). Source: the FIFO allocation of its active lots is read
+  // here and applied guarded + strict, with the aggregate decremented for the
+  // full quantity (lots plus any legacy-unlotted remainder) -- the same plan
+  // POST /adjust's auto-routed removal uses. Destination: a batch can't cross
+  // products, so the units arrive as a fresh lot, planned exactly as
+  // receiveBatchStock plans one. Both movements ride the same batch.
+  //
+  // It used to be four writes: a clamped lot drain that re-read the lots
+  // without guarding them, the remainder through applyStockDelta's UPSERT
+  // (which the CHECK refused -- a mixed source 500'd with its lots already
+  // drained), the destination receipt, then the movements. A lot sold between
+  // the read and the drain was clamped at 0 while the destination was still
+  // credited the full quantity: units created from nothing.
+  const sourceLots = await listBatchesForProduct(db, sourceProductId, branchId, { onlyAvailable: true })
+  let removal: ReturnType<typeof planRemoveStockAcrossBatches>
+  let receipt: ReturnType<typeof planReceiveBatchStock>
+  try {
+    removal = planRemoveStockAcrossBatches({
+      productId: sourceProductId, branchId, quantity, allocations: fifoRemovalAllocations(sourceLots, quantity),
+    })
+    receipt = planReceiveBatchStock({
+      productId: destinationProductId,
+      branchId,
+      quantity,
+      receiptLotTarget: await prepareReceiptLotTarget(db, { productId: destinationProductId }),
+    })
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
+  }
+  try {
+    await db.batch([
+      ...removal.statements,
+      ...receipt.statements,
+      { sql: 'DELETE FROM stock_session_guards', params: {} },
+      {
+        // 0084 batch attribution: out is stampable only when ONE source lot
+        // covered the whole move; in always lands on exactly the lot the
+        // receipt resolved.
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'move_out', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP, @batchId)`,
+        params: { productId: sourceProductId, productName: source.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: removal.batchIds.length === 1 && removal.remainder === 0 ? removal.batchIds[0] : null },
+      },
+      {
+        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+              VALUES (@productId, @productName, @branchId, @branchName, 'move_in', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP,
+                (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
+        params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchKey: receipt.batchKey },
+      },
+    ])
+  } catch (err) {
+    if (isStockRemovalConflict(err)) {
+      return c.json({ ...STOCK_REMOVAL_CONFLICT, error: 'The stock changed while it was being moved. Nothing was moved; refresh and try again.' }, 409)
+    }
+    return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
+  }
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
@@ -2779,12 +2875,31 @@ app.get('/tagged-lots', async (c) => {
 // both refuse outright when the held quantity no longer covers the request
 // -- a stale page must not partially apply. Gated exactly like /adjust: this
 // is a stock write.
+//
+// SCAN1 STK-D: a client_request_id makes a Restore / Dispose whose reply was
+// lost replay instead of posting twice -- the same per-line receipt guard
+// POST /adjust uses (kind 'adjust'; the action is part of the fingerprint, so
+// one id cannot be a Restore once and a Dispose the next). The kernel's one
+// batch carries the write mark, so the in-batch held-lot guard's 409 releases
+// the claim and the same id can be retried.
 async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'restore') {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return c.json({ error: 'Changing tagged stock requires Full Access to Inventory.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  return withStockMutationReceipt(
+    () => getDb(c.env),
+    user?.id ?? null,
+    'adjust',
+    { ...body, taggedLotAction: action },
+    (value, status) => c.json(value as never, status as never),
+    (_markWritten, atomicMark) => runTaggedLotActionKernel(c, action, body, atomicMark),
+  )
+}
+
+async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' | 'restore', body: Record<string, unknown>, atomicMark: StockMutationAtomicMark) {
+  const user = c.get('user')
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   const branchId = Number.parseInt(String(body.branchId ?? ''), 10)
   const quantity = Number(body.quantity)
@@ -2825,11 +2940,21 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
   }
   try {
-    await ordinaryBusinessBatch(db, action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change))
+    const mark = atomicMark.statement()
+    await ordinaryBusinessBatch(db, [
+      ...(mark ? [mark] : []),
+      ...(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
+    ])
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    // The in-batch held-lot guard refused: a concurrent sale or action took
+    // these units after they were read. Nothing was written.
+    if (isTaggedLotConflict(error)) {
+      return c.json({ error: 'The held stock changed while this was being saved. Nothing was changed; refresh and try again.', code: TAGGED_LOT_CONFLICT_CODE }, 409)
+    }
     return c.json({ error: error instanceof Error ? error.message : 'Failed to change tagged stock' }, 400)
   }
+  atomicMark.committed()
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
     branchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),

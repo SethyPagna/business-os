@@ -1,4 +1,5 @@
 import { apiFetch, route } from './http.ts'
+import { ensureClientRequestId } from './requestIds.ts'
 
 // K2 / 11.9 (Part 416): open damaged lots for the POS damage source option
 // (see cloudflare/src/routes/batches.ts GET /damaged-lots and
@@ -67,14 +68,21 @@ export type TaggedLotChange = {
   conditionTag: string
   quantity: number
   reason: string
+  /** SCAN1 STK-D: the per-request receipt id (POST /inventory/adjust's guard).
+    * A retry that carries the same id replays the first answer instead of
+    * disposing / restoring the units a second time. The dialog mints it once
+    * so its own retries reuse it; a caller that sends none still gets one. */
+  client_request_id?: string
 }
 
 /** Remove entirely: the held units are destroyed and booked as a loss at cost. */
 export function disposeTaggedLot(payload: TaggedLotChange): Promise<unknown> {
-  return route('inventory:tagged-lots:dispose', () => apiFetch('POST', '/api/inventory/tagged-lots/dispose', payload), null, true)
+  const body = ensureClientRequestId(payload, 'tagged')
+  return route('inventory:tagged-lots:dispose', () => apiFetch('POST', '/api/inventory/tagged-lots/dispose', body), null, true)
 }
 
 /** Restore to sellable: the exact reversal of keeping the units as tagged. */
 export function restoreTaggedLot(payload: TaggedLotChange): Promise<unknown> {
-  return route('inventory:tagged-lots:restore', () => apiFetch('POST', '/api/inventory/tagged-lots/restore', payload), null, true)
+  const body = ensureClientRequestId(payload, 'tagged')
+  return route('inventory:tagged-lots:restore', () => apiFetch('POST', '/api/inventory/tagged-lots/restore', body), null, true)
 }
