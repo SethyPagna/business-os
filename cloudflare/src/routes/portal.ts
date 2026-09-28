@@ -818,10 +818,11 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
 // GET /config -- the public storefront config (buildPublicPortalConfig).
 // It carries branding, logo framing, contact and social links, the About
 // title/story/blocks/picture, FAQ, promo cards, catalog display options, the
-// loyalty display settings and the public AI fields. It leaves out the AI prompt and provider (see
-// buildPublicPortalConfig) and a few Website Editor keys no visitor feature
-// reads yet (translations, language, title size, badges, stock thresholds;
-// the list is pinned by scripts/test-portal-about-publish-pure.cjs).
+// loyalty display settings and the public AI fields. It leaves out the AI
+// prompt and provider (see buildPublicPortalConfig) and a few Website Editor
+// keys no visitor feature reads yet (translations, language, title size,
+// badges, stock thresholds; the list is pinned by
+// scripts/test-portal-about-publish-pure.cjs).
 // ---------------------------------------------------------------------------
 // Public read caching
 // ---------------------------------------------------------------------------
