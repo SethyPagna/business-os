@@ -163,7 +163,7 @@ function requestWorkerVersion(worker: ServiceWorker): Promise<string> {
 // re-registration can park the build this page is already running, and a
 // standing "New version ready" bar that a restart cannot clear is worse than
 // no bar at all. An unanswered probe is treated the same way -- silence is
-// recoverable on the next visibility/online re-check, a wrong "restart now"
+// recoverable on watchForNewAppShell's next re-check, a wrong "restart now"
 // in the middle of a sale is not.
 async function announceWaitingAppShell(registration: ServiceWorkerRegistration) {
   const waiting = registration.waiting
