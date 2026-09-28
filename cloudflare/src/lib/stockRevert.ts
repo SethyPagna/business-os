@@ -279,9 +279,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       // and payment state stay on the row (see planUnreceiveBatchStock).
       if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
     } else {
-      // Same FIFO order removeStockAcrossBatches uses (listBatchesForProduct),
-      // written as strict statements into the one batch; whatever the lots
-      // cannot cover comes off the aggregate only.
+      // FIFO in listBatchesForProduct's order, written as strict statements
+      // into the one batch; whatever the lots cannot cover comes off the
+      // aggregate only.
       const lots = await listBatchesForProduct(db, productId, branchId, { onlyAvailable: true })
       const { takes, uncovered } = allocateAcrossLots(
         lots.map((lot) => ({ batchId: Number(lot.id), lotCode: lot.lot_code ?? null, expiryDate: lot.expiry_date ?? null, available: Number(lot.quantity) || 0 })),

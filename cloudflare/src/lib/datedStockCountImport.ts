@@ -178,9 +178,8 @@ export interface StockCountPlan {
   batchTopUps: BatchTopUp[]
   batchCreates: BatchCreate[]
   batchDrains: BatchDrain[]
-  // Existing batches this run's drains left at exactly 0 -- caller should
-  // mark these product_batches rows inactive (same as any other
-  // FIFO-drain-to-empty, matching removeStockAcrossBatches's convention).
+  // Existing lots this run's drains leave at exactly 0. The apply does not
+  // deactivate them; it reads only their branch ids, for its authority checks.
   batchDeactivations: { productId: number; branchId: number; batchId: number }[]
   // FX-stock F2: lot-only moves the apply layer writes with no movement of
   // their own -- units a sale took out of a superseded movement's receipt,
@@ -279,11 +278,9 @@ function computeBatchPlanForGroup(
         }
         actions.push({ batchId: lot.kind === 'existing' ? lot.batchId : null, date: lot.date, quantity: -take })
       }
-      // Any shortfall (this group's tracked batches can't cover the full
-      // decrease) is left untracked at the batch level, same as
-      // removeStockAcrossBatches's own "remainder" convention -- the
-      // aggregate movement above already accounts for the full amount
-      // either way.
+      // A shortfall the group's lots cannot cover stays untracked at the lot
+      // level, as planRemoveStockAcrossBatches treats its remainder; the
+      // count movement carries the full amount either way.
     }
   }
 
