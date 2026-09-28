@@ -43,6 +43,12 @@ const boundaries: Array<[string, string]> = [
   ['utils/alphaRail.ts', 'shared-ui'],
   ['components/catalog/logoImageStyle.ts', 'catalog-public-utils'],
   ['components/catalog/legal/PortalEmbedConsent.tsx', 'catalog-legal'],
+  // The data-repair transports are imported only by the repair panels inside
+  // ResetData's lazy chunk. The '/src/api/' fallback filed them in
+  // app-api-methods, which the storefront and every admin page load at boot.
+  ['api/legacySubtotalRepairTransport.ts', 'backup-reset-tools'],
+  ['api/generalCustomerRepairTransport.ts', 'backup-reset-tools'],
+  ['api/generalCustomerMembershipRepairTransport.ts', 'backup-reset-tools'],
 ]
 for (const [relative, expected] of boundaries) {
   const id = path.join(frontend, 'src', relative)
@@ -158,11 +164,11 @@ if (process.argv.includes('--bundle')) {
     return closure
   }
   for (const [entryName, forbidden] of [
-    ['index', ['vendor', 'app-auth', 'auth-login', 'catalog']],
+    ['index', ['vendor', 'app-auth', 'auth-login', 'catalog', 'backup-reset-tools']],
     ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker']],
-    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker']],
-    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api']],
-    ['catalog-secondary-tabs', ['app-auth', 'catalog', 'file-api', 'import-jobs-api']],
+    ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools']],
+    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
+    ['catalog-secondary-tabs', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
   ] as const) {
     const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
     const entry = files.find(file => match(entryName).test(file))
@@ -179,7 +185,7 @@ if (process.argv.includes('--bundle')) {
   const preloads = JSON.parse(preloadJson[1]) as { public: string[] }
   assert.ok(preloads.public.length > 0)
   const publicPreloadClosure = closureOf(preloads.public.map(file => path.posix.basename(file)))
-  for (const name of ['app-auth', 'auth-login', 'catalog', 'file-api', 'import-jobs-api']) {
+  for (const name of ['app-auth', 'auth-login', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']) {
     assert.equal([...publicPreloadClosure].some(file => new RegExp(`^${name}-[\\w-]{8}\\.js$`).test(file)), false, `public preload graph pulls ${name}`)
   }
   console.log(`PASS actual public preload closure: ${publicPreloadClosure.size} chunks, no admin/file/import code`)

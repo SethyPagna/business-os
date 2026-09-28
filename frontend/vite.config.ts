@@ -928,6 +928,14 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
+    // Only the repair panels inside ResetData import these. The '/src/api/'
+    // fallback below would file them in app-api-methods, which the storefront
+    // and every admin page load at boot.
+    if (
+      normalized.endsWith('/src/api/legacySubtotalRepairTransport.ts')
+      || normalized.endsWith('/src/api/generalCustomerRepairTransport.ts')
+      || normalized.endsWith('/src/api/generalCustomerMembershipRepairTransport.ts')
+    ) return 'backup-reset-tools'
     if (normalized.includes('/src/components/utils-settings/OtpModal.tsx')) return 'settings-otp-modal'
     if (normalized.includes('/src/components/users/permissionDefinitions.ts')) return 'user-permission-definitions'
     if (normalized.includes('/src/components/users/UserProfileModal.tsx')) return 'user-profile-modal'
