@@ -3099,31 +3099,101 @@ app.post('/customers/link-conflicts/undismiss', async (c) => {
 // Administrator-only manual point awards. A ledger event is created instead
 // of mutating a balance column, preserving the same calculable/auditable
 // model used for sales, returns, and approved share rewards.
+//
+// SCAN1 F2 (loyalty half): the Loyalty page's POST outlives its 12 s UI
+// timer, so a retry of an award that DID commit must be replayed, not added
+// twice. As with the shift lifecycle (routes/shifts.ts), the award's own audit
+// row is the receipt: written in the SAME batch as the ledger row, keyed on
+// (actor, client_request_id), carrying the canonical intent. A body without
+// an id (an older client) keeps the previous, unprotected behaviour.
+const AWARD_POINTS_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
+const AWARD_POINTS_RECEIPT_WHERE = `action = 'award_points' AND user_id = @actorId AND json_valid(details)
+      AND json_extract(details, '$.request.id') = @requestId`
 app.post('/customers/:id/points', async (c) => {
   const actor = c.get('user')
   if (!isAdminControlUser(actor)) return c.json({ error: 'Administrator access required to award loyalty points.' }, 403)
   const customerId = clampInt(c.req.param('id'), 0, 1, Number.MAX_SAFE_INTEGER)
-  const body = await c.req.json<{ points?: unknown; note?: unknown }>()
+  const body = await c.req.json<{ points?: unknown; note?: unknown; client_request_id?: unknown }>()
   const points = Number(body.points)
   if (!Number.isFinite(points) || points <= 0 || points > 1_000_000) {
     return c.json({ error: 'Points must be a positive number no greater than 1,000,000.' }, 400)
   }
+  // An id that was SENT but cannot be used is refused: running it unprotected
+  // would let the client believe the award is deduped when it is not.
+  const suppliedRequestId = body.client_request_id
+  const requestId = typeof suppliedRequestId === 'string' ? suppliedRequestId.trim() : ''
+  if (suppliedRequestId != null && suppliedRequestId !== '' && !AWARD_POINTS_REQUEST_ID.test(requestId)) {
+    return c.json({ error: 'Invalid loyalty award request identity. Reload the app and try again.', code: 'invalid_client_request_id' }, 400)
+  }
+  const awardedPoints = Number(points.toFixed(2))
+  const note = String(body.note || '').trim().slice(0, 500) || null
+  const canonical = JSON.stringify({ customer_id: customerId, points: awardedPoints, note })
   const db = getDb(c.env)
+  const replayAward = async (): Promise<Response | null> => {
+    const receipt = await db.prepare(`SELECT details FROM audit_logs WHERE ${AWARD_POINTS_RECEIPT_WHERE} ORDER BY id DESC LIMIT 1`)
+      .get<{ details: string }>({ actorId: actor.id, requestId })
+    if (!receipt) return null
+    const saved = JSON.parse(receipt.details) as { adjustmentId?: unknown; request?: { canonical?: unknown } }
+    if (saved.request?.canonical !== canonical) {
+      return c.json({ error: 'This loyalty award request identity was already used with different values.', code: 'idempotency_conflict' }, 409)
+    }
+    return c.json({ success: true, id: Number(saved.adjustmentId ?? 0), customer_id: customerId, points: awardedPoints, replayed: true }, 200)
+  }
+  if (requestId) {
+    const prior = await replayAward()
+    if (prior) return prior
+  }
   const customer = await db.prepare('SELECT id, name, membership_number, is_anonymous FROM customers WHERE id = ?').get<{ id: number; name: string | null; membership_number: string | null; is_anonymous: number }>([customerId])
   if (!customer) return c.json({ error: 'Customer not found.' }, 404)
   if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
-  const note = String(body.note || '').trim().slice(0, 500) || null
+  const auditDetails = {
+    adjustmentId: 0,
+    customerName: customer.name,
+    membershipNumber: customer.membership_number,
+    points: awardedPoints,
+    note,
+  }
   // created_by_name is a USER_NAME_SNAPSHOTS column (userIdentity.ts), so the
   // rename cascade rewrites it to the account USERNAME. Stamping the full name
   // here would make this row change shape the first time anyone is renamed.
+  const ledgerParams = { customerId, points: awardedPoints, note, actorId: actor.id, actorName: actorSnapshot(actor), requestId }
   let result
   try {
-    const results = await db.batch([
+    const results = await db.batch(requestId ? [
+      anonymousCustomerGuardStatement(customerId),
+      // The receipt is checked AGAIN inside the write: a concurrent retry that
+      // passed replayAward() before its twin committed inserts nothing here.
+      {
+        sql: `INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
+          SELECT @customerId, @points, @note, @actorId, @actorName
+          WHERE NOT EXISTS (SELECT 1 FROM audit_logs WHERE ${AWARD_POINTS_RECEIPT_WHERE})`,
+        params: ledgerParams,
+      },
+      // audit()'s own columns, written only when the ledger row above was
+      // (changes() = 1), carrying that row's id and the request identity.
+      {
+        sql: `INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, new_value, device_name, device_tz)
+          SELECT @actorId, COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@actorName), '')),
+            'award_points', 'customer', @customerId,
+            json_set(@details, '$.adjustmentId', last_insert_rowid()), 'customer', @customerId,
+            json_set(@details, '$.adjustmentId', last_insert_rowid()),
+            s.device_name, s.device_tz
+          FROM (SELECT 1 AS one) AS _receipt
+          LEFT JOIN users u ON u.id = @actorId
+          LEFT JOIN (
+            SELECT device_name, device_tz FROM user_sessions
+            WHERE user_id = @actorId AND revoked_at IS NULL
+            ORDER BY last_seen_at DESC, id DESC LIMIT 1
+          ) AS s ON 1 = 1
+          WHERE changes() = 1`,
+        params: { ...ledgerParams, details: JSON.stringify({ ...auditDetails, request: { id: requestId, canonical } }) },
+      },
+    ] : [
       anonymousCustomerGuardStatement(customerId),
       {
         sql: `INSERT INTO loyalty_point_adjustments (customer_id, points, note, created_by_id, created_by_name)
           VALUES (@customerId, @points, @note, @actorId, @actorName)`,
-        params: { customerId, points: Number(points.toFixed(2)), note, actorId: actor.id, actorName: actorSnapshot(actor) },
+        params: ledgerParams,
       },
     ])
     result = results[1]
@@ -3131,17 +3201,19 @@ app.post('/customers/:id/points', async (c) => {
     if ((await anonymousCustomerIds(db, [customerId])).has(customerId)) return anonymousCustomerMutationResponse(c)
     throw error
   }
+  if (requestId && Number(result.meta?.changes ?? 0) !== 1) {
+    // Its twin committed between replayAward() and this batch.
+    const committed = await replayAward()
+    if (committed) return committed
+    return c.json({ error: "The loyalty award could not be confirmed. Check the customer's points before retrying.", code: 'write_outcome_unknown', outcome: 'unknown' }, 503)
+  }
   const adjustmentId = Number(result.meta?.last_row_id ?? 0)
-  await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, {
-    adjustmentId,
-    customerName: customer.name,
-    membershipNumber: customer.membership_number,
-    points: Number(points.toFixed(2)),
-    note,
-  })
+  if (!requestId) {
+    await audit(c.env, actor.id, actorSnapshot(actor), 'award_points', 'customer', customerId, { ...auditDetails, adjustmentId })
+  }
   c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'award_points', id: customerId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'customers'))
-  return c.json({ success: true, id: adjustmentId, customer_id: customerId, points: Number(points.toFixed(2)) }, 201)
+  return c.json({ success: true, id: adjustmentId, customer_id: customerId, points: awardedPoints }, 201)
 })
 
 // GET /api/customers/points-summary -- was a hardcoded `[]` stub. Exported
