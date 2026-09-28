@@ -59,6 +59,21 @@ async function tryStoreCredential(username: string, password: string, displayNam
   }
 }
 
+export interface PasswordSaveRequest {
+  username: string
+  password: string
+  displayName?: string
+}
+
+// Asks the browser to save or update the person's OWN credential; the username
+// must be the canonical account username, never what was typed to sign in.
+// Never touches the clipboard: a copy happens only from a Copy button.
+export async function requestPasswordSave(request: PasswordSaveRequest): Promise<boolean> {
+  const username = String(request.username || '').trim()
+  if (!username || !request.password) return false
+  return tryStoreCredential(username, request.password, request.displayName)
+}
+
 export async function copyPasswordToClipboard(password: string): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return false
   try {
