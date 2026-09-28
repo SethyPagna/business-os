@@ -58,8 +58,7 @@ for (const file of transports) {
 }
 const localDb = read('src/api/localDb.ts')
 ok(!/localGetSettingsMeta|localSaveSettingsMeta/.test(localDb), 'the device-local settings_meta reader/writer pair is gone')
-ok(!/SettingsMeta/.test(read('src/api/settingsTransport.ts')) && !/SettingsMeta/.test(read('src/api/offlineSnapshotTransport.ts')),
-  'no writer feeds settings_meta any more')
+ok(!/SettingsMeta/.test(read('src/api/settingsTransport.ts')), 'no writer feeds settings_meta any more')
 ok(!/withExpectedUpdatedAt|await import\('\.\/expectedUpdatedAt\.ts'\)/.test(read('src/api/contactWriteTransport.ts')), 'contact writes no longer lazy-load the helper')
 
 // ── 2. transports send exactly what the caller passed ───────────────────────

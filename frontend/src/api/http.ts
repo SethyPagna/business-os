@@ -1051,8 +1051,6 @@ let healthLifecycleListenersRegistered = false
 // an import because websocket.ts already imports this module.
 let _syncSocketOpen = false
 
-export function isServerOnline(): boolean { return _serverOnline }
-
 function setServerHealth(online: boolean): void {
   if (online === _serverOnline) return
   _serverOnline = online

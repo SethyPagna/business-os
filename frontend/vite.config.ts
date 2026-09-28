@@ -740,15 +740,20 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
-    if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
     if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
     if (normalized.endsWith('/src/api/requestIds.ts')) return 'request-ids'
     if (normalized.endsWith('/src/api/conflicts.ts')) return 'api-conflicts'
+    // storagePolicy.ts is shared by localMirrors (here) and the notification /
+    // drive-sync transports. Left unassigned, it lands in whichever manual
+    // chunk Rollup reaches first, so an unrelated import change (F1, 27 Sep)
+    // moved it into notification-api and pulled that chunk into every
+    // api-local-cache consumer, the catalog closure included.
     if (
       normalized.endsWith('/src/api/localMirrors.ts')
       || normalized.endsWith('/src/api/lazyLocalDb.ts')
       || normalized.endsWith('/src/api/queryCache.ts')
+      || normalized.endsWith('/src/platform/storage/storagePolicy.ts')
     ) {
       return 'api-local-cache'
     }

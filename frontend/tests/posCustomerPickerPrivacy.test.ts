@@ -7,7 +7,6 @@ import { createServer } from 'vite'
 
 const transport = fs.readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
-const snapshot = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 
 assert.match(transport, /export async function getSalesCustomerPicker/)
 assert.match(transport, /fields: 'sales_picker'/)
@@ -42,5 +41,4 @@ try {
 assert.match(pos, /const changeCustomerSearch[\s\S]{0,500}invalidateTrackedRequest\(customerRequestRef\)[\s\S]{0,240}setCustomerSuggestions\(\[\]\)/, 'the input handler invalidates an in-flight old query and clears its visible rows synchronously')
 assert.match(pos, /onChange=\{e => changeCustomerSearch\(e\.target\.value\)\}/, 'the mounted POS input uses the guarded transition handler')
 
-assert.match(snapshot, /\/api\/customers\?fields=picker/, 'offline mirror stays on the bounded snapshot route')
 console.log('PASS POS search and exact-id refresh use the narrow picker; offline fallback keeps the same allowlist')
