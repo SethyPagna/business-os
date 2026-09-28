@@ -6,10 +6,13 @@
 // of truth but shown differently based on the settings").
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
+import { transformSync } from 'esbuild'
+import ts from 'typescript'
 import { formatReportMoney, makeReportMoneyFormatter, type ReportMoneyDeps } from '../src/utils/reportMoney.ts'
 import { actualUsdValue } from '../src/utils/financialPrecision.ts'
 import { normalizePriceValue } from '../src/utils/pricing.ts'
+import * as reportModel from '../src/components/sales/reports/reportModel.ts'
 import { num, pct, round2 } from '../src/components/sales/reports/reportModel.ts'
 
 let failed = 0
@@ -217,6 +220,82 @@ test('M3: the Returns hint tells the owner the rule the cells follow, in both pa
   }
   assert.doesNotMatch(packs.en.rpt_hint_returns, /recorded in/i, 'en no longer says a refund keeps the currency it was recorded in')
   assert.ok(!packs.km.rpt_hint_returns.includes('រូបិយប័ណ្ណដែលបានកត់ត្រា'), 'km no longer says a refund keeps the currency it was recorded in')
+})
+
+const require = createRequire(import.meta.url)
+const React = require('react') as typeof import('react')
+const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server')
+type ReturnsReportProps = Record<string, unknown>
+function renderReturnsReport(response: unknown, fmtMoney: Fmt, search: string): string {
+  const passThrough = ({ children }: { children?: React.ReactNode }) => React.createElement(React.Fragment, null, children)
+  const noIcon = () => null
+  const reportTable = ({ columns, rows, totalsRow, fmtMoney: money }: { columns: Column[]; rows: unknown[]; totalsRow: unknown; fmtMoney: Fmt }) =>
+    React.createElement('table', null, [...rows, ...(totalsRow ? [totalsRow] : [])].map((row, index) =>
+      React.createElement('tr', { key: index }, columns.map((column) =>
+        React.createElement('td', { key: column.key }, table.formatCell(column, row, money) as React.ReactNode)))))
+  const reportFrame = ({ summary, children }: { summary: string; children?: React.ReactNode }) =>
+    React.createElement('section', null, React.createElement('p', null, summary), children)
+  const modules: Record<string, unknown> = {
+    'lucide-react/dist/esm/icons/download.js': { __esModule: true, default: noIcon },
+    'lucide-react/dist/esm/icons/printer.js': { __esModule: true, default: noIcon },
+    '../../../api/reportsTransport.ts': { getBusinessSummaryReturnsPage: () => Promise.resolve(null) },
+    '../../../api/returnsReadTransport.ts': { getReturnsReport: () => Promise.resolve(null) },
+    '../../../utils/csv.ts': { downloadCSV: () => undefined },
+    '../../../utils/exportOptions.ts': { openPrintExport: () => undefined },
+    '../../../utils/formatters.ts': { fmtDateOnly: String, fmtDateTime24: String },
+    '../../shared/kit': { Button: passThrough, Chip: passThrough, Fold: passThrough, OverflowMenu: noIcon },
+    './ReceiptSheet.tsx': { __esModule: true, default: noIcon },
+    './ReportFrame.tsx': { __esModule: true, default: reportFrame, useReportData: () => ({ data: response, loading: false, error: null, reload: () => undefined }) },
+    './ReportTable.tsx': { __esModule: true, default: reportTable, csvColumnsFor: table.csvColumnsFor },
+    './reportModel.ts': reportModel,
+    './reportTypes.ts': { tableLabels: () => ({ total: 'Total' }), exportMenuItems: () => [], rangeSubtitle: () => '' },
+    './usePagedReport.ts': { usePagedReport: () => ({ rows: [], hasMore: false, loading: false, loadingMore: false, error: null, reload: () => undefined, loadMore: () => undefined }) },
+  }
+  const compiled = { exports: {} as { default?: React.ComponentType<ReturnsReportProps> } }
+  new Function('require', 'module', 'exports', transformSync(returnsSource, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code)(
+    (id: string) => (id in modules ? modules[id] : require(id)), compiled, compiled.exports)
+  const tr = (_key: string, fallback: string) => fallback
+  return renderToStaticMarkup(React.createElement(compiled.exports.default!, {
+    tr, t: (key: string) => key, fmtMoney, style: {}, search, canExport: () => false,
+    filters: { startDate: '2026-09-01', endDate: '2026-09-02' }, view: { labelKey: 'returns', fallback: 'Returns' },
+  }))
+}
+
+test('M3: the rendered Returns report hands fmtMoney each refund once -- summary, search total and totals row', () => {
+  const calls: Array<[number, number | undefined]> = []
+  const both = makeReportMoneyFormatter(deps('both'))
+  const spy: Fmt = (usd, khr) => { calls.push([usd, khr]); return both(usd, khr) }
+  const html = renderReturnsReport({
+    totals: { count: 2, refund_usd: 15, refund_khr: 61_500 },
+    days: [
+      { date: '2026-09-01', count: 1, refund_usd: 10, refund_khr: 41_000 },
+      { date: '2026-09-02', count: 1, refund_usd: 5, refund_khr: 20_500 },
+    ],
+  }, spy, '2026-09')
+  assert.ok(calls.length >= 5, `the summary, the search total, two rows and the totals row all reached fmtMoney (${calls.length})`)
+  assert.deepEqual(calls.filter(([, khr]) => khr !== undefined), [], 'no refund reaches fmtMoney with its riel twin')
+  assert.match(html, /Refunds \$15\.00/)
+  assert.match(html, /of 2 · \$15\.00/)
+  assert.doesNotMatch(html, /៛/, 'BOTH mode prints no riel figure beside a refund')
+})
+
+test('M3: every fmtMoney call in ReturnsReport.tsx passes one amount, including the row detail', () => {
+  const callsWithSecondAmount = (source: string) => {
+    const file = ts.createSourceFile('ReturnsReport.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const lines: number[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'fmtMoney' && node.arguments.length !== 1) {
+        lines.push(file.getLineAndCharacterOfPosition(node.getStart()).line + 1)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(file)
+    return lines
+  }
+  assert.deepEqual(callsWithSecondAmount("const s = fmtMoney(totals.refund_usd, num(state.data?.totals?.['refund' + '_khr']))"), [1],
+    'negative control: a riel twin read through a computed key is still a second amount')
+  assert.deepEqual(callsWithSecondAmount(returnsSource), [])
+  assert.ok(/fmtMoney\(openRow\.refund_usd\)/.test(returnsSource), 'the row detail formats the refund through fmtMoney')
 })
 
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }
