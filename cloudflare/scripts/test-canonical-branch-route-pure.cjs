@@ -143,7 +143,6 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   }
   if (id === '../lib/productIdentity') return { findIdentityMatch: async () => null, findIdentityMatches: async () => new Map() }
   if (id === '../lib/productBatches') return {
-    decrementBatchStockStatement: noop,
     decrementBatchStockStrictStatement: noop,
     incrementBatchStockStatement: noop,
     resolveDestinationBatch: noop,
