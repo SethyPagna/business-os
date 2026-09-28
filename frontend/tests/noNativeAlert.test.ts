@@ -56,8 +56,8 @@ function sourceFiles(dir: string): string[] {
 // notify().
 const REMAINING: Record<string, number> = {
   'components/products/forms/ProductForm.tsx': 6,
-  'components/receipt-settings/PrintSettings.tsx': 3,
-  'components/receipt/Receipt.tsx': 2,
+  'components/receipt-settings/PrintSettings.tsx': 2,
+  'components/receipt/Receipt.tsx': 1,
   'components/sales/ExportModal.tsx': 2,
 }
 
