@@ -15,6 +15,7 @@ import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import InfoHint from '../shared/InfoHint.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
+import { localizeAuthError } from '../../utils/authErrorText.ts'
 import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
@@ -75,6 +76,9 @@ interface AppSettings {
 interface LoginResult {
   success?: boolean
   error?: string
+  // A refusal's stable code and wait (utils/authErrorText.ts maps the code).
+  code?: string
+  retryAfterSeconds?: number
   message?: string
   otpRequired?: boolean
   // Minted by the first factor (password / Google identity) and required by
@@ -713,9 +717,10 @@ export default function Login() {
         setPendingOtpChallenge(result.otpChallenge || '')
         return
       }
-      if (!result?.success) setError(result?.error || 'Login failed')
+      // The server's code, translated (I18N-4); its English only when there is none.
+      if (!result?.success) setError(localizeAuthError(result, tr, tr('login_failed_try_again', 'Login failed. Please try again.')))
     } catch (loginError) {
-      setError(getErrorMessage(loginError, tr('login_failed_try_again', 'Login failed. Please try again.')))
+      setError(localizeAuthError(loginError, tr, tr('login_failed_try_again', 'Login failed. Please try again.')))
     } finally {
       loginSubmitInFlightRef.current = false
       setLoading(false)
@@ -756,10 +761,10 @@ export default function Login() {
       } else if (verifyResult?.success && verifyResult?.user) {
         await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.sessionExpiresAt || '')
       } else {
-        setError(verifyResult?.error || tr('invalid_otp_code', 'Invalid OTP code'))
+        setError(localizeAuthError(verifyResult, tr, tr('invalid_otp_code', 'Invalid OTP code')))
       }
     } catch (otpError) {
-      setError(getErrorMessage(otpError, tr('otp_verification_failed', 'OTP verification failed')))
+      setError(localizeAuthError(otpError, tr, tr('otp_verification_failed', 'OTP verification failed')))
     } finally {
       otpVerifyInFlightRef.current = false
       setLoading(false)

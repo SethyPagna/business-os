@@ -19,6 +19,7 @@ import { requestPersistentAppStorage } from './api/syncRuntime.ts'
 import { disconnectWS, isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
+import { authErrorDetail } from './utils/authErrorText.ts'
 import { getAuthStorage } from './utils/authStorage.ts'
 import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { flushPendingWorkDrafts } from './utils/workDrafts.ts'
@@ -1980,6 +1981,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const isNet = ['fetch', 'ECONNREFUSED', 'NetworkError', 'Failed to fetch']
         .some(s => message.includes(s))
       return {
+        // The server's stable code and wait (I18N-4), for Login.tsx to translate.
+        ...authErrorDetail(e),
         success: false,
         error: isNet
           ? 'Cannot reach sync server. Check the URL in Settings -> Server, or clear it to use local mode.'

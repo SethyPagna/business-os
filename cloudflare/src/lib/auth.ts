@@ -172,12 +172,21 @@ export async function createSession(
 // user+device pair, the same way a password reset invalidates every
 // session for a user (see revokeUserSessions above), just scoped to one
 // device instead of the whole account.
+//
+// A session re-issued by POST /session-duration lives on the same browser as
+// the sign-in it came from, so the whole sign-in family goes too. That also
+// reaches rows re-issued before the route copied the device id (NULL there).
 export async function revokeSessionsForDevice(env: Env, userId: number, deviceId: string | null | undefined): Promise<number> {
   if (!deviceId || !deviceId.trim()) return 0
   const db = getDb(env)
-  const result = await db.prepare(
-    'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL',
-  ).run({ user_id: userId, device_id: deviceId })
+  const result = await db.prepare(`
+    UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP
+    WHERE user_id = @user_id AND revoked_at IS NULL
+      AND (
+        device_id = @device_id
+        OR limit_family_id IN (SELECT id FROM user_sessions WHERE user_id = @user_id AND device_id = @device_id)
+      )
+  `).run({ user_id: userId, device_id: deviceId })
   return result?.changes || 0
 }
 
@@ -409,14 +418,24 @@ async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env 
 // Returns null when the request has no cookie or no matching row. Throws if
 // the column is missing (migration 0201 not applied); callers decide.
 export async function currentSessionLimitFamily<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<number | null> {
+  return (await currentSessionReissueSource(c))?.limitFamilyId ?? null
+}
+
+// What a session re-issued from the request's session inherits: its sign-in
+// family and its device. The device comes from the row, never the request
+// body, so Devices -> Revoke / Reject still reaches the new session.
+export type SessionReissueSource = { limitFamilyId: number; deviceId: string | null; deviceName: string | null }
+
+export async function currentSessionReissueSource<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<SessionReissueSource | null> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return null
   const tokenHash = await hashToken(token)
   const row = await getDb(c.env).prepare(
-    'SELECT COALESCE(limit_family_id, id) AS family FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
-  ).get<{ family: number | null }>({ token_hash: tokenHash })
+    'SELECT COALESCE(limit_family_id, id) AS family, device_id, device_name FROM user_sessions WHERE token_hash = @token_hash LIMIT 1',
+  ).get<{ family: number | null; device_id: string | null; device_name: string | null }>({ token_hash: tokenHash })
   const family = Number(row?.family || 0)
-  return Number.isSafeInteger(family) && family > 0 ? family : null
+  if (!row || !Number.isSafeInteger(family) || family <= 0) return null
+  return { limitFamilyId: family, deviceId: row.device_id || null, deviceName: row.device_name || null }
 }
 
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
