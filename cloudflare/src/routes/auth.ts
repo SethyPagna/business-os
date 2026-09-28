@@ -5,7 +5,7 @@ import { createSession, currentSessionLimitFamily, setSessionCookie, clearSessio
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
 import { audit } from '../lib/audit'
-import { encryptSecret, decryptSecret } from '../lib/secretCrypto'
+import { encryptSecret, decryptSecret, MissingEncryptionKeyError } from '../lib/secretCrypto'
 import { generateTotpSecret, verifyTotpStep } from '../lib/totp'
 import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
@@ -885,7 +885,15 @@ app.post('/otp/setup', requireAuth, async (c) => {
   // generated codes. Use the public product name for newly enrolled devices
   // so people do not select an old, similarly named BusinessOS entry.
   const { base32, otpauthUrl } = generateTotpSecret(target.username, 'Leang Beauty')
-  const encrypted = await encryptSecret(base32, c.env.APP_ENCRYPTION_KEY)
+  // Without a usable APP_ENCRYPTION_KEY the TOTP secret is refused rather
+  // than stored in plaintext; nothing is written and enrollment does not start.
+  let encrypted: string
+  try {
+    encrypted = await encryptSecret(base32, c.env.APP_ENCRYPTION_KEY)
+  } catch (error) {
+    if (error instanceof MissingEncryptionKeyError) return c.json({ error: error.message, code: error.code }, 400)
+    throw error
+  }
   const db = getDb(c.env)
   await db.prepare(`
     UPDATE users SET otp_pending_secret = ?, otp_pending_created_at = CURRENT_TIMESTAMP WHERE id = ?
