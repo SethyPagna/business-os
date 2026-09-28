@@ -83,9 +83,9 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
       const linked = Number(impact.linked_records || 0)
       const targetNote = impact.target_exists ? ` ${tr('return_reason_merge_notice', 'The target already exists, so the presets will merge.')}` : ''
       const scopeLabel = tr(scope, scope === 'customer' ? 'Customer' : 'Supplier').toLocaleLowerCase()
-      // Both answers save the rename: Confirm also rewrites the matching
-      // returns, Cancel renames only the saved choice -- what OK and Cancel
-      // meant on the native prompt this replaced, now spelled out per button.
+      // Both answers save the rename, as on the native prompt this replaced:
+      // Confirm also rewrites the matching returns, Cancel renames only the
+      // saved choice. The buttons say which is which, as in Inventory.
       const replaceLinked = linked > 0 && await askToConfirm({
         title: tr('rename_reason_prompt', 'Rename saved reason'),
         message: tr('return_reason_replace_confirm_intro', '{count} live {scope} return(s) use "{from}".{targetNote}')
@@ -96,10 +96,10 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
         items: [
           { label: tr('before', 'Before'), value: from },
           { label: tr('after', 'After'), value: to },
-          { label: tr('confirm', 'Confirm'), value: tr('return_reason_replace_confirm_ok', 'OK: update those exact matches too.') },
-          { label: tr('cancel', 'Cancel'), value: tr('return_reason_replace_confirm_cancel', 'Cancel: rename only the saved preset.') },
         ],
         note: tr('return_reason_replace_confirm_note', 'Audit and stock history remain unchanged.'),
+        confirmLabel: tr('reason_update_linked_too', 'Update linked records too'),
+        cancelLabel: tr('reason_rename_saved_only', 'Rename saved reason only'),
       })
       const response = await replaceReturnReason({
         return_scope: scope,
