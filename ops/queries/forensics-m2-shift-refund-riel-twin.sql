@@ -4,7 +4,9 @@
 -- equivalent of the same refund (customerReturnEntitlement: multiplyMoney4(usd,
 -- rate); the legacy path sums the sale lines' riel twins). A shift whose window
 -- held such a return showed expected riel too low by the twin, so its riel
--- difference read as a surplus (or hid a real shortage).
+-- difference read as a surplus (or hid a real shortage). Only when its riel
+-- opening was counted: every surface reads opening_float_khr_registered = 0
+-- (0132 gave it to every historic zero) as unknown and prints no riel expected.
 -- Nothing is STORED wrong: shift_sessions has no expected/difference column and
 -- every app surface recomputes on read, so the app corrects itself once the fix
 -- is live. The Telegram shift reports already sent for these shifts (close,
@@ -15,6 +17,7 @@
 -- Counts and dates only: no cash figures, names or notes.
 --   ended_shifts               shifts that were closed or cancelled
 --   affected_shifts            ... whose window held a customer return with a riel twin
+--                              and whose riel opening was counted
 --   affected_closed_shifts     ... of those, closed (the close sent the Telegram report)
 --   affected_with_riel_count   ... of those, a riel count was entered, so the
 --                              difference line printed a phantom riel figure
@@ -28,13 +31,19 @@
 -- Proposed repair (NOT run): none to stored data -- the fixed loader recomputes
 -- every affected shift correctly once deployed. Tell the owner how many closed
 -- shifts' Telegram reports carried a wrong riel expected/difference, and over
--- which dates. If riel_only_returns is ever non-zero, stop: those returns need
+-- which dates. A sent report holds what the release live at sending computed:
+-- before 16575be1 (live 2026-09-06 05:36 UTC) a refund put the cash under review
+-- and no riel expected printed; before 821efc94 (live 2026-09-07 09:54 UTC) an
+-- uncounted riel opening read as 0, so those reports carried the twin as well.
+-- Check the shifts closed across those two releases by hand before quoting.
+-- If riel_only_returns is ever non-zero, stop: those returns need
 -- an owner decision before the dollars-only drawer and report ship.
 -- Proof: cloudflare/scripts/test-forensics-m2-shift-refund-twin-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
 WITH ended AS (
   SELECT s.id, s.business_date, s.branch_id, s.user_id, s.closed_at, s.closing_counted_khr,
+    s.opening_float_khr_registered,
     COALESCE(s.scope_mode, 'per_account') AS scope_mode,
     datetime(s.opened_at) AS win_from,
     datetime(COALESCE(s.closed_at, s.cancelled_at)) AS win_to
@@ -52,14 +61,15 @@ hit AS (
     AND COALESCE(r.total_refund_khr, 0) <> 0
 ),
 affected AS (
-  SELECT ended.* FROM ended WHERE ended.id IN (SELECT shift_id FROM hit)
+  SELECT ended.* FROM ended
+  WHERE ended.opening_float_khr_registered = 1 AND ended.id IN (SELECT shift_id FROM hit)
 )
 SELECT
   (SELECT COUNT(*) FROM ended) AS ended_shifts,
   (SELECT COUNT(*) FROM affected) AS affected_shifts,
   (SELECT COUNT(*) FROM affected WHERE closed_at IS NOT NULL) AS affected_closed_shifts,
   (SELECT COUNT(*) FROM affected WHERE closed_at IS NOT NULL AND closing_counted_khr IS NOT NULL) AS affected_with_riel_count,
-  (SELECT COUNT(DISTINCT return_id) FROM hit) AS affected_returns,
+  (SELECT COUNT(DISTINCT return_id) FROM hit WHERE shift_id IN (SELECT id FROM affected)) AS affected_returns,
   (SELECT COUNT(*) FROM returns
     WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
       AND COALESCE(total_refund_usd, 0) = 0 AND COALESCE(total_refund_khr, 0) <> 0) AS riel_only_returns,

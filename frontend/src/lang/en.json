@@ -6105,7 +6105,7 @@
   "rpt_hint_overview": "Revenue = net sales of recognized sales minus refunds; tax and delivery are excluded. Cost and profit are visible to admins only.",
   "rpt_hint_periods": "One row per business day, week (Monday–Sunday) or month in the range. Same revenue definition as everywhere else; rows add up to the Overview.",
   "rpt_hint_products": "Line sales = item line totals after line discounts, before order-level discounts, over recognized sales only. Ranked by line sales; top 500.",
-  "rpt_hint_returns": "Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the currency they were recorded in; the same refunds are already subtracted from Revenue.",
+  "rpt_hint_returns": "Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the display currency, like revenue; the same refunds are already subtracted from Revenue.",
   "rpt_hint_sales_list": "One row per receipt, newest first, 250 at a time. Revenue per receipt = net sale minus its refunds; Not Paid sales are recognized and only cancelled rows show 0.",
   "rpt_label": "Label",
   "rpt_last_delivery": "Last delivery",
