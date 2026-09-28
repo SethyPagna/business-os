@@ -1077,6 +1077,8 @@ export function classifyObject({ key, size, bytes, complete = true, activeJobIds
   const total = Number.isFinite(size) ? size : bytes.length
   const extension = extensionOf(key)
   const verdict = (group, format = '', extra = {}) => ({ action: GROUP_BY_ID.get(group).action, group, format, extension, ...extra })
+  const keyProblem = unsafeKeyReason(key)
+  if (keyProblem) return verdict('unrecognised', `not read: ${keyProblem}`)
   const jobId = jobIdOfImportKey(key)
   if (jobId && activeJobIds.has(jobId)) return verdict('running-import', describeBytes(bytes, total))
   const encoding = String(contentEncoding || '').trim().toLowerCase()
@@ -1281,8 +1283,25 @@ const HTTP_METADATA_HEADERS = [
 
 export const stampOf = (date) => date.toISOString().replace(/[:.]/g, '-')
 export const quarantineKeyFor = (stamp, key) => `${QUARANTINE_ROOT}${stamp}/${key}`
+const KEY_CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
+const KEY_ENCODED_DOT_SLASH_OR_BACKSLASH = /%(?:25)*(?:2e|2f|5c)/i
+const KEY_DOT_SEGMENTS = new Set(['', '.', '..'])
+// Why `key` is never sent in a request ('' when it may be): fetch resolves '.'
+// and '..' segments, and a server may decode %2e, %2f or a backslash into one.
+export function unsafeKeyReason(key) {
+  const text = String(key)
+  if (KEY_CONTROL_CHARACTER.test(text)) return 'it contains a control character'
+  if (text.includes('\\')) return 'it contains a backslash'
+  if (KEY_ENCODED_DOT_SLASH_OR_BACKSLASH.test(text)) return 'it contains a percent-encoded dot, slash or backslash'
+  if (text.split('/').some((segment) => KEY_DOT_SEGMENTS.has(segment))) return "it has an empty, '.' or '..' part"
+  return ''
+}
 // Each segment of a key is percent-encoded; the slashes between them stay.
-export const objectPath = (key) => String(key).split('/').map((segment) => encodeURIComponent(segment)).join('/')
+export const objectPath = (key) => {
+  const reason = unsafeKeyReason(key)
+  if (reason) throw new Error(`refusing to send the file name ${printable(String(key))}: ${reason}`)
+  return String(key).split('/').map((segment) => encodeURIComponent(segment)).join('/')
+}
 export const sha256Hex = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 function normalizeHttpMetadata(raw) {
@@ -1310,7 +1329,9 @@ export function validateManifest(manifest) {
   if (!Array.isArray(manifest.moves)) problems.push('it has no list of moved files')
   for (const move of Array.isArray(manifest.moves) ? manifest.moves : []) {
     const key = String(move?.key ?? '')
+    const keyProblem = unsafeKeyReason(key)
     if (!PREFIXES.some((prefix) => key.startsWith(prefix)) || key.length <= 0) problems.push(`a file outside ${PREFIXES.join(', ')}: ${printable(key)}`)
+    else if (keyProblem) problems.push(`the file name ${printable(key)} cannot be used: ${keyProblem}`)
     else if (move.quarantineKey !== quarantineKeyFor(stamp, key)) problems.push(`the quarantine name of ${printable(key)} does not match`)
     if (!/^[0-9a-f]{64}$/.test(String(move?.sha256 ?? ''))) problems.push(`no SHA-256 for ${printable(key)}`)
     if (!Number.isSafeInteger(move?.size) || move.size < 0) problems.push(`no size for ${printable(key)}`)
@@ -1766,7 +1787,8 @@ async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, mo
   const entries = new Array(objects.length)
   let checked = 0
   await mapLimit(objects, concurrency * 2, async (object, index) => {
-    let read = object.size > 0 ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
+    const readable = object.size > 0 && !unsafeKeyReason(object.key)
+    let read = readable ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
     // An image the app accepts is read whole, so hidden markup anywhere
     // in it is found.
     if (!read.contentEncoding && read.bytes.length < object.size && object.size <= FULL_SCAN_MAX_BYTES && detectUploadFormat(read.bytes)?.kind === 'image') {
