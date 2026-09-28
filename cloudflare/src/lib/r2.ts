@@ -180,9 +180,15 @@ const SNIFFED_INLINE_TYPES: ReadonlySet<string> = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/heic', 'image/heif',
 ])
 const SNIFFED_ATTACHMENT_TYPES: ReadonlySet<string> = new Set(['video/mp4', 'video/quicktime', 'video/webm'])
-// Covers every signature detectUploadFormat reads (12 bytes) and an ISO-BMFF
-// ftyp box's compatible-brand list.
-const SNIFF_BYTES = 64
+// uploadSecurity.ts STORED_MEDIA_HEAD_BYTES (a literal here: this module
+// loads uploadSecurity lazily). judgeStoredMedia decides a stored object by
+// that many first bytes, as the owner-run purge and the backup restore do,
+// so this read must not be shorter. S-uploads5 (R-S-uploads4 F10): it was
+// 64 bytes, and a classic QuickTime movie whose first atom held 56+ bytes of
+// encoder text looked like text here -- a 404 -- while the purge and the
+// restore kept it as a movie. scripts/test-upload-stored-media-agreement-
+// pure.cjs checks the length and that the three agree.
+const SNIFF_BYTES = 4096
 
 export const UPLOAD_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
 
@@ -232,7 +238,9 @@ function isoBmffImageType(bytes: Uint8Array): string | null {
   if (bytes.length < 12) return null
   const fourcc = (at: number) => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]).toLowerCase()
   if (fourcc(4) !== 'ftyp') return null
-  const boxEnd = Math.min(bytes.length, ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0)
+  // At most 64 compatible brands, as uploadSecurity's readFtypBrands reads
+  // them (the sniff read was 64 bytes before S-uploads5; see SNIFF_BYTES).
+  const boxEnd = Math.min(bytes.length, 16 + 4 * 64, ((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]) >>> 0)
   // The major brand, then the compatible brands after the 4-byte minor version.
   const brands = [fourcc(8)]
   for (let at = 16; at + 4 <= boxEnd; at += 4) brands.push(fourcc(at))
@@ -246,9 +254,9 @@ function isoBmffImageType(bytes: Uint8Array): string | null {
  * What a sniffed key's object may be served as, from its first bytes: an
  * allowlisted image or video (uploadSecurity's own detection), a legacy
  * HEIC/HEIF photo, a legacy MP4-family or QuickTime video the owner-run purge
- * keeps as media (detectOtherMedia, e.g. a Canon `CAEP` clip; audio is not
+ * keeps as media (judgeStoredMedia, e.g. a Canon `CAEP` clip; audio is not
  * served), or null (404). `found: false` when the key does not exist. One
- * small ranged read, paid only by sniffed keys -- every extension-typed key
+ * ranged read of the first 4 KB, paid only by sniffed keys -- every extension-typed key
  * (the image hot path) never comes here. `meta` is that read's object
  * metadata (full size, ETag), enough to answer a HEAD without another read.
  */
@@ -268,18 +276,19 @@ async function sniffServedImageType(bucket: R2Bucket, key: string): Promise<{ fo
   try {
     // Lazy: keeps this module free of load-time imports for the callers and
     // tests that load it standalone. Fails closed if it cannot load.
-    const { detectUploadFormat, isPublicImageFormat, detectOtherMedia, otherMediaLooksLikeText } = await import('./uploadSecurity')
-    const detected = detectUploadFormat(bytes)
+    const { judgeStoredMedia, isPublicImageFormat } = await import('./uploadSecurity')
+    // The judgement the purge and the backup restore make of the same object.
+    const size = typeof meta.size === 'number' ? meta.size : bytes.length
+    const stored = judgeStoredMedia(bytes, size, bytes.length >= size)
+    const detected = stored && stored.kind === 'allowed' ? stored.format : null
     if (detected && isPublicImageFormat(detected)) return { found: true, contentType: detected.mime, meta }
     // A photo brand wins over a video reading of the same ftyp, as before.
     const photo = isoBmffImageType(bytes)
     if (photo) return { found: true, contentType: photo, meta }
     if (detected && detected.kind === 'video') return { found: true, contentType: detected.mime, meta }
-    const size = typeof meta.size === 'number' ? meta.size : bytes.length
-    const other = detectOtherMedia(bytes, size)
-    if (other && !otherMediaLooksLikeText(other, bytes, bytes.length >= size)) {
-      if (other.format === 'QuickTime') return { found: true, contentType: 'video/quicktime', meta }
-      if (other.format.startsWith('MP4 family')) return { found: true, contentType: 'video/mp4', meta }
+    if (stored && stored.kind === 'other') {
+      if (stored.media.format === 'QuickTime') return { found: true, contentType: 'video/quicktime', meta }
+      if (stored.media.format.startsWith('MP4 family')) return { found: true, contentType: 'video/mp4', meta }
     }
   } catch {
     return { found: true, contentType: null }
