@@ -245,9 +245,14 @@ async function main() {
       path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'server', 'ServerPage.tsx'),
       'utf8',
     )
-    assert.match(serverPageSource, /setInterval\(fetchServerLog, 15000\)/,
+    // Every interval that polls the log, setInterval or F2's hidden-tab-paused
+    // startVisibleInterval: a pin on one spelling misses a 3s poll in the other.
+    const logPollPeriods = [...serverPageSource.matchAll(/\b(?:setInterval|startVisibleInterval)\(([^\n]*?),\s*(\d+)\)/g)]
+      .filter((call) => /\bfetchServerLog\b/.test(call[1]))
+      .map((call) => Number(call[2]))
+    assert.ok(logPollPeriods.length > 0, 'the debug log must still be polled')
+    assert.deepEqual(logPollPeriods, logPollPeriods.map(() => 15000),
       'the debug log poll must run every 15s, not every 3s')
-    assert.doesNotMatch(serverPageSource, /setInterval\(fetchServerLog, 3000\)/)
   }
 
   console.log('PASS worker efficiency sweep: D4 schema-probe memoization, D2 familyPagination single batch, D5 sales-list fan-out, D1 products bootstrap fan-out, D3 attach-helper fan-out (with clobbering regression pin), R1 uploads read-through cache (with bucket.get() call-count proof and portal.ts non-cache pin), K1 bumpVersions batched D1 fallback, F1 15s debug-log poll interval')

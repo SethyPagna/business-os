@@ -17,7 +17,10 @@ let wsPingTimer: ReturnType<typeof setInterval> | null = null
 let reconnectAttempts = 0
 let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
-let wsIntentionalClose = false
+// Per socket, not one shared flag: a flag set for a socket that is then
+// replaced (disconnect + immediate reconnect) used to leak onto the next one
+// and swallow its first genuine drop as "intentional", so it never reconnected.
+const intentionallyClosedSockets = new WeakSet<WebSocket>()
 let wsLifecycleListenersRegistered = false
 let wsDeferredConnectTimer: ReturnType<typeof setTimeout> | null = null
 let wsLastPongAt = 0
@@ -25,6 +28,12 @@ let wsLastPongAt = 0
 const WS_BOOT_CONNECT_DELAY_MS = 1200
 const WS_PING_INTERVAL_MS = 25_000
 const WS_PONG_TIMEOUT_MS = 55_000
+// Byte for byte the frame the BroadcastHub answers through the Durable Object
+// runtime auto-response (cloudflare/src/durable-objects/broadcastHub.ts), which
+// replies without waking the hibernated hub. Any other shape, even the same JSON
+// with different spacing, would wake it for every ping of every open tab.
+// Pinned by cloudflare/scripts/test-broadcast-hub-autopong-pure.cjs.
+const WS_PING_FRAME = '{"type":"ping"}'
 
 function clearReconnectTimer(): void {
   if (!wsReconnectTimer) return
@@ -97,7 +106,6 @@ export function connectWS(): void {
 
   try {
     logWs('debug', 'attempting connect to', wsUrl)
-    wsIntentionalClose = false
     ws = new WebSocket(wsUrl)
   } catch (e) {
     logWs('warn', 'connect error (constructor):', e)
@@ -105,7 +113,15 @@ export function connectWS(): void {
     return
   }
 
+  // Handlers below belong to this socket only. resumeWS() replaces a stale
+  // socket before the old one's close event arrives; without this check that
+  // late close cleared the NEW socket's ping timer, nulled `ws` and announced
+  // "disconnected" while the new socket was open. AppContext trusts the
+  // sync:status events instead of polling, so a false one would stick.
+  const socket = ws
+
   ws.onopen = () => {
+    if (ws !== socket) return
     logWs('debug', 'connected')
     const reconnected = reconnectAttempts > 0
     reconnectAttempts = 0
@@ -118,7 +134,7 @@ export function connectWS(): void {
     }
     // Send a ping every 25 s to prevent idle-timeout drops on reverse proxies
     // (Cloudflare Tunnel, Nginx, AWS ALB, etc. typically close idle WS after ~60 s).
-    // The backend already handles { type:'ping' } and replies { type:'pong' }.
+    // The hub auto-responds to WS_PING_FRAME with { type:'pong' } without waking.
     clearPingTimer()
     wsPingTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -129,7 +145,7 @@ export function connectWS(): void {
           try { ws.close(4000, 'pong-timeout') } catch (_) {}
           return
         }
-        ws.send(JSON.stringify({ type: 'ping' }))
+        ws.send(WS_PING_FRAME)
       }
     }, WS_PING_INTERVAL_MS)
   }
@@ -155,6 +171,7 @@ export function connectWS(): void {
   }
 
   ws.onclose = (ev: CloseEvent) => {
+    if (ws !== socket) return
     clearPingTimer()
     const code = ev?.code || 0
     const reason = ev?.reason || ''
@@ -163,10 +180,7 @@ export function connectWS(): void {
     window.dispatchEvent(new CustomEvent('sync:status', { detail: { connected: false } }))
     ws = null
     wsLastPongAt = 0
-    if (wsIntentionalClose) {
-      wsIntentionalClose = false
-      return
-    }
+    if (intentionallyClosedSockets.has(socket)) return
     if (code === 4001) {
       window.dispatchEvent(new CustomEvent('auth:unauthorized', {
         detail: {
@@ -187,7 +201,7 @@ export function connectWS(): void {
 
   ws.onerror = (err: Event) => {
     logWs('warn', 'error', err)
-    try { ws?.close() } catch (_) {}
+    try { socket.close() } catch (_) {}
   }
 }
 
@@ -208,10 +222,9 @@ export function disconnectWS(): void {
   wsLastPongAt = 0
   if (ws) {
     if (ws.readyState === WebSocket.OPEN) {
-      wsIntentionalClose = true
+      intentionallyClosedSockets.add(ws)
       ws.close(1000, 'manual-reconnect')
     } else if (ws.readyState === WebSocket.CONNECTING) {
-      wsIntentionalClose = false
       ws.onerror = null
       ws.onclose = null
       try { ws.close() } catch (_) {}
@@ -285,7 +298,7 @@ export function ensureWebSocketLifecycleListeners(): void {
     wsSuppressReconnectUntil = Date.now() + 60_000
     reconnectAttempts = 0
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      wsIntentionalClose = true
+      intentionallyClosedSockets.add(ws)
       try { ws.close(1000, 'auth-required') } catch (_) {}
     }
   })

@@ -1221,30 +1221,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       setSyncConnected(detail.connected === true)
       if (detail.connected === true) setSyncServerUnreachable(false)
     }
-    // Poll every 500 ms to catch WS connection that established before this listener was registered.
-    // Once connected, we keep polling (WS can drop/reconnect) but at a slower rate.
-    let pollRate = 500
-    let pollTimer: number | null = null
-    const poll = () => {
-      const connected = isWSConnected()
-      setSyncConnected(prev => {
-        if (prev !== connected) {
-          if (connected) setSyncServerUnreachable(false)
-          return connected
-        }
-        return prev
-      })
-      // Slow down once connected; fast polling is only needed during initial connect.
-      if (connected && pollRate < 3000) {
-        pollRate = 3000
-        clearTimeout(quickCheck)
-        if (pollTimer != null) clearInterval(pollTimer)
-        pollTimer = window.setInterval(poll, pollRate)
-      }
-    }
-    // Also check immediately after 100ms (catches fast connections)
-    const quickCheck = window.setTimeout(poll, 100)
-    pollTimer = window.setInterval(poll, pollRate)
+    // websocket.ts announces every open and close as sync:status (onStatus
+    // above). Until F2 this also polled isWSConnected() every 500 ms and then
+    // every 3 s for the whole session, only to catch a socket that opened
+    // before this listener existed. One read at registration covers that
+    // gap; every later change arrives as an event.
+    const connectedAtRegistration = isWSConnected()
+    setSyncConnected(connectedAtRegistration)
+    if (connectedAtRegistration) setSyncServerUnreachable(false)
     const onError = (e: Event) => {
       const detail = eventDetail<{
         channel?: string
@@ -1450,8 +1434,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => {
       disposed = true
-      clearTimeout(quickCheck)
-      if (pollTimer != null) clearInterval(pollTimer)
       if (permissionRefreshTimerRef.current != null) {
         window.clearTimeout(permissionRefreshTimerRef.current)
         permissionRefreshTimerRef.current = null

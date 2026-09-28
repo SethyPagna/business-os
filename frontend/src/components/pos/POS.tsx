@@ -17,6 +17,7 @@
 
 import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
@@ -2229,8 +2230,9 @@ export default function POS() {
     if (!trackedBatchLoadFailed) return
     const retry = () => setBatchTrackingReloadKey((key) => key + 1)
     window.addEventListener('online', retry)
-    const timer = window.setInterval(retry, 45_000)
-    return () => { window.removeEventListener('online', retry); window.clearInterval(timer) }
+    // Paused while the tab is hidden (F2); retries once on return if due.
+    const stopRetrying = startVisibleInterval(retry, 45_000)
+    return () => { window.removeEventListener('online', retry); stopRetrying() }
   }, [trackedBatchLoadFailed])
 
   // ...and retry immediately on any stock-relevant sync push: reconnects

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { visibleTimeout } from '../../utils/visibilityPolling.ts'
 import ModalBase from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -227,7 +228,10 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
   const [postStartStep, setPostStartStep] = useState<'idle' | 'polling' | 'conflicts' | 'ready_to_approve'>('idle')
   const [postStartJobId, setPostStartJobId] = useState<string | number | null>(null)
   const [approving, setApproving] = useState(false)
-  const pollTimeoutRef = useRef<number | null>(null)
+  // Cancels the next post-start status read, which waits for the tab to be
+  // visible (F2). Attempts only count reads, so a hidden spell cannot use up
+  // CONTACT_IMPORT_POST_START_MAX_ATTEMPTS.
+  const cancelNextPollRef = useRef<(() => void) | null>(null)
   const pollAttemptRef = useRef(0)
   const pollGenerationRef = useRef(0)
   // Direct-apply: fire the approve once when a clean (no-conflict) import is
@@ -242,10 +246,8 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
 
   const stopPostStartPoll = () => {
     pollGenerationRef.current += 1
-    if (pollTimeoutRef.current !== null) {
-      window.clearTimeout(pollTimeoutRef.current)
-      pollTimeoutRef.current = null
-    }
+    cancelNextPollRef.current?.()
+    cancelNextPollRef.current = null
   }
 
   useEffect(() => () => stopPostStartPoll(), [])
@@ -289,7 +291,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
           void fallBackToBackgroundTracking(queuedRowCount, jobId, mode)
           return
         }
-        pollTimeoutRef.current = window.setTimeout(() => pollPostStartJob(jobId, queuedRowCount, mode), CONTACT_IMPORT_POST_START_POLL_MS)
+        cancelNextPollRef.current = visibleTimeout(() => pollPostStartJob(jobId, queuedRowCount, mode), CONTACT_IMPORT_POST_START_POLL_MS)
       })
       .catch(() => {
         if (!aliveRef.current || generation !== pollGenerationRef.current) return
@@ -300,7 +302,7 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
           void fallBackToBackgroundTracking(queuedRowCount, jobId, mode)
           return
         }
-        pollTimeoutRef.current = window.setTimeout(() => pollPostStartJob(jobId, queuedRowCount, mode), CONTACT_IMPORT_POST_START_POLL_MS)
+        cancelNextPollRef.current = visibleTimeout(() => pollPostStartJob(jobId, queuedRowCount, mode), CONTACT_IMPORT_POST_START_POLL_MS)
       })
   }
 

@@ -1,6 +1,7 @@
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { describeJobPolicy } from '../products/import/importTemplateRouter.ts'
 import { parseServerTimestampMs } from '../../utils/formatters.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -815,7 +816,6 @@ export default function BackgroundImportTracker() {
   }, [])
   const previousHasAttentionRef = useRef(false)
   const aliveRef = useRef(true)
-  const timerRef = useRef<number | null>(null)
   const jobsSignatureRef = useRef('')
   const jobsRef = useRef<ImportJob[]>([])
   const actionInFlightRef = useRef('')
@@ -1002,13 +1002,13 @@ export default function BackgroundImportTracker() {
     loadJobs()
     const baseIntervalMs = activeJobs.length ? IMPORT_TRACKER_ACTIVE_POLL_MS : IMPORT_TRACKER_IDLE_POLL_MS
     const intervalMs = Math.max(baseIntervalMs, pollBackoffMs || 0)
-    timerRef.current = window.setInterval(() => {
-      if (document.visibilityState === 'hidden' && !activeJobs.length) return
-      loadJobs()
-    }, intervalMs)
+    // Paused while the tab is hidden, even with a job running (F2): the job
+    // runs server-side either way, and the read on return -- immediate when a
+    // tick came due -- still dispatches its completion refresh.
+    const stopPolling = startVisibleInterval(() => { loadJobs() }, intervalMs)
     return () => {
       aliveRef.current = false
-      if (timerRef.current) window.clearInterval(timerRef.current)
+      stopPolling()
     }
   }, [activeJobs.length, loadJobs, pollBackoffMs])
 

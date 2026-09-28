@@ -68,7 +68,7 @@ await (async function backupUiShouldPollJobsInsteadOfWaitingSilently() {
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getBackupApi\(\)\.queueBackupFolderRestore\?\.\(folderImportPath\),\s*'Queue backup restore',\s*BACKUP_JOB_QUEUE_TIMEOUT_MS,\s*\)/)
   assert.match(source, /consecutiveFailures >= SYSTEM_JOB_STATUS_MAX_FAILURES/)
   assert.match(source, /const failureDelay = consecutiveFailures > 0/)
-  assert.match(source, /window\.setTimeout\(tick/)
+  assert.match(source, /visibleTimeout\(\(\) => \{ void tick\(\) \}/)
   assert.doesNotMatch(source, /window\.setInterval\(tick/)
   assert.doesNotMatch(source, /business-os:backup:section/)
   assert.doesNotMatch(source, /Sync every \(seconds\)/)

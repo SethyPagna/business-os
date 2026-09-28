@@ -64,7 +64,8 @@ const production = evaluate([
   useState, useEffect, useRef, ...scopes, ...ownership,
   getAppShellApi: () => ({ getPendingSyncState: () => { const request = deferred(); reads.push(request); return request.promise } }),
   scheduleInitialPendingSyncRefresh: (refresh: () => void) => { refresh(); return () => {} },
-  scheduleDeferredPendingSyncPolling: () => () => {},
+  PENDING_SYNC_POLL_INTERVAL_MS: 20_000,
+  createPendingSyncPoll: () => ({ observe() {}, cancel() {}, isPolling: () => false }),
   persistentNoticeFingerprint: () => '', FRONTEND_BUILD_HASH: 'test',
   SYNC_ERROR_RESOLVED_EVENT: 'sync:error-resolved', shouldClearResolvedSyncError: () => false,
 })

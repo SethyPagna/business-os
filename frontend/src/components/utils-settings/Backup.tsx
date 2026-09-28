@@ -1,6 +1,7 @@
 import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { startVisibleInterval, visibleTimeout } from '../../utils/visibilityPolling.ts'
 import { fmtDateTime24, fmtDayFirst } from '../../utils/formatters.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
@@ -288,8 +289,8 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
       } catch { /* transient -- keep the last known state */ }
     }
     void poll()
-    const timer = window.setInterval(poll, 15000)
-    return () => { alive = false; window.clearInterval(timer) }
+    const stopPolling = startVisibleInterval(() => { void poll() }, 15000)
+    return () => { alive = false; stopPolling() }
   }, [pageActive])
   if (!state) return null
   const failed = state.phase === 'failed'
@@ -797,7 +798,9 @@ function startJobWatcher(jobId: string | number | undefined, {
   if (typeof window === 'undefined' || !jobId) return () => {}
   let stopped = false
   let inFlight = false
-  let timer: number | null = null
+  // Cancels the next status read; that read waits for the tab to be
+  // visible (F2), so a hidden tab never polls the job.
+  let cancelNextTick: (() => void) | null = null
   let lastSignature = ''
   let changedOnLastTick = true
   let consecutiveFailures = 0
@@ -805,14 +808,14 @@ function startJobWatcher(jobId: string | number | undefined, {
 
   const stop = () => {
     stopped = true
-    if (timer) window.clearTimeout(timer)
-    timer = null
+    cancelNextTick?.()
+    cancelNextTick = null
   }
 
   const scheduleTick = (delayMs = basePollMs) => {
     if (stopped) return
-    if (timer) window.clearTimeout(timer)
-    timer = window.setTimeout(tick, Math.max(250, Number(delayMs || basePollMs)))
+    cancelNextTick?.()
+    cancelNextTick = visibleTimeout(() => { void tick() }, Math.max(250, Number(delayMs || basePollMs)))
   }
 
   const tick = async () => {

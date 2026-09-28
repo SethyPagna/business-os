@@ -238,11 +238,11 @@ assert.match(app, /const PENDING_SYNC_POLL_INTERVAL_MS = 20_000/, 'pending-sync 
 assert.match(app, /function useSyncErrorBanner\(user: AppUser \| null\)/, 'pending sync polling should know whether an authenticated user exists')
 assert.match(app, /setPendingSync\(null\)[\s\S]*if \(!owner \|\| typeof window === 'undefined'\) return undefined[\s\S]*const refreshPendingSync = \(\) => \{\s*if \(!isCurrent\(\)\) return[\s\S]*getAppShellApi\(\)\.getPendingSyncState/, 'unverified/logged-out startup should clear old state and not register sync listeners or read pending sync')
 assert.match(app, /function pendingSaleOwnerForUser[\s\S]*if \(!user \|\| isActorSessionQuarantined\(\)\) return null/, 'only a current authenticated, nonquarantined actor can admit the deferred queue read')
-assert.match(app, /function scheduleDeferredPendingSyncPolling\(refresh: \(\) => void\): CancelWarmup \{[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*window\.setInterval\(refresh, PENDING_SYNC_POLL_INTERVAL_MS\)[\s\S]*PENDING_SYNC_INITIAL_REFRESH_DELAY_MS/, 'pending sync polling should be created only after the initial startup window')
-assert.match(app, /const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)[\s\S]*const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling\(refreshPendingSync\)/, 'pending sync refresh and polling should both stay behind the authenticated guard')
+assert.doesNotMatch(app, /scheduleDeferredPendingSyncPolling/, 'F2: no session-long pending sync interval; the poll starts only from a completed read')
+assert.match(app, /const pendingSyncPoll = createPendingSyncPoll\(\(\) => refreshPendingSync\(\), PENDING_SYNC_POLL_INTERVAL_MS\)[\s\S]*const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh\(refreshPendingSync\)/, 'pending sync refresh and polling should both stay behind the authenticated guard')
 assert.doesNotMatch(app, /const timer = window\.setInterval\(refreshPendingSync, 20_000\)/, 'pending sync polling should not allocate an immediate first-paint interval')
 assert.match(app, /\}, \[user, ownerKey\]\)/, 'pending sync listeners should re-evaluate when bootstrap validates/clears the actor or its authority changes')
-assert.match(appContext, /const hasRecoverableSession = !!\(user\?\.id \|\| getStoredUserPayload\(\)\)[\s\S]*if \(!hasRecoverableSession\) \{[\s\S]*return undefined[\s\S]*const quickCheck = window\.setTimeout\(poll, 100\)/, 'signed-out startup should skip sync listeners and websocket polling until a stored or active user exists')
+assert.match(appContext, /const hasRecoverableSession = !!\(user\?\.id \|\| getStoredUserPayload\(\)\)[\s\S]*if \(!hasRecoverableSession\) \{[\s\S]*return undefined[\s\S]*const connectedAtRegistration = isWSConnected\(\)/, 'signed-out startup should skip sync listeners and the websocket status read until a stored or active user exists')
 assert.match(httpApi, /let healthLifecycleListenersRegistered = false/, 'health lifecycle listeners should be one-shot and not module-load work')
 assert.match(httpApi, /export function startHealthCheck\(\): void \{\s*ensureHealthLifecycleListeners\(\)/, 'health lifecycle listeners should install only when authenticated health polling starts')
 assert.match(httpApi, /export function ensureHealthLifecycleListeners\(\): void \{[\s\S]*healthLifecycleListenersRegistered[\s\S]*window\.addEventListener\('offline', \(\) => setServerHealth\(false\)\)/, 'health lifecycle listeners should keep only the immediate offline health flip')
@@ -2636,10 +2636,10 @@ assert.match(
 )
 // 15s (not the old 3s): this is an occasional diagnostics read, not a feed
 // anything depends on staying seconds-fresh -- see the interval's own comment.
-assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics refresh should still poll after startup, at the debloated 15s interval')
-assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 15000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
+assert.match(serverPage, /return startVisibleInterval\(\(\) => \{ void fetchServerLog\(\) \}, 15000\)/, 'server diagnostics refresh should still poll after startup, at the debloated 15s interval')
+assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*return startVisibleInterval\(\(\) => \{ void fetchServerLog\(\) \}, 15000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
 assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250/, 'server online count should wait briefly after first route-ready work without adding a fake 1.8s delay')
-assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
+assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*startVisibleInterval\(\(\) => \{ void check\(\) \}, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
 // SETTINGS_OTP_STATUS_TIMEOUT_MS / getSettingsApi().otpStatus: removed along
 // with the rest of the dead OTP-modal machinery in Settings.tsx (see the
 // doesNotMatch assertion above) -- this page no longer checks OTP status at

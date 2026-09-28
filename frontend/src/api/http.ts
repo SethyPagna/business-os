@@ -176,6 +176,13 @@ const API_MISMATCH_COOLDOWN_MS = 30_000
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
 const CLOUDFLARE_ACCESS_LOGIN_RE = /(?:^|\/\/)[^/]*cloudflareaccess\.com\/cdn-cgi\/access\/login|\/cdn-cgi\/access\/login/i
 const HEALTH_CHECK_INTERVAL_MS = 30_000
+// While the sync socket is open and answering pings (the hub pongs every 25 s
+// and websocket.ts closes it after 55 s of silence), the socket already proves
+// the server is reachable, so the 30 s /health probe only needs to run often
+// enough to keep its other job: noticing that the Worker was redeployed under a
+// long-lived tab (checkRuntimeVersionFromHealth). A redeploy also drops every
+// socket, and the reconnect probes at once (see ensureHealthLifecycleListeners).
+const HEALTH_CHECK_SOCKET_LIVE_INTERVAL_MS = 5 * 60_000
 const HEALTH_CHECK_INITIAL_DELAY_MS = 2_500
 const HEALTH_PROBE_TIMEOUT_MS = 4_000
 const HEALTH_PROBE_REUSE_MS = 8_000
@@ -813,6 +820,7 @@ export function __resetApiHealthForTests(): void {
   _lastHealthProbeResult = null
   _lastHealthProbeAt = 0
   _serverOnline = true
+  _syncSocketOpen = false
 }
 
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -1070,6 +1078,9 @@ let _healthProbeInFlight: Promise<ServerHealthProbeResult> | null = null
 let _lastHealthProbeResult: ServerHealthProbeResult | null = null
 let _lastHealthProbeAt = 0
 let healthLifecycleListenersRegistered = false
+// Mirrors websocket.ts's sync:status events. Read through an event rather than
+// an import because websocket.ts already imports this module.
+let _syncSocketOpen = false
 
 function setServerHealth(online: boolean): void {
   if (online === _serverOnline) return
@@ -1176,15 +1187,40 @@ export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): S
   return result
 }
 
+// Whether a tick of the 30 s health interval should actually hit /health.
+// - A hidden tab never probes: nobody can see the banner, and web-api.ts's
+//   focus/visibility/online recovery forces a probe the moment it is shown.
+// - An open, answering sync socket is liveness; probe only every 5 minutes
+//   for the runtime-version check. Never while the server is marked offline:
+//   the probe is what notices it came back.
+export function shouldRunScheduledHealthProbe(state: {
+  hidden: boolean
+  serverOnline: boolean
+  syncSocketOpen: boolean
+  msSinceLastProbe: number
+}): boolean {
+  if (state.hidden) return false
+  if (state.serverOnline && state.syncSocketOpen) return state.msSinceLastProbe >= HEALTH_CHECK_SOCKET_LIVE_INTERVAL_MS
+  return true
+}
+
+function runScheduledHealthProbe(): void {
+  const probe = shouldRunScheduledHealthProbe({
+    hidden: typeof document !== 'undefined' && document.visibilityState === 'hidden',
+    serverOnline: _serverOnline,
+    syncSocketOpen: _syncSocketOpen,
+    msSinceLastProbe: Date.now() - _lastHealthProbeAt,
+  })
+  if (probe) pingServerHealth().catch(() => {})
+}
+
 // Active health check runs on a slower cadence after the first shared probe.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck(): void {
   ensureHealthLifecycleListeners()
   if (_healthTimer) return
-  _healthTimer = setInterval(async () => {
-    await pingServerHealth()
-  }, HEALTH_CHECK_INTERVAL_MS)
+  _healthTimer = setInterval(runScheduledHealthProbe, HEALTH_CHECK_INTERVAL_MS)
   _healthInitialTimer = setTimeout(() => {
     _healthInitialTimer = null
     pingServerHealth().catch(() => {})
@@ -1195,6 +1231,18 @@ export function ensureHealthLifecycleListeners(): void {
   if (typeof window === 'undefined' || healthLifecycleListenersRegistered) return
   healthLifecycleListenersRegistered = true
   window.addEventListener('offline', () => setServerHealth(false))
+  window.addEventListener('sync:status', (event: Event) => {
+    const connected = (event as CustomEvent<{ connected?: boolean }>).detail?.connected === true
+    const changed = connected !== _syncSocketOpen
+    _syncSocketOpen = connected
+    // The socket is the fastest signal we have. It dropping (server outage,
+    // redeploy, dead network that 'offline' never reported) or coming back
+    // (possibly onto a new Worker build) is worth one probe right away rather
+    // than at the next tick. Forced, because a result from the last 8 s
+    // predates the change. Hidden tabs wait for the resume probe instead.
+    if (!changed || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
+    pingServerHealth(true).catch(() => {})
+  })
 }
 
 // ?€?€?€ Stale-while-revalidate cache (extended TTL for offline resilience) ?€?€?€?€
