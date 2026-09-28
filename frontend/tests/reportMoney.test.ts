@@ -206,5 +206,18 @@ test('M3: the riel twin never enters a Reports hub refund figure', () => {
   assert.equal(carriesTwin(overviewSource), false, 'OverviewReport.tsx reads refund_usd only')
 })
 
+test('M3: the Returns hint tells the owner the rule the cells follow, in both packs', () => {
+  const packs = Object.fromEntries(['en', 'km'].map((name) => [name,
+    JSON.parse(fs.readFileSync(new URL(`../src/lang/${name}.json`, import.meta.url), 'utf8')) as Record<string, string>]))
+  const fallback = /tr\('rpt_hint_returns', '((?:[^'\\]|\\.)*)'\)/.exec(returnsSource)?.[1]
+  assert.equal(fallback, packs.en.rpt_hint_returns, 'the in-code fallback is the English pack text')
+  for (const [name, pack] of Object.entries(packs)) {
+    assert.ok(pack.rpt_hint_returns.toLowerCase().includes(pack.display_currency.toLowerCase()),
+      `${name}: refunds are shown in the display currency ("${pack.display_currency}") -- ${pack.rpt_hint_returns}`)
+  }
+  assert.doesNotMatch(packs.en.rpt_hint_returns, /recorded in/i, 'en no longer says a refund keeps the currency it was recorded in')
+  assert.ok(!packs.km.rpt_hint_returns.includes('រូបិយប័ណ្ណដែលបានកត់ត្រា'), 'km no longer says a refund keeps the currency it was recorded in')
+})
+
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }
 console.log('\nAll reportMoney tests passed')
