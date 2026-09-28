@@ -35,6 +35,14 @@ spend it faster; they add no capacity.
 6. For lanes that look finished, start a read-only refuter instead of the writer.
 7. Update the registry state column on every change.
 
+## Waves that survive stops
+- Check the remaining budget before each wave. About 20 concurrent agents can empty a 5-hour window in under two hours; run the release-critical tier first and hold scans and designs.
+- An auth or network blip (for example HTTP 403 "Request not allowed") kills every live agent in the same second without being a limit. Relaunch only the dead agents, after checking which are still alive.
+- Wrap every agent call in a retry that re-sends the same prompt with a resume hint when the agent returns nothing. Keep the first attempt identical to the original so a cached result still replays.
+- Orchestrators that cache by call order re-run every later call when an earlier prompt changes. Save finished results to the local records first, then relaunch only the failed work as a new run; never edit-and-resume past finished agents.
+- Report and log files are append-only across attempts: keep an existing file (or copy it to `.prevN`) before writing; never overwrite it.
+- Lanes run their related and composition-sensitive tests, not the full suite: several lanes sweeping on one machine produce timeout reds that are not real. The full suite runs once, on CI, for the composed candidate.
+
 ## Never
 - Delete a worktree or branch holding unmerged commits or a dirty tree.
 - Reset/stash/checkout away a stopped agent's changes.
