@@ -178,7 +178,7 @@ function requiresSelfOtpDisablePassword(actor: SessionUser | null | undefined, t
 app.post('/login', async (c) => {
   const body = await c.req.json<{ username: string; password: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string }>()
   if (!body.username || !body.password) {
-    return c.json({ error: 'Username and password are required' }, 400)
+    return c.json({ error: 'Username and password are required', code: 'credentials_required' }, 400)
   }
 
   const ip = getClientIp(c.req.raw)
@@ -189,7 +189,7 @@ app.post('/login', async (c) => {
   // through the per-user bucket for many different usernames in parallel.
   const ipLimit = await checkRateLimit(c.env, 'auth:login_ip', ip, LOGIN_IP_LIMIT_MAX, LOGIN_IP_LIMIT_WINDOW_MS)
   if (!ipLimit.allowed) {
-    return c.json({ error: 'Too many login attempts from this network. Please try again later.' }, 429)
+    return c.json({ error: 'Too many login attempts from this network. Please try again later.', code: 'login_rate_limited_network' }, 429)
   }
 
   // Persistent, escalating per-username lockout (see lib/loginLockout.ts) --
@@ -202,6 +202,7 @@ app.post('/login', async (c) => {
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
+      code: 'login_locked',
       locked: true,
       retryAfterSeconds: lockoutState.retryAfterSeconds,
       failedAttempts: lockoutState.failedCount,
@@ -268,7 +269,7 @@ app.post('/login', async (c) => {
   const userLimitKey = `user:${body.username.trim().toLowerCase()}@${ip}`
   const userLimit = await peekRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
   if (!userLimit.allowed) {
-    return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+    return c.json({ error: 'Too many login attempts for this account. Please try again later.', code: 'login_rate_limited_account' }, 429)
   }
 
   // P2-1: the typed-identifier bucket and lockout above give every alias of
@@ -282,16 +283,17 @@ app.post('/login', async (c) => {
   if (user && resolvedLockoutKey && accountLimitKey && accountWideKey) {
     const accountWide = await peekRateLimit(c.env, 'auth:login_account', accountWideKey, LOGIN_ACCOUNT_WIDE_MAX, LOGIN_ACCOUNT_WIDE_WINDOW_MS)
     if (!accountWide.allowed) {
-      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.', code: 'login_rate_limited_account' }, 429)
     }
     const accountLimit = await peekRateLimit(c.env, 'auth:login_user', accountLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
     if (!accountLimit.allowed) {
-      return c.json({ error: 'Too many login attempts for this account. Please try again later.' }, 429)
+      return c.json({ error: 'Too many login attempts for this account. Please try again later.', code: 'login_rate_limited_account' }, 429)
     }
     const accountLockout = await getLoginLockoutState(c.env, resolvedLockoutKey)
     if (accountLockout.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${accountLockout.retryAfterSeconds} seconds and try again.`,
+        code: 'login_locked',
         locked: true,
         retryAfterSeconds: accountLockout.retryAfterSeconds,
         failedAttempts: accountLockout.failedCount,
@@ -320,6 +322,7 @@ app.post('/login', async (c) => {
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
+        code: 'login_locked',
         locked: true,
         retryAfterSeconds: failure.retryAfterSeconds,
         failedAttempts: failure.failedCount,
@@ -328,7 +331,7 @@ app.post('/login', async (c) => {
     // The typed identifier's own count only (SEC1-02): the account-wide count
     // showed that two spellings of a phone, or an email and a username, are
     // one account.
-    return c.json({ error: 'Invalid username or password', failedAttempts: typedFailure.failedCount }, 401)
+    return c.json({ error: 'Invalid username or password', code: 'invalid_credentials', failedAttempts: typedFailure.failedCount }, 401)
   }
 
   if (!user || !user.is_active) {
@@ -374,7 +377,7 @@ app.post('/login', async (c) => {
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId: body.deviceId })
-        return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', deviceStatus: 'rejected' }, 403)
+        return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', code: 'device_rejected', deviceStatus: 'rejected' }, 403)
       }
       await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, {
         deviceId: body.deviceId,
@@ -403,7 +406,7 @@ app.post('/login', async (c) => {
   if (user.otp_enabled) {
     const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
     if (!otpSecret) {
-      return c.json({ error: 'Two-factor authentication is unavailable for this account. Please contact an administrator.' }, 503)
+      return c.json({ error: 'Two-factor authentication is unavailable for this account. Please contact an administrator.', code: 'otp_unavailable' }, 503)
     }
     // The challenge binds the upcoming /otp/verify to THIS successful
     // password (+ device) step -- see the challenge helpers above.
@@ -714,23 +717,23 @@ app.get('/otp/status/:id', requireAuth, async (c) => {
 // gates would have refused.
 app.post('/otp/verify', async (c) => {
   const body = await c.req.json<{ userId?: number; token?: string; otpChallenge?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }>().catch(() => ({} as { userId?: number; token?: string; otpChallenge?: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string; clientTime?: string }))
-  if (!body.userId || !body.token) return c.json({ error: 'userId and token required' }, 400)
+  if (!body.userId || !body.token) return c.json({ error: 'userId and token required', code: 'otp_code_required' }, 400)
 
   const ip = getClientIp(c.req.raw)
   const ipLimit = await checkRateLimit(c.env, 'auth:otp_ip', ip, OTP_IP_LIMIT_MAX, OTP_IP_LIMIT_WINDOW_MS)
-  if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.' }, 429)
+  if (!ipLimit.allowed) return c.json({ error: 'Too many OTP attempts from this network.', code: 'otp_rate_limited_network' }, 429)
 
   // The first factor must have run, recently, for THIS user -- checked
   // before any DB read so an unbound caller learns nothing (same generic
   // shape as an unknown userId).
   if (!(await isLiveOtpChallenge(c.env, body.otpChallenge, body.userId))) {
-    return c.json({ error: 'Your sign-in step expired. Please enter your password again.' }, 401)
+    return c.json({ error: 'Your sign-in step expired. Please enter your password again.', code: 'otp_challenge_expired' }, 401)
   }
   // S-auth4d: the per-user allowance is spent only by a caller holding a live
   // challenge (one who passed the password step). Spent before the challenge
   // check, ten forged calls naming a user id blocked that user's second factor.
   const userLimit = await checkRateLimit(c.env, 'auth:otp', `user:${body.userId}`, OTP_LIMIT_MAX, OTP_LIMIT_WINDOW_MS)
-  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.' }, 429)
+  if (!userLimit.allowed) return c.json({ error: 'Too many OTP attempts.', code: 'otp_rate_limited_account' }, 429)
 
   const db = getDb(c.env)
   const user = await db.prepare(`
@@ -740,7 +743,7 @@ app.post('/otp/verify', async (c) => {
     LEFT JOIN roles r ON r.id = u.role_id
     WHERE u.id = ? AND u.is_active = 1 AND u.deleted_at IS NULL AND u.otp_enabled = 1 AND u.otp_secret IS NOT NULL
   `).get<{ id: number; username: string; name: string; organization_id: number | null; role_id: number | null; permissions: string; otp_secret: string; role_code: string | null; role_permissions: string | null }>([body.userId])
-  if (!user) return c.json({ error: 'Invalid request' }, 401)
+  if (!user) return c.json({ error: 'Invalid request', code: 'otp_unavailable' }, 401)
 
   // Same escalating per-username lockout as /login -- a wrong second factor
   // counts like a wrong password, and a locked account waits here too. Also
@@ -755,13 +758,14 @@ app.post('/otp/verify', async (c) => {
   if (lockoutState.locked) {
     return c.json({
       error: `Too many failed login attempts. Please wait ${lockoutState.retryAfterSeconds} seconds and try again.`,
+      code: 'login_locked',
       locked: true,
       retryAfterSeconds: lockoutState.retryAfterSeconds,
     }, 429)
   }
 
   const otpSecret = await decryptSecret(user.otp_secret, c.env.APP_ENCRYPTION_KEY)
-  if (!otpSecret) return c.json({ error: 'OTP secret is unavailable. Please set up OTP again.' }, 400)
+  if (!otpSecret) return c.json({ error: 'OTP secret is unavailable. Please set up OTP again.', code: 'otp_unavailable' }, 400)
   // A code already spent (here or at /password-reset/otp) is refused for
   // the rest of its validity window -- see lib/otpReplay.ts.
   const matchedStep = await verifyTotpStep(otpSecret, String(body.token || ''))
@@ -774,11 +778,12 @@ app.post('/otp/verify', async (c) => {
     if (failure.locked) {
       return c.json({
         error: `Too many failed login attempts. Please wait ${failure.retryAfterSeconds} seconds and try again.`,
+        code: 'login_locked',
         locked: true,
         retryAfterSeconds: failure.retryAfterSeconds,
       }, 429)
     }
-    return c.json({ error: 'Invalid OTP code. Enter the current code and make sure your authenticator device uses automatic date and time.', failedAttempts: failure.failedCount }, 401)
+    return c.json({ error: 'Invalid OTP code. Enter the current code and make sure your authenticator device uses automatic date and time.', code: 'otp_invalid', failedAttempts: failure.failedCount }, 401)
   }
 
   // Device-approval gate, re-run HERE with the deviceId this request
@@ -794,7 +799,7 @@ app.post('/otp/verify', async (c) => {
     if (trustCheck.status !== 'approved') {
       if (trustCheck.status === 'rejected') {
         await audit(c.env, user.id, user.username, 'login_device_rejected', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify' })
-        return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', deviceStatus: 'rejected' }, 403)
+        return c.json({ error: 'This device was denied access by an administrator. Contact your admin if this is unexpected.', code: 'device_rejected', deviceStatus: 'rejected' }, 403)
       }
       await audit(c.env, user.id, user.username, 'login_device_pending', 'user', user.id, { deviceId: body.deviceId, via: 'otp_verify', status: trustCheck.status })
       return c.json({
