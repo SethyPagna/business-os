@@ -31,7 +31,12 @@
 -- Proposed repair (NOT run): none to stored data -- the fixed loader recomputes
 -- every affected shift correctly once deployed. Tell the owner how many closed
 -- shifts' Telegram reports carried a wrong riel expected/difference, and over
--- which dates. If riel_only_returns is ever non-zero, stop: those returns need
+-- which dates. A sent report holds what the release live at sending computed:
+-- before 16575be1 (live 2026-09-06 05:36 UTC) a refund put the cash under review
+-- and no riel expected printed; before 821efc94 (live 2026-09-07 09:54 UTC) an
+-- uncounted riel opening read as 0, so those reports carried the twin as well.
+-- Check the shifts closed across those two releases by hand before quoting.
+-- If riel_only_returns is ever non-zero, stop: those returns need
 -- an owner decision before the dollars-only drawer and report ship.
 -- Proof: cloudflare/scripts/test-forensics-m2-shift-refund-twin-pure.cjs
 -- ops:min-rows 1
