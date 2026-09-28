@@ -409,6 +409,14 @@ async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<bo
   return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
 }
 
+const DELIVERY_FEE_PAYER_ERROR = 'Delivery fee must be paid by the customer or by the store.'
+
+/** The two real payers, trimmed and lower-cased; null for anything else. */
+function parseDeliveryFeePayer(raw: unknown): 'customer' | 'store' | null {
+  const payer = String(raw).trim().toLowerCase()
+  return payer === 'customer' || payer === 'store' ? payer : null
+}
+
 app.get('/create-receipt', async (c) => {
   c.header('Cache-Control','private, no-store')
   const user = c.get('user')
@@ -975,7 +983,8 @@ app.post('/', async (c) => {
   const isDelivery = Boolean(body.is_delivery)
   const deliveryFeeUsd = newSaleMoney4(body.delivery_fee_usd)
   const deliveryFeeKhr = multiplyMoney4(deliveryFeeUsd,exchangeRate)
-  const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
+  const deliveryFeePaidBy = parseDeliveryFeePayer(body.delivery_fee_paid_by || 'customer')
+  if (!deliveryFeePaidBy) return c.json({ error: DELIVERY_FEE_PAYER_ERROR }, 400)
   // P6: what the delivery ACTUALLY cost the shop (courier money out) --
   // staff-only, never on receipts. NULL when not entered, so stats can
   // tell "recorded as zero" apart from "never recorded".
@@ -4382,7 +4391,7 @@ app.post('/:id/amendments', async (c) => {
     if (payerRaw !== null && payerRaw !== undefined) {
       const payer = String(payerRaw).trim().toLowerCase()
       if (payer !== 'customer' && payer !== 'store') {
-        return c.json({ error: 'Delivery fee must be paid by the customer or by the store.' }, 400)
+        return c.json({ error: DELIVERY_FEE_PAYER_ERROR }, 400)
       }
       newPaidBy = payer
     }
