@@ -80,7 +80,8 @@ import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
-import { createClientRequestId, identityForIntent, retryableRequestId, type IntentIdentityRef } from '../../api/requestIds.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { identityForIntent, retryableRequestId, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
@@ -94,7 +95,6 @@ import {
   isTrackedRequestCurrent,
   settleLoaderMap,
   withLoaderTimeout,
-  withWriteTimeout,
 } from '../../utils/loaders.ts'
 
 type LegacyInventoryRecord = Record<string, any>

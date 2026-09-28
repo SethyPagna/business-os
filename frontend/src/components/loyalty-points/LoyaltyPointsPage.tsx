@@ -16,9 +16,9 @@ import {
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
-  withWriteTimeout,
 } from '../../utils/loaders.ts'
-import { createClientRequestId, identityForIntent, type IntentIdentityRef } from '../../api/requestIds.ts'
+import { createClientRequestId } from '../../api/requestIds.ts'
+import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'

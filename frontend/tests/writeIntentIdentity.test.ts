@@ -26,16 +26,24 @@ const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.ur
 const translate = (pack: Record<string, string>) => (key: string) => pack[key]
 
 type IdentityRef<T> = { current: { intent: string; identity: T } | null }
-type RequestIdsModule = {
+type WriteIntentModule = {
   identityForIntent?: <T>(ref: IdentityRef<T>, intent: unknown, mint: () => T) => T
   retryableRequestId?: (prefix: string) => { current(): string; settle(): void }
+  withWriteTimeout?: <T>(loader: () => T | Promise<T>, label: string, timeoutMs: number, t?: (key: string) => string | undefined) => Promise<T>
 }
 type LoadersModule = {
-  withWriteTimeout?: <T>(loader: () => T | Promise<T>, label: string, timeoutMs: number, t?: (key: string) => string | undefined) => Promise<T>
   withLoaderTimeout: <T>(loader: () => T | Promise<T>, label: string, timeoutMs: number) => Promise<T>
 }
 
-const requestIds = await import('../src/api/requestIds.ts') as RequestIdsModule
+const sourceOf = (relative: string): string => {
+  try {
+    return readFileSync(new URL(`../src/${relative}`, import.meta.url), 'utf8')
+  } catch {
+    return ''
+  }
+}
+// The helpers are admin-only (write modals), so they live in their own module.
+const writeIntent = (sourceOf('utils/writeIntent.ts') ? await import('../src/utils/writeIntent.ts') : {}) as WriteIntentModule
 const loaders = await import('../src/utils/loaders.ts') as unknown as LoadersModule
 const { presentWriteError } = await import('../src/utils/writeErrorPresentation.ts')
 
@@ -52,8 +60,8 @@ async function runTest(name: string, fn: () => void | Promise<void>): Promise<vo
 }
 
 await runTest('identityForIntent reuses one identity for the same intent and mints for a changed one', () => {
-  const { identityForIntent } = requestIds
-  assert.equal(typeof identityForIntent, 'function', 'requestIds.ts must export identityForIntent')
+  const { identityForIntent } = writeIntent
+  assert.equal(typeof identityForIntent, 'function', 'utils/writeIntent.ts must export identityForIntent')
   let minted = 0
   const mint = () => ({ client_request_id: `ret_${++minted}`, return_number: `RET-${minted}` })
   const ref: IdentityRef<ReturnType<typeof mint>> = { current: null }
@@ -72,8 +80,8 @@ await runTest('identityForIntent reuses one identity for the same intent and min
 })
 
 await runTest('retryableRequestId stays put across failed attempts and rotates only after success', () => {
-  const { retryableRequestId } = requestIds
-  assert.equal(typeof retryableRequestId, 'function', 'requestIds.ts must export retryableRequestId')
+  const { retryableRequestId } = writeIntent
+  assert.equal(typeof retryableRequestId, 'function', 'utils/writeIntent.ts must export retryableRequestId')
   const undoId = retryableRequestId!('stockadjust-undo')
   const attempt1 = undoId.current()
   assert.match(attempt1, /^stockadjust-undo_/)
@@ -85,8 +93,8 @@ await runTest('retryableRequestId stays put across failed attempts and rotates o
 })
 
 await runTest('withWriteTimeout reports an unknown outcome in English and Khmer, never "try again"', async () => {
-  const { withWriteTimeout } = loaders
-  assert.equal(typeof withWriteTimeout, 'function', 'loaders.ts must export withWriteTimeout')
+  const { withWriteTimeout } = writeIntent
+  assert.equal(typeof withWriteTimeout, 'function', 'utils/writeIntent.ts must export withWriteTimeout')
   const never = () => new Promise<never>(() => {})
   for (const [pack, label] of [[en, 'en'], [km, 'km']] as const) {
     const error = await withWriteTimeout!(never, 'Create return', 20, translate(pack)).then(
@@ -106,7 +114,7 @@ await runTest('withWriteTimeout reports an unknown outcome in English and Khmer,
 })
 
 await runTest('withWriteTimeout passes a result or a real refusal through untouched', async () => {
-  const { withWriteTimeout } = loaders
+  const { withWriteTimeout } = writeIntent
   assert.equal(typeof withWriteTimeout, 'function')
   assert.equal(await withWriteTimeout!(async () => 42, 'Adjust', 1_000), 42)
   const refusal = Object.assign(new Error('Only 2 available'), { code: 'insufficient_stock' })
@@ -117,6 +125,26 @@ await runTest('withWriteTimeout passes a result or a real refusal through untouc
 await runTest('reads keep their own timeout wording (withLoaderTimeout is unchanged)', async () => {
   const error = await loaders.withLoaderTimeout(() => new Promise<never>(() => {}), 'Load returns', 20).catch((reason: Error) => reason)
   assert.match(error.message, /^Load returns took longer than 0s\. Please try again\.$/)
+})
+
+// The storefront loads loaders.ts and requestIds.ts (vite.config.ts routes
+// them to the shared 'route-sync-utils' and 'request-ids' chunks), so what
+// they import ships to every catalog visitor. Putting the write helpers there
+// pulled writeErrorPresentation.ts into the catalog-products closure and
+// pushed it past its +10% budget (tests/performanceBudgets.test.ts, which
+// needs a build); this pins the same boundary on the source.
+await runTest('the admin-only write helpers stay off the storefront chunks', () => {
+  const viteConfig = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
+  assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/loaders\.ts'\)\) return 'route-sync-utils'/)
+  assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\) return 'request-ids'/)
+  assert.doesNotMatch(viteConfig, /writeIntent/, 'writeIntent.ts must not be routed into a shared (storefront) chunk')
+  const loadersSource = sourceOf('utils/loaders.ts')
+  assert.doesNotMatch(loadersSource, /writeErrorPresentation|withWriteTimeout|createWriteTimeoutError/, 'loaders.ts ships to the storefront: no write-outcome helpers or their presenter')
+  assert.doesNotMatch(sourceOf('api/requestIds.ts'), /identityForIntent|retryableRequestId/, 'requestIds.ts ships to the storefront: no per-intent helpers')
+  const helpers = sourceOf('utils/writeIntent.ts')
+  for (const name of ['identityForIntent', 'retryableRequestId', 'withWriteTimeout', 'createWriteTimeoutError']) {
+    assert.match(helpers, new RegExp(`export (?:async )?function ${name}\\b`), `utils/writeIntent.ts exports ${name}`)
+  }
 })
 
 if (failed) {
