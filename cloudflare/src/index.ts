@@ -135,10 +135,10 @@ export type Env = {
   // rewrite it on every run -- so renaming the org in the database was
   // silently undone. Optional: unset keeps the historical default.
   BUSINESS_OS_ORGANIZATION_NAME?: string
-  // Optional secret (wrangler secret put APP_ENCRYPTION_KEY) used to encrypt
-  // AI provider API keys at rest. See cloudflare/src/lib/secretCrypto.ts --
-  // without it, keys are stored in plaintext, matching how the Node backend
-  // behaves when process.env.APP_ENCRYPTION_KEY is unset.
+  // Secret (wrangler secret put APP_ENCRYPTION_KEY) encrypting AI provider
+  // API keys, TOTP secrets and Google Drive tokens at rest. Optional only so
+  // reads keep working: without it lib/secretCrypto.ts refuses every write
+  // of a new secret (legacy plaintext values still read).
   APP_ENCRYPTION_KEY?: string
   // Optional secret + var (wrangler secret put RESEND_API_KEY / a
   // RESEND_FROM_EMAIL var in wrangler.toml) used by lib/verification.ts to
@@ -162,6 +162,13 @@ export type Env = {
   // HMAC secret for signing the Google OAuth `state` param. Falls back to
   // GOOGLE_LOGIN_CLIENT_SECRET if unset (see lib/googleOauth.ts).
   AUTH_SESSION_SECRET?: string
+  // Dedicated secret for the login and Drive OAuth `state` HMAC; takes
+  // precedence over AUTH_SESSION_SECRET and the client-secret fallback.
+  OAUTH_STATE_SECRET?: string
+  // Seed password for a first administrator, used only when no active
+  // admin-role user and no user named 'admin' exist
+  // (lib/coreDataInvariants.ts). Factory reset requires it (routes/system.ts).
+  BUSINESS_OS_ADMIN_PASSWORD?: string
   // Google Drive OAuth (backup mirror) -- see lib/googleDrive.ts. Separate
   // OAuth client from the login one above, matching the legacy backend's
   // own separation of "sign-in with Google" vs "Drive sync" credentials.

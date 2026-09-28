@@ -35,6 +35,7 @@ const stubs = {
   './secretCrypto': {
     decryptSecret: async (value) => value === 'access-enc' ? 'access-token' : 'refresh-token',
     encryptSecret: async (value) => `enc:${value}`,
+    upgradeLegacySecret: async () => null,
   },
   './backup': {
     DRIVE_STAGED_BACKUP_PREFIX: 'backups/cloudflare/drive-staged-',

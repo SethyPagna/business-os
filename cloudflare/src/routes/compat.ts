@@ -19,6 +19,7 @@ import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertStat
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { secretEncryptionStatus } from '../lib/secretCrypto'
 import { gateTotals } from './reports'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
@@ -989,6 +990,14 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   }
 
   const checks = { database, objectStorage, queue, analytics, googleDrive, googleLogin, backup: backupCheck }
+  // Is APP_ENCRYPTION_KEY usable (boolean only, never the value)? Without it
+  // every secret write is refused (lib/secretCrypto.ts). The doctor also
+  // answers backup-only accounts, so this readout is added for admins only.
+  if (isAdminControlUser(c.get('user'))) {
+    const secretEncryption = secretEncryptionStatus(c.env.APP_ENCRYPTION_KEY)
+    Object.assign(checks, { secretEncryption })
+    if (!secretEncryption.ok) ok = false
+  }
   // tier rides in `runtime` beside objectStorageDriver: the doctor is where
   // someone looks when production behaves like a smaller machine than they
   // expect, and "which plan is this deployment on" is the first question.
