@@ -865,6 +865,21 @@ const SETTINGS_BUCKET_LABELS: Record<string, string> = {
   customer_portal: 'Manage portal config',
 }
 
+// The 403 text for the first key the user may not save, or null when every
+// key is allowed. A bucket key passes on its own grant or on full `settings`.
+function settingsPermissionRefusal(user: SessionUser, keys: string[]): string | null {
+  const missing = keys.find((key) => {
+    const bucket = settingsBucketPermissionFor(key)
+    if (bucket) return !hasPermission(user, bucket) && !hasPermission(user, 'settings')
+    return !hasPermission(user, 'settings')
+  })
+  if (!missing) return null
+  const bucket = settingsBucketPermissionFor(missing)
+  return bucket
+    ? `You do not have permission to change "${missing}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
+    : 'You do not have permission to perform this action'
+}
+
 // Section 4 (2026-09-02 RC): the receipt's "Text contrast" setting
 // (Normal | Maximum black) lives inside the opaque receipt_template JSON
 // blob, same as font family/size/alignment/etc. Every other template field
@@ -946,7 +961,13 @@ app.post('/', async (c) => {
   const attemptedKeys = Object.keys(body).filter((key) => !METADATA_KEYS.has(key))
   if (attemptedKeys.length === 0) {
     // Only unrequested blanks were sent: nothing to write, nothing changed.
-    if (keptAsStored.length) return c.json({ updatedAt: await getSettingsUpdatedAt(c.env), keys: [] })
+    // The answer carries updatedAt, so it needs the grant a real save of
+    // those keys needs.
+    if (keptAsStored.length) {
+      const refused = settingsPermissionRefusal(user, keptAsStored)
+      if (refused) return c.json({ error: refused }, 403)
+      return c.json({ updatedAt: await getSettingsUpdatedAt(c.env), keys: [] })
+    }
     return c.json({ error: 'No settings provided' }, 400)
   }
 
@@ -973,19 +994,8 @@ app.post('/', async (c) => {
   // `settings` implies every narrower settings permission, same as
   // lib/permissions.ts's hasPermission() already encodes for these two
   // keys). A key with no bucket falls back to requiring plain `settings`.
-  const missingBucket = attemptedKeys.find((key) => {
-    const bucket = settingsBucketPermissionFor(key)
-    if (bucket) return !hasPermission(user, bucket) && !hasPermission(user, 'settings')
-    return !hasPermission(user, 'settings')
-  })
-  if (missingBucket) {
-    const bucket = settingsBucketPermissionFor(missingBucket)
-    return c.json({
-      error: bucket
-        ? `You do not have permission to change "${missingBucket}" (requires ${SETTINGS_BUCKET_LABELS[bucket] || bucket} access or full Settings access).`
-        : 'You do not have permission to perform this action',
-    }, 403)
-  }
+  const permissionRefusal = settingsPermissionRefusal(user, attemptedKeys)
+  if (permissionRefusal) return c.json({ error: permissionRefusal }, 403)
 
   // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
   // need administrator control to CHANGE here. An unchanged value -- the

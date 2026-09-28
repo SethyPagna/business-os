@@ -91,6 +91,7 @@ import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesT
 import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSell } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -3230,11 +3231,11 @@ export default function POS() {
         const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
         if (!isActorReadScopeCurrent(checkoutScope)) return
         if (isSaleRecorded(result)) finishRecorded(result)
-        else notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
+        else notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
           if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
-          notify(getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error')), 'error')
+          notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
       return
@@ -3455,7 +3456,7 @@ export default function POS() {
         // sentence the sheet's greyed pill shows, not as the server's
         // English -- this is the path an offline sale replayed later, or a
         // stale tab, actually arrives on.
-        notify(localizeBranchRuleError(result.error, t) || t('error'), 'error')
+        notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
@@ -3470,7 +3471,7 @@ export default function POS() {
           'ម៉ាស៊ីនមេមិនទាន់បញ្ជាក់ការលក់នេះទេ។ វាប្រហែលជាត្រូវបានកត់ត្រា - ចុច Complete ម្តងទៀតដោយសុវត្ថិភាព វានឹងមិនបង្កើតច្បាប់ចម្លងទេ។',
         ), 'error')
       } else {
-        notify(localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
+        notify(saleSubmitRefusalText(e, t) ?? localizeBranchRuleError(getErrorMessage(e, t('error') || 'Error'), t), 'error')
       }
     } finally {
       checkoutInFlightRef.current = false

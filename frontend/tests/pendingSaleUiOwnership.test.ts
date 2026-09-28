@@ -117,6 +117,8 @@ console.log('PASS mounted shell counts and receipt events are owner/scope fenced
 setSyncServerUrl('https://shop.test')
 setActor(userA)
 const money = await import('../src/utils/saleMoneyV1.ts')
+// POS.tsx imports it; the extracted callback below runs with the real one.
+const { saleSubmitRefusalText } = await import('../src/api/saleSubmitErrors.ts')
 const { assertPosCheckoutOwner } = evaluate(extract(posSource, 'assertPosCheckoutOwner'), ['assertPosCheckoutOwner'], ownership)
 const input = { client_request_id: 'unchanged-request', money_precision_version: 1, items: [{ quantity: 1, applied_price_usd: 2 }], subtotal_usd: 2, total_usd: 2, amount_paid_usd: 2, amount_paid_khr: 0, exchange_rate: 4000, sale_status: 'completed' }
 const frozen = money.frozenSaleCheckoutBody('unchanged-request', undefined, () => ownership.stampOfflineSaleOwner(input))
@@ -136,7 +138,7 @@ assert.equal(JSON.stringify(money.frozenSaleCheckoutBody('unchanged-request', fr
 
 // Execute the actual existing-checkout callback. Unknown outcomes throw but
 // must not call any close/reset/write path or change the saved wire request.
-async function retry(payload: Record<string, unknown> | undefined) {
+async function retry(payload: Record<string, unknown> | undefined, failure: Error = new Error('Unknown network outcome')) {
   let dispatched = 0
   let lookedUp = 0
   const notifications: string[] = []
@@ -146,10 +148,10 @@ async function retry(payload: Record<string, unknown> | undefined) {
     checkoutInFlightRef: { current: false }, resolvedActiveId: 'order-1', active: retained,
     checkoutRequestIdsRef: { current: new Map([['order-1', 'unchanged-request']]) },
     getSaleWriteTransport: async () => ({ recoverSaleCreateReceipt: async () => { lookedUp++; return { committed: false } } }),
-    createPosSale: async (value: unknown) => { dispatched++; assert.equal(JSON.stringify(value), original); throw new Error('Unknown network outcome') },
+    createPosSale: async (value: unknown) => { dispatched++; assert.equal(JSON.stringify(value), original); throw failure },
     withLoaderTimeout: (fn: () => unknown) => fn(), POS_CHECKOUT_TIMEOUT_MS: 45000,
     setLoading: () => {}, notify: (message: string) => notifications.push(message), t: (key: string) => key,
-    getErrorMessage: (error: Error) => error.message,
+    getErrorMessage: (error: Error) => error.message, saleSubmitRefusalText,
     closeOrder: () => assert.fail('failed checkout must remain open'),
     setOrders: () => assert.fail('failed checkout must not reset the saved request'),
   })
@@ -163,6 +165,10 @@ const retried = await retry(frozen)
 assert.equal(retried.dispatched, 1)
 assert.equal(retried.lookedUp, 1)
 assert.deepEqual(retried.notifications, ['Unknown network outcome'])
+// FX-exc1 item 3: a receipt-number race refused on the retry is restated
+// through t (the pack), not shown in the Worker's English.
+const raced = await retry(frozen, Object.assign(new Error('Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.'), { status: 409, code: 'receipt_number_conflict' }))
+assert.deepEqual(raced.notifications, ['receipt_number_conflict'], 'the retry restates receipt_number_conflict through t')
 assert.equal(JSON.stringify(frozen), original)
 const checkoutSource = extract(posSource, 'handleCheckout')
 const stampAt = checkoutSource.indexOf('() => stampOfflineSaleOwner(saleData)')

@@ -1223,7 +1223,9 @@ app.post('/bulk', async (c) => {
     }
     return c.json(result)
   } catch (error) {
-    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action') }, error.statusCode)
+    // A coded refusal's params (return_restore_over_capacity's product and
+    // counts) go with it, so the till's restated sentence keeps them.
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)
     throw error
   }
 })

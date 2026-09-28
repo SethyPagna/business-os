@@ -100,21 +100,40 @@ export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierCon
 // action_history.last_error and API callers.
 export const UNDO_RECORD_CHANGED_CODE = 'undo_record_changed'
 export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
+// FX-exc1 item 1: the other refusals carry a code too.
+// The history entry no longer matches the server (a stale generation, pointer
+// or receipt): refresh history and try again.
+export const UNDO_HISTORY_STALE_CODE = 'undo_history_stale'
+// This direction was already replayed (by another tab or device).
+export const UNDO_ALREADY_DONE_CODE = 'undo_already_done'
+// The saved replay details are missing, invalid or cannot be checked, so the
+// entry cannot be replayed safely. The code of any refusal that names none.
+export const UNDO_HISTORY_UNUSABLE_CODE = 'undo_history_unusable'
+// Answered by routes/actionHistory.ts itself: the row has no payload the Worker
+// can replay, so only the tab that performed it can reverse it.
+export const UNDO_NEEDS_ORIGINAL_TAB_CODE = 'undo_needs_original_tab'
+// Any other 409 replay refusal that carries no stable code of its own (a
+// grouped Return or bulk Sales replay's, say).
+export const UNDO_REFUSED_CODE = 'undo_refused'
 
 export class UndoConflictError extends Error {
   readonly statusCode = 409
-  readonly code?: string
+  readonly code: string
 
-  constructor(message: string, code?: string) {
+  constructor(message: string, code: string = UNDO_HISTORY_UNUSABLE_CODE) {
     super(message)
-    if (code) this.code = code
+    this.code = code
   }
 }
 
-// The machine code of a coded replay refusal, or null for any other error, so
-// the route never forwards a code from an error that is not a refusal.
-export function undoConflictCode(error: unknown): string | null {
-  return error instanceof UndoConflictError && error.code ? error.code : null
+// The code a 409 replay refusal answers with: the refusal's own stable machine
+// code (an UndoConflictError's, or another lib's such as
+// TransferConflictError's), else UNDO_REFUSED_CODE, so every refusal reaches
+// the client with a code it can restate. Only for 409s: a failure that is not
+// a refusal keeps its old uncoded shape.
+export function replayRefusalCode(error: unknown): string {
+  const own = (error as { code?: unknown } | null)?.code
+  return typeof own === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(own) ? own : UNDO_REFUSED_CODE
 }
 
 // Every applier declares the permission section its replay writes under, and
@@ -1180,7 +1199,7 @@ async function replayAtomicSaleAddItems(
   ctx: UndoApplierContext,
 ): Promise<void> {
   if (!ctx.user || !Number.isSafeInteger(ctx.historyId) || !Number.isSafeInteger(ctx.generation) || Number(ctx.generation) < 0) {
-    throw new UndoConflictError('Refresh history before replaying these added items.')
+    throw new UndoConflictError('Refresh history before replaying these added items.', UNDO_HISTORY_STALE_CODE)
   }
   const user = ctx.user
   if (typeof reversal.saleStateRevision !== 'number' || !Number.isSafeInteger(reversal.saleStateRevision) || reversal.saleStateRevision < 0) {
@@ -1190,7 +1209,7 @@ async function replayAtomicSaleAddItems(
   const generation = Number(ctx.generation)
   const operationId = String(payload.operation_id || '')
   if (!operationId || String(reversal.operationId || '') !== operationId || payload.generation !== generation) {
-    throw new UndoConflictError('This added-items receipt does not match its history generation.')
+    throw new UndoConflictError('This added-items receipt does not match its history generation.', UNDO_HISTORY_STALE_CODE)
   }
   const saleId = Number(reversal.saleId)
   const expectedRevision = reversal.saleStateRevision
@@ -1200,7 +1219,7 @@ async function replayAtomicSaleAddItems(
   `).get<Record<string, unknown>>([operationId])
   if (!operation || Number(operation.sale_id) !== saleId || Number(operation.history_id) !== historyId
     || Number(operation.generation) !== generation || Number(operation.sale_revision) !== expectedRevision) {
-    throw new UndoConflictError('This added-items receipt changed or no longer matches its history.')
+    throw new UndoConflictError('This added-items receipt changed or no longer matches its history.', UNDO_HISTORY_STALE_CODE)
   }
   const revision = await db.prepare('SELECT COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=?),0) AS revision')
     .get<{ revision: number }>([saleId])
@@ -1217,7 +1236,7 @@ async function replayAtomicSaleAddItems(
       const resolved=await resolveProductMergeLineage(db,saleId,currentLines)
       if(Number(currentSale.money_precision_version)===1)validateCapturedSaleBasket(currentLines,currentSale,resolved.bindings)
       lineage=resolved
-    }catch{throw new UndoConflictError('Recorded product merge evidence changed. Nothing was reversed.')}
+    }catch{throw new UndoConflictError('Recorded product merge evidence changed. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)}
   }
   const currentHeaderJson=JSON.stringify(currentSale),currentLinesJson=JSON.stringify(currentLines)
   if(new TextEncoder().encode(currentHeaderJson+currentLinesJson).byteLength>500_000)throw new UndoConflictError('The recorded sale basket is too large to replay safely.')
@@ -1263,7 +1282,7 @@ async function replayAtomicSaleAddItems(
       : `NOT EXISTS(SELECT 1 FROM sale_items WHERE id=@${key})`)
   }
   const expectedSnapshotStatus = ctx.direction === 'undo' ? 'applied' : 'reversed'
-  if (snapshotStatus !== expectedSnapshotStatus) throw new UndoConflictError('These added items were already replayed.')
+  if (snapshotStatus !== expectedSnapshotStatus) throw new UndoConflictError('These added items were already replayed.', UNDO_ALREADY_DONE_CODE)
   const guard = saleMutationGuard(`
     NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')
     AND EXISTS(
@@ -2604,7 +2623,7 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
     const priorRows = readRows(prior, [...keys])
     const targetIds = [...new Set(affected.map(Number))].filter((id) => priorRows.has(id))
     if (!targetIds.length) continue
-    if (targetIds.some((id) => !currentRows.has(id))) throw new UndoConflictError('Missing current group merge timestamp provenance.')
+    if (targetIds.some((id) => !currentRows.has(id))) throw new UndoConflictError('Missing current group merge timestamp provenance.', UNDO_RECORD_CHANGED_CODE)
     before.push(...rowGuards(table, targetIds.map((id) => currentRows.get(id)!), false))
     const savedRows = targetIds.map((id) => priorRows.get(id)!)
     after.push(...rowGuards(table, savedRows, true), {
@@ -2621,7 +2640,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   if (!ctx.user || !ctx.historyId) throw new UndoConflictError('Authoritative group history identity is required.')
   const expectedGeneration = Number(ctx.generation)
   if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0) {
-    throw new UndoConflictError('An exact group reversal generation is required.')
+    throw new UndoConflictError('An exact group reversal generation is required.', UNDO_HISTORY_STALE_CODE)
   }
   const loaded = await loadProductMergeGroupReplay(ctx.env, payload, Number(ctx.historyId))
   const { db, pointer, groupSnapshot, association, children } = loaded
@@ -2634,10 +2653,10 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
   if (generation === expectedGeneration + 1 && terminal) {
     return { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation }
   }
-  if (generation !== expectedGeneration) throw new UndoConflictError('This group reversal generation is stale.')
+  if (generation !== expectedGeneration) throw new UndoConflictError('This group reversal generation is stale.', UNDO_HISTORY_STALE_CODE)
   const targetIndex = ctx.direction === 'undo' ? appliedCount - 1 : appliedCount
   if (targetIndex < 0 || targetIndex >= children.length) {
-    throw new UndoConflictError(`This group merge is already ${ctx.direction === 'undo' ? 'reversed' : 'applied'}.`)
+    throw new UndoConflictError(`This group merge is already ${ctx.direction === 'undo' ? 'reversed' : 'applied'}.`, UNDO_ALREADY_DONE_CODE)
   }
   const child = children[targetIndex]
   const final = ctx.direction === 'undo' ? targetIndex === 0 : targetIndex === children.length - 1
@@ -2657,7 +2676,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
     statements.push(...timestamps.after, ...completion.slice(1))
     try { await db.batch(statements) } catch (error) {
       if (/malformed JSON|product_merge_group_guard|constraint/i.test(String(error))) {
-        throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.')
+        throw new UndoConflictError('This group merge changed concurrently. Nothing was reversed.', UNDO_RECORD_CHANGED_CODE)
       }
       throw error
     }
@@ -2686,7 +2705,7 @@ async function replayProductMergeGroup(payload: Record<string, unknown>, ctx: Un
       .run({ payload: fingerprinted, child: child.id, kind: PRODUCT_MERGE_GROUP_CHILD_KIND, before: refreshed.payload_json })
     if (!Number((updated as { changes?: number; meta?: { changes?: number } }).changes
       ?? (updated as { meta?: { changes?: number } }).meta?.changes)) {
-      throw new UndoConflictError('The redone group child changed before its fingerprint was recorded.')
+      throw new UndoConflictError('The redone group child changed before its fingerprint was recorded.', UNDO_RECORD_CHANGED_CODE)
     }
   }
   const pending = ctx.direction === 'undo' ? targetIndex : children.length - targetIndex - 1
@@ -2708,7 +2727,7 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
   const expectedGeneration = Number(ctx.generation)
   if (!operationId || !Number.isSafeInteger(pointerGeneration) || pointerGeneration < 0
     || !Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0 || pointerGeneration !== expectedGeneration) {
-    throw new UndoConflictError('An exact product removal generation is required.')
+    throw new UndoConflictError('An exact product removal generation is required.', UNDO_HISTORY_STALE_CODE)
   }
   const db = getDb(ctx.env)
   const operation = await db.prepare(`SELECT * FROM product_remove_operations
@@ -2720,7 +2739,7 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
   }
   if (Number(operation.generation) !== expectedGeneration
     || operation.status !== (ctx.direction === 'undo' ? 'undo_ready' : 'reversed')) {
-    throw new UndoConflictError('This product removal generation is stale.')
+    throw new UndoConflictError('This product removal generation is stale.', UNDO_HISTORY_STALE_CODE)
   }
   const snapshotRow = await db.prepare('SELECT payload_json FROM undo_snapshots WHERE id=@snapshot AND kind=@kind')
     .get<{ payload_json: string }>({ snapshot: operation.undo_snapshot_id, kind: PRODUCT_REMOVE_ACTION_KIND })
@@ -2738,7 +2757,7 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
       historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }))
   } catch (error) {
     if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
-      throw new UndoConflictError('This removed product changed concurrently. Nothing was replayed.')
+      throw new UndoConflictError('This removed product changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
     }
     throw error
   }
@@ -2898,7 +2917,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       // since been cancelled has already had these units restored by the
       // cancellation, and undoing here would add them a second time.
       if (String(sale.sale_status || 'completed') !== String(reversal.saleStatus)) {
-        throw new Error("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.")
+        throw new UndoConflictError("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.", UNDO_RECORD_CHANGED_CODE)
       }
 
       const atomicReversal = reversal as AtomicSaleAddItemsReversal
@@ -2908,7 +2927,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (atomicReplay) {
         await replayAtomicSaleAddItems(db, atomicReversal, snapshotId, snap.status, payload, ctx)
       } else if (ctx.direction === 'undo') {
-        if (String(snap.status) !== 'applied') throw new Error('These added items have already been removed.')
+        if (String(snap.status) !== 'applied') throw new UndoConflictError('These added items have already been removed.', UNDO_ALREADY_DONE_CODE)
         const savedFingerprint = (reversal as SaleAddItemsReversal & { saleStateFingerprint?: string }).saleStateFingerprint
         if (savedFingerprint && !sameSaleStateFingerprint(await saleStateFingerprint(db, saleId),savedFingerprint)) {
           throw new UndoConflictError('This sale was edited after the items were added, so this can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
@@ -2961,7 +2980,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         ]).catch((error: unknown) => { throw legacySaleAddItemsRaceError(error, 'undo') })
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
-        if (String(snap.status) !== 'reversed') throw new Error('These items are already on the sale; there is nothing to redo.')
+        if (String(snap.status) !== 'reversed') throw new UndoConflictError('These items are already on the sale; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
         // A redo writes moneyAfter over the sale, so it too must find the sale
         // exactly as the undo left it (R-undo C10: it was never checked).
         const saleGuard = await assertLegacySaleAddItemsUnchanged(db, reversal, 'redo')
@@ -3146,14 +3165,14 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       if (ctx.direction === 'undo') {
-        if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)
         await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
         const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
         const legacyGuards = await assertLegacyMergeUnchanged(db, [reversal], reversal.mergedStateFingerprint, canChangeImages)
         await applyMergeReversal(ctx.env, reversal, canChangeImages, legacyGuards?.[0])
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
-        if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
+        if (String(snap.status) !== 'reversed') throw new UndoConflictError('This merge is already in place; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
         if (!mergeFoldFn) throw new Error('This merge cannot be redone in the current server build.')
         const keeperId = Number(reversal.keeperId)
         const dupId = Number(reversal.dupId)
@@ -3224,14 +3243,14 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       if (!reversals.length) throw new Error('This merge has no saved folds to replay.')
 
       if (ctx.direction === 'undo') {
-        if (String(snap.status) !== 'applied') throw new Error('This merge has already been undone.')
+        if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)
         await assertMergeStateUnchanged(db, reversals, mergedStateFingerprint)
         const canChangeImages = !!ctx.user && getActionTier(ctx.user, 'products', 'image') === 'full'
         const legacyGuards = await assertLegacyMergeUnchanged(db, reversals, mergedStateFingerprint, canChangeImages)
         await applyBulkMergeReversal(ctx.env, reversals, canChangeImages, legacyGuards)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
-        if (String(snap.status) !== 'reversed') throw new Error('This merge is already in place; there is nothing to redo.')
+        if (String(snap.status) !== 'reversed') throw new UndoConflictError('This merge is already in place; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
         const fresh = await redoBulkMergeFolds(ctx.env, ctx.user, reversals)
         const freshFingerprint = await mergeStateFingerprint(db, fresh)
         await db.prepare("UPDATE undo_snapshots SET status = 'applied', payload_json = @payload, updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ payload: JSON.stringify({ reversals: fresh, mergedStateFingerprint: freshFingerprint }), id: snapshotId })
@@ -3283,11 +3302,11 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       }
 
       if (ctx.direction === 'undo') {
-        if (String(snap.status) !== 'applied') throw new Error('This attribution has already been undone.')
+        if (String(snap.status) !== 'applied') throw new UndoConflictError('This attribution has already been undone.', UNDO_ALREADY_DONE_CODE)
         await applySupplierBackfillUndo(ctx.env, reversal)
         await db.prepare("UPDATE undo_snapshots SET status = 'reversed', updated_at = CURRENT_TIMESTAMP WHERE id = @id").run({ id: snapshotId })
       } else {
-        if (String(snap.status) !== 'reversed') throw new Error('This attribution is already in place; there is nothing to redo.')
+        if (String(snap.status) !== 'reversed') throw new UndoConflictError('This attribution is already in place; there is nothing to redo.', UNDO_ALREADY_DONE_CODE)
         const name = await applySupplierBackfillRedo(ctx.env, reversal)
         // Keep the snapshot's cached name current for a future undo's label.
         if (name != null && name !== reversal.supplierName) {
