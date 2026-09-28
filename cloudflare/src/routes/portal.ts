@@ -120,17 +120,12 @@ export function normalizePortalPromoItems(value: unknown) {
     .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
 }
 
-// Trimmed text cut to `max` characters, never splitting one in two.
 function capPortalText(value: unknown, max: number): string {
   const text = String(value ?? '').trim()
   return text.length <= max ? text : Array.from(text).slice(0, max).join('')
 }
 
-// The editor's About blocks (customer_portal_about_blocks, serialised by
-// portalEditorUtils.ts serializeAboutBlocks). Block media pass the same link
-// allowlist as the promo cards above. The editor keeps blank blocks while one
-// is being written; they are dropped before the cap, so a blank never pushes a
-// real block out. Malformed JSON fails closed to no blocks.
+// Reads the JSON the Website Editor writes (portalEditorUtils.ts serializeAboutBlocks).
 const PORTAL_ABOUT_BLOCK_TYPES = new Set(['text', 'image', 'video'])
 const MAX_PORTAL_ABOUT_BLOCKS = 30
 
@@ -161,9 +156,7 @@ export function normalizePortalAboutBlocks(value: unknown) {
     .slice(0, MAX_PORTAL_ABOUT_BLOCKS)
 }
 
-// The address's map link: http(s) only. Same rule as the Website Editor's save
-// (CatalogPage.tsx normalizeExternalUrl), which also completes a bare host such
-// as `maps.app.goo.gl/...` with https://.
+// Same bare-host completion and http(s) rule as the editor's CatalogPage.tsx normalizeExternalUrl.
 function normalizePortalAddressLink(value: unknown): string {
   const raw = String(value ?? '').trim()
   if (!raw || raw.length > 2048 || /[\u0000-\u001f\u007f]/.test(raw)) return ''
@@ -180,8 +173,6 @@ function normalizePortalAddressLink(value: unknown): string {
   }
 }
 
-// Logo framing, clamped like the Website Editor's save (whole numbers; size
-// 48-144, zoom 80-180, position 0-100). Blank or non-numeric is the default.
 function clampPortalWhole(value: unknown, min: number, max: number, fallback: number): number {
   const raw = String(value ?? '').trim()
   const num = raw ? Number(raw) : Number.NaN
@@ -326,6 +317,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessLogo: normalizeSafeLinkUrl(settings.customer_portal_logo_image) || '',
     businessFavicon: normalizeSafeLinkUrl(settings.customer_portal_favicon_image) || '',
     businessCover: normalizeSafeLinkUrl(settings.customer_portal_cover_image) || '',
+    // The Website Editor's logo slider ranges and defaults.
     logoSize: clampPortalWhole(settings.customer_portal_logo_size, 48, 144, 80),
     logoFit: String(settings.customer_portal_logo_fit || '').trim().toLowerCase() === 'contain' ? 'contain' : 'cover',
     logoZoom: clampPortalWhole(settings.customer_portal_logo_zoom, 80, 180, 100),
@@ -341,7 +333,6 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     aboutTitle: String(settings.customer_portal_about_title || '').trim(),
     aboutContent: String(settings.customer_portal_about_content || '').trim(),
     aboutBlocks: normalizePortalAboutBlocks(settings.customer_portal_about_blocks),
-    // The About picture (owner's square poster) is this site's own upload only.
     aboutImage: normalizePortalUploadPath(settings.customer_portal_about_image) || '',
     aboutImageAlt: capPortalText(settings.customer_portal_about_image_alt, 200),
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
@@ -815,14 +806,6 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-// GET /config -- the public storefront config (buildPublicPortalConfig).
-// It carries branding, logo framing, contact and social links, the About
-// title/story/blocks/picture, FAQ, promo cards, catalog display options, the
-// loyalty display settings and the public AI fields. It leaves out the AI
-// prompt and provider (see buildPublicPortalConfig) and a few Website Editor
-// keys no visitor feature reads yet (translations, language, title size,
-// badges, stock thresholds; the list is pinned by
-// scripts/test-portal-about-publish-pure.cjs).
 // ---------------------------------------------------------------------------
 // Public read caching
 // ---------------------------------------------------------------------------

@@ -1034,10 +1034,7 @@ app.post('/', async (c) => {
     if (isRegisteredBusinessIdentityKey(key)) body[key] = (body[key] as string).trim()
   }
 
-  // Every storefront visitor loads the About picture, so only this site's own
-  // upload is stored; empty clears it. The public config applies the same rule
-  // to a value stored any other way (a backup restore), and caps the
-  // description the same way.
+  // Every storefront visitor loads the About picture, so only this site's own upload is stored.
   if (attemptedKeys.includes('customer_portal_about_image')) {
     const raw = body.customer_portal_about_image
     const text = raw == null ? '' : String(raw).trim()

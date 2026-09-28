@@ -52,12 +52,8 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
   return raw
 }
 
-// A picture the storefront must load from this site only (the About picture,
-// AB-W): an uploaded file, `/uploads/NAME`. Stricter than the link rule above,
-// which also admits any https:// URL -- a third-party image would let another
-// host log every visitor. A step out of /uploads/ is refused in each spelling a
-// browser or the upload route resolves as one: `..` or `.` (also
-// percent-encoded), a backslash, an encoded slash.
+// Stricter than normalizeSafeLinkUrl: a picture served by another host would
+// let that host log every storefront visitor.
 const MAX_UPLOAD_PATH_LENGTH = 500
 const UPLOADS_PREFIX = '/uploads/'
 

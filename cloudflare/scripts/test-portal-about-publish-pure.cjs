@@ -1,32 +1,3 @@
-// AB-W (PUBLIC-PAINT-FINAL.md section 5, 29 Sep 2026): the storefront receives
-// the About title, story, blocks and picture, the address link and the logo
-// framing the owner sets in the Website Editor, and a bad stored value never
-// reaches a visitor.
-//
-// Before this lane buildPortalConfig published none of aboutTitle /
-// aboutContent / aboutBlocks / addressLink / logoSize / logoFit / logoZoom /
-// logoPositionX / logoPositionY, so the About text the owner wrote showed in
-// the editor preview but never on the live site, and the editor (which builds
-// its draft from the public config) reset those fields to defaults and saved
-// the defaults back.
-//
-// Pins, against the REAL routes/portal.ts, lib/safeLinkUrl.ts and
-// routes/settings.ts:
-//   - every published key follows its own stored setting (fixture values all
-//     differ from the defaults, so a builder that returns defaults fails);
-//   - the About picture is published only as this site's own /uploads/ path,
-//     block media and the logo/cover/favicon only through the link allowlist,
-//     the address link only as http(s), and the logo framing clamped exactly
-//     like the editor save;
-//   - ratchet: every key the Website Editor's buildDraft reads from the public
-//     config is published, or is on KNOWN_UNPUBLISHED, and that list can only
-//     shrink;
-//   - POST /api/settings refuses a bad About picture with invalid_about_image,
-//     trims the picture description to 200 characters, and files both keys in
-//     the About permission bucket.
-//
-// Run: node scripts/test-portal-about-publish-pure.cjs
-
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -71,6 +42,7 @@ const BLOCKS = [
   { id: 'b1', type: 'text', title: 'Since 2019', body: 'Family shop in Phnom Penh.', mediaUrl: '' },
   { id: 'b2', type: 'image', title: 'Our counter', body: '', mediaUrl: '/uploads/counter-2-def.webp' },
 ]
+// Every value differs from its default, so a builder that publishes defaults fails.
 const FIXTURE = {
   business_name: 'Leang Cosmetics',
   customer_portal_about_title: 'Our story',
@@ -112,7 +84,6 @@ const BAD_ABOUT_IMAGES = [
 ]
 
 async function main() {
-  // ---------------------------------------------------------------- publish
   await check('publish matrix: every About / address / logo key follows its stored setting', () => {
     const config = publish(FIXTURE)
     assert.equal(config.aboutTitle, 'Our story')
@@ -161,7 +132,7 @@ async function main() {
     }
   })
 
-  await check('logo framing is clamped exactly like the editor save', () => {
+  await check('logo framing is clamped to the editor slider ranges; blank or junk publishes the default', () => {
     const cases = [
       [{ customer_portal_logo_size: '10' }, 'logoSize', 48],
       [{ customer_portal_logo_size: '999' }, 'logoSize', 144],
@@ -264,12 +235,8 @@ async function main() {
     assert.equal(JSON.stringify(config).includes('INTERNAL prompt'), false)
   })
 
-  // ----------------------------------------------------------------- ratchet
-  // The Website Editor builds its draft from the PUBLIC config (CatalogPage.tsx
-  // buildDraft), so an editor key the Worker does not publish comes back as a
-  // default and is saved back over the stored value. Every such key is listed
-  // here, deliberately. Publishing one of them removes it from this list;
-  // nothing may be added without raising MAX_KNOWN_UNPUBLISHED in review.
+  // The editor builds its draft from the public config (CatalogPage.tsx buildDraft), so an
+  // unpublished editor key comes back as its default and is saved over the stored value.
   const KNOWN_UNPUBLISHED = [
     'customer_portal_title_size',
     'customer_portal_ai_intro',
@@ -344,8 +311,7 @@ async function main() {
     assert.equal(publishedFrom('customer_portal_title_size', ['titleSize']), false)
   })
 
-  // ------------------------------------------------------ POST /api/settings
-  const db = openDb(loadAll())
+  const db =openDb(loadAll())
   let sessionUser = null
   const overrides = {
     '../lib/db': { getDb: (e) => e.DB },
