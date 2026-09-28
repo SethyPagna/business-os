@@ -32,6 +32,7 @@ const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
 const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200
 const SERVICE_WORKER_UPDATE_POLL_MS = 15 * 60 * 1000
 const SERVICE_WORKER_UPDATE_MIN_GAP_MS = 60 * 1000
+const SERVICE_WORKER_UPDATE_TIMEOUT_MS = 30 * 1000
 const WAITING_WORKER_VERSION_TIMEOUT_MS = 2000
 const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000
 const FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS = 1200
@@ -68,18 +69,26 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
   if (typeof window === 'undefined') return
 
   let lastCheckedAt = Date.now()
-  let checking = false
+  // The check still waiting on the browser, compared by identity so a check
+  // that timed out and settles late cannot release the one that replaced it.
+  let inFlight: symbol | null = null
 
   const check = (minGapMs = 0) => {
-    if (checking) return
+    // A trigger while a check is in flight folds into it -- until that check
+    // has waited past the timeout: a sw.js fetch that never settles must not
+    // silence every later check in a tab that stays open all day. (The
+    // browser folds a repeat into an update it is still running.)
+    if (inFlight && Date.now() - lastCheckedAt < SERVICE_WORKER_UPDATE_TIMEOUT_MS) return
     // An offline till would only burn a failing fetch every tick.
     if (navigator.onLine === false) return
     if (minGapMs > 0 && Date.now() - lastCheckedAt < minGapMs) return
-    checking = true
     lastCheckedAt = Date.now()
-    Promise.resolve(registration.update?.())
+    const self = Symbol('update-check')
+    inFlight = self
+    // Called inside the executor so an update() that throws is a rejection.
+    new Promise((resolve) => { resolve(registration.update?.()) })
       .catch(() => {})
-      .finally(() => { checking = false })
+      .finally(() => { if (inFlight === self) inFlight = null })
   }
 
   window.setInterval(() => {
@@ -95,9 +104,28 @@ function watchForNewAppShell(registration: ServiceWorkerRegistration) {
     check(SERVICE_WORKER_UPDATE_MIN_GAP_MS)
   })
 
+  // The same return, as the other signals report it: clicking back into a
+  // till window left visible beside another app fires focus but no
+  // visibilitychange, and a page restored from the back/forward cache may
+  // report only pageshow. Same gap, so one return seen by every signal is one
+  // request.
+  window.addEventListener('focus', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) check(SERVICE_WORKER_UPDATE_MIN_GAP_MS)
+  })
+
   // Reconnecting is the other moment a deploy missed while offline becomes
   // reachable.
   window.addEventListener('online', () => { check(SERVICE_WORKER_UPDATE_MIN_GAP_MS) })
+
+  // The app's own reconnect signal: websocket.ts dispatches it when the live
+  // socket re-opens after a drop, http.ts when a failed health probe
+  // recovers. A deploy restarts the Durable Object behind that socket, so this
+  // is how an open till hears about a new build within seconds instead of on
+  // the next poll. No minimum gap on purpose: a check made seconds earlier
+  // saw the old sw.js. The socket's reconnect backoff bounds how often this
+  // fires, and `inFlight` folds the two emitters of one reconnect into one.
+  window.addEventListener('sync:reconnected', () => { check() })
 }
 
 // Asks a specific worker which build it is. Resolves to an empty string if it
@@ -135,7 +163,7 @@ function requestWorkerVersion(worker: ServiceWorker): Promise<string> {
 // re-registration can park the build this page is already running, and a
 // standing "New version ready" bar that a restart cannot clear is worse than
 // no bar at all. An unanswered probe is treated the same way -- silence is
-// recoverable on the next visibility/online re-check, a wrong "restart now"
+// recoverable on watchForNewAppShell's next re-check, a wrong "restart now"
 // in the middle of a sale is not.
 async function announceWaitingAppShell(registration: ServiceWorkerRegistration) {
   const waiting = registration.waiting
