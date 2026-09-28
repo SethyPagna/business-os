@@ -1618,10 +1618,8 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
-  // day), which is why it is its own section and never subtracted. A refund
-  // is ONE amount, in dollars like every total here: total_refund_khr is the
-  // same refund at the return's rate, so printing it beside the dollars read
-  // as a second refund (SCAN1 M3, the Reports hub rule).
+  // day), which is why it is its own section and never subtracted. Dollars
+  // only: total_refund_khr is this same refund at the return's rate, not a second one.
   const returned = figures.returns
   section('returns', returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : [])
   return lines.join('\n')
