@@ -964,7 +964,13 @@ async function main() {
     const beforeMovements = rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n
     const removed = await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'availability race', branchId: 1 })
     beforeDbBatchHook = null
-    assert.strictEqual(removed.status, 400)
+    // SCAN1 STK-C: a refused in-batch guard is a CONFLICT (nothing was
+    // written; refresh and retry), answered 409 with a code the frontend
+    // translates -- it used to surface as a 400 carrying SQLite's raw
+    // "malformed JSON" text. scripts/test-stock-remove-atomic-pure.cjs pins
+    // the rest of that contract.
+    assert.strictEqual(removed.status, 409, JSON.stringify(removed.json))
+    assert.strictEqual(removed.json.code, 'stock_removal_conflict')
     assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get([batchId]).quantity, 1, 'failed exact plan applied no partial decrement')
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) AS n FROM inventory_movements WHERE movement_type='remove'").get().n, beforeMovements, 'failed exact plan published no movement')
   })

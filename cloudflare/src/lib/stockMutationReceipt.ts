@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import type { StockWriteStatement } from './productBatches'
 
 // Per-line idempotency for the two single-line stock write kernels --
 // routes/inventory.ts's runAdjustAction and routes/batches.ts's
@@ -65,6 +66,18 @@ import type { D1Compat } from './db'
 // changed row owns it, so two racing retries still produce one write).
 // written = 1 is never taken over.
 //
+// THE ATOMIC MARK. A kernel whose whole stock write IS one db.batch -- the
+// auto-routed removal in routes/inventory.ts (captured lot drain + strict
+// aggregate decrement + movement or held row) and the tagged-stock Restore /
+// Dispose -- does not call markWritten() ahead of that batch. It puts the
+// written=1 UPDATE INSIDE the batch (atomicMark.statement()) and reports the
+// commit (atomicMark.committed()). The mark then commits exactly when the
+// stock does: an in-batch guard that refuses the write (409, nothing moved)
+// rolls the mark back with it and the claim is released, so the retry runs
+// the kernel again instead of being told "partially applied" for a request
+// that wrote nothing. A batch that committed but whose reply was lost still
+// left written=1 behind, which the release's written=0 condition respects.
+//
 // Free/paid: no KV, no Queues, no Durable Object, no cron, no custom CPU
 // limit. It does spend D1 queries on the binding the kernel already holds:
 // four per identified line that succeeds (the receipt read, the claim insert,
@@ -84,6 +97,16 @@ const STOCK_MUTATION_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 const STOCK_MUTATION_STALE_SECONDS = 120
 
 type StockMutationKind = 'adjust' | 'receive'
+
+/** The write mark as a statement for a kernel whose whole stock write is one db.batch (see THE ATOMIC MARK). */
+export type StockMutationAtomicMark = {
+  /** The written=1 UPDATE to include in that batch, or null when no claim is held (or it is already marked). */
+  statement(): StockWriteStatement | null
+  /** Call once that batch has committed. */
+  committed(): void
+}
+
+const NO_ATOMIC_MARK: StockMutationAtomicMark = { statement: () => null, committed: () => {} }
 
 type StockMutationClaim =
   | { state: 'disabled' }
@@ -244,10 +267,11 @@ async function claimStockMutation(
 }
 
 /** Set immediately before the kernel's first stock-mutating statement. */
+const MARK_STOCK_MUTATION_WRITTEN_SQL =
+  'UPDATE stock_mutation_receipts SET written=1 WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL'
+
 async function markStockMutationWritten(db: D1Compat, actorId: number, requestId: string): Promise<void> {
-  await db.prepare(
-    'UPDATE stock_mutation_receipts SET written=1 WHERE actor_id=@actor AND request_id=@request AND completed_at IS NULL',
-  ).run({ actor: actorId, request: requestId })
+  await db.prepare(MARK_STOCK_MUTATION_WRITTEN_SQL).run({ actor: actorId, request: requestId })
 }
 
 async function completeStockMutation(
@@ -307,7 +331,7 @@ export async function withStockMutationReceipt(
   kind: StockMutationKind,
   body: Record<string, unknown>,
   json: (value: unknown, status?: number) => Response,
-  run: (markWritten: () => Promise<void>) => Promise<Response>,
+  run: (markWritten: () => Promise<void>, atomicMark: StockMutationAtomicMark) => Promise<Response>,
 ): Promise<Response> {
   const supplied = body.client_request_id ?? body.clientRequestId
   const requestId = normalizeStockMutationRequestId(supplied)
@@ -316,13 +340,13 @@ export async function withStockMutationReceipt(
     // unprotected would be the worst of the three answers: the client believes
     // the line is deduped, and it is not.
     if (requestIdWasSupplied(supplied)) return json(STOCK_MUTATION_INVALID_ID, 400)
-    return run(async () => {})
+    return run(async () => {}, NO_ATOMIC_MARK)
   }
-  if (actorId == null) return run(async () => {})
+  if (actorId == null) return run(async () => {}, NO_ATOMIC_MARK)
   const db = openDb()
   const canonical = canonicalStockMutationRequest(body)
   const claim = await claimStockMutation(db, actorId, requestId, kind, canonical)
-  if (claim.state === 'disabled') return run(async () => {})
+  if (claim.state === 'disabled') return run(async () => {}, NO_ATOMIC_MARK)
   if (claim.state === 'conflict') return json(STOCK_MUTATION_CONFLICT, 409)
   if (claim.state === 'in_flight') return json(STOCK_MUTATION_IN_FLIGHT, 409)
   if (claim.state === 'partial') return json(STOCK_MUTATION_PARTIAL, 409)
@@ -334,9 +358,13 @@ export async function withStockMutationReceipt(
     wrote = true
     await markStockMutationWritten(db, actorId, requestId)
   }
+  const atomicMark: StockMutationAtomicMark = {
+    statement: () => (wrote ? null : { sql: MARK_STOCK_MUTATION_WRITTEN_SQL, params: { actor: actorId, request: requestId } }),
+    committed: () => { wrote = true },
+  }
   let response: Response
   try {
-    response = await run(markWritten)
+    response = await run(markWritten, atomicMark)
   } catch (error) {
     if (wrote) await completeStockMutation(db, actorId, requestId, 500, STOCK_MUTATION_PARTIAL)
     else await releaseStockMutation(db, actorId, requestId)

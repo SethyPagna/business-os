@@ -185,16 +185,42 @@ export function planHoldAsTagged(input: HoldAsTaggedInput): StockWriteStatement[
   ]
 }
 
-function decrementLotStatement(lotId: number, quantity: number): StockWriteStatement {
-  // Guarded on quantity_remaining so a concurrent POS damage sale (which draws
-  // the same column down) can never drive it negative; the caller re-reads and
-  // refuses when the allocation no longer covers the request.
-  return {
-    sql: `UPDATE damaged_stock_lots
-      SET quantity_remaining = quantity_remaining - @quantity, updated_at = CURRENT_TIMESTAMP
-      WHERE id = @lotId AND quantity_remaining >= @quantity`,
-    params: { lotId, quantity },
-  }
+/** The code the in-batch guard below aborts with; the route answers 409 with it. */
+export const TAGGED_LOT_CONFLICT_CODE = 'tagged_lot_conflict'
+
+/**
+ * True when a DISPOSE / RESTORE batch was refused by takeLotStatements' guard
+ * (json_extract on a non-JSON code raises "malformed JSON"). The whole batch
+ * rolled back: nothing was written.
+ */
+export function isTaggedLotConflict(error: unknown): boolean {
+  return /malformed JSON|tagged_lot_conflict/i.test(error instanceof Error ? error.message : String(error))
+}
+
+// One held-lot take, GUARDED IN THE BATCH (SCAN1 STK-D). The route reads the
+// open lots and allocates before it writes; a concurrent POS damage sale (or a
+// second Restore / Dispose) can draw the same quantity_remaining down in
+// between. The decrement's own WHERE only stops the column going negative --
+// on its own it turns into a silent 0-row UPDATE while the rest of the batch
+// still credits sellable stock (Restore) or books a second loss (Dispose). So
+// the guard aborts the whole batch first, and the route answers 409
+// tagged_lot_conflict with nothing written.
+function takeLotStatements(lotId: number, quantity: number): StockWriteStatement[] {
+  const params = { lotId, quantity }
+  return [
+    {
+      sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM damaged_stock_lots WHERE id = @lotId AND quantity_remaining >= @quantity
+        ) THEN 1 ELSE json_extract('${TAGGED_LOT_CONFLICT_CODE}','$') END AS tagged_lot_guard`,
+      params,
+    },
+    {
+      sql: `UPDATE damaged_stock_lots
+        SET quantity_remaining = quantity_remaining - @quantity, updated_at = CURRENT_TIMESTAMP
+        WHERE id = @lotId AND quantity_remaining >= @quantity`,
+      params,
+    },
+  ]
 }
 
 export type TaggedLotChangeInput = {
@@ -242,7 +268,7 @@ export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatem
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Disposed quantity must be positive')
   return [
-    ...input.takes.map((take) => decrementLotStatement(take.lotId, take.quantity)),
+    ...input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity)),
     movementStatement({
       productId: input.productId,
       productName: input.productName,
@@ -269,7 +295,7 @@ export function planDisposeTagged(input: TaggedLotChangeInput): StockWriteStatem
 export function planRestoreTagged(input: TaggedLotChangeInput): StockWriteStatement[] {
   const quantity = takenQuantity(input.takes)
   if (!(quantity > 0)) throw new Error('Restored quantity must be positive')
-  const statements: StockWriteStatement[] = input.takes.map((take) => decrementLotStatement(take.lotId, take.quantity))
+  const statements: StockWriteStatement[] = input.takes.flatMap((take) => takeLotStatements(take.lotId, take.quantity))
   for (const take of input.takes) {
     if (take.batchId == null) continue
     statements.push({

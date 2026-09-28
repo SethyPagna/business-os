@@ -904,10 +904,12 @@ export function decrementBatchStockStatement(batchId: number, branchId: number, 
 // Strict sibling of decrementBatchStockStatement: plain subtraction, no
 // MAX(0) clamp, so an oversell of a specific lot violates branch_batch_stock's
 // CHECK(quantity >= 0) (migration 0058) and aborts the whole atomic sale batch
-// instead of silently flooring the lot at 0. Used only by the POS/sales write
-// paths, which pre-validate availability and want a concurrent oversell to
-// FAIL the sale rather than clamp it. Other callers (transfers, returns) keep
-// the clamped version deliberately -- see each call site.
+// instead of silently flooring the lot at 0. Used by the POS/sales write
+// paths and by planRemoveStockAcrossBatches (POST /inventory/adjust's
+// auto-routed remove and /move-row), which pre-validate availability and want
+// a concurrent oversell to FAIL the write rather than clamp it. Other callers
+// (transfers, returns) keep the clamped version deliberately -- see each call
+// site.
 export function decrementBatchStockStrictStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
   return {
     sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
@@ -1062,105 +1064,160 @@ export async function productHasBatchHistory(db: D1Compat, productId: number): P
   return Boolean(row)
 }
 
-// FIFO-drain `quantity` off a product's active batches at one branch,
-// across as many batches as it takes (same expiry-then-received-then-id
-// order listBatchesForProduct already uses -- "sell/remove the lot that
-// expires soonest" applies just as much to a programmatic removal as an
-// interactive one). Companion to removeStockFromBatch for callers that
-// can't name a single batchId: undo/redo restoring a lower snapshot
-// quantity, and "clear stock to zero" (routes/inventory.ts's /adjust,
-// Products.tsx's clearProductStockByIds) both need to remove a specific
-// total amount from *some* batch(es), not one named lot.
+// FIFO allocation of `quantity` across a product's available lots at one
+// branch, in the order the caller read them -- listBatchesForProduct's
+// expiry-then-received-then-id order ("remove the lot that expires soonest"
+// applies as much to a programmatic removal as to an interactive one).
+// Pure: the caller reads the lots, planRemoveStockAcrossBatches below applies
+// exactly this allocation and guards it, so a lot consumed between the read
+// and the write fails the whole batch instead of being silently clamped.
+export function fifoRemovalAllocations(
+  lots: ReadonlyArray<{ id: number; quantity: number }>,
+  quantity: number,
+): Array<{ batchId: number; quantity: number }> {
+  let remaining = Number(quantity)
+  const allocations: Array<{ batchId: number; quantity: number }> = []
+  for (const lot of lots) {
+    if (!(remaining > 0)) break
+    const take = Math.min(remaining, Number(lot.quantity) || 0)
+    if (!(take > 0)) continue
+    allocations.push({ batchId: Number(lot.id), quantity: take })
+    remaining -= take
+  }
+  return allocations
+}
+
+// The one way the aggregate (branch_stock + products.stock_quantity) is
+// decremented by a removal that has to be strict: an in-batch guard that the
+// branch row exists and still holds the quantity, then a PLAIN UPDATE --
+// never the accumulating UPSERT. SQLite checks CHECK(quantity >= 0)
+// (migration 0058) on an UPSERT's candidate VALUES row before ON CONFLICT is
+// considered, so `INSERT ... VALUES(-n) ON CONFLICT DO UPDATE` can never
+// decrement anything: it fails every time (SCAN1 STK-C). The plain UPDATE is
+// the idiom lib/stockRevert.ts's aggregate statements already use; the guard
+// is what refuses a row that vanished (an UPDATE of a missing row changes
+// nothing and reports no error). The product rollup is re-derived from the
+// branch rows, as planRemoveStockFromBatch does, so it cannot drift further.
+export function planBranchStockRemoval(input: { productId: number; branchId: number; quantity: number }): StockWriteStatement[] {
+  const params = { productId: Number(input.productId), branchId: Number(input.branchId), quantity: Number(input.quantity) }
+  return [
+    {
+      sql: `SELECT CASE WHEN EXISTS(
+          SELECT 1 FROM branch_stock
+          WHERE product_id=@productId AND branch_id=@branchId AND quantity>=@quantity
+        ) THEN 1 ELSE json_extract('stock_removal_conflict','$') END AS branch_stock_guard`,
+      params,
+    },
+    {
+      sql: `UPDATE branch_stock SET quantity = quantity - @quantity
+            WHERE product_id = @productId AND branch_id = @branchId`,
+      params,
+    },
+    {
+      sql: `UPDATE products SET stock_quantity = (
+              SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@productId
+            ), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params,
+    },
+  ]
+}
+
+/**
+ * True when a removal batch was refused because the stock it read is no longer
+ * there: one of the in-batch guards above aborted (json_extract on a non-JSON
+ * code raises "malformed JSON"), or a strict decrement hit a stock CHECK. The
+ * whole D1 batch rolled back, so NOTHING was written -- the caller answers 409
+ * and the operator refreshes and retries.
+ */
+export function isStockRemovalConflict(error: unknown): boolean {
+  return /malformed JSON|stock_removal_conflict|captured_batch_allocation_conflict|CHECK constraint failed/i
+    .test(error instanceof Error ? error.message : String(error))
+}
+
+export type StockRemovalPlan = {
+  statements: StockWriteStatement[]
+  batchIds: number[]
+  /** Signed negative (this is a removal), one entry per touched lot. */
+  batchQuantities: Array<{ batchId: number; quantity: number }>
+  /** Units the lots covered. */
+  drained: number
+  /** Units no lot covered: legacy / imported stock that rides branch_stock alone. */
+  remainder: number
+}
+
+// Removal of `quantity` from a product at one branch across its lots, as ONE
+// set of statements for the caller's own db.batch -- the caller adds its
+// movement (or held-lot) rows to the SAME batch, so stock can never leave
+// without its ledger line and a failure anywhere leaves both ledgers exactly
+// where they were (SCAN1 STK-C / OV-6).
 //
-// Same atomicity guarantee as removeStockFromBatch: one db.batch() call
-// covering every touched branch_batch_stock row plus the single
-// branch_stock/products.stock_quantity decrement, so a mid-drain failure
-// can't leave the aggregate and the ledger disagreeing.
+// `allocations` is the exact per-lot split the caller read (see
+// fifoRemovalAllocations, or /adjust's cost capture): each one is guarded in
+// the batch and decremented strictly. Whatever the lots do not cover is the
+// `remainder` -- stock that predates batch tracking for this product and sits
+// in branch_stock with nothing in branch_batch_stock behind it. That is a
+// legitimate state, not an error (blocking the removal would be a regression
+// against the plain pre-batch behaviour), so the aggregate is decremented for
+// the FULL quantity -- lots plus remainder -- through planBranchStockRemoval.
 //
-// Unlike removeStockFromBatch (one named lot -- an interactive picker
-// choosing a lot with too little available is a real error, must pick a
-// different one), this never throws for a shortfall. A product can have
-// batch history (productHasBatchHistory true, so an auto-routed caller
-// gets here) while some of its current aggregate stock predates that
-// batch ever being created -- e.g. stock added before batch tracking
-// started for this product, still sitting in branch_stock with nothing
-// in branch_batch_stock behind it. Blocking a legitimate removal because
-// the *batch* ledger alone can't cover it would be a regression versus
-// the plain pre-batch behavior. So: drain whatever active batches have
-// (FIFO), and report back how much of the request that covered --
-// routes/inventory.ts's /adjust applies the remainder through the
-// ordinary applyStockDelta decrement, same as it always did for a
-// product with no batch ledger at all.
-export async function removeStockAcrossBatches(db: D1Compat, input: {
+// This replaced removeStockAcrossBatches, which committed the lot drain in a
+// batch of its own with MAX(0) clamps and left the remainder to a separate
+// UPSERT that the CHECK always refused: a mixed lot + unlotted removal drained
+// the lots, wrote no movement, and answered 400.
+export function planRemoveStockAcrossBatches(input: {
   productId: number
   branchId: number
   quantity: number
-  /** Exact FIFO allocation captured by a caller that must bind metadata to it. */
-  allocations?: Array<{ batchId: number; quantity: number }>
-}): Promise<{ batchIds: number[]; batchQuantities: { batchId: number; quantity: number }[]; drained: number; remainder: number }> {
-  let remaining = input.quantity
-  const touched: { batchId: number; take: number }[] = []
-  if (input.allocations) {
-    const ids = new Set<number>()
-    for (const allocation of input.allocations) {
-      const batchId = Number(allocation.batchId)
-      const take = Number(allocation.quantity)
-      if (!Number.isSafeInteger(batchId) || batchId <= 0 || !Number.isFinite(take) || !(take > 0) || ids.has(batchId)) {
-        throw new Error('The captured received-date allocation is invalid. Refresh and try again.')
-      }
-      ids.add(batchId)
-      touched.push({ batchId, take })
-      remaining -= take
-    }
-    if (remaining < -0.000000001) throw new Error('The captured received-date allocation exceeds the stock removal.')
-    remaining = Math.max(0, remaining)
-  } else {
-    const batches = await listBatchesForProduct(db, input.productId, input.branchId, { onlyAvailable: true })
-    for (const batch of batches) {
-      if (remaining <= 0) break
-      const take = Math.min(remaining, Number(batch.quantity) || 0)
-      if (take <= 0) continue
-      touched.push({ batchId: batch.id, take })
-      remaining -= take
-    }
+  allocations: ReadonlyArray<{ batchId: number; quantity: number }>
+}): StockRemovalPlan {
+  const productId = Number(input.productId)
+  const branchId = Number(input.branchId)
+  const quantity = Number(input.quantity)
+  if (![productId, branchId].every((value) => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('A valid product and branch are required')
   }
-  const drained = input.quantity - remaining
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be a positive number')
+  let remaining = quantity
+  const touched: { batchId: number; take: number }[] = []
+  const ids = new Set<number>()
+  for (const allocation of input.allocations) {
+    const batchId = Number(allocation.batchId)
+    const take = Number(allocation.quantity)
+    if (!Number.isSafeInteger(batchId) || batchId <= 0 || !Number.isFinite(take) || !(take > 0) || ids.has(batchId)) {
+      throw new Error('The captured received-date allocation is invalid. Refresh and try again.')
+    }
+    ids.add(batchId)
+    touched.push({ batchId, take })
+    remaining -= take
+  }
+  if (remaining < -0.000000001) throw new Error('The captured received-date allocation exceeds the stock removal.')
+  remaining = Math.max(0, remaining)
 
-  if (touched.length) {
-    await db.batch([
-      // The exact pre-read allocation and its cost snapshot travel together.
-      // Fail the entire D1 batch before any decrement if a concurrent write
-      // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
-      // lot is deliberately irrelevant: this call applies only captured IDs.
-      ...(input.allocations ? touched.map(({ batchId, take }) => ({
-        sql: `SELECT CASE WHEN EXISTS(
+  const statements: StockWriteStatement[] = [
+    // The exact pre-read allocation and its cost snapshot travel together.
+    // Fail the entire D1 batch before any decrement if a concurrent write
+    // consumed/deleted/reassigned one of those lots. A newly inserted FIFO
+    // lot is deliberately irrelevant: this applies only the captured IDs.
+    ...touched.map(({ batchId, take }) => ({
+      sql: `SELECT CASE WHEN EXISTS(
           SELECT 1 FROM branch_batch_stock bbs
           JOIN product_batches pb ON pb.id=bbs.batch_id
           WHERE bbs.batch_id=@batchId AND bbs.branch_id=@branchId
             AND pb.variant_product_id=@productId AND pb.is_active=1 AND bbs.quantity>=@quantity
         ) THEN 1 ELSE json_extract('captured_batch_allocation_conflict','$') END AS allocation_guard`,
-        params: { batchId, branchId: input.branchId, productId: input.productId, quantity: take },
-      })) : []),
-      ...touched.map(({ batchId, take }) => decrementBatchStockStatement(batchId, input.branchId, take)),
-      {
-        sql: `UPDATE branch_stock SET quantity = MAX(0, quantity - @quantity) WHERE product_id = @productId AND branch_id = @branchId`,
-        params: { productId: input.productId, branchId: input.branchId, quantity: drained },
-      },
-      {
-        sql: `UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-        params: { productId: input.productId, quantity: drained },
-      },
-    ])
-  }
+      params: { batchId, branchId, productId, quantity: take },
+    })),
+    ...touched.map(({ batchId, take }) => decrementBatchStockStrictStatement(batchId, branchId, take)),
+    ...planBranchStockRemoval({ productId, branchId, quantity }),
+  ]
 
   return {
+    statements,
     batchIds: touched.map((entry) => entry.batchId),
-    // Signed negative (this is a removal) so a caller recording
-    // provenance (datedStockCountApply.ts) can store these rows
-    // directly without re-deriving the sign -- symmetric with how a
-    // receiveBatchStock top-up's quantity is recorded positive.
+    // Signed negative, symmetric with how a receiveBatchStock top-up's
+    // quantity is recorded positive.
     batchQuantities: touched.map((entry) => ({ batchId: entry.batchId, quantity: -entry.take })),
-    drained,
+    drained: quantity - remaining,
     remainder: remaining,
   }
 }
