@@ -852,6 +852,16 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      // portalNoTranslate.ts (owner [[ ]] never-translate markers) is imported by
+      // CatalogSecondaryTabs (catalog-secondary-tabs), which must not pull the
+      // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts). Same
+      // shared-by-several-catalog-surfaces case as the modules above.
+      || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
+      // portalFaqLayout.ts: same consumer, same reason.
+      || normalized.includes('/src/components/catalog/portalFaqLayout.ts')
+      // portalActiveFilters.ts (filter chips) is imported by
+      // CatalogProductsSection (catalog-products); same reason.
+      || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic
@@ -897,7 +907,12 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
-    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
+    if (
+      normalized.includes('/src/components/catalog/portalTranslateController.ts')
+      // The DOM guard shares this chunk: PublicCatalogRoot (which installs
+      // it) already reaches this chunk statically via PublicCatalogPage.
+      || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
+    ) {
       return 'portal-translate-controller'
     }
     if (

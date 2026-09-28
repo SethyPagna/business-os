@@ -159,7 +159,10 @@ const vite = await createServer({
       server.middlewares.use('/api/', (_request, response) => json(response, {}))
       server.middlewares.use('/promotion-click-fixture', async (_request, response) => {
         response.setHeader('content-type', 'text/html; charset=utf-8')
-        const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script>window.addEventListener("error",function(event){document.body.dataset.fixtureError=String(event.error&&event.error.stack||event.message)});window.addEventListener("unhandledrejection",function(event){document.body.dataset.fixtureError=String(event.reason&&event.reason.stack||event.reason)})</script><script type="module" src="/@id/virtual:bos-promotion-click-fixture"></script></body></html>'
+        // The storefront opens in Khmer for a first-time visitor (P-public-1);
+        // this fixture visitor has picked English, so the click paths below
+        // can be driven by the English labels they were written against.
+        const html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script>try{localStorage.setItem("business-os:portal-translate-target","en")}catch(e){}window.addEventListener("error",function(event){document.body.dataset.fixtureError=String(event.error&&event.error.stack||event.message)});window.addEventListener("unhandledrejection",function(event){document.body.dataset.fixtureError=String(event.reason&&event.reason.stack||event.reason)})</script><script type="module" src="/@id/virtual:bos-promotion-click-fixture"></script></body></html>'
         response.end(await server.transformIndexHtml('/promotion-click-fixture', html))
       })
     },

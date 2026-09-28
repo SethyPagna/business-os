@@ -161,3 +161,30 @@ export function parseProductDescription(description: string | null | undefined):
 
   return { intro: introParts.join('\n\n'), officialName, sections, hasStructuredSections: sections.length > 0 }
 }
+
+// Owner, 2026-09-25: the Official Product Name row shows ONLY a dedicated
+// official name -- hidden when there is none, never the shop's own name.
+//
+// Where it lives: there is no official-name column. It is the
+// "Official Product Name:" section inside products.description, parsed
+// above (the importer writes it from the template's official_product_name
+// column, cloudflare/src/lib/importEngine.ts). The old-system migration
+// filled that line with a copy of the shop name on 6030 of 6031 products
+// (progress.md), so an official name that only repeats the shop's product
+// name is treated as absent -- otherwise the row would show the shop name
+// on every product, which is exactly what the owner asked to stop.
+// Comparison ignores case, spacing and punctuation; Khmer vowel signs are
+// marks (\p{M}) and are kept.
+const comparableName = (value: unknown) => String(value ?? '')
+  .normalize('NFKC')
+  .toLowerCase()
+  .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
+  .trim()
+
+export function resolveOfficialProductName(officialName: unknown, shopProductName: unknown): string {
+  const official = String(officialName ?? '').trim()
+  if (!official) return ''
+  const comparable = comparableName(official)
+  if (!comparable || comparable === comparableName(shopProductName)) return ''
+  return official
+}

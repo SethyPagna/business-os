@@ -45,7 +45,13 @@ runTest('catalog compact filters float instead of inserting a layout row', () =>
   assert.match(catalogProducts, /filterPanelRef\.current\?\.focus\(\)/)
   assert.doesNotMatch(catalogProducts, /\{filtersOpen \? \(\s*<div className="space-y-2 rounded-\[1\.35rem\]/)
   assert.doesNotMatch(catalogProducts, /setFiltersOpen\(\(current\) => !current\)/)
-  assert.match(catalogProducts, /<aside className="hidden[^"]*lg:block/, 'wide screens should retain the permanent filter rail')
+  // P-public-10 (owner, 2026-09-25): the permanent lg+ filter rail is gone so
+  // the search owns the full row; wide screens get a slim collapsible panel
+  // under the search, toggled by its own state, collapsed by default.
+  assert.doesNotMatch(catalogProducts, /<aside className="hidden[^"]*lg:block/, 'the permanent filter rail is back')
+  assert.match(catalogProducts, /const \[desktopFiltersOpen, setDesktopFiltersOpen\] = useState\(false\)/, 'the desktop panel starts collapsed')
+  assert.match(catalogProducts, /aria-expanded=\{desktopFiltersOpen\}[\s\S]{0,120}aria-controls="portal-desktop-filters"/)
+  assert.match(catalogProducts, /\{desktopFiltersOpen \? \(\s*<div id="portal-desktop-filters"[^>]*lg:block/, 'the panel is lg+ only and mounted only while open')
 })
 
 runTest('catalog option comboboxes share the body portal and searchable focus contract', () => {

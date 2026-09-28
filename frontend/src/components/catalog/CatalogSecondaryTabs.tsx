@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
@@ -20,6 +21,8 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
+import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
+import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -278,6 +281,23 @@ type CatalogSecondaryTabsProps = {
   tab?: string
 } & Record<string, unknown>
 
+/**
+ * Owner-written storefront copy. Phrases the owner wrapped in [[ ]] render
+ * inside translate="no" so Google Translate leaves them exactly as written;
+ * everything else stays translatable (see portalNoTranslate.ts).
+ */
+function OwnerText({ text }: { text: string }) {
+  return (
+    <>
+      {splitNoTranslateSegments(text).map((segment, index) => (
+        segment.noTranslate
+          ? <span key={index} translate="no" className="notranslate">{segment.text}</span>
+          : <Fragment key={index}>{segment.text}</Fragment>
+      ))}
+    </>
+  )
+}
+
 function normalizePortalColor(value: unknown, fallback: string): string {
   const raw = String(value || '').trim()
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
@@ -428,7 +448,11 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const fallbackStory = copy('portalAboutFallback', 'Welcome to our store.')
   const storyText = String(previewConfig.aboutContent || fallbackStory).trim()
   const heroTitle = previewTitle || aboutTitle
-  const introText = String(previewConfig.intro || storyText || fallbackStory).trim()
+  // P-public-9: the hero line is the merchant's short intro only. It used to
+  // fall back to the story, so a shop without an intro printed its whole story
+  // twice -- once under the name and again in the story card below.
+  const configuredIntro = String(previewConfig.intro || '').trim()
+  const introText = configuredIntro && configuredIntro !== storyText ? configuredIntro : ''
   const aboutBlocks = Array.isArray(previewConfig.aboutBlocks)
     ? previewConfig.aboutBlocks.filter((block) => block?.title || block?.body || block?.mediaUrl)
     : []
@@ -525,7 +549,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   {previewConfig.businessName}
                 </div>
               ) : null}
-              <h2 className="notranslate mt-1 truncate text-2xl font-semibold tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
+              <h2 className="notranslate mt-1 break-words text-2xl font-semibold leading-[1.35] tracking-tight text-slate-900 dark:text-neutral-100 sm:text-3xl" translate="no">
                 {heroTitle}
               </h2>
               {previewConfig.businessTagline ? <div className="notranslate mt-1 text-sm text-slate-500 dark:text-neutral-400" translate="no">{previewConfig.businessTagline}</div> : null}
@@ -533,8 +557,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           </div>
 
           {introText ? (
-            <p className="notranslate mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7" translate="no">
-              {introText}
+            <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-600 dark:text-neutral-300 sm:text-base sm:leading-7">
+              <OwnerText text={introText} />
             </p>
           ) : null}
 
@@ -548,6 +572,17 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
           own full-width section below instead of sitting beside either
           column, so a long story never squeezes it down to a sliver. */}
       <div className="grid gap-4 lg:grid-cols-[1fr,1.4fr] lg:items-start">
+        {/* Story first in the DOM (P-public-9) so a phone, which stacks this
+            row, reads the story before the contact details; lg:order keeps
+            the requested desktop layout. */}
+        {storyText ? (
+          <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
+            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
+            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
+              <OwnerText text={storyText} />
+            </p>
+          </div>
+        ) : null}
         {hasContactInfo ? (
           <div data-portal-contact-tray="true" className={`space-y-3 rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-700 dark:bg-neutral-900/90 lg:order-1 ${storyText ? '' : 'lg:col-span-2'}`}>
             {businessFacts?.length ? (
@@ -595,7 +630,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                       href={item.value}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
+                      className="inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:px-3.5 sm:text-sm"
                       aria-label={item.label}
                       title={item.label}
                     >
@@ -606,14 +641,6 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                 })}
               </div>
             ) : null}
-          </div>
-        ) : null}
-        {storyText ? (
-          <div className={`rounded-[28px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 lg:order-2 ${hasContactInfo ? '' : 'lg:col-span-2'}`}>
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{aboutTitle}</div>
-            <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">
-              {storyText}
-            </p>
           </div>
         ) : null}
       </div>
@@ -662,18 +689,18 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   <button
                     type="button"
                     className={`flex w-full items-center justify-center bg-slate-50 p-4 dark:bg-neutral-950/60 ${mediaFirst ? 'sm:order-1' : 'sm:order-2'}`}
-                    onClick={() => openPortalImage(block.title || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
+                    onClick={() => openPortalImage(stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About'), block.mediaUrl ? [block.mediaUrl] : [])}
                   >
                     {block.type === 'video' ? (
                       <video src={block.mediaUrl} controls preload="metadata" className="max-h-[280px] w-full rounded-2xl bg-white object-contain dark:bg-neutral-950 sm:h-full sm:max-h-none" />
                     ) : (
-                      <img src={block.mediaUrl} alt={block.title || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
+                      <img src={block.mediaUrl} alt={stripNoTranslateMarkers(block.title) || previewConfig.aboutTitle || copy('about', 'About')} className="max-h-[280px] w-full rounded-2xl object-contain sm:h-full sm:max-h-none" />
                     )}
                   </button>
                 ) : null}
                 <div className={`flex flex-col justify-center space-y-3 p-6 ${block.mediaUrl ? (mediaFirst ? 'sm:order-2' : 'sm:order-1') : 'sm:col-span-2'}`}>
-                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{block.title}</h3> : null}
-                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300">{block.body}</p> : null}
+                  {block.title ? <h3 className="text-lg font-semibold text-slate-900 dark:text-neutral-100"><OwnerText text={block.title} /></h3> : null}
+                  {block.body ? <p className="whitespace-pre-line text-sm leading-7 text-slate-700 dark:text-neutral-300"><OwnerText text={block.body} /></p> : null}
                 </div>
               </div>
             )
@@ -692,15 +719,22 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
     expandedFaqId,
     setExpandedFaqId,
   } = props
+  const faqColumns = splitFaqColumns(publicFaqItems)
 
   return (
     <SectionShell
       title={previewConfig.faqTitle || copy('faq', 'FAQ')}
       subtitle={copy('faqHint', 'Quick answers to common questions.')}
     >
-      <div className="grid items-start gap-4 sm:grid-cols-2">
-        {publicFaqItems.length ? publicFaqItems.map((item, index) => {
-          const open = expandedFaqId === item.id
+      {/* Two independent column stacks, not a shared grid: opening a card
+          only moves the cards below it in its own column (portalFaqLayout.ts). */}
+      {publicFaqItems.length ? (
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start" data-portal-faq-columns="true">
+          {faqColumns.map((column, columnIndex) => (
+            <div key={columnIndex} className="flex min-w-0 flex-col gap-4 sm:flex-1">
+              {column.map(({ item, index, key }) => {
+          const open = expandedFaqId === key
+          const answerId = `portal-faq-answer-${index}`
           const accentClass = index % 2 === 0
             ? 'from-cyan-50 to-white border-cyan-200/80'
             : 'from-amber-50 to-white border-amber-200/80'
@@ -708,11 +742,13 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
             ? 'bg-cyan-100 text-cyan-700'
             : 'bg-amber-100 text-amber-700'
           return (
-            <article key={item.id || index} className={`self-start overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 ${accentClass}`}>
+            <article key={key} className={`overflow-hidden rounded-[24px] border bg-gradient-to-br shadow-sm dark:border-neutral-700 dark:from-neutral-900 dark:to-neutral-800 ${accentClass}`}>
               <button
                 type="button"
                 className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left"
-                onClick={() => setExpandedFaqId((current) => current === item.id ? null : item.id)}
+                aria-expanded={open}
+                aria-controls={open ? answerId : undefined}
+                onClick={() => setExpandedFaqId((current) => nextOpenFaqKey(current, key))}
               >
                 <div className="flex items-center gap-3">
                   <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${iconClass}`}>
@@ -725,15 +761,18 @@ function CatalogFaqSection(props: CatalogFaqSectionProps) {
                 </div>
                 <span className="rounded-full bg-white/90 p-2 text-slate-500 shadow-sm dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
               </button>
-              {open ? <div className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
+              {open ? <div id={answerId} className="border-t border-white/80 px-5 py-4 text-sm leading-7 text-slate-700 dark:border-neutral-700 dark:text-neutral-300">{item.answer}</div> : null}
             </article>
           )
-        }) : (
-          <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400 sm:col-span-2">
-            {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
-          </div>
-        )}
-      </div>
+              })}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400">
+          {copy('faqEmptyState', 'No questions yet. Contact us any time and we are happy to help.')}
+        </div>
+      )}
     </SectionShell>
   )
 }
@@ -956,10 +995,10 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200">{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
+                        <div translate="no" className="notranslate text-sm font-semibold text-slate-900 dark:text-neutral-100">{item.name}</div>
+                        <span translate={item.brand ? 'no' : undefined} className={`${item.brand ? 'notranslate ' : ''}rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-neutral-800 dark:text-neutral-200`}>{item.brand || copy('noBrand', 'No brand', 'គ្មានម៉ាក')}</span>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | {previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-neutral-400">{item.category || copy('noCategory', 'No category', 'គ្មានប្រភេទ')} | <span translate="no" className="notranslate">{previewConfig.priceDisplay === 'KHR' ? `${Number(item.selling_price_khr || 0).toLocaleString()}៛` : `$${Number(item.selling_price_usd || 0).toFixed(2)}`}</span></div>
                       {item.reason ? <div className="mt-2 text-sm text-slate-600 dark:text-neutral-300">{item.reason}</div> : null}
                     </div>
                     <span className="rounded-full bg-slate-100 p-2 text-slate-500 dark:bg-neutral-800 dark:text-neutral-300">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>

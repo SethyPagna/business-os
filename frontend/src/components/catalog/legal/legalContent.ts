@@ -135,7 +135,6 @@ const EN: Record<string, string> = {
   portal_legal_cookies_title: 'Cookie Policy',
   portal_legal_last_updated: 'Last updated {date}',
   portal_legal_close: 'Close',
-  portal_legal_open_policies: 'Open policies menu',
   portal_legal_template_notice: 'This document is a template prepared for {name}. The business owner should have it reviewed by a qualified lawyer before relying on it. It is not legal advice.',
   portal_legal_identity_h: 'Business details',
   portal_legal_identity_legal_name: 'Registered name',
@@ -146,6 +145,10 @@ const EN: Record<string, string> = {
   portal_legal_footer_rights: 'Site operated by {name}.',
   portal_legal_footer_content_concerns: 'If something on this site is about you, or you are concerned about an image, contact {email}. We will review the request and may ask for information needed to identify the content and the person making the request.',
   portal_legal_footer_landmark: 'Site information and policies',
+  // P-public-9 footer column headings.
+  portal_legal_footer_contact: 'Contact',
+  portal_legal_footer_quick_links: 'Quick links',
+  portal_legal_footer_follow: 'Follow us',
 
   // --- Privacy Policy ------------------------------------------------------
   portal_legal_privacy_who_h: 'Who we are',
@@ -256,7 +259,6 @@ const KM: Record<string, string> = {
   portal_legal_cookies_title: 'គោលការណ៍ខូឃី',
   portal_legal_last_updated: 'ធ្វើបច្ចុប្បន្នភាពចុងក្រោយ {date}',
   portal_legal_close: 'បិទ',
-  portal_legal_open_policies: 'បើកបញ្ជីគោលការណ៍',
   portal_legal_template_notice: 'ឯកសារនេះជាគំរូដែលរៀបចំសម្រាប់ {name}។ ម្ចាស់អាជីវកម្មគួរឱ្យមេធាវីជំនាញពិនិត្យមុននឹងប្រើ។ វាមិនមែនជាការប្រឹក្សាផ្នែកច្បាប់ទេ។',
   portal_legal_identity_h: 'ព័ត៌មានអាជីវកម្ម',
   portal_legal_identity_legal_name: 'ឈ្មោះចុះបញ្ជី',
@@ -267,6 +269,9 @@ const KM: Record<string, string> = {
   portal_legal_footer_rights: 'គេហទំព័រនេះដំណើរការដោយ {name}។',
   portal_legal_footer_content_concerns: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទង {email}។ យើងនឹងពិនិត្យសំណើ ហើយអាចសុំព័ត៌មានដែលត្រូវការដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
   portal_legal_footer_landmark: 'ព័ត៌មាននិងគោលការណ៍របស់គេហទំព័រ',
+  portal_legal_footer_contact: 'ទំនាក់ទំនង',
+  portal_legal_footer_quick_links: 'តំណភ្ជាប់រហ័ស',
+  portal_legal_footer_follow: 'តាមដានយើង',
 
   portal_legal_privacy_who_h: 'យើងជានរណា',
   portal_legal_privacy_who_b: 'កាតាឡុកអនឡាញនេះដំណើរការដោយអ្នកលក់ដែលមានអត្តសញ្ញាណក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង")។ ព័ត៌មាននោះជាចំណុចទំនាក់ទំនងសម្រាប់រឿងទាំងអស់ក្នុងគោលការណ៍នេះ។',

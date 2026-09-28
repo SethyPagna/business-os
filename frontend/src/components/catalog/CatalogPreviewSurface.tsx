@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -11,6 +11,7 @@ import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
+import type { PortalFooterProps } from './legal/LegalPages.tsx'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -226,6 +227,23 @@ export default function CatalogPreviewSurface({
   const firstPartyTranslateOptions = filteredTranslateOptions.filter((option) => option.kind !== 'external')
   const externalTranslateOptions = filteredTranslateOptions.filter((option) => option.kind === 'external')
 
+  // P-public-9: the footer's quick links are the nav's own tabs. This
+  // surface owns the tabs, so it hands them to whichever footer the caller
+  // mounted (public page and admin preview alike) -- one source, no drift.
+  // A footer jump always lands at the top of the section, so unlike a nav
+  // click it scrolls even when the tab is already active.
+  const handleFooterQuickLink = (key: string) => {
+    if (key !== activeTab) setActiveTab(key)
+    if (typeof window === 'undefined') return
+    window.requestAnimationFrame(() => {
+      const target = publicPortalNavRef?.current || previewSectionRef?.current
+      target?.scrollIntoView({ block: 'start' })
+    })
+  }
+  const footerWithQuickLinks = isValidElement<PortalFooterProps>(footer)
+    ? cloneElement(footer, { quickLinks: portalTabs.map((tab) => ({ key: tab.key, label: tab.label, onSelect: () => handleFooterQuickLink(tab.key) })) })
+    : footer
+
   const handlePortalTabClick = (key: string) => {
     if (key === activeTab) return
     setActiveTab(key)
@@ -354,7 +372,13 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            {/* Square, full-width bars (P-public-8, owner 2026-09-25): the 28px
+                corners on these two shells sat 4px (px-1) from their content, so
+                in dark mode -- where both shells and the nav track paint a
+                background -- the curve cut into the header row, and the sticky
+                nav's rounded bottom left two see-through notches that the About
+                hero (the first section) scrolled through. */}
+            <header className="portal-header-shell border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
@@ -393,7 +417,7 @@ export default function CatalogPreviewSurface({
                           href={item.value}
                           target="_blank"
                           rel="noreferrer"
-                          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
+                          className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
                           aria-label={item.label}
                           title={item.label}
                         >
@@ -439,7 +463,7 @@ export default function CatalogPreviewSurface({
                     {onOpenWishlist ? (
                       <button
                         type="button"
-                        className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                        className="relative inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                         onClick={onOpenWishlist}
                         aria-label={copy('wishlistTitle', 'Wishlist')}
                         title={copy('wishlistTitle', 'Wishlist')}
@@ -455,7 +479,7 @@ export default function CatalogPreviewSurface({
                     {onOpenAccount ? (
                       <button
                         type="button"
-                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
                         onClick={onOpenAccount}
                         aria-label={copy('account', 'Account')}
                         title={copy('account', 'Account')}
@@ -472,7 +496,7 @@ export default function CatalogPreviewSurface({
                         trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                            className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
                           >
@@ -580,7 +604,7 @@ export default function CatalogPreviewSurface({
                     ) : null}
                     <button
                       type="button"
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                      className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                       onClick={toggleTheme}
                       aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
@@ -602,7 +626,7 @@ export default function CatalogPreviewSurface({
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
               <div
-                className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
+                className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
                 <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
@@ -645,7 +669,7 @@ export default function CatalogPreviewSurface({
               {catalogSection}
               {secondaryTabSection}
             </main>
-            {footer}
+            {footerWithQuickLinks}
           </div>
         </div>
       </div>
@@ -707,6 +731,7 @@ export default function CatalogPreviewSurface({
             index={productGalleryView.index}
             onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
             onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
+            variant="immersive"
             labels={{
               prev: copy('prevImage', 'Prev'),
               next: copy('nextImage', 'Next'),
@@ -727,6 +752,7 @@ export default function CatalogPreviewSurface({
             contactNote={productDetailContactNote}
             cautionDefault={productDetailCautionDefault}
             needMoreDetailsDefault={productDetailNeedMoreDetailsDefault}
+            language={translateTarget}
             onAddToBucket={onAddToBucket}
             bucketQty={productDetailView.product ? getBucketQty?.(productDetailView.product.id) : 0}
           />

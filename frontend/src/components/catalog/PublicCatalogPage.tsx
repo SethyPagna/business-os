@@ -53,20 +53,22 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import {
-  ALL_PUBLIC_TRANSLATE_OPTIONS,
-  GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
-  isFirstPartyPortalLanguage,
+  PUBLIC_STOREFRONT_DEFAULT_LANGUAGE,
+  PUBLIC_STOREFRONT_TRANSLATE_OPTIONS,
   normalizeFirstPartyPortalLanguage,
+  resolvePublicStorefrontLanguage,
 } from './portalLanguageOptions.ts'
 import {
   applyGoogleTranslateSelection,
+  clearGoogleTranslateCookies,
+  hasPortalTranslatedMarker,
   isPortalTranslateApplied,
-  normalizeTranslateTarget,
-  readStoredTranslateTarget,
+  readPublicStorefrontLanguage,
   removePortalTranslateWidgetHost,
   requestPortalTranslateReload,
   setupPortalExternalTranslateWidget,
   sleep,
+  storePortalTranslatePreference,
 } from './portalTranslateController.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -86,8 +88,11 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
+// Every language the storefront hands to Google Translate (all but km/en).
+const PUBLIC_GOOGLE_TRANSLATE_LANGUAGES = PUBLIC_STOREFRONT_TRANSLATE_OPTIONS
+  .filter((option) => option.kind === 'external')
+  .map((option) => option.value)
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
-const CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
@@ -279,25 +284,6 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   submissionRewardPoints: 5,
   title: 'Leang Beauty',
   translateWidgetEnabled: true,
-}
-
-/**
- * Resolve a translate-target selection to its canonical form: 'original',
- * a first-party language code, or (via the shared translate controller) a
- * canonical Google-Translate language code for the 9 external-only
- * languages. Same shape as the admin editor's `normalizePortalTranslateChoice`,
- * just without that copy's now-redundant first-party lookup table.
- */
-function normalizePublicTranslateChoice(value: unknown, sourceLang = 'en'): string {
-  const raw = String(value || 'original').trim()
-  if (raw.toLowerCase() === 'original') return 'original'
-  const firstParty = normalizeFirstPartyPortalLanguage(raw)
-  if (firstParty) return firstParty
-  return normalizeTranslateTarget(raw, sourceLang)
-}
-
-function isFirstPartyTranslateChoice(value: string): boolean {
-  return value === 'original' || isFirstPartyPortalLanguage(value)
 }
 
 function getCatalogApi(): CatalogApi {
@@ -663,8 +649,10 @@ export default function PublicCatalogPage() {
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
   const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
-  const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
-  const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'applied' | 'failed'>('idle')
+  // Khmer unless this visitor already chose another language (owner,
+  // 2026-09-25: "Default language of the public site = Khmer").
+  const [translateTarget, setTranslateTarget] = useState(() => readPublicStorefrontLanguage('en', PUBLIC_STOREFRONT_DEFAULT_LANGUAGE))
+  const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'pending' | 'applied' | 'failed'>('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
   const [translateReady, setTranslateReady] = useState(true)
   const bucket = usePortalBucket()
@@ -687,26 +675,14 @@ export default function PublicCatalogPage() {
   // once. Keeping the drawer's shortcut on its own state removes that
   // cross-talk entirely.
   const [contactOpen, setContactOpen] = useState(false)
-  // Minimized state is remembered per viewer, not per store -- a shopper who
-  // tucks the contact button away should not see it pop back on their next
-  // page view in this browser. Read once at mount; localStorage throws in
-  // Safari private mode, so a blocked read/write just falls back to "not
-  // minimized" instead of taking the storefront down.
-  const [contactMinimized, setContactMinimizedState] = useState(() => {
-    try {
-      return window.localStorage?.getItem(CONTACT_MINIMIZED_STORAGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
-  const setContactMinimized = (value: boolean) => {
-    setContactMinimizedState(value)
-    try {
-      window.localStorage?.setItem(CONTACT_MINIMIZED_STORAGE_KEY, value ? '1' : '0')
-    } catch {
-      // Storage unavailable -- the choice still applies for this page view.
-    }
-  }
+  // Owner, 2026-09-25 (P-public-5): "the Contact us floating button is
+  // minimized by default as a small icon and expands on click." Every page
+  // view starts minimized. The old per-viewer memory
+  // (business-os-portal-contact-minimized-v1) only ever remembered
+  // "minimized", which is now the default, and remembering "expanded" would
+  // bring the full button back on every later visit -- the opposite of the
+  // ask. So there is no storage read or write at all.
+  const [contactMinimized, setContactMinimized] = useState(true)
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
@@ -790,6 +766,19 @@ export default function PublicCatalogPage() {
     }
   }, [])
 
+  // Merchant's own catalog-entry language (what product names/descriptions
+  // are actually typed in) -- the "from" side of a Google translation.
+  // Defaults to English same as the admin editor.
+  const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(config.language) || 'en'
+  const translateWidgetEnabled = config.translateWidgetEnabled !== false
+  // pageLanguage: the hand-written pack every storefront string renders in
+  // (km or en). externalTranslateTarget: set only for a language Google
+  // translates the whole page into; that page renders in the source
+  // language first so Google is told the truth about what it receives.
+  const languageRoute = resolvePublicStorefrontLanguage(translateTarget, configuredPortalLanguage)
+  const pageLanguage = languageRoute.pageLanguage
+  const externalTranslateTarget = translateWidgetEnabled ? languageRoute.googleTarget : null
+
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) => {
     // This lane's assistive-technology names (portal_a11y_*) are flat keys in
     // src/lang/en.json + km.json, not portalEditor.* ones, so they have to be
@@ -797,7 +786,7 @@ export default function PublicCatalogPage() {
     // entries would be dead weight. `t` follows the APP's language, so an
     // explicit Khmer choice for the storefront wins over it.
     if (key.startsWith('portal_a11y_')) {
-      if (translateTarget === 'km' && fallbackKm) return fallbackKm
+      if (pageLanguage === 'km' && fallbackKm) return fallbackKm
       const packed = typeof t === 'function' ? t(key) : ''
       if (packed && packed !== key) return packed
       return fallback
@@ -807,34 +796,20 @@ export default function PublicCatalogPage() {
     // the other 17 languages in the dropdown changed nothing on screen.
     // `getPortalLanguageText` is the same first-party language-pack lookup
     // the admin editor's live preview already used correctly.
-    const localized = getPortalLanguageText(translateTarget, key)
+    const localized = getPortalLanguageText(pageLanguage, key)
     if (localized) return localized
     const fullKey = `portalEditor.${key}`
     const translated = typeof t === 'function' ? t(fullKey) : ''
     if (translated && translated !== fullKey) return translated
-    return translateTarget === 'km' ? (fallbackKm || fallback) : fallback
+    return pageLanguage === 'km' ? (fallbackKm || fallback) : fallback
   }
-
-  // Merchant's own catalog-entry language (what product names/descriptions
-  // are actually typed in) — the "from" side of any translation, first-
-  // party or external. Defaults to English same as the admin editor.
-  const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(config.language) || 'en'
-  const normalizedTranslateTarget = normalizePublicTranslateChoice(translateTarget, configuredPortalLanguage)
-  const translateWidgetEnabled = config.translateWidgetEnabled !== false
-  // Any of the 9 Google-Translate-only languages route through the legacy
-  // external widget below instead of the first-party lookup `copy()` uses.
-  const externalTranslateTarget = translateWidgetEnabled && !isFirstPartyTranslateChoice(normalizedTranslateTarget)
-    ? normalizedTranslateTarget
-    : null
 
   // WCAG 3.1.1: the language selector changed every string on screen but
   // never what the DOCUMENT claimed to be written in, so a screen reader
   // kept reading a Khmer storefront with English pronunciation (and a
   // translation tool kept offering to translate it into the language it was
-  // already showing). 'original' means the merchant's own catalog language.
-  const portalDocumentLanguage = normalizedTranslateTarget === 'original'
-    ? configuredPortalLanguage
-    : normalizedTranslateTarget
+  // already showing).
+  const portalDocumentLanguage = externalTranslateTarget || pageLanguage
 
   useEffect(() => {
     if (typeof document === 'undefined' || !portalDocumentLanguage) return undefined
@@ -870,24 +845,41 @@ export default function PublicCatalogPage() {
   // localStorage) once we know the catalog's own source language.
   useEffect(() => {
     if (!translateWidgetEnabled) return
-    setTranslateTarget(readStoredTranslateTarget(configuredPortalLanguage))
+    setTranslateTarget(readPublicStorefrontLanguage(configuredPortalLanguage, PUBLIC_STOREFRONT_DEFAULT_LANGUAGE))
   }, [configuredPortalLanguage, translateWidgetEnabled])
 
-  // First-party path (original, or one of the 18 built-in languages):
-  // no external widget needed, so tear one down if a prior external
-  // selection left one mounted, and reflect the applied state instantly.
+  // Built-in path (Khmer or English): no external widget needed, so tear one
+  // down if a prior Google selection left one mounted, and mark the choice
+  // applied at once -- the page itself is already in that language.
   useEffect(() => {
     if (!translateWidgetEnabled || externalTranslateTarget) return
     removePortalTranslateWidgetHost()
     setTranslateReady(true)
-    setTranslateApplyState(normalizedTranslateTarget === 'original' ? 'idle' : 'applied')
-    setTranslateApplyMessage(normalizedTranslateTarget === 'original'
-      ? ''
-      : copy('translationApplied', 'Translation applied'))
-  }, [externalTranslateTarget, normalizedTranslateTarget, translateWidgetEnabled])
+    setTranslateApplyState('applied')
+    setTranslateApplyMessage('')
+  }, [externalTranslateTarget, pageLanguage, translateWidgetEnabled])
 
-  // External path: load/attach the Google Translate widget for one of the
-  // 9 languages with no first-party pack.
+  // One place a picker choice is taken and remembered. Leaving a Google
+  // translation clears its cookie, and -- because Google rewrote the DOM text
+  // in place -- reloads once so the page is rendered fresh in the chosen
+  // built-in language instead of staying machine-translated.
+  const changeTranslateTarget = (nextTarget: string) => {
+    const route = resolvePublicStorefrontLanguage(nextTarget, configuredPortalLanguage)
+    if (!route.googleTarget) {
+      clearGoogleTranslateCookies()
+      storePortalTranslatePreference(route.pageLanguage)
+      setTranslateTarget(route.pageLanguage)
+      if (hasPortalTranslatedMarker()) requestPortalTranslateReload('built-in-language-switch', 5000)
+      return
+    }
+    storePortalTranslatePreference(route.googleTarget)
+    setTranslateApplyState('pending')
+    setTranslateApplyMessage(copy('externalTranslationPreparing', 'Preparing external translation...'))
+    setTranslateTarget(route.googleTarget)
+  }
+
+  // Google path: load/attach the Google Translate widget for every language
+  // other than Khmer and English.
   useEffect(() => {
     if (!translateWidgetEnabled || !externalTranslateTarget || typeof window === 'undefined' || typeof document === 'undefined') {
       removePortalTranslateWidgetHost()
@@ -896,7 +888,7 @@ export default function PublicCatalogPage() {
     let cancelled = false
     const cleanupWidget = setupPortalExternalTranslateWidget({
       sourceLanguage: configuredPortalLanguage,
-      includedLanguages: GOOGLE_TRANSLATE_FALLBACK_OPTIONS.map((option) => option.value),
+      includedLanguages: PUBLIC_GOOGLE_TRANSLATE_LANGUAGES,
       onPending: () => setTranslateReady(false),
       onReady: () => {
         setTranslateReady(true)
@@ -926,8 +918,8 @@ export default function PublicCatalogPage() {
       const maxTries = 20
       for (let tries = 0; tries < maxTries; tries += 1) {
         if (cancelled) return
-        applyGoogleTranslateSelection(configuredPortalLanguage, normalizedTranslateTarget)
-        if (isPortalTranslateApplied(configuredPortalLanguage, normalizedTranslateTarget)) {
+        applyGoogleTranslateSelection(configuredPortalLanguage, externalTranslateTarget)
+        if (isPortalTranslateApplied(configuredPortalLanguage, externalTranslateTarget)) {
           setTranslateApplyState('applied')
           setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
           return
@@ -943,7 +935,7 @@ export default function PublicCatalogPage() {
       cancelled = true
       window.clearTimeout(settleTimer)
     }
-  }, [configuredPortalLanguage, externalTranslateTarget, loading, normalizedTranslateTarget, translateWidgetEnabled, translateReady])
+  }, [configuredPortalLanguage, externalTranslateTarget, loading, translateWidgetEnabled, translateReady])
 
   useEffect(() => {
     if (embeddedPortalRef.current && reloadToken === 0) {
@@ -1679,8 +1671,8 @@ export default function PublicCatalogPage() {
                         Khmer line box is bought by
                         `.detail-scroll-text.khmer-text` (styles/main.css)
                         off the value itself. */}
-                    <div {...getKhmerTextProps(item.name, 'detail-scroll-text text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
-                    {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
+                    <div {...getKhmerTextProps(item.name, 'detail-scroll-text notranslate text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
+                    {item.priceText ? <div translate="no" className="notranslate text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -1840,8 +1832,8 @@ export default function PublicCatalogPage() {
                     <div className="min-w-0 flex-1">
                       {/* Scrolls, like the cart row above it and every other
                           name in the app. */}
-                      <div {...getKhmerTextProps(item.name, 'detail-scroll-text text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
-                      {item.priceText ? <div className="text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
+                      <div {...getKhmerTextProps(item.name, 'detail-scroll-text notranslate text-sm font-medium text-slate-900 dark:text-neutral-100')}>{item.name}</div>
+                      {item.priceText ? <div translate="no" className="notranslate text-xs text-slate-500 dark:text-neutral-400">{item.priceText}</div> : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button
@@ -1959,12 +1951,19 @@ export default function PublicCatalogPage() {
   // are (bg-slate-700, not just an outline that only fills on hover).
   const contactFab = contactChannels.length > 0 ? (
     contactMinimized ? (
+      // A small round icon (40px -- still a full touch target), in the same
+      // slot as the full button. One tap expands it AND opens the contact
+      // list, so reaching a channel never takes an extra tap.
       <button
         type="button"
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-0 z-50 flex h-11 w-7 items-center justify-center rounded-l-full bg-white text-slate-700 shadow-xl ring-1 ring-slate-200 transition hover:w-9 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-neutral-700"
-        onClick={() => setContactMinimized(false)}
-        aria-label={copy('contactUsRestore', 'Show the contact us button')}
-        title={copy('contactUsRestore', 'Show the contact us button')}
+        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(0.75rem+env(safe-area-inset-right))] z-50 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-700 shadow-lg ring-1 ring-slate-200 transition hover:bg-white dark:bg-neutral-900/95 dark:text-neutral-100 dark:ring-neutral-700"
+        onClick={() => {
+          setContactMinimized(false)
+          setContactOpen(true)
+        }}
+        aria-label={copy('contactUs', 'Contact us')}
+        title={copy('contactUs', 'Contact us')}
+        aria-expanded={false}
       >
         <Headset className="h-4 w-4" />
       </button>
@@ -1972,7 +1971,7 @@ export default function PublicCatalogPage() {
       <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-[calc(1.25rem+env(safe-area-inset-right))] z-50 flex items-center gap-1.5">
         <button
           type="button"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-700 text-white shadow-md transition hover:bg-slate-600 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
           onClick={() => {
             setContactOpen(false)
             setContactMinimized(true)
@@ -1980,7 +1979,7 @@ export default function PublicCatalogPage() {
           aria-label={copy('contactUsMinimize', 'Minimize the contact us button')}
           title={copy('contactUsMinimize', 'Minimize the contact us button')}
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-4 w-4" />
         </button>
         <button
           type="button"
@@ -2087,7 +2086,7 @@ export default function PublicCatalogPage() {
       catalogSection={activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={secondaryTabSection}
       promotionsSection={promotionsSection}
-      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} />}
+      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
@@ -2103,13 +2102,13 @@ export default function PublicCatalogPage() {
       portalImageView={portalImageView}
       setPortalImageView={setPortalImageView}
       toggleTheme={toggleTheme}
-      translateTarget={translateTarget}
-      translateApplyState="idle"
-      translateApplyMessage=""
-      externalTranslateTarget={null}
-      translateReady
-      changeTranslateTarget={setTranslateTarget}
-      allPublicTranslateOptions={ALL_PUBLIC_TRANSLATE_OPTIONS}
+      translateTarget={externalTranslateTarget || pageLanguage}
+      translateApplyState={translateApplyState}
+      translateApplyMessage={translateApplyMessage}
+      externalTranslateTarget={externalTranslateTarget}
+      translateReady={translateReady}
+      changeTranslateTarget={changeTranslateTarget}
+      allPublicTranslateOptions={PUBLIC_STOREFRONT_TRANSLATE_OPTIONS}
     />
     </div>
   )

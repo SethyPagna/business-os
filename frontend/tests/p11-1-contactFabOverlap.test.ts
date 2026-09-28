@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const publicPage = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'PublicCatalogPage.tsx'), 'utf8')
 
-const fabBlock = /const contactFab = contactChannels\.length > 0 \?[\s\S]{0,2200}\bcontactPopover\b/.exec(publicPage)
+// P-public-5 (owner, 2026-09-25) put the minimized-by-default icon branch in
+// front of the full button, so the block grew past the old 2200-char window.
+const fabBlock = /const contactFab = contactChannels\.length > 0 \?[\s\S]{0,3200}\bcontactPopover\b/.exec(publicPage)
 assert.ok(fabBlock, 'the contactFab block must still exist')
 const block = fabBlock[0]
 assert.doesNotMatch(block, /-right-1\.5 -top-1\.5/, 'the minimize control must not be absolutely overlaid on the main button corner')
