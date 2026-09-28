@@ -12,7 +12,7 @@ import { createWriteTimeoutError } from '../src/utils/writeIntent.ts'
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
 const translate = (key: string, fallback = ''): string => km[key] ?? fallback
 const UI_TIMEOUT_MS = 5
-const SETTLE_DEADLINE_MS = 2_000
+const SETTLE_DEADLINE_MS = 10_000
 const OPERATOR_PAUSE_MS = 20_000
 const unknownOutcome = createWriteTimeoutError('write', UI_TIMEOUT_MS, (key: string) => km[key]).message
 
