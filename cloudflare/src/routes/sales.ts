@@ -142,7 +142,7 @@ import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError }
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
@@ -407,6 +407,14 @@ app.get('/money-precision-capability', async (c) => {
 
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
   return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+}
+
+const DELIVERY_FEE_PAYER_ERROR = 'Delivery fee must be paid by the customer or by the store.'
+
+/** The two real payers, trimmed and lower-cased; null for anything else. */
+function parseDeliveryFeePayer(raw: unknown): 'customer' | 'store' | null {
+  const payer = String(raw).trim().toLowerCase()
+  return payer === 'customer' || payer === 'store' ? payer : null
 }
 
 app.get('/create-receipt', async (c) => {
@@ -975,7 +983,8 @@ app.post('/', async (c) => {
   const isDelivery = Boolean(body.is_delivery)
   const deliveryFeeUsd = newSaleMoney4(body.delivery_fee_usd)
   const deliveryFeeKhr = multiplyMoney4(deliveryFeeUsd,exchangeRate)
-  const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
+  const deliveryFeePaidBy = parseDeliveryFeePayer(body.delivery_fee_paid_by || 'customer')
+  if (!deliveryFeePaidBy) return c.json({ error: DELIVERY_FEE_PAYER_ERROR }, 400)
   // P6: what the delivery ACTUALLY cost the shop (courier money out) --
   // staff-only, never on receipts. NULL when not entered, so stats can
   // tell "recorded as zero" apart from "never recorded".
@@ -2500,9 +2509,10 @@ app.patch('/:id/status', async (c) => {
     }
     statements.push({
       sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-            VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
       params: {
         label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+        fee_date: businessToday(Date.parse(mutationStamp)),
         amount_usd: cancelFeeUsd,
         amount_khr: cancelFeeKhr,
         sale_id: Number(id),
@@ -4381,7 +4391,7 @@ app.post('/:id/amendments', async (c) => {
     if (payerRaw !== null && payerRaw !== undefined) {
       const payer = String(payerRaw).trim().toLowerCase()
       if (payer !== 'customer' && payer !== 'store') {
-        return c.json({ error: 'Delivery fee must be paid by the customer or by the store.' }, 400)
+        return c.json({ error: DELIVERY_FEE_PAYER_ERROR }, 400)
       }
       newPaidBy = payer
     }
@@ -4994,7 +5004,8 @@ type StatementList = Array<{ sql: string; params: Record<string, unknown> }>
 function canonicalSaleChildrenGuard(saleId: number | string, version=1): StatementList[number] {
   if(version===0)return saleMutationGuard(`(SELECT COUNT(*) FROM sale_items WHERE sale_id=@canonicalSale) BETWEEN 1 AND 200
     AND NOT EXISTS(SELECT 1 FROM sale_items WHERE sale_id=@canonicalSale AND (quantity<=0 OR quantity IS NULL))`,{canonicalSale:saleId},3)
-  const identity = typeof saleId === 'string' ? '(SELECT id FROM sales WHERE client_request_id=@canonicalSale)' : '@canonicalSale'
+  // The only client_request_id index is partial (<> ''); without that predicate every checkout scans sales twice.
+  const identity = typeof saleId === 'string' ? "(SELECT id FROM sales WHERE client_request_id=@canonicalSale AND client_request_id<>'')" : '@canonicalSale'
   const amount = (key: string) => `(typeof(i.${key}) IN ('real','integer') AND i.${key} BETWEEN 0 AND 100000000000
     AND i.${key}=CAST(ROUND(i.${key}*10000) AS INTEGER)/10000.0)`
   const keys = ['applied_price_usd','applied_price_khr','total_usd','total_khr','product_discount_usd','product_discount_khr',
