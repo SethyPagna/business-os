@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { compileFunction, compileHandler, findFunction, isFunctionNode, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
+import { createHarness, installSteppedClock as installOperatorClock, type Harness } from './mountedComponentHarness.ts'
 import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
@@ -15,6 +16,10 @@ const UI_TIMEOUT_MS = 5
 const SETTLE_DEADLINE_MS = 10_000
 const OPERATOR_PAUSE_MS = 20_000
 const unknownOutcome = createWriteTimeoutError('write', UI_TIMEOUT_MS, (key: string) => km[key]).message
+const OPERATOR_DAY_BOUNDARY_MS = 25 * 60 * 60 * 1000
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const unknownOutcomeAfterAnyWait = new RegExp(km.write_outcome_unknown_timeout.split('{seconds}').map(escapeRegExp).join('\\d+'))
+const shown = (key: string, fallback: string): string => km[key] ?? fallback
 
 let failed = 0
 async function runTest(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -30,12 +35,13 @@ async function runTest(name: string, fn: () => void | Promise<void>): Promise<vo
 
 type Call = unknown[]
 type Notice = { message: string; tone?: string }
-type Outcome = { kind: 'hang' } | { kind: 'lost' } | { kind: 'answer'; value: unknown }
+type Outcome = { kind: 'hang' } | { kind: 'lost' } | { kind: 'refused' } | { kind: 'answer'; value: unknown }
 type WireRequest = Record<string, unknown>
 type HistoryAction = { undo: () => Promise<void>; redo: () => Promise<void> }
 
 const HANG: Outcome = { kind: 'hang' }
 const LOST: Outcome = { kind: 'lost' }
+const REFUSED: Outcome = { kind: 'refused' }
 const answer = (value: unknown): Outcome => ({ kind: 'answer', value })
 
 function outcomeOf(outcome: Outcome): Promise<unknown> {
@@ -43,17 +49,26 @@ function outcomeOf(outcome: Outcome): Promise<unknown> {
   if (outcome.kind === 'lost') {
     return Promise.reject(Object.assign(new Error('The server did not confirm the write.'), { code: 'write_outcome_unknown', status: 503 }))
   }
+  if (outcome.kind === 'refused') {
+    return Promise.reject(Object.assign(new Error('The same request is still being processed.'), { code: 'in_flight', status: 409 }))
+  }
   return Promise.resolve(outcome.value)
 }
 
 function scriptedWrite() {
   const calls: Call[] = []
   let next: Outcome = HANG
+  let hanging = false
   return {
     calls,
-    will(outcome: Outcome): void { next = outcome },
+    get hanging(): boolean { return hanging },
+    will(outcome: Outcome): void {
+      next = outcome
+      hanging = false
+    },
     fn: (...args: unknown[]): Promise<unknown> => {
       calls.push(JSON.parse(JSON.stringify(args)) as Call)
+      hanging = next.kind === 'hang'
       return outcomeOf(next)
     },
   }
@@ -150,37 +165,121 @@ function recordNotices(notices: Notice[]) {
   return (message: string, tone?: string) => { notices.push({ message: String(message), tone }) }
 }
 
+interface MountedIntentDrive {
+  press(): Promise<void>
+  write: ScriptedWrite
+  notices: Notice[]
+  identityOf(call: Call): string[]
+  requestOf(call: Call): unknown
+  editIntent(): void
+  committed: Outcome
+  failParentOnce?: () => void
+}
+
+async function proveOneIdentityPerMountedIntent(drive: MountedIntentDrive): Promise<void> {
+  const clock = installOperatorClock()
+  try {
+    const attempt = async (outcome: Outcome, label: string): Promise<Call> => {
+      clock.advance(OPERATOR_DAY_BOUNDARY_MS)
+      drive.write.will(outcome)
+      const before = drive.write.calls.length
+      await drive.press()
+      assert.equal(drive.write.calls.length, before + 1, `${label}: one write per press`)
+      return drive.write.calls[before]
+    }
+    const noticesBefore = drive.notices.length
+    const timedOut = await attempt(HANG, 'the attempt the UI stopped waiting for')
+    assert.ok(
+      drive.notices.slice(noticesBefore).some((notice) => unknownOutcomeAfterAnyWait.test(notice.message)),
+      `the UI stops waiting and says the outcome is unknown, in the active language; saw ${JSON.stringify(drive.notices.slice(noticesBefore))}`,
+    )
+    const retries = [
+      await attempt(LOST, 'the retry whose answer was lost'),
+      await attempt(REFUSED, 'the retry the Worker refused with a 409'),
+    ]
+    if (drive.failParentOnce) {
+      drive.failParentOnce()
+      retries.push(await attempt(drive.committed, 'the retry the Worker committed while the parent failed'))
+    }
+    retries.push(await attempt(drive.committed, 'the retry that committed'))
+    for (const retry of retries) {
+      assert.deepEqual(drive.identityOf(retry), drive.identityOf(timedOut), 'a retry after a failed or unknown attempt resends its identity, so the Worker replays instead of applying twice')
+      assert.deepEqual(drive.requestOf(retry), drive.requestOf(timedOut), 'the retry resends the same request under that identity')
+    }
+    const identical = await attempt(LOST, 'the same values after a committed write')
+    assertEveryPartChanged(drive.identityOf(identical), drive.identityOf(timedOut), 'after a committed write, even an identical intent is a new request')
+    drive.editIntent()
+    const edited = await attempt(LOST, 'a changed intent')
+    assertEveryPartChanged(drive.identityOf(edited), drive.identityOf(identical), 'a changed intent is a new request, never a replay of the old one')
+    const editedRetry = await attempt(drive.committed, 'the retry of the changed intent')
+    assert.deepEqual(drive.identityOf(editedRetry), drive.identityOf(edited))
+  } finally {
+    clock.restore()
+  }
+}
+
+function adminApp(overrides: Record<string, unknown>): Record<string, unknown> {
+  return {
+    page: 'dashboard',
+    language: 'en',
+    t: (key: string) => km[key] ?? key,
+    user: { id: 3, name: 'Dara', username: 'dara', role: 'admin' },
+    settings: {},
+    notify: () => {},
+    hasPermission: () => true,
+    can: () => true,
+    canAccessPage: () => true,
+    getPermissions: () => ({}),
+    saveSettings: async () => ({ success: true }),
+    navigateTo: () => {},
+    fmtUSD: (value: unknown) => `$${Number(value || 0).toFixed(2)}`,
+    fmtKHR: (value: unknown) => `${Number(value || 0)}៛`,
+    usdSymbol: '$',
+    khrSymbol: '៛',
+    exchangeRate: 4100,
+    ...overrides,
+  }
+}
+
+const harness: Harness = await createHarness()
+const pressing = (write: ScriptedWrite) => ({ expireWaitsWhen: () => write.hanging })
+
 await runTest('loyalty add: a timed-out or lost award keeps its id; only a committed award or a changed intent mints a new one', async () => {
   const write = scriptedWrite()
   const notices: Notice[] = []
   const form = { points: '50', note: 'Birthday' }
-  const scope: Scope = {
-    lookupData: { customer: { id: 42 } },
-    notify: recordNotices(notices),
-    copy: (_key: string, fallback = '') => fallback,
-    t: (key: string) => km[key] ?? key,
-    setManualPointSaving: () => {},
-    setManualPoints: () => {},
-    setManualPointNote: () => {},
-    handleLookup: async () => {},
-    loadCustomerPoints: async () => {},
-    awardIdentityRef: { current: null },
-    awardCustomerPoints: write.fn,
-    LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS: UI_TIMEOUT_MS,
-    manualPoints: form.points,
-    manualPointNote: form.note,
-  }
-  const render = await compileHandler<() => Promise<void>>(readComponent('components/loyalty-points/LoyaltyPointsPage.tsx'), 'handleAwardPoints', { locals: Object.keys(scope) })
-  await proveOneIdentityPerIntent({
-    press: () => render({ ...scope, manualPoints: form.points, manualPointNote: form.note })(),
-    write,
-    notices,
-    identityOf: (call) => [String((call[1] as WireRequest).client_request_id)],
-    requestOf: (call) => [call[0], withoutIdentity(call[1])],
-    editIntent: () => { form.points = '75' },
-    committed: answer({ success: true }),
+  const member = { customer: { id: 42, name: 'Sokha', membership_number: 'M-42' }, points: { balance: 120 } }
+  const page = await harness.mount({
+    component: 'components/loyalty-points/LoyaltyPointsPage.tsx',
+    app: adminApp({ page: 'promotions', notify: recordNotices(notices) }),
+    doubles: {
+      'api/contactsTransport.ts': { getCustomerPointSummaries: async () => [] },
+      'api/portalTransport.ts': { lookupPortalMembership: async () => member, getPortalSubmissionsForReview: async () => [] },
+      'api/contactWriteTransport.ts': { awardCustomerPoints: write.fn },
+    },
   })
-  assert.match(String((write.calls[0][1] as WireRequest).client_request_id), /^loyalty_points_/)
+  try {
+    await page.type(page.field('membership_lookup'), member.customer.membership_number)
+    await page.click(page.button(shown('lookup', 'Check points')))
+    await proveOneIdentityPerMountedIntent({
+      press: async () => {
+        await page.type(page.field('loyalty_manual_points'), form.points)
+        await page.type(page.field('loyalty_manual_points_note'), form.note)
+        await page.click(page.button('Add points'), pressing(write))
+      },
+      write,
+      notices,
+      identityOf: (call) => [String((call[1] as WireRequest).client_request_id)],
+      requestOf: (call) => [call[0], withoutIdentity(call[1])],
+      editIntent: () => { form.points = '75' },
+      committed: answer({ success: true }),
+    })
+    assert.deepEqual(write.calls[0][0], 42)
+    assert.deepEqual(withoutIdentity(write.calls[0][1]), { points: 50, note: 'Birthday' })
+    assert.match(String((write.calls[0][1] as WireRequest).client_request_id), /^loyalty_points_/)
+  } finally {
+    await page.unmount()
+  }
 })
 
 await runTest('legacy customer return: a timed-out or lost create keeps its id AND return number until the create commits', async () => {
@@ -682,6 +781,8 @@ await runTest('every keyed intent holds only the operator-entered values, nothin
   assert.ok(intent?.initializer)
   assertStableIntent(importModal, intent.initializer)
 })
+
+await harness.close()
 
 if (failed) {
   console.error(`${failed} write retry idempotency test(s) failed`)
