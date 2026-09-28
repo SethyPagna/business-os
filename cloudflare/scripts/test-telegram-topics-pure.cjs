@@ -320,7 +320,7 @@ const baseSettings = [
   // Since 27 Sep 2026 the rule is ONE exported function, shared with the
   // Telegram /settopic save (lib/telegramTopicSetting.ts), pinned by value.
   assert.match(settingsSource, /if \(!isTelegramTopicSettingValue\(raw\)\)/, 'validation must use the shared topic value rule')
-  for (const good of ['', '7', '733']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
+  for (const good of ['', '7', '9001']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
   for (const bad of ['-5', '3.5', 'abc', ' 7x']) assert.equal(bare.isTelegramTopicSettingValue(bad), false, `${JSON.stringify(bad)} must be rejected`)
   console.log('PASS routes/settings.ts: every TELEGRAM_TOPIC_KEYS entry is validated integer-or-empty, rejected with invalid_telegram_topic_id')
 
