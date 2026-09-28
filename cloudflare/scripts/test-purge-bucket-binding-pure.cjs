@@ -271,6 +271,11 @@ async function main() {
   })
   check('step 1 adds the Workers Scripts Read row to the token', () => assert.match(source, /^\/\/ +Account \| Workers Scripts +\| Read$/m))
   check('step 2 is a fresh pull of main in the BusinessOS checkout', () => assert.match(source, /BusinessOS checkout[\s\S]{0,400}git pull/))
+  check('the owner text says to pull first and never that an old copy is safe to run', () => {
+    const prose = source.replace(/\n\/\/\s*/g, ' ')
+    assert.match(prose, /Always pull first/)
+    assert.doesNotMatch(prose, /old copy cannot do harm|old copy of the script, or a website rolled back/)
+  })
   check('the lifecycle step names the live bucket', () => {
     const start = source.indexOf('Deleting the quarantine for good')
     assert.ok(start > 0, 'no lifecycle step')

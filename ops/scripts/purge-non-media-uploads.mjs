@@ -31,9 +31,8 @@
 //     Then take a fresh git pull of main, so this script is current:
 //         git checkout main
 //         git pull
-//     An old copy cannot do harm: before reading anything the script checks
-//     that the live website stores its files in the bucket it names, and
-//     stops if not.
+//     Always pull first: an older copy of this script has only the checks
+//     it was written with, and early copies name the wrong bucket.
 //
 //  3. Do a DRY RUN (lists and counts, changes nothing):
 //         node ops/scripts/purge-non-media-uploads.mjs
@@ -78,10 +77,14 @@
 // What it does
 //   (0) Before any other request, reads the production Worker's live
 //       ASSETS binding (every version carrying traffic) and stops unless
-//       each one is BUCKET, the bucket this script works on. So an old copy
-//       of the script, or a website rolled back to the old bucket, never
-//       reads or changes the wrong bucket or the database. A token without
-//       Workers Scripts Read is refused the same way.
+//       each one is BUCKET, the bucket this script works on; --move and
+//       --restore read it again after you type MOVE or RESTORE, before the
+//       first change. A token without Workers Scripts Read is refused the
+//       same way. Every file request names one file of BUCKET: a name with
+//       an empty, '.' or '..' part, a backslash, a percent-encoded dot,
+//       slash or backslash, or a control character is never sent (the
+//       listing keeps such a file for REVIEW; a manifest naming one is
+//       refused).
 //   (a) Lists every object in R2 bucket business-os-assets-apac (BUCKET)
 //       under uploads/, private/ and imports/ through the Cloudflare API,
 //       with the token you paste (read from a hidden prompt, or from
@@ -1315,8 +1318,8 @@ function normalizeHttpMetadata(raw) {
 }
 
 // Problems that make a manifest unusable for --restore (empty when fine).
-// Keys, quarantine keys, hashes and row columns are all checked, so an
-// edited file cannot make --restore write anywhere else.
+// One that passes can only make --restore write files under PREFIXES and in
+// its own quarantine folder of BUCKET, and only rows restorableRows accepts.
 export function validateManifest(manifest) {
   const problems = []
   if (!manifest || manifest.tool !== MANIFEST_TOOL) return ['it was not written by this script']
