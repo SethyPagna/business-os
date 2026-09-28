@@ -35,7 +35,6 @@ type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
 type AuthTransportModule = typeof import('./api/authTransport.ts')
 type PortalTransportModule = typeof import('./api/portalTransport.ts')
 type SystemRuntimeModule = typeof import('./api/systemRuntime.ts')
-type OfflineSnapshotTransportModule = typeof import('./api/offlineSnapshotTransport.ts')
 type NotificationSummaryModule = typeof import('./api/notificationSummary.ts')
 type SettingsTransportModule = typeof import('./api/settingsTransport.ts')
 type ProductReadTransportModule = typeof import('./api/productReadTransport.ts')
@@ -64,24 +63,13 @@ type OfflineOperation = AnyRecord & {
 type OfflineSyncOptions = { limit?: number; force?: boolean }
 type OfflineFileOwner = OfflineOperation & { upload_id?: string }
 
-const OFFLINE_REFRESH_INTERVAL_MS = 5 * 60_000
-const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
-const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
-const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000
-const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000
 const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
 const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
 const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
 const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000
-const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const FOREGROUND_REFRESH_AFTER_MS = 45_000
 const FOREGROUND_RECOVERY_THROTTLE_MS = 1500
-let offlineMaintenanceStarted = false
-let initialOfflineMaintenanceScheduled = false
-let lastServiceWorkerUpdateAt = 0
-let offlineSnapshotTimer: number = 0
-let offlineSnapshotIdleId: number = 0
 let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
@@ -94,7 +82,6 @@ let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
 let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
 let systemRuntimeModulePromise: Promise<SystemRuntimeModule> | null = null
-let offlineSnapshotTransportModulePromise: Promise<OfflineSnapshotTransportModule> | null = null
 let notificationSummaryModulePromise: Promise<NotificationSummaryModule> | null = null
 let settingsTransportModulePromise: Promise<SettingsTransportModule> | null = null
 let productReadTransportModulePromise: Promise<ProductReadTransportModule> | null = null
@@ -151,11 +138,6 @@ function loadPortalTransportModule(): Promise<PortalTransportModule> {
 function loadSystemRuntimeModule(): Promise<SystemRuntimeModule> {
   if (!systemRuntimeModulePromise) systemRuntimeModulePromise = import('./api/systemRuntime.ts')
   return systemRuntimeModulePromise
-}
-
-function loadOfflineSnapshotTransportModule(): Promise<OfflineSnapshotTransportModule> {
-  if (!offlineSnapshotTransportModulePromise) offlineSnapshotTransportModulePromise = import('./api/offlineSnapshotTransport.ts')
-  return offlineSnapshotTransportModulePromise
 }
 
 function loadNotificationSummaryModule(): Promise<NotificationSummaryModule> {
@@ -369,89 +351,21 @@ async function syncUnlockedOfflineFileChunks(_options: OfflineSyncOptions = {}):
   })
 }
 
-function refreshOfflineSnapshotSoon(force = false): void {
-  if (typeof window === 'undefined') return
-  if (offlineSnapshotTimer) {
-    window.clearTimeout(offlineSnapshotTimer)
-    offlineSnapshotTimer = 0
-  }
-  if (offlineSnapshotIdleId && typeof window.cancelIdleCallback === 'function') {
-    window.cancelIdleCallback(offlineSnapshotIdleId)
-    offlineSnapshotIdleId = 0
-  }
-  const run = () => {
-    offlineSnapshotTimer = 0
-    offlineSnapshotIdleId = 0
-    if (document.visibilityState === 'hidden') {
-      refreshOfflineSnapshotSoon(force)
-      return
-    }
-    loadOfflineSnapshotTransportModule()
-      .then((module) => module.refreshOfflineDeviceSnapshot({ force }))
-      .catch(() => {})
-  }
-  const delay = force ? OFFLINE_SNAPSHOT_FORCE_DELAY_MS : OFFLINE_SNAPSHOT_IDLE_DELAY_MS
-  if (typeof window.requestIdleCallback === 'function') {
-    offlineSnapshotTimer = window.setTimeout(() => {
-      offlineSnapshotIdleId = window.requestIdleCallback(run, { timeout: delay })
-    }, delay)
-    return
-  }
-  offlineSnapshotTimer = window.setTimeout(run, delay)
-}
-
-function refreshServiceWorkerSoon(force = false): void {
-  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return
-  const now = Date.now()
-  if (!force && now - lastServiceWorkerUpdateAt < SERVICE_WORKER_UPDATE_INTERVAL_MS) return
-  lastServiceWorkerUpdateAt = now
-  navigator.serviceWorker.ready
-    .then((registration) => registration.update?.())
-    .catch(() => {})
-}
-
-function runOfflineMaintenance(force = false): void {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-  if (!hasStoredUserSession()) return
-  refreshOfflineSnapshotSoon(force)
-  // Maintenance refreshes reads/app-shell only, never business writes.
-  // Legacy encrypted/file records remain untouched pending verified recovery.
-  refreshServiceWorkerSoon(force)
-}
-
-function startOfflineMaintenanceLoop(): void {
-  if (typeof window === 'undefined' || offlineMaintenanceStarted) return
-  offlineMaintenanceStarted = true
-  window.setInterval(() => {
-    runOfflineMaintenance(false)
-  }, OFFLINE_REFRESH_INTERVAL_MS)
-}
-
-function scheduleInitialOfflineMaintenance(): void {
-  if (typeof window === 'undefined' || initialOfflineMaintenanceScheduled) return
-  initialOfflineMaintenanceScheduled = true
-
-  const run = () => {
-    startOfflineMaintenanceLoop()
-    runOfflineMaintenance(false)
-  }
-  const scheduleIdle = () => {
-    if (typeof window.requestIdleCallback === 'function') {
-      window.setTimeout(() => {
-        window.requestIdleCallback(run, { timeout: INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS })
-      }, INITIAL_OFFLINE_MAINTENANCE_DELAY_MS)
-      return
-    }
-    window.setTimeout(run, INITIAL_OFFLINE_MAINTENANCE_DELAY_MS)
-  }
-
-  if (document.readyState === 'complete') {
-    scheduleIdle()
-    return
-  }
-  window.addEventListener('load', scheduleIdle, { once: true })
-}
-
+// F1 (27 Sep 2026): there is no background "offline maintenance" loop any more.
+// Offline selling is cancelled (owner, 26 Sep): the loop's snapshot refresh
+// made eleven serial GETs every five minutes and again on every online/focus/
+// visibility/pageshow/reconnect, and localMirrors.ts discards every one of
+// them on an http(s) origin, so it was pure Worker and D1 load. Its second job,
+// the service-worker update check, is index.tsx's watchForNewAppShell alone
+// (interval, visibility, focus, back/forward-cache pageshow, online and
+// sync:reconnected) -- one checker, so a long-lived till tab still sees the
+// "Restart now" bar. The loop never drained queued sales either. The one-time
+// drain is the MANUAL review path:
+// retryPendingSyncNow -> syncPendingSalesQueue({ manualRecovery: true }) in
+// pendingSyncTransport.ts / saleWriteTransport.ts, started from the App banner
+// and the Server page. Keep it until every device has upgraded. The service
+// worker does not drain: its sync / BUSINESS_OS_SYNC_NOW handlers run
+// syncOutboxOnce, which answers manual_recovery_required and replays nothing.
 function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
@@ -478,7 +392,6 @@ function ensureSessionRecoveryListeners(): void {
     resumeWS()
     startHealthCheck()
     pingServerHealth(force).catch(() => {})
-    runOfflineMaintenance(force)
     if (refreshData) {
       dispatchSyncUpdates(FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS, reason)
     }
@@ -510,9 +423,6 @@ function ensureSessionRecoveryListeners(): void {
   })
   window.addEventListener('pageshow', (event) => {
     recoverAfterBackground('pageshow-resume', Boolean((event as PageTransitionEvent).persisted))
-  })
-  window.addEventListener('sync:reconnected', () => {
-    runOfflineMaintenance(true)
   })
 }
 
@@ -728,9 +638,6 @@ const staticApi = {
         scheduleConnectWS()
         startHealthCheck()
       }
-      if (syncServerChanged && hasStoredUserSession()) {
-        scheduleInitialOfflineMaintenance()
-      }
     } else {
       if (syncServerChanged) {
         scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_server_url'))
@@ -795,11 +702,6 @@ const staticApi = {
   async discardPendingSyncQueue(reason?: string, reviewToken?: string) {
     const module = await import('./api/pendingSyncTransport.ts')
     return module.discardPendingSyncQueue(reason, reviewToken)
-  },
-
-  async refreshOfflineDeviceSnapshot(options: unknown = {}) {
-    const module = await loadOfflineSnapshotTransportModule()
-    return module.refreshOfflineDeviceSnapshot(options as Record<string, unknown>)
   },
 
   async getSettings(options: unknown = {}) {
@@ -1053,7 +955,6 @@ if (typeof window !== 'undefined') {
         ensureSessionRecoveryListeners()
         scheduleConnectWS()
         startHealthCheck()
-        scheduleInitialOfflineMaintenance()
       }
     }
   } catch (e: any) {

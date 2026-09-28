@@ -76,15 +76,13 @@ await runTest('disabled offline file replay does not change retained chunk statu
   assert.doesNotMatch(webApiSource, /Promise\.all\(rows\.map\(\(row\) => (dexieDb|offlineDb)\.offline_file_chunks\.update/)
 })
 
-await runTest('online maintenance keeps the offline mirror and app shell fresh without blocking the UI', () => {
-  assert.match(webApiSource, /const OFFLINE_REFRESH_INTERVAL_MS = 5 \* 60_000/)
-  assert.match(webApiSource, /const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000/)
-  assert.match(webApiSource, /const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000/)
-  assert.match(webApiSource, /startOfflineMaintenanceLoop/)
-  assert.match(webApiSource, /window\.setInterval/)
-  assert.match(webApiSource, /refreshOfflineSnapshotSoon/)
-  assert.match(webApiSource, /document\.visibilityState === 'hidden'/)
-  assert.match(webApiSource, /registration\.update\?\.\(\)/)
+// F1 (27 Sep 2026): offline selling is cancelled, so the five-minute offline
+// mirror refresh is gone and index.tsx is the only app-shell update checker.
+// singleAppUpdateChecker.test.ts runs both behaviours; this pins the absence.
+await runTest('no background offline maintenance loop; the app shell update check lives only in index.tsx', () => {
+  assert.doesNotMatch(webApiSource, /OFFLINE_REFRESH_INTERVAL_MS|startOfflineMaintenanceLoop|refreshOfflineSnapshotSoon|runOfflineMaintenance/)
+  assert.doesNotMatch(webApiSource, /window\.setInterval/)
+  assert.doesNotMatch(webApiSource, /registration\.update\?\.\(\)/)
 })
 
 await runTest('legacy sale payloads retain their original identity and never disappear on conflicts', () => {
