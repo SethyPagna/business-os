@@ -51,3 +51,30 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
   return raw
 }
+
+// A picture the storefront must load from this site only (the About picture,
+// AB-W): an uploaded file, `/uploads/NAME`. Stricter than the link rule above,
+// which also admits any https:// URL -- a third-party image would let another
+// host log every visitor. A step out of /uploads/ is refused in each spelling a
+// browser or the upload route resolves as one: `..` or `.` (also
+// percent-encoded), a backslash, an encoded slash.
+const MAX_UPLOAD_PATH_LENGTH = 500
+const UPLOADS_PREFIX = '/uploads/'
+
+export function normalizePortalUploadPath(value: unknown): string | null {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > MAX_UPLOAD_PATH_LENGTH) return null
+  if (/[\u0000-\u001f\u007f\\]/.test(raw) || raw.includes('//')) return null
+  const pathPart = raw.split(/[?#]/)[0]
+  if (!pathPart.startsWith(UPLOADS_PREFIX) || pathPart.length <= UPLOADS_PREFIX.length) return null
+  for (const segment of pathPart.split('/')) {
+    let decoded = ''
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      return null
+    }
+    if (decoded === '.' || decoded === '..' || /[\u0000-\u001f\u007f/\\]/.test(decoded)) return null
+  }
+  return raw
+}

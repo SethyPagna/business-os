@@ -32,6 +32,7 @@ import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
+import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -839,6 +840,8 @@ const PORTAL_ABOUT_KEYS = new Set([
   'customer_portal_about_content',
   'customer_portal_about_blocks',
   'customer_portal_show_about',
+  'customer_portal_about_image',
+  'customer_portal_about_image_alt',
 ])
 
 function settingsBucketPermissionFor(key: string): string | null {
@@ -1029,6 +1032,25 @@ app.post('/', async (c) => {
   }
   for (const key of attemptedKeys) {
     if (isRegisteredBusinessIdentityKey(key)) body[key] = (body[key] as string).trim()
+  }
+
+  // Every storefront visitor loads the About picture, so only this site's own
+  // upload is stored; empty clears it. The public config applies the same rule
+  // to a value stored any other way (a backup restore), and caps the
+  // description the same way.
+  if (attemptedKeys.includes('customer_portal_about_image')) {
+    const raw = body.customer_portal_about_image
+    const text = raw == null ? '' : String(raw).trim()
+    const uploadPath = text ? normalizePortalUploadPath(text) : ''
+    if (uploadPath === null) {
+      return c.json({ error: 'The About picture must be a picture uploaded to this site.', code: 'invalid_about_image' }, 400)
+    }
+    body.customer_portal_about_image = uploadPath
+  }
+  if (attemptedKeys.includes('customer_portal_about_image_alt')) {
+    const raw = body.customer_portal_about_image_alt
+    const text = raw == null ? '' : String(raw).trim()
+    body.customer_portal_about_image_alt = text.length <= 200 ? text : Array.from(text).slice(0, 200).join('')
   }
 
   // The low-stock alert switch and its threshold decide what the WHOLE
