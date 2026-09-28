@@ -163,6 +163,15 @@ export function classifyStockAdjustFailure(error: unknown): StockAdjustFailure {
 
 type StockRequestFailureEntry = { key: string; fallback: string }
 
+// SCAN1 STK-C / STK-D: the Worker's in-batch guard refused a removal because
+// the stock it read was sold or moved before the write. The whole batch
+// rolled back -- nothing was written -- so this one IS a plain retry
+// (stockLineNeedsRemoval stays false for it). One entry for both codes.
+const STOCK_CHANGED_RETRY: StockRequestFailureEntry = {
+  key: 'stock_changed_retry',
+  fallback: 'The stock changed while this was being saved. Nothing was changed. Refresh and try again.',
+}
+
 const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = {
   stock_request_in_flight: {
     key: 'stock_request_in_flight',
@@ -180,6 +189,8 @@ const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = 
     key: 'stock_request_id_invalid',
     fallback: 'This line lost its request id. Remove it and add it again.',
   },
+  stock_removal_conflict: STOCK_CHANGED_RETRY,
+  tagged_lot_conflict: STOCK_CHANGED_RETRY,
 }
 
 /** The pack key + English fallback for a guard code, or null for anything else. */
