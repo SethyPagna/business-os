@@ -110,6 +110,12 @@ runTest('no manifest promises offline use or carries a retired name', () => {
   }
 })
 
+runTest('the raw HTML head names the shop before the bootstrap overwrites it', () => {
+  const html = read('../index.html')
+  assert.match(html, /<title>Leang Cosmetics<\/title>/)
+  assert.match(html, /<meta name="apple-mobile-web-app-title" content="Leang" \/>/)
+})
+
 runTest('neither manifest names the other host\'s icons', () => {
   assert.ok(staff.icons.length > 0 && shop.icons.length > 0, 'both manifests list icons')
   for (const icon of staff.icons) assert.doesNotMatch(icon.src, /leang/i, `staff manifest names shop icon ${icon.src}`)
