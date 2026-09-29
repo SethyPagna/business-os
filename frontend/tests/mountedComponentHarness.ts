@@ -24,7 +24,8 @@ const DISPATCH = Symbol.for('mountedComponentHarness.dispatch')
 const LONG_TIMER_MS = 1_000
 const FLUSH_MS = 4
 const QUIET_MS = 120
-const SETTLE_DEADLINE_MS = 10_000
+// Only a stuck surface reaches it; 10 s was hit once by a healthy surface on a loaded machine.
+const SETTLE_DEADLINE_MS = 30_000
 
 let domVersion = 0
 let bundlerActivity = 0
