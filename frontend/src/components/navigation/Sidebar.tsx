@@ -5,16 +5,18 @@ import { mobileChromeViewportOffset, navLayerToggle } from '../../utils/mobileNa
 import './nav-chrome.css'
 import { useMobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { useIsCompactViewport } from '../../utils/useViewport.ts'
-import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
+import { APP_NAVIGATION_EVENT, isAdminHostname } from '../../app/pathRouting.ts'
 import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
 import { restartIntoLatestApp } from '../../utils/appUpdate.ts'
+import { installMenuRoute, promptAppInstall, subscribeInstallOffer } from '../../utils/standaloneNavigation.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
@@ -37,6 +39,8 @@ import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, 
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import MinimizedWorkTray from '../shared/MinimizedWorkTray.tsx'
+import { translateFromPack } from '../shared/InstallPromptBand.tsx'
+import IosInstallSteps from '../install/IosInstallSteps.tsx'
 import { getMobileSectionIcon } from './mobileSectionIcons.ts'
 
 const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
@@ -114,6 +118,7 @@ interface SidebarAppContext {
   user?: SidebarUser | null
   logout: () => void
   t: TranslateFn
+  language: string
   settings?: SidebarSettings | null
   hasPermission: (permission: string) => boolean
   getPermissionTier: (key: string) => string
@@ -151,6 +156,7 @@ type SidebarProps = {
 }
 
 const useApp = useAppHook as () => SidebarAppContext
+const noInstallRouteOutsideBrowser = () => null
 const UserProfileModal = lazyRetry(async () => ({
   default: (await import('../users/UserProfileModal')).default as ComponentType<UserProfileModalProps>,
 }), 'sidebar-user-profile-modal')
@@ -241,6 +247,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     user,
     logout,
     t,
+    language: uiLanguage,
     settings,
     hasPermission,
     getPermissionTier,
@@ -309,6 +316,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     void restartIntoLatestApp({
       unsavedWorkMessage: t('save_or_discard_before_update') || 'Save or discard your unfinished work before updating the app.',
     })
+  }
+  const installRoute = useSyncExternalStore(subscribeInstallOffer, installMenuRoute, noInstallRouteOutsideBrowser)
+  const [iosInstallStepsOpen, setIosInstallStepsOpen] = useState(false)
+  const installApp = () => {
+    if (installRoute === 'ios-share') setIosInstallStepsOpen(true)
+    else void promptAppInstall()
   }
 
   // N2: which pages currently hold registered unsaved work -- drives the
@@ -427,6 +440,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
     { id: 'profile', label: t('profile') || 'Profile', icon: User, onClick: () => setProfileOpen(true) },
     ...(canAccessPage('settings') ? [{ id: 'settings', label: t('settings') || 'Settings', icon: Settings, onClick: () => inline ? openMobileGroup('settings') : navigateTo('settings') } as AccountAction] : []),
     ...(canAccessPage('receipt_settings') ? [{ id: 'receipt_settings', label: t('receipt_settings') || 'Receipt Settings', icon: Receipt, onClick: () => navigateTo('receipt_settings') } as AccountAction] : []),
+    ...(installRoute && isAdminHostname() ? [{ id: 'install', label: t('install_app') || 'Install app', icon: Download, onClick: installApp } as AccountAction] : []),
     { id: 'update', label: t('refresh_app') || 'Update', icon: RefreshCw, onClick: runAppUpdate, tone: 'blue' },
     { id: 'logout', label: t('logout') || 'Exit', icon: LogOut, onClick: logout, tone: 'red' },
   ]
@@ -834,6 +848,10 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             )}
           </div>
         </>
+      ) : null}
+
+      {iosInstallStepsOpen ? (
+        <IosInstallSteps translate={translateFromPack(t, uiLanguage)} onClose={() => setIosInstallStepsOpen(false)} />
       ) : null}
 
       {profileOpen ? (

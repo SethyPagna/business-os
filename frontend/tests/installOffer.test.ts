@@ -484,6 +484,60 @@ await check('the staff loading screens say Leang Cosmetics Admin', () => {
   assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
 })
 
+await check('the staff account menu offers Install next to Update, on the admin host, whenever an install is possible', () => {
+  const sidebar = read('src/components/navigation/Sidebar.tsx')
+  assert.match(sidebar, /const installRoute = useSyncExternalStore\(subscribeInstallOffer, installMenuRoute,/, 'the row reads the menu route, which allows desktops (owner default)')
+  const install = sidebar.indexOf("{ id: 'install', label: t('install_app') || 'Install app', icon: Download, onClick: installApp }")
+  assert.ok(install > 0, 'the account panel has an Install row with the Download icon')
+  assert.match(sidebar.slice(install - 60, install), /\.\.\.\(installRoute && isAdminHostname\(\) \? \[$/, 'the row exists only when an install is possible, and only on the admin host')
+  const update = sidebar.indexOf("{ id: 'update'")
+  assert.ok(update > install && !sidebar.slice(install + 1, update).includes('{ id: '), 'the Install row sits right before Update')
+  assert.match(sidebar, /if \(installRoute === 'ios-share'\) setIosInstallStepsOpen\(true\)\s*else void promptAppInstall\(\)/, 'iOS opens the steps; Chromium replays the native prompt')
+  assert.match(sidebar, /language: uiLanguage,/, 'the sheet falls back in the UI language the admin t() uses')
+  assert.match(sidebar, /<IosInstallSteps translate=\{translateFromPack\(t, uiLanguage\)\} onClose=\{\(\) => setIosInstallStepsOpen\(false\)\} \/>/)
+})
+
+await check('the iOS steps sheet shows its three steps from first paint, in both languages', async () => {
+  assert.ok(!fs.existsSync(new URL('../src/components/shared/IosInstallSteps.tsx', import.meta.url)), 'new install UI stays out of the app-shared chunk')
+  useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
+  const { translateFromPack } = compileBand(await freshInstallModule()) as unknown as {
+    translateFromPack: (t: (key: string) => string, language: string) => (key: string, fallback: string, fallbackKm: string) => string
+  }
+  const modalProps: Array<Record<string, unknown>> = []
+  const ModalStub = ({ title, children, ...rest }: { title: string; children: unknown }) => {
+    modalProps.push(rest)
+    return React.createElement('div', { role: 'dialog' }, React.createElement('h2', null, title), children as never)
+  }
+  const steps = compileComponent('src/components/install/IosInstallSteps.tsx', { '../shared/Modal.tsx': ModalStub })
+  for (const language of ['en', 'km'] as const) {
+    const pack = readPack(language)
+    const html = renderToStaticMarkup(React.createElement(steps.default, { translate: translateFromPack(packText(language), language), onClose: () => {} }))
+    assert.equal(modalProps.at(-1)?.unsavedChanges, 'read-only', 'the shared Modal gives the sheet its close, Escape and focus handling; nothing typed can be lost')
+    const text = visibleText(html)
+    let at = text.indexOf(String(pack.ios_install_steps_title))
+    assert.ok(at >= 0, `${language}: the title renders`)
+    for (const key of ['ios_install_step_menu', 'ios_install_step_add', 'ios_install_step_web_app']) {
+      const next = text.indexOf(String(pack[key]), at)
+      assert.ok(next > at, `${language}: ${key} renders, in order`)
+      at = next
+    }
+    assert.ok(text.includes('•••'), `${language}: the first step names the ••• menu`)
+  }
+  assert.doesNotMatch(stripComments(read('src/components/install/IosInstallSteps.tsx')), /collapsed|minimi[sz]ed|expanded/i, 'no stub that expands later')
+})
+
+await check('install sheet texts carry their own Khmer, and every inline fallback matches the packs', () => {
+  assertEveryTranslateCallHasKhmer('src/components/install/IosInstallSteps.tsx', 4)
+  const en = readPack('en')
+  const km = readPack('km')
+  for (const rel of ['src/components/shared/InstallPromptBand.tsx', 'src/components/install/IosInstallSteps.tsx']) {
+    for (const [, key, english, khmer] of read(rel).matchAll(/translate\(\s*'([^']+)',\s*'([^']*)',\s*'([^']*)'/g)) {
+      assert.equal(english, en[key], `${rel}: the English fallback for ${key} is the en.json text, so the shop and the till read the same words`)
+      assert.equal(khmer, km[key], `${rel}: the Khmer fallback for ${key} is the km.json text`)
+    }
+  }
+})
+
 if (failed > 0) {
   console.error(`installOffer.test.ts: ${failed} failing check(s)`)
   process.exit(1)
