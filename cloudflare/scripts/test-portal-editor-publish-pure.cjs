@@ -73,6 +73,7 @@ const SWITCHES = [
   ['customer_portal_show_promotion_badge', 'showPromotionBadge', false],
   ['customer_portal_show_new_arrival_badge', 'showNewArrivalBadge', false],
 ]
+const RETIRED_STOREFRONT_LANGUAGES = ['zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']
 const KHMER_STACK = 'ស្ត្រី'
 const capFallsInside = (filler, max, character, inside) => filler.repeat(max - inside) + character
 const translationsOf = (value) => publish({ customer_portal_translations: typeof value === 'string' ? value : JSON.stringify(value) }).translations
@@ -147,30 +148,51 @@ async function main() {
     assert.deepEqual(published, stored.slice(0, 100))
   })
 
-  await check('default language: a storefront language publishes in its own spelling, anything else is automatic (English)', () => {
-    const language = (value) => {
-      const config = publish({ customer_portal_language: value })
-      return [config.languageSetting, config.language]
-    }
-    assert.deepEqual(language('km'), ['km', 'km'])
-    assert.deepEqual(language(' KM '), ['km', 'km'])
-    assert.deepEqual(language('zh-cn'), ['zh-CN', 'zh-CN'])
-    assert.deepEqual(language('auto'), ['auto', 'en'])
-    assert.deepEqual(language('en'), ['en', 'en'])
-    for (const refused of ['', 'xx', 'zh', 'en-US', 'nl', 'khmer', '<script>']) {
-      assert.deepEqual(language(refused), ['auto', 'en'], JSON.stringify(refused))
+  const publishedLanguage = (value) => {
+    const config = publish({ customer_portal_language: value })
+    return [config.languageSetting, config.language]
+  }
+
+  await check('default language: English or Khmer publishes as stored, anything else is automatic (English)', () => {
+    assert.deepEqual(publishedLanguage('km'), ['km', 'km'])
+    assert.deepEqual(publishedLanguage(' KM '), ['km', 'km'])
+    assert.deepEqual(publishedLanguage('auto'), ['auto', 'en'])
+    assert.deepEqual(publishedLanguage('en'), ['en', 'en'])
+    assert.deepEqual(publishedLanguage('EN'), ['en', 'en'])
+    for (const refused of ['', 'xx', 'zh', 'en-US', 'nl', 'khmer', '<script>', 'zh-cn', 'FR']) {
+      assert.deepEqual(publishedLanguage(refused), ['auto', 'en'], JSON.stringify(refused))
     }
     assert.deepEqual([publish({}).languageSetting, publish({}).language], ['auto', 'en'])
   })
 
-  await check('default language: every first-party storefront language is accepted (frontend portalLanguageOptions.ts)', () => {
-    const list = frontendList('frontend/src/components/catalog/portalLanguageOptions.ts', 'FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS')
+  await check('default language: a stored retired storefront language (French, Chinese, ...) publishes as English', () => {
+    assert.deepEqual(publishedLanguage('fr'), ['auto', 'en'])
+    for (const code of RETIRED_STOREFRONT_LANGUAGES) {
+      assert.deepEqual(publishedLanguage(code), ['auto', 'en'], code)
+    }
+  })
+
+  await check('default language: the Worker accepts exactly the storefront languages (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS)', () => {
+    const list = frontendList('frontend/src/components/catalog/portalLanguageOptions.ts', 'PUBLIC_STOREFRONT_LANGUAGE_OPTIONS')
     const codes = [...list.matchAll(/value: '([^']+)'/g)].map((match) => match[1])
     assert.ok(codes.includes('en') && codes.includes('km'), `parsed ${codes.length} codes`)
     for (const code of codes) {
-      assert.equal(publish({ customer_portal_language: code }).languageSetting, code, code)
-      assert.equal(publish({ customer_portal_language: code.toUpperCase() }).languageSetting, code, code.toUpperCase())
+      assert.deepEqual(publishedLanguage(code), [code, code], code)
+      assert.deepEqual(publishedLanguage(code.toUpperCase()), [code, code], code.toUpperCase())
     }
+    const candidates = [...new Set([...codes, ...RETIRED_STOREFRONT_LANGUAGES])]
+    const accepted = candidates.filter((code) => publishedLanguage(code)[0] === code)
+    assert.deepEqual(accepted.sort(), [...codes].sort())
+  })
+
+  await check('translations: a block for a retired storefront language is never published', () => {
+    for (const code of RETIRED_STOREFRONT_LANGUAGES) {
+      assert.deepEqual(translationsOf({ [code]: { aboutTitle: `about in ${code}` } }), {}, code)
+    }
+  })
+
+  await check('translations: an English block that is not an object, or a Khmer block with nothing translatable, publishes none', () => {
+    assert.deepEqual(translationsOf({ en: 'not an object', km: {} }), {})
   })
 
   await check('translations: only storefront languages and translatable text reach the shop', () => {
@@ -188,11 +210,11 @@ async function main() {
         linkLabels: { facebook: 'ហ្វេសប៊ុក', tiktok: 'TikTok', fields: { telegram: 'តេឡេក្រាម' } },
         script: '<script>alert(1)</script>',
       },
+      En: { promotionsIntro: 'Featured' },
       'zh-cn': { promotionsIntro: '精选' },
+      fr: { aboutTitle: 'À propos' },
       zh: { aboutTitle: 'base language' },
       xx: { aboutTitle: 'unknown' },
-      fr: 'not an object',
-      ja: {},
     })
     assert.deepEqual(published, {
       km: {
@@ -202,7 +224,7 @@ async function main() {
         text: { membershipInfoText: 'ពិន្ទុ' },
         linkLabels: { facebook: 'ហ្វេសប៊ុក', fields: { telegram: 'តេឡេក្រាម' } },
       },
-      'zh-CN': { promotionsIntro: '精选' },
+      en: { promotionsIntro: 'Featured' },
     })
     assert.equal(JSON.stringify(publish({ customer_portal_translations: JSON.stringify({ km: { aiPrompt: 'INTERNAL rules' } }) })).includes('INTERNAL'), false)
   })

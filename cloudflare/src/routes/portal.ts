@@ -197,12 +197,12 @@ function normalizePortalRecommendedProductIds(value: unknown): number[] {
   return [...ids]
 }
 
-// The storefront's first-party languages (frontend portalLanguageOptions.ts).
-const PORTAL_LANGUAGE_CODES = ['en', 'km', 'zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']
-const PORTAL_LANGUAGE_BY_LOWER_CASE = new Map(PORTAL_LANGUAGE_CODES.map((code) => [code.toLowerCase(), code]))
+// Owner decision, 27 Sep 2026: the storefront is English and Khmer only (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS).
+const PORTAL_LANGUAGE_CODES: ReadonlySet<string> = new Set(['en', 'km'])
 
 function portalLanguageCode(value: unknown): string {
-  return typeof value === 'string' ? PORTAL_LANGUAGE_BY_LOWER_CASE.get(value.trim().toLowerCase()) || '' : ''
+  const code = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return PORTAL_LANGUAGE_CODES.has(code) ? code : ''
 }
 
 const MAX_PORTAL_TRANSLATIONS_JSON_LENGTH = 128 * 1024
