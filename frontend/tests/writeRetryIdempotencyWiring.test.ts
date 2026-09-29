@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { compileHandler, findFunction, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
 import { accessibleText, createHarness, installSteppedClock as installOperatorClock, propsOf, type Harness, type MountedSurface, type SettleOptions } from './mountedComponentHarness.ts'
-import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
 import { adjustStock } from '../src/api/inventoryWriteTransport.ts'
@@ -112,55 +111,6 @@ function assertEveryPartChanged(next: string[], previous: string[], why: string)
   next.forEach((part, index) => assert.notEqual(part, previous[index], why))
 }
 
-interface IntentDrive {
-  press(): Promise<unknown>
-  write: ScriptedWrite
-  notices: Notice[]
-  identityOf(call: Call): string[]
-  requestOf(call: Call): unknown
-  editIntent(): void
-  committed: Outcome
-  failParentOnce?: () => void
-}
-
-async function proveOneIdentityPerIntent(drive: IntentDrive): Promise<void> {
-  const clock = installSteppedClock()
-  try {
-    const attempt = async (outcome: Outcome, label: string): Promise<Call> => {
-      clock.advance(OPERATOR_PAUSE_MS)
-      drive.write.will(outcome)
-      const before = drive.write.calls.length
-      await settled(drive.press(), label)
-      assert.equal(drive.write.calls.length, before + 1, `${label}: one write per press`)
-      return drive.write.calls[before]
-    }
-    const timedOut = await attempt(HANG, 'the attempt the UI stopped waiting for')
-    assert.ok(
-      drive.notices.some((notice) => notice.message.includes(unknownOutcome)),
-      `the UI timeout says the outcome is unknown, in the active language; saw ${JSON.stringify(drive.notices)}`,
-    )
-    const retries = [await attempt(LOST, 'the retry whose answer was lost')]
-    if (drive.failParentOnce) {
-      drive.failParentOnce()
-      retries.push(await attempt(drive.committed, 'the retry the Worker committed while the parent failed'))
-    }
-    retries.push(await attempt(drive.committed, 'the retry that committed'))
-    for (const retry of retries) {
-      assert.deepEqual(drive.identityOf(retry), drive.identityOf(timedOut), 'a retry after a failed or unknown attempt resends its identity, so the Worker replays instead of applying twice')
-      assert.deepEqual(drive.requestOf(retry), drive.requestOf(timedOut), 'the retry resends the same request under that identity')
-    }
-    const identical = await attempt(LOST, 'the same values after a committed write')
-    assertEveryPartChanged(drive.identityOf(identical), drive.identityOf(timedOut), 'after a committed write, even an identical intent is a new request')
-    drive.editIntent()
-    const edited = await attempt(LOST, 'a changed intent')
-    assertEveryPartChanged(drive.identityOf(edited), drive.identityOf(identical), 'a changed intent is a new request, never a replay of the old one')
-    const editedRetry = await attempt(drive.committed, 'the retry of the changed intent')
-    assert.deepEqual(drive.identityOf(editedRetry), drive.identityOf(edited))
-  } finally {
-    clock.restore()
-  }
-}
-
 function recordNotices(notices: Notice[]) {
   return (message: string, tone?: string) => { notices.push({ message: String(message), tone }) }
 }
@@ -218,12 +168,14 @@ async function proveOneIdentityPerMountedIntent(drive: MountedIntentDrive): Prom
   }
 }
 
+const operator = { id: 3, name: 'Dara', username: 'dara', role: 'admin' }
+
 function adminApp(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
     page: 'dashboard',
     language: 'en',
     t: (key: string) => km[key] ?? key,
-    user: { id: 3, name: 'Dara', username: 'dara', role: 'admin' },
+    user: operator,
     settings: {},
     notify: () => {},
     hasPermission: () => true,
@@ -241,7 +193,9 @@ function adminApp(overrides: Record<string, unknown>): Record<string, unknown> {
   }
 }
 
-const harness: Harness = await createHarness()
+const harness: Harness = await createHarness({
+  localStorage: { businessos_user: JSON.stringify(operator), businessos_read_session: 'read-session-of-dara' },
+})
 function pressing(write: ScriptedWrite): SettleOptions {
   const before = write.calls.length
   return { until: () => write.calls.length > before, waitingFor: 'the write this press sends', expireWaitsWhen: () => write.hanging }
@@ -289,52 +243,60 @@ await runTest('loyalty add: a timed-out or lost award keeps its id; only a commi
 await runTest('legacy customer return: a timed-out or lost create keeps its id AND return number until the create commits', async () => {
   const write = scriptedWrite()
   const notices: Notice[] = []
-  const form = { reason: 'Damaged' }
-  const scope: Scope = {
-    pendingLoaded: true,
-    pendingError: null,
-    sessionStale: false,
-    lifecycle: { current: { alive: true, generation: 0, scope: captureActorReadScope('returns') } },
-    pendingV1: null,
-    isV1Sale: false,
-    unsupportedMoneyVersion: false,
-    submitNetReturn: async () => { throw new Error('a legacy sale must not take the v1 create path') },
-    activeItems: [{ id: 11, product_id: 5, product_name: 'Serum', returnQty: 1, applied_price_usd: 10, applied_price_khr: 41000, return_to_stock: true, stock_action: 'restock', branch_id: 1, pickedBatchId: 31 }],
-    notify: recordNotices(notices),
-    T: translate,
-    itemsMissingLot: [],
-    replacementsMissingLot: [],
-    submitInFlightRef: { current: false },
-    setSubmitting: () => {},
-    foundSale: { id: 7, receipt_number: 'R-0007', customer_name: 'Sokha', branch_id: 1, exchange_rate: 4100 },
-    user: { id: 3, name: 'Dara' },
-    returnType: 'refund',
-    notes: '',
-    totalRefund: 10,
-    totalRefundKhr: 41000,
-    replacements: [],
-    replacementPaymentMethod: 'cash',
-    legacyReturnIdentityRef: { current: null },
-    createReturnRequest: write.fn,
-    RETURN_CREATE_TIMEOUT_MS: UI_TIMEOUT_MS,
-    window: { dispatchEvent: () => true },
-    onClose: () => {},
-    onSuccess: () => {},
-    finalReason: form.reason,
-  }
-  const render = await compileHandler<() => Promise<void>>(readComponent('components/returns/NewReturnModal.tsx'), 'handleSubmit', { locals: Object.keys(scope) })
-  await proveOneIdentityPerIntent({
-    press: () => render({ ...scope, finalReason: form.reason })(),
-    write,
-    notices,
-    identityOf: (call) => [String((call[0] as WireRequest).client_request_id), String((call[0] as WireRequest).return_number)],
-    requestOf: (call) => withoutIdentity(call[0]),
-    editIntent: () => { form.reason = 'Wrong shade' },
-    committed: answer({ success: true, id: 90 }),
+  const form = { quantity: '1', notes: '' }
+  const serumLine = { id: 11, product_id: 5, product_name: 'Serum', quantity: 2, applied_price_usd: 10, applied_price_khr: 41000, branch_id: 1, batch_id: 31 }
+  const sale = { id: 7, receipt_number: 'R-0007', customer_name: 'Sokha', branch_id: 1, exchange_rate: 4100, total_usd: 20, created_at: '2026-09-20 10:00:00', items: [serumLine] }
+  const page = await harness.mount({
+    component: 'components/returns/NewReturnModal.tsx',
+    props: {
+      initialReceiptQuery: sale.receipt_number,
+      notify: recordNotices(notices),
+      fmtUSD: (value: unknown) => `$${Number(value || 0).toFixed(2)}`,
+      onClose: () => {},
+      onSuccess: () => {},
+    },
+    app: adminApp({ page: 'returns' }),
+    doubles: {
+      'api/returnsReadTransport.ts': {
+        lookupReturnReceipts: async () => [{ id: sale.id, receipt_number: sale.receipt_number, total_usd: sale.total_usd, created_at: sale.created_at, customer_name: sale.customer_name }],
+        getReturns: async () => [],
+        getReturnReasonPresets: async () => ({}),
+      },
+      'api/salesTransport.ts': { getSales: async () => [sale] },
+      'api/returnsTransport.ts': { createReturn: write.fn },
+    },
   })
-  const first = write.calls[0][0] as WireRequest
-  assert.match(String(first.client_request_id), /^return_/)
-  assert.match(String(first.return_number), /^RET-/)
+  const confirmReturn = shown('submit_return', 'Confirm Return')
+  const onConfirmStep = (): boolean => page.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(confirmReturn)).length > 0
+  try {
+    await page.waitFor(() => page.findAll((node) => node.getAttribute('role') === 'option' && node.textContent.includes(sale.receipt_number)).length > 0, 'the matching receipt')
+    await page.click(page.button(sale.receipt_number))
+    await page.waitFor(() => page.findAll((node) => node.tagName === 'INPUT' && node.getAttribute('type') === 'number').length > 0, 'the sale lines')
+    await proveOneIdentityPerMountedIntent({
+      press: async () => {
+        if (onConfirmStep()) await page.click(page.button(shown('back', 'Back')))
+        await page.type(page.find((node) => node.tagName === 'INPUT' && node.getAttribute('type') === 'number', `the return quantity for ${serumLine.product_name}`), form.quantity)
+        await page.type(page.find((node) => node.tagName === 'TEXTAREA', 'the return notes'), form.notes)
+        await page.click(page.button(new RegExp(`^${escapeRegExp(shown('confirm', 'Review'))} →`)))
+        await page.click(page.button(confirmReturn), pressing(write))
+      },
+      write,
+      notices,
+      identityOf: (call) => [String((call[0] as WireRequest).client_request_id), String((call[0] as WireRequest).return_number)],
+      requestOf: (call) => withoutIdentity(call[0]),
+      editIntent: () => { form.notes = 'Opened box' },
+      committed: answer({ success: true, id: 90 }),
+    })
+    const first = write.calls[0][0] as WireRequest
+    assert.deepEqual(
+      { sale: first.sale_id, receipt: first.receipt_number, notes: first.notes, items: (first.items as WireRequest[]).map((item) => [item.sale_item_id, item.product_id, item.quantity]) },
+      { sale: 7, receipt: 'R-0007', notes: null, items: [[11, 5, 1]] },
+    )
+    assert.match(String(first.client_request_id), /^return_/)
+    assert.match(String(first.return_number), /^RET-/)
+  } finally {
+    await page.unmount()
+  }
 })
 
 await runTest('supplier return: the id survives a timeout, a lost answer and a failed hand-over to the parent', async () => {

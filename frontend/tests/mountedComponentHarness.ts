@@ -244,7 +244,10 @@ interface SourceTimer { sequence: number; delay: number; handle: TimerHandle; ru
 
 const realSetTimeout = globalThis.setTimeout as unknown as (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => TimerHandle
 const realClearTimeout = globalThis.clearTimeout as unknown as (handle: unknown) => void
+const realSetInterval = globalThis.setInterval as unknown as (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => TimerHandle
+const realClearInterval = globalThis.clearInterval as unknown as (handle: unknown) => void
 const sourceTimers = new Map<unknown, SourceTimer>()
+const sourceIntervals = new Set<unknown>()
 let timerSequence = 0
 
 function calledFromSource(): boolean {
@@ -271,6 +274,24 @@ function trackedSetTimeout(callback: unknown, delay?: number, ...args: unknown[]
 function trackedClearTimeout(handle: unknown): void {
   sourceTimers.delete(handle)
   realClearTimeout(handle)
+}
+
+function trackedSetInterval(callback: unknown, delay?: number, ...args: unknown[]): TimerHandle {
+  const handle = realSetInterval(callback as Listener, delay, ...args)
+  if (calledFromSource()) sourceIntervals.add(handle)
+  return handle
+}
+
+function trackedClearInterval(handle: unknown): void {
+  sourceIntervals.delete(handle)
+  realClearInterval(handle)
+}
+
+function disposeSourceTimers(): void {
+  for (const timer of sourceTimers.values()) realClearTimeout(timer.handle)
+  sourceTimers.clear()
+  for (const handle of sourceIntervals) realClearInterval(handle)
+  sourceIntervals.clear()
 }
 
 export function timerMark(): number { return timerSequence }
@@ -348,17 +369,20 @@ memoryWindow.window = memoryWindow
 memoryWindow.self = memoryWindow
 memoryDocument.defaultView = memoryWindow
 
+const BROWSER_GLOBALS = ['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'HTMLInputElement', 'Node', 'ResizeObserver', 'IntersectionObserver', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'cancelAnimationFrame']
+
 function installGlobals(): () => void {
-  const replaced = ['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'HTMLInputElement', 'Node', 'ResizeObserver', 'IntersectionObserver', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT', 'fetch', 'setTimeout', 'clearTimeout']
-  const saved = new Map(replaced.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
-  const define = (name: string, value: unknown): void => { Object.defineProperty(globalThis, name, { configurable: true, writable: true, value }) }
-  for (const name of ['window', 'document', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'HTMLInputElement', 'Node', 'ResizeObserver', 'IntersectionObserver', 'MutationObserver', 'matchMedia', 'requestAnimationFrame', 'cancelAnimationFrame']) {
-    define(name, memoryWindow[name])
+  const installed: Record<string, unknown> = {
+    ...Object.fromEntries(BROWSER_GLOBALS.map((name) => [name, memoryWindow[name]])),
+    IS_REACT_ACT_ENVIRONMENT: true,
+    fetch: async (input: unknown) => { throw new TypeError(`the mounted surface fetched ${String(input)}; give that transport a double`) },
+    setTimeout: trackedSetTimeout,
+    clearTimeout: trackedClearTimeout,
+    setInterval: trackedSetInterval,
+    clearInterval: trackedClearInterval,
   }
-  define('IS_REACT_ACT_ENVIRONMENT', true)
-  define('fetch', async (input: unknown) => { throw new TypeError(`the mounted surface fetched ${String(input)}; give that transport a double`) })
-  define('setTimeout', trackedSetTimeout)
-  define('clearTimeout', trackedClearTimeout)
+  const saved = new Map(Object.keys(installed).map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
+  for (const [name, value] of Object.entries(installed)) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value })
   return () => {
     for (const [name, descriptor] of saved) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor)
@@ -492,8 +516,14 @@ export interface Harness {
   close(): Promise<void>
 }
 
-export async function createHarness(): Promise<Harness> {
+export interface HarnessOptions {
+  localStorage?: Record<string, string>
+}
+
+export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
   const restoreGlobals = installGlobals()
+  const storage = memoryWindow.localStorage as Storage
+  for (const [key, value] of Object.entries(options.localStorage ?? {})) storage.setItem(key, value)
   let doubles: ModuleDoubles = {}
   let doubleCalls = 0
   ;(globalThis as Record<symbol, unknown>)[DISPATCH] = (key: string, name: string, actual: Listener, args: unknown[]) => {
@@ -540,6 +570,8 @@ export async function createHarness(): Promise<Harness> {
     }
   }
 
+  const mountedSurfaces = new Set<() => Promise<void>>()
+
   async function mount(options: MountOptions): Promise<MountedSurface> {
     doubles = options.doubles
     const core = await server.ssrLoadModule(`/src/${APP_CONTEXT_CORE}`) as { AppContext: React.Context<unknown> }
@@ -547,6 +579,12 @@ export async function createHarness(): Promise<Harness> {
     const container = memoryDocument.createElement('div')
     memoryDocument.body.appendChild(container)
     const root = createRoot(container as unknown as Element)
+    const unmount = async (): Promise<void> => {
+      if (!mountedSurfaces.delete(unmount)) return
+      await act(async () => root.unmount())
+      container.remove()
+    }
+    mountedSurfaces.add(unmount)
     const render = async (props: Record<string, unknown>): Promise<void> => {
       await act(async () => {
         root.render(React.createElement(core.AppContext.Provider, { value: options.app }, React.createElement(module.default, props)))
@@ -595,10 +633,7 @@ export async function createHarness(): Promise<Harness> {
       settle: (settleOptions) => settle(settleOptions),
       waitFor: (condition, what) => settle({ until: condition, waitingFor: what }),
       render,
-      unmount: async () => {
-        await act(async () => root.unmount())
-        container.remove()
-      },
+      unmount,
     }
   }
 
@@ -606,6 +641,8 @@ export async function createHarness(): Promise<Harness> {
     mount,
     close: async () => {
       try {
+        for (const unmount of [...mountedSurfaces]) await unmount()
+        disposeSourceTimers()
         await server.close()
       } finally {
         restoreGlobals()
