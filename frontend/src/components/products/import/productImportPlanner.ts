@@ -7,6 +7,7 @@ import {
   parseCsvNumber,
   parseCsvRows,
 } from '../../../utils/csvImport.ts'
+import { normalizeInternalMoney } from '../../../utils/pricing.ts'
 import { barcodeSearchKeys } from '../../../utils/searchMatch.ts'
 
 export const PRODUCT_MONEY_FIELDS = [
@@ -25,14 +26,17 @@ export const PRODUCT_MONEY_FIELDS = [
   'special_price_khr',
   'discount_amount_usd',
   'discount_amount_khr',
-  'purchase_price_usd',
-  'purchase_price_khr',
-  'cost_price_usd',
-  'cost_price_khr',
   'unit_price_usd',
   'unit_price_khr',
   'total_usd',
   'total_khr',
+]
+
+export const PRODUCT_COST_FIELDS = [
+  'purchase_price_usd',
+  'purchase_price_khr',
+  'cost_price_usd',
+  'cost_price_khr',
 ]
 
 export const PRODUCT_PERCENT_FIELDS = ['discount_percent']
@@ -269,6 +273,12 @@ function normalizeFlag(value: unknown, fallback = 0): number {
   return Number(fallback || 0) ? 1 : 0
 }
 
+function normalizeCostFields(normalized: ImportRow): void {
+  PRODUCT_COST_FIELDS.forEach((field) => {
+    if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeInternalMoney(parseCsvNumber(normalized[field], 0))
+  })
+}
+
 export function normalizeProductImportRow(row: ImportRow = {}, index = 0): ImportRow {
   const normalized: ImportRow = {}
   Object.entries(row || {}).forEach(([key, value]) => {
@@ -280,6 +290,7 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
   PRODUCT_MONEY_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
   })
+  normalizeCostFields(normalized)
   PRODUCT_PERCENT_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvPercent(normalized[field], 0)
   })
@@ -341,6 +352,7 @@ function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   PRODUCT_MONEY_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvMoney(normalized[field], 0)
   })
+  normalizeCostFields(normalized)
   PRODUCT_PERCENT_FIELDS.forEach((field) => {
     if (normalized[field] !== undefined && normalized[field] !== '') normalized[field] = normalizeCsvPercent(normalized[field], 0)
   })

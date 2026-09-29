@@ -70,8 +70,12 @@ await runTest('the tracker approve carries the stock confirm flag so hub stock j
 
 await runTest('the product resolver persists explicit apply/skip decisions and exposes their consequence', () => {
   const source = fs.readFileSync(new URL('../src/components/products/import/ProductImportConflictsModal.tsx', import.meta.url), 'utf8')
-  assert.match(source, /WARNING_KINDS = 'negative_stock,barcode_collision,sku_collision'/)
-  assert.match(source, /updateImportJobDecisions\(jobId, \{ \[String\(rowNumber\)\]: \{ action \} \}\)/)
+  const kinds = fs.readFileSync(new URL('../src/components/products/import/productImportReviewKinds.ts', import.meta.url), 'utf8')
+  assert.match(kinds, /PRODUCT_DECISION_WARNING_KINDS = \['negative_stock', 'barcode_collision', 'sku_collision', 'stock_receipt'\]/)
+  assert.match(source, /WARNING_KINDS = PRODUCT_DECISION_WARNING_KINDS\.join\(','\)/)
+  assert.match(source, /updateImportJobDecisions\(jobId, \{ \[String\(rowNumber\)\]: decision \}\)/)
+  assert.match(source, /decide\(row\.rowNumber, \{ action: 'apply' \}\)/)
+  assert.match(source, /decide\(row\.rowNumber, \{ action: 'skip' \}\)/)
   assert.match(source, /Use safe result[\s\S]*colliding identifier stays a separate product[\s\S]*negative stock becomes 0/)
   assert.match(source, /unresolvedProductConflicts/)
 })
@@ -91,8 +95,8 @@ await runTest('the products modal uses one persisted server review instead of ad
 
 await runTest('serious product warnings require a visible durable choice and approval is fail-closed', () => {
   const screen = fs.readFileSync(new URL('../src/components/products/import/ProductServerImportReviewScreen.tsx', import.meta.url), 'utf8')
-  assert.match(screen, /\['negative_stock', 'barcode_collision', 'sku_collision'\]/)
-  assert.match(screen, /if \(needsDecision && !row\.decision\) return 'needs_decision'/)
+  assert.match(screen, /import \{ productRowNeedsDecision \} from '\.\/productImportReviewKinds\.ts'/)
+  assert.match(screen, /if \(productRowNeedsDecision\(row\) && !row\.decision\) return 'needs_decision'/)
   // Cost-edit authority is additive: all three existing fail-closed blockers
   // still apply, and a denied edit grant must block even a fully loaded review.
   const disabledExpression = screen.match(/disabled=\{(!canEditCosts \|\| approving \|\| loadingRows \|\| unresolved > 0)\}/)?.[1]

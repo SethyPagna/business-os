@@ -9,6 +9,7 @@ import { approveImportJob, getImportJob, getImportJobReview, updateImportJobDeci
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards'
 import { importPollDelayMs } from '../../../utils/importPoll'
 import { visibleTimeout } from '../../../utils/visibilityPolling.ts'
+import { productRowNeedsDecision } from './productImportReviewKinds.ts'
 
 const PAGE_SIZE = 50
 
@@ -42,8 +43,7 @@ function unwrapJob(value: unknown): Record<string, unknown> | null {
 
 function choiceFor(row: ReviewRow): string {
   if (row.decision?.action === 'skip') return 'skip'
-  const needsDecision = (row.warnings || []).some((warning) => ['negative_stock', 'barcode_collision', 'sku_collision'].includes(String(warning.kind || '')))
-  if (needsDecision && !row.decision) return 'needs_decision'
+  if (productRowNeedsDecision(row) && !row.decision) return 'needs_decision'
   const mode = String(row.decision?.field_overrides?._action || row.plannedMode || '')
   return ['merge_stock', 'override_add', 'override_replace'].includes(mode) ? mode : 'apply'
 }
@@ -258,7 +258,7 @@ function ProductServerImportReviewBody({ jobId, jobRevision, t, notify, onApprov
 
   return <div className="space-y-4">
     <div><h3 className="text-sm font-semibold">{tr('import_review_title', 'Review before importing')} — Products</h3><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{summary || tr('import_review_no_actions', 'No actionable rows were found.')}</p></div>
-    {unresolved > 0 ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><strong>{unresolved} flagged row(s) still need a decision.</strong> Barcode/SKU collisions stay separate by default; negative stock becomes 0. Confirm that safe result or skip the row.</div> : null}
+    {unresolved > 0 ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100"><strong>{unresolved} flagged row(s) still need a decision.</strong> Barcode/SKU collisions stay separate by default; negative stock becomes 0. Confirm that safe result or skip the row. {tr('product_import_stock_receipt_hint', 'A stock receipt row adds its quantity to stock. Choose to add it, or to update the details and keep the stock.')}</div> : null}
     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
       <label className="relative block"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={tr('search_rows', 'Search rows')} className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-3 text-sm dark:border-slate-700 dark:bg-slate-900" /></label>
       <AppSelect value={filter} onChange={(value) => { setFilter(value); setPage(1) }} ariaLabel="Filter rows" buttonClassName="w-full px-2.5 py-2 text-sm" options={[{ value: 'all', label: 'All' }, { value: 'create', label: 'Create' }, { value: 'update', label: 'Update' }, { value: 'skip', label: 'Skip' }, { value: 'error', label: 'Errors' }]} />

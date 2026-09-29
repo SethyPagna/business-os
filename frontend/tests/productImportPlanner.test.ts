@@ -92,6 +92,15 @@ await runTest('same product name and a different COST merges into the existing r
   assert.equal(analysis.summary.variantCount, 0)
 })
 
+await runTest('a typed cost keeps its four decimals on the way to the server', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', cost_price_usd: '1.2345', cost_price_khr: '5,061.4523', stock_quantity: '2' },
+  ], [])
+
+  assert.equal(analysis.rows[0].cost_price_usd, 1.2345)
+  assert.equal(analysis.rows[0].cost_price_khr, 5061.4523)
+})
+
 await runTest('same name + same barcode + same cost merges even when the SELLING price differs', () => {
   // Selling and special price are what we plan to charge and are adjusted
   // for sales/POS -- not what the item is. Same barcode and same cost means

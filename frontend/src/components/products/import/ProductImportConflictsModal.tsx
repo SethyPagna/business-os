@@ -20,11 +20,13 @@ import Modal from '../../shared/Modal'
 import ScanSearchButton from '../../shared/ScanSearchButton.tsx'
 import { getImportJobReview, updateImportJobDecisions } from '../../../api/importJobsTransport'
 import PaginationControls from '../../shared/PaginationControls'
+import { KEEP_STOCK_DECISION, PRODUCT_DECISION_WARNING_KINDS, isKeepStockDecision, productRowIsStockReceipt } from './productImportReviewKinds.ts'
 
 const PAGE_SIZE = 50
-const WARNING_KINDS = 'negative_stock,barcode_collision,sku_collision'
+const WARNING_KINDS = PRODUCT_DECISION_WARNING_KINDS.join(',')
 
 type TranslateFn = (key: string) => string | undefined
+type ProductConflictDecision = { action?: string; field_overrides?: Record<string, unknown> }
 
 type ReviewRow = {
   rowNumber: number
@@ -32,7 +34,7 @@ type ReviewRow = {
   identifier?: string | null
   message?: string | null
   warnings?: Array<{ kind?: string; message?: string }>
-  decision?: { action?: string } | null
+  decision?: ProductConflictDecision | null
   data?: Record<string, unknown>
 }
 
@@ -96,12 +98,12 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
 
   useEffect(() => { void load() }, [jobId, page, query]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const decide = async (rowNumber: number, action: 'apply' | 'skip') => {
+  const decide = async (rowNumber: number, decision: ProductConflictDecision) => {
     if (!canEditCosts) return
     if (savingRow !== null) return
     setSavingRow(rowNumber)
     try {
-      await updateImportJobDecisions(jobId, { [String(rowNumber)]: { action } })
+      await updateImportJobDecisions(jobId, { [String(rowNumber)]: decision })
       await load()
     } catch (error) {
       notify(error instanceof Error ? error.message : tr('products_import_conflicts_save_failed', 'Could not save this decision.'), 'error')
@@ -112,6 +114,8 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
 
   const applyLabel = tr('products_import_conflicts_apply', 'Use safe result')
   const skipLabel = tr('products_import_conflicts_skip', 'Skip row')
+  const addStockLabel = tr('products_import_conflicts_add_stock', 'Add stock')
+  const keepStockLabel = tr('products_import_conflicts_keep_stock', 'Keep stock')
 
   return (
     <Modal title={tr('products_import_conflicts_title', 'Resolve product import conflicts')} onClose={onClose} size="xl" unsavedChanges="read-only">
@@ -125,7 +129,8 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
             <strong>{applyLabel}</strong>{' '}
             {tr('products_import_conflicts_intro_apply', 'keeps the server preview (a colliding identifier stays a separate product; negative stock becomes 0).')}{' '}
             <strong>{skipLabel}</strong>{' '}
-            {tr('products_import_conflicts_intro_skip', 'makes no change for that row.')}
+            {tr('products_import_conflicts_intro_skip', 'makes no change for that row.')}{' '}
+            {tr('product_import_stock_receipt_hint', 'A stock receipt row adds its quantity to stock. Choose to add it, or to update the details and keep the stock.')}
           </p></div>
           <p className="mt-2 font-semibold">
             {tr('products_import_conflicts_remaining', '{count} unresolved of {total} flagged rows')
@@ -142,15 +147,17 @@ function ProductImportConflictsBody({ jobId, t, notify, onClose, onAllResolved }
         </div>
         <div className="max-h-[30rem] space-y-2 overflow-auto">
           {loading ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? rows.map((row) => {
-            const choice = String(row.decision?.action || '')
+            const choice = isKeepStockDecision(row.decision) ? 'keep_stock' : String(row.decision?.action || '')
+            const stockReceipt = productRowIsStockReceipt(row)
             const details = row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ')
             const rowName = row.identifier || String(row.data?.name || tr('products_import_conflicts_unnamed', 'Unnamed product'))
             return <div key={row.rowNumber} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0"><p className="text-sm font-semibold">{tr('products_import_conflicts_row', 'Row {row}: {name}').replace('{row}', String(row.rowNumber)).replace('{name}', rowName)}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{details || tr('products_import_conflicts_review_required', 'Review required')}</p></div>
                 <div className="flex shrink-0 gap-2">
-                  <button type="button" className={choice === 'apply' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, 'apply')}><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{applyLabel}</button>
-                  <button type="button" className={choice === 'skip' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, 'skip')}>{skipLabel}</button>
+                  <button type="button" className={choice === 'apply' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, { action: 'apply' })}><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />{stockReceipt ? addStockLabel : applyLabel}</button>
+                  {stockReceipt ? <button type="button" className={choice === 'keep_stock' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, KEEP_STOCK_DECISION)}>{keepStockLabel}</button> : null}
+                  <button type="button" className={choice === 'skip' ? 'btn-primary text-xs' : 'btn-secondary text-xs'} disabled={!canEditCosts || savingRow !== null} onClick={() => void decide(row.rowNumber, { action: 'skip' })}>{skipLabel}</button>
                 </div>
               </div>
             </div>

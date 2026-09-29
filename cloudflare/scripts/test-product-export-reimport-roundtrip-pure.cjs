@@ -264,6 +264,15 @@ async function main() {
     assert.deepEqual(unresolvedRows(database, jobId, { [receipt.rowNumber]: { action: 'apply', field_overrides: { _action: 'override_replace' } } }), [])
   })
 
+  await check('a four-decimal cost change reaches the server intact and is held as a receipt', async () => {
+    const database = seedCatalog()
+    const rows = exportRows(database.db)
+    rows[0].Cost_Price_USD = '1.2301'
+    const results = await analyze(database, await uploadOf(csvFile(rows)), 'job-4dp-cost')
+    assert.equal(results[0].plannedMode, 'merge_stock', 'the upload must not round 1.2301 up to a cent that restates 1.2345')
+    assert.ok((results[0].warnings || []).some((w) => w.kind === 'stock_receipt'))
+  })
+
   await check('the reviewer\'s "update details; keep stock" decision lands the cost edit without adding stock', async () => {
     const database = seedCatalog()
     const before = snapshot(database.db)
