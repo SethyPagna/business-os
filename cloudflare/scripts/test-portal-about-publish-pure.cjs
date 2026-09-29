@@ -32,12 +32,34 @@ function loadIsolated(rel) {
   return mod.exports
 }
 
+// workerd, the Worker's runtime, segments a Khmer coeng cluster as 'ស្' + 'រ' where Node keeps 'ស្រ' whole
+// (R-AB-W2 F1). Every module below loads under workerd's split, so no cap can pass by leaning on Node's.
+const HostSegmenter = Intl.Segmenter
+Intl.Segmenter = class WorkerdGraphemeSegmenter {
+  constructor(locales, options) {
+    this.host = new HostSegmenter(locales, options)
+  }
+  segment(text) {
+    const pieces = [...this.host.segment(text)].flatMap(({ segment }) => segment.split(/(?<=\u17D2)/))
+    let index = 0
+    return pieces.map((segment) => {
+      const piece = { segment, index, input: text }
+      index += segment.length
+      return piece
+    })
+  }
+}
+
 const portal = require('./harness/load_portal_route.cjs')
 const safeLink = loadIsolated('lib/safeLinkUrl.ts')
+const portalText = loadIsolated('lib/portalText.ts')
 const env = { BUSINESS_OS_PUBLIC_URL: 'https://shop.example' }
 const publish = (settings) => portal.buildPublicPortalConfig(settings, env)
 
 const POSTER = '/uploads/Leang poster-1-abc.webp'
+// JSON.parse can return an object that String() throws on.
+const UNPRINTABLE_JSON = '{"toString":"x"}'
+const UNPRINTABLE = JSON.parse(UNPRINTABLE_JSON)
 const BLOCKS = [
   { id: 'b1', type: 'text', title: 'Since 2019', body: 'Family shop in Phnom Penh.', mediaUrl: '' },
   { id: 'b2', type: 'image', title: 'Our counter', body: '', mediaUrl: '/uploads/counter-2-def.webp' },
@@ -59,8 +81,19 @@ const FIXTURE = {
   customer_portal_logo_image: '/uploads/logo-1-aaa.png',
   customer_portal_cover_image: '/uploads/Leang cover 1-2-bbb.webp',
   customer_portal_favicon_image: '/uploads/fav-3-ccc.png',
+  customer_portal_show_top_seller_badge: 'false',
+  customer_portal_show_top_product_badge: 'false',
+  customer_portal_show_recommended_badge: 'false',
+  customer_portal_show_promotion_badge: 'true',
+  customer_portal_show_new_arrival_badge: 'true',
+  customer_portal_highlight_rank_limit: '7',
+  customer_portal_recommended_product_ids: '[12,5]',
+  customer_portal_language: 'km',
+  customer_portal_translations: JSON.stringify({ km: { aboutTitle: 'អំពីយើង', faqItems: [{ question: 'សំណួរ', answer: 'ចម្លើយ' }] } }),
+  customer_portal_ai_intro: 'សួស្តី! Ask me about sunscreen.',
 }
 
+const BIDI_CONTROLS = [...'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069']
 const BAD_ABOUT_IMAGES = [
   'javascript:alert(1)',
   '//evil.example/p.png',
@@ -80,7 +113,64 @@ const BAD_ABOUT_IMAGES = [
   'uploads/p.png',
   '/files/p.png',
   '/uploads/%E0%A4%A.png',
+  '/uploads/%C0%AE%C0%AE/secret',
   `/uploads/${'a'.repeat(500)}.png`,
+  '/UPLOADS/x.png',
+  '/Uploads/x.png',
+  '/uploads/x.png?v=\u0001',
+  '/uploads/x.png#\u0007',
+  '/uploads/x.png?v=%00',
+  '/uploads/a\u0080b.png',
+  '/uploads/a\u0085b.png',
+  '/uploads/a\u009Fb.png',
+  '/uploads/x%c2%85.png',
+  '/uploads/x%C2%9F.png',
+  '/uploads/a\uFEFFb.png',
+  '/uploads/a%EF%BB%BFb.png',
+  '/uploads/x.png?v=\u202E',
+  '/uploads/x.png?v=%E2%80%AE',
+  '/uploads/x.png#%e2%81%a6',
+  ...BIDI_CONTROLS.flatMap((control) => [`/uploads/a${control}b.png`, `/uploads/a${encodeURIComponent(control)}b.png`]),
+]
+// Visible non-ASCII names keep working, and so do the invisible characters people really type: a Khmer
+// keyboard puts U+200B between words and U+200D joins an emoji. A '%' that starts no escape is served as itself.
+const GOOD_ABOUT_IMAGES = [
+  '/uploads/រូបភាព ហាង-1-abc.webp',
+  '/uploads/%E1%9E%9A%E1%9E%BC%E1%9E%94-1-abc.webp',
+  '/uploads/ស្រស់-2-def.webp',
+  '/uploads/\u{1F484}-3-aaa.png',
+  '/uploads/poster-4-bbb.webp?v=2',
+  '/uploads/poster-4-bbb.webp#top',
+  '/uploads/រូបភាព\u200Bហាង-5-abc.webp',
+  '/uploads/a%E2%80%8Bb.png',
+  '/uploads/a\u200Cb.png',
+  '/uploads/\u{1F469}\u200D\u{1F469}\u200D\u{1F467}-6-abc.png',
+  '/uploads/a%E2%80%8Db.png',
+  '/uploads/x.png#%E2%80%8B',
+  '/uploads/a\u200Eb.png',
+  '/uploads/a%C2%ADb.png',
+  '/uploads/a\u2060b.png',
+  '/uploads/50% off-7-abc.webp',
+  '/uploads/100%-8-abc.webp',
+  '/uploads/x.png?v=%',
+]
+const SHOP = new URL(env.BUSINESS_OS_PUBLIC_URL)
+const BACKSLASH_OR_DOUBLE_SLASH_LINKS = [
+  '/\\evil.example/p.png',
+  '/%2fevil.example/p.png',
+  '/%2Fevil.example/p.png',
+  '/%5cevil.example/p.png',
+  '/%5C/evil.example/p.png',
+  'https://shop.example\\@evil.example/p.png',
+  '/uploads\\x.png',
+]
+// On this site as written, but the resolved path is '//evil.example/p.png': anything that re-emits it leaves the site.
+const RESOLVES_TO_SECOND_SLASH_LINKS = [
+  '/.//evil.example/p.png',
+  '/..//evil.example/p.png',
+  '/%2e%2e//evil.example/p.png',
+  '/%2E//evil.example/p.png',
+  '/promotions/..//evil.example/p.png',
 ]
 
 async function main() {
@@ -99,6 +189,21 @@ async function main() {
     assert.equal(config.aboutImageAlt, 'Poster: new arrivals this month')
   })
 
+  await check('publish matrix (AB-W4): the ten editor settings the preview showed now follow their stored setting', () => {
+    const config = publish(FIXTURE)
+    assert.equal(config.showTopSellerBadge, false)
+    assert.equal(config.showTopProductBadge, false)
+    assert.equal(config.showRecommendedBadge, false)
+    assert.equal(config.showPromotionBadge, true)
+    assert.equal(config.showNewArrivalBadge, true)
+    assert.equal(config.highlightRankLimit, 7)
+    assert.deepEqual(config.recommendedProductIds, [12, 5])
+    assert.equal(config.languageSetting, 'km')
+    assert.equal(config.language, 'km')
+    assert.deepEqual(config.translations, { km: { aboutTitle: 'អំពីយើង', faqItems: [{ question: 'សំណួរ', answer: 'ចម្លើយ' }] } })
+    assert.equal(config.aiIntro, 'សួស្តី! Ask me about sunscreen.')
+  })
+
   await check('defaults: an untouched shop publishes the look the storefront already shows', () => {
     const config = publish({})
     assert.equal(config.aboutTitle, '', 'empty so the storefront uses its own translated "About"')
@@ -112,6 +217,17 @@ async function main() {
     assert.equal(config.logoPositionY, 50)
     assert.equal(config.aboutImage, '')
     assert.equal(config.aboutImageAlt, '')
+    assert.equal(config.showTopSellerBadge, true)
+    assert.equal(config.showTopProductBadge, true)
+    assert.equal(config.showRecommendedBadge, true)
+    assert.equal(config.showPromotionBadge, false, 'the storefront has never shown it without a stored choice')
+    assert.equal(config.showNewArrivalBadge, false)
+    assert.equal(config.highlightRankLimit, 3)
+    assert.deepEqual(config.recommendedProductIds, [])
+    assert.equal(config.languageSetting, 'auto')
+    assert.equal(config.language, 'en')
+    assert.deepEqual(config.translations, {})
+    assert.equal(config.aiIntro, '')
   })
 
   await check('AW-2: the stored cover, logo and favicon paths publish unchanged', () => {
@@ -124,11 +240,31 @@ async function main() {
   })
 
   await check('logo, cover and favicon never publish an unsafe link', () => {
-    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)']) {
+    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)', ...BACKSLASH_OR_DOUBLE_SLASH_LINKS, ...RESOLVES_TO_SECOND_SLASH_LINKS]) {
       const config = publish({ customer_portal_logo_image: bad, customer_portal_cover_image: bad, customer_portal_favicon_image: bad })
       assert.equal(config.businessLogo, '', `logo ${JSON.stringify(bad)}`)
       assert.equal(config.businessCover, '', `cover ${JSON.stringify(bad)}`)
       assert.equal(config.businessFavicon, '', `favicon ${JSON.stringify(bad)}`)
+    }
+  })
+
+  await check('P1: a link that starts with a slash is accepted only when the browser keeps it on this site', () => {
+    assert.equal(new URL('/\\evil.example/p.png', SHOP).host, 'evil.example', 'control: the browser reads /\\host as //host')
+    for (const bad of BACKSLASH_OR_DOUBLE_SLASH_LINKS) {
+      assert.equal(safeLink.normalizeSafeLinkUrl(bad), null, JSON.stringify(bad))
+    }
+    const kept = ['/uploads/logo-1-aaa.png', '/promotions', '/?legal=terms', '/uploads/a%2fb.png', '/', '/%E1%9E%9A', '/./promotions', '/promotions//sale', '/?from=https://example.com']
+    for (const good of kept) {
+      assert.equal(safeLink.normalizeSafeLinkUrl(good), good, JSON.stringify(good))
+      assert.equal(new URL(good, SHOP).origin, SHOP.origin, `${good} stays on this site`)
+      assert.equal(new URL(new URL(good, SHOP).pathname, SHOP).origin, SHOP.origin, `${good} re-emitted as its resolved path stays on this site`)
+    }
+  })
+
+  await check('F5: a site path is refused when its resolved path starts with two slashes', () => {
+    for (const bad of RESOLVES_TO_SECOND_SLASH_LINKS) {
+      assert.equal(new URL(new URL(bad, SHOP).pathname, SHOP).host, 'evil.example', `control: ${bad} re-emitted as its resolved path leaves the site`)
+      assert.equal(safeLink.normalizeSafeLinkUrl(bad), null, JSON.stringify(bad))
     }
   })
 
@@ -176,12 +312,103 @@ async function main() {
     assert.equal(safeLink.normalizePortalUploadPath(`/uploads/${'a'.repeat(487)}.png`).length, 500, 'exactly 500 characters is allowed')
   })
 
+  await check('P2/F2: a Khmer, emoji, encoded, zero-width or literal-% name is still this site\'s own upload', () => {
+    for (const good of GOOD_ABOUT_IMAGES) {
+      assert.equal(safeLink.normalizePortalUploadPath(good), good, JSON.stringify(good))
+      assert.equal(publish({ customer_portal_about_image: good }).aboutImage, good, JSON.stringify(good))
+    }
+  })
+
   await check('about picture description is trimmed and capped at 200 characters', () => {
     assert.equal(publish({ customer_portal_about_image_alt: '   shelf   ' }).aboutImageAlt, 'shelf')
     const long = 'ក'.repeat(250)
     assert.equal(publish({ customer_portal_about_image_alt: long }).aboutImageAlt, 'ក'.repeat(200))
     const emoji = '\u{1F484}'.repeat(201)
     assert.equal([...publish({ customer_portal_about_image_alt: emoji }).aboutImageAlt].length, 200, 'counted in characters, never splitting one')
+  })
+
+  // The cap is a code-point budget, and wherever it falls inside a written character the whole character goes.
+  const KHMER_STACK = 'ស្ត្រី'
+  const ZWJ_EMOJI = '\u{1F469}\u200D\u{1F4BB}'
+  const capFallsInside = (filler, max, character, inside) => filler.repeat(max - inside) + character
+
+  await check('control: the caps run under the workerd segmenter, which splits a Khmer coeng cluster', () => {
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment('ស្រ')].map(({ segment }) => segment)
+    assert.deepEqual(segments, ['ស្', 'រ'])
+  })
+
+  await check('S3: the picture description drops control characters before the cap counts', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: '\u0000Poster\u0007 new\u0085' }).aboutImageAlt, 'Poster new')
+    assert.equal(publish({ customer_portal_about_image_alt: ZWJ_EMOJI }).aboutImageAlt, ZWJ_EMOJI, 'a ZWJ emoji is a picture, not a control')
+    assert.equal(publish({ customer_portal_about_image_alt: '\u0000'.repeat(10) + 'a'.repeat(200) }).aboutImageAlt, 'a'.repeat(200))
+  })
+
+  await check('S4 (F1): a published cap never ends on a Khmer coeng or inside a ZWJ emoji', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: capFallsInside('ក', 200, KHMER_STACK, 2) }).aboutImageAlt, 'ក'.repeat(198))
+    assert.equal(publish({ customer_portal_about_image_alt: capFallsInside('a', 200, ZWJ_EMOJI, 2) }).aboutImageAlt, 'a'.repeat(198))
+    assert.equal(publish({ customer_portal_about_image_alt: 'a'.repeat(197) + ZWJ_EMOJI }).aboutImageAlt, 'a'.repeat(197) + ZWJ_EMOJI, 'a character that fits is kept whole')
+    assert.equal(publish({ customer_portal_about_title: capFallsInside('ក', 160, 'ស្រី', 2) }).aboutTitle, 'ក'.repeat(158))
+    assert.equal(publish({ customer_portal_about_content: capFallsInside('ក', 4000, KHMER_STACK, 4) }).aboutContent, 'ក'.repeat(3996))
+    const block = { id: 'k', type: 'text', title: capFallsInside('ក', 160, KHMER_STACK, 2), body: capFallsInside('a', 4000, ZWJ_EMOJI, 2), mediaUrl: '' }
+    const [published] = publish({ customer_portal_about_blocks: JSON.stringify([block]) }).aboutBlocks
+    assert.equal(published.title, 'ក'.repeat(158))
+    assert.equal(published.body, 'a'.repeat(3998))
+    const zalgo = `a${'\u0301'.repeat(5000)}`
+    assert.ok([...publish({ customer_portal_about_content: zalgo }).aboutContent].length <= 4000, 'one huge cluster cannot slip past the cap')
+  })
+
+  const WHOLE_CHARACTERS = [
+    ['Khmer subscript stack', KHMER_STACK],
+    ['Khmer consonant with a vowel sign', 'កា'],
+    ['Latin letter with a combining accent', 'e\u0301'],
+    ['ZWJ emoji', ZWJ_EMOJI],
+    ['skin-tone emoji', '\u{1F44D}\u{1F3FD}'],
+    ['flag', '\u{1F1F0}\u{1F1ED}'],
+    ['subdivision flag', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}'],
+  ]
+
+  await check('S4: wherever the cap falls inside a character, the character is dropped whole and nothing after it is kept', () => {
+    const max = 20
+    for (const [label, character] of WHOLE_CHARACTERS) {
+      const size = [...character].length
+      for (let inside = 1; inside < size; inside += 1) {
+        const capped = portalText.capPortalText(`${capFallsInside('a', max, character, inside)}b`, max)
+        assert.equal(capped, 'a'.repeat(max - inside), `${label}, cap ${inside} code point(s) in`)
+      }
+      assert.equal(portalText.capPortalText(`${capFallsInside('a', max, character, size)}b`, max), 'a'.repeat(max - size) + character, `${label} that fits`)
+    }
+  })
+
+  await check('S4: flags pair up from the start of a run of regional indicators', () => {
+    const khmerFlag = '\u{1F1F0}\u{1F1ED}'
+    assert.equal(portalText.capPortalText(`${'a'.repeat(17)}${khmerFlag}${khmerFlag}`, 20), 'a'.repeat(17) + khmerFlag)
+  })
+
+  await check('S4: every Khmer vowel and sign stays with its consonant', () => {
+    const signs = [...Array.from({ length: 0x17d3 - 0x17b6 + 1 }, (_, i) => 0x17b6 + i), 0x17dd].map((cp) => String.fromCodePoint(cp))
+    for (const sign of signs) {
+      const label = `U+${sign.codePointAt(0).toString(16).toUpperCase()}`
+      assert.equal(portalText.capPortalText(`${'ក'.repeat(19)}ខ${sign}`, 20), 'ក'.repeat(19), label)
+    }
+  })
+
+  await check('S4: a Khmer phrase is cut only between its written characters, at every cap', () => {
+    const characters = ['គ្រឿ', 'ង', 'សំ', 'អា', 'ង', KHMER_STACK]
+    const phrase = characters.join('')
+    for (let max = 1; max <= [...phrase].length; max += 1) {
+      let expected = ''
+      for (const character of characters) {
+        if ([...expected + character].length > max) break
+        expected += character
+      }
+      assert.equal(portalText.capPortalText(phrase, max), expected, `cap ${max}`)
+    }
+  })
+
+  await check('S3: the About title and story are capped like a block (160 and 4000) and the story keeps its line breaks', () => {
+    assert.equal(publish({ customer_portal_about_title: 'T'.repeat(200) }).aboutTitle, 'T'.repeat(160))
+    assert.equal(publish({ customer_portal_about_content: 'B'.repeat(5000) }).aboutContent, 'B'.repeat(4000))
+    assert.equal(publish({ customer_portal_about_content: 'Line one\nLine two' }).aboutContent, 'Line one\nLine two')
   })
 
   await check('about blocks: media only through the link allowlist, types and sizes bounded', () => {
@@ -208,6 +435,39 @@ async function main() {
     assert.equal(byId.x7.body.length, 4000)
     assert.equal(out.length, 6)
     for (const block of out) assert.deepEqual(Object.keys(block).sort(), ['body', 'id', 'mediaUrl', 'title', 'type'])
+  })
+
+  await check('S2: a block title or body that is not text publishes as empty, never "[object Object]"', () => {
+    const blocks = [
+      { id: 'o1', type: 'text', title: { a: 1 }, body: 'Kept body', mediaUrl: '' },
+      { id: 'o2', type: 'text', title: 'Kept title', body: ['x'], mediaUrl: '' },
+      { id: 'o3', type: 'text', title: 42, body: { toString: 'x' }, mediaUrl: '' },
+      { id: 'o4', type: 'image', title: 'Beacon', body: '', mediaUrl: '/\\evil.example/p.png' },
+      { id: UNPRINTABLE, type: UNPRINTABLE, title: UNPRINTABLE, body: 'Fifth body', mediaUrl: UNPRINTABLE },
+    ]
+    const out = publish({ customer_portal_about_blocks: JSON.stringify(blocks) }).aboutBlocks
+    const byId = Object.fromEntries(out.map((b) => [b.id, b]))
+    assert.deepEqual([byId.o1.title, byId.o1.body], ['', 'Kept body'])
+    assert.deepEqual([byId.o2.title, byId.o2.body], ['Kept title', ''])
+    assert.equal(byId.o3, undefined, 'a block left with no text is dropped')
+    assert.equal(byId.o4.mediaUrl, '', 'block media goes through the same link rule')
+    assert.deepEqual(byId['about-5'], { id: 'about-5', type: 'text', title: '', body: 'Fifth body', mediaUrl: '' })
+    assert.equal(JSON.stringify(out).includes('[object Object]'), false)
+  })
+
+  await check('S2 siblings: one crafted FAQ or promo card never takes the whole storefront config down', () => {
+    const faq = [{ id: UNPRINTABLE, question: UNPRINTABLE, answer: 'A' }, { id: 'f2', question: 'Open on Sunday?', answer: 'Yes' }]
+    assert.deepEqual(publish({ customer_portal_faq_items: JSON.stringify(faq) }).faqItems, [{ id: 'f2', question: 'Open on Sunday?', answer: 'Yes' }])
+    const cards = [
+      { id: UNPRINTABLE, eyebrow: UNPRINTABLE, title: UNPRINTABLE, subtitle: 'Sub', body: '', mediaUrl: UNPRINTABLE, ctaLabel: UNPRINTABLE, linkUrl: UNPRINTABLE, linkProductId: UNPRINTABLE, linkProductName: UNPRINTABLE },
+      { id: 'p2', title: 'Serum week', linkProductId: 42 },
+    ]
+    const [first, second] = publish({ customer_portal_promo_items: JSON.stringify(cards) }).promoItems
+    assert.deepEqual(first, { id: 'promo-1', eyebrow: '', title: '', subtitle: 'Sub', body: '', mediaUrl: '', ctaLabel: '', linkUrl: '', linkProductId: null, linkProductName: '' })
+    assert.equal(second.linkProductId, 42, 'a numeric product id still links')
+    for (const normalize of [safeLink.normalizeSafeLinkUrl, safeLink.normalizePortalUploadPath]) {
+      assert.equal(normalize(JSON.parse(UNPRINTABLE_JSON)), null, `${normalize.name} never throws`)
+    }
   })
 
   await check('about blocks: at most 30 shown, blanks never push a real block out, bad JSON is no blocks', () => {
@@ -239,16 +499,6 @@ async function main() {
   // unpublished editor key comes back as its default and is saved over the stored value.
   const KNOWN_UNPUBLISHED = [
     'customer_portal_title_size',
-    'customer_portal_ai_intro',
-    'customer_portal_translations',
-    'customer_portal_language',
-    'customer_portal_show_top_seller_badge',
-    'customer_portal_show_top_product_badge',
-    'customer_portal_show_recommended_badge',
-    'customer_portal_show_promotion_badge',
-    'customer_portal_show_new_arrival_badge',
-    'customer_portal_highlight_rank_limit',
-    'customer_portal_recommended_product_ids',
     'customer_portal_stock_threshold_mode',
     'customer_portal_low_stock_threshold',
     'customer_portal_out_of_stock_threshold',
@@ -256,7 +506,7 @@ async function main() {
     // Fixed false: membership history lives in the signed-in account only.
     'customer_portal_show_membership',
   ]
-  const MAX_KNOWN_UNPUBLISHED = 16
+  const MAX_KNOWN_UNPUBLISHED = 6
 
   function buildDraftEntries() {
     const src = fs.readFileSync(path.join(REPO, 'frontend', 'src', 'components', 'catalog', 'CatalogPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
@@ -273,12 +523,13 @@ async function main() {
   }
 
   const PROBES = [
-    'true', 'false', '0', '1', '97', 'khr', 'contain', 'global', '#123456', 'zz-probe',
+    'true', 'false', '0', '1', '97', 'khr', 'km', 'contain', 'global', '#123456', 'zz-probe',
     'https://probe.example/x', '/uploads/probe.webp', 'https://www.google.com/maps/embed?pb=probe',
     JSON.stringify([{ id: 'f', question: 'q', answer: 'a' }]),
     JSON.stringify([{ id: 'a', type: 'text', title: 't', body: 'b', mediaUrl: '' }]),
     JSON.stringify([{ id: 'p', title: 't', subtitle: '', body: '', mediaUrl: '' }]),
     JSON.stringify({ km: { about: 'x' } }),
+    JSON.stringify({ km: { aboutTitle: 'x' } }),
     JSON.stringify([5, 6]),
   ]
   function publishedFrom(key, fields) {
@@ -384,6 +635,14 @@ async function main() {
     assert.equal(stored(IMAGE), '', 'null clears to empty, never the text "null"')
   })
 
+  await check('F2: a Khmer name typed with its zero-width spaces, a ZWJ emoji name or a literal % saves as the About picture', async () => {
+    for (const good of GOOD_ABOUT_IMAGES) {
+      const res = await save(ABOUT_ONLY, { [IMAGE]: good })
+      assert.equal(res.status, 200, `${JSON.stringify(good)} -> ${res.status} ${JSON.stringify(res.body)}`)
+      assert.equal(stored(IMAGE), good)
+    }
+  })
+
   await check('the picture description is stored trimmed to 200 characters', async () => {
     const res = await save(ABOUT_ONLY, { [ALT]: `   ${'ក'.repeat(250)}   ` })
     assert.equal(res.status, 200, JSON.stringify(res.body))
@@ -391,6 +650,28 @@ async function main() {
     const plain = await save(ABOUT_ONLY, { [ALT]: '  Poster  ' })
     assert.equal(plain.status, 200)
     assert.equal(stored(ALT), 'Poster')
+  })
+
+  await check('S3/S4 (write side): the stored description has no control characters and ends on a whole character', async () => {
+    const cases = [
+      ['\u0000Poster\u0007 new\u0085', 'Poster new'],
+      ['\u0000'.repeat(10) + 'a'.repeat(200), 'a'.repeat(200)],
+      [capFallsInside('ក', 200, KHMER_STACK, 2), 'ក'.repeat(198)],
+      [capFallsInside('a', 200, ZWJ_EMOJI, 2), 'a'.repeat(198)],
+      ['a'.repeat(197) + ZWJ_EMOJI, 'a'.repeat(197) + ZWJ_EMOJI],
+      [UNPRINTABLE, ''],
+    ]
+    for (const [sent, expected] of cases) {
+      const res = await save(ABOUT_ONLY, { [ALT]: sent })
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      assert.equal(stored(ALT), expected, JSON.stringify(sent).slice(0, 40))
+    }
+  })
+
+  await check('the About picture refusal also holds for a value that is not text', async () => {
+    const res = await save(ABOUT_ONLY, { [IMAGE]: UNPRINTABLE })
+    assert.equal(res.status, 400, JSON.stringify(res.body))
+    assert.equal(res.body.code, 'invalid_about_image')
   })
 
   await check('AW-4: a posts-only or config-only grant gets the bucket 403 for both keys; About-only and full Settings succeed', async () => {

@@ -5,6 +5,7 @@
 -- before/after values (settings route since cdbcd6539, 23 Sep 2026) are
 -- visible; an old value over 2048 characters is recorded as "(N chars, #hash)".
 -- An owner who deliberately chose the default looks the same: review each row.
+-- The five badge switches reset to 'true': the editor fills fields the config lacks from its own defaults, all on.
 --   audit_id, saved_at, user_id, setting_key, old_value_chars, old_value_preview
 --   keys_reset_in_same_save   many at once is the editor's signature
 --   current_is_reset_value    1: the stored value is still the default
@@ -19,9 +20,9 @@ WITH editor_defaults(setting_key, reset_value) AS (
     ('customer_portal_logo_zoom', '100'), ('customer_portal_logo_position_x', '50'),
     ('customer_portal_logo_position_y', '50'), ('customer_portal_title_size', '40'),
     ('customer_portal_ai_intro', ''), ('customer_portal_translations', '{}'),
-    ('customer_portal_language', 'auto'), ('customer_portal_show_top_seller_badge', 'false'),
-    ('customer_portal_show_top_product_badge', 'false'), ('customer_portal_show_recommended_badge', 'false'),
-    ('customer_portal_show_promotion_badge', 'false'), ('customer_portal_show_new_arrival_badge', 'false'),
+    ('customer_portal_language', 'auto'), ('customer_portal_show_top_seller_badge', 'true'),
+    ('customer_portal_show_top_product_badge', 'true'), ('customer_portal_show_recommended_badge', 'true'),
+    ('customer_portal_show_promotion_badge', 'true'), ('customer_portal_show_new_arrival_badge', 'true'),
     ('customer_portal_highlight_rank_limit', '3'), ('customer_portal_recommended_product_ids', '[]'),
     ('customer_portal_stock_threshold_mode', 'product'), ('customer_portal_low_stock_threshold', '10'),
     ('customer_portal_out_of_stock_threshold', '0'), ('customer_portal_show_point_value', 'false')
@@ -43,6 +44,7 @@ resets AS (
     AND NULLIF(CAST(json_extract(s.old_value, '$.' || d.setting_key) AS TEXT), '') IS NOT NULL
     AND CAST(json_extract(s.old_value, '$.' || d.setting_key) AS TEXT) <> d.reset_value
     AND NOT (d.reset_value = 'false' AND lower(CAST(json_extract(s.old_value, '$.' || d.setting_key) AS TEXT)) IN ('0', 'false', 'no', 'off'))
+    AND NOT (d.reset_value = 'true' AND lower(CAST(json_extract(s.old_value, '$.' || d.setting_key) AS TEXT)) IN ('1', 'true', 'yes', 'on'))
 )
 SELECT
   r.audit_id, r.saved_at, r.user_id, r.setting_key,
