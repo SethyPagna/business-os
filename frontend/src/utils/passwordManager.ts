@@ -1,6 +1,6 @@
 // Asks the browser's password manager to save a password the Worker has just
-// accepted (sign-in, own change, reset); the browser alone decides whether a
-// prompt appears. The clipboard is written only by a Copy button and by
+// accepted (a sign-in or the person's own change); the browser alone decides
+// whether a prompt appears. The clipboard is written only by a Copy button and by
 // persistChangedPassword's opt-in fallback on the Users page.
 import { withLoaderTimeout } from './loaders.ts'
 
