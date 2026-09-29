@@ -328,9 +328,8 @@ export interface OrphanStagingReport {
 
 // Orphan staging = job-scoped rows whose import_jobs row no longer exists
 // (left behind by the pre-K4 per-job delete, which skipped half the
-// ledgers). Per the locked plan this cleanup is NEVER automatic: the
-// admin endpoint (routes/system.ts) defaults to a dry-run report and only
-// deletes on an explicit force, after the operator has a backup.
+// ledgers). Applied on every scheduled tick (index.ts); the admin endpoint
+// (routes/system.ts) defaults to a dry-run report.
 export async function cleanOrphanImportStaging(env: Env, options: { apply: boolean }): Promise<OrphanStagingReport> {
   const db = getDb(env)
   const tables: Record<string, number> = {}
@@ -344,15 +343,19 @@ export async function cleanOrphanImportStaging(env: Env, options: { apply: boole
   // The bulk staging tables live on the separate import-staging DB (see
   // lib/db.ts). import_jobs is on the MAIN DB and D1 has no cross-database
   // queries, so the `NOT IN (SELECT id FROM import_jobs)` subquery used above
-  // cannot run here. Read the live job ids once from the main DB, then group
-  // each staging table by job_id on its own DB and treat every group whose id
-  // is not live as orphaned -- bounded by the (small) number of distinct jobs,
-  // not by row count.
+  // cannot run here. Group each staging table by job_id on its own DB, then
+  // read the live job ids from the main DB and treat every group whose id is
+  // not live as orphaned -- bounded by the (small) number of distinct jobs,
+  // not by row count. The live ids are read AFTER grouping: a job row is
+  // written before its staging rows, so every grouped live job is seen.
+  const stagingGroups: Array<{ table: (typeof STAGING_JOB_SCOPED_TABLES)[number]; grouped: Array<{ job_id: string; n: number }> }> = []
+  for (const table of STAGING_JOB_SCOPED_TABLES) {
+    stagingGroups.push({ table, grouped: await db.staging.prepare(`SELECT job_id, COUNT(*) AS n FROM ${table} GROUP BY job_id`).all<{ job_id: string; n: number }>() })
+  }
   const liveJobRows = await db.prepare(`SELECT id FROM import_jobs`).all<{ id: string }>()
   const liveJobIds = new Set(liveJobRows.map((r) => String(r.id)))
   const stagingOrphanJobIds: Record<string, string[]> = {}
-  for (const table of STAGING_JOB_SCOPED_TABLES) {
-    const grouped = await db.staging.prepare(`SELECT job_id, COUNT(*) AS n FROM ${table} GROUP BY job_id`).all<{ job_id: string; n: number }>()
+  for (const { table, grouped } of stagingGroups) {
     const orphanIds: string[] = []
     let count = 0
     for (const group of grouped) {
