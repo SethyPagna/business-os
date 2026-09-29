@@ -1033,15 +1033,15 @@ function CatalogEditorSurfaceContent() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('text')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('text')}>
                     <Plus className="h-4 w-4" />
                     {copy('addTextBlock', 'Text')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('image')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('image')}>
                     <Images className="h-4 w-4" />
                     {copy('addImageBlock', 'Image')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('video')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('video')}>
                     <Plus className="h-4 w-4" />
                     {copy('addVideoBlock', 'Video')}
                   </button>

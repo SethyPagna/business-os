@@ -100,6 +100,10 @@ runTest('T-L7: the About block limits in the editor are the Worker\'s, so nothin
     const tag = editor.slice(editor.lastIndexOf('<button', button.index), editor.indexOf('>', button.index))
     assert.match(tag, /disabled=\{aboutBlocksFull\}/, 'Add block stops at the limit')
     assert.match(tag, /aria-describedby=\{aboutBlocksFull \? 'portal-about-blocks-max' : undefined\}/, 'the disabled button is described by the reason')
+    const buttonClass = tag.match(/className="([^"]*)"/)?.[1].split(/\s+/) ?? []
+    for (const look of ['disabled:opacity-50', 'disabled:cursor-not-allowed']) {
+      assert.ok(buttonClass.includes(look), `a stopped Add block looks stopped (btn-secondary has no disabled look of its own): ${look}`)
+    }
   }
   assert.match(editor, /const aboutBlocksFull = aboutBlocks\.length >= ABOUT_BLOCKS_MAX/)
   assert.match(editor, /\{aboutBlocksFull \? \(\s*<p id="portal-about-blocks-max" role="status"[^>]*>\{ed\('web_editor_blocks_max', 'Up to 30 blocks\.', 'រហូតដល់ ៣០ ប្លុក។'\)\}<\/p>/, 'the reason is shown, not only hovered')
