@@ -12,6 +12,7 @@ import {
   type SaleRecordEventStatement,
 } from './saleRecordEvents'
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords'
+import { sendSaleStatusTelegramEvent } from './saleStatusTelegram'
 
 export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 
@@ -294,6 +295,18 @@ export async function notifySaleSettlementAction(env: Env): Promise<void> {
     bumpVersion(env, 'sales'),
     broadcast(env, 'sales', { action: 'update' }),
   ])
+}
+
+export async function sendSaleSettlementReplayTelegramEvent(env: Env, historyId: number, direction: 'undo' | 'redo', by: string | null): Promise<void> {
+  const operation = await getDb(env).prepare(`
+    SELECT sale_id, json_extract(before_json,'$.sale_status') AS before_status, json_extract(after_json,'$.sale_status') AS after_status
+    FROM sale_mutation_receipts WHERE history_id=@history AND mutation_kind='settlement'
+  `).get<{ sale_id: number; before_status: string | null; after_status: string | null }>({ history: historyId })
+  if (!operation) return
+  const [fromStatus, toStatus] = direction === 'undo'
+    ? [operation.after_status, operation.before_status]
+    : [operation.before_status, operation.after_status]
+  await sendSaleStatusTelegramEvent(env, [{ saleId: Number(operation.sale_id), fromStatus: fromStatus || 'completed', toStatus: toStatus || 'completed' }], by)
 }
 
 class SaleSettlementReplayConflict extends Error {

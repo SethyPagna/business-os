@@ -8,12 +8,12 @@ import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerRe
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
-import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
+import { BULK_STATUS_KIND, notifyBulkStatus, sendSaleBulkStatusTelegramEvent } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
 import { sendReturnStatusTelegramEvents } from '../lib/telegram'
-import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
+import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND, sendSaleSettlementReplayTelegramEvent } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { TRANSFER_OPERATION_KIND, canReplayTransferPayload, notifyTransferOperation } from '../lib/transferOperation'
@@ -465,6 +465,14 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           .all<{ return_id: number }>({ operation: String(payload.operation_id) })
           .then((rows) => sendReturnStatusTelegramEvents(c.env, rows.map((member) => Number(member.return_id)), actorSnapshot(user)))
           .catch((error) => console.error('[telegram] return status notification failed', error)))
+      }
+      if (applier.name === BULK_STATUS_KIND) {
+        c.executionCtx.waitUntil(sendSaleBulkStatusTelegramEvent(c.env, String(payload.operation_id), direction, actorSnapshot(user))
+          .catch((error) => console.error('[telegram] sale bulk status notification failed', error)))
+      }
+      if (applier.name === SALE_SETTLEMENT_ACTION_KIND) {
+        c.executionCtx.waitUntil(sendSaleSettlementReplayTelegramEvent(c.env, existing.id, direction, actorSnapshot(user))
+          .catch((error) => console.error('[telegram] sale settlement notification failed', error)))
       }
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
       return c.json({

@@ -4,7 +4,7 @@ import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
-import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
+import { allocateReturnedQuantities, cancelReasonLabel, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
@@ -12,6 +12,8 @@ import { branchCanSell } from './branchRoles';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { businessToday } from './businessDateWindow';
+import { sendSaleStatusTelegramEvent, type SaleStatusTelegramChange } from './saleStatusTelegram';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -66,6 +68,7 @@ type Member = {
     fee: Row | null;
     createdFee: Row | null;
 };
+type StatusChangeVia = 'apply' | 'undo' | 'redo';
 type Snapshot = {
     version: 1;
     operationId: string;
@@ -306,6 +309,41 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
 export async function notifyBulkStatus(env: Env) {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
+function statusOf(state: Row): string {
+    return String(state.sale_status || 'completed');
+}
+function skippedUnits(member: Member): number {
+    if (!member.skipped)
+        return 0;
+    const returned = new Map(member.returned);
+    return member.items
+        .filter(item => item.product_id && (item.damaged_lot_id || item.branch_id))
+        .reduce((units, item) => {
+        const held = (state: Row) => heldQuantity(statusOf(state), item.quantity, returned.get(item.id) || 0);
+        return units + Math.abs(held(member.after) - held(member.before));
+    }, 0);
+}
+function telegramChanges(members: Member[], via: StatusChangeVia): SaleStatusTelegramChange[] {
+    return members.filter(member => member.changed).map(member => {
+        const [from, to] = via === 'undo' ? [member.after, member.before] : [member.before, member.after];
+        const cancelling = statusOf(to) === 'cancelled';
+        const lostFee = !cancelling ? null : via === 'undo' ? member.fee : member.createdFee;
+        const reason = cancelling ? normalizeCancelReason(to.cancel_reason) : null;
+        return {
+            saleId: member.id, fromStatus: statusOf(from), toStatus: statusOf(to),
+            reason: reason ? cancelReasonLabel(reason) : null,
+            skippedUnits: skippedUnits(member),
+            lostFeeUsd: Number(lostFee?.amount_usd) || 0, lostFeeKhr: Number(lostFee?.amount_khr) || 0,
+        };
+    });
+}
+export async function sendSaleBulkStatusTelegramEvent(env: Env, operationId: string, via: StatusChangeVia, by: string | null): Promise<void> {
+    const operation = await getDb(env).prepare('SELECT s.payload_json FROM sale_bulk_operations o JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=?').get<Row>([operationId]);
+    if (!operation)
+        return;
+    const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot;
+    await sendSaleStatusTelegramEvent(env, telegramChanges(snapshot.members, via), by);
+}
 export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row) {
     permission(user);
     const request = parseRequest(raw);
@@ -420,7 +458,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 label: `Cancelled sale ${member.receipt} -- lost fee`,
                 amount_usd: Math.round(Math.max(0, Number(itemCancel.fee_usd) || 0) * 100) / 100,
                 amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
-                fee_date: stamp.slice(0, 10),
+                fee_date: businessToday(Date.parse(stamp)),
                 sale_id: expected.id,
                 branch_id: sale.branch_id ?? null,
                 delivery_contact_id: null,
