@@ -898,10 +898,167 @@ async function runBulk() {
   })
 }
 
+// UI-CONFLICTS B1/B2 (owner 30 Sep 2026): a Resolve keep-merge whose grid
+// choices renamed the survivor, re-picked its catalog, prices, barcode and
+// cover, and settled the stock-in sessions that blocked it. The forward side is
+// the same mirror fold plus the real choice and settle statements; undo is the
+// real applier and must put back every one of those exactly.
+async function runResolveChoiceUndo() {
+  console.log('\n-- Resolve choices + settled stock-in sessions across undo --')
+  const d1 = openDb(loadAll())
+  const undo = loadUndoAppliers(d1)
+  const choices = loadActualDependency(path.join(LIB_DIR, 'productResolveChoices.ts'))
+  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const one = (sql, ...a) => { const row = d1.db.prepare(sql).get(...a); return row ? { ...row } : row }
+  const KEEPER = 110, DUP = 111
+  const CHOICE_COLUMNS = 'name,name_normalized,barcode,brand,brands,brand_compact,category,categories,unit,unit_normalized,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,cost_price_usd,cost_price_khr,image_path'
+  const keeperRow = () => one(`SELECT ${CHOICE_COLUMNS} FROM products WHERE id = ?`, KEEPER)
+  const session = (id) => one('SELECT status, reversible, last_error FROM action_history WHERE id = ?', id)
+
+  function seed() {
+    run1(`INSERT INTO branches (id, name) VALUES (1,'B1')`)
+    run1(`INSERT INTO products (id, name, name_normalized, barcode, brand, brands, brand_compact, category, categories, unit, unit_normalized,
+      selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, image_path, is_active) VALUES
+      (110,'Glow Serum 30ml','glow serum 30ml (legacy)','8850000000070','Glowy','Glowy','glowy-legacy','Serum','Serum','pcs','pcs',12,49200,10,41000,5,20500,'products/glow-70.jpg',1),
+      (111,'Glow-Serum 30ml','glow serum 30ml','8850000000071','Glowy Lab','Glowy Lab||Glowy','glowylab','Skin Care','Skin Care','bottle','bottle',9.5,38950,8,32800,6,24600,NULL,1),
+      (999,'Unrelated',NULL,'1',NULL,NULL,NULL,NULL,NULL,'pcs','pcs',1,0,0,0,0,0,NULL,1)`)
+    run1(`INSERT INTO sales (id) VALUES (960)`)
+    run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (760,960,110,'Glow Serum 30ml',1),(761,960,111,'Glow-Serum 30ml',1)`)
+    // Three stock-in sessions: one on the discarded row (undoable), one on the
+    // survivor (redoable, with an earlier note), one on an unrelated product.
+    run1(`INSERT INTO action_history (id, scope, entity, entity_id, label, reversible, status, last_error, undo_payload, redo_payload) VALUES
+      (950,'global','stock_session','op-a','Stock in',1,'undoable',NULL,'{}','{}'),
+      (951,'global','stock_session','op-b','Stock in',1,'redoable','earlier note','{}','{}'),
+      (952,'global','stock_session','op-c','Stock in',1,'undoable',NULL,'{}','{}')`)
+    run1(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, history_id) VALUES
+      ('op-a',1,'req-a','stock_in','{}',950),('op-b',1,'req-b','stock_in','{}',951),('op-c',1,'req-c','stock_in','{}',952)`)
+    run1(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity) VALUES
+      ('op-a','l1','receive',111,1,5),('op-b','l1','receive',110,1,2),('op-c','l1','receive',999,1,1)`)
+  }
+  seed()
+  const frozenRows = d1.db.prepare(`SELECT * FROM products WHERE id IN (${KEEPER},${DUP})`).all().map((row) => ({ ...row }))
+  const before = keeperRow()
+  const parsed = choices.parseProductResolveChoices({ choices: {
+    name: { source_id: DUP }, barcode: { source_id: DUP }, brand: { source_id: DUP }, category: { custom: 'Face Care' },
+    unit: { source_id: DUP }, selling_price_usd: { source_id: DUP }, wholesale_price_usd: { custom: 7.123 }, image: { source_id: KEEPER },
+  } }, [KEEPER, DUP])
+  assert.equal(parsed.ok, true, JSON.stringify(parsed))
+  const values = choices.resolveChoiceValues(parsed.choices, frozenRows)
+  const choiceBefore = choices.keeperChoiceBefore(one('SELECT * FROM products WHERE id = ?', KEEPER), values)
+  const settled = {
+    marker: undo.stockSessionSettleMarker('op-merge-1'),
+    sessions: await undo.readSettleableStockSessions(undo.__testDbAdapter, [KEEPER, DUP]),
+  }
+
+  await check('only the reversible sessions touching either merged product are read to settle, with their exact prior state', async () => {
+    assert.deepEqual(settled.sessions, [
+      { operationId: 'op-a', historyId: 950, status: 'undoable', reversible: 1, lastError: null },
+      { operationId: 'op-b', historyId: 951, status: 'redoable', reversible: 1, lastError: 'earlier note' },
+    ])
+    assert.equal(settled.marker, 'settled by product merge op-merge-1')
+  })
+
+  await check('a session that changed after it was read, or a new one on either product, aborts the whole batch', async () => {
+    const guarded = undo.settleStockSessionStatements(settled, [KEEPER, DUP])
+    run1("UPDATE action_history SET status = 'redoable' WHERE id = 950")
+    await assert.rejects(d1.batch([{ sql: 'UPDATE products SET cost_price_usd = 77 WHERE id = 110' }, ...guarded]), /JSON|malformed/i)
+    assert.equal(one('SELECT cost_price_usd FROM products WHERE id = 110').cost_price_usd, 5, 'the merge write rolled back with it')
+    assert.equal(session(951).status, 'redoable', 'no session was settled')
+    run1("UPDATE action_history SET status = 'undoable' WHERE id = 950")
+    run1(`INSERT INTO action_history (id, scope, entity, label, reversible, status) VALUES (953,'global','stock_session','Stock in',1,'undoable')`)
+    run1(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, history_id) VALUES ('op-new',1,'req-new','stock_in','{}',953)`)
+    run1(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity) VALUES ('op-new','l1','receive',110,1,1)`)
+    await assert.rejects(d1.batch(guarded), /JSON|malformed/i)
+    assert.equal(session(950).status, 'undoable')
+    run1("DELETE FROM stock_session_members WHERE operation_id = 'op-new'")
+    run1("DELETE FROM stock_session_operations WHERE id = 'op-new'")
+    run1('DELETE FROM action_history WHERE id = 953')
+  })
+
+  // The mirror fold, then the grid's Final values and the settle, as the
+  // Resolve merge's one batch applies them after the economics write.
+  const res = await foldForward(d1, { id: KEEPER, name: 'Glow Serum 30ml' }, { id: DUP, name: 'Glow-Serum 30ml', image_path: null }, new Map([[1, 'B1']]), 'resolve grid keep merge')
+  const reversal = {
+    ...res.reversal,
+    keeperBarcodeBefore: before.barcode,
+    keeperPricingBefore: {
+      selling_price_usd: before.selling_price_usd, selling_price_khr: before.selling_price_khr,
+      wholesale_price_usd: before.wholesale_price_usd, wholesale_price_khr: before.wholesale_price_khr,
+      cost_price_usd: before.cost_price_usd, cost_price_khr: before.cost_price_khr,
+    },
+    keeperChoice: { follows: true, fields: values },
+    ...choiceBefore,
+    settledStockSessions: settled,
+  }
+  await d1.batch([
+    { sql: 'UPDATE products SET selling_price_usd = 12, selling_price_khr = 49200 WHERE id = @id', params: { id: KEEPER } },
+    ...choices.keeperChoiceStatements(KEEPER, values),
+    ...undo.productNameSnapshotStatements(KEEPER, values.name),
+    ...undo.settleStockSessionStatements(settled, [KEEPER, DUP]),
+  ])
+
+  await check('forward: the survivor carries every chosen value and both sessions are settled under this merge', async () => {
+    const after = keeperRow()
+    for (const [column, value] of Object.entries(values)) assert.equal(after[column], value, column)
+    assert.equal(after.selling_price_usd, 9.5, 'the chosen lower selling price, written after the highest-price economics')
+    assert.equal(after.name_normalized, 'glow serum 30ml')
+    assert.deepEqual(session(950), { status: 'recorded', reversible: 0, last_error: 'settled by product merge op-merge-1' })
+    assert.deepEqual(session(951), { status: 'recorded', reversible: 0, last_error: 'settled by product merge op-merge-1' })
+    assert.deepEqual(session(952), { status: 'undoable', reversible: 1, last_error: null }, 'an unrelated session is never touched')
+    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 760').product_name, 'Glow-Serum 30ml')
+  })
+
+  const rec = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, reversal)
+  const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: rec.snapshotId })
+
+  await check('a chosen cover counts as an image effect; the same cover does not', async () => {
+    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: rec.snapshotId }, 'undo'), false,
+      'choosing the survivor\'s own cover changes no image')
+    const moved = { ...reversal, keeperChoice: { follows: true, fields: { ...values, image_path: 'products/glow-72.jpg' } } }
+    const other = d1.db.prepare("INSERT INTO undo_snapshots (kind, status, payload_json) VALUES ('product.merge','applied',?)").run(JSON.stringify(moved))
+    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: Number(other.lastInsertRowid) }, 'undo'), true)
+    run1('DELETE FROM undo_snapshots WHERE id = ?', Number(other.lastInsertRowid))
+  })
+
+  await check('UNDO restores the survivor exactly: name, search name, catalog, prices, barcode and cover', async () => {
+    // A later sweep re-marked one session: undo must leave that one alone.
+    run1("UPDATE action_history SET last_error = 'retention sweep' WHERE id = 951")
+    await applier.run({ applier: 'product.merge', snapshot_id: rec.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual(keeperRow(), before)
+    assert.equal(one('SELECT is_active FROM products WHERE id = ?', DUP).is_active, 1)
+    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 760').product_name, 'Glow Serum 30ml', 'the survivor\'s own history reads its name again')
+  })
+
+  await check('UNDO gives each settled session back its exact status, guarded on this merge\'s marker', async () => {
+    assert.deepEqual(session(950), { status: 'undoable', reversible: 1, last_error: null })
+    assert.deepEqual(session(951), { status: 'recorded', reversible: 0, last_error: 'retention sweep' }, 'no longer carrying the marker: untouched')
+    assert.deepEqual(session(952), { status: 'undoable', reversible: 1, last_error: null })
+  })
+
+  await check('an older snapshot without the new fields restores neither name nor sessions', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({ keeperId: KEEPER, dupId: DUP, keeperImagePathBefore: null, dupImagesBefore: [], imagesMovedToKeeper: [] }, false)
+    assert.doesNotMatch(statement.sql, /\bname=/)
+    assert.deepEqual(undo.restoreSettledStockSessionStatements(undefined), [])
+    assert.deepEqual(undo.restoreSettledStockSessionStatements({ marker: 'm', sessions: [] }), [])
+  })
+
+  await check('the name-snapshot list matches the rename/merge path in products.ts', async () => {
+    const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
+    const at = src.indexOf('function linkedProductNameSnapshotStatements(')
+    assert.ok(at > 0, 'linkedProductNameSnapshotStatements is still the rename/merge sync')
+    const body = src.slice(at, src.indexOf('\n}\n', at))
+    if (/productNameSnapshotStatements|PRODUCT_NAME_SNAPSHOT_COLUMNS/.test(body)) return
+    const routeList = [...body.matchAll(/UPDATE (\w+) SET (\w+) = @productName WHERE (\w+) IN/g)]
+      .map(([, table, nameColumn, idColumn]) => ({ table, idColumn, nameColumn }))
+    assert.deepEqual(routeList, undo.PRODUCT_NAME_SNAPSHOT_COLUMNS.map((entry) => ({ ...entry })))
+  })
+}
+
 async function main() {
   await run()
   await runSavedClusterEconomics()
   await runBulk()
+  await runResolveChoiceUndo()
   console.log(`\n${passed} check(s) passed.`)
 }
 

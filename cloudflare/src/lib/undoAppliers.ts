@@ -1,5 +1,8 @@
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
+// Type-only on purpose: dozens of test loaders stub this module's relative
+// imports one by one, so a new runtime import would break them.
+import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
 import { audit } from './audit'
@@ -191,8 +194,13 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** Present only when a Resolve choice rewrote the keeper's name; undo restores both. */
+  keeperNameBefore?: string | null
+  keeperNameNormalizedBefore?: string | null
   /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
   keeperChoice?: ProductMergeKeeperChoice
+  /** Stock-in sessions this merge settled (B2); undo gives them back their status. */
+  settledStockSessions?: SettledStockSessions
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
     category: string | null
@@ -287,6 +295,9 @@ const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bul
 
 function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
   if ((reversal.dupImagesBefore || []).length || (reversal.imagesMovedToKeeper || []).length) return true
+  const fields = reversal.keeperChoice?.fields
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'image_path')
+    && String(fields.image_path || '').trim() !== String(reversal.keeperImagePathBefore || '').trim()) return true
   if (Object.prototype.hasOwnProperty.call(reversal, 'dupImagePathBefore')) {
     return !String(reversal.keeperImagePathBefore || '').trim() && Boolean(String(reversal.dupImagePathBefore || '').trim())
   }
@@ -376,6 +387,113 @@ export type ProductMergeKeeperChoice = {
   cost?: { cost_price_usd: number; cost_price_khr?: number | null }
   /** Server-frozen group economics; carried through each pair's undo/redo. */
   economics?: ProductMergeEconomics
+  /**
+   * The grid's per-field Final values (lib/productResolveChoices.ts), resolved
+   * from the frozen reviewed rows. Applied after the economics on every step,
+   * so a later step's highest-price rule cannot overwrite a chosen price.
+   */
+  fields?: ResolveChoiceValues
+}
+
+// B2 (owner question 1, default = settle, 30 Sep 2026): a keep-mode merge no
+// longer waits for a stock-in session to stop being undoable (nothing ever
+// settled one, so it waited forever). The same batch marks each session that
+// touches either product as recorded; merge undo gives back the exact status.
+export type SettledStockSessions = {
+  marker: string
+  sessions: Array<{ operationId: string; historyId: number; status: string; reversible: number | null; lastError: string | null }>
+}
+
+export const STOCK_SESSION_SETTLED_BY_MERGE = 'settled by product merge'
+export const stockSessionSettleMarker = (mergeOperationId: string): string => `${STOCK_SESSION_SETTLED_BY_MERGE} ${mergeOperationId}`
+
+const REVERSIBLE_STOCK_SESSION_TOUCHING = `SELECT o.id AS operationId, h.id AS historyId, h.status AS status,
+    h.reversible AS reversible, h.last_error AS lastError
+  FROM stock_session_operations o JOIN action_history h ON h.id = o.history_id
+  WHERE h.status IN ('undoable', 'redoable')
+    AND EXISTS (SELECT 1 FROM stock_session_members m
+      WHERE m.operation_id = o.id AND m.product_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@settleProductIds)))`
+
+export async function readSettleableStockSessions(
+  db: ReturnType<typeof getDb>,
+  productIds: number[],
+): Promise<SettledStockSessions['sessions']> {
+  const ids = intIds(productIds)
+  if (!ids.length) return []
+  const rows = await db.prepare(`${REVERSIBLE_STOCK_SESSION_TOUCHING} ORDER BY h.id`)
+    .all<{ operationId: string; historyId: number; status: string; reversible: number | null; lastError: string | null }>({ settleProductIds: JSON.stringify(ids) })
+  return rows.map((row) => ({
+    operationId: String(row.operationId),
+    historyId: Number(row.historyId),
+    status: String(row.status),
+    reversible: row.reversible == null ? null : Number(row.reversible),
+    lastError: row.lastError == null ? null : String(row.lastError),
+  }))
+}
+
+// For the fold's own db.batch. The UPDATE matches each session only in the
+// status it was read in, and the guard aborts the whole merge (fold catch ->
+// merge_state_conflict) if any session changed meanwhile or a new reversible
+// one appeared on either product, so no merge can silently brick a replay.
+export function settleStockSessionStatements(settled: SettledStockSessions, productIds: number[]): AtomicMergeStatement[] {
+  const ids = JSON.stringify(intIds(productIds))
+  const sessions = JSON.stringify(settled.sessions)
+  const statements: AtomicMergeStatement[] = []
+  if (settled.sessions.length) {
+    statements.push({
+      sql: `UPDATE action_history SET status = 'recorded', reversible = 0, last_error = @settleMarker, updated_at = CURRENT_TIMESTAMP
+            WHERE id IN (SELECT CAST(json_extract(value, '$.historyId') AS INTEGER) FROM json_each(@settleSessions))
+              AND status = (SELECT json_extract(s.value, '$.status') FROM json_each(@settleSessions) s
+                WHERE CAST(json_extract(s.value, '$.historyId') AS INTEGER) = action_history.id)`,
+      params: { settleMarker: settled.marker, settleSessions: sessions },
+    })
+  }
+  statements.push({
+    sql: `SELECT CASE WHEN
+            (SELECT COUNT(*) FROM action_history WHERE status = 'recorded' AND last_error = @settleMarker
+              AND id IN (SELECT CAST(json_extract(value, '$.historyId') AS INTEGER) FROM json_each(@settleSessions)))
+              = json_array_length(@settleSessions)
+            AND NOT EXISTS (${REVERSIBLE_STOCK_SESSION_TOUCHING})
+          THEN 1 ELSE json_extract('', '$') END AS merge_guard_stock_session_settle`,
+    params: { settleMarker: settled.marker, settleSessions: sessions, settleProductIds: ids },
+  })
+  return statements
+}
+
+// Undo side: only a session still carrying THIS merge's marker is touched.
+export function restoreSettledStockSessionStatements(settled: SettledStockSessions | undefined): AtomicMergeStatement[] {
+  if (!settled || !Array.isArray(settled.sessions) || !settled.sessions.length || !settled.marker) return []
+  const pick = (key: string) => `(SELECT json_extract(s.value, '$.${key}') FROM json_each(@restoreSessions) s
+      WHERE CAST(json_extract(s.value, '$.historyId') AS INTEGER) = action_history.id)`
+  return [{
+    sql: `UPDATE action_history SET status = ${pick('status')}, reversible = ${pick('reversible')},
+            last_error = ${pick('lastError')}, updated_at = CURRENT_TIMESTAMP
+          WHERE id IN (SELECT CAST(json_extract(value, '$.historyId') AS INTEGER) FROM json_each(@restoreSessions))
+            AND status = 'recorded' AND last_error = @restoreMarker`,
+    params: { restoreSessions: JSON.stringify(settled.sessions), restoreMarker: String(settled.marker) },
+  }]
+}
+
+// The history rows that carry a product's name as a snapshot (the rename and
+// merge paths keep them in step with products.name). Undo of a merge whose
+// choice renamed the survivor writes the old name back to the survivor's rows.
+export const PRODUCT_NAME_SNAPSHOT_COLUMNS: ReadonlyArray<{ table: string; idColumn: string; nameColumn: string }> = [
+  { table: 'sale_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'inventory_movements', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'return_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'stock_transfers', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'damaged_stock_lots', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'return_replacement_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'stock_row_moves', idColumn: 'source_product_id', nameColumn: 'source_product_name' },
+  { table: 'stock_row_moves', idColumn: 'destination_product_id', nameColumn: 'destination_product_name' },
+]
+
+export function productNameSnapshotStatements(productId: number, productName: string | null): AtomicMergeStatement[] {
+  if (productName == null || !Number.isSafeInteger(productId) || productId <= 0) return []
+  return PRODUCT_NAME_SNAPSHOT_COLUMNS.map(({ table, idColumn, nameColumn }) => ({
+    sql: `UPDATE ${table} SET ${nameColumn} = @snapshotName WHERE ${idColumn} = @snapshotProductId`,
+    params: { snapshotName: productName, snapshotProductId: productId },
+  }))
 }
 
 // The ONE list of foreign keys a product merge must move onto the survivor.
@@ -428,24 +546,16 @@ export type ProductMergeKeeperChoice = {
 //     against a postimage recorded for the loser -- and `members` is itself
 //     inside the postimage, so the UPDATE alone breaks the assertion. Moving
 //     this row does not fix the orphan; it inverts it onto the survivor.
-//     What DOES protect the session is the guard in routes/products.ts
-//     (mergeBlockedByReversibleStockSession): a merge is REFUSED while either
-//     row still belongs to a stock session that can be undone or redone, so no
-//     merge can silently brick a replay. Once the session's history row is
-//     gone the members row is pure history and stays where it happened.
-//
-//     OWNER DECISION, OPEN -- a recorded DEVIATION from the N15 ask ("the
-//     merge moves EVERY linked record ... including stock_session_members"),
-//     not an oversight. What it costs: nothing ever settles a stock session
-//     (lib/stockSession.ts writes only 'undoable' and 'redoable'), so the block
-//     on a touched product lifts only when the retention sweep deletes the
-//     action_history row at ACTION_HISTORY_TTL_DAYS = 180. Three ways out, for
-//     the owner to pick: (a) accept the guard as it stands; (b) add a way to
-//     settle/retire a spent session so the block lifts in days rather than
-//     months; (c) implement the compensating postimage rewrite so the member
-//     row can be reparented with the replay following it. Both halves are
-//     pinned in scripts/test-merge-identity-fk-pure.cjs section 5, so
-//     whichever way it goes the test moves with it.
+//     What DOES protect the session: no merge may leave it replayable. The
+//     identity, bulk and review paths REFUSE while either row belongs to a
+//     session that can be undone or redone (routes/products.ts
+//     mergeBlockedByReversibleStockSession); the Resolve grid's keep-mode merge
+//     SETTLES it instead, in the same batch (settleStockSessionStatements
+//     above, option (b) of the N15 deviation, UI-CONFLICTS B2 30 Sep 2026),
+//     and merge undo restores its status. Once the session's history row is
+//     not replayable the members row is pure history and stays where it
+//     happened. Both halves are pinned in scripts/test-merge-identity-fk-pure.cjs
+//     section 5 and scripts/test-product-resolve-keep-merge-native.cjs.
 export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'sale_items', column: 'product_id' },
   { table: 'return_items', column: 'product_id' },
@@ -1658,12 +1768,16 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
   const catalogSet = catalog
     ? `category=@category,categories=@categories,brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unitNormalized,brand_compact=@brandCompact,`
     : ''
+  // products.name is NOT NULL: a snapshot without a usable name leaves it alone.
+  const restoresName = typeof r.keeperNameBefore === 'string'
+  const nameSet = restoresName ? 'name=@name,name_normalized=@nameNormalized,' : ''
   return {
-    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}${catalogSet}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
+    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}${nameSet}${catalogSet}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
     params: {
       keeperId: Number(r.keeperId),
       ...(canChangeProductImages ? { path: r.keeperImagePathBefore ?? null } : {}),
       ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}),
+      ...(restoresName ? { name: r.keeperNameBefore, nameNormalized: r.keeperNameNormalizedBefore ?? null } : {}),
       ...(catalog ? {
         category: catalog.category ?? null,
         categories: catalog.categories ?? null,
@@ -1838,6 +1952,16 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
       params: { keeperId, parentId: Number(r.keeperParentIdBefore) },
     })
   }
+
+  // 4e. A chosen name was synced onto the survivor's history rows; the rows
+  //     reparented above are back on the discarded id, so this touches only
+  //     the survivor's own.
+  const chosenName = r.keeperChoice?.fields?.name
+  if (typeof r.keeperNameBefore === 'string' && typeof chosenName === 'string' && chosenName !== r.keeperNameBefore) {
+    stmts.push(...productNameSnapshotStatements(keeperId, r.keeperNameBefore))
+  }
+  // 4f. Stock-in sessions this merge settled get their status back.
+  stmts.push(...restoreSettledStockSessionStatements(r.settledStockSessions))
 
   // 5. product_images: pull the moved paths off the keeper, restore the dup's
   //    gallery (the fold had deleted every dup image row).
