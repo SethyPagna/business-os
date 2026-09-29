@@ -132,7 +132,8 @@ async function check(name, fn) {
   await check('wiring: index.ts gates writes + skips the scheduled tick under maintenance', () => {
     const indexSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'index.ts'), 'utf8')
     assert.match(indexSrc, /isMaintenanceGatedRequest\(c\.req\.method, c\.req\.path\)/)
-    assert.match(indexSrc, /if \(await getMaintenance\(env\)\) return/)
+    assert.match(indexSrc, /const maintenance = await runStep\('maintenance-check', \(\) => getMaintenance\(env\)\)/)
+    assert.match(indexSrc, /if \(!maintenance\.ok \|\| maintenance\.value\) return/)
   })
 
   await check('wiring: backups.ts wraps the restore (begin/progress/end, crash leaves the flag, active imports refuse)', () => {

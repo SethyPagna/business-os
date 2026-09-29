@@ -43,6 +43,7 @@ import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
+import { runCronStep } from './lib/cronStepStatus'
 import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
@@ -605,11 +606,13 @@ export default {
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil((async () => {
+      const runStep = <T>(label: string, step: () => Promise<T>) => runCronStep(env, label, step)
       // Restore maintenance: skip the whole tick. A scheduled backup taken
       // DURING a restore would snapshot the half-restored database as if it
       // were a good state; the sweeps behind it write too. The next 6h tick
-      // runs normally once maintenance clears.
-      if (await getMaintenance(env)) return
+      // runs normally once maintenance clears. An unreadable flag skips too.
+      const maintenance = await runStep('maintenance-check', () => getMaintenance(env))
+      if (!maintenance.ok || maintenance.value) return
 
       // Each sweep runs in its OWN guard. These used to be a bare await-chain,
       // so the FIRST step to throw aborted every step behind it -- and the
@@ -625,13 +628,6 @@ export default {
       // no longer stop retention from reclaiming the space that lets the next
       // backup succeed. Order is unchanged (backup first, image-audit last);
       // independence changes only what a failure does to the steps after it.
-      const runStep = async (label: string, step: () => Promise<unknown>) => {
-        try {
-          await runBackground(env, `cron:${label}`, step)
-        } catch (error) {
-          console.error(`[scheduled] ${label} failed`, (error as Error)?.message || error)
-        }
-      }
       // T10: the backstop for a shift overview nothing else has sent. Ahead
       // of the backup because it is a few indexed statements and the backup
       // is the step that runs out of budget.
