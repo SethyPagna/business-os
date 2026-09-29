@@ -938,7 +938,6 @@ function lowStockRowLines(row: LowStockRow): string[] {
   return telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`])
 }
 
-/** The day summary's "Stock out" movements. */
 const STOCK_OUT_MOVEMENT = "movement_type IN ('remove', 'transfer_out', 'move_out')"
 
 /** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
@@ -1794,7 +1793,7 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   // Its refund is not the Refunds row above (that one follows the SALE's
   // day), which is why it is its own section and never subtracted. Dollars
   // only: total_refund_khr is this same refund at the return's rate, not a second one.
-  // The optional riel row shows that same riel figure on its own line, for information.
+  // The Returns switch prints that riel figure as its own row; it is never added to the dollars.
   const returned = figures.returns
   const returnRows = returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : []
   if (extra.returns && returned.count) returnRows.push(labeled('riel', riel(extra.returns.khr)), labeled('itemsReturned', extra.returns.items))

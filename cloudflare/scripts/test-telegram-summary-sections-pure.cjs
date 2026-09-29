@@ -5,7 +5,8 @@
 // lowStockSettings.ts over node:sqlite carrying the REAL migration chain. The
 // sales kernel's totals, grouped totals and product ranking are recording
 // stubs, so each figure is proven to be the kernel's for exactly the filters
-// asked. The Telegram API is a local function; every id is synthetic.
+// asked. The switches' write rule is driven through the REAL routes/settings.ts
+// POST /. The Telegram API is a local function; every id is synthetic.
 //
 // Run (from cloudflare/): node scripts/test-telegram-summary-sections-pure.cjs
 const fs = require('fs')
@@ -113,6 +114,7 @@ function seedShopA(db) {
   item(9, 9, 'Soap Bar')
   insert(db, 'inventory_movements', { id: 1, product_id: 8, product_name: 'Sunscreen', branch_id: 1, movement_type: 'remove', quantity: 3, created_at: '2026-09-23 04:00:00' })
   insert(db, 'inventory_movements', { id: 2, product_id: 3, product_name: 'Face Wash', branch_id: 1, movement_type: 'remove', quantity: 1, created_at: '2026-09-22 04:00:00' })
+  insert(db, 'inventory_movements', { id: 3, product_id: 5, product_name: 'Clay Mask', branch_id: 2, movement_type: 'transfer_out', quantity: 1, created_at: '2026-09-23 06:00:00' })
   const ret = (id, extra, items) => {
     insert(db, 'returns', { id, branch_id: 1, created_at: '2026-09-23 09:00:00', status: 'completed', return_scope: 'customer', ...extra })
     for (const quantity of items) insert(db, 'return_items', { return_id: id, quantity })
@@ -272,13 +274,25 @@ async function main() {
     sales: ['=====Received====='], cashiers: ['=====Cashiers====='], products: ['=====Top products=====', '=====Low stock====='],
     returns: [], expenses: ['=====Each expense====='], compare: ['=====Compare====='],
   }
+  const reads = {
+    sales: (sql) => sql.some((text) => /payment_details/.test(text)),
+    cashiers: (sql, calls) => calls.some(([kind, , by]) => kind === 'grouped' && by !== 'payment_method'),
+    products: (sql, calls) => sql.some((text) => /inventory_movements/.test(text)) || calls.some(([kind]) => kind === 'ranking'),
+    returns: (sql) => sql.some((text) => /return_items/.test(text)),
+    expenses: (sql) => sql.some((text) => /GROUP BY 1 ORDER BY usd DESC/.test(text)),
+    compare: (sql, calls) => calls.some(([kind, filters]) => kind === 'totals' && filters.startDate !== DAY),
+  }
   const single = {}
   for (const [section, key] of Object.entries(SWITCH)) {
     setting(shopA, key, 'true')
+    const sqlFrom = preparedSql.length
+    kernelCalls.length = 0
     single[section] = (await overview(envA)).text
     clearSetting(shopA, key)
     const added = headersOf(single[section]).filter((header) => !DEFAULT_HEADERS.includes(header))
     check(`${section} alone adds exactly its own section(s)`, JSON.stringify(added) === JSON.stringify(alone[section]), single[section])
+    const read = Object.keys(reads).filter((name) => reads[name](preparedSql.slice(sqlFrom), kernelCalls))
+    check(`${section} alone reads only its own figures`, JSON.stringify(read) === JSON.stringify([section]), read.join(', '))
   }
 
   check('Received: dollars net of change, riel, bank; cancelled, other-branch and other-day sales out; the 00:30 local sale in',
@@ -389,7 +403,8 @@ async function main() {
     today.text)
   check('Send today\'s summary: the kernel is asked for the whole shop', kernelCalls.length > 0 && kernelCalls.every(([, filters]) => filters.branchId == null), JSON.stringify(kernelCalls))
   check('Send today\'s summary: the whole shop\'s dollars include the other branch', rowsUnder(today.text, '=====Received=====')[0] === '· Dollars: $73.00', today.text)
-  check('Send today\'s summary: the whole shop\'s low stock includes an item sold only on the other branch', rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Night Cream: 4 (⚠ 5)'), today.text)
+  check('Send today\'s summary: the whole shop\'s low stock includes items sold or moved out only on the other branch',
+    rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Night Cream: 4 (⚠ 5)') && rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Clay Mask: 1 (⚠ 5)'), today.text)
 
   const shopB = openShop()
   seedShopB(shopB)
@@ -423,6 +438,7 @@ async function main() {
   const settingsSource = fs.readFileSync(path.join(root, 'src', 'routes', 'settings.ts'), 'utf8')
   check('routes/settings.ts validates every summary switch with the shared rule',
     /for \(const key of Object\.values\(TELEGRAM_SUMMARY_SWITCHES\)\)/.test(settingsSource) && /isTelegramSwitchValue\(raw\)/.test(settingsSource) && /code: 'invalid_telegram_switch'/.test(settingsSource))
+  await settingsRouteEnforcesTheSwitchRule()
   const bucketSets = ['BUSINESS_IDENTITY_KEYS', 'SALES_POLICY_KEYS', 'RECEIPT_SETTINGS_KEYS', 'PORTAL_POSTS_KEYS', 'PORTAL_FAQ_KEYS', 'PORTAL_ABOUT_KEYS']
     .map((name) => (settingsSource.match(new RegExp(`const ${name} = new Set\\(\\[[\\s\\S]*?\\]\\)`)) || [''])[0])
   check('the switches take the full Settings grant, like telegram_sales_enabled (no narrower bucket)', Object.values(SWITCH).every((key) => bucketSets.every((block) => !block.includes(key))))
@@ -433,6 +449,62 @@ async function main() {
   check('no chat or topic id is written into the Worker modules', !/(message_thread_id|messageThreadId|chat_id)\s*[:=]\s*-?\d{3,}/.test(telegramSource))
 
   console.log(`\n${passed} checks passed; ${posts.length} messages composed for the local Telegram stand-in (none sent anywhere).`)
+}
+
+// The REAL routes/settings.ts POST / (the frontend toggles' backend), with its
+// relative imports transpiled from source and only I/O stubbed.
+async function settingsRouteEnforcesTheSwitchRule() {
+  const { openDb } = require('./harness/d1compat.cjs')
+  const db = openDb(MIGRATIONS)
+  let sessionUser = null
+  const stubs = {
+    '../lib/db': { getDb: (env) => env.DB },
+    '../lib/auth': { requireAuth: async (c, next) => { c.set('user', sessionUser); return next() } },
+    '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} },
+    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    '../lib/cache': { bumpVersion: async () => {} },
+  }
+  const loaded = new Map()
+  const load = (rel) => {
+    if (loaded.has(rel)) return loaded.get(rel).exports
+    const sourcePath = path.join(root, 'src', rel)
+    const { outputText } = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath,
+    })
+    const mod = { exports: {} }
+    loaded.set(rel, mod)
+    const localRequire = (request) => {
+      if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+      if (!request.startsWith('.')) return require(request)
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(rel), request))
+      return load(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+    }
+    new Function('require', 'module', 'exports', outputText)(localRequire, mod, mod.exports)
+    return mod.exports
+  }
+  const app = load('routes/settings.ts').default
+  const manager = { id: 21, username: 'synthetic-manager', permissions: JSON.stringify({ settings: true }), role_code: null, role_permissions: null }
+  const save = async (body) => {
+    sessionUser = manager
+    const res = await app.request('/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: db }, { waitUntil() {}, passThroughOnException() {} })
+    return { status: res.status, body: await res.json() }
+  }
+  const stored = (key) => db.prepare('SELECT value FROM settings WHERE key = @key').get({ key })?.value ?? null
+  const switches = Object.values(SWITCH)
+
+  const on = await save(Object.fromEntries(switches.map((key) => [key, 'true'])))
+  check('the Settings route saves every switch as \'true\' for a Settings account', on.status === 200 && switches.every((key) => stored(key) === 'true'), JSON.stringify(on))
+  const off = await save({ [SWITCH.sales]: 'false', [SWITCH.compare]: ' ' })
+  check('the Settings route saves \'false\' and a blank switch as empty', off.status === 200 && stored(SWITCH.sales) === 'false' && stored(SWITCH.compare) === '', JSON.stringify(off))
+  for (const bad of ['TRUE', 'yes', '1', 'on']) {
+    for (const key of switches) {
+      const refused = await save({ business_name: `Renamed ${bad}`, [key]: bad })
+      assert.equal(refused.status, 400, `${key}=${JSON.stringify(bad)} must be refused`)
+      assert.equal(refused.body.code, 'invalid_telegram_switch')
+      assert.notEqual(stored('business_name'), `Renamed ${bad}`, 'a refused save writes nothing')
+    }
+  }
+  check('the Settings route refuses any other switch value, and the whole save with it', true)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })
