@@ -85,6 +85,14 @@ export function parseImportNumericValue(
   return parsed
 }
 
+/** Decimal places the cell was written with, after separator detection; null when it holds no number. */
+export function importNumericDecimalPlaces(value: unknown): number | null {
+  const normalized = normalizeNumberSeparators(value)
+  if (!normalized) return null
+  const point = normalized.indexOf('.')
+  return point < 0 ? 0 : normalized.length - point - 1
+}
+
 export function normalizeImportMoney(value: unknown, fallbackValue = 0): number {
   // Legacy sale imports retain their existing policy until versioned sale
   // settlement is activated. Cost writers opt into the explicit helper below.

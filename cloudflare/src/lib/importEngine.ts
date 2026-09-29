@@ -77,7 +77,7 @@ import {
   findBlankHeaderIndexes,
   type ParsedCsvRow,
 } from './importCsv'
-import { parseImportNumericValue, normalizeImportMoney, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+import { importNumericDecimalPlaces, parseImportNumericValue, normalizeImportMoney, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
 import { createMembershipNumberAllocator, membershipGlob } from './membershipNumber'
 import { buildImportedContactState, contactDisplayAddress } from './contactOptions'
 import { collectContactPhones, contactDuplicateWriteGuardStatement, formatContactOptionPhones, formatPhoneP8, normalizeContactName } from './contactDuplicates'
@@ -192,7 +192,7 @@ async function loadImportApplyActor(db: D1Compat, actorId: number): Promise<Sess
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'cost_outlier' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'cost_outlier' | 'stock_receipt' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
 
@@ -209,6 +209,41 @@ export function costOutlierWarning(outlier: MergedCostOutlier): ImportRowWarning
   return {
     kind: 'cost_outlier',
     message: `Costs ${outlier.min} and ${outlier.max} (${currency}) are more than ${COST_OUTLIER_RATIO}x apart, so they were NOT averaged -- the higher one (${outlier.max}) was kept. Check whether one of them is a typo.`,
+  }
+}
+
+const MONEY4_PLACES = 4
+
+// A cost cell restates the stored cost when it is that cost as a sheet prints
+// it at the cell's own precision: rounded up (this app's product export) or to
+// nearest (a spreadsheet's number format).
+export function costCellRestatesStoredCost(cell: unknown, storedCost: unknown): boolean {
+  const places = importNumericDecimalPlaces(cell)
+  const stated = parseImportNumericValue(cell, Number.NaN)
+  const stored = Number(storedCost ?? 0)
+  if (places == null || !Number.isFinite(stated) || !Number.isFinite(stored) || stored < 0) return false
+  const storedUnits = Math.round(stored * 10 ** MONEY4_PLACES)
+  if (places >= MONEY4_PLACES) return Math.round(stated * 10 ** MONEY4_PLACES) === storedUnits
+  const unitsPerStep = 10 ** (MONEY4_PLACES - places)
+  const statedSteps = Math.round(stated * 10 ** places)
+  return statedSteps === Math.ceil(storedUnits / unitsPerStep)
+    || statedSteps === Math.floor((storedUnits + unitsPerStep / 2) / unitsPerStep)
+}
+
+function keepStoredCostWhereCellRestatesIt(
+  data: Record<string, unknown>,
+  match: { cost_price_usd: number | null; cost_price_khr: number | null },
+  rawCostUsd: unknown,
+  rawCostKhr: unknown,
+): void {
+  if (str(rawCostUsd) !== '' && costCellRestatesStoredCost(rawCostUsd, match.cost_price_usd)) data.cost_price_usd = Number(match.cost_price_usd) || 0
+  if (str(rawCostKhr) !== '' && costCellRestatesStoredCost(rawCostKhr, match.cost_price_khr)) data.cost_price_khr = Number(match.cost_price_khr) || 0
+}
+
+function stockReceiptWarning(quantity: number, branchName: string, reason: string): ImportRowWarning {
+  return {
+    kind: 'stock_receipt',
+    message: `Adds ${quantity} to ${branchName} as a new stock receipt because ${reason}. Choose whether to add it, or to update the details and keep the stock.`,
   }
 }
 
@@ -391,6 +426,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   duplicate_row_match: 'Two rows in this file matched the same existing contact',
   stock_action_conflict: 'Stock action needs explicit confirmation',
   cost_outlier: 'Costs too far apart to average (highest kept)',
+  stock_receipt: 'Adds stock as a new receipt (needs a decision)',
   other: 'Other warning',
 }
 
@@ -1986,6 +2022,8 @@ export async function classifyProducts(
       }
     }
 
+    if (match) keepStoredCostWhereCellRestatesIt(data, match, rawCostUsd, rawCostKhr)
+
     // Selling and wholesale price are NOT identity (see productDetailRule.ts):
     // they are what we plan to charge, not what the item is. When this row
     // merges into an existing product and the two disagree, the HIGHEST of
@@ -2104,6 +2142,16 @@ export async function classifyProducts(
       : matchedByLotEvidence || statesADifferentCost
         ? 'merge_stock' as const
         : undefined
+    const addsStockUnasked = plannedMode === 'merge_stock' && requestedRowMode !== 'merge_stock'
+      && Boolean(data.branch_id_explicit) && Number(data.stock_quantity) > 0
+    if (addsStockUnasked && match) {
+      const usdDiffers = (Number(data.cost_price_usd) || 0) !== (Number(match.cost_price_usd) || 0)
+      rowWarnings.push(stockReceiptWarning(Number(data.stock_quantity), importBranch.name, matchedByLotEvidence
+        ? `it names batch ${String(data.lot_code)}, which only this product holds`
+        : usdDiffers
+          ? `the file's cost ${str(rawCostUsd)} USD differs from the product's ${Number(match.cost_price_usd) || 0} USD`
+          : `the file's cost ${str(rawCostKhr)} KHR differs from the product's ${Number(match.cost_price_khr) || 0} KHR`))
+    }
 
     results.push({
       rowNumber: row._rowNumber,

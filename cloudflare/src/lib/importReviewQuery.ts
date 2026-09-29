@@ -15,7 +15,7 @@ export interface ImportReviewWhere {
 export type ImportReviewSort = 'row_asc' | 'row_desc' | 'name_asc' | 'name_desc'
 
 export const CONTACT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['name_match', 'membership_phone_conflict']
-export const PRODUCT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['negative_stock', 'barcode_collision', 'sku_collision']
+export const PRODUCT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['negative_stock', 'barcode_collision', 'sku_collision', 'stock_receipt']
 
 function escapeLike(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
