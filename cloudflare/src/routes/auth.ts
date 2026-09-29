@@ -1176,7 +1176,8 @@ async function accountMustChangePassword(env: Env, userId: number): Promise<bool
 
 // AUTH-P1 (shared tills): the app asks the browser to save the password after
 // a sign-in unless another account has been seen on this browser's device id.
-// Administrators have no trusted_devices rows, so any other row means shared.
+// The device gate records only staff sign-ins, so a device only administrators
+// use reads as not shared.
 // Advisory only: a failed lookup answers "shared" (no save offer) rather than
 // failing a sign-in whose password was already verified.
 async function deviceUsedByAnotherAccount(env: Env, userId: number, deviceId: unknown): Promise<boolean> {

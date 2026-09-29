@@ -2,13 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { passwordForSecondFactor, passwordNoticeKey, requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
 
-// AUTH-P1: after a successful sign-in or own password change the app asks the
-// browser's password manager to save the credential (Chromium's
-// navigator.credentials.store shows "Save password?" / "Update password?").
-// The app never writes a password to the clipboard on its own: a copy happens
-// only when the person presses a Copy button. So requestPasswordSave must
-// leave the clipboard alone whatever the browser does -- store refused, store
-// missing, no PasswordCredential at all.
+// A save request never touches the clipboard, whatever the browser does with it;
+// only a Copy button copies a password.
 
 type TestCallback = () => void | Promise<void>
 let failed = 0

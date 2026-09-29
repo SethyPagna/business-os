@@ -42,11 +42,8 @@ const handoffPath = new URL('../src/components/auth/passwordRecoveryHandoff.ts',
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, unknown>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, unknown>
 
-// AUTH-P1: password managers. The form is what Safari, Firefox and Chromium
-// key on to offer "Update password?": a visible-to-them username text input
-// first (never display:none), then named current / new / confirm inputs.
-// After a successful change the app asks the browser to update the saved
-// password BEFORE it leaves the screen -- the saved one is the leaked one.
+// Safari, Firefox and Chromium pair this form by a username text input they can
+// see (never display:none) before the named current / new / confirm inputs.
 
 const require = createRequire(import.meta.url)
 const React = require('react')

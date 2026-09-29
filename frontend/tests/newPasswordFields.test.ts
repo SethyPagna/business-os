@@ -4,17 +4,8 @@ import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import { newPasswordProblem } from '../src/utils/passwordRules.ts'
 
-// AUTH-P1: components/auth/password/NewPasswordFields.tsx, the new + confirm
-// pair every set-a-password screen uses.
-//   - 'self': autocomplete="new-password" and Safari's passwordrules, so the
-//     person's own password manager offers to save it;
-//   - 'other-user' (an administrator setting someone else's password): off
-//     plus the 1Password / LastPass / Bitwarden ignore attributes, so it never
-//     lands in the administrator's vault;
-//   - Show never switches the input to type=text (a submit while revealed can
-//     skip the browsers' save logic): the value appears in a line below;
-//   - Suggest fills both inputs with one suggestion; Copy writes the clipboard
-//     only when pressed.
+// Show never switches an input to type=text: a submit while revealed can skip
+// the browsers' save logic.
 
 type TestCallback = () => void | Promise<void>
 let failed = 0

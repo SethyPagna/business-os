@@ -1,18 +1,5 @@
-// AUTH-P1 (C15): shared tills. After a password sign-in the app asks the
-// browser to save the password (frontend Login.tsx requestPasswordSave). On a
-// till that other staff also sign in to, that would leave one person's
-// password in the till's password manager for the next person. The sign-in
-// answer therefore says `sharedDevice: true` when ANOTHER account has already
-// been seen on this browser's device id (trusted_devices, migration 0005),
-// and the app then does not ask.
-//
-// Administrator accounts skip device approval and get no trusted_devices row,
-// so an administrator signing in on a staff till is still recognised as
-// shared (a staff row exists for that device), while a device only ever used
-// by administrators reads as not shared.
-//
-// Drives the REAL routes/auth.ts /login and /otp/verify (harness/
-// load_auth_route.cjs, every migration applied).
+// The device gate records only staff sign-ins, so a device only administrators
+// use reads as not shared.
 //
 // Run: node scripts/test-login-shared-device-pure.cjs
 
