@@ -8,7 +8,7 @@
 // subtraction, so a race turns into a real constraint failure that rolls the
 // whole sale transaction back.
 //
-// This checks three things against a real in-memory SQLite:
+// This checks four things against a real in-memory SQLite:
 //   1. migration 0058 is valid SQL, rebuilds both tables with the CHECK, and
 //      defensively floors any pre-existing negative row during the copy.
 //   2. the exact deduction pattern the route now uses (plain subtraction in an
@@ -17,6 +17,8 @@
 //   3. routes/sales.ts actually ships that pattern (no MAX(0, ...) on the sale
 //      deduction) and uses the strict batch helper -- a guard so a future edit
 //      can't quietly reintroduce the clamp.
+//   4. lib/productBatches.ts exports no clamped lot-decrement statement
+//      builder, so no batch caller can pick up a silent floor.
 
 const fs = require('fs')
 const path = require('path')
@@ -135,6 +137,20 @@ test('routes/sales.ts ships the strict pattern (no MAX(0) clamp on the sale dedu
   )
   // The race is reported as a 409 stock conflict, not an opaque 500.
   assert.ok(src.includes("code: 'stock_conflict'"), 'a concurrent-oversell abort is mapped to a 409 stock_conflict')
+})
+
+test('lib/productBatches.ts exports no clamped lot-decrement statement builder', () => {
+  const ts = require('typescript')
+  const file = path.join(__dirname, '..', 'src', 'lib', 'productBatches.ts')
+  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+  const hasModifier = (node, kind) => (node.modifiers || []).some((modifier) => modifier.kind === kind)
+  const clampedBuilders = source.statements
+    .filter((node) => ts.isFunctionDeclaration(node)
+      && hasModifier(node, ts.SyntaxKind.ExportKeyword)
+      && !hasModifier(node, ts.SyntaxKind.AsyncKeyword))
+    .filter((node) => /UPDATE branch_batch_stock SET quantity = MAX\(0/.test(node.getText(source)))
+    .map((node) => node.name.text)
+  assert.deepStrictEqual(clampedBuilders, [])
 })
 
 if (failed) { console.error(`\n${failed} test(s) failed`); process.exit(1) }

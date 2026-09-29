@@ -223,11 +223,13 @@ const NOW = Date.parse('2026-09-06T08:00:00.000Z')
   // --- 3. the two currencies stay apart ------------------------------------
   // The dollar side moved by 10 + 58 - 8.5 - 9 - 3 = +47.5 and the riel side
   // by 5,000 + 82,000 - 20,000 - 4,000 = +63,000. Neither number is
-  // derivable from the other at any exchange rate the fixture uses (4,100),
+  // derivable from the other at either rate the fixture uses (4,100 or 4,000),
   // so an implementation that folded them would have to miss one.
   assert.equal(result.expected.usd - result.opening.usd, 47.5)
   assert.equal(result.expected.khr - result.opening.khr, 63_000)
-  assert.notEqual(Math.round((result.expected.khr - result.opening.khr) / 4100), result.expected.usd - result.opening.usd)
+  for (const rate of [4100, 4000]) {
+    assert.notEqual((result.expected.khr - result.opening.khr) / rate, result.expected.usd - result.opening.usd, `riel / ${rate}`)
+  }
   console.log('PASS native currencies: dollars and riel move independently; no exchange rate is applied anywhere')
 
   // --- 4. cash is a KIND, not a name ---------------------------------------

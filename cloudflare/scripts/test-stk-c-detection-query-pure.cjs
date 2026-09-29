@@ -9,14 +9,14 @@
 //   the old removeStockAcrossBatches drain, replayed with its own SQL (every
 //   lot to 0, aggregate decremented by the drained units) and no movement --
 //   what a mixed lot + unlotted removal left before the fix;
+//   a lot at 0 whose nearest movement is 10 minutes later, at ANOTHER branch,
+//   or of another product (a time-, branch- or product-blind match would
+//   clear it);
 //   a receipt that wrote stock and then stored the CHECK failure (400), and
 //   one still unfinished long after it was claimed.
 // Known negatives, each the counterexample to a plausible wrong query:
 //   the same drain WITH its movement (a query flagging every lot at 0 fails);
 //   a movement 119 s later, or in the other timestamp shape (an exact-time
-//   match fails);
-//   a movement of the same product at ANOTHER branch, or another product at
-//   the same branch, does NOT clear a drain (a product-only or branch-only
 //   match fails);
 //   a partly drained lot (a mixed removal always drained every lot to 0);
 //   a completed 200 receipt, an unwritten refusal, a request still in flight;
