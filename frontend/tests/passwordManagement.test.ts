@@ -143,8 +143,12 @@ await runTest('the e-mail reset request is a real form: Enter sends it', () => {
 
 await runTest('the browser is asked to save only after a verified password, never with an automatic copy', () => {
   assert.match(sliceConst(loginSource, 'handleLogin'), /requestPasswordSaveAfterSignIn\(result, password\)/)
-  assert.match(sliceConst(loginSource, 'handleLogin'), /passwordForSecondFactorRef\.current = password/)
-  assert.match(sliceConst(loginSource, 'handleOtp'), /requestPasswordSaveAfterSignIn\(verifyResult, passwordForSecondFactorRef\.current\)/)
+  assert.match(sliceConst(loginSource, 'handleLogin'), /passwordForSecondFactorRef\.current = \{ otpChallenge: result\.otpChallenge \|\| '', password \}/)
+  assert.match(
+    sliceConst(loginSource, 'handleOtp'),
+    /requestPasswordSaveAfterSignIn\(verifyResult, passwordForSecondFactor\(passwordForSecondFactorRef\.current, pendingOtpChallenge\)\)/,
+    'the held password goes only to the authenticator step its own password step opened (R-AUTH-P1 F4)',
+  )
   assert.doesNotMatch(loginSource, /persistChangedPassword|copyPasswordToClipboard|passwordPersistenceNotice/)
 })
 

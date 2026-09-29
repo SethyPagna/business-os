@@ -97,6 +97,14 @@ export async function requestPasswordSaveAfterSignIn(answer: SignInAnswer, passw
   return requestPasswordSave({ username: String(answer.user?.username || ''), password, displayName: answer.user?.name })
 }
 
+export type SecondFactorPassword = { otpChallenge: string; password: string }
+
+// The password step's password belongs to the authenticator challenge that
+// step opened; a step Google opened (another account, perhaps) never gets it.
+export function passwordForSecondFactor(held: SecondFactorPassword, otpChallenge: string): string {
+  return held.otpChallenge && held.otpChallenge === otpChallenge ? held.password : ''
+}
+
 export async function copyPasswordToClipboard(password: string): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return false
   try {

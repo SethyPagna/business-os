@@ -16,7 +16,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
-import { requestPasswordSaveAfterSignIn } from '../../utils/passwordManager.ts'
+import { passwordForSecondFactor, requestPasswordSaveAfterSignIn, type SecondFactorPassword } from '../../utils/passwordManager.ts'
 import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
@@ -31,6 +31,7 @@ import {
 } from '../../utils/loaders.ts'
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
+const NO_SECOND_FACTOR_PASSWORD: SecondFactorPassword = { otpChallenge: '', password: '' }
 
 // The staff sign-in shows the staff app's own icon, not the storefront's: an
 // explicit request (Aug 25 2026) reversed the earlier storefront default and
@@ -310,7 +311,7 @@ export default function Login() {
   const otpVerifyInFlightRef = useRef(false)
   // The password the Worker accepted before asking for the authenticator code;
   // saved to the browser only once the code is accepted too.
-  const passwordForSecondFactorRef = useRef('')
+  const passwordForSecondFactorRef = useRef<SecondFactorPassword>(NO_SECOND_FACTOR_PASSWORD)
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -713,7 +714,7 @@ export default function Login() {
         return
       }
       if (result?.otpRequired) {
-        passwordForSecondFactorRef.current = password
+        passwordForSecondFactorRef.current = { otpChallenge: result.otpChallenge || '', password }
         setOtpRequired(true)
         setPendingUserId(result.userId ?? null)
         setPendingOtpChallenge(result.otpChallenge || '')
@@ -766,7 +767,7 @@ export default function Login() {
           : '')
       } else if (verifyResult?.success && verifyResult?.user) {
         await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.sessionExpiresAt || '')
-        void requestPasswordSaveAfterSignIn(verifyResult, passwordForSecondFactorRef.current)
+        void requestPasswordSaveAfterSignIn(verifyResult, passwordForSecondFactor(passwordForSecondFactorRef.current, pendingOtpChallenge))
       } else {
         setError(localizeAuthError(verifyResult, tr, tr('invalid_otp_code', 'Invalid OTP code')))
       }
@@ -1508,7 +1509,7 @@ export default function Login() {
                 setOtpRequired(false)
                 setPendingUserId(null)
                 setPendingOtpChallenge('')
-                passwordForSecondFactorRef.current = ''
+                passwordForSecondFactorRef.current = NO_SECOND_FACTOR_PASSWORD
                 setOtp('')
                 setError('')
               }}

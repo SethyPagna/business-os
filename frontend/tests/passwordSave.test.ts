@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { passwordNoticeKey, requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
+import { passwordForSecondFactor, passwordNoticeKey, requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
 
 // AUTH-P1: after a successful sign-in or own password change the app asks the
 // browser's password manager to save the credential (Chromium's
@@ -138,6 +138,14 @@ await runTest('after sign-in: a password the Worker marked must-change (publicly
     assert.deepEqual(stored, [{ id: 'sokha', password: 'Typed-Pass-1', name: 'Sokha' }, { id: 'sokha', password: 'Typed-Pass-2', name: 'Sokha' }])
     assert.deepEqual(clipboardWrites, [])
   })
+})
+
+await runTest('the authenticator step saves the password only when that same password step opened it, never one Google opened', () => {
+  const held = { otpChallenge: 'challenge-from-password-step', password: 'Typed-Pass-1' }
+  assert.equal(passwordForSecondFactor(held, 'challenge-from-password-step'), 'Typed-Pass-1')
+  assert.equal(passwordForSecondFactor(held, 'challenge-from-google-step'), '', "another account's Google step never inherits it")
+  assert.equal(passwordForSecondFactor({ otpChallenge: '', password: 'Typed-Pass-1' }, ''), '', 'no challenge binds nothing')
+  assert.equal(passwordForSecondFactor({ otpChallenge: '', password: '' }, 'challenge-from-google-step'), '')
 })
 
 await runTest('the notice after an own password change says whether the browser was asked to save it, in both languages', () => {
