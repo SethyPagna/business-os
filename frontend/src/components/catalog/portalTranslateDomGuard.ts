@@ -1,8 +1,8 @@
-// Google Translate vs React (P-public-1 follow-up, refuter 2026-09-25).
+// Browser page translation vs React (P-public-1 follow-up, refuter 2026-09-25).
 //
-// Google Translate rewrites text nodes in place -- it wraps them in <font>
-// elements and moves them. React still holds the ORIGINAL text nodes, so the
-// next commit that removes or inserts next to one calls
+// Chrome's built-in translator rewrites text nodes in place -- it wraps them
+// in <font> elements and moves them. React still holds the ORIGINAL text
+// nodes, so the next commit that removes or inserts next to one calls
 // parent.removeChild(child) / parent.insertBefore(node, ref) on a node whose
 // parent is no longer `parent`, and the DOM throws NotFoundError. Until now
 // the only recovery was publicErrorRecovery.ts reloading the page (rate
