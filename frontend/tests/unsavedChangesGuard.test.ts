@@ -224,7 +224,7 @@ await runTest('form dirtiness ignores key order and re-typed identical values', 
 await runTest('both language packs carry every string the prompt renders', () => {
   const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
   const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-  const keys = ['unsaved_changes_title', 'unsaved_changes_body', 'discard_changes', 'back', 'saving', 'save_and_close']
+  const keys = ['unsaved_changes_title', 'discard', 'back', 'saving', 'save_and_close']
   for (const key of keys) {
     assert.ok(en[key], `en.json is missing ${key}`)
     assert.ok(km[key], `km.json is missing ${key}`)
@@ -235,6 +235,28 @@ await runTest('both language packs carry every string the prompt renders', () =>
     // Khmer must be Khmer, not an English placeholder.
     assert.match(km[key], /[ក-៿]/, `km.json's ${key} is not written in Khmer`)
   }
+})
+
+await runTest('the close prompt is the title alone with Discard and Back on one row (owner, 30 Sep)', () => {
+  const prompt = readFileSync(new URL('../src/components/shared/UnsavedChangesPrompt.tsx', import.meta.url), 'utf8')
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.doesNotMatch(prompt, /unsaved_changes_body/, 'no body paragraph under the title')
+  assert.doesNotMatch(prompt, /guard\.workLabel/, 'no work-label line under the title')
+  assert.doesNotMatch(prompt, /'discard_changes'/, 'the discard button reads "Discard", not "Discard changes"')
+  assert.match(prompt, /tr\('discard', 'Discard'\)/)
+  const actions = /data-unsaved-actions=""[^>]*className="([^"]+)"/.exec(prompt)
+  assert.ok(actions, 'the action row is marked')
+  assert.match(actions[1], /\bflex\b/)
+  assert.doesNotMatch(actions[1], /flex-col/, 'the buttons sit on one row, never stacked')
+  assert.equal((prompt.match(/min-w-0 flex-1 basis-0/g) || []).length, 3, 'every option button takes an equal share of the row')
+  assert.match(prompt, /items\.map\(/, 'concrete items still render when a host passes them')
+  assert.match(prompt, /guard\.preserveAndMinimize \? \([\s\S]*?<MinimizeButton/, 'the minimize icon stays on the title row')
+  assert.equal(en.discard, 'Discard')
+  assert.equal(km.discard, 'បោះបង់ចោល')
+  assert.equal(en.unsaved_changes_title, 'Discard unsaved changes?')
+  assert.equal(en.unsaved_changes_body, undefined, 'the retired body key is gone from en')
+  assert.equal(km.unsaved_changes_body, undefined, 'the retired body key is gone from km')
 })
 
 await runTest('every shared-Modal call site declares unsavedChanges -- no silent opt-out', () => {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Modal from '../shared/Modal.tsx'
+import ReasonListEditor from '../shared/ReasonListEditor.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { getReturnReasonPresets } from '../../api/returnsReadTransport.ts'
 import { getReturnReasonImpact, replaceReturnReason, saveReturnReasonPresets } from '../../api/returnsTransport.ts'
@@ -33,6 +32,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [editorDirty, setEditorDirty] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -62,8 +62,7 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
     }
   }
 
-  const add = async () => {
-    const label = draft.trim().replace(/\s+/g, ' ')
+  const add = async (label: string) => {
     if (!label) return
     const nextList = normalizeReturnReasonList([...presets[scope], label])
     if (nextList.length === presets[scope].length) {
@@ -74,9 +73,8 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
     await persist({ ...presets, [scope]: nextList }, tr('return_reason_added', 'Saved return reason added.'))
   }
 
-  const rename = async (from: string) => {
-    const to = window.prompt(tr('rename_reason_prompt', 'Rename saved reason'), from)?.trim().replace(/\s+/g, ' ')
-    if (!to || to.toLocaleLowerCase() === from.toLocaleLowerCase()) return
+  const rename = async (from: string, to: string): Promise<boolean> => {
+    if (to.toLocaleLowerCase() === from.toLocaleLowerCase()) return true
     setSaving(true)
     try {
       const impact = await getReturnReasonImpact({ return_scope: scope, from, to }) as { linked_records?: number; target_exists?: boolean }
@@ -113,47 +111,53 @@ export default function ReturnReasonManagerModal({ onClose, onChanged, notify, t
         ? tr('return_reason_updated_linked', 'Saved reason and linked returns updated.')
         : tr('return_reason_updated_only', 'Saved reason updated; existing returns were preserved.'), 'success')
       onChanged?.()
+      return true
     } catch (error) {
       notify(error instanceof Error ? error.message : tr('return_reason_rename_failed', 'Failed to rename return reason'), 'error')
+      return false
     } finally {
       setSaving(false)
     }
   }
 
+  // The shared editor asks this through the confirm dialog before remove() runs.
+  const removeConfirm = (value: string) => ({
+    title: tr('remove', 'Remove'),
+    message: tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value),
+    confirmLabel: tr('remove', 'Remove'),
+    danger: true,
+  })
   const remove = async (value: string) => {
-    const confirmed = await askToConfirm({
-      title: tr('remove', 'Remove'),
-      message: tr('return_reason_remove_confirm', 'Remove "{name}" from saved choices? Existing returns keep their recorded reason.').replace('{name}', value),
-      confirmLabel: tr('remove', 'Remove'),
-      danger: true,
-    })
-    if (!confirmed) return
     await persist(removeReturnReasonPreset(presets, scope, value), tr('return_reason_removed', 'Saved choice removed; existing returns were preserved.'))
   }
 
+  const rows = useMemo(() => presets[scope].map((reason) => ({ id: reason.toLocaleLowerCase(), label: reason })), [presets, scope])
+
   return (
-    <Modal title={tr('return_reasons_title', 'Return reasons')} onClose={onClose} size="sm" unsavedChanges={{ dirty: Boolean(draft.trim()) }}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+    <Modal title={tr('return_reasons_title', 'Return reasons')} onClose={onClose} size="sm" unsavedChanges={{ dirty: editorDirty }}>
+      <div className="space-y-2.5">
+        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
           {(['customer', 'supplier'] as ReturnReasonScope[]).map((value) => (
-            <button key={value} type="button" onClick={() => setScope(value)} className={`h-8 rounded-md px-2 text-xs font-semibold capitalize ${scope === value ? 'bg-white text-blue-700 shadow-sm dark:bg-slate-700 dark:text-blue-300' : 'text-slate-500'}`}>
+            <button key={value} type="button" role="tab" aria-selected={scope === value} onClick={() => setScope(value)} className={`min-h-8 rounded-md px-2 text-xs font-semibold leading-relaxed ${scope === value ? 'bg-white text-blue-700 shadow-sm dark:bg-slate-700 dark:text-blue-300' : 'text-slate-500'}`}>
               {tr(value, value === 'customer' ? 'Customer' : 'Supplier')}
             </button>
           ))}
         </div>
-        <div className="flex min-w-0 gap-1.5">
-          <input className="input h-9 min-w-0 flex-1 text-sm" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void add() }} placeholder={tr('new_reason_placeholder', 'Add a reusable reason')} />
-          <button type="button" className="btn-primary h-9 shrink-0 px-3 text-xs" disabled={saving || !draft.trim()} onClick={() => void add()}>{tr('add', 'Add')}</button>
-        </div>
-        <div className="max-h-72 space-y-1 overflow-y-auto">
-          {loading ? <div className="py-6 text-center text-sm text-slate-400">{tr('loading', 'Loading...')}</div> : presets[scope].length ? presets[scope].map((reason) => (
-            <div key={reason.toLocaleLowerCase()} className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 dark:border-slate-700">
-              <span className="min-w-0 flex-1 detail-scroll-text text-sm text-slate-700 dark:text-slate-200">{reason}</span>
-              <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 dark:text-blue-300" onClick={() => void rename(reason)} disabled={saving} aria-label={`${tr('rename', 'Rename')} ${reason}`} title={tr('preview_and_replace', 'Preview and replace')}><Pencil className="h-3.5 w-3.5" /></button>
-              <button type="button" className="flex h-7 w-7 items-center justify-center rounded-md text-red-500 hover:bg-red-50 dark:text-red-300" onClick={() => void remove(reason)} disabled={saving} aria-label={`${tr('remove', 'Remove')} ${reason}`} title={tr('remove_saved_reason_choice', 'Remove saved choice')}><Trash2 className="h-3.5 w-3.5" /></button>
-            </div>
-          )) : <div className="rounded-lg border border-dashed border-slate-300 py-6 text-center text-sm text-slate-400 dark:border-slate-700">{tr('no_saved_reasons', 'No saved reasons yet for this workflow.')} {tr('return_reason_free_text_note', 'Free-text entry remains available.')}</div>}
-        </div>
+        <ReasonListEditor
+          items={rows}
+          tr={tr}
+          loading={loading}
+          busy={saving}
+          draft={draft}
+          onDraftChange={setDraft}
+          onAdd={(label) => add(label)}
+          addPlaceholder={tr('new_reason_placeholder', 'Add a reusable reason')}
+          onRename={(row, to) => rename(row.label, to)}
+          onDelete={(row) => remove(row.label)}
+          deleteConfirm={(row) => removeConfirm(row.label)}
+          onDirtyChange={setEditorDirty}
+          emptyText={<>{tr('no_saved_reasons', 'No saved reasons yet for this workflow.')} {tr('return_reason_free_text_note', 'Free-text entry remains available.')}</>}
+        />
       </div>
       {confirmDialog}
     </Modal>

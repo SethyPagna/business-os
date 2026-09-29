@@ -24,6 +24,7 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const modalSource = fs.readFileSync(new URL('../src/components/returns/ReturnReasonManagerModal.tsx', import.meta.url), 'utf8')
+const editorSource = fs.readFileSync(new URL('../src/components/shared/ReasonListEditor.tsx', import.meta.url), 'utf8')
 const returnsSource = fs.readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
 const brandsSource = fs.readFileSync(new URL('../src/components/products/lookups/ManageBrandsModal.tsx', import.meta.url), 'utf8')
 const enPack = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -52,10 +53,14 @@ runTest('the per-row rename/remove tooltips and aria-labels are translated, reus
   assert.doesNotMatch(modalSource, /title="Remove saved choice"/, 'the trash tooltip should not be a bare English literal')
   assert.doesNotMatch(modalSource, /aria-label=\{`Rename \$\{reason\}`\}/, 'the pencil aria-label should not string-interpolate a raw English word')
   assert.doesNotMatch(modalSource, /aria-label=\{`Remove \$\{reason\}`\}/, 'the trash aria-label should not string-interpolate a raw English word')
-  assert.match(modalSource, /tr\('preview_and_replace'/, 'the pencil tooltip should reuse the shared preview_and_replace key (see ExpenseLabelManagerModal)')
-  assert.match(modalSource, /tr\('remove_saved_reason_choice'/, 'the trash tooltip should use a translated key')
-  assert.match(modalSource, /tr\('rename', 'Rename'\)\}\s*\$\{reason\}/, 'the pencil aria-label should translate the verb via the shared rename key')
-  assert.match(modalSource, /tr\('remove', 'Remove'\)\}\s*\$\{reason\}/, 'the trash aria-label should translate the verb via the shared remove key')
+  // UI-STOCK-1: the rows are the shared ReasonListEditor's, so the icons and
+  // their names are translated once there, through the tr this modal hands it.
+  assert.match(modalSource, /<ReasonListEditor[\s\S]*?tr=\{tr\}/, 'the modal hands its translator to the shared editor')
+  assert.match(editorSource, /const renameLabel = tr\('rename', 'Rename'\)/, 'the pencil name comes from the shared rename key')
+  assert.match(editorSource, /const deleteLabel = tr\('delete', 'Delete'\)/, 'the trash name comes from the shared delete key')
+  assert.match(editorSource, /aria-label=\{`\$\{renameLabel\} \$\{item\.label\}`\} title=\{renameLabel\}/, 'the pencil names the reason it renames')
+  assert.match(editorSource, /aria-label=\{`\$\{deleteLabel\} \$\{item\.label\}`\} title=\{deleteLabel\}/, 'the trash names the reason it deletes')
+  assert.doesNotMatch(editorSource, /title="[A-Z][a-z]/, 'no bare English tooltip in the shared editor')
 })
 
 runTest('the empty state and loading text are translated', () => {
@@ -63,7 +68,8 @@ runTest('the empty state and loading text are translated', () => {
   assert.match(modalSource, /tr\('no_saved_reasons'/, 'the empty state should reuse the shared no_saved_reasons key (see InventoryReasonManagerModal)')
   assert.match(modalSource, /tr\('return_reason_free_text_note'/, 'the free-text remark should resolve through a translated key')
   assert.doesNotMatch(modalSource, />Loading…</, 'the loading placeholder should not be a hardcoded literal')
-  assert.match(modalSource, /tr\('loading'/, 'the loading placeholder should reuse the shared loading key')
+  assert.match(modalSource, /<ReasonListEditor[\s\S]*?loading=\{loading\}/, 'the modal shows its loading state through the shared editor')
+  assert.match(editorSource, /tr\('loading'/, 'the loading placeholder should reuse the shared loading key')
 })
 
 runTest('every prompt/confirm/notify string in the rename and remove flows is translated', () => {
@@ -109,14 +115,14 @@ runTest('the linked-rename question labels its buttons like Inventory\'s saved-r
   const end = modalSource.indexOf('const response = await replaceReturnReason(')
   assert.ok(start >= 0 && end > start, 'the linked-rename ask is where the rename flow asks it')
   const ask = modalSource.slice(start, end)
-  const inventorySource = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+  const stockCatalogSource = fs.readFileSync(new URL('../src/utils/useStockReasonCatalog.ts', import.meta.url), 'utf8')
   for (const [prop, key, fallback] of [
     ['confirmLabel', 'reason_update_linked_too', 'Update linked records too'],
     ['cancelLabel', 'reason_rename_saved_only', 'Rename saved reason only'],
   ]) {
     const call = `${prop}: tr('${key}', '${fallback}')`
     assert.ok(ask.includes(call), `ReturnReasonManagerModal's ask sets ${call}`)
-    assert.ok(inventorySource.includes(call), `Inventory's rename sets the same ${call}`)
+    assert.ok(stockCatalogSource.includes(call), `the stock reasons manager's rename sets the same ${call}`)
     assert.equal(typeof enPack[key], 'string', `en.json has ${key}`)
     assert.match(String(kmPack[key] ?? ''), /[ក-៿]/, `km.json ${key} is Khmer`)
   }

@@ -57,15 +57,6 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
             <h2 className="text-base font-bold leading-relaxed text-gray-900 dark:text-white">
               {tr('unsaved_changes_title', 'Discard unsaved changes?')}
             </h2>
-            <p className="mt-1 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
-              {tr('unsaved_changes_body', 'This form has changes that were never saved. Go back to keep them, or discard them and close.')}
-            </p>
-            {guard.workLabel ? (
-              <p className="mt-2 flex items-center gap-2 text-sm leading-relaxed text-gray-500 dark:text-gray-400">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
-                <span className="min-w-0 break-words">{guard.workLabel}</span>
-              </p>
-            ) : null}
           </div>
           {guard.preserveAndMinimize ? (
             <MinimizeButton
@@ -87,14 +78,14 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
         ) : null}
         {/* Actions at the end of the content, never beside a close control
             (S4-20's rule, applied to this dialog too). */}
-        <div className="mt-4 flex flex-col gap-2">
+        <div data-unsaved-actions="" className="mt-4 flex items-stretch gap-2">
           {guard.options.map((option) => {
             if (option === 'save') {
               return (
                 <button
                   key="save"
                   type="button"
-                  className="btn-primary min-h-11 w-full text-sm leading-relaxed"
+                  className="btn-primary min-h-11 min-w-0 flex-1 basis-0 text-sm leading-relaxed"
                   disabled={guard.saving}
                   onClick={guard.saveAndClose}
                 >
@@ -107,11 +98,11 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
                 <button
                   key="discard"
                   type="button"
-                  className="min-h-11 w-full rounded-lg border border-red-300 px-4 py-2 text-sm font-medium leading-relaxed text-red-600 hover:bg-red-50 disabled:opacity-40 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-900/20"
+                  className="min-h-11 min-w-0 flex-1 basis-0 rounded-lg border border-red-300 px-3 py-2 text-sm font-medium leading-relaxed text-red-600 hover:bg-red-50 disabled:opacity-40 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-900/20"
                   disabled={guard.saving}
                   onClick={guard.discardAndClose}
                 >
-                  {tr('discard_changes', 'Discard changes')}
+                  {tr('discard', 'Discard')}
                 </button>
               )
             }
@@ -119,7 +110,7 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
               <button
                 key="back"
                 type="button"
-                className="btn-secondary min-h-11 w-full text-sm leading-relaxed"
+                className="btn-secondary min-h-11 min-w-0 flex-1 basis-0 text-sm leading-relaxed"
                 disabled={guard.saving}
                 onClick={guard.dismissPrompt}
               >
