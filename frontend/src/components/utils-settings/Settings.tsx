@@ -31,6 +31,7 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
+import TelegramSummarySections from './TelegramSummarySections.tsx'
 import { ACCOUNT_NAV_IDS, DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -2202,6 +2203,7 @@ export default function Settings() {
                   />
                 </label>
               ))}
+              <TelegramSummarySections form={form} setValue={setValue} disabled={!canEditSettings} t={t} />
               <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
                 <div className="min-w-0 pr-3">
                   <label htmlFor="settings-telegram-language" className="block text-sm font-medium leading-relaxed text-gray-800 dark:text-gray-100">
