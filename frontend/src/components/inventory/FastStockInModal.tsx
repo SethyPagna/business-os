@@ -63,6 +63,7 @@ import {
   type StockSessionStep,
 } from '../../utils/stockSessionDraft.ts'
 import { convertLegacyStockDraft, type LegacyStockDraft } from '../../utils/legacyStockDrafts.ts'
+import { discardStockAdjustDraft, stockAdjustDraftKey } from '../../utils/stockAdjustDraft.ts'
 import StockSessionHeader, { StockSessionSteps, STOCK_MODE_KEYS } from '../stock-session/StockSessionHeader.tsx'
 import StockSessionSharedDetails from '../stock-session/StockSessionSharedDetails.tsx'
 import StockSessionLineEntry from '../stock-session/StockSessionLineEntry.tsx'
@@ -197,9 +198,10 @@ export default function FastStockInModal({
     let stored: StockSessionDraft | null = null
     let rewrite = false
     let legacyBlocked = ''
+    let legacyConverted = false
     if (legacyDraft) {
       const converted = convertLegacyStockDraft(legacyDraft, mintLineId)
-      if (converted.draft) { stored = converted.draft; rewrite = true } else legacyBlocked = converted.blocked
+      if (converted.draft) { stored = converted.draft; rewrite = true; legacyConverted = true } else legacyBlocked = converted.blocked
     }
     if (!stored) {
       const raw = readWorkDraft<unknown>(fastStockInDraftKey)?.data
@@ -234,6 +236,16 @@ export default function FastStockInModal({
       if (!stored) pristine = { ...pristine, ...entryFor(initialProduct, opened.mode) }
     }
     if (rewrite) writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, opened)
+    // The work now lives in the session draft, so the retired surface's copy goes.
+    // A blocked conversion keeps it: it is the evidence of an unknown outcome.
+    if (legacyDraft && legacyConverted) {
+      if (legacyDraft.kind === 'stock_adjust') {
+        const productId = (legacyDraft.data as { product?: { id?: unknown } } | null)?.product?.id
+        discardStockAdjustDraft(stockAdjustDraftKey(productId), user?.id ?? user?.username ?? null)
+      } else {
+        clearWorkDraft(scopedWorkDraftKey('create_products_session'))
+      }
+    }
     initRef.current = { draft: opened, pristine, legacyBlocked }
   }
   const init = initRef.current

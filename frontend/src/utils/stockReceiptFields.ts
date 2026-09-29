@@ -353,9 +353,12 @@ export type StockReceiptGateInput = {
   unitCostUsd?: number | string | null
   freeGoods?: boolean | null
   attribution?: string | null
-  /** Paid units. Quantity 0 with freeQuantity > 0 is a declared-free receipt. */
+  /**
+   * The paid quantity and the free units riding with it. Nothing paid and
+   * something free is a fully free receipt: it declares itself free, so its
+   * cost is 0 whatever was typed.
+   */
   quantity?: number | string | null
-  /** Units the supplier gave at no cost (Stock Session "Free"). */
   freeQuantity?: number | string | null
 }
 
@@ -371,12 +374,13 @@ export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockRe
   if (!input.isStockIn) return ''
   if (input.attribution === 'correction') return ''
   if (!String(input.supplierName ?? '').trim() && !String(input.lotSupplierName ?? '').trim() && !input.lotAttributionDeferred) return 'supplier_required'
+  if (Number(input.quantity) === 0 && Number(input.freeQuantity) > 0) return ''
   const typed = typeof input.unitCostUsd === 'string' ? input.unitCostUsd.trim() : input.unitCostUsd
   if (typed === '' || typed == null) return 'cost_required'
   const cost = Number(typed)
   if (!Number.isFinite(cost)) return 'cost_required'
   if (cost < 0) return 'cost_negative'
-  if (cost === 0 && !receiptDeclaresFree(input)) return 'free_goods_required'
+  if (cost === 0 && !input.freeGoods) return 'free_goods_required'
   return ''
 }
 
