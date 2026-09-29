@@ -385,6 +385,12 @@ await runTest('the landing cover is fetched first and fades in; the PublicCatalo
   assert.match(cover, /fetchPriority=\{imageFetchPriority\}/)
   assert.match(cover, /onLoad=/, 'the cover fades in once decoded')
   assert.match(publicPage(), /imageFetchPriority="high"/)
+  const css = read('../src/styles/public-portal.css')
+  const coverRules = css.match(/^[^{}\n]*\.portal-cover-image[^{}\n]*\{/gm) || []
+  assert.equal(coverRules.length, 2, 'one hidden rule and one loaded rule')
+  for (const selector of coverRules) {
+    assert.match(selector, /^body\[data-public-portal='true'\] \.portal-cover-image/, 'the fade is the storefront\'s only: the Website Editor preview loads this stylesheet too and must render exactly as before')
+  }
   const root = publicRoot()
   assert.match(root, /<PublicStorefrontSkeleton /)
   assert.match(root, /'loadingPortal'/)
