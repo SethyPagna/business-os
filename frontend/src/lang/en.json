@@ -3661,6 +3661,7 @@
   "password_required": "Password required",
   "password_required_new_user": "Password is required for new users",
   "password_reset_done": "Password reset complete. You can now sign in with the new password.",
+  "password_changed_sign_in_to_save": "Password changed. Sign in to keep it on this device.",
   "password_suggest": "Suggest a strong password",
   "password_strength_label": "Strength",
   "password_strength_weak": "Weak",

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { requestPasswordSave } from '../src/utils/passwordManager.ts'
+import { requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
 
 // AUTH-P1: after a successful sign-in or own password change the app asks the
 // browser's password manager to save the credential (Chromium's
@@ -98,6 +98,30 @@ await runTest('nothing to save without a username or a password', async () => {
   await withBrowser({ store: async () => undefined }, async (clipboardWrites, stored) => {
     assert.equal(await requestPasswordSave({ username: '  ', password: 'New pass-1' }), false)
     assert.equal(await requestPasswordSave({ username: 'sokha', password: '' }), false)
+    assert.deepEqual(stored, [])
+    assert.deepEqual(clipboardWrites, [])
+  })
+})
+
+await runTest('after sign-in: saves the verified password under the account username, never the typed phone or e-mail', async () => {
+  await withBrowser({ store: async () => undefined }, async (clipboardWrites, stored) => {
+    const answer = { success: true, sharedDevice: false, user: { username: 'sokha', name: 'Sokha' } }
+    assert.equal(await requestPasswordSaveAfterSignIn(answer, 'Typed-Pass-1'), true)
+    assert.deepEqual(stored, [{ id: 'sokha', password: 'Typed-Pass-1', name: 'Sokha' }])
+    assert.equal(await requestPasswordSaveAfterSignIn({ success: true, user: { username: 'sokha' } }, 'Typed-Pass-1'), true, 'an older Worker without the flag still saves')
+    assert.deepEqual(clipboardWrites, [])
+  })
+})
+
+await runTest('after sign-in: nothing is saved on a shared device, a refusal, a pending device or a password-less sign-in', async () => {
+  await withBrowser({ store: async () => undefined }, async (clipboardWrites, stored) => {
+    const user = { username: 'sokha', name: 'Sokha' }
+    const devicePending: { success?: boolean; deviceApprovalRequired: boolean; deviceStatus: string } = { deviceApprovalRequired: true, deviceStatus: 'pending' }
+    assert.equal(await requestPasswordSaveAfterSignIn({ success: true, sharedDevice: true, user }, 'Typed-Pass-1'), false)
+    assert.equal(await requestPasswordSaveAfterSignIn({ success: false, user }, 'Typed-Pass-1'), false)
+    assert.equal(await requestPasswordSaveAfterSignIn(devicePending, 'Typed-Pass-1'), false)
+    assert.equal(await requestPasswordSaveAfterSignIn({ success: true, sharedDevice: false, user }, ''), false, 'Google, then the authenticator code: no password to save')
+    assert.equal(await requestPasswordSaveAfterSignIn(null, 'Typed-Pass-1'), false)
     assert.deepEqual(stored, [])
     assert.deepEqual(clipboardWrites, [])
   })

@@ -74,6 +74,20 @@ export async function requestPasswordSave(request: PasswordSaveRequest): Promise
   return tryStoreCredential(username, request.password, request.displayName)
 }
 
+type SignInAnswer = {
+  success?: boolean
+  sharedDevice?: boolean
+  user?: { username?: string; name?: string }
+} | null | undefined
+
+// After the Worker accepted the password (with or without the authenticator
+// step). Not on a device other accounts use (the Worker's sharedDevice): the
+// next person at that till would be offered this one's password.
+export async function requestPasswordSaveAfterSignIn(answer: SignInAnswer, password: string): Promise<boolean> {
+  if (!answer?.success || answer.sharedDevice) return false
+  return requestPasswordSave({ username: String(answer.user?.username || ''), password, displayName: answer.user?.name })
+}
+
 export async function copyPasswordToClipboard(password: string): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return false
   try {

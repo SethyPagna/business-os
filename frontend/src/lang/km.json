@@ -3661,6 +3661,7 @@
   "password_required": "ពាក្យសម្ងាត់ត្រូវការ",
   "password_required_new_user": "ត្រូវការពាក្យសម្ងាត់សម្រាប់អ្នកប្រើថ្មី",
   "password_reset_done": "កំណត់ពាក្យសម្ងាត់ឡើងវិញបានសម្រេច។ ឥឡូវអ្នកអាចចូលដោយពាក្យសម្ងាត់ថ្មី។",
+  "password_changed_sign_in_to_save": "បានប្ដូរពាក្យសម្ងាត់។ សូមចូលគណនី ដើម្បីរក្សាទុកវានៅលើឧបករណ៍នេះ។",
   "password_suggest": "ណែនាំពាក្យសម្ងាត់រឹងមាំ",
   "password_strength_label": "កម្រិតសុវត្ថិភាព",
   "password_strength_weak": "ខ្សោយ",
