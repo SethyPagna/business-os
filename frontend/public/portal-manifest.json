@@ -1,13 +1,13 @@
 {
-  "name": "Leang Beauty",
-  "short_name": "Leang Beauty",
-  "description": "Leang Beauty online store",
+  "name": "Leang Cosmetics",
+  "short_name": "Leang",
+  "description": "Browse Leang Cosmetics products and contact the store.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#1e3a8a",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/leang-cosmetics-icon-192.png",

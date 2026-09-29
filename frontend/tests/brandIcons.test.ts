@@ -51,7 +51,7 @@ assert.match(indexHtml, /adminAppleIcon\.setAttribute\('href', '\/apple-touch-ic
 assert.match(indexHtml, /hostname\.indexOf\('admin\.'\) === 0/, 'the bootstrap should distinguish the admin hostname')
 assert.match(indexHtml, /pathname === '\/'\s*\? !adminHostname/, 'the public production root must not be classified as admin')
 
-assert.equal(manifest.name, 'Business OS', 'manifest.json remains the admin app manifest')
+assert.equal(manifest.name, 'Leang Cosmetics Admin', 'manifest.json remains the staff app manifest')
 assert.deepEqual(
   manifest.icons.map((icon) => `${icon.src} ${icon.sizes} ${icon.purpose}`).sort(),
   [
@@ -97,7 +97,7 @@ const portalManifest = JSON.parse(read('../public/portal-manifest.json')) as {
   name: string
   icons: Array<{ src: string }>
 }
-assert.equal(portalManifest.name, 'Leang Beauty', 'the static portal manifest is the storefront brand, not Business OS')
+assert.equal(portalManifest.name, 'Leang Cosmetics', 'the static portal manifest is the storefront brand, not the staff app')
 assert.ok(
   portalManifest.icons.length > 0 && portalManifest.icons.every((icon) => /leang/i.test(icon.src)),
   'every portal-manifest icon must be a Leang asset',
