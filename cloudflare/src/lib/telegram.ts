@@ -238,12 +238,28 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
   }
 }
 
-function configurationProblem(config: TelegramConfig): string | null {
-  if (!config.token) return 'Telegram bot token is not configured on this Worker.'
-  if (!config.chatId) return 'Enter the Telegram alerts chat ID in Settings.'
+export const TELEGRAM_ERROR_CODES = [
+  'telegram_token_missing', 'telegram_chat_missing', 'telegram_admin_url_invalid', 'telegram_webhook_failed', 'telegram_rejected', 'telegram_menu_failed',
+] as const
+export type TelegramErrorCode = typeof TELEGRAM_ERROR_CODES[number]
+
+/** The message stays as it always read; `code` is what the Settings screen translates. */
+export class TelegramError extends Error {
+  readonly code: TelegramErrorCode
+
+  constructor(code: TelegramErrorCode, message: string) {
+    super(message)
+    this.name = 'TelegramError'
+    this.code = code
+  }
+}
+
+function configurationProblem(config: TelegramConfig): TelegramError | null {
+  if (!config.token) return new TelegramError('telegram_token_missing', 'Telegram bot token is not configured on this Worker.')
+  if (!config.chatId) return new TelegramError('telegram_chat_missing', 'Enter the Telegram alerts chat ID in Settings.')
   return null
 }
-function commandProblem(config: TelegramConfig): string | null {
+function commandProblem(config: TelegramConfig): TelegramError | null {
   return configurationProblem(config)
 }
 export function splitTelegramMessage(text: string): string[] {
@@ -287,7 +303,7 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
         response = await sendTelegramApi(config, chatId, part)
         if (!response.ok) body = await response.text().catch(() => '')
       }
-      if (!response.ok) throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
+      if (!response.ok) throw new TelegramError('telegram_rejected', `Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
     }
   }
 }
@@ -332,13 +348,49 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   return true
 }
 
-export async function getTelegramStatus(env: Env): Promise<{ configured: boolean; connected: boolean; enabled: boolean }> {
-  const config = await getTelegramConfig(env)
-  return { configured: Boolean(config.token), connected: !configurationProblem(config), enabled: config.enabled }
+export type TelegramCommandsState = 'connected' | 'not_connected' | 'unknown'
+const WEBHOOK_INFO_TIMEOUT_MS = 3000
+
+function commandWebhookUrl(env: Env): string {
+  return `${String(env.BUSINESS_OS_ADMIN_URL || '').replace(/\/$/, '')}/api/telegram/webhook`
 }
+
+// "Configured" is not "connected": a webhook that was never registered, or was lost with a token
+// change, leaves every command unanswered. Only the state is returned, nothing of WebhookInfo.
+async function commandsState(env: Env, config: TelegramConfig): Promise<TelegramCommandsState> {
+  if (configurationProblem(config)) return 'unknown'
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/getWebhookInfo`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      signal: AbortSignal.timeout(WEBHOOK_INFO_TIMEOUT_MS),
+    })
+    if (!response.ok) return 'unknown'
+    const result = await response.json<{ ok?: boolean; result?: { url?: string } }>().catch(() => null)
+    if (!result?.ok) return 'unknown'
+    return result.result?.url === commandWebhookUrl(env) ? 'connected' : 'not_connected'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export async function getTelegramStatus(env: Env): Promise<{ configured: boolean; connected: boolean; enabled: boolean; commands: TelegramCommandsState }> {
+  const config = await getTelegramConfig(env)
+  return { configured: Boolean(config.token), connected: !configurationProblem(config), enabled: config.enabled, commands: await commandsState(env, config) }
+}
+
+/** What the command menu needs, all from this deployment's own settings: never from a request. */
+export async function telegramMenuSettings(env: Env): Promise<{ token: string; alertsChatId: string; chatIds: string[]; describe: (doc: { en: string; km: string }) => string }> {
+  const config = await getTelegramConfig(env); const problem = configurationProblem(config)
+  if (problem) throw problem
+  return {
+    token: config.token, alertsChatId: config.chatId, chatIds: config.chatIds,
+    describe: (doc) => withLanguage(config.language, () => bi(doc.en, doc.km)),
+  }
+}
+
 export async function sendTelegramTest(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
-  if (problem) throw new Error(problem)
+  if (problem) throw problem
   // One confirmation line, then the reference. The sentence that used to sit
   // between them -- "Every notification category is on by default; turn any
   // off in Settings" -- explained Settings to a reader who was standing in
@@ -348,7 +400,7 @@ export async function sendTelegramTest(env: Env): Promise<void> {
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
     '',
     telegramCommandReference(),
-  ].join('\n')), config.chatId, config.topics.telegram_topic_alerts)
+  ].join('\n')), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts')
   await configureTelegramWebhook(env)
 }
 
@@ -767,7 +819,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
 
 export async function sendTelegramTodaySummary(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
-  if (problem) throw new Error(problem)
+  if (problem) throw problem
   const today = businessToday()
   const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
   await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
@@ -1817,11 +1869,9 @@ function unknownCommandReply(command: string): string {
 
 /**
  * `categories` is the owner's per-category switch set, threaded in from the
- * SAME `getTelegramConfig` read that supplies `language` just above it. It was
- * missing until Sep 23 2026, and the effect was that the switches worked on
- * the pushed evening summary (sendTelegramTodaySummary passes them) but did
- * nothing at all when someone typed `/report`: the same report, the same
- * builder, two different answers depending on how it was asked for.
+ * SAME `getTelegramConfig` read that supplies `language` just above it, so
+ * `/report` and "Send today's summary" (sendTelegramTodaySummary passes them
+ * too) give the same answer for the same day.
  */
 export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
@@ -1878,8 +1928,9 @@ export type TelegramTopicSave = {
   telegramUserId: string
   chatId: string
 }
-export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave) => Promise<void>
-export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter }
+export type TelegramWaitUntil = (work: Promise<unknown>) => void
+export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave, waitUntil?: TelegramWaitUntil) => Promise<void>
+export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter; waitUntil?: TelegramWaitUntil }
 
 const TOPIC_COMMANDS = new Set(['/settopic', '/topics'])
 const TOPIC_ID_LABEL = () => bi('Topic ID', 'លេខសម្គាល់ប្រធានបទ')
@@ -2014,7 +2065,7 @@ async function topicCommandReply(env: Env, config: TelegramConfig, message: Tele
   if (!deps.saveTopics) return withLanguage(language, topicSaveFailedReply)
   const { actor, userId } = telegramActor(message, chatId)
   try {
-    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId })
+    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId }, deps.waitUntil)
   } catch (error) {
     console.warn(`Telegram /settopic could not save: ${error instanceof Error ? error.message : String(error)}`)
     return withLanguage(language, topicSaveFailedReply)
@@ -2112,16 +2163,16 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, de
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
-  if (problem) throw new Error(problem)
-  const webhookUrl = `${String(env.BUSINESS_OS_ADMIN_URL || '').replace(/\/$/, '')}/api/telegram/webhook`
-  if (!/^https:\/\//i.test(webhookUrl)) throw new Error('A public HTTPS Business OS admin URL is required for Telegram commands.')
+  if (problem) throw problem
+  const webhookUrl = commandWebhookUrl(env)
+  if (!/^https:\/\//i.test(webhookUrl)) throw new TelegramError('telegram_admin_url_invalid', 'A public HTTPS Business OS admin URL is required for Telegram commands.')
   const response = await fetch(`https://api.telegram.org/bot${config.token}/setWebhook`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ url: webhookUrl, secret_token: await webhookSecretFromToken(config.token), allowed_updates: ['message'], drop_pending_updates: false }),
   })
-  if (!response.ok) throw new Error(`Telegram could not connect the command webhook (${response.status}).`)
+  if (!response.ok) throw new TelegramError('telegram_webhook_failed', `Telegram could not connect the command webhook (${response.status}).`)
   const result = await response.json<{ ok?: boolean; description?: string }>().catch(() => ({} as { ok?: boolean; description?: string }))
-  if (!result.ok) throw new Error(result.description || 'Telegram could not connect the command webhook.')
+  if (!result.ok) throw new TelegramError('telegram_webhook_failed', result.description || 'Telegram could not connect the command webhook.')
 }
 export function telegramMoney(usd: unknown, khr: unknown): string { return money(usd, khr) }
 

@@ -99,14 +99,12 @@ const THREADED = {
   'generalCustomerMembershipRepair.ts': ['refreshGeneralCustomerMembershipRepair'],
   'generalCustomerRepair.ts': ['refreshGeneralCustomerRepair'],
   'reviewApply.ts': ['notify'],
+  'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }
 const PENDING = {
   // Undo/redo replays run inside POST /api/action-history/:id/{undo,redo};
   // UndoApplierContext carries no waitUntil yet.
   'undoAppliers.ts': ['replayProductMergeGroup', 'replayProductRemove', 'APPLIERS'],
-  // /settopic runs inside POST /api/telegram/webhook, whose only reader is
-  // Telegram; the TelegramTopicWriter it is handed carries no waitUntil yet.
-  'telegramTopicSetting.ts': ['saveTelegramTopicSetting'],
 }
 const classes = { QUEUE_ONLY, NOTIFIERS, THREADED, PENDING }
 const classOf = (file, unit) => Object.keys(classes).find((name) => (classes[name][file] || []).includes(unit))
@@ -169,6 +167,8 @@ const THREADED_ENTRY_POINTS = [
   ['reviewQueue.ts', 'applyApprovedPendingAction'],
   ['system.ts', 'refreshGeneralCustomerMembershipRepair'],
   ['system.ts', 'refreshGeneralCustomerRepair'],
+  // saveTelegramTopicSetting reaches the route as the webhook's writer, with the request's waitUntil beside it.
+  ['telegram.ts', 'handleTelegramWebhook'],
 ]
 for (const [file, fn] of THREADED_ENTRY_POINTS) {
   const lines = routes.find((route) => route.file === file).lines

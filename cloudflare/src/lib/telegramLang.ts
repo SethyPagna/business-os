@@ -761,8 +761,8 @@ export const SHIFT_SECTION_EDGE = '='
 
 /**
  * The mark on either side of a section's name in every OTHER sectioned
- * report -- the `/report` day summary (and the evening push, which sends the
- * same text), `/sales`, `/fees`, `/stock` and `/inventory`:
+ * report -- the `/report` day summary (and "Send today's summary", which sends
+ * the same text), `/sales`, `/fees`, `/stock` and `/inventory`:
  * `=====Sales / ការលក់=====`, one line, no number and no rule above it.
  *
  * Owner, Sep 23 2026: "for telegram reports, instead of plain line ------we

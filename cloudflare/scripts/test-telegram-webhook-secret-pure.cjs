@@ -84,6 +84,7 @@ const route = load('routes/telegram.ts', {
   '../lib/permissions': { hasPermission: () => false },
   '../lib/telegram': telegram,
   '../lib/telegramTopicSetting': { saveTelegramTopicSetting: async (_env, save) => { saves.push(save) } },
+  '../lib/telegramCommandMenu': { connectTelegramCommands: async () => { throw new Error('the webhook never connects commands') }, registerTelegramCommandMenu: async () => { throw new Error('the webhook never sets the menu') } },
   '../lib/actorSnapshot': { actorSnapshot: () => ({}) },
 }).default
 // Mounted exactly as src/index.ts mounts it (pinned below), so the path the
@@ -133,7 +134,7 @@ globalThis.fetch = async (url, init) => {
 const HELP = JSON.stringify({ update_id: 1, message: { message_id: 9, text: '/help', chat: { id: Number(ALERTS_CHAT), type: 'supergroup' }, from: { id: 42, username: 'owner' } } })
 async function post(headers, runEnv = env, body = HELP) {
   dbHolder.db = makeDb(SETTINGS); calls = []; prepares = 0; authCalls = 0; saves.length = 0
-  const response = await app.request(WEBHOOK_PATH, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body }, runEnv)
+  const response = await app.request(WEBHOOK_PATH, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body }, runEnv, { waitUntil() {}, passThroughOnException() {} })
   return { status: response.status, json: await response.json().catch(() => null) }
 }
 const SECRET_HEADER = 'X-Telegram-Bot-Api-Secret-Token'

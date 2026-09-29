@@ -433,7 +433,7 @@ globalThis.fetch = async (url, init) => {
     assert.match(returnsRoute, /wrote && body\.field === 'status' && changedIds\.length\) \{\s*c\.executionCtx\.waitUntil\(sendReturnStatusTelegramEvents\(c\.env, changedIds, actorSnapshot\(user\)\)/, 'bulk status change announces only the changed ids, and only from the call whose batch wrote them')
     const historyRoute = read('routes/actionHistory.ts')
     assert.match(historyRoute, /applier\.name === RETURN_BULK_ACTION_KIND && payload\.field === 'status'[\s\S]{0,400}sendReturnStatusTelegramEvents/, 'undo/redo of a return status change is announced')
-    assert.match(read('routes/telegram.ts'), /handleTelegramWebhook\(c\.env, update, \{ saveTopics: saveTelegramTopicSetting \}\)/)
+    assert.match(read('routes/telegram.ts'), /handleTelegramWebhook\(c\.env, update, \{ saveTopics: saveTelegramTopicSetting, waitUntil: \(work\) => c\.executionCtx\.waitUntil\(work\) \}\)/)
     for (const rel of ['lib/telegram.ts', 'lib/telegramLang.ts', 'lib/telegramTopicSetting.ts', 'routes/telegram.ts']) {
       const source = read(rel)
       assert.ok(!/(message_thread_id|messageThreadId|threadId|telegram_topic_[a-z]+)['"]?\s*[:=]\s*['"]?\d/.test(source), `${rel} must take every topic id from settings, never a literal`)
