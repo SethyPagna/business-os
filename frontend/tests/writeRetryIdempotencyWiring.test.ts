@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { compileFunction, compileHandler, findFunction, isFunctionNode, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
-import { createHarness, installSteppedClock as installOperatorClock, type Harness, type SettleOptions } from './mountedComponentHarness.ts'
+import { compileHandler, findFunction, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
+import { accessibleText, createHarness, installSteppedClock as installOperatorClock, propsOf, type Harness, type MountedSurface, type SettleOptions } from './mountedComponentHarness.ts'
 import { captureActorReadScope } from '../src/api/actorReadScope.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
@@ -529,21 +529,11 @@ await runTest('stock-action import: a retry resumes the job it created; only a s
   const uploads: unknown[] = []
   const starts: unknown[] = []
   const cancels: unknown[] = []
-  const reviewed: unknown[] = []
   let uploadOutcome: Outcome = answer({ ok: true })
   let startOutcome: Outcome = answer({ ok: true })
-  const sheet = { csvText: 'barcode,quantity\n111,2\n', fileName: 'shelf-a.csv' }
-  const scope: Scope = {
-    canEditCosts: true,
-    setError: () => {},
-    tr: (_key: string, english: string) => english,
-    busy: false,
-    setBusy: () => {},
-    mode: 'direct',
-    rowCount: 1,
-    pendingJobRef: { current: null },
-    aliveRef: { current: true },
-    setReviewJob: (job: unknown) => { reviewed.push(job) },
+  const shelfA = { name: 'shelf-a.csv', text: 'name,barcode,shop,warehouse,date,action\nSerum,111,2,0,2026-09-01,add\n' }
+  const shelfB = { name: 'shelf-b.csv', text: 'name,barcode,shop,warehouse,date,action\nToner,222,5,0,2026-09-01,add\n' }
+  const importJobs = {
     createImportJob: async () => {
       created.push(`job-${created.length + 1}`)
       return { job: { id: created[created.length - 1] } }
@@ -551,50 +541,55 @@ await runTest('stock-action import: a retry resumes the job it created; only a s
     uploadImportJobCsv: (upload: { jobId: unknown }) => { uploads.push(upload.jobId); return outcomeOf(uploadOutcome) },
     startImportJob: (jobId: unknown) => { starts.push(jobId); return outcomeOf(startOutcome) },
     cancelImportJob: async (jobId: unknown) => { cancels.push(jobId) },
-    csvText: sheet.csvText,
-    fileName: sheet.fileName,
+    getImportJob: async (jobId: unknown) => ({ job: { id: jobId, status: 'completed' } }),
+    getImportJobReview: async () => ({ items: [], total: 0 }),
   }
-  const importModal = readComponent('components/products/import/StockActionImportModal.tsx')
-  const render = await compileHandler<() => Promise<void>>(importModal, 'handleImport', { locals: Object.keys(scope) })
-  const [closeEffect] = callsNamed(importModal.file, 'useEffect')
-    .map((call) => call.arguments[0])
-    .filter((fn) => isFunctionNode(fn) && descendants(fn, (node) => ts.isIdentifier(node) && node.text === 'pendingJobRef').length > 0)
-  assert.ok(isFunctionNode(closeEffect), 'the modal owns an effect whose cleanup handles the pending job')
-  const mountEffect = await compileFunction<() => () => void>(importModal, 'closeEffect', closeEffect, { locals: Object.keys(scope) })
-  const clock = installSteppedClock()
+  const openSheet = () => harness.mount({
+    component: 'components/products/import/StockActionImportModal.tsx',
+    props: { t: (key: string, english: string) => km[key] ?? english, notify: () => {}, onClose: () => {}, onDone: () => {} },
+    app: adminApp({ page: 'products' }),
+    doubles: { 'api/importJobsTransport.ts': importJobs },
+  })
+  const importLabel = new RegExp(`^${escapeRegExp(shown('stock_import_start', 'Import'))}$`)
+  const clock = installOperatorClock()
   try {
-    const importSheet = async (upload: Outcome, start: Outcome) => {
-      clock.advance(OPERATOR_PAUSE_MS)
+    const pick = async (sheet: MountedSurface, file: { name: string; text: string }) => {
+      const input = sheet.find((node) => node.tagName === 'INPUT' && node.getAttribute('type') === 'file', 'the file input')
+      await sheet.call(input, 'onChange', [{ target: Object.assign(input, { files: [new File([file.text], file.name, { type: 'text/csv' })] }) }])
+      await sheet.waitFor(() => sheet.findAll((node) => node.tagName === 'BUTTON' && importLabel.test(accessibleText(node)) && !propsOf(node).disabled).length > 0, `${file.name} ready to import`)
+    }
+    const importSheet = async (sheet: MountedSurface, upload: Outcome, start: Outcome) => {
+      clock.advance(OPERATOR_DAY_BOUNDARY_MS)
       uploadOutcome = upload
       startOutcome = start
-      await settled(render({ ...scope, ...sheet })(), 'the import press')
+      const sent = uploads.length + starts.length
+      await sheet.click(sheet.button(importLabel), { until: () => uploads.length + starts.length > sent, waitingFor: 'the upload or start this press sends' })
     }
-    await importSheet(answer({ ok: true }), LOST)
-    await importSheet(answer({ ok: true }), answer({ ok: true }))
-    assert.deepEqual(created, ['job-1'], 'the retry after a lost start answer resumes job-1 instead of creating a second job')
-    assert.deepEqual(uploads, ['job-1'], 'the sheet is not uploaded twice into the same job')
+
+    const first = await openSheet()
+    await pick(first, shelfA)
+    await importSheet(first, LOST, answer({ ok: true }))
+    await importSheet(first, answer({ ok: true }), LOST)
+    await importSheet(first, answer({ ok: true }), LOST)
+    assert.deepEqual(created, ['job-1'], 'a retry after a failed upload or a lost start answer resumes job-1 instead of creating a second job')
+    assert.deepEqual(uploads, ['job-1', 'job-1'], 'the failed upload is retried once and a delivered sheet is never uploaded twice into the same job')
     assert.deepEqual(starts, ['job-1', 'job-1'])
-    assert.deepEqual(reviewed, [{ id: 'job-1', rowCount: 1 }])
+    await pick(first, shelfB)
+    await importSheet(first, answer({ ok: true }), LOST)
+    assert.deepEqual(cancels, ['job-1'], 'a different sheet cancels the orphaned job first')
+    assert.deepEqual(created, ['job-1', 'job-2'])
+    await first.unmount()
+    assert.deepEqual(cancels, ['job-1', 'job-2'], 'closing the sheet cancels the job it created but never started')
 
-    await importSheet(LOST, answer({ ok: true }))
-    await importSheet(answer({ ok: true }), answer({ ok: true }))
-    assert.deepEqual(created, ['job-1', 'job-2'], 'a started job is released: the next import of the same sheet is a new job, and a failed upload is resumed')
-    assert.deepEqual(uploads, ['job-1', 'job-2', 'job-2'])
-
-    await importSheet(answer({ ok: true }), LOST)
-    sheet.csvText = 'barcode,quantity\n222,5\n'
-    sheet.fileName = 'shelf-b.csv'
-    await importSheet(answer({ ok: true }), answer({ ok: true }))
-    assert.deepEqual(cancels, ['job-3'], 'a different sheet cancels the orphaned job first')
-    assert.deepEqual(created, ['job-1', 'job-2', 'job-3', 'job-4'])
-    assert.deepEqual(reviewed.at(-1), { id: 'job-4', rowCount: 1 })
-
-    await importSheet(answer({ ok: true }), LOST)
-    const closeSheet = mountEffect({ ...scope, ...sheet })()
-    closeSheet()
-    assert.deepEqual(cancels, ['job-3', 'job-5'], 'closing the sheet cancels the job it created but never started')
-    mountEffect({ ...scope, ...sheet })()()
-    assert.deepEqual(cancels, ['job-3', 'job-5'], 'nothing is pending after a close, so a second close cancels nothing')
+    const second = await openSheet()
+    await pick(second, shelfA)
+    await importSheet(second, answer({ ok: true }), LOST)
+    await importSheet(second, answer({ ok: true }), answer({ ok: true }))
+    assert.deepEqual(created, ['job-1', 'job-2', 'job-3'], 'the retry after a lost start answer resumes job-3')
+    assert.deepEqual(uploads.slice(-1), ['job-3'], 'the resumed job is not uploaded again')
+    assert.deepEqual(starts.slice(-2), ['job-3', 'job-3'])
+    await second.unmount()
+    assert.deepEqual(cancels, ['job-1', 'job-2'], 'a started job is released: closing the sheet never cancels it')
   } finally {
     clock.restore()
   }

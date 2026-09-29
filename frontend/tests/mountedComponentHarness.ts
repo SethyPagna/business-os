@@ -9,7 +9,7 @@ import { createServer, type Plugin, type ViteDevServer } from 'vite'
 import ts from 'typescript'
 
 type Listener = (...args: unknown[]) => unknown
-export type Double = (...args: unknown[]) => unknown
+export type Double = (...args: never[]) => unknown
 export type ModuleDoubles = Record<string, Record<string, Double>>
 export type NodePredicate = (node: MemoryNode) => boolean
 
@@ -496,10 +496,10 @@ export async function createHarness(): Promise<Harness> {
   const restoreGlobals = installGlobals()
   let doubles: ModuleDoubles = {}
   let doubleCalls = 0
-  ;(globalThis as Record<symbol, unknown>)[DISPATCH] = (key: string, name: string, actual: Double, args: unknown[]) => {
+  ;(globalThis as Record<symbol, unknown>)[DISPATCH] = (key: string, name: string, actual: Listener, args: unknown[]) => {
     doubleCalls += 1
     const double = doubles[key]?.[name]
-    return double ? double(...args) : actual(...args)
+    return double ? (double as Listener)(...args) : actual(...args)
   }
   let server: ViteDevServer
   try {
