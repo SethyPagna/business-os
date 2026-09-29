@@ -1,7 +1,5 @@
-// What a Website Editor Save may send, and how an edit made during a Save
-// survives it. The storefront config does not carry every editor key, so the
-// editor also reads the stored staff settings and never writes a key it has
-// neither loaded nor seen edited.
+// The storefront config lacks some editor keys, so a Save writes only keys it
+// loaded (public config or staff settings) or saw edited.
 export type EditorDraft = Record<string, unknown>
 export type StaffSettings = Record<string, unknown>
 export type EditedKeys = ReadonlySet<string>
