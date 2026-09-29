@@ -225,6 +225,17 @@ check('an unavailable status table never aborts the tick', async () => {
   assert.equal(reports.length, 1, 'the step failure is still reported when its record cannot be written')
 })
 
+check('import retention lets its failure reach the step runner instead of reporting success', async () => {
+  const unavailable = { prepare() { throw new Error('D1_ERROR: database unavailable') } }
+  const retention = loadPure('lib/importRetention.ts', {
+    './db': { getDb: () => unavailable },
+    './audit': { audit: async () => {} },
+    './r2': loadPure('lib/r2.ts'),
+    './planTier': loadPure('lib/planTier.ts'),
+  })
+  await assert.rejects(() => retention.maybeRunScheduledImportRetention({}), /database unavailable/)
+})
+
 async function main() {
   let failed = 0
   const originalError = console.error

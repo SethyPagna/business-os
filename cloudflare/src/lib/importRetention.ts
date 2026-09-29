@@ -199,123 +199,117 @@ export interface ImportRetentionRunResult {
 }
 
 // Runs on the scheduled worker tick, throttled like the audit-log
-// retention sweep. Swallows its own errors: retention must never be the
-// reason the backup/image-audit chain around it breaks -- a failed pass
-// just runs again on a later tick.
+// retention sweep. A failure propagates to index.ts's runStep, which
+// reports and records it; a failed pass runs again on a later tick.
 export async function maybeRunScheduledImportRetention(env: Env): Promise<ImportRetentionRunResult> {
-  try {
-    const lastRunRaw = await getSettingValue(env, IMPORT_RETENTION_LAST_RUN_KEY)
-    const lastRun = lastRunRaw ? Date.parse(lastRunRaw) : 0
-    if (lastRun && Date.now() - lastRun < IMPORT_RETENTION_MIN_INTERVAL_MS) {
-      return { skipped: true, reason: 'ran-recently' }
-    }
-
-    const detailHours = await getPositiveIntSetting(env, DETAIL_RETENTION_SETTING_KEY, IMPORT_DETAIL_RETENTION_HOURS_DEFAULT)
-    const summaryDays = await getPositiveIntSetting(env, SUMMARY_RETENTION_SETTING_KEY, IMPORT_SUMMARY_RETENTION_DAYS_DEFAULT)
-    // The summary window can never be shorter than the detail window --
-    // a misconfigured pair would otherwise delete whole jobs while their
-    // details were still inside their own retention.
-    const summaryHours = Math.max(summaryDays * 24, detailHours)
-
-    const db = getDb(env)
-    // Jobs pruned per tier per tick, tier-aware -- see lib/planTier.ts.
-    // Free gets 5 instead of 20 so one cron invocation stays inside the
-    // 10 ms budget; the sweep continues on later ticks until steady state,
-    // which is already how it is designed to drain a backlog.
-    const maxJobsPerTier = getPlanLimits(env).importRetentionMaxJobsPerTier
-    let detailPruned = 0
-    let summaryDeleted = 0
-    let r2Deleted = 0
-    const r2Errors: string[] = []
-
-    // ---- 24h tier: strip bulk detail, keep the summary row -------------
-    const detailCutoff = sqliteTimestamp(Date.now() - detailHours * 60 * 60 * 1000)
-    const detailJobs = await db.prepare(`
-      SELECT id FROM import_jobs
-      WHERE status IN ${TERMINAL_STATUS_SQL}
-        AND details_pruned_at IS NULL
-        AND ${FINISHED_AT_SQL} < @cutoff
-      ORDER BY ${FINISHED_AT_SQL} ASC
-      LIMIT ${maxJobsPerTier}
-    `).all<{ id: string }>({ cutoff: detailCutoff })
-
-    for (const job of detailJobs) {
-      // R2 first, best-effort: a failed object delete is reported in the
-      // audit event but does not stop the D1 purge or the marker below --
-      // the D1 payload is the 193MB that must not stay hostage to an R2
-      // hiccup, and the raw files measured only ~14MB total. The 7d full
-      // delete tries the same keys again (deleting a gone key is a no-op).
-      const r2 = await deleteUnlinkedJobFiles(env, job.id)
-      r2Deleted += r2.deleted
-      r2Errors.push(...r2.errors)
-      // Delete the two bulk staging tables (separate import-staging DB) FIRST,
-      // then stamp details_pruned_at on the main DB. Order matters across the
-      // two databases: a db.batch is atomic only within ONE D1, so if the
-      // staging call failed AFTER details_pruned_at were stamped, those rows
-      // would be marked pruned yet still present -- an invisible orphan the
-      // detail tier (details_pruned_at IS NULL) can never re-select. Doing
-      // staging first means a mid-failure (a thrown call, or the isolate killed
-      // between the two) leaves details_pruned_at unset, so the job is simply
-      // re-selected next tick and retried (a staging re-delete is a no-op).
-      // This is the ONLY delete of those tables (they were removed from the
-      // detail builder), so it is not redundant even in single-DB envs
-      // (db.staging === db).
-      await db.staging.batch(importJobStagingDeleteStatements(job.id))
-      await db.batch([
-        ...importJobDetailDeleteStatements(job.id),
-        // chunk_state_json/materialize_state_json are continuation state a
-        // terminal job can never use again, and they can be large.
-        // updated_at is deliberately NOT bumped: the 7d summary clock runs
-        // from the job's own finish time, not from this sweep's visit.
-        { sql: `UPDATE import_jobs SET details_pruned_at = CURRENT_TIMESTAMP, chunk_state_json = NULL, materialize_state_json = NULL WHERE id = @id`, params: { id: job.id } },
-      ])
-      detailPruned += 1
-    }
-
-    // ---- 7d tier: delete the whole job ---------------------------------
-    // No details_pruned_at filter: a job that somehow crossed 7 days
-    // without a detail pass (sweep down for a week) is fully deleted here
-    // in one go -- the full list contains every detail statement.
-    const summaryCutoff = sqliteTimestamp(Date.now() - summaryHours * 60 * 60 * 1000)
-    const summaryJobs = await db.prepare(`
-      SELECT id FROM import_jobs
-      WHERE status IN ${TERMINAL_STATUS_SQL}
-        AND ${FINISHED_AT_SQL} < @cutoff
-      ORDER BY ${FINISHED_AT_SQL} ASC
-      LIMIT ${maxJobsPerTier}
-    `).all<{ id: string }>({ cutoff: summaryCutoff })
-
-    for (const job of summaryJobs) {
-      const r2 = await deleteUnlinkedJobFiles(env, job.id)
-      r2Deleted += r2.deleted
-      r2Errors.push(...r2.errors)
-      // Staging children on the separate import-staging DB FIRST, then the
-      // parent import_jobs row -- so a cross-DB mid-failure leaves a still-
-      // reachable job that retention re-selects and retries, never an orphaned
-      // staging set with no parent (see the detail tier for the full rationale).
-      await db.staging.batch(importJobStagingDeleteStatements(job.id))
-      await db.batch(importJobFullDeleteStatements(job.id))
-      summaryDeleted += 1
-    }
-
-    await setSettingValue(env, IMPORT_RETENTION_LAST_RUN_KEY, new Date().toISOString())
-
-    if (detailPruned > 0 || summaryDeleted > 0) {
-      await audit(env, null, null, 'import_retention_auto_clean', 'import_job', null, {
-        detailPruned,
-        summaryDeleted,
-        r2Deleted,
-        r2Errors: r2Errors.length || undefined,
-        detailHours,
-        summaryDays,
-      })
-    }
-
-    return { skipped: false, detailPruned, summaryDeleted, r2Deleted, r2Errors: r2Errors.length, detailHours, summaryDays }
-  } catch (error) {
-    console.error('[import-retention] sweep failed', (error as Error).message || error)
-    return { skipped: true, reason: 'error' }
+  const lastRunRaw = await getSettingValue(env, IMPORT_RETENTION_LAST_RUN_KEY)
+  const lastRun = lastRunRaw ? Date.parse(lastRunRaw) : 0
+  if (lastRun && Date.now() - lastRun < IMPORT_RETENTION_MIN_INTERVAL_MS) {
+    return { skipped: true, reason: 'ran-recently' }
   }
+
+  const detailHours = await getPositiveIntSetting(env, DETAIL_RETENTION_SETTING_KEY, IMPORT_DETAIL_RETENTION_HOURS_DEFAULT)
+  const summaryDays = await getPositiveIntSetting(env, SUMMARY_RETENTION_SETTING_KEY, IMPORT_SUMMARY_RETENTION_DAYS_DEFAULT)
+  // The summary window can never be shorter than the detail window --
+  // a misconfigured pair would otherwise delete whole jobs while their
+  // details were still inside their own retention.
+  const summaryHours = Math.max(summaryDays * 24, detailHours)
+
+  const db = getDb(env)
+  // Jobs pruned per tier per tick, tier-aware -- see lib/planTier.ts.
+  // Free gets 5 instead of 20 so one cron invocation stays inside the
+  // 10 ms budget; the sweep continues on later ticks until steady state,
+  // which is already how it is designed to drain a backlog.
+  const maxJobsPerTier = getPlanLimits(env).importRetentionMaxJobsPerTier
+  let detailPruned = 0
+  let summaryDeleted = 0
+  let r2Deleted = 0
+  const r2Errors: string[] = []
+
+  // ---- 24h tier: strip bulk detail, keep the summary row -------------
+  const detailCutoff = sqliteTimestamp(Date.now() - detailHours * 60 * 60 * 1000)
+  const detailJobs = await db.prepare(`
+    SELECT id FROM import_jobs
+    WHERE status IN ${TERMINAL_STATUS_SQL}
+      AND details_pruned_at IS NULL
+      AND ${FINISHED_AT_SQL} < @cutoff
+    ORDER BY ${FINISHED_AT_SQL} ASC
+    LIMIT ${maxJobsPerTier}
+  `).all<{ id: string }>({ cutoff: detailCutoff })
+
+  for (const job of detailJobs) {
+    // R2 first, best-effort: a failed object delete is reported in the
+    // audit event but does not stop the D1 purge or the marker below --
+    // the D1 payload is the 193MB that must not stay hostage to an R2
+    // hiccup, and the raw files measured only ~14MB total. The 7d full
+    // delete tries the same keys again (deleting a gone key is a no-op).
+    const r2 = await deleteUnlinkedJobFiles(env, job.id)
+    r2Deleted += r2.deleted
+    r2Errors.push(...r2.errors)
+    // Delete the two bulk staging tables (separate import-staging DB) FIRST,
+    // then stamp details_pruned_at on the main DB. Order matters across the
+    // two databases: a db.batch is atomic only within ONE D1, so if the
+    // staging call failed AFTER details_pruned_at were stamped, those rows
+    // would be marked pruned yet still present -- an invisible orphan the
+    // detail tier (details_pruned_at IS NULL) can never re-select. Doing
+    // staging first means a mid-failure (a thrown call, or the isolate killed
+    // between the two) leaves details_pruned_at unset, so the job is simply
+    // re-selected next tick and retried (a staging re-delete is a no-op).
+    // This is the ONLY delete of those tables (they were removed from the
+    // detail builder), so it is not redundant even in single-DB envs
+    // (db.staging === db).
+    await db.staging.batch(importJobStagingDeleteStatements(job.id))
+    await db.batch([
+      ...importJobDetailDeleteStatements(job.id),
+      // chunk_state_json/materialize_state_json are continuation state a
+      // terminal job can never use again, and they can be large.
+      // updated_at is deliberately NOT bumped: the 7d summary clock runs
+      // from the job's own finish time, not from this sweep's visit.
+      { sql: `UPDATE import_jobs SET details_pruned_at = CURRENT_TIMESTAMP, chunk_state_json = NULL, materialize_state_json = NULL WHERE id = @id`, params: { id: job.id } },
+    ])
+    detailPruned += 1
+  }
+
+  // ---- 7d tier: delete the whole job ---------------------------------
+  // No details_pruned_at filter: a job that somehow crossed 7 days
+  // without a detail pass (sweep down for a week) is fully deleted here
+  // in one go -- the full list contains every detail statement.
+  const summaryCutoff = sqliteTimestamp(Date.now() - summaryHours * 60 * 60 * 1000)
+  const summaryJobs = await db.prepare(`
+    SELECT id FROM import_jobs
+    WHERE status IN ${TERMINAL_STATUS_SQL}
+      AND ${FINISHED_AT_SQL} < @cutoff
+    ORDER BY ${FINISHED_AT_SQL} ASC
+    LIMIT ${maxJobsPerTier}
+  `).all<{ id: string }>({ cutoff: summaryCutoff })
+
+  for (const job of summaryJobs) {
+    const r2 = await deleteUnlinkedJobFiles(env, job.id)
+    r2Deleted += r2.deleted
+    r2Errors.push(...r2.errors)
+    // Staging children on the separate import-staging DB FIRST, then the
+    // parent import_jobs row -- so a cross-DB mid-failure leaves a still-
+    // reachable job that retention re-selects and retries, never an orphaned
+    // staging set with no parent (see the detail tier for the full rationale).
+    await db.staging.batch(importJobStagingDeleteStatements(job.id))
+    await db.batch(importJobFullDeleteStatements(job.id))
+    summaryDeleted += 1
+  }
+
+  await setSettingValue(env, IMPORT_RETENTION_LAST_RUN_KEY, new Date().toISOString())
+
+  if (detailPruned > 0 || summaryDeleted > 0) {
+    await audit(env, null, null, 'import_retention_auto_clean', 'import_job', null, {
+      detailPruned,
+      summaryDeleted,
+      r2Deleted,
+      r2Errors: r2Errors.length || undefined,
+      detailHours,
+      summaryDays,
+    })
+  }
+
+  return { skipped: false, detailPruned, summaryDeleted, r2Deleted, r2Errors: r2Errors.length, detailHours, summaryDays }
 }
 
 export interface OrphanStagingReport {
