@@ -1,16 +1,8 @@
-/**
- * Best-effort bridge to the browser/OS password manager after a successful
- * password change/reset.
- *
- * Browsers decide whether to show a native save/update prompt; web code cannot
- * force that UI. We therefore do two things:
- *  1) use standards-friendly form autocomplete semantics at the call sites;
- *  2) ask Credential Management API to store/update the credential when the
- *     browser exposes it.
- *
- * If the browser does not support credential storage, callers can request a
- * clipboard fallback so the newly-set password is not lost after fields clear.
- */
+// Asks the browser's password manager to save a password the Worker has just
+// accepted (sign-in, own change, reset); the browser alone decides whether a
+// prompt appears. The clipboard is written only by a Copy button and by
+// persistChangedPassword's opt-in fallback on the Users page.
+import { withLoaderTimeout } from './loaders.ts'
 
 export interface PasswordPersistenceOptions {
   username: string
@@ -33,6 +25,10 @@ type PasswordCredentialConstructor = new (data: {
   name?: string
 }) => Credential
 
+// store() normally answers at once; one that never settles (a broken extension
+// or polyfill) must not hold the screen of a password that is already changed.
+const CREDENTIAL_STORE_WAIT_MS = 1500
+
 function getPasswordCredentialConstructor(): PasswordCredentialConstructor | null {
   if (typeof window === 'undefined') return null
   const candidate = (window as typeof window & { PasswordCredential?: PasswordCredentialConstructor }).PasswordCredential
@@ -50,7 +46,7 @@ async function tryStoreCredential(username: string, password: string, displayNam
       password,
       ...(displayName ? { name: displayName } : {}),
     })
-    await navigator.credentials.store(credential)
+    await withLoaderTimeout(() => navigator.credentials.store(credential), 'Password save', CREDENTIAL_STORE_WAIT_MS)
     return true
   } catch (_) {
     // Password-manager support is browser/OS dependent. Failing this request

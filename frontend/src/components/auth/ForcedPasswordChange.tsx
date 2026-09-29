@@ -27,8 +27,8 @@ import { requestPasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.t
 // are publicly known; the check below only saves a round trip with the shared
 // new-password rule (utils/passwordRules.ts). No password rule of its own.
 //
-// On success the browser is asked to UPDATE the saved password before the app
-// leaves this screen: the one it holds is the publicly known one.
+// On success the browser is asked to save the new password before the app
+// leaves this screen, replacing the publicly known one if it holds it.
 
 type ForcedPasswordUser = { id?: number | string; username?: string; name?: string } | null
 type ForcedPasswordAppContext = {

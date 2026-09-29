@@ -21,8 +21,9 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 
 type StoredCredential = { id: string; password: string; name?: string }
 type Browser = { stored: StoredCredential[]; clipboardWrites: string[] }
+type StoreAnswer = 'accepts' | 'refuses' | 'never answers'
 
-async function withBrowser(storeAccepts: boolean, fn: (browser: Browser) => Promise<void>) {
+async function withBrowser(storeAnswer: StoreAnswer, fn: (browser: Browser) => Promise<void>) {
   const browser: Browser = { stored: [], clipboardWrites: [] }
   const originalWindow = (globalThis as { window?: unknown }).window
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
@@ -43,7 +44,8 @@ async function withBrowser(storeAccepts: boolean, fn: (browser: Browser) => Prom
       clipboard: { writeText: async (text: string) => { browser.clipboardWrites.push(text) } },
       credentials: {
         store: async (credential: StoredCredential) => {
-          if (!storeAccepts) throw new Error('NotAllowedError')
+          if (storeAnswer === 'never answers') await new Promise(() => {})
+          if (storeAnswer === 'refuses') throw new Error('NotAllowedError')
           browser.stored.push({ ...credential })
         },
       },
@@ -73,6 +75,18 @@ function input(overrides: Partial<OwnPasswordChangeInput> = {}, sent: Sent[] = [
   }
 }
 
+const HUNG_SAVE_LIMIT_MS = 4000
+
+async function settlesWithin<T>(ms: number, promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`still waiting after ${ms} ms`)), ms) })
+  try {
+    return await Promise.race([promise, limit])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function refusedWith(code: string) {
   return async () => ({ success: false, error: 'English server text', code })
 }
@@ -82,7 +96,7 @@ function thrownWith(code: string) {
 }
 
 await runTest('accepted and saved: exact passwords sent, canonical username saved, success notice, clipboard untouched', async () => {
-  await withBrowser(true, async ({ stored, clipboardWrites }) => {
+  await withBrowser('accepts', async ({ stored, clipboardWrites }) => {
     const sent: Sent[] = []
     const outcome = await changeOwnPassword(input({ username: ' sokha ' }, sent))
     assert.deepEqual(sent, [{ currentPassword: 'Old pass-1', newPassword: 'New pass-1' }])
@@ -93,7 +107,7 @@ await runTest('accepted and saved: exact passwords sent, canonical username save
 })
 
 await runTest('accepted but the browser refuses to save: a warning notice and still no automatic copy', async () => {
-  await withBrowser(false, async ({ stored, clipboardWrites }) => {
+  await withBrowser('refuses', async ({ stored, clipboardWrites }) => {
     const outcome = await changeOwnPassword(input())
     assert.equal(outcome.changed, true)
     assert.equal(outcome.changed && outcome.tone, 'warning')
@@ -103,8 +117,18 @@ await runTest('accepted but the browser refuses to save: a warning notice and st
   })
 })
 
+await runTest('a browser whose save never answers: the change still finishes with the warning notice', async () => {
+  await withBrowser('never answers', async ({ clipboardWrites }) => {
+    const outcome = await settlesWithin(HUNG_SAVE_LIMIT_MS, changeOwnPassword(input()))
+    assert.equal(outcome.changed, true)
+    assert.equal(outcome.changed && outcome.tone, 'warning')
+    assert.match(outcome.message, /^password_updated_save_it: /)
+    assert.deepEqual(clipboardWrites, [])
+  })
+})
+
 await runTest('the Worker refuses: nothing is saved and the refusal is in the operator language', async () => {
-  await withBrowser(true, async ({ stored, clipboardWrites }) => {
+  await withBrowser('accepts', async ({ stored, clipboardWrites }) => {
     const cases: Array<[OwnPasswordChangeInput['change'], RegExp]> = [
       [refusedWith('password_too_long'), /^password_too_long: Too long: at most 72 characters \(24 in Khmer\)\.$/],
       [refusedWith('password_edge_whitespace'), /^password_edge_whitespace: /],
@@ -127,7 +151,7 @@ await runTest('the Worker refuses: nothing is saved and the refusal is in the op
 })
 
 await runTest('checked before the Worker: the shared new-password rule, confirmation and the current password', async () => {
-  await withBrowser(true, async ({ stored }) => {
+  await withBrowser('accepts', async ({ stored }) => {
     const sent: Sent[] = []
     const cases: Array<[Partial<OwnPasswordChangeInput>, RegExp]> = [
       [{ newPassword: ' New pass-1', confirmPassword: ' New pass-1' }, /^password_edge_whitespace: /],

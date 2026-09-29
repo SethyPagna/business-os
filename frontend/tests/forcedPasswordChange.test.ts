@@ -72,7 +72,7 @@ function compileModule(rel: string, resolve: (id: string) => unknown): Record<st
   return mod.exports
 }
 
-function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}): ForcedModule {
+function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}, passwordManager?: unknown): ForcedModule {
   return compileModule('../src/components/auth/ForcedPasswordChange.tsx', (id) => {
     if (id.endsWith('/AppContext.tsx')) return { useApp: () => ({ user: SOKHA, t: (key: string) => key, logout: async () => {}, ...appContext }) }
     if (id.endsWith('/userAdminTransport.ts')) {
@@ -80,6 +80,7 @@ function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}
     }
     if (id.endsWith('/loaders.ts')) return { withLoaderTimeout: (fn: () => unknown) => fn() }
     if (id.endsWith('/passwordManager.ts')) {
+      if (passwordManager) return passwordManager
       return { requestPasswordSave: async (request: { username: string; password: string }) => { spies.calls.push(`save:${request.username}:${request.password}`); return spies.saveAnswer } }
     }
     if (id.endsWith('/passwordRules.ts')) return require('../src/utils/passwordRules.ts')
@@ -96,9 +97,10 @@ function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}
   }) as unknown as ForcedModule
 }
 
-async function withWindowEvents<T>(spies: Spies, fn: () => Promise<T>): Promise<T> {
+async function withWindowEvents<T>(spies: Spies, fn: () => Promise<T>, windowExtras: Record<string, unknown> = {}): Promise<T> {
   const originalWindow = globalThis.window
   globalThis.window = {
+    ...windowExtras,
     dispatchEvent: (event: Event) => {
       spies.calls.push(`dispatch:${event.type}:${(event as CustomEvent).detail?.must_change_password}`)
       return true
@@ -108,6 +110,18 @@ async function withWindowEvents<T>(spies: Spies, fn: () => Promise<T>): Promise<
     return await fn()
   } finally {
     globalThis.window = originalWindow
+  }
+}
+
+const HUNG_SAVE_LIMIT_MS = 4000
+
+async function settlesWithin<T>(ms: number, promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`still waiting after ${ms} ms`)), ms) })
+  try {
+    return await Promise.race([promise, limit])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -272,6 +286,22 @@ await runTest('a browser that will not save never blocks leaving the screen', as
   const { changeForcedPassword } = loadForcedScreen(spies)
   assert.equal(await withWindowEvents(spies, () => changeForcedPassword(input())), '')
   assert.deepEqual(spies.calls.at(-1), 'dispatch:user:updated:0')
+})
+
+await runTest('a browser whose save never answers still leaves the screen once the password is changed', async () => {
+  const spies = createSpies(async () => ({ success: true }))
+  const { changeForcedPassword } = loadForcedScreen(spies, {}, require('../src/utils/passwordManager.ts'))
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { credentials: { store: () => new Promise(() => {}) } } })
+  class PasswordCredential {}
+  try {
+    const shown = await settlesWithin(HUNG_SAVE_LIMIT_MS, withWindowEvents(spies, () => changeForcedPassword(input()), { PasswordCredential }))
+    assert.equal(shown, '')
+    assert.deepEqual(spies.calls, ['change:2:Brand-New-9x', 'dispatch:user:updated:0'])
+  } finally {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor)
+    else delete (globalThis as { navigator?: unknown }).navigator
+  }
 })
 
 await runTest('the new-password rule: refused before any request, in the operator\'s language; a server refusal code too', async () => {
