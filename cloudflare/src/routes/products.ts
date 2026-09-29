@@ -2637,9 +2637,15 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   return c.json({ success: true })
 })
 
+// A variant is a new product row with opening stock, so "Add product" off
+// stops it too. Review Required has no variant queue.
+function canAddVariant(user: SessionUser): boolean {
+  return getActionTier(user, 'products', 'variant') === 'full' && getActionTier(user, 'products', 'add') !== 'none'
+}
+
 app.post('/variant', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (!canAddVariant(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
