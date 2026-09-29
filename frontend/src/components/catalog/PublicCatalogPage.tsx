@@ -1933,8 +1933,8 @@ export default function PublicCatalogPage() {
     </button>
   )
 
-  // Minimized: a slim edge tab, same vertical slot as the full button, that
-  // restores it on tap. Full: the round button and its own minimize control.
+  // Minimized: one round icon that expands and opens the contact list on tap.
+  // Full: the round button and its own minimize control.
   //
   // 2026-09-18 (owner): "the x button just keep the icon instead of filling
   // it and bocking the contact us button". The minimize X used to be an

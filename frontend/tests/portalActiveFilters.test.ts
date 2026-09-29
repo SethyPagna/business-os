@@ -28,7 +28,8 @@ const base = {
 // 1. Nothing active -> no chips (and the 'all' letter is not a filter).
 assert.deepEqual(buildPortalActiveFilterChips(base), [])
 
-// 2. One chip per value, in panel order, with human labels for coded facets.
+// 2. One chip per value, storefront panel order then branch and letter, with
+//    human labels for coded facets.
 const chips = buildPortalActiveFilterChips({
   ...base,
   initialFilter: 'N',

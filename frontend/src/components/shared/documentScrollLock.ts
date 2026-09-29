@@ -14,10 +14,10 @@
 //    means the inner one closing cannot unlock the page under the outer one,
 //    and the page is restored exactly once, to what it was before the first
 //    lock.
-//  - storefrontScrollRoot.test.ts exists because a lock left armed made the
-//    storefront unscrollable. Every lock here returns its release, callers
-//    take it in a useEffect and release it in the cleanup (so unmount always
-//    releases), and a release is idempotent.
+//  - A lock left armed leaves the storefront unscrollable (one of the ways
+//    storefrontScrollRoot.test.ts pins). Every lock here returns its
+//    release, callers take it in a useEffect and release it in the cleanup
+//    (so unmount always releases), and a release is idempotent.
 
 type SavedProperty = { value: string; priority: string }
 type SavedState = { html: SavedProperty; body: SavedProperty }

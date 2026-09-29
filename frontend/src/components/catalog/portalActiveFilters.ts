@@ -3,9 +3,8 @@
 // undo one filter without reopening the Filters panel. Pure so a node test can
 // pin the order and the removal semantics (no JSX here).
 //
-// Chip order follows the field order in the panel -- most useful first:
-// category, brand, promotions, stock, then the admin-only branch facet and the
-// letter picked on the brand index rail.
+// Chips follow the storefront panel's order (category, brand, promotions,
+// stock); the admin-only branch facet and the brand-rail letter come last.
 
 export type PortalActiveFilterKind = 'category' | 'brand' | 'promo' | 'stock' | 'branch' | 'initial'
 

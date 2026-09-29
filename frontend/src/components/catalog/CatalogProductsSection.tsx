@@ -1205,7 +1205,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           renders this same section inside a `.page-scroll` panel, where a
           fixed rail would float out of the preview and over the admin's own
           chrome -- so it takes the `inline` variant, which sticks inside this
-          (relatively positioned) grid instead. Gating the preview out
+          (relatively positioned) block instead. Gating the preview out
           entirely, as an earlier pass did, left the editor with no brand
           index at all after both letter lists were deleted. */}
       {initialOptions.length > 1 ? (

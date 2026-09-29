@@ -117,10 +117,10 @@ type CatalogPreviewSurfaceProps = {
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   promotionsSection?: ReactNode
-  // N45 legal lane: the storefront <footer> (business details + the
-  // Policies menu). Rendered here so the live site and the admin
-  // preview show the SAME footer from one place; the caller supplies it
-  // so this surface never has to know the business-detail shape.
+  // N45 legal lane: the storefront <footer> (business details, quick links,
+  // social links and the policy links). Rendered here so the live site and
+  // the admin preview show the SAME footer from one place; the caller
+  // supplies it so this surface never has to know the business-detail shape.
   footer?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
@@ -396,7 +396,7 @@ export default function CatalogPreviewSurface({
                       icons` is the hook public-portal.css's pointer:coarse
                       44px floor exempts -- every icon below carries an
                       aria-label, which matched that rule and would otherwise
-                      silently re-widen it past `h-8`/`h-9` and reopen this
+                      silently re-widen it past `w-8`/`w-9` and reopen this
                       same overflow. */}
                   {/* 2026-09-18 (owner): "for the top of the website, the
                       buttons can be below the business name... so Leang

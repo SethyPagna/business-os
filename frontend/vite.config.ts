@@ -854,8 +854,7 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
       // portalNoTranslate.ts (owner [[ ]] never-translate markers) is imported by
       // CatalogSecondaryTabs (catalog-secondary-tabs), which must not pull the
-      // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts). Same
-      // shared-by-several-catalog-surfaces case as the modules above.
+      // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts).
       || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
       // portalFaqLayout.ts: same consumer, same reason.
       || normalized.includes('/src/components/catalog/portalFaqLayout.ts')

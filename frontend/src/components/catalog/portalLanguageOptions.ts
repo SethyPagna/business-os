@@ -101,7 +101,7 @@ export function isFirstPartyPortalLanguage(value: unknown): boolean {
  * storefront they now go through Google Translate with the rest of the
  * machine-translated list, which translates the whole page. (The admin
  * editor preview in CatalogPage.tsx still offers the chrome-only packs; it
- * keeps ALL_PUBLIC_TRANSLATE_OPTIONS below.)
+ * keeps ALL_PUBLIC_TRANSLATE_OPTIONS above.)
  */
 export const PUBLIC_STOREFRONT_DEFAULT_LANGUAGE = 'km'
 const PUBLIC_STOREFRONT_BUILT_IN_LANGUAGES = ['km', 'en']

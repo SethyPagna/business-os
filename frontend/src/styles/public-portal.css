@@ -295,7 +295,7 @@ body[data-public-portal='true'] video,
   }
 
   /* Same floor, same aria-label match, against the header's social/account
-     icon row: those intentionally shrink below 44px under `sm` (h-8 w-8,
+     icon row: those intentionally shrink below 44px under `sm` (h-10 w-8/w-9,
      CatalogPreviewSurface.tsx) so all of them fit on one row at 320-375px.
      Left unexempted the rule silently re-widened every icon back past that
      width and reopened the overflow/wrap the nowrap fix closed. */
