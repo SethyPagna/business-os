@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
@@ -451,6 +451,11 @@ function normalizeConfigPayload(payload: unknown): PortalConfig {
   return { ...DEFAULT_PUBLIC_CONFIG, ...fetched }
 }
 
+function SignalOnMount({ onMount }: { onMount: () => void }) {
+  useLayoutEffect(onMount, [onMount])
+  return null
+}
+
 // The public catalog's bootstrap/search endpoints return one row per branch
 // for products that are otherwise identical, and grouped products (same
 // name, different branch/price/barcode) get collapsed to a single card
@@ -476,6 +481,8 @@ export default function PublicCatalogPage() {
   const [realConfigInHand, setRealConfigInHand] = useState(() => paintConfigRef.current !== null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [productsFailed, setProductsFailed] = useState(false)
+  const [tabContentMounted, setTabContentMounted] = useState(false)
+  const markTabContentMounted = useCallback(() => setTabContentMounted(true), [])
   const [products, setProducts] = useState<CatalogProduct[]>([])
   // The grid holds its skeletons until a page cut at the viewer's own size
   // lands. The bootstrap is always the store's first 50 families ordered by
@@ -1302,8 +1309,11 @@ export default function PublicCatalogPage() {
         setAssistantDataUseConsent={setAssistantDataUseConsent}
         accountSignedIn={!!portalAccount.account}
       />
+      <SignalOnMount onMount={markTabContentMounted} />
     </Suspense>
   ) : storefrontSkeleton) : null
+  // A footer painted under the skeleton is pushed off screen by the taller content (layout shift).
+  const footerReady = realConfigInHand && (activeTab === 'products' || tabContentMounted)
 
   const scrollPublicPortal = (direction: 'top' | 'bottom') => {
     const top = direction === 'bottom' ? Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) : 0
@@ -1851,7 +1861,7 @@ export default function PublicCatalogPage() {
       catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
       secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
       promotionsSection={loadFailed ? null : promotionsSection}
-      footer={realConfigInHand ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
+      footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

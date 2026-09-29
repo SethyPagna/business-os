@@ -154,11 +154,11 @@ test.describe('leangbeauty storefront boot', () => {
     await context.setOffline(true)
     try {
       await page.reload({ waitUntil: 'load' })
-      // The shell, from cache. Its brand text is rendered by index.html before
-      // any script runs, so this proves a real document came back rather than
-      // the browser's own network-error page.
+      // The shell, from cache, boots into the storefront's own translated retry
+      // state: a real document came back rather than the browser's own
+      // network-error page, and no saved copy of the shop was painted (P2).
       await expect(page.locator('#root'), JSON.stringify(health)).not.toBeEmpty()
-      await expect(page.locator('body')).toContainText('Leang Beauty')
+      await expect(page.locator('[data-portal-load-failed="true"]')).toContainText(FAILURE_KM)
     } finally {
       await context.setOffline(false)
     }

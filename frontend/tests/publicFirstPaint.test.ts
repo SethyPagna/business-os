@@ -368,7 +368,15 @@ await runTest('the About tab and header show the skeleton while pending; the Web
   const heading = between(surface, '<h1', '</h1>')
   assert.match(heading, /configPending\s*\?/, 'the header name keeps its height as a skeleton while pending')
   assert.match(page, /configPending=\{!realConfigInHand\}/)
-  assert.match(page, /footer=\{realConfigInHand \? /, 'the footer waits for the real business details')
+})
+
+await runTest('the footer commits with the tab content, never under the skeleton it would be pushed out of (P2-3 layout shift)', () => {
+  const page = publicPage()
+  const secondary = between(page, 'const secondaryTabSection = ', ') : storefrontSkeleton) : null')
+  assert.match(secondary, /<CatalogSecondaryTabs[\s\S]*?\/>\s*<SignalOnMount onMount=\{markTabContentMounted\} \/>\s*<\/Suspense>/, 'the signal shares the content\'s Suspense boundary, so it mounts only when the content does')
+  assert.match(between(page, 'function SignalOnMount(', '\n}\n'), /useLayoutEffect\(onMount, \[onMount\]\)/, 'a layout effect: the footer joins the same frame, before the browser paints')
+  assert.match(page, /const footerReady = realConfigInHand && \(activeTab === 'products' \|\| tabContentMounted\)/, 'the footer waits for the real business details and for the tab content')
+  assert.match(page, /footer=\{footerReady \? <PortalFooter /)
 })
 
 await runTest('the landing cover is fetched first and fades in; the PublicCatalogRoot fallback is the same skeleton', () => {
