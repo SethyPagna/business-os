@@ -127,6 +127,19 @@ await runTest('after sign-in: nothing is saved on a shared device, a refusal, a 
   })
 })
 
+await runTest('after sign-in: a password the Worker marked must-change (publicly known or temporary) is never offered for saving', async () => {
+  await withBrowser({ store: async () => undefined }, async (clipboardWrites, stored) => {
+    const flagged = (must_change_password: unknown) => ({ success: true, sharedDevice: false, user: { username: 'sokha', name: 'Sokha', must_change_password } })
+    assert.equal(await requestPasswordSaveAfterSignIn(flagged(1), 'admin123'), false, 'the Worker sends 1')
+    assert.equal(await requestPasswordSaveAfterSignIn(flagged('1'), 'admin123'), false, 'read like the app reads it: Number(flag) === 1')
+    assert.deepEqual(stored, [])
+    assert.equal(await requestPasswordSaveAfterSignIn(flagged(0), 'Typed-Pass-1'), true, 'control: a cleared flag still saves')
+    assert.equal(await requestPasswordSaveAfterSignIn(flagged('0'), 'Typed-Pass-2'), true, 'control: the app shows no forced change for "0", so the save stays')
+    assert.deepEqual(stored, [{ id: 'sokha', password: 'Typed-Pass-1', name: 'Sokha' }, { id: 'sokha', password: 'Typed-Pass-2', name: 'Sokha' }])
+    assert.deepEqual(clipboardWrites, [])
+  })
+})
+
 await runTest('the notice after an own password change says whether the browser was asked to save it, in both languages', () => {
   const saved = passwordNoticeKey({ stored: true })
   const unsaved = passwordNoticeKey({ stored: false })

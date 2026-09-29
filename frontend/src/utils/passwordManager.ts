@@ -84,14 +84,16 @@ export function passwordNoticeKey({ stored }: { stored: boolean }): { key: strin
 type SignInAnswer = {
   success?: boolean
   sharedDevice?: boolean
-  user?: { username?: string; name?: string }
+  user?: { username?: string; name?: string; must_change_password?: unknown }
 } | null | undefined
 
 // After the Worker accepted the password (with or without the authenticator
 // step). Not on a device other accounts use (the Worker's sharedDevice): the
-// next person at that till would be offered this one's password.
+// next person at that till would be offered this one's password. Not a
+// must-change password either: the forced change saves the new one instead.
 export async function requestPasswordSaveAfterSignIn(answer: SignInAnswer, password: string): Promise<boolean> {
   if (!answer?.success || answer.sharedDevice) return false
+  if (Number(answer.user?.must_change_password || 0) === 1) return false
   return requestPasswordSave({ username: String(answer.user?.username || ''), password, displayName: answer.user?.name })
 }
 
