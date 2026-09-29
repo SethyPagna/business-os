@@ -758,11 +758,13 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
             <code className="mx-1 rounded bg-red-200 px-1 py-0.5 font-mono font-bold text-red-800 dark:bg-red-900/40 dark:text-red-300">{CONFIRM_WORD}</code>
             {T('reset_type_to_confirm', 'Type {word} to confirm').split('{word}')[1]}
           </p>
-          <input autoFocus disabled={working} className="input border-red-400 font-mono text-sm focus:ring-red-500 disabled:opacity-60 dark:border-red-700" placeholder={CONFIRM_WORD} value={typed} onChange={(event) => setTyped(event.target.value)} />
+          <input autoFocus name="reset_confirm_word" autoComplete="off" disabled={working} className="input border-red-400 font-mono text-sm focus:ring-red-500 disabled:opacity-60 dark:border-red-700" placeholder={CONFIRM_WORD} value={typed} onChange={(event) => setTyped(event.target.value)} />
+          <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
           <label className="block text-sm font-medium text-red-700 dark:text-red-300">
             {T('current_password', 'Current password')}
             <input
               type="password"
+              name="current_password"
               autoComplete="current-password"
               disabled={working}
               className="input mt-1 border-red-400 text-sm focus:ring-red-500 disabled:opacity-60 dark:border-red-700"

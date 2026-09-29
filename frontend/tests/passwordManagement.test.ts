@@ -110,21 +110,114 @@ await runTest('admin reset never stores another user credential in the admin pas
   }
 })
 
-await runTest('login and recovery forms expose password-manager autocomplete semantics', () => {
-  assert.match(loginSource, /name="username"[\s\S]*?autoComplete="username"/)
+// Login block (AUTH-P1-login). The sign-in form pairs for password managers
+// and the browser is asked to save only after the Worker accepted the password
+// (sign-in, or sign-in + authenticator code), under the account username. A
+// finished reset never keeps a spent link or code: it ends on the real sign-in
+// form with the new password filled in, and signing in there is what every
+// browser's save logic understands (AUTH-UX-FINAL C1, C2).
+function sliceConst(source: string, name: string): string {
+  const start = source.indexOf(`  const ${name} = `)
+  assert.ok(start >= 0, `${name} exists`)
+  const next = source.slice(start + 1).search(/\n  (?:const |return \()/)
+  return source.slice(start, next < 0 ? undefined : start + 1 + next)
+}
+
+await runTest('sign-in and recovery forms pair for password managers; the reveal is reachable by keyboard', () => {
+  assert.match(loginSource, /id="login-username"\s+name="username"[\s\S]*?autoComplete="username"/)
   assert.match(loginSource, /name="password"[\s\S]*?autoComplete="current-password"/)
   assert.match(loginSource, /id="reset-identifier" name="username" autoComplete="username"/)
-  assert.match(loginSource, /reset-password-new[\s\S]*?autoComplete="new-password"/)
-  assert.match(loginSource, /recovery-password-new[\s\S]*?autoComplete="new-password"/)
-  assert.ok((loginSource.match(/copyPasswordToClipboard\(resetNewPassword\)/g) || []).length >= 2)
+  const reveal = /<button\b[^>]*?onClick=\{\(\) => setShowPassword\(\(visible\) => !visible\)\}[\s\S]*?<\/button>/.exec(loginSource)?.[0] || ''
+  assert.ok(reveal, 'the reveal toggle exists')
+  assert.doesNotMatch(reveal, /tabIndex=\{-1\}/)
+  assert.match(loginSource, /<NewPasswordFields\s[^>]*idPrefix="reset-password"/)
+  assert.match(loginSource, /<NewPasswordFields\s[^>]*idPrefix="recovery-password"/)
+  assert.doesNotMatch(loginSource, /placeholder="(?:username \/ name \/ phone \/ email|6-digit code)"/, 'no English placeholders')
 })
 
-await runTest('self password change always requires current password and offers explicit copy backup', () => {
-  assert.match(profileSource, /if \(!currentPassword\.trim\(\)\) return notify\(tr\('current_password_required_change'/)
-  assert.match(profileSource, /name="current_password"[\s\S]*?autoComplete="current-password"/)
-  assert.match(profileSource, /name="new_password"[\s\S]*?autoComplete="new-password"/)
-  assert.match(profileSource, /copyPasswordToClipboard\(newPassword\)/)
+await runTest('the e-mail reset request is a real form: Enter sends it', () => {
+  const panel = loginSource.slice(loginSource.indexOf("{tr('email_recovery', 'Email recovery')}") - 600, loginSource.indexOf("tr('send_reset_email'"))
+  assert.match(panel, /<form\b[^>]*onSubmit=\{[^}]*handleResetWithEmail\(\)/)
+  assert.match(panel, /type="submit"/)
+})
+
+await runTest('the browser is asked to save only after a verified password, never with an automatic copy', () => {
+  assert.match(sliceConst(loginSource, 'handleLogin'), /requestPasswordSaveAfterSignIn\(result, password\)/)
+  assert.match(sliceConst(loginSource, 'handleLogin'), /passwordForSecondFactorRef\.current = password/)
+  assert.match(sliceConst(loginSource, 'handleOtp'), /requestPasswordSaveAfterSignIn\(verifyResult, passwordForSecondFactorRef\.current\)/)
+  assert.doesNotMatch(loginSource, /persistChangedPassword|copyPasswordToClipboard|passwordPersistenceNotice/)
+})
+
+await runTest('a finished reset ends on the pre-filled sign-in form: link and code cleared whatever the browser does (F-SPENT)', () => {
+  for (const handler of ['handleResetWithOtp', 'handleCompleteEmailReset']) {
+    const body = sliceConst(loginSource, handler)
+    assert.match(body, /showSignInWithNewPassword\(String\(result\?\.username/, `${handler} uses the account username the Worker answered`)
+    assert.match(body, /newPasswordProblem\(resetNewPassword\)/, `${handler} checks the shared rule`)
+    assert.doesNotMatch(body, /passwordSecured|credentialStoreSucceeded|copiedToClipboard|length < 6/)
+  }
+  const finish = sliceConst(loginSource, 'showSignInWithNewPassword')
+  assert.match(finish, /closeAuxMode\(\)/)
+  assert.match(finish, /setUsername\(canonicalUsername\)/)
+  assert.match(finish, /setPassword\(newPassword\)/)
+  assert.match(finish, /setSignInNotice\(tr\('password_changed_sign_in_to_save'/)
+  const close = sliceConst(loginSource, 'closeAuxMode')
+  assert.match(close, /setRecoveryAccessToken\(''\)/)
+  assert.match(close, /setResetOtp\(''\)/)
+})
+
+function inputBefore(source: string, id: string): string {
+  const own = source.lastIndexOf('<input', source.indexOf(`id="${id}"`))
+  const previous = source.lastIndexOf('<input', own - 1)
+  return previous < 0 ? '' : source.slice(previous, source.indexOf('/>', previous) + 2)
+}
+
+function assertAccountUsername(input: string, value: RegExp, surface: string) {
+  for (const attribute of [/type="text"/, /name="username"/, /autoComplete="username"/, /readOnly/, /className="sr-only"/, /tabIndex=\{-1\}/, /aria-hidden="true"/]) {
+    assert.match(input, attribute, `${surface}: the input just before the password is the account username (${attribute})`)
+  }
+  assert.match(input, value, `${surface}: the username is the signed-in account's`)
+}
+
+await runTest('My Profile password change: shared fields, a save request under the account username, all three fields cleared, never an automatic copy', () => {
+  // The last SAVED username: the Personal section edits `profile` in place, and an
+  // unsaved rename must never become the username the password is saved under.
+  assert.match(profileSource, /const accountUsername = String\(savedProfile\?\.username \|\| user\?\.username \|\| ''\)/)
+  assert.doesNotMatch(profileSource, /value=\{profile\?\.username/)
+  const save = sliceConst(profileSource, 'handlePasswordSave')
+  assert.match(save, /changeOwnPassword\(\{[\s\S]*username: accountUsername,/)
+  assert.match(save, /changeUserPassword\(userId, \{ \.\.\.passwords, userId, userName: user\?\.name \}\)/, 'sends exactly what changeOwnPassword checked')
+  assert.match(
+    save,
+    /if \(!outcome\.changed\) \{\s+notify\(outcome\.message, 'error'\)\s+return\s+\}\s+setCurrentPassword\(''\)\s+setNewPassword\(''\)\s+setConfirmPassword\(''\)\s+notify\(outcome\.message, outcome\.tone\)/,
+    'every change clears all three fields, whether or not the browser saved it',
+  )
+  assert.doesNotMatch(profileSource, /persistChangedPassword|copyPasswordToClipboard|copyFallback|passwordPersistenceNotice|passwordSecured/)
+  assert.doesNotMatch(profileSource, /tr\('copy_new_password'/, 'the text Copy button is now the Copy icon inside NewPasswordFields')
   assert.doesNotMatch(profileSource, /changeUserPassword\(userId, \{[\s\S]{0,220}adminOverride:/)
+
+  const form = profileSource.slice(profileSource.indexOf('void handlePasswordSave()'), profileSource.indexOf('</form>', profileSource.indexOf('void handlePasswordSave()')))
+  assertAccountUsername(inputBefore(form, 'security-current-password'), /value=\{accountUsername\}/, 'Security form')
+  assert.match(form, /id="security-current-password"\s+name="current_password"\s+type="password"\s+autoComplete="current-password"/)
+  const fields = /<NewPasswordFields\b[\s\S]*?\/>/.exec(form)?.[0] || ''
+  assert.match(fields, /idPrefix="security-password"/)
+  assert.doesNotMatch(fields, /mode=/, 'the default self mode: the person\'s own password is offered to their manager')
+  assert.ok(form.indexOf('id="security-current-password"') < form.indexOf('<NewPasswordFields'), 'current password before the new ones')
+  assert.equal((form.match(/<button\b/g) || []).length, 1, 'only the main action is a text button')
+  const submit = /<button type="submit"[\s\S]*?<\/button>/.exec(form)?.[0] || ''
+  assert.match(submit, /title=\{tr\('change_password', 'Change password'\)\}/)
+  assert.match(submit, /<KeyRound\b[\s\S]*?tr\('save', 'Save'\)/, 'main action: icon + one word ("change" is the change-money word in Khmer)')
+})
+
+await runTest('re-auth passwords pair with the signed-in account: Google disconnect and both authenticator steps', () => {
+  assertAccountUsername(inputBefore(profileSource, 'disconnect-google-password'), /value=\{accountUsername\}/, 'Google connect/disconnect')
+  assert.match(otpSource, /const signedInUsername = String\(app\.user\?\.username \|\| ''\)/)
+  for (const id of ['otp-setup-password', 'otp-disable-password']) {
+    const username = inputBefore(otpSource, id)
+    assertAccountUsername(username, /value=\{signedInUsername\}/, id)
+    assert.doesNotMatch(username, /targetUsername|targetName/, `${id}: recovery re-enters the ADMINISTRATOR's password, never the target's`)
+  }
+  const disable = otpSource.slice(otpSource.indexOf("step === 'confirm_disable'"), otpSource.indexOf('id="otp-disable-password"'))
+  assert.doesNotMatch(disable, /<form\b/, 'not a form: Enter must never disable or reset 2FA')
 })
 
 await runTest('profile photo opens view-first actions and keeps every picker reachable', () => {
@@ -141,12 +234,10 @@ await runTest('profile photo opens view-first actions and keeps every picker rea
 await runTest('profile and recovery security surfaces remain compact without weakening gates', () => {
   assert.match(profileSource, /h-12 w-12 rounded-xl/)
   assert.match(profileSource, /flex min-w-0 items-center gap-1\.5 whitespace-nowrap[\s\S]{0,1400}2FA \{otpEnabled/)
-  assert.match(profileSource, /grid gap-2 lg:grid-cols-3[\s\S]{0,1800}name="current_password"[\s\S]{0,1200}name="new_password"[\s\S]{0,800}name="confirm_password"/)
+  assert.match(profileSource, /grid gap-2 lg:grid-cols-3[\s\S]{0,1800}name="current_password"[\s\S]{0,600}lg:col-span-2[\s\S]{0,200}<NewPasswordFields[\s\S]{0,600}layout="columns"/)
   assert.match(profileSource, /sm:grid-cols-\[auto_minmax\(0,1fr\)_auto\][\s\S]{0,500}setOtpMode\(otpEnabled \? 'disable' : 'setup'\)/)
   assert.match(profileSource, /<InfoHint label=\{tr\('current_password'/)
   assert.match(loginSource, /id="reset-identifier"[\s\S]{0,700}id="reset-otp"/)
-  assert.match(loginSource, /grid gap-2 sm:grid-cols-2[\s\S]{0,700}id="reset-password-new"[\s\S]{0,700}id="reset-password-confirm"/)
-  assert.match(loginSource, /id="recovery-password-new"[\s\S]{0,700}id="recovery-password-confirm"/)
   assert.doesNotMatch(profileSource, /onClick=\{[^}]*logout|onClick=\{[^}]*refresh/i)
 })
 

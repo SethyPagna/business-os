@@ -16,9 +16,11 @@ import InfoHint from '../shared/InfoHint.tsx'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
-import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import { requestPasswordSaveAfterSignIn } from '../../utils/passwordManager.ts'
+import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
+import NewPasswordFields from './password/NewPasswordFields.tsx'
 import { takePasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
 import { finishActorOauthCookieRedirect, isActorCookieMutationPending } from '../../api/actorReadScope.ts'
 import {
@@ -30,29 +32,15 @@ import {
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 
-// Admin sign-in is Business OS branding; the storefront is Leang Beauty.
-//
-// This REVERSES an earlier decision recorded here, at explicit request
-// (Aug 25 2026): "business-os logo for admin page, default... leang
-// cosmetics logo, wire to everything business logo, public website logo,
-// favicon and the pwa logo for public website". The previous version
-// defaulted this page to the storefront icon on the reasoning that a
-// single-tenant deployment should look like the merchant everywhere. The
-// two brands are now deliberately split by AUDIENCE instead: staff signing
-// into the admin app see the product they are signing into, customers see
-// the shop. It also removes a visible inconsistency -- this page already
-// rendered the heading "Business OS" above the pink storefront icon.
-//
-// Only the DEFAULT changes. A merchant logo configured in settings still
-// wins, via the brandLogo/brandName state below.
-//
-// The storefront's own defaults are untouched and must stay Leang
-// Beauty: PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON (the live
-// customer site, its favicon and its PWA icon) and CatalogPage.tsx's
-// DEFAULT_PORTAL_ICON_SRC (the admin-side preview OF that customer site).
-// tests/brandIcons.test.ts pins the whole split.
+// The staff sign-in shows the staff app's own icon, not the storefront's: an
+// explicit request (Aug 25 2026) reversed the earlier storefront default and
+// split the brands by audience; the owner kept the blue BO icon (28 Sep 2026).
+// The name fallback is the shop's (owner, 27 Sep 2026: "Leang Cosmetics"). A
+// logo or name configured in settings wins. The storefront keeps its own icon
+// defaults (PublicCatalogPage.tsx DEFAULT_PUBLIC_PORTAL_ICON, CatalogPage.tsx
+// DEFAULT_PORTAL_ICON_SRC); tests/brandIcons.test.ts pins the icon split.
 const DEFAULT_LOGIN_LOGO_SRC = '/icon-512.png'
-const DEFAULT_LOGIN_BRAND_NAME = 'Business OS'
+const DEFAULT_LOGIN_BRAND_NAME = 'Leang Cosmetics'
 
 type IdValue = string | number
 type TranslateFunction = (key: string) => string | undefined
@@ -89,6 +77,7 @@ interface LoginResult {
   sessionExpiresAt?: string
   deviceApprovalRequired?: boolean
   deviceStatus?: 'pending' | 'rejected'
+  sharedDevice?: boolean
 }
 
 interface AppContextValue {
@@ -141,6 +130,7 @@ interface OrganizationSearchResult {
 interface PasswordResetResult {
   success?: boolean
   error?: string
+  code?: string
   message?: string
   username?: string
   name?: string
@@ -218,6 +208,12 @@ function getAuthApi(): AuthApi {
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return String((error as { message?: unknown })?.message || fallback)
+}
+
+// A reset refusal (a thrown API error or a { success: false } answer) in the
+// operator's language when the Worker sent a known code.
+function resetFailureMessage(value: unknown, tr: TranslationLookup, fallback: string): string {
+  return newPasswordRefusalMessage(value, tr) || localizeAuthError(value, tr, fallback)
 }
 
 function readPendingOauthLogin(): PendingOauthLogin | null {
@@ -301,6 +297,7 @@ export default function Login() {
   const [pendingOtpChallenge, setPendingOtpChallenge] = useState<string>('')
   const [deviceApprovalPending, setDeviceApprovalPending] = useState(false)
   const [error, setError] = useState('')
+  const [signInNotice, setSignInNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | ''>('')
   const capabilityRequestRef = useRef(0)
@@ -311,6 +308,9 @@ export default function Login() {
   const oauthStartInFlightRef = useRef(false)
   const loginSubmitInFlightRef = useRef(false)
   const otpVerifyInFlightRef = useRef(false)
+  // The password the Worker accepted before asking for the authenticator code;
+  // saved to the browser only once the code is accepted too.
+  const passwordForSecondFactorRef = useRef('')
 
   const [showOtpReset, setShowOtpReset] = useState(false)
   const [showEmailReset, setShowEmailReset] = useState(false)
@@ -697,6 +697,7 @@ export default function Login() {
       return
     }
     setError('')
+    setSignInNotice('')
     loginSubmitInFlightRef.current = true
     setLoading(true)
     try {
@@ -712,13 +713,18 @@ export default function Login() {
         return
       }
       if (result?.otpRequired) {
+        passwordForSecondFactorRef.current = password
         setOtpRequired(true)
         setPendingUserId(result.userId ?? null)
         setPendingOtpChallenge(result.otpChallenge || '')
         return
       }
       // The server's code, translated (I18N-4); its English only when there is none.
-      if (!result?.success) setError(localizeAuthError(result, tr, tr('login_failed_try_again', 'Login failed. Please try again.')))
+      if (!result?.success) {
+        setError(localizeAuthError(result, tr, tr('login_failed_try_again', 'Login failed. Please try again.')))
+        return
+      }
+      void requestPasswordSaveAfterSignIn(result, password)
     } catch (loginError) {
       setError(localizeAuthError(loginError, tr, tr('login_failed_try_again', 'Login failed. Please try again.')))
     } finally {
@@ -760,6 +766,7 @@ export default function Login() {
           : '')
       } else if (verifyResult?.success && verifyResult?.user) {
         await persistAuthenticatedUser(verifyResult.user, sessionDuration, verifyResult.sessionExpiresAt || '')
+        void requestPasswordSaveAfterSignIn(verifyResult, passwordForSecondFactorRef.current)
       } else {
         setError(localizeAuthError(verifyResult, tr, tr('invalid_otp_code', 'Invalid OTP code')))
       }
@@ -782,7 +789,8 @@ export default function Login() {
     if (!resolvedOrganization) return setError(tr('enter_organization_first', 'Please choose your organization first.'))
     if (!resetIdentifier.trim()) return setError(tr('enter_username_email_first', 'Enter your username or email first.'))
     if (!resetOtp.trim()) return setError(tr('enter_otp_first', 'Enter the OTP code from your authenticator app.'))
-    if (resetNewPassword.length < 6) return setError(tr('password_min_6', 'Use at least 6 characters for the new password.'))
+    const problem = newPasswordProblem(resetNewPassword)
+    if (problem) return setError(passwordProblemMessage(problem, tr))
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
 
     setError('')
@@ -796,28 +804,12 @@ export default function Login() {
         newPassword: resetNewPassword,
       }), 'OTP password reset')
       if (result?.success === false) {
-        setError(result.error || tr('otp_reset_failed', 'Failed to reset password with OTP.'))
+        setError(resetFailureMessage(result, tr, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
         return
       }
-      const persistence = await persistChangedPassword({
-        username: String(result?.username || resetIdentifier).trim(),
-        displayName: String(result?.name || result?.username || resetIdentifier).trim(),
-        password: resetNewPassword,
-        allowCredentialStore: true,
-        copyFallback: true,
-      })
-      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
-      setResetInfo(passwordPersistenceNotice(persistence))
-      setUsername(String(result?.username || resetIdentifier).trim())
-      setPassword('')
-      setOtp('')
-      setResetOtp('')
-      if (passwordSecured) {
-        setResetNewPassword('')
-        setResetConfirmPassword('')
-      }
+      showSignInWithNewPassword(String(result?.username || resetIdentifier).trim(), resetNewPassword)
     } catch (resetError) {
-      setError(getErrorMessage(resetError, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
+      setError(resetFailureMessage(resetError, tr, tr('otp_reset_failed', 'Failed to reset password with OTP.')))
     } finally {
       passwordResetActionRef.current = false
       setLoading(false)
@@ -859,7 +851,8 @@ export default function Login() {
       setError(tr('recovery_link_missing', 'Recovery link is missing or expired. Please request a new email reset link.'))
       return
     }
-    if (resetNewPassword.length < 6) return setError(tr('password_min_6', 'Use at least 6 characters for the new password.'))
+    const problem = newPasswordProblem(resetNewPassword)
+    if (problem) return setError(passwordProblemMessage(problem, tr))
     if (resetNewPassword !== resetConfirmPassword) return setError(tr('password_confirm_mismatch', 'Password confirmation does not match.'))
 
     setError('')
@@ -871,26 +864,12 @@ export default function Login() {
         newPassword: resetNewPassword,
       }), 'Complete email password reset')
       if (result?.success === false) {
-        setError(result.error || tr('email_reset_complete_failed', 'Failed to update password from recovery email.'))
+        setError(resetFailureMessage(result, tr, tr('email_reset_complete_failed', 'Failed to update password from recovery email.')))
         return
       }
-      const persistence = await persistChangedPassword({
-        username: String(result?.username || resetIdentifier || username).trim(),
-        displayName: String(result?.name || result?.username || resetIdentifier || username).trim(),
-        password: resetNewPassword,
-        allowCredentialStore: true,
-        copyFallback: true,
-      })
-      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
-      setUsername(String(result?.username || resetIdentifier || username).trim())
-      if (passwordSecured) {
-        setRecoveryAccessToken('')
-        setResetNewPassword('')
-        setResetConfirmPassword('')
-      }
-      setResetInfo(passwordPersistenceNotice(persistence))
+      showSignInWithNewPassword(String(result?.username || resetIdentifier || username).trim(), resetNewPassword)
     } catch (resetError) {
-      setError(getErrorMessage(resetError, tr('email_reset_complete_failed', 'Failed to update password from recovery email.')))
+      setError(resetFailureMessage(resetError, tr, tr('email_reset_complete_failed', 'Failed to update password from recovery email.')))
     } finally {
       passwordResetActionRef.current = false
       setLoading(false)
@@ -956,6 +935,19 @@ export default function Login() {
     setResetOtp('')
     setResetNewPassword('')
     setResetConfirmPassword('')
+  }
+
+  // A finished reset (AUTH-UX-FINAL C2): the spent link and code go with the
+  // reset panel, and the real sign-in form opens with the account username and
+  // the new password filled in. Signing in there is the moment every browser's
+  // save logic recognises, and the one requestPasswordSaveAfterSignIn uses.
+  const showSignInWithNewPassword = (canonicalUsername: string, newPassword: string) => {
+    closeAuxMode()
+    setUsername(canonicalUsername)
+    setPassword(newPassword)
+    setShowPassword(false)
+    setOtp('')
+    setSignInNotice(tr('password_changed_sign_in_to_save', 'Password changed. Sign in to keep it on this device.'))
   }
 
   // S-auth4c: the methods offered are the same for every account -- email
@@ -1229,13 +1221,14 @@ export default function Login() {
                   className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200"
                   aria-label={showPassword ? tr('hide_password', 'Hide password') : tr('show_password', 'Show password')}
                   title={showPassword ? tr('hide_password', 'Hide password') : tr('show_password', 'Show password')}
-                  tabIndex={-1}
+                  aria-pressed={showPassword}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
+            {signInNotice ? <div role="status" className="rounded-xl bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/20 dark:text-green-300">{signInNotice}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
             <button className="btn-primary h-11 w-full" type="submit" disabled={loading}>
@@ -1299,7 +1292,7 @@ export default function Login() {
         ) : null}
 
         {!otpRequired && !deviceApprovalPending && showEmailReset && !recoveryAccessToken ? (
-          <div className="space-y-3">
+          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void handleResetWithEmail() }}>
             <div className="flex items-center justify-center gap-1 text-sm font-semibold text-primary-800 dark:text-primary-300">
               <span>{tr('email_recovery', 'Email recovery')}</span>
               <InfoHint label={tr('email_recovery', 'Email recovery')} text={tr('email_reset_notice', "We'll email a reset link if this account has one saved.")} />
@@ -1308,13 +1301,13 @@ export default function Login() {
               <label htmlFor="email-reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                 {tr('username_name_email_phone', 'Username, name, email, or phone')}
               </label>
-              <input id="email-reset-identifier" name="email_reset_identifier" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+              <input id="email-reset-identifier" name="email_reset_identifier" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} />
             </div>
 
             {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <button className="btn-primary h-10 w-full text-sm" type="button" disabled={loading} onClick={handleResetWithEmail}>
+            <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
               {loading ? tr('sending_reset_email', 'Sending reset email...') : tr('send_reset_email', 'Send reset email')}
             </button>
 
@@ -1322,7 +1315,7 @@ export default function Login() {
               {tr('reset_choose_another_way', 'Choose another way')}
             </button>
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
-          </div>
+          </form>
         ) : null}
 
         {/* S-auth4c: one recovery entry point, then a choice of method. The
@@ -1389,7 +1382,7 @@ export default function Login() {
                 <label htmlFor="reset-identifier" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                   {tr('username_name_email_phone', 'Username, name, email, or phone')}
                 </label>
-                <input id="reset-identifier" name="username" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="username / name / phone / email" />
+                <input id="reset-identifier" name="username" autoComplete="username" className="input h-10" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} />
               </div>
               <div>
                 <label htmlFor="reset-otp" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -1403,49 +1396,27 @@ export default function Login() {
                   className="input h-10"
                   value={resetOtp}
                   onChange={(event) => setResetOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="6-digit code"
+                  placeholder="000000"
                 />
               </div>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor="reset-password-new" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('new_password', 'New password')}
-                </label>
-                <input id="reset-password-new" name="reset_password_new" type="password" className="input h-10" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-              <div>
-                <label htmlFor="reset-password-confirm" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('confirm_new_password', 'Confirm new password')}
-                </label>
-                <input id="reset-password-confirm" name="reset_password_confirm" type="password" className="input h-10" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-            </div>
+            <NewPasswordFields
+              tr={tr}
+              idPrefix="reset-password"
+              password={resetNewPassword}
+              confirm={resetConfirmPassword}
+              onPasswordChange={setResetNewPassword}
+              onConfirmChange={setResetConfirmPassword}
+              identity={{ username: resetIdentifier }}
+              disabled={loading}
+            />
 
             {resetInfo ? <div className="rounded-lg border border-green-100 bg-green-50/90 p-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-300">{resetInfo}</div> : null}
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
-                {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
-              </button>
-              <button
-                className="btn-secondary h-10 w-full text-sm"
-                type="button"
-                disabled={!resetNewPassword}
-                onClick={() => {
-                  void copyPasswordToClipboard(resetNewPassword).then((copied) => {
-                    setResetInfo(
-                      copied
-                        ? tr('new_password_copied', 'New password copied to clipboard.')
-                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
-                    )
-                  })
-                }}
-              >
-                {tr('copy_new_password', 'Copy new password')}
-              </button>
-            </div>
+            <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
+              {loading ? tr('updating_password', 'Updating password...') : tr('reset_password', 'Reset password')}
+            </button>
 
             <button type="button" className="w-full text-sm font-medium text-primary-700 hover:text-primary-800 dark:text-primary-300" onClick={() => openResetMethod('chooser')}>
               {tr('reset_choose_another_way', 'Choose another way')}
@@ -1461,44 +1432,22 @@ export default function Login() {
               <span>{tr('set_new_password_from_email', 'Set new password')}</span>
               <InfoHint label={tr('set_new_password_from_email', 'Set new password')} text={resetInfo || tr('set_new_password_from_email', 'Set your new password below to finish email recovery.')} />
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor="recovery-password-new" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('new_password', 'New password')}
-                </label>
-                <input id="recovery-password-new" name="recovery_password_new" type="password" className="input h-10" value={resetNewPassword} onChange={(event) => setResetNewPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-              <div>
-                <label htmlFor="recovery-password-confirm" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  {tr('confirm_new_password', 'Confirm new password')}
-                </label>
-                <input id="recovery-password-confirm" name="recovery_password_confirm" type="password" className="input h-10" value={resetConfirmPassword} onChange={(event) => setResetConfirmPassword(event.target.value)} autoComplete="new-password" />
-              </div>
-            </div>
+            <NewPasswordFields
+              tr={tr}
+              idPrefix="recovery-password"
+              password={resetNewPassword}
+              confirm={resetConfirmPassword}
+              onPasswordChange={setResetNewPassword}
+              onConfirmChange={setResetConfirmPassword}
+              identity={{ username: resetIdentifier || username }}
+              disabled={loading}
+            />
 
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
-                {loading ? tr('updating_password', 'Updating password...') : tr('save_new_password', 'Save new password')}
-              </button>
-              <button
-                className="btn-secondary h-10 w-full text-sm"
-                type="button"
-                disabled={!resetNewPassword}
-                onClick={() => {
-                  void copyPasswordToClipboard(resetNewPassword).then((copied) => {
-                    setResetInfo(
-                      copied
-                        ? tr('new_password_copied', 'New password copied to clipboard.')
-                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
-                    )
-                  })
-                }}
-              >
-                {tr('copy_new_password', 'Copy new password')}
-              </button>
-            </div>
+            <button className="btn-primary h-10 w-full text-sm" type="submit" disabled={loading}>
+              {loading ? tr('updating_password', 'Updating password...') : tr('save_new_password', 'Save new password')}
+            </button>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
           </form>
@@ -1559,6 +1508,7 @@ export default function Login() {
                 setOtpRequired(false)
                 setPendingUserId(null)
                 setPendingOtpChallenge('')
+                passwordForSecondFactorRef.current = ''
                 setOtp('')
                 setError('')
               }}

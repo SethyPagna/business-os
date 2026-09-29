@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
+import { transformSync } from 'esbuild'
 import { apiFetch, setSyncServerUrl, __resetApiWriteDedupeForTests, __resetApiHealthForTests } from '../src/api/http.ts'
 
 // S-auth4b, owner requirement (27 Sep 2026): the forced password change for an
@@ -39,6 +41,84 @@ const appContextSource = read('../src/AppContext.tsx')
 const handoffPath = new URL('../src/components/auth/passwordRecoveryHandoff.ts', import.meta.url)
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, unknown>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, unknown>
+
+// AUTH-P1: password managers. The form is what Safari, Firefox and Chromium
+// key on to offer "Update password?": a visible-to-them username text input
+// first (never display:none), then named current / new / confirm inputs.
+// After a successful change the app asks the browser to update the saved
+// password BEFORE it leaves the screen -- the saved one is the leaked one.
+
+const require = createRequire(import.meta.url)
+const React = require('react')
+const renderToStaticMarkup = require('react-dom/server').renderToStaticMarkup as (node: unknown) => string
+
+type Spies = { calls: string[]; changeAnswer: () => Promise<unknown>; saveAnswer: boolean }
+type ForcedUser = { id?: number; username?: string; name?: string }
+type Translate = (key: string, fallback: string) => string
+type ForcedInput = { user: ForcedUser; currentPassword: string; newPassword: string; confirmPassword: string; tr: Translate }
+type ForcedModule = { default: unknown; changeForcedPassword: (input: ForcedInput) => Promise<string> }
+
+const createSpies = (changeAnswer: () => Promise<unknown>, saveAnswer = true): Spies => ({ calls: [], changeAnswer, saveAnswer })
+const trFrom = (values: Record<string, string>): Translate => (key, fallback) => values[key] ?? fallback
+const SOKHA = { id: 2, username: 'sokha', name: 'Sokha' }
+const input = (overrides: Partial<ForcedInput> = {}): ForcedInput => ({
+  user: SOKHA, currentPassword: 'Admin123456!', newPassword: 'Brand-New-9x', confirmPassword: 'Brand-New-9x', tr: trFrom({}), ...overrides,
+})
+
+function compileModule(rel: string, resolve: (id: string) => unknown): Record<string, unknown> {
+  const code = transformSync(read(rel), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
+  const mod = { exports: {} as Record<string, unknown> }
+  new Function('require', 'module', 'exports', code)(resolve, mod, mod.exports)
+  return mod.exports
+}
+
+function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}): ForcedModule {
+  return compileModule('../src/components/auth/ForcedPasswordChange.tsx', (id) => {
+    if (id.endsWith('/AppContext.tsx')) return { useApp: () => ({ user: SOKHA, t: (key: string) => key, logout: async () => {}, ...appContext }) }
+    if (id.endsWith('/userAdminTransport.ts')) {
+      return { changeUserPassword: async (userId: unknown, body: { newPassword: string }) => { spies.calls.push(`change:${userId}:${body.newPassword}`); return spies.changeAnswer() } }
+    }
+    if (id.endsWith('/loaders.ts')) return { withLoaderTimeout: (fn: () => unknown) => fn() }
+    if (id.endsWith('/passwordManager.ts')) {
+      return { requestPasswordSave: async (request: { username: string; password: string }) => { spies.calls.push(`save:${request.username}:${request.password}`); return spies.saveAnswer } }
+    }
+    if (id.endsWith('/passwordRules.ts')) return require('../src/utils/passwordRules.ts')
+    if (id.endsWith('/ownPasswordChange.ts')) return require('../src/components/auth/password/ownPasswordChange.ts')
+    if (id.endsWith('/NewPasswordFields.tsx')) {
+      return compileModule('../src/components/auth/password/NewPasswordFields.tsx', (inner) => {
+        if (inner.endsWith('/passwordManager.ts')) return require('../src/utils/passwordManager.ts')
+        if (inner.endsWith('/passwordSuggest.ts')) return require('../src/utils/passwordSuggest.ts')
+        return require(inner)
+      })
+    }
+    if (id.endsWith('/passwordRecoveryHandoff.ts')) return { requestPasswordRecoveryAfterSignOut: (identifier: string) => spies.calls.push(`recover:${identifier}`) }
+    return require(id)
+  }) as unknown as ForcedModule
+}
+
+async function withWindowEvents<T>(spies: Spies, fn: () => Promise<T>): Promise<T> {
+  const originalWindow = globalThis.window
+  globalThis.window = {
+    dispatchEvent: (event: Event) => {
+      spies.calls.push(`dispatch:${event.type}:${(event as CustomEvent).detail?.must_change_password}`)
+      return true
+    },
+  } as unknown as Window & typeof globalThis
+  try {
+    return await fn()
+  } finally {
+    globalThis.window = originalWindow
+  }
+}
+
+type Tag = Record<string, string>
+function tagsOf(html: string, name: string): Tag[] {
+  return [...html.matchAll(new RegExp(`<${name}\\b([^>]*)>`, 'g'))].map((match) => {
+    const attributes: Tag = {}
+    for (const attribute of match[1].matchAll(/([a-zA-Z0-9_:-]+)(?:="([^"]*)")?/g)) attributes[attribute[1].toLowerCase()] = attribute[2] ?? ''
+    return attributes
+  })
+}
 
 function createStorage(): Storage {
   const values = new Map<string, string>()
@@ -133,13 +213,80 @@ await runTest('every entry path hands the Worker\'s user (with its flag) to the 
 
 await runTest('old -> new: the change screen adds no password rule of its own', () => {
   assert.doesNotMatch(forcedSource, /newPassword === currentPassword/, 'the Worker decides what is publicly known')
-  assert.match(forcedSource, /if \(newPassword\.length < 6\)/, 'the app-wide minimum (passwordPolicy.ts MIN_PASSWORD_LENGTH) stays')
+  assert.doesNotMatch(forcedSource, /length < \d/, 'no local minimum: the shared rule (utils/passwordRules.ts = the Worker\'s) decides')
+  assert.match(forcedSource, /import \{[^}]*\bnewPasswordProblem\b[^}]*\} from '\.\.\/\.\.\/utils\/passwordRules\.ts'/)
   assert.match(forcedSource, /changeUserPassword\(userId, \{ currentPassword, newPassword \}\)/)
 })
 
-await runTest('a wrong current password is an error in the operator\'s language, and the screen stays', () => {
-  assert.match(forcedSource, /resultCode\(value\) === 'incorrect_password'\) \{\s*return tr\('current_password_incorrect',/)
-  assert.match(forcedSource, /currentPasswordRateLimitMessage\(value, tr\)/, 'the usual limit keeps its own message')
+await runTest('a wrong current password is an error in the operator\'s language, and the screen stays', async () => {
+  const spies = createSpies(async () => ({ success: false, error: 'Current password is incorrect', code: 'incorrect_password' }))
+  const { changeForcedPassword } = loadForcedScreen(spies)
+  const shown = await withWindowEvents(spies, () => changeForcedPassword(input({ tr: trFrom({ current_password_incorrect: 'KM-WRONG' }) })))
+  assert.equal(shown, 'KM-WRONG')
+  assert.deepEqual(spies.calls, ['change:2:Brand-New-9x'], 'nothing saved, the screen is not left')
+  const limited = createSpies(async () => ({ success: false, error: 'Too many attempts', code: 'current_password_rate_limited' }))
+  const limitedShown = await withWindowEvents(limited, () => loadForcedScreen(limited).changeForcedPassword(input({ tr: trFrom({ current_password_rate_limited: 'KM-LIMIT' }) })))
+  assert.equal(limitedShown, 'KM-LIMIT', 'the usual limit keeps its own message')
+})
+
+await runTest('the form pairs for password managers: username text input first, then named current, new and confirm', () => {
+  const screen = loadForcedScreen(createSpies(async () => ({ success: true })))
+  const html = renderToStaticMarkup(React.createElement(screen.default))
+  assert.equal(tagsOf(html, 'form').length, 1, 'one real form with a submit button')
+  const inputs = tagsOf(html, 'input')
+  assert.deepEqual(inputs.map((tag) => [tag.type, tag.name, tag.autocomplete]), [
+    ['text', 'username', 'username'],
+    ['password', 'current_password', 'current-password'],
+    ['password', 'new_password', 'new-password'],
+    ['password', 'confirm_password', 'new-password'],
+  ])
+  const [username] = inputs
+  assert.equal(username.value, 'sokha', 'the canonical username, not what was typed at sign-in')
+  assert.equal('hidden' in username, false, 'never display:none: WebKit may skip a hidden username when pairing')
+  assert.match(username.class || '', /\bsr-only\b/)
+  assert.ok(inputs[2].passwordrules, 'Safari\'s generator gets the rules for its own suggestion')
+})
+
+await runTest('Suggest, Show and Copy are icon-only buttons whose tooltip is their translated name', () => {
+  const screen = loadForcedScreen(createSpies(async () => ({ success: true })), {
+    t: (key: string) => ({ password_suggest: 'KM-SUGGEST', show_password: 'KM-SHOW', copy_new_password: 'KM-COPY' } as Record<string, string>)[key] ?? key,
+  })
+  const html = renderToStaticMarkup(React.createElement(screen.default))
+  for (const label of ['KM-SUGGEST', 'KM-SHOW', 'KM-COPY']) {
+    const button = new RegExp(`<button type="button"[^>]*aria-label="${label}" title="${label}"[^>]*>([\\s\\S]*?)</button>`).exec(html)
+    assert.ok(button, `${label} button with a matching tooltip`)
+    assert.equal(button[1].replace(/<[^>]+>/g, '').trim(), '', `${label} shows an icon, no text`)
+  }
+})
+
+await runTest('success asks the browser to update the saved password BEFORE the app leaves the screen', async () => {
+  const spies = createSpies(async () => ({ success: true }))
+  const { changeForcedPassword } = loadForcedScreen(spies)
+  const shown = await withWindowEvents(spies, () => changeForcedPassword(input()))
+  assert.equal(shown, '')
+  assert.deepEqual(spies.calls, ['change:2:Brand-New-9x', 'save:sokha:Brand-New-9x', 'dispatch:user:updated:0'])
+})
+
+await runTest('a browser that will not save never blocks leaving the screen', async () => {
+  const spies = createSpies(async () => ({ success: true }), false)
+  const { changeForcedPassword } = loadForcedScreen(spies)
+  assert.equal(await withWindowEvents(spies, () => changeForcedPassword(input())), '')
+  assert.deepEqual(spies.calls.at(-1), 'dispatch:user:updated:0')
+})
+
+await runTest('the new-password rule: refused before any request, in the operator\'s language; a server refusal code too', async () => {
+  const tr = trFrom({ password_edge_whitespace: 'KM-EDGE', password_too_short: 'KM-SHORT {min}', new_password_confirm_mismatch: 'KM-MISMATCH' })
+  let spies = createSpies(async () => ({ success: true }))
+  let screen = loadForcedScreen(spies)
+  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ newPassword: ' Brand-New-9x', confirmPassword: ' Brand-New-9x', tr }))), 'KM-EDGE')
+  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ newPassword: 'abcde', confirmPassword: 'abcde', tr }))), 'KM-SHORT 6')
+  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ confirmPassword: 'Brand-New-9y', tr }))), 'KM-MISMATCH')
+  assert.deepEqual(spies.calls, [], 'no request, no save, no dispatch')
+
+  spies = createSpies(async () => ({ success: false, error: 'Password cannot start or end with a space', code: 'password_edge_whitespace' }))
+  screen = loadForcedScreen(spies)
+  assert.equal(await withWindowEvents(spies, () => screen.changeForcedPassword(input({ tr }))), 'KM-EDGE', 'the server\'s English is not shown')
+  assert.deepEqual(spies.calls, ['change:2:Brand-New-9x'])
 })
 
 await runTest('the ways out: the reset-method chooser (after signing out) and a plain Sign out', () => {
@@ -169,7 +316,11 @@ await runTest('the recovery handoff survives sign-out in memory, is taken once, 
 })
 
 await runTest('both language packs carry every new string', () => {
-  for (const key of ['current_password_incorrect', 'forced_password_change_forgot', 'forced_password_change_sign_out']) {
+  for (const key of [
+    'current_password_incorrect', 'forced_password_change_forgot', 'forced_password_change_sign_out',
+    'password_suggest', 'password_strength_label', 'password_strength_weak', 'password_strength_fair', 'password_strength_strong',
+    'password_too_short', 'password_too_long', 'password_edge_whitespace',
+  ]) {
     for (const [name, pack] of [['en', en], ['km', km]] as const) {
       assert.equal(typeof pack[key], 'string', `${name}.${key}`)
       assert.ok(String(pack[key]).trim(), `${name}.${key} is not empty`)

@@ -93,7 +93,6 @@ await runTest('every screen that re-enters the current password maps the code, o
   const users = code(read('../src/components/users/Users.tsx'))
   const surfaces = [
     ['My Profile save', between(profile, 'const commitProfileSave = async', 'const handlePasswordSave = async')],
-    ['My Profile password change', between(profile, 'const handlePasswordSave = async', 'const handleSessionSave = ')],
     ['My Profile Google disconnect', between(profile, 'const handleDisconnectOauthProvider = async', 'const handleAvatarSelected = async')],
     ['Users page password change', between(users, 'const handleResetPassword = async', 'const handleSaveRole = async')],
   ] as const
@@ -101,6 +100,14 @@ await runTest('every screen that re-enters the current password maps the code, o
     assert.ok(body.includes('currentPasswordRateLimitMessage(result, tr) ||'), `${name}: a { success: false } result`)
     assert.ok(body.includes('currentPasswordRateLimitMessage(error, tr) ||'), `${name}: a thrown ApiError`)
   }
+  // My Profile's password change maps it inside changeOwnPassword, on both
+  // paths (behaviour: tests/ownPasswordChange.test.ts).
+  const passwordChange = between(profile, 'const handlePasswordSave = async', 'const handleSessionSave = ')
+  assert.ok(passwordChange.includes('changeOwnPassword({'), 'My Profile password change goes through changeOwnPassword')
+  const own = code(read('../src/components/auth/password/ownPasswordChange.ts'))
+  assert.ok(own.includes('currentPasswordRateLimitMessage(value, tr)'), 'changeOwnPassword maps the code')
+  assert.ok(own.includes('passwordChangeFailureMessage(answer, tr)'), 'changeOwnPassword: a { success: false } result')
+  assert.ok(own.includes('passwordChangeFailureMessage(error, tr)'), 'changeOwnPassword: a thrown ApiError')
 })
 
 await runTest('the remove-photo dialog no longer promises the photo is deleted from storage', () => {
