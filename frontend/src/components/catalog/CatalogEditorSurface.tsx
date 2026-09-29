@@ -436,6 +436,7 @@ function CatalogEditorSurfaceContent() {
               <button
                 key={sectionId}
                 type="button"
+                data-editor-section={sectionKey}
                 className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${
                   activeEditorSection === sectionKey
                     ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
