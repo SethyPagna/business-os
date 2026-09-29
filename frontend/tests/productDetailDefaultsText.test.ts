@@ -95,6 +95,6 @@ assert.match(flyout, /: \[resolveProductDetailDefault\('caution', cautionDefault
 assert.match(flyout, /const needMoreDetailsText = resolveProductDetailDefault\('need_more_details', needMoreDetailsDefault, language\)/)
 assert.doesNotMatch(flyout, /No product-specific caution has been added yet|Contact us for more product details\./)
 const surface = read('src/components/catalog/CatalogPreviewSurface.tsx')
-assert.match(surface, /needMoreDetailsDefault=\{productDetailNeedMoreDetailsDefault\}\s*language=\{translateTarget\}/,'the flyout is told the page language')
+assert.match(surface, /needMoreDetailsDefault=\{productDetailNeedMoreDetailsDefault\}\s*language=\{pageLanguage\}/,'the flyout is told the page language')
 
 console.log('productDetailDefaultsText tests passed')

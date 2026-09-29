@@ -29,7 +29,7 @@ export const DEVICE_SETTINGS_KEY = 'businessos_device_settings'
 export const USER_STORAGE_KEY = 'businessos_user'
 /** frontend/src/constants.ts STORAGE_KEYS.USER_EXPIRY */
 export const USER_EXPIRY_STORAGE_KEY = 'businessos_user_expiry'
-/** frontend/src/components/catalog/portalTranslateController.ts */
+/** frontend/src/components/catalog/portalLanguageOptions.ts PORTAL_LANGUAGE_STORAGE_KEY */
 export const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
 /** frontend/src/components/catalog/portalLanguagePacks.ts, km: the language a first visit opens in. */
 export const STOREFRONT_KM_LABELS = { sectionNavigation: 'ការរុករកផ្នែក', products: 'ផលិតផល', page: 'ទំព័រ', about: 'អំពី', faq: 'សំណួរ', membership: 'សមាជិកភាព' } as const

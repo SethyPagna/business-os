@@ -51,13 +51,7 @@ import {
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
-import {
-  ALL_PUBLIC_TRANSLATE_OPTIONS,
-  FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
-  GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
-  isFirstPartyPortalLanguage,
-  normalizeFirstPartyPortalLanguage,
-} from './portalLanguageOptions.ts'
+import { normalizePortalLanguage, readStoredPortalLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
@@ -91,18 +85,10 @@ import { aggregateInitialOptions } from '../../utils/initials.ts'
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
-type PortalTranslateControllerModule = typeof import('./portalTranslateController.ts')
 type PortalLanguagePacksModule = typeof import('./portalLanguagePacks.ts')
 type PortalContentI18nModule = typeof import('./portalContentI18n.ts')
-let portalTranslateControllerModulePromise: Promise<PortalTranslateControllerModule> | null = null
 let portalLanguagePacksModulePromise: Promise<PortalLanguagePacksModule> | null = null
 let portalContentI18nModulePromise: Promise<PortalContentI18nModule> | null = null
-function loadPortalTranslateControllerModule(): Promise<PortalTranslateControllerModule> {
-  if (!portalTranslateControllerModulePromise) {
-    portalTranslateControllerModulePromise = import('./portalTranslateController.ts')
-  }
-  return portalTranslateControllerModulePromise
-}
 function loadPortalLanguagePacksModule(): Promise<PortalLanguagePacksModule> {
   if (!portalLanguagePacksModulePromise) {
     portalLanguagePacksModulePromise = import('./portalLanguagePacks.ts')
@@ -1045,78 +1031,6 @@ function replaceVars(template: unknown, values: Record<string, unknown>): string
   return String(template || '').replace(/\{(\w+)\}/g, (_match: string, key: string) => String(values?.[key] ?? ''))
 }
 
-const FIRST_PARTY_TRANSLATE_BY_LOWER = new Map(
-  FIRST_PARTY_TRANSLATE_LANG_OPTIONS.map((option) => [option.value.toLowerCase(), option.value])
-)
-
-const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
-const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
-
-function canonicalPortalTranslateLanguage(value: unknown, fallback = 'en'): string {
-  const raw = String(value || fallback).trim()
-  if (!raw) return fallback
-  const lower = raw.toLowerCase()
-  if (lower === 'zh-cn') return 'zh-CN'
-  if (lower === 'zh-tw') return 'zh-TW'
-  return lower
-}
-
-function normalizeExternalTranslateTarget(value: unknown, sourceLang: unknown = 'en'): string {
-  const from = canonicalPortalTranslateLanguage(sourceLang)
-  const target = canonicalPortalTranslateLanguage(value, 'original')
-  return !target || target === from ? 'original' : target
-}
-
-function isFirstPartyTranslateTarget(value: unknown): boolean {
-  const raw = String(value || '').trim()
-  if (!raw) return false
-  if (FIRST_PARTY_TRANSLATE_BY_LOWER.has(raw.toLowerCase())) return true
-  return isFirstPartyPortalLanguage(raw)
-}
-
-function normalizePortalTranslateChoice(value: unknown, sourceLang = 'en'): string {
-  const raw = String(value || 'original').trim()
-  const lower = raw.toLowerCase()
-  const firstParty = FIRST_PARTY_TRANSLATE_BY_LOWER.get(lower) || normalizeFirstPartyPortalLanguage(raw)
-  if (firstParty) return firstParty
-  return normalizeExternalTranslateTarget(raw, sourceLang)
-}
-
-function readGoogleTranslateCookieTarget(sourceLang: unknown): string {
-  if (typeof document === 'undefined') return ''
-  const from = canonicalPortalTranslateLanguage(sourceLang)
-  const cookie = document.cookie
-    .split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith('googtrans='))
-  if (!cookie) return ''
-  const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
-  const parts = cookieValue.split('/').filter(Boolean)
-  const target = canonicalPortalTranslateLanguage(parts[1] || '', '')
-  return target && target !== from ? target : ''
-}
-
-function readStoredTranslateTargetLocal(sourceLang: unknown): string {
-  const cookieTarget = readGoogleTranslateCookieTarget(sourceLang)
-  if (cookieTarget) return cookieTarget
-  if (typeof window !== 'undefined') {
-    try {
-      const rawStored = canonicalPortalTranslateLanguage(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY), 'original')
-      if (['original', 'en', 'km'].includes(rawStored)) return rawStored
-      return normalizeExternalTranslateTarget(rawStored, sourceLang)
-    } catch (_) {}
-  }
-  return 'original'
-}
-
-function removePortalTranslateWidgetHostLocal(): void {
-  if (typeof document === 'undefined') return
-  Array.from(document.querySelectorAll(`#${PORTAL_TRANSLATE_WIDGET_HOST_ID}`)).forEach((node) => node.remove())
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
 const DEFAULT_CONFIG = {
   businessName: '',
   businessPhone: '',
@@ -1334,10 +1248,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: '', note: '', screenshots: [] })
   const [submissionSaving, setSubmissionSaving] = useState(false)
   const [aiProviders, setAiProviders] = useState<LegacyCatalogRecord[]>([])
-  const [translateReady, setTranslateReady] = useState(false)
-  const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTargetLocal('en'))
-  const [translateApplyState, setTranslateApplyState] = useState('idle')
-  const [translateApplyMessage, setTranslateApplyMessage] = useState('')
+  const [chosenPortalLanguage, setChosenPortalLanguage] = useState(readStoredPortalLanguage)
   const [productGalleryView, setProductGalleryView] = useState<GalleryViewState>({ open: false, title: '', items: [], index: 0 })
   // Same gap as PublicCatalogPage.tsx's own openProductDetail fix this
   // session: the admin-side editor preview never wired the product-detail
@@ -1416,51 +1327,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     ),
     [canEdit, editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
-  const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(previewConfig.language) || 'en'
-  const normalizedTranslateTarget = normalizePortalTranslateChoice(translateTarget, configuredPortalLanguage)
-  const externalTranslateTarget = publicView
-    && previewConfig.translateWidgetEnabled
-    && !isFirstPartyTranslateTarget(normalizedTranslateTarget)
-    ? normalizedTranslateTarget
-    : null
-  const portalCopyLanguage = publicView && previewConfig.translateWidgetEnabled && !externalTranslateTarget
-    ? (normalizedTranslateTarget === 'original' ? configuredPortalLanguage : normalizedTranslateTarget)
+  const configuredPortalLanguage = normalizePortalLanguage(previewConfig.language) || 'en'
+  const language = publicView && previewConfig.translateWidgetEnabled && chosenPortalLanguage
+    ? chosenPortalLanguage
     : configuredPortalLanguage
-  const language = publicView ? portalCopyLanguage : configuredPortalLanguage
-  const portalTranslateContentKey = useMemo(() => {
-    if (!publicView) return ''
-    const firstProduct = products[0]?.id || products[0]?.name || ''
-    const lastProduct = products[products.length - 1]?.id || products[products.length - 1]?.name || ''
-    return [
-      loading ? 'loading' : 'ready',
-      language,
-      activeTab,
-      products.length,
-      firstProduct,
-      lastProduct,
-      previewConfig.businessName,
-      previewConfig.title,
-      previewConfig.showCatalog,
-      previewConfig.showMembership,
-      previewConfig.showAbout,
-      previewConfig.showFaq,
-      previewConfig.aiEnabled,
-    ].join('|')
-  }, [
-    activeTab,
-    language,
-    loading,
-    previewConfig.aiEnabled,
-    previewConfig.businessName,
-    previewConfig.showAbout,
-    previewConfig.showCatalog,
-    previewConfig.showFaq,
-    previewConfig.showMembership,
-    previewConfig.title,
-    products,
-    publicView,
-  ])
-  const editorLanguage = normalizeFirstPartyPortalLanguage(appLanguage) || 'en'
+  const editorLanguage = normalizePortalLanguage(appLanguage) || 'en'
   const activeCopyLanguage = publicView ? language : editorLanguage
   const shouldLoadFirstPartyPortalText = activeCopyLanguage !== 'en'
   const shouldLocalizePortalContent = publicView && language !== 'en'
@@ -1658,65 +1529,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     })
   }
 
-  /** Apply selected language. Business OS handles English/Khmer instantly; Google is only the external fallback. */
-  async function changeTranslateTarget(nextTarget: string) {
-    const target = normalizePortalTranslateChoice(nextTarget, configuredPortalLanguage)
-    setTranslateTarget(target)
-    setTranslateApplyMessage('')
-    if (!publicView || !previewConfig.translateWidgetEnabled) return
-    if (typeof window === 'undefined') return
-
-    if (isFirstPartyTranslateTarget(target)) {
-      const {
-        clearGoogleTranslateCookies,
-        hasPortalTranslatedMarker,
-        requestPortalTranslateReload,
-        storePortalTranslatePreference,
-      } = await loadPortalTranslateControllerModule()
-      clearGoogleTranslateCookies()
-      storePortalTranslatePreference(target)
-      removePortalTranslateWidgetHostLocal()
-      setTranslateReady(true)
-      setTranslateApplyState('pending')
-      setTranslateApplyMessage(copy('translationApplied', 'Translation applied'))
-      if (hasPortalTranslatedMarker() && requestPortalTranslateReload('first-party-switch', 5000)) return
-      window.requestAnimationFrame(() => {
-        if (!aliveRef.current) return
-        setTranslateApplyState(target === 'original' ? 'idle' : 'applied')
-        setTranslateApplyMessage(target === 'original'
-          ? copy('translationOriginalApplied', 'Original language restored')
-          : copy('translationApplied', 'Translation applied'))
-      })
-      return
-    }
-
-    const {
-      applyGoogleTranslateSelection,
-      isPortalTranslateApplied,
-      requestPortalTranslateReload,
-      writePortalTranslateTarget,
-    } = await loadPortalTranslateControllerModule()
-    writePortalTranslateTarget(configuredPortalLanguage, target)
-    setTranslateApplyState('pending')
-    setTranslateApplyMessage(copy('externalTranslationPreparing', 'Preparing external translation...'))
-
-    const sourceReadyAtStart = translateReady
-    const maxAttempts = sourceReadyAtStart ? 26 : 36
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const attempted = applyGoogleTranslateSelection(configuredPortalLanguage, target)
-      if (attempted && isPortalTranslateApplied(configuredPortalLanguage, target)) {
-        setTranslateApplyState('applied')
-        setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
-        return
-      }
-      await sleep(sourceReadyAtStart ? 180 : 220)
-    }
-
-    if (requestPortalTranslateReload('external-translate-stuck', 5000)) {
-      return
-    }
-    setTranslateApplyState('failed')
-    setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
+  function changePageLanguage(next: string) {
+    const nextLanguage = normalizePortalLanguage(next)
+    if (!nextLanguage || !publicView || !previewConfig.translateWidgetEnabled) return
+    storePortalLanguage(nextLanguage)
+    setChosenPortalLanguage(nextLanguage)
   }
 
   function isPortalLoadCurrent(requestId: number) {
@@ -2180,64 +1997,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [publicView])
 
   useEffect(() => {
-    setTranslateReady(!externalTranslateTarget)
-    return undefined
-  }, [externalTranslateTarget, publicView, previewConfig.translateWidgetEnabled])
-
-  useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled) return
-    setTranslateTarget(readStoredTranslateTargetLocal(configuredPortalLanguage))
-  }, [configuredPortalLanguage, previewConfig.translateWidgetEnabled, publicView])
-
-  useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled || externalTranslateTarget) return undefined
-    removePortalTranslateWidgetHostLocal()
-    setTranslateReady(true)
-    setTranslateApplyState(normalizedTranslateTarget === 'original' ? 'idle' : 'applied')
-    setTranslateApplyMessage(normalizedTranslateTarget === 'original'
-      ? ''
-      : copy('translationApplied', 'Translation applied'))
-    return undefined
-  }, [externalTranslateTarget, normalizedTranslateTarget, previewConfig.translateWidgetEnabled, publicView])
-
-  useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || typeof window === 'undefined' || typeof document === 'undefined') {
-      removePortalTranslateWidgetHostLocal()
-      return undefined
-    }
-    let cancelled = false
-    let cleanupWidget: (() => void) | null = null
-
-    async function setupExternalTranslateWidget() {
-      const {
-        setupPortalExternalTranslateWidget,
-      } = await loadPortalTranslateControllerModule()
-      if (cancelled) return
-      cleanupWidget = setupPortalExternalTranslateWidget({
-        sourceLanguage: configuredPortalLanguage,
-        includedLanguages: GOOGLE_TRANSLATE_FALLBACK_OPTIONS.map((option) => option.value),
-        onPending: () => setTranslateReady(false),
-        onReady: () => {
-          setTranslateReady(true)
-          setTranslateApplyMessage('')
-        },
-        onFailure: () => {
-          if (cancelled) return
-          setTranslateReady(false)
-          setTranslateApplyState('failed')
-          setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-        },
-      })
-    }
-    void setupExternalTranslateWidget()
-
-    return () => {
-      cancelled = true
-      cleanupWidget?.()
-    }
-  }, [configuredPortalLanguage, externalTranslateTarget, previewConfig.translateWidgetEnabled, publicView])
-
-  useEffect(() => {
     if (!isPageActive || !syncChannel) return undefined
     if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories', 'inventory'].includes(String(syncChannel.channel || ''))) {
       return undefined
@@ -2255,46 +2014,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }
     }
   }, [isPageActive, syncChannel])
-
-  useEffect(() => {
-    if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || !translateReady) return undefined
-    let cancelled = false
-    const settleTimer = window.setTimeout(async () => {
-      const {
-        applyGoogleTranslateSelection,
-        isPortalTranslateApplied,
-        requestPortalTranslateReload,
-      } = await loadPortalTranslateControllerModule()
-      const maxTries = 20
-      for (let tries = 0; tries < maxTries; tries += 1) {
-        if (cancelled) return
-        applyGoogleTranslateSelection(configuredPortalLanguage, normalizedTranslateTarget)
-        if (isPortalTranslateApplied(configuredPortalLanguage, normalizedTranslateTarget)) {
-          setTranslateApplyState('applied')
-          setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
-          return
-        }
-        await sleep(180)
-      }
-      if (cancelled) return
-      if (requestPortalTranslateReload('external-translate-stuck', 5000)) return
-      setTranslateApplyState('failed')
-      setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-    }, loading ? 650 : 260)
-    return () => {
-      cancelled = true
-      window.clearTimeout(settleTimer)
-    }
-  }, [
-    configuredPortalLanguage,
-    externalTranslateTarget,
-    loading,
-    normalizedTranslateTarget,
-    portalTranslateContentKey,
-    previewConfig.translateWidgetEnabled,
-    publicView,
-    translateReady,
-  ])
 
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) => {
@@ -3700,13 +3419,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         portalImageView={portalImageView}
         setPortalImageView={setPortalImageView}
         toggleTheme={toggleTheme}
-        translateTarget={translateTarget}
-        translateApplyState={translateApplyState}
-        translateApplyMessage={translateApplyMessage}
-        externalTranslateTarget={externalTranslateTarget}
-        translateReady={translateReady}
-        changeTranslateTarget={changeTranslateTarget}
-        allPublicTranslateOptions={ALL_PUBLIC_TRANSLATE_OPTIONS}
+        pageLanguage={language}
+        changePageLanguage={changePageLanguage}
       />
     </Suspense>
   )

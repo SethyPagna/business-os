@@ -93,7 +93,6 @@ assert.doesNotMatch(PORTAL_LEGAL_EN.portal_legal_store_session_l, /each time|eve
 const storageNames = LEGAL_STORAGE_ROWS.map((row) => row.name)
 for (const expected of [
   'bos_portal',
-  'googtrans',
   'business-os-portal-bucket-v1',
   'business-os-portal-wishlist-v1',
   'business-os:portal-translate-target',
@@ -107,7 +106,7 @@ const source = (rel: string) => fs.readFileSync(path.join(here, '..', 'src', rel
 const bucketSource = source('components/catalog/portalBucket.ts')
 assert.match(bucketSource, /'business-os-portal-bucket-v1'/, 'the bucket storage key moved; update the cookie policy')
 assert.match(bucketSource, /'business-os-portal-wishlist-v1'/, 'the wishlist storage key moved; update the cookie policy')
-assert.match(source('components/catalog/portalTranslateController.ts'), /'business-os:portal-translate-target'/, 'the translate storage key moved; update the cookie policy')
+assert.match(source('components/catalog/portalLanguageOptions.ts'), /'business-os:portal-translate-target'/, 'the language storage key moved; update the cookie policy')
 assert.match(source('components/catalog/PublicCatalogPage.tsx'), /PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'/, 'the portal cache key moved; update the cookie policy')
 const embedSource = source('components/catalog/legal/PortalEmbedConsent.tsx')
 assert.match(embedSource, /MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'/, 'the map consent key moved; update the cookie policy')

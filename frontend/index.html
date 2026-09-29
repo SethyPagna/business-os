@@ -219,11 +219,11 @@
           // Both signals, on purpose: the meta is what Chrome/Edge read to
           // suppress the offer entirely, translate="no" is the HTML standard
           // attribute other engines honour. The PUBLIC branch above must stay
-          // translatable -- customers read the storefront in their own
-          // language, it has its own Google Translate widget
-          // (src/components/catalog/portalTranslateController.ts), and it
-          // already carries its own reload recovery for this crash class
-          // (src/app/publicErrorRecovery.ts).
+          // translatable -- a customer may still run the browser's page
+          // translator on the storefront, which carries its own guard and
+          // reload recovery for this crash class
+          // (src/components/catalog/portalTranslateDomGuard.ts,
+          // src/app/publicErrorRecovery.ts).
           var adminNoTranslate = document.createElement('meta')
           adminNoTranslate.setAttribute('name', 'google')
           adminNoTranslate.setAttribute('content', 'notranslate')

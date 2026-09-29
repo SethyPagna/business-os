@@ -46,8 +46,7 @@ const collapse = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').tr
 /**
  * The text a product with no value of its own shows for Caution / Need More
  * Details. Order: the merchant's saved portal-wide text, else the owner's
- * default in the page language (Khmer on a Khmer page, English otherwise --
- * any other language is Google-translated from the English page).
+ * default in the page language (Khmer on a Khmer page, English otherwise).
  *
  * A saved value that IS the English suggestion (what "Use suggested text"
  * writes) counts as the owner default, so a Khmer page still gets Khmer

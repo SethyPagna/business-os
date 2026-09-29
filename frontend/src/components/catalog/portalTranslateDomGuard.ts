@@ -1,8 +1,8 @@
-// Google Translate vs React (P-public-1 follow-up, refuter 2026-09-25).
+// Browser page translation vs React (P-public-1 follow-up, refuter 2026-09-25).
 //
-// Google Translate rewrites text nodes in place -- it wraps them in <font>
-// elements and moves them. React still holds the ORIGINAL text nodes, so the
-// next commit that removes or inserts next to one calls
+// Chrome's built-in translator rewrites text nodes in place -- it wraps them
+// in <font> elements and moves them. React still holds the ORIGINAL text
+// nodes, so the next commit that removes or inserts next to one calls
 // parent.removeChild(child) / parent.insertBefore(node, ref) on a node whose
 // parent is no longer `parent`, and the DOM throws NotFoundError. Until now
 // the only recovery was publicErrorRecovery.ts reloading the page (rate
@@ -17,10 +17,10 @@
 // resort for anything this does not cover.
 //
 // Installed on EVERY storefront page load by PublicCatalogRoot.tsx (the
-// storefront entry), not only when our widget loads: Chrome's built-in
-// translator and translation extensions cause the same crash for visitors
-// who never open our language menu. The guard only changes calls that would
-// otherwise throw. Never installed by the admin app (AdminRoot).
+// storefront entry): Chrome's built-in translator and translation extensions
+// cause this crash on the Khmer and English pages alike. The guard only
+// changes calls that would otherwise throw. Never installed by the admin app
+// (AdminRoot).
 
 export const PORTAL_TRANSLATE_DOM_GUARD_FLAG = '__businessOsTranslateDomGuard'
 

@@ -285,7 +285,7 @@ type CatalogSecondaryTabsProps = {
 
 /**
  * Owner-written storefront copy. Phrases the owner wrapped in [[ ]] render
- * inside translate="no" so Google Translate leaves them exactly as written;
+ * inside translate="no" so a browser's page translator leaves them as written;
  * everything else stays translatable (see portalNoTranslate.ts).
  */
 function OwnerText({ text }: { text: string }) {

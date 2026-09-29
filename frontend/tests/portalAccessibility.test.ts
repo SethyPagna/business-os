@@ -325,11 +325,11 @@ runTest('the portal stylesheet scopes focus, touch targets and reduced motion to
 
 runTest('the storefront controls no portal-scoped CSS can reach carry their own ring', () => {
   // shared/PortalMenu.tsx createPortal()s its popup to document.body, so the
-  // filter menu's search field and the language-menu search field sit OUTSIDE
-  // every portal root: no descendant selector in public-portal.css can ever
-  // match them. Their base-tree indicator was focus:ring-blue-100 (#dbeafe on
-  // white = 1.16:1). They need the ring in their own class string.
-  for (const file of ['PortalFilterCombobox.tsx', 'CatalogPreviewSurface.tsx']) {
+  // filter menu's search field sits OUTSIDE every portal root: no descendant
+  // selector in public-portal.css can ever match it. Its base-tree indicator
+  // was focus:ring-blue-100 (#dbeafe on white = 1.16:1). It needs the ring in
+  // its own class string.
+  for (const file of ['PortalFilterCombobox.tsx']) {
     const source = read(file)
     assert.match(source, /focus-visible:outline-\[#0369a1\]/, `${file}: the popup search field paints its own focus outline`)
     assert.match(source, /dark:focus-visible:outline-\[#fcd34d\]/, `${file}: and the dark-mode counterpart`)
@@ -499,7 +499,7 @@ runTest('the page language follows the chosen storefront language', () => {
   // Base tree: the <html lang> stayed on whatever the admin app set, so a
   // Khmer storefront was announced to a screen reader as English.
   assert.match(publicPage, /document\.documentElement\.lang = /, 'the document language is set')
-  assert.match(publicPage, /portalDocumentLanguage/, 'from the resolved storefront language, not a constant')
+  assert.match(publicPage, /document\.documentElement\.lang = pageLanguage/, 'from the chosen storefront language, not a constant')
 })
 
 runTest('the storefront offers a skip-to-content link', () => {

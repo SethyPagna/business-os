@@ -22,7 +22,8 @@
 // Run: node tests/storefrontPagerLayout.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { getPortalLanguageText, FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguagePacks.ts'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguageOptions.ts'
 import { pagerState } from '../src/utils/pagerState.ts'
 
 let failed = 0
@@ -204,10 +205,10 @@ runTest("no storefront source still asks for the retired 'showing' string", () =
 
 runTest('every storefront language pack carries the pager and rail vocabulary', () => {
   const blocks = packs.split(/\n  ([a-zA-Z-]+): \{\n/)
-  const perPagePacks = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS
+  const perPagePacks = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS
     .map((option) => option.value)
     .filter((value) => getPortalLanguageText(value, 'perPage'))
-  assert.ok(perPagePacks.length >= 18, `expected the 18 packs that already carry pagination words, found ${perPagePacks.length}`)
+  assert.deepEqual(perPagePacks, ['km'], 'Khmer is the one storefront pack; English is the fallback text')
   assert.ok(blocks.length > 1, 'the pack file should still be a per-language object literal')
   for (const value of perPagePacks) {
     for (const key of ['back', 'next', 'jumpToBrand']) {
