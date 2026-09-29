@@ -15,6 +15,13 @@
 //   N4  a chosen cost is written only with product_cost_edit (403 without),
 //       and undo restores the kept product exactly, redo repeats the choice
 //   --  the old body (no keep) keeps refusing a cross-identity pair
+//   B2  (UI-CONFLICTS, 30 Sep 2026) a stock-in session that can still be
+//       undone no longer blocks the Resolve merge forever: the same batch
+//       settles it, merge undo gives it back, the other doors still refuse,
+//       and a session appearing mid-merge aborts the merge
+//   B3  a fold whose atomic batch throws answers 409 merge_failed /
+//       not_applied with an errorId instead of a raw 500, and writes nothing
+//   The B2/B3 checks need the products.ts wiring (UI-CONFLICTS-2 HANDOFF).
 //
 // Run (from cloudflare/scripts): node test-product-resolve-keep-merge-native.cjs
 const assert = require('node:assert/strict')
@@ -95,6 +102,8 @@ const acquisitionCostAccess = load('lib/acquisitionCostAccess.ts', { './permissi
 const noAudit = { audit: async (_env, _uid, _uname, action, entity, id, detail) => { state.audits.push({ action, entity, id, detail }) } }
 const broadcastHub = { broadcast: async () => {} }
 const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision })
+// UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
+const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
@@ -126,6 +135,7 @@ const products = load('routes/products.ts', {
   '../lib/productIdentity': productIdentity,
   '../lib/productMerge': productMerge,
   '../lib/productMergeSnapshot': productMergeSnapshot,
+  '../lib/productResolveChoices': resolveChoices,
   '../lib/sqlBinding': sqlBinding,
   '../lib/moneyPrecision': moneyPrecision,
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
@@ -477,6 +487,81 @@ async function main() {
     const refreshed = await preview(10, 11)
     assert.equal(refreshed.status, 200)
     assert.equal(refreshed.body.stockImpact.totalQuantity, 9)
+  })
+
+  // A stock-in session (the only add path since 6 Sep) that received product 41
+  // 40 days ago and was never undone: on main it blocked every merge of 41.
+  const seedSession = (historyId, operationId, productId, status = 'undoable', age = '-40 days') => {
+    const db = state.native.db
+    db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload, created_by_id, created_at)
+      VALUES (?, 'global', 'stock_session', ?, 'Stock in 3 lines', 1, ?, '{}', '{}', 1, datetime('now', ?))`).run(historyId, operationId, status, age)
+    db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, history_id, created_at)
+      VALUES (?, 1, ?, 'stock_in', '{}', ?, datetime('now', ?))`).run(operationId, `req-${operationId}`, historyId, age)
+    db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity)
+      VALUES (?, 'l1', 'receive', ?, 1, 5)`).run(operationId, productId)
+  }
+  const sessionRow = (historyId) => one('SELECT status, reversible, last_error FROM action_history WHERE id = ?', historyId)
+
+  await check('B2: an old stock-in session no longer blocks the Resolve merge; the batch settles it and undo gives it back', async () => {
+    fresh()
+    seedSession(900, 'op-old', 41)
+    const seen = await preview(40, 41, '&groupIds=40,41')
+    assert.equal(seen.status, 200, JSON.stringify(seen.body))
+    assert.equal(seen.body.blocked, null, `the grid must not show a blocker: ${JSON.stringify(seen.body.blocked)}`)
+    assert.deepEqual(seen.body.settlesStockSessions, ['op-old'], 'the confirm lists the session it settles')
+    const done = await merge({ keepId: 40, mergeId: 41, keep: true })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    assert.deepEqual(done.body.settledStockSessions, ['op-old'])
+    assert.deepEqual(sessionRow(900), { status: 'recorded', reversible: 0, last_error: `settled by product merge ${done.body.operationId}` })
+    assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 0)
+    const history = one("SELECT id, undo_payload FROM action_history WHERE entity = 'product' AND status = 'undoable' ORDER BY id DESC LIMIT 1")
+    const payload = JSON.parse(history.undo_payload)
+    await undoAppliers.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id })
+    assert.deepEqual(sessionRow(900), { status: 'undoable', reversible: 1, last_error: null })
+    assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 1)
+  })
+
+  await check('B2: every other merge door still refuses while a session can be undone', async () => {
+    fresh()
+    seedSession(901, 'op-twin', 20)
+    const before = dump()
+    const refused = await merge({ keepId: 21, mergeId: 20 })
+    assert.equal(refused.status, 409, JSON.stringify(refused.body))
+    assert.equal(refused.body.code, 'stock_session_reversible')
+    const plainPreview = await request('GET', '/api/products/possible-duplicates/merge-preview?keepId=21&mergeId=20')
+    assert.equal(plainPreview.body.blocked.code, 'stock_session_reversible')
+    assert.equal(dump(), before)
+  })
+
+  await check('B2: a session that becomes undoable between the read and the batch aborts the merge and writes nothing', async () => {
+    fresh()
+    state.beforeFold = () => seedSession(902, 'op-race', 41, 'undoable', '-1 minutes')
+    const raced = await merge({ keepId: 40, mergeId: 41, keep: true })
+    assert.equal(raced.status, 409, JSON.stringify(raced.body))
+    assert.equal(raced.body.code, 'merge_state_conflict')
+    assert.equal(one('SELECT is_active FROM products WHERE id = 41').is_active, 1)
+    assert.deepEqual(sessionRow(902), { status: 'undoable', reversible: 1, last_error: null }, 'the new session keeps its Undo')
+    assert.equal(one("SELECT COUNT(*) n FROM audit_logs WHERE action = 'merge_duplicate'").n, 0)
+  })
+
+  await check('B3: a fold whose batch throws is 409 merge_failed / not_applied with an errorId, logged, and writes nothing', async () => {
+    fresh()
+    state.native.db.exec(`INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (950, 'R-950', 1, 15, 'completed');
+      INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (951, 950, 11, 'Rose Toner 100ml', 1, 15, 15, 1);
+      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`)
+    const before = dump()
+    const logged = []
+    const consoleError = console.error
+    console.error = (...args) => { logged.push(args) }
+    let failedMerge
+    try { failedMerge = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' }) } finally { console.error = consoleError }
+    assert.equal(failedMerge.status, 409, JSON.stringify(failedMerge.body))
+    assert.equal(failedMerge.body.code, 'merge_failed')
+    assert.equal(failedMerge.body.outcome, 'not_applied')
+    assert.match(failedMerge.body.errorId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    assert.ok(logged.some((args) => args.includes(failedMerge.body.errorId) && args.some((arg) => /boom/.test(String(arg)))),
+      'the cause is logged under the same errorId')
+    assert.equal(dump(), before)
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
