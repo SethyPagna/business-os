@@ -1,3 +1,5 @@
+import type { PrivateAiState } from './portalPrivateAi.ts'
+
 // The storefront config lacks some editor keys, so a Save writes only keys it
 // loaded (public config or staff settings) or saw edited.
 export type EditorDraft = Record<string, unknown>
@@ -57,6 +59,18 @@ export function settleSavedEdits(edited: EditedKeys, sentDraft: EditorDraft, dra
 
 export function replaceDraftValues(draft: EditorDraft, values: EditorDraft): EditorDraft {
   return { ...draft, ...values }
+}
+
+export function discardEditorDraft(loadedDraft: EditorDraft, staff: StaffSettings | null, privateAi: PrivateAiState): {
+  draft: EditorDraft
+  editedKeys: EditedKeys
+  privateAi: PrivateAiState
+} {
+  return {
+    draft: overlayStaffSettings(loadedDraft, staff),
+    editedKeys: NO_EDITED_KEYS,
+    privateAi: { ...privateAi, edits: {} },
+  }
 }
 
 // resolveUploadUrl is how this site shows an upload path; only a URL it would

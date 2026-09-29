@@ -15,8 +15,9 @@ const packs = [['en', en], ['km', km]] as const
 // about when to fill the field, never that the value was rejected.
 const guardAt = catalogPage.indexOf('if (sanitizedPublicUrl && ')
 assert.ok(guardAt > 0, 'the editor save still validates the public website URL')
-const guardBranch = catalogPage.slice(guardAt, catalogPage.indexOf('return', guardAt))
-assert.match(guardBranch, /notify\(copy\('publicUrlInvalid', /, 'a rejected public URL shows its own error')
+const guardBranch = catalogPage.slice(guardAt, catalogPage.indexOf('\n', catalogPage.indexOf('return', guardAt)))
+assert.match(guardBranch, /return refuseSave\('publicUrlInvalid', /, 'a rejected public URL shows its own error')
+assert.match(catalogPage, /function refuseSave\(messageKey: string, fallback: string, field\?: string\): PortalSaveResult \{\r?\n\s*notify\(copy\(messageKey, fallback\), 'error'\)/, 'refuseSave shows the message it is given')
 assert.doesNotMatch(guardBranch, /publicUrlHint/, 'the error toast must not reuse the InfoHint text')
 for (const [name, pack] of packs) {
   assert.equal(typeof pack.publicUrlInvalid, 'string', `${name}.json carries publicUrlInvalid`)

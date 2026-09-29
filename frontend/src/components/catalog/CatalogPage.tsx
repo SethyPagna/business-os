@@ -6,6 +6,7 @@ import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
@@ -70,6 +71,7 @@ import {
   settlePrivateAiSave,
 } from './portalPrivateAi.ts'
 import {
+  discardEditorDraft,
   isAboutImageRefusal,
   markEdited,
   overlayStaffSettings,
@@ -123,9 +125,11 @@ const CATALOG_IMAGE_READ_CONCURRENCY = 2
 const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PORTAL_CACHE_PRODUCT_LIMIT = 80
 const PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
+const WEBSITE_EDITOR_WORK_KEY = 'website-editor'
 
 type LegacyCatalogRecord = Record<string, any>
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
+type PortalSaveResult = { ok: true } | { ok: false; field?: string; messageKey?: string }
 type CatalogProduct = LegacyCatalogRecord & {
   id: string | number
   name?: string
@@ -2214,7 +2218,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
       )
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
-      if (!aliveRef.current) return ''
+      if (!aliveRef.current || controller.signal.aborted) return ''
 
       const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
       setPortalMediaValue(targetKey, nextPath)
@@ -2229,8 +2233,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     } catch (error) {
       const errorMessage = getCatalogErrorMessage(error, 'Image upload failed')
       const cancelled = /cancelled|canceled|aborted/i.test(errorMessage)
+      const restorable = mediaUploadOriginalValuesRef.current.has(targetKey)
       const previousValue = mediaUploadOriginalValuesRef.current.get(targetKey)
-      if (aliveRef.current) {
+      if (aliveRef.current && restorable) {
         setPortalMediaValue(targetKey, previousValue || '')
         updateMediaUploadState(targetKey, cancelled ? { type: 'cancel' } : { type: 'error', error: errorMessage })
         if (!cancelled) notify(errorMessage, 'error')
@@ -2429,20 +2434,35 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     notify(copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.'), 'error')
   }
 
-  async function savePortalDraft() {
+  function refuseSave(messageKey: string, fallback: string, field?: string): PortalSaveResult {
+    notify(copy(messageKey, fallback), 'error')
+    return { ok: false, messageKey, field }
+  }
+
+  function discardPortalDraft() {
+    const discarded = discardEditorDraft(buildDraft(config), staffSettingsRef.current, privateAi)
+    for (const controller of mediaUploadControllersRef.current.values()) controller.abort()
+    mediaUploadControllersRef.current.clear()
+    mediaUploadOriginalValuesRef.current.clear()
+    for (const target of [...mediaUploadPreviewUrlsRef.current.keys()]) clearPortalUploadPreview(target)
+    setMediaUploadStates({})
+    replaceEditedKeys(discarded.editedKeys)
+    setEditorDraft(discarded.draft)
+    setPrivateAi(discarded.privateAi)
+    setRefusedAboutImage(null)
+  }
+
+  async function savePortalDraft(): Promise<PortalSaveResult> {
     try {
       if (hasActiveMediaUpload) {
-        notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the website.'), 'error')
-        return
+        return refuseSave('portalUploadPending', 'Wait for media uploads to finish before saving the website.')
       }
       if (canEditConfig && privateAiBlocksSave(privateAi)) {
-        notify(copy('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.'), 'error')
-        return
+        return refuseSave('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.')
       }
       const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/')
       if (isReservedPortalPath(normalizedPath)) {
-        notify(copy('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.'), 'error')
-        return
+        return refuseSave('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.', 'customer_portal_path')
       }
       if (
         !editorDraft.customer_portal_show_catalog
@@ -2450,8 +2470,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         && !editorDraft.customer_portal_show_faq
         && !editorDraft.customer_portal_ai_enabled
       ) {
-        notify(copy('portalVisibilityRequired', 'Enable at least one customer section before saving the website.'), 'error')
-        return
+        return refuseSave('portalVisibilityRequired', 'Enable at least one customer section before saving the website.', 'customer_portal_show_catalog')
       }
 
       const sanitizedRefreshSeconds = Math.min(120, Math.max(5, Math.floor(toNumber(editorDraft.customer_portal_refresh_seconds, 20))))
@@ -2467,12 +2486,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const sanitizedPublicUrl = String(editorDraft.customer_portal_public_url || '').trim()
       const sanitizedGoogleMapEmbed = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
       if (sanitizedPublicUrl && !/^https?:\/\/.+/i.test(sanitizedPublicUrl)) {
-        notify(copy('publicUrlInvalid', 'Use a full https:// URL for the public website address, or leave it empty.'), 'error')
-        return
+        return refuseSave('publicUrlInvalid', 'Use a full https:// URL for the public website address, or leave it empty.', 'customer_portal_public_url')
       }
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {
-        notify(copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.'), 'error')
-        return
+        return refuseSave('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.', 'customer_portal_google_maps_embed')
       }
       let sanitizedTranslations = '{}'
       try {
@@ -2483,8 +2500,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         }
         sanitizedTranslations = stringifyPortalTranslations(parsedTranslations)
       } catch (_) {
-        notify(copy('translationJsonInvalid', 'Translation overrides must be valid JSON.'), 'error')
-        return
+        return refuseSave('translationJsonInvalid', 'Translation overrides must be valid JSON.', 'customer_portal_translations')
       }
       const aboutImagePath = siteUploadPath(
         sanitizePortalMediaValue(editorDraft.customer_portal_about_image, config.aboutImage || ''),
@@ -2492,7 +2508,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       )
       if (aboutImagePath === null) {
         showAboutImageRefusal(String(editorDraft.customer_portal_about_image || ''))
-        return
+        return { ok: false, field: 'customer_portal_about_image', messageKey: 'aboutImageInvalid' }
       }
 
       const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
@@ -2649,15 +2665,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const clearKeys = privateAiChanges.clearKeys.filter((key) => Object.prototype.hasOwnProperty.call(savePayload, key))
       const result = await saveSettings(savePayload, { baselineSettings, clearKeys }) as LegacyCatalogRecord
       if (result?.conflict) {
-        notify(copy('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
-        return
+        return refuseSave('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.')
       }
       // saveSettings does not throw on a failed write: it shows its own error
       // and answers { success: false }. Everything below marks the draft as
       // saved (posts and their order included), so a failed write stops here
       // and the edits stay unsaved for another try.
       if (isAboutImageRefusal(result)) showAboutImageRefusal(String(sentDraft.customer_portal_about_image || ''))
-      if (result?.success === false) return
+      if (result?.success === false) return { ok: false }
       // What this save sent is now the stored value; a read begun before it
       // landed would bring back the old one, so it is dropped.
       invalidateTrackedRequest(privateAiReadRef)
@@ -2677,9 +2692,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const settledMediaValues = Object.fromEntries(Object.entries(savedMediaValues).filter(([key]) => !stillEdited.has(key)))
       setEditorDraft((current) => replaceDraftValues(current, settledMediaValues))
       setConfig((current) => applyDraft(current, replaceDraftValues(editorDraft, savedMediaValues)))
-      await loadPortal()
+      await loadPortal().catch((error) => notify(getCatalogErrorMessage(error, 'Failed to load the website'), 'error'))
+      return { ok: true }
     } catch (error) {
       notify(getCatalogErrorMessage(error, 'Failed to save portal'), 'error')
+      return { ok: false }
     } finally {
       setEditorSaving(false)
     }
@@ -2946,6 +2963,22 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       units: membershipData?.points?.redeemableUnits ?? 0,
     }
   )
+  const savePortalDraftRef = useRef(savePortalDraft)
+  savePortalDraftRef.current = savePortalDraft
+  const discardPortalDraftRef = useRef(discardPortalDraft)
+  discardPortalDraftRef.current = discardPortalDraft
+  useEffect(() => {
+    if (publicView || !canEdit) return undefined
+    return registerDirtyWork({
+      key: WEBSITE_EDITOR_WORK_KEY,
+      pageId: 'catalog',
+      label: t('studioTitle'),
+      isDirty: () => editedKeysRef.current.size > 0,
+      save: async () => (await savePortalDraftRef.current()).ok,
+      discard: () => discardPortalDraftRef.current(),
+    })
+  }, [publicView, canEdit, editorDirty, t])
+
   const mobileGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsMobile, 1)), STORED_PHONE_COLUMNS)
   const desktopGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsDesktop, 4)), PORTAL_GRID_LIMITS.desktop)
   const compactTwoColumnMobile = mobileGridColumns === 2
