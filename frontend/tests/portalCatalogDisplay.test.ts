@@ -678,13 +678,15 @@ runTest('T-G3: the phone-columns input starts at the smallest count the shop ren
   assert.match(phoneInput, /\smax=\{editorLimits\.phone\[1\]\}/)
   assert.equal(gridLimits().phone[0], storefrontFloor, 'the phone minimum is the storefront floor')
   assert.equal(gridLimits().phone[1], workerClamp('customer_portal_grid_columns_mobile')[1])
-  const stored = (portalDisplay as Record<string, unknown>).STORED_PHONE_COLUMNS as ColumnRange | undefined
+  const storedDeclaration = catalogPageColumnsSource.match(/^const STORED_PHONE_COLUMNS: ColumnRange = \[(\d+), PORTAL_GRID_LIMITS\.phone\[1\]\]$/m)
+  assert.ok(storedDeclaration, 'CatalogPage keeps the stored phone range beside its Save, capped by the one limits object')
+  const stored: ColumnRange = [Number(storedDeclaration[1]), gridLimits().phone[1]]
   assert.deepEqual(stored, workerClamp('customer_portal_grid_columns_mobile'), 'the Save keeps the range the Worker stores, so an untouched 1 is sent back as 1')
   assert.match(catalogPageColumnsSource, /const sanitizedGridMobile = clampToRange\([^\n]*STORED_PHONE_COLUMNS\)/)
   const clamp = (portalDisplay as Record<string, unknown>).clampToRange as ((value: number, range: ColumnRange) => number) | undefined
   assert.equal(typeof clamp, 'function', 'one clamp helper for every column range')
   assert.equal(clamp!(1, gridLimits().phone), 2, 'a stored 1 is shown as 2')
-  assert.equal(clamp!(1, stored!), 1, 'and saved back as 1 when not edited')
+  assert.equal(clamp!(1, stored), 1, 'and saved back as 1 when not edited')
   assert.equal(clamp!(10, gridLimits().desktop), 8)
 })
 

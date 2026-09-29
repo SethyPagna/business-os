@@ -46,11 +46,11 @@ import {
   getPortalGridClass,
   getPortalMobileGridClass,
   PORTAL_GRID_LIMITS,
-  STORED_PHONE_COLUMNS,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
   buildPortalPricePresentation,
   resolvePortalStockStatus,
+  type ColumnRange,
 } from './portalCatalogDisplay.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
@@ -129,6 +129,9 @@ const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PORTAL_CACHE_PRODUCT_LIMIT = 80
 const PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const WEBSITE_EDITOR_WORK_KEY = 'website-editor'
+// The Worker still stores and publishes 1 phone column (the shop shows it as 2),
+// so a stored 1 the owner did not change is sent back as 1.
+const STORED_PHONE_COLUMNS: ColumnRange = [1, PORTAL_GRID_LIMITS.phone[1]]
 
 type LegacyCatalogRecord = Record<string, any>
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
