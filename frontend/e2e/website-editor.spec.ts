@@ -15,6 +15,9 @@ import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test website-editor
  */
 
+// Service workers are blocked so page.route sees every request, the multipart upload included.
+test.use({ serviceWorkers: 'block' })
+
 const POSTER_FILE = fileURLToPath(new URL('./fixtures/about-poster.png', import.meta.url))
 const POSTER = readFileSync(POSTER_FILE)
 const POSTER_UPLOAD = '/uploads/about-poster-e2e.png'
@@ -163,8 +166,11 @@ test.describe('Website Editor round trip', () => {
     await openSection(page, 'Business details')
     await page.locator('#portal-business-tagline').fill('Before the save')
     const response = page.waitForResponse((candidate) => candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === '/api/settings')
+    let saveLanded = false
+    void response.then(() => { saveLanded = true })
     await saveButton(page).click()
     await page.locator('#portal-business-tagline').fill('Typed while saving')
+    expect(saveLanded, 'the text was typed while the Save was still in flight').toBe(false)
     expect((await response).ok()).toBe(true)
 
     await page.waitForTimeout(BROADCAST_RELOAD_SETTLE_MS)

@@ -12,9 +12,13 @@ import { STOREFRONT_ORIGIN, collectPageHealth, expectNoRuntimeErrors } from './s
  * RUN ONLY THIS FILE:  cd frontend && npx playwright test storefront-about-picture
  */
 
+// Service workers are blocked so page.route sees every request, the multipart upload included.
+test.use({ serviceWorkers: 'block' })
+
 const POSTER = readFileSync(new URL('./fixtures/about-poster.png', import.meta.url))
 const POSTER_PATH = '/uploads/about-poster-e2e.png'
 const POSTER_SIDE = 256
+const POSTER_FRAME = 4
 const WIDTHS = [
   { width: 360, height: 800 },
   { width: 390, height: 844 },
@@ -64,7 +68,7 @@ test.describe('About picture on the storefront', () => {
       expect(box.width, 'never wider than 640 px').toBeLessThanOrEqual(640.5)
 
       const shot = await picture.screenshot()
-      const samples = await page.evaluate(async (base64: string) => {
+      const samples = await page.evaluate(async ({ base64, frameShare }) => {
         const image = new Image()
         image.src = `data:image/png;base64,${base64}`
         await image.decode()
@@ -73,7 +77,7 @@ test.describe('About picture on the storefront', () => {
         canvas.height = image.height
         const context = canvas.getContext('2d') as CanvasRenderingContext2D
         context.drawImage(image, 0, 0)
-        const inset = 2
+        const inset = Math.max(1, Math.floor((image.width * frameShare) / 2))
         const at = (x: number, y: number) => Array.from(context.getImageData(x, y, 1, 1).data.slice(0, 3))
         const midX = Math.floor(image.width / 2)
         const midY = Math.floor(image.height / 2)
@@ -84,16 +88,16 @@ test.describe('About picture on the storefront', () => {
           right: at(image.width - 1 - inset, midY),
           centre: at(midX, midY),
         }
-      }, shot.toString('base64')) as Record<'top' | 'bottom' | 'left' | 'right' | 'centre', Rgb>
+      }, { base64: shot.toString('base64'), frameShare: POSTER_FRAME / POSTER_SIDE }) as Record<'top' | 'bottom' | 'left' | 'right' | 'centre', Rgb>
       for (const edge of ['top', 'bottom', 'left', 'right'] as const) {
         expect(isFrame(samples[edge]), `${edge} frame edge visible (${samples[edge].join(',')})`).toBe(true)
       }
       expect(isFrame(samples.centre), 'the sample is the poster, not a flat frame colour').toBe(false)
 
       await picture.click()
-      const viewer = page.getByRole('dialog')
-      await expect(viewer).toBeVisible()
-      await expect(viewer.locator(`img[src*="${POSTER_PATH}"]`).first()).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Zoom in' }), 'the image viewer opened').toBeVisible()
+      const shownPoster = page.locator(`img[src*="${POSTER_PATH}"]`)
+      await expect.poll(() => shownPoster.count(), 'the viewer shows the same picture as the page').toBeGreaterThan(1)
 
       expectNoRuntimeErrors(health)
       expect(health.failedApiResponses, 'storefront API responses').toEqual([])
