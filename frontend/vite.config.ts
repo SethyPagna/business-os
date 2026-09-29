@@ -904,9 +904,8 @@ function manualChunks(id: string): string | undefined {
     }
     if (
       normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
-      // Unpinned, it follows whichever importer Rollup meets first; once the
-      // editor's Save check (portalEditorDraft.ts) imported it, that was the
-      // admin 'catalog' chunk and catalog-products gained a catalog back-edge.
+      // Unpinned, Rollup files it with its first importer, the admin catalog chunk,
+      // and catalog-products would statically pull catalog.
       || normalized.endsWith('/src/utils/safeLinkUrl.ts')
     ) {
       return 'catalog-products'
