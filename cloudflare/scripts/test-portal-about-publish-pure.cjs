@@ -107,6 +107,9 @@ const BAD_ABOUT_IMAGES = [
   '/uploads/x.png?v=‮',
   '/uploads/x.png?v=%E2%80%AE',
   '/uploads/x.png#%E2%80%8B',
+  '/uploads/a‎b.png',
+  '/uploads/a%C2%ADb.png',
+  '/uploads/a⁠b.png',
 ]
 // Visible non-ASCII names must keep working: the refusal is for invisible and control characters only.
 const GOOD_ABOUT_IMAGES = [
