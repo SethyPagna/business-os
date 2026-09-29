@@ -256,8 +256,8 @@ async function main() {
       assert.equal(done.body.keeper.name, expected.name)
       assert.equal(done.body.keeper.barcode, expected.barcode)
       assert.equal(done.body.keeper.selling_price_usd, 9.5)
+      assert.equal(one('SELECT product_name FROM sale_items WHERE id = 700').product_name, expected.name, `step ${mergeId}: the survivor's history follows the chosen name`)
     }
-    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 700').product_name, expected.name, 'the survivor\'s history follows the chosen name')
     assert.equal(rows('SELECT id FROM products WHERE id IN (?, ?) AND is_active = 0', M1, M2).length, 2)
   })
 
@@ -308,6 +308,7 @@ async function main() {
     const expected = choicesLib.resolveChoiceValues(choicesLib.parseProductResolveChoices({ choices: pairChoices }, [KEEP, M1]).choices, FIXTURE.rows)
     const merged = keeperColumns()
     for (const [column, value] of Object.entries(expected)) assert.equal(merged[column], value, `merged: ${column}`)
+    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 700').product_name, expected.name)
     const [history] = undoableHistories()
     await replay(history, 'undo')
     assert.deepEqual(keeperColumns(), original)
