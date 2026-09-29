@@ -36,6 +36,8 @@ type DraftPrimitive = string | number | boolean | null | undefined
 type DraftUpdateValue = string | number | boolean | null
 type EditorSectionKey = string
 type EditorSection = readonly [string, EditorSectionKey, string]
+type ColumnRange = readonly [min: number, max: number]
+type EditorColumnLimits = { desktop: ColumnRange; phone: ColumnRange }
 
 type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_address?: string
@@ -193,6 +195,7 @@ type CatalogEditorSurfaceContext = {
   dragPromoItemId: string | null
   editorDirty: boolean
   editorDraft: CatalogEditorDraft
+  editorLimits: EditorColumnLimits
   editorSaving: boolean
   editorSections: EditorSection[]
   faqItems: CatalogFaqItem[]
@@ -239,6 +242,13 @@ type CatalogEditorSurfaceContext = {
 
 type CatalogEditorSurfaceProps = {
   contextValue: unknown
+}
+
+// A stored count outside the range shows clamped and stays stored until edited; an empty field is an edit in progress.
+function withinColumns(value: DraftPrimitive, [min, max]: ColumnRange): string {
+  const typed = String(value ?? '').trim()
+  const columns = Math.round(Number(typed))
+  return typed && Number.isFinite(columns) ? String(Math.min(max, Math.max(min, columns))) : typed
 }
 
 // Density: a setting's title with its explanation folded into an InfoHint (i)
@@ -324,6 +334,7 @@ function CatalogEditorSurfaceContent() {
     dragPromoItemId,
     editorDirty,
     editorDraft,
+    editorLimits,
     editorSaving,
     editorSections,
     faqItems,
@@ -511,11 +522,11 @@ function CatalogEditorSurfaceContent() {
                   name="customer_portal_grid_columns_mobile"
                   className="input"
                   type="number"
-                  min="1"
-                  max="3"
+                  min={editorLimits.phone[0]}
+                  max={editorLimits.phone[1]}
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_mobile ?? '1'}
-                  onChange={(event) => setDraft('customer_portal_grid_columns_mobile', event.target.value)}
+                  value={withinColumns(editorDraft.customer_portal_grid_columns_mobile, editorLimits.phone)}
+                  onChange={(event) => setDraft('customer_portal_grid_columns_mobile', withinColumns(event.target.value, editorLimits.phone))}
                 />
               </div>
               <div>
@@ -525,11 +536,11 @@ function CatalogEditorSurfaceContent() {
                   name="customer_portal_grid_columns_desktop"
                   className="input"
                   type="number"
-                  min="2"
-                  max="10"
+                  min={editorLimits.desktop[0]}
+                  max={editorLimits.desktop[1]}
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_desktop ?? '4'}
-                  onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}
+                  value={withinColumns(editorDraft.customer_portal_grid_columns_desktop, editorLimits.desktop)}
+                  onChange={(event) => setDraft('customer_portal_grid_columns_desktop', withinColumns(event.target.value, editorLimits.desktop))}
                 />
               </div>
             </div>

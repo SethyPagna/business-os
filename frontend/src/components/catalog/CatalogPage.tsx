@@ -41,8 +41,11 @@ import {
   serializePromoItems,
 } from './portalEditorUtils.ts'
 import {
+  clampToRange,
   getPortalGridClass,
   getPortalMobileGridClass,
+  PORTAL_GRID_LIMITS,
+  STORED_PHONE_COLUMNS,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
   buildPortalPricePresentation,
@@ -895,8 +898,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
-    gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)))),
-    gridColumnsDesktop: Math.min(10, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
+    gridColumnsMobile: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)), STORED_PHONE_COLUMNS),
+    gridColumnsDesktop: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)), PORTAL_GRID_LIMITS.desktop),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
     pointsPerUsd: toNumber(draft.customer_portal_points_per_usd, config.pointsPerUsd),
     pointsPerKhr: toNumber(draft.customer_portal_points_per_khr, config.pointsPerKhr),
@@ -2454,8 +2457,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const sanitizedRefreshSeconds = Math.min(120, Math.max(5, Math.floor(toNumber(editorDraft.customer_portal_refresh_seconds, 20))))
       const sanitizedLowStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_low_stock_threshold, 10))
       const sanitizedOutOfStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_out_of_stock_threshold, 0))
-      const sanitizedGridMobile = Math.min(3, Math.max(1, Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1))))
-      const sanitizedGridDesktop = Math.min(8, Math.max(2, Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4))))
+      const sanitizedGridMobile = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1)), STORED_PHONE_COLUMNS)
+      const sanitizedGridDesktop = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4)), PORTAL_GRID_LIMITS.desktop)
       const sanitizedHighlightRankLimit = Math.max(1, Math.min(10, Math.round(toNumber(editorDraft.customer_portal_highlight_rank_limit, 3))))
       const sanitizedLogoSize = Math.min(144, Math.max(48, Math.round(toNumber(editorDraft.customer_portal_logo_size, 80))))
       const sanitizedLogoZoom = Math.min(180, Math.max(80, Math.round(toNumber(editorDraft.customer_portal_logo_zoom, 100))))
@@ -2629,8 +2632,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
         customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
-        customer_portal_grid_columns_mobile: String(Math.min(3, Math.max(1, sanitizedGridMobile))),
-        customer_portal_grid_columns_desktop: String(Math.min(8, Math.max(2, sanitizedGridDesktop))),
+        customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
+        customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
@@ -2943,8 +2946,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       units: membershipData?.points?.redeemableUnits ?? 0,
     }
   )
-  const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
-  const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
+  const mobileGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsMobile, 1)), STORED_PHONE_COLUMNS)
+  const desktopGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsDesktop, 4)), PORTAL_GRID_LIMITS.desktop)
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
@@ -3246,6 +3249,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       : (availableSectionIds[0] || 'branding')
     const aboutImageRefused = refusedAboutImage !== null && String(editorDraft.customer_portal_about_image || '') === refusedAboutImage
     const editorContextValue = {
+      editorLimits: PORTAL_GRID_LIMITS,
       aboutBlocks,
       activeEditorSection: effectiveEditorSection,
       canEditConfig,
