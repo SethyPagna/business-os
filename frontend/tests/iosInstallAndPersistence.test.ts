@@ -169,7 +169,7 @@ check('G5 the install hint renders its real content from first paint', () => {
   assert.match(installBand, /translate\('ios_install_hint'/, 'the visible line must be the real hint text')
   // The admin wrapper must actually mount the shared band rather than
   // re-implementing it -- otherwise the two could silently drift apart.
-  assert.match(installHint, /<InstallPromptBand translate=\{\(key, fallback\) => t\(key\) \|\| fallback\}/, 'IosInstallHint must adapt t() into the shared band, not duplicate its logic')
+  assert.match(installHint, /<InstallPromptBand translate=\{translateFromPack\(t, language\)\} \/>/, 'IosInstallHint must adapt t() into the shared band, not duplicate its logic')
 })
 
 check('G5 a closed install bar stays closed on the device, and survives sign-out', () => {

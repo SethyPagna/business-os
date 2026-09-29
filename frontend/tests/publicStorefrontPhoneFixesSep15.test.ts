@@ -275,7 +275,9 @@ check('5 the storefront mounts the shared install band, not a duplicate implemen
 })
 
 check('5 the admin app keeps the same install behaviour via the shared band', () => {
-  assert.match(iosInstallHint, /<InstallPromptBand translate=\{\(key, fallback\) => t\(key\) \|\| fallback\}/, 'IosInstallHint must delegate to the shared band')
+  // The admin wrapper hands the band the UI language, so a key missing from the pack still reads Khmer on a Khmer till.
+  assert.match(iosInstallHint, /<InstallPromptBand translate=\{translateFromPack\(t, language\)\} \/>/, 'IosInstallHint must delegate to the shared band')
+  assert.match(installPromptBand, /return language === 'km' \? fallbackKm : fallback/, 'the wrapper falls back to Khmer on a Khmer till')
   assert.ok(!/beforeinstallprompt|shouldOfferIosInstallHint\(\)/.test(stripComments(iosInstallHint)), 'the device-detection logic must not be duplicated in the admin wrapper (comments may still explain the history)')
 })
 

@@ -311,15 +311,16 @@ function compileComponent(rel: string, deps: Record<string, unknown>): Component
 type Language = 'en' | 'km'
 const inlineCopy = (language: Language) => (_key: string, fallback: string, fallbackKm: string) => (language === 'km' ? fallbackKm : fallback)
 
+const compileBand = (install: InstallModule): ComponentModule => compileComponent('src/components/shared/InstallPromptBand.tsx', {
+  '../../utils/standaloneNavigation.ts': install,
+  './InfoHint.tsx': InfoHintStub,
+})
+
 async function renderBand(device: Device, language: Language, afterLoad?: (win: EventTarget, install: InstallModule) => void): Promise<string> {
   const { window: win } = useDevice(device)
   const install = await freshInstallModule()
   afterLoad?.(win, install)
-  const band = compileComponent('src/components/shared/InstallPromptBand.tsx', {
-    '../../utils/standaloneNavigation.ts': install,
-    './InfoHint.tsx': InfoHintStub,
-  })
-  return renderToStaticMarkup(React.createElement(band.default, { translate: inlineCopy(language) }))
+  return renderToStaticMarkup(React.createElement(compileBand(install).default, { translate: inlineCopy(language) }))
 }
 
 const visibleText = (html: string): string => html.replace(/<[^>]+>/g, '').trim()
@@ -421,6 +422,66 @@ function assertEveryTranslateCallHasKhmer(rel: string, minimumCalls: number): vo
 
 await check('every install band text carries its own Khmer and no offline promise', () => {
   assertEveryTranslateCallHasKhmer('src/components/shared/InstallPromptBand.tsx', 5)
+})
+
+const pathRouting = await import('../src/app/pathRouting.ts')
+const packText = (language: Language) => {
+  const packs = { en: readPack('en'), km: readPack('km') }
+  return (key: string): string => String(packs[language][key] ?? packs.en[key] ?? key)
+}
+
+async function renderStaffBand(hostname: string, language: Language): Promise<string> {
+  useDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, hostname })
+  const install = await freshInstallModule()
+  const hint = compileComponent('src/components/shared/IosInstallHint.tsx', {
+    '../../AppContext.tsx': { useApp: () => ({ t: packText(language), language }) },
+    '../../app/pathRouting.ts': pathRouting,
+    './InstallPromptBand.tsx': compileBand(install),
+  })
+  return renderToStaticMarkup(React.createElement(hint.default, {}))
+}
+
+await check('the staff band shows the pack text on the admin host and nothing on the shop host', async () => {
+  for (const language of ['en', 'km'] as const) {
+    const html = await renderStaffBand('admin.leangbeauty.com', language)
+    assert.ok(visibleText(html).includes(String(readPack(language).ios_install_hint)), `${language}: the admin host shows the band in the UI language`)
+  }
+  assert.equal(await renderStaffBand('leangbeauty.com', 'en'), '', 'staff signing in on the shop host must not install a shop-named app')
+})
+
+await check('translateFromPack falls back to the Khmer text when the pack has no value', async () => {
+  useDevice({ userAgent: USER_AGENTS.desktopChrome })
+  const { translateFromPack } = compileBand(await freshInstallModule()) as unknown as {
+    translateFromPack: (t: (key: string) => string, language: string) => (key: string, fallback: string, fallbackKm: string) => string
+  }
+  const missingKey = (key: string) => key
+  assert.equal(translateFromPack(missingKey, 'km')('not_in_pack', 'English', 'ខ្មែរ'), 'ខ្មែរ')
+  assert.equal(translateFromPack(missingKey, 'en')('not_in_pack', 'English', 'ខ្មែរ'), 'English')
+  assert.equal(translateFromPack(() => 'ពីកញ្ចប់', 'km')('in_pack', 'English', 'ខ្មែរ'), 'ពីកញ្ចប់', 'a pack value wins')
+})
+
+const appSource = read('src/App.tsx').replace(/\r\n/g, '\n')
+function appBranch(opening: string): string {
+  const at = appSource.indexOf(opening)
+  assert.ok(at > 0, `App.tsx branch moved: ${opening}`)
+  return appSource.slice(at, appSource.indexOf('\n  }\n', at))
+}
+
+await check('the staff sign-in screen carries the band; the spinner and the forced password change never do', () => {
+  assert.match(
+    appBranch('  if (!user) {'),
+    /<Login \/>[\s\S]*<div className=\{bottomStackClass\(BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS\)\}>\s*<IosInstallHint \/>/,
+    'the sign-in screen mounts the band in a bottom stack below the form',
+  )
+  assert.doesNotMatch(appBranch('if ((!authReady && !user) || storedAuthSessionPending) {'), /IosInstallHint/, 'no band on the pre-auth spinner')
+  const forced = appBranch('must_change_password || 0) === 1) {')
+  assert.match(forced, /<ForcedPasswordChange \/>/)
+  assert.doesNotMatch(forced, /IosInstallHint/, 'no band over the forced password change')
+})
+
+await check('the staff loading screens say Leang Cosmetics Admin', () => {
+  const titles = [...appSource.matchAll(/<h1 className="business-os-initial-title">([^<]*)<\/h1>/g)].map(([, title]) => title)
+  assert.deepEqual(titles, ['Leang Cosmetics Admin', 'Leang Cosmetics Admin'])
 })
 
 if (failed > 0) {

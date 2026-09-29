@@ -255,6 +255,7 @@ const useApp = useAppHook as () => AppContextValue
 const BOTTOM_STACK_CLEARS_NAV_CLASS = 'bottom-[calc(3.55rem+env(safe-area-inset-bottom))]'
 /** Pages-mode compact navigation has no bottom nav: only the safe area. */
 const BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS = 'bottom-[env(safe-area-inset-bottom)]'
+const bottomStackClass = (clearance: string) => `pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${clearance} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`
 
 function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
   return () => importer() as Promise<{ default: ComponentType<Record<string, unknown>> }>
@@ -1658,7 +1659,7 @@ function PageLoader() {
         <div className="business-os-initial-panel">
           <div className="business-os-initial-spinner" aria-hidden="true" />
           <div className="business-os-initial-brand">
-            <h1 className="business-os-initial-title">Business OS</h1>
+            <h1 className="business-os-initial-title">Leang Cosmetics Admin</h1>
             <p className="business-os-initial-copy">
               {stalled ? 'Page bundle is still loading' : 'Loading this workspace view...'}
             </p>
@@ -2189,7 +2190,7 @@ export default function App() {
           <div className="business-os-initial-panel">
             <div className="business-os-initial-spinner" aria-hidden="true" />
             <div className="business-os-initial-brand">
-              <h1 className="business-os-initial-title">Business OS</h1>
+              <h1 className="business-os-initial-title">Leang Cosmetics Admin</h1>
               <p className="business-os-initial-copy">Preparing secure sign-in...</p>
             </div>
           </div>
@@ -2205,6 +2206,9 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <Login />
         </Suspense>
+        <div className={bottomStackClass(BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS)}>
+          <IosInstallHint />
+        </div>
       </>
     )
   }
@@ -2284,9 +2288,7 @@ export default function App() {
       {/* One bottom stack for the shell's persistent advisories, so two of
           them can never land on top of each other, and so the clearance over
           the mobile bottom nav is decided once. Inert where empty. */}
-      <div
-        className={`pointer-events-none fixed inset-x-2 z-[1200] flex flex-col gap-2 ${inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS} md:inset-x-auto md:bottom-4 md:right-4 md:w-[24rem]`}
-      >
+      <div className={bottomStackClass(inlineMobileNavigation ? BOTTOM_STACK_CLEARS_SAFE_AREA_CLASS : BOTTOM_STACK_CLEARS_NAV_CLASS)}>
         <StorageEvictionBand pendingSync={pendingSync} storagePersisted={storagePersisted} />
         <IosInstallHint />
       </div>
