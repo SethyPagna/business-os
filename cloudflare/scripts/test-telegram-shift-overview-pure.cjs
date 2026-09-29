@@ -467,6 +467,56 @@ async function main() {
   clearSetting('telegram_shift_overview_enabled')
   check('a skipped send is final: turning it back on does not resend', (await telegram.deliverTelegramShiftOverview(envPaid, lateKey, T0 + 120_000)) === 'taken' && posts.length === postsBeforeLate)
 
+  const SHIFT_TOPIC = 9001
+  const SUMMARY_TOPIC = 9007
+  const deliverOne = async () => {
+    const routed = closedShift()
+    const key = telegram.shiftOverviewKey(routed.id, routed.revision)
+    await telegram.scheduleTelegramShiftOverview(envFree, routed.id, T0)
+    const before = posts.length
+    const outcome = await telegram.deliverTelegramShiftOverview(envFree, key, T0 + 60_000)
+    assert.equal(outcome, 'sent')
+    assert.equal(posts.length, before + 1)
+    return posts[posts.length - 1]
+  }
+  setting('telegram_topic_shift', String(SHIFT_TOPIC))
+  setting('telegram_topic_reports', String(SUMMARY_TOPIC))
+  const toSummary = await deliverOne()
+  check('the overview goes to the Summary topic when one is set', toSummary.message_thread_id === SUMMARY_TOPIC, JSON.stringify(toSummary))
+  clearSetting('telegram_topic_reports')
+  const toShift = await deliverOne()
+  check('with no Summary topic it falls back to the Shift topic', toShift.message_thread_id === SHIFT_TOPIC, JSON.stringify(toShift))
+  clearSetting('telegram_topic_shift')
+  const toGeneral = await deliverOne()
+  check('with neither topic set it goes to the group itself, with no thread id at all', !('message_thread_id' in toGeneral), JSON.stringify(toGeneral))
+  setting('telegram_topic_reports', String(SUMMARY_TOPIC))
+  const summaryOnly = await deliverOne()
+  check('a Summary topic alone is used without a Shift topic', summaryOnly.message_thread_id === SUMMARY_TOPIC, JSON.stringify(summaryOnly))
+
+  const warnings = []
+  const realWarn = console.warn
+  const stubFetch = globalThis.fetch
+  let deletedOnce = true
+  console.warn = (...args) => warnings.push(args.join(' '))
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body)
+    if (deletedOnce && body.message_thread_id === SUMMARY_TOPIC) {
+      deletedOnce = false
+      return { ok: false, status: 400, text: async () => '{"ok":false,"description":"Bad Request: message thread not found"}' }
+    }
+    return stubFetch(url, init)
+  }
+  try {
+    const retried = await deliverOne()
+    check('a deleted Summary topic retries once into the group and the warning names telegram_topic_reports',
+      !('message_thread_id' in retried) && warnings.some((line) => line.includes('telegram_topic_reports')) && !warnings.some((line) => line.includes('telegram_topic_shift')),
+      warnings.join('\n'))
+  } finally {
+    console.warn = realWarn
+    globalThis.fetch = stubFetch
+    clearSetting('telegram_topic_reports')
+  }
+
   // ---- the table itself ---------------------------------------------------
   let rejected = false
   try { sqlite.prepare("INSERT INTO telegram_scheduled_sends (send_key, kind, shift_id, due_at, created_at) VALUES (?, 'shift_overview', 1, 'x', 'x')").run(paidKey) } catch { rejected = true }

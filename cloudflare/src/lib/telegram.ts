@@ -1780,6 +1780,11 @@ export async function scheduleTelegramShiftOverview(env: Env, shiftId: number, n
   }
 }
 
+// Owner, 29 Sep 2026: the overview belongs in the Summary topic; the shift report stays in the Shift topic.
+function overviewTopicKey(config: TelegramConfig): TelegramTopicKey {
+  return config.topics.telegram_topic_reports ? 'telegram_topic_reports' : 'telegram_topic_shift'
+}
+
 export type ShiftOverviewDeliveryResult = 'sent' | 'skipped' | 'taken' | 'not-due' | 'retry' | 'failed'
 
 /**
@@ -1812,7 +1817,8 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
     const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
-    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    const topicKey = overviewTopicKey(config)
+    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics[topicKey], topicKey)
     await settle('sent', null, ', sent_at = @now')
     return 'sent'
   } catch (error) {
